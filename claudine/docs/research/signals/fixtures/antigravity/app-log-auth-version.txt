@@ -1,0 +1,8 @@
+I0708 11:17:34.547650 12345 server.go:1380] Language server version: 1.1.0
+E0708 11:17:34.647767 12345 log.go:398] Failed to poll ListExperiments: error getting token source: You are not logged into Antigravity.
+W0708 11:17:34.648411 12345 log_context.go:117] Cache(loadCodeAssistResponse): Singleflight refresh failed: error getting token source: You are not logged into Antigravity.
+E0708 11:17:34.648430 12345 log.go:398] error getting token source: You are not logged into Antigravity.
+W0708 11:17:34.648568 12345 log_context.go:117] Cache(availableModels): Singleflight refresh failed: failed to get load code assist response: error getting token source: You are not logged into Antigravity.
+E0708 11:17:34.648581 12345 log.go:398] failed to get load code assist response: error getting token source: You are not logged into Antigravity.
+E0708 11:17:34.648690 12345 log.go:398] Failed to poll FetchAvailableModels: failed to get load code assist response: error getting token source: You are not logged into Antigravity.
+I0708 11:17:34.656522 12345 quota_manager.go:63] quotaRefreshLoop: skipped (not logged in)

@@ -1,0 +1,57 @@
+name: biscuit-tui-windows-captured-stdout
+
+# Reusable Windows-host runtime verification for biscuit-tui F2: `question` with
+# stdout captured to a pipe while a console is attached must deliver ONLY the
+# submitted value (no TUI/ANSI bytes) to the captured stream. This runs the
+# ignored, deterministic console-boundary integration test that needs a Windows
+# host. The test self-attaches a console (`AllocConsole`) and PROVES the
+# precondition (`stderr.is_terminal()` + `CONOUT$` usable) before spawning,
+# failing loudly otherwise — so a green run here is real evidence the
+# attached-console contract held, not merely that the binary compiled. Actions
+# captures stdout to a pipe, so the test cannot rely on an ambient console;
+# `--nocapture` is kept only so the `F2 precondition HELD` line is recorded in
+# the log.
+#
+# Orchestrated by `ci.yml` when biscuit-tui is in the affected scope (D12), so it
+# no longer self-triggers on pushes/PRs. Also dispatchable manually.
+
+on:
+  workflow_call: {}
+  workflow_dispatch: {}
+
+env:
+  # The repository tracks no rustc wrapper; cleared explicitly so a stray
+  # environment value cannot silently intercept this workflow's builds.
+  RUSTC_WRAPPER: ""
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  CARGO_TERM_COLOR: never
+
+jobs:
+  verify:
+    name: biscuit-tui / captured-stdout / windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      # No native step: biscuit-tui declares no `[package.metadata.ci.native]`
+      # requirements on any OS. `_ensure-native-libs` now takes literal package
+      # names, not an area name — passing `biscuit-tui` made it hunt a host
+      # package by that name and fail.
+
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: biscuit-tui-windows-captured-stdout
+
+      - name: Run Windows captured-stdout verification test
+        shell: cmd
+        run: cargo test -p biscuit-tui-cli --test windows_captured_stdout -- --ignored captured_stdout_receives_only_value_no_tui_bytes --nocapture

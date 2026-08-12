@@ -524,17 +524,12 @@ mod tests {
     }
 
     // ================================================================
-    // Review-4 finding 1: page-level HR defaults must reach bare `---`
-    // rules through the DarkmatterPage render path, restoring assertions
-    // removed during the tree cutover. These exercise the full
-    // frontmatter → page → render-tree path the CLI render pipeline uses
-    // (`from_frontmatter` migrates the deprecated top-level `hr:` block into
-    // `style.hr.*`; `apply_hr_style` projects it onto the page; the page
-    // threads it through `hr_defaults` to the tree entry points).
+    // Page-level HR defaults must reach bare `---` rules through the
+    // DarkmatterPage render path. These exercise the full `style.hr.*`
+    // frontmatter → page → render-tree path the CLI render pipeline uses.
     // ================================================================
 
-    /// Parses `md`'s style frontmatter (migrating the deprecated top-level
-    /// `hr:` alias into `style.hr.*`) and applies it onto a default page.
+    /// Parses `md`'s `style.hr.*` frontmatter and applies it onto a default page.
     fn page_with_frontmatter_hr(md: &Markdown) -> DarkmatterPage {
         let (style, _warnings) =
             from_frontmatter(md.frontmatter()).expect("parse style frontmatter");
@@ -559,15 +554,19 @@ mod tests {
     }
 
     #[test]
-    fn bare_rule_uses_deprecated_top_level_hr_frontmatter_in_html() {
-        // The deprecated top-level `hr:` block (with the legacy `style:` key)
-        // migrates into `style.hr.*` and still styles a bare `---`.
-        let markdown = "---\nhr:\n  style: waves\n  weight: thick\n  width: \"50%\"\n---\n\n---\n";
+    fn top_level_hr_frontmatter_is_ignored_for_bare_rule_defaults_in_html() {
+        let markdown =
+            "---\nhr:\n  kind: waves\n  weight: thick\n  width: \"50%\"\n---\n\n---\n";
         let md: Markdown = markdown.into();
-        let html = page_with_frontmatter_hr(&md).render_to_browser(&md).unwrap();
-        assert!(html.contains(r#"width="50%""#), "{html}");
-        assert!(html.contains("--hr-weight: 8"), "{html}");
-        assert!(html.contains("<path"), "{html}");
+        let direct_html = md.as_html(Default::default()).unwrap();
+        let page_html = page_with_frontmatter_hr(&md).render_to_browser(&md).unwrap();
+
+        for html in [direct_html, page_html] {
+            assert!(html.contains(r#"width="100%""#), "{html}");
+            assert!(!html.contains(r#"width="50%""#), "{html}");
+            assert!(!html.contains("--hr-weight: 8"), "{html}");
+            assert!(!html.contains("<path"), "{html}");
+        }
     }
 
     #[test]
@@ -607,80 +606,4 @@ mod tests {
         );
     }
 
-    // ================================================================
-    // Review-5 finding: the DIRECT public `Markdown::as_html` /
-    // `as_terminal` paths (no `DarkmatterPage` wrapper) must honor the
-    // deprecated top-level `hr:` frontmatter defaults even with default
-    // options. These restore the bespoke-serializer compatibility tests
-    // dropped during the tree cutover, exercising the path
-    // `md.as_html(HtmlOptions::default())` / `md.as_terminal(...)` takes
-    // without routing through the page.
-    // ================================================================
-
-    #[test]
-    fn direct_as_html_applies_deprecated_top_level_hr_defaults_to_bare_rule() {
-        let markdown = "---\nhr:\n  style: waves\n  weight: thick\n  width: \"50%\"\n---\n\n---\n";
-        let md: Markdown = markdown.into();
-        let html = md.as_html(Default::default()).unwrap();
-        assert!(html.contains(r#"width="50%""#), "{html}");
-        assert!(html.contains("--hr-weight: 8"), "thick ⇒ 8px: {html}");
-        assert!(html.contains("<path"), "waves ⇒ <path> svg: {html}");
-    }
-
-    #[test]
-    fn direct_as_terminal_applies_deprecated_top_level_hr_defaults_to_bare_rule() {
-        let markdown = "---\nhr:\n  style: waves\n---\n\n---\n";
-        let md: Markdown = markdown.into();
-        let out = md.as_terminal(terminal_text_options()).unwrap();
-        // Waves uses ≋ in Unicode mode, ~ otherwise.
-        assert!(
-            out.contains('≋') || out.contains('~'),
-            "bare rule must adopt the `waves` frontmatter default: {out:?}"
-        );
-    }
-
-    #[test]
-    fn direct_as_html_inline_attribute_overrides_top_level_hr_defaults_partially() {
-        // Inline rule attributes win per-property; unset properties fall back
-        // to the top-level `hr:` defaults.
-        let markdown =
-            "---\nhr:\n  style: waves\n  weight: thick\n  width: \"80%\"\n---\n\n--- { width: \"25%\" }\n";
-        let md: Markdown = markdown.into();
-        let html = md.as_html(Default::default()).unwrap();
-        assert!(
-            html.contains(r#"width="25%""#),
-            "inline width must win over the frontmatter default: {html}"
-        );
-        assert!(
-            html.contains("--hr-weight: 8"),
-            "weight must fall back to the thick default: {html}"
-        );
-        assert!(
-            html.contains("<path"),
-            "kind must fall back to the waves default: {html}"
-        );
-    }
-
-    #[test]
-    fn direct_as_html_top_level_hr_numeric_and_bool_scalars_preserve_siblings() {
-        // YAML numeric width (`20`, no quotes) and bool alignment coerce to
-        // strings; recognized sibling keys still apply. A numeric width is
-        // emitted verbatim as the CSS `width="20"`.
-        let markdown = "---\nhr:\n  style: dots\n  width: 20\n  alignment: true\n  color: red\n---\n\n---\n";
-        let md: Markdown = markdown.into();
-        let html = md.as_html(Default::default()).unwrap();
-        assert!(html.contains(r#"width="20""#), "numeric width ⇒ width=\"20\": {html}");
-        assert!(html.contains("--hr-color: red"), "color sibling must apply: {html}");
-    }
-
-    #[test]
-    fn direct_as_html_top_level_hr_defaults_apply_to_blockquote_contained_bare_rule() {
-        // A bare `---` nested in a blockquote must also pick up the top-level
-        // `hr:` defaults on the direct path.
-        let markdown = "---\nhr:\n  style: waves\n  width: \"50%\"\n---\n\n> before\n>\n> ---\n>\n> after\n";
-        let md: Markdown = markdown.into();
-        let html = md.as_html(Default::default()).unwrap();
-        assert!(html.contains(r#"width="50%""#), "{html}");
-        assert!(html.contains("<path"), "waves ⇒ <path> svg: {html}");
-    }
 }

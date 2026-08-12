@@ -1,4 +1,3 @@
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::path::PathBuf;
 
@@ -18,7 +17,8 @@ fn empty_home() -> PathBuf {
 
 #[test]
 fn test_main_help() {
-    cargo_bin_cmd!("homey")
+    assert_cmd::Command::cargo_bin("homey")
+        .unwrap()
         .args(["--help"])
         .assert()
         .success()
@@ -29,7 +29,8 @@ fn test_main_help() {
 
 #[test]
 fn test_no_command_shows_error() {
-    cargo_bin_cmd!("homey")
+    assert_cmd::Command::cargo_bin("homey")
+        .unwrap()
         .env_remove("COMPLETE")
         .assert()
         .failure();
@@ -37,7 +38,8 @@ fn test_no_command_shows_error() {
 
 #[test]
 fn test_completions_help_section() {
-    cargo_bin_cmd!("homey")
+    assert_cmd::Command::cargo_bin("homey")
+        .unwrap()
         .args(["completions"])
         .assert()
         .success()
@@ -51,7 +53,8 @@ fn test_completions_help_section() {
 
 #[test]
 fn test_dynamic_completions_bash() {
-    cargo_bin_cmd!("homey")
+    assert_cmd::Command::cargo_bin("homey")
+        .unwrap()
         .env("COMPLETE", "bash")
         .assert()
         .success()
@@ -60,7 +63,8 @@ fn test_dynamic_completions_bash() {
 
 #[test]
 fn test_dynamic_completions_zsh() {
-    cargo_bin_cmd!("homey")
+    assert_cmd::Command::cargo_bin("homey")
+        .unwrap()
         .env("COMPLETE", "zsh")
         .assert()
         .success()
@@ -69,7 +73,8 @@ fn test_dynamic_completions_zsh() {
 
 #[test]
 fn test_dynamic_completions_fish() {
-    cargo_bin_cmd!("homey")
+    assert_cmd::Command::cargo_bin("homey")
+        .unwrap()
         .env("COMPLETE", "fish")
         .assert()
         .success()
@@ -82,7 +87,8 @@ fn test_dynamic_completions_fish() {
 
 #[test]
 fn test_arcam_missing_host_error() {
-    cargo_bin_cmd!("homey")
+    assert_cmd::Command::cargo_bin("homey")
+        .unwrap()
         .env_remove("ARCAM_AMP")
         .env("HOME", empty_home())
         .args(["arcam", "on"])
@@ -93,7 +99,8 @@ fn test_arcam_missing_host_error() {
 
 #[test]
 fn test_arcam_help_shows_actions() {
-    cargo_bin_cmd!("homey")
+    assert_cmd::Command::cargo_bin("homey")
+        .unwrap()
         .args(["arcam", "--help"])
         .assert()
         .success()
@@ -110,7 +117,8 @@ fn test_arcam_help_shows_actions() {
 
 #[test]
 fn test_sony_missing_host_error() {
-    cargo_bin_cmd!("homey")
+    assert_cmd::Command::cargo_bin("homey")
+        .unwrap()
         .env_remove("SONY_RECEIVER")
         .env("HOME", empty_home())
         .args(["sony", "system", "power-status"])
@@ -121,7 +129,8 @@ fn test_sony_missing_host_error() {
 
 #[test]
 fn test_sony_help_shows_subcommands() {
-    cargo_bin_cmd!("homey")
+    assert_cmd::Command::cargo_bin("homey")
+        .unwrap()
         .args(["sony", "--help"])
         .assert()
         .success()
@@ -137,7 +146,8 @@ fn test_sony_help_shows_subcommands() {
 
 #[test]
 fn test_sony_system_help() {
-    cargo_bin_cmd!("homey")
+    assert_cmd::Command::cargo_bin("homey")
+        .unwrap()
         .args(["sony", "system", "--help"])
         .assert()
         .success()
@@ -150,7 +160,8 @@ fn test_sony_system_help() {
 
 #[test]
 fn test_sony_audio_help() {
-    cargo_bin_cmd!("homey")
+    assert_cmd::Command::cargo_bin("homey")
+        .unwrap()
         .args(["sony", "audio", "--help"])
         .assert()
         .success()
@@ -163,7 +174,8 @@ fn test_sony_audio_help() {
 
 #[test]
 fn test_sony_input_help() {
-    cargo_bin_cmd!("homey")
+    assert_cmd::Command::cargo_bin("homey")
+        .unwrap()
         .args(["sony", "input", "--help"])
         .assert()
         .success()
@@ -175,7 +187,8 @@ fn test_sony_input_help() {
 
 #[test]
 fn test_sony_playback_help() {
-    cargo_bin_cmd!("homey")
+    assert_cmd::Command::cargo_bin("homey")
+        .unwrap()
         .args(["sony", "playback", "--help"])
         .assert()
         .success()
@@ -187,7 +200,8 @@ fn test_sony_playback_help() {
 
 #[test]
 fn test_sony_debug_help() {
-    cargo_bin_cmd!("homey")
+    assert_cmd::Command::cargo_bin("homey")
+        .unwrap()
         .args(["sony", "debug", "--help"])
         .assert()
         .success()

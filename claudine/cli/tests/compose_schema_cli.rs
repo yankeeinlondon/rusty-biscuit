@@ -16,14 +16,16 @@
 //!   optional ones for `claudine compose <prompt> key=<TAB>`.
 //! - `enum` values complete from the schema member list.
 
-use assert_cmd::cargo::cargo_bin_cmd;
+#[cfg(unix)]
 use std::fs;
+#[cfg(unix)]
 use tempfile::tempdir;
 
 mod common;
 use common::completion::{
     run_complete, seed_cargo_workspace_members as seed_cargo_workspace, write_file,
 };
+#[cfg(unix)]
 use common::{augmented_path, strip_ansi, write_executable};
 
 // ============================================================================
@@ -60,7 +62,7 @@ Plan for {{topic}}.
         ),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -130,7 +132,7 @@ Plan for {{topic}}.
         ),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -183,7 +185,7 @@ Plan for {{topic}}.
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -230,7 +232,7 @@ Plan for {{count}}.
         ),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -258,6 +260,118 @@ Plan for {{count}}.
     assert!(
         !count_path.exists(),
         "no provider session should have been launched on hard validation; stub recorded a call"
+    );
+}
+
+// ============================================================================
+// SchemaParse focused excerpt + OSC8 link (real-errors review-2 medium)
+// ============================================================================
+
+#[cfg(unix)]
+#[test]
+fn compose_schema_grammar_error_reports_invalid_schema_without_launching_provider() {
+    // A bad constraint separator (`,` instead of `;`) in the `$schema.spec`
+    // type-and-constraint string is a grammar error. It must surface as the
+    // typed `invalid schema` report (not a path-focused `schema load failed`),
+    // name the offending property, and never launch the provider.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let count_path = workspace.path().join("call-count.txt");
+
+    let md_file = workspace.path().join("plan.md");
+    fs::write(
+        &md_file,
+        "---\n$schema:\n    spec: file(required, match(**/*spec*.md))\nspec: \"x\"\n---\nPlan.\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\necho touched >> {count}\nexit 0\n",
+            count = count_path.display()
+        ),
+    );
+
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("invalid schema"),
+        "expected the `invalid schema` (SchemaParse) header; stderr:\n{plain}"
+    );
+    assert!(
+        plain.contains("spec"),
+        "expected the offending property name `spec`; stderr:\n{plain}"
+    );
+    assert!(
+        !plain.to_lowercase().contains("schema load failed"),
+        "grammar error must not collapse into path-focused `schema load failed`; stderr:\n{plain}"
+    );
+    assert!(
+        !count_path.exists(),
+        "no provider session should have been launched on a schema parse error"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_schema_grammar_error_force_color_highlights_line_and_links_file() {
+    // With color forced on (optimistic terminal), the SchemaParse report must
+    // append the frontmatter excerpt with the offending `$schema.spec` line
+    // highlighted and an OSC8 link to the prompt file. The excerpt is TTY-gated
+    // but `FORCE_COLOR=1` lifts the gate even under a piped stderr.
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    let md_file = workspace.path().join("plan.md");
+    fs::write(
+        &md_file,
+        "---\n$schema:\n    spec: file(required, match(**/*spec*.md))\nspec: \"x\"\n---\nPlan.\n",
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\ncat > /dev/null\nexit 0\n",
+    );
+
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .env_remove("NO_COLOR")
+        .env("FORCE_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+
+    // The appended YAML excerpt reproduces the offending frontmatter line.
+    assert!(
+        plain.contains("spec: file(required, match(**/*spec*.md))"),
+        "expected the appended frontmatter excerpt with the offending line; stderr:\n{plain}"
+    );
+    // OSC8 hyperlink wrapping the prompt path survives under FORCE_COLOR.
+    assert!(
+        stderr.contains("\u{1b}]8;;"),
+        "expected an OSC8 link to the prompt file under FORCE_COLOR; raw stderr:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("plan.md"),
+        "expected the prompt file name in the linked report; raw stderr:\n{stderr}"
     );
 }
 
@@ -300,7 +414,7 @@ Plan for {{runtime_agent}}.
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -344,7 +458,7 @@ Plan for {{topic}}.
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -400,7 +514,7 @@ Plan for {{topic}}.
         ),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -471,7 +585,7 @@ ignored body
         ),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -532,7 +646,7 @@ ignored body
         ),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -609,7 +723,7 @@ Plan for tier {{tier}}.
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -652,7 +766,7 @@ Plan for tier {{tier}}.
         ),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -707,7 +821,7 @@ ignored body
         ),
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -763,7 +877,7 @@ Plan for {{topic}}.
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -815,7 +929,7 @@ Plan for {{topic}}.
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
@@ -839,6 +953,129 @@ Plan for {{topic}}.
     assert!(
         plain.contains("count"),
         "expected dropped property name `count` in warning; stderr:\n{plain}"
+    );
+}
+
+// ============================================================================
+// Motivating case: lazy `file` output + eager `file` input (eager-files spec)
+// ============================================================================
+//
+// Mirrors `sniff/prompts/plan-review-implementation.md` after the migration in
+// `features/2026-06-29-eager-files/spec.md`: `review` is an eager INPUT that
+// must exist, `plan` is a lazy OUTPUT path this run is about to create. The
+// pair proves the reported bug is fixed end-to-end through the compiled binary:
+// a lazy `plan` pointing at a not-yet-existing file composes, while a missing
+// eager `review` still aborts before the provider launches.
+
+#[cfg(unix)]
+#[test]
+fn compose_lazy_plan_output_composes_with_present_eager_review() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+
+    // The eager `review` input exists; the lazy `plan` output names a path that
+    // does NOT exist yet (this run would create it).
+    fs::write(
+        workspace.path().join("design-review.md"),
+        "# Review\n",
+    )
+    .unwrap();
+
+    let md_file = workspace.path().join("plan-review.md");
+    fs::write(
+        &md_file,
+        r#"---
+$schema:
+  review: 'file(eager; required; match(**/*review*.md))'
+  plan: 'file'
+  iteration: 'number'
+review: design-review.md
+plan: plan-1.md
+iteration: 1
+---
+Implement {{plan}} from {{review}}.
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\ncat > /dev/null\nexit 0\n",
+    );
+
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+}
+
+#[cfg(unix)]
+#[test]
+fn compose_missing_eager_review_aborts_without_launching_provider() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let count_path = workspace.path().join("call-count.txt");
+
+    // Same prompt, but the eager `review` input is absent from disk. The lazy
+    // `plan` output is still a not-yet-existing path; only the missing eager
+    // `review` may cause the failure.
+    let md_file = workspace.path().join("plan-review.md");
+    fs::write(
+        &md_file,
+        r#"---
+$schema:
+  review: 'file(eager; required; match(**/*review*.md))'
+  plan: 'file'
+  iteration: 'number'
+review: missing-review.md
+plan: plan-1.md
+iteration: 1
+---
+Implement {{plan}} from {{review}}.
+"#,
+    )
+    .unwrap();
+
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\necho touched >> {count}\nexit 0\n",
+            count = count_path.display()
+        ),
+    );
+
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
+        .args(["compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
+    let plain = strip_ansi(&stderr);
+    assert!(
+        plain.contains("CompositionError"),
+        "expected typed CompositionError surface; stderr:\n{plain}"
+    );
+    assert!(
+        plain.to_lowercase().contains("schema validation"),
+        "missing eager `review` must surface a schema validation error; stderr:\n{plain}"
+    );
+    assert!(
+        plain.contains("review"),
+        "expected the offending `review` property; stderr:\n{plain}"
+    );
+    assert!(
+        !count_path.exists(),
+        "no provider session should have been launched on a missing eager input"
     );
 }
 
@@ -1097,6 +1334,168 @@ fn completion_sequence_enum_values_from_schema() {
     assert!(
         got.iter().any(|c| c == "tier='large'"),
         "expected tier='large' from sequence schema completer: {got:?}"
+    );
+}
+
+#[test]
+fn completion_file_bare_falls_back_to_default_glob() {
+    let ws = common::TestWorkspace::named("complete-schema-bare-file");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    write_file(
+        &ws.path().join("prompts").join("plan.md"),
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  cover: file\n",
+            "---\n",
+            "Cover at {{cover}}.\n",
+        ),
+    );
+    write_file(&ws.path().join("readme.md"), "# Readme\n");
+    write_file(&ws.path().join("draft.txt"), "plain text\n");
+
+    let got = run_complete(ws.path(), &["compose", "prompts/plan.md", "cover="]);
+    assert!(
+        got.iter().any(|c| c == "cover='readme.md'"),
+        "bare file property must surface default-glob markdown: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c.contains("draft.txt")),
+        "non-markdown file must not surface in default glob: {got:?}"
+    );
+}
+
+#[test]
+fn completion_file_array_first_file_uses_default_glob() {
+    let ws = common::TestWorkspace::named("complete-schema-file-array-first");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    write_file(
+        &ws.path().join("prompts").join("plan.md"),
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\n",
+            "Attachments: {{attachments}}.\n",
+        ),
+    );
+    write_file(&ws.path().join("notes.md"), "# Notes\n");
+
+    let got = run_complete(ws.path(), &["compose", "prompts/plan.md", "attachments="]);
+    assert!(
+        got.iter().any(|c| c == "attachments='notes.md'"),
+        "file[] first file must complete from default glob: {got:?}"
+    );
+}
+
+#[test]
+fn completion_file_array_trailing_comma_reopens_completion() {
+    let ws = common::TestWorkspace::named("complete-schema-file-array-comma");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    write_file(
+        &ws.path().join("prompts").join("plan.md"),
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\n",
+            "Attachments: {{attachments}}.\n",
+        ),
+    );
+    write_file(&ws.path().join("a.md"), "# A\n");
+    write_file(&ws.path().join("b.md"), "# B\n");
+
+    let got = run_complete(ws.path(), &["compose", "prompts/plan.md", "attachments=a.md,"]);
+    assert!(
+        got.iter().any(|c| c == "attachments='a.md,b.md'"),
+        "trailing comma must append a new default-glob file: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c == "attachments='a.md,a.md'"),
+        "already-selected file must be excluded: {got:?}"
+    );
+}
+
+#[test]
+fn completion_file_array_continuation_filters_by_active_partial() {
+    let ws = common::TestWorkspace::named("complete-schema-file-array-partial");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    write_file(
+        &ws.path().join("prompts").join("plan.md"),
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\n",
+            "Attachments: {{attachments}}.\n",
+        ),
+    );
+    write_file(&ws.path().join("alpha.md"), "# A\n");
+    write_file(&ws.path().join("beta.md"), "# B\n");
+
+    let got = run_complete(
+        ws.path(),
+        &["compose", "prompts/plan.md", "attachments=alpha.md,b"],
+    );
+    assert!(
+        got.iter().any(|c| c == "attachments='alpha.md,beta.md'"),
+        "active partial must filter continuation candidates: {got:?}"
+    );
+    assert!(
+        !got.iter().any(|c| c == "attachments='alpha.md,alpha.md'"),
+        "prior file must stay excluded: {got:?}"
+    );
+}
+
+#[test]
+fn completion_file_array_unclosed_quote_round_trips() {
+    let ws = common::TestWorkspace::named("complete-schema-file-array-quote");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    write_file(
+        &ws.path().join("prompts").join("plan.md"),
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\n",
+            "Attachments: {{attachments}}.\n",
+        ),
+    );
+    write_file(&ws.path().join("a.md"), "# A\n");
+    write_file(&ws.path().join("b.md"), "# B\n");
+
+    let got = run_complete(ws.path(), &["compose", "prompts/plan.md", "attachments='a.md,b"]);
+    assert!(
+        got.iter().any(|c| c == "attachments='a.md,b.md'"),
+        "unclosed quote must produce a closed single-quoted candidate: {got:?}"
+    );
+}
+
+#[test]
+fn completion_file_array_literal_comma_filename_is_unsupported() {
+    // Documents the known limitation: the comma-list parser splits on
+    // every top-level comma, so a filename that itself contains a comma
+    // cannot be expressed in the exclusion set. The test only asserts
+    // non-panic and that some candidate is produced.
+    let ws = common::TestWorkspace::named("complete-schema-file-array-comma-limit");
+    seed_cargo_workspace(ws.path(), &["pkg"]);
+    write_file(
+        &ws.path().join("prompts").join("plan.md"),
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  attachments: file[]\n",
+            "---\n",
+            "Attachments: {{attachments}}.\n",
+        ),
+    );
+    write_file(&ws.path().join("a,b.md"), "# Comma\n");
+    write_file(&ws.path().join("b.md"), "# B\n");
+
+    let got = run_complete(ws.path(), &["compose", "prompts/plan.md", "attachments='a,b.md"]);
+    assert!(
+        !got.is_empty(),
+        "comma-named file edge case must produce candidates without panicking: {got:?}"
     );
 }
 

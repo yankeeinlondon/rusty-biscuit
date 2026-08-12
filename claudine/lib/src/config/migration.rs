@@ -11,7 +11,6 @@ const OLD_PROVIDER_KEYS: &[&str] = &[
     "kimi_code",
     "opencode",
     "qwen_code",
-    "roo_code",
 ];
 
 /// Returns `true` if `value` looks like the old per-provider config format.

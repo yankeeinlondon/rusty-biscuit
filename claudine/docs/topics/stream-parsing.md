@@ -16,7 +16,6 @@ We have done deep research on the JSON streaming data that each of CLI Agents re
 - [opencode](claudine/docs/research/non-interactive-sessions/opencode.md)
 - [qwen](claudine/docs/research/non-interactive-sessions/qwen.md)
 - [goose](claudine/docs/research/non-interactive-sessions/goose.md)
-- [roo code](claudine/docs/research/non-interactive-sessions/roo-code.md)
 
 ## Streaming Schemas
 
@@ -123,27 +122,6 @@ Based on this research we've been able to establish the following schemas for th
 - **Batch `json` shape:** `{ messages: Message[], metadata: { total_tokens, status } }`
 - **Notes:** current `StreamEvent` enum has **no** `model_change` variant; authentication failures surface as `{type: "error", error: "<string>"}`. Some MCP and subagent notifications are reduced to formatted strings before stream emission. Non-interactive human-in-the-loop is still sharp-edged: tool confirmations and elicitation requests are currently intercepted before stream emission.
 
-### Roo Code
-
-- **Flag:** `roo --output-format stream-json --yolo` (or `--json` for a single completion-time array)
-- **Format:** NDJSON
-- **Discriminator:** top-level `type`
-- **Envelope:** `{ type, timestamp (ISO-8601), data }`
-- **Schema source:** TypeScript interfaces in the `@roo-code/types` package (`schemas/cli/json-events.ts`); JSON Schema versions are exported for cross-language validation.
-- **Event types:** `init`, `thinking`, `tool_use`, `tool_result`, `cost`, `final_result`, `model_switch`, `plan_cap_approaching`, `plan_capped`, `insufficient_funds`, `auth_info`, `permission_denied`, `fatal_error`
-- **Key event payloads:**
-    - `init.data`: `model`, `provider`
-    - `tool_use.data`: `name`, `input`, `tool_use_id`
-    - `tool_result.data`: `tool_use_id`, `content`, `isError`
-    - `cost.data`: `input_tokens`, `output_tokens`, `cache_creation_input_tokens`, `total_cost_usd` (per-turn)
-    - `final_result.data`: aggregated status and totals
-    - `auth_info.data`: `method` (`api_key`|`oauth`|`session_token`), `provider` (never secrets)
-    - `permission_denied.data`: `operation` (`read`|`write`), `path`, `reason` (e.g. `EACCES`, `system_whitelist_blocked`)
-    - `plan_cap_approaching.data`: `remaining_tokens`, `percent_used`, `reset_timestamp` (fires at 80% usage)
-    - `plan_capped.data`: `reset_timestamp`, `upgrade_url`
-    - `insufficient_funds.data`: `provider_name`, `current_balance`, `required_minimum`
-- **Notes:** `-y` / `--yolo` / `--permission-mode acceptAll` is required for non-interactive runs to prevent the agent from hanging on approval prompts. In `--json` mode, ANSI styling is disabled; in `stream-json`, stdout is reserved for JSON and logging is redirected to stderr. `ask_followup_question` tool use is the detection point for HITL attempts; subagent HITL events nest within the subagent's event context.
-
 ## Typed Protocol Models
 
 The 6 currently-supported providers (Claude, Codex, Gemini, OpenCode, Qwen, Kimi) have a matching typed event model at [`claudine/lib/src/stream/protocol/<provider>.rs`](claudine/lib/src/stream/protocol/). Each module exports a tagged enum `*Event` that covers every event type the corresponding parser dispatches on, plus one struct per variant payload. Shared design rules across all six modules:
@@ -175,11 +153,15 @@ Every protocol module has its own `#[cfg(test)] mod tests` block covering each e
 Every parser now uses the same shape:
 
 ```rust
-fn feed_line(&mut self, line: &str) -> Result<Option<StreamChunk>, StreamParseError> {
+fn feed_line(&mut self, line: &str) {
     // 1. line trimming + empty-line shortcut (unchanged)
 
-    // 2. Parse as `Value` first — preserves malformed-line handling
-    let raw: Value = serde_json::from_str(line).map_err(...)?;
+    // 2. Parse as `Value` first. A malformed line emits
+    //    `SemanticEvent::Warning` and returns — it is never an error return.
+    let Ok(raw) = serde_json::from_str::<Value>(line) else {
+        self.emit_malformed_warning(...);
+        return;
+    };
 
     // 3. Extract event_type for tracing (the only residual `.get("type")`
     //    call in the parsers)
@@ -188,12 +170,20 @@ fn feed_line(&mut self, line: &str) -> Result<Option<StreamChunk>, StreamParseEr
 
     // 4. Typed dispatch
     match serde_json::from_value::<<X>Event>(raw.clone()) {
-        Ok(<X>Event::<Variant>(payload)) => { self.handle_<variant>(payload); Ok(None) }
+        Ok(<X>Event::<Variant>(payload)) => self.handle_<variant>(payload),
         ...
-        Err(_) => Ok(None),  // unknown or schema-mismatched — silently skipped
+        Err(_) => {}  // unknown or schema-mismatched — silently skipped
     }
 }
 ```
+
+**`feed_line` is infallible.** It returns `()`: every unparseable input becomes a
+`SemanticEvent::Warning`, and no parser has any way to declare a stream unusable.
+An earlier `StreamParseError` return existed but no implementation ever
+constructed either of its variants, so its only consumer — a raw-echo fallback in
+the stdout reader — was unreachable; both were removed (2026-07-18). A parser that
+genuinely needs to abandon a stream should reintroduce a failure return here
+rather than signal it out of band.
 
 Handler methods take the typed struct by value (e.g. `fn handle_result(&mut self, result: ClaudeResult, raw: Value)`) so there is no lingering `fn handle_*(&mut self, obj: &Value)` in any parser. The only handlers that still accept a raw `Value` are the two that construct a `raw_summary` for the execution summary (Claude's `handle_result`, Codex's `handle_turn_completed`, Gemini's `handle_result`, Qwen's `handle_result`) — those take both the typed event and the `raw` clone so the compact "large-arrays stripped" summary can be built from the original JSON.
 
@@ -201,7 +191,7 @@ Handler methods take the typed struct by value (e.g. `fn handle_result(&mut self
 
 **Claude** — `ClaudeEvent` has separate `Init` and `System` variants that both wrap `ClaudeInit`, so `init` and `system` events funnel into the same handler via `Ok(ClaudeEvent::Init(init) | ClaudeEvent::System(init))`. `ContentBlockStart` is its own variant and the parser checks `content_block.kind == "tool_use"` before forwarding via `ClaudeContentBlock::into_tool_use()`. `ClaudeResult::effective_cost_usd()` picks `total_cost_usd` over the legacy `cost_usd`.
 
-**Codex** — Dotted event names work cleanly with `#[serde(rename = "thread.created")]` on each variant. `turn.started` uses an empty `CodexTurnStarted {}` struct because internally-tagged unit variants in serde have quirky behavior around extra fields; empty structs silently accept any residual fields. `CodexItem` is a single flat struct covering every item subtype (agent_message, tool_use, tool_call, permission_request, etc.), with associated functions `is_tool_item_kind()` and `is_permission_item_kind()` that replace the old string-matching helpers. The `item.started` → `item.completed` merge is now a typed operation via `CodexItem::merge_started()` instead of a `Value` map-overlay. Codex keeps `StreamParseError::Fatal` (not `MalformedLine`) for malformed JSON. `handle_error` additionally suppresses duplicate sink emissions: Codex commonly emits `turn.failed` plus a top-level `error` carrying the same resolved `kind`/`message` for a single failure (rate-limit hits, auth failures). Summary state is always refreshed with the latest values, but the sink only sees one `SemanticEvent::Error` per distinct (kind, message) pair to avoid rendering identical "Agent Error" blocks twice on the live stderr surface.
+**Codex** — Dotted event names work cleanly with `#[serde(rename = "thread.created")]` on each variant. `turn.started` uses an empty `CodexTurnStarted {}` struct because internally-tagged unit variants in serde have quirky behavior around extra fields; empty structs silently accept any residual fields. `CodexItem` is a single flat struct covering every item subtype (agent_message, tool_use, tool_call, permission_request, etc.), with associated functions `is_tool_item_kind()` and `is_permission_item_kind()` that replace the old string-matching helpers. The `item.started` → `item.completed` merge is now a typed operation via `CodexItem::merge_started()` instead of a `Value` map-overlay. `handle_error` additionally suppresses duplicate sink emissions: Codex commonly emits `turn.failed` plus a top-level `error` carrying the same resolved `kind`/`message` for a single failure (rate-limit hits, auth failures). Summary state is always refreshed with the latest values, but the sink only sees one `SemanticEvent::Error` per distinct (kind, message) pair to avoid rendering identical "Agent Error" blocks twice on the live stderr surface.
 
 **Gemini** — `GeminiMessage.content` stays `Option<Value>` because Gemini emits content as either a plain string or an array of `{text: ...}` parts; the handler branches on `content_val.as_str()` vs `content_val.as_array()` after typed deserialization. The severity-based warning/error branching in `handle_error` stays in the handler, since it affects sink dispatch rather than field extraction.
 
@@ -213,7 +203,7 @@ Handler methods take the typed struct by value (e.g. `fn handle_result(&mut self
 
 ### Why `raw.clone()` is acceptable
 
-The `feed_line` pattern parses the line twice: once into `Value`, once into the typed enum via `from_value`. That clone is unavoidable today because we need both the malformed-line error path and the raw `Value` for result summaries. The cost is negligible — result/summary events are rare, and the clone is a single `serde_json::Value` (not a full string reparse). Cleaning this up would require either collapsing the raw `Value` needs into the typed structs (via `#[serde(flatten)] extra: serde_json::Map<String, Value>`) or introducing a second code path that parses only the typed enum and loses the raw fallback.
+The `feed_line` pattern parses the line twice: once into `Value`, once into the typed enum via `from_value`. That clone is unavoidable today because we need both the malformed-line warning path and the raw `Value` for result summaries. The cost is negligible — result/summary events are rare, and the clone is a single `serde_json::Value` (not a full string reparse). Cleaning this up would require either collapsing the raw `Value` needs into the typed structs (via `#[serde(flatten)] extra: serde_json::Map<String, Value>`) or introducing a second code path that parses only the typed enum and loses the raw fallback.
 
 ### What still uses `.get()`
 

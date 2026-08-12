@@ -20,6 +20,21 @@ pub(crate) fn inference_error(
     InferenceError::new(kind, message)
 }
 
+/// Map a provider process spawn failure onto the contract's stable error kinds.
+pub(crate) fn map_spawn_error(err: std::io::Error, program: &str) -> InferenceError {
+    match err.kind() {
+        std::io::ErrorKind::NotFound => inference_error(
+            InferenceErrorKind::Unavailable,
+            format!("provider binary `{}` not found on PATH", program),
+        ),
+        std::io::ErrorKind::PermissionDenied => inference_error(
+            InferenceErrorKind::Unavailable,
+            format!("provider binary `{}` is not executable", program),
+        ),
+        _ => inference_error(InferenceErrorKind::Provider, "failed to spawn provider process"),
+    }
+}
+
 /// Reject a session that escaped the tool-free contract.
 ///
 /// A successful-looking summary that nonetheless recorded tool calls,

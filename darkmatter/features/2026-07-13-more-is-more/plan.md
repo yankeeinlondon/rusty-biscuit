@@ -1,0 +1,498 @@
+---
+agent: "claude/"
+total_phases: 4
+created: 2026-07-14
+phase: 4
+yolo: "true"
+source_files_during_phase_1:
+  - sniff/cli/tests/snapshots.rs
+  - sniff/lib/src/error.rs
+  - sniff/lib/src/filesystem/git/api.rs
+  - sniff/lib/src/filesystem/git/merge_conflicts.rs
+  - sniff/lib/src/filesystem/git/mod.rs
+  - sniff/lib/src/filesystem/git/remote_refresh.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/filesystem/repo/area.rs
+  - sniff/lib/tests/merge_conflict_prediction.rs
+docs_updated_during_phase_1:
+  - darkmatter/features/2026-07-13-more-is-more/plan.md
+docs_created_during_phase_1: []
+skills_files_updated_during_phase_1: []
+source_files_during_phase_2:
+  - darkmatter/cli/tests/schema_about.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/git.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/groups.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/mod.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/snapshot.rs
+  - darkmatter/lib/src/markdown/compose/context/catalog.rs
+  - darkmatter/lib/tests/git_context_integration.rs
+  - sniff/lib/src/filesystem/git/status.rs
+  - sniff/lib/src/filesystem/git/types.rs
+  - sniff/lib/src/filesystem/git/worktree.rs
+docs_updated_during_phase_2:
+  - darkmatter/docs/schemas/darkmatter.yaml
+  - darkmatter/docs/topics/context-variables.md
+  - darkmatter/features/2026-07-13-more-is-more/plan.md
+docs_created_during_phase_2: []
+skills_files_updated_during_phase_2:
+  - .claude/skills/darkmatter/SKILL.md
+source_files_during_phase_3:
+  - darkmatter/lib/Cargo.toml
+  - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/git.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+  - darkmatter/lib/tests/predict_conflicts.rs
+docs_updated_during_phase_3:
+  - darkmatter/docs/schemas/expression-functions.yaml
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/features/2026-07-13-more-is-more/plan.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_4:
+  - darkmatter/dmls/src/overlay/expressions.rs
+  - darkmatter/dmls/tests/lsp_session.rs
+  - darkmatter/dmls/tests/no_side_effects.rs
+  - sniff/lib/src/filesystem/git/api.rs
+docs_updated_during_phase_4:
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/features/2026-07-13-more-is-more/plan.md
+  - sniff/docs/sniff-library-architecture.md
+  - sniff/lib/README.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+  - .claude/skills/darkmatter/SKILL.md
+  - .claude/skills/rust-devops/SKILL.md
+  - .claude/skills/rust-devops/gitoxide.md
+  - .claude/skills/sniff/SKILL.md
+packages:
+  - darkmatter
+  - dmls
+  - sniff
+source_code:
+  - darkmatter/cli/tests/schema_about.rs
+  - darkmatter/dmls/src/overlay/expressions.rs
+  - darkmatter/dmls/tests/lsp_session.rs
+  - darkmatter/dmls/tests/no_side_effects.rs
+  - darkmatter/lib/Cargo.toml
+  - darkmatter/lib/src/markdown/compose/context/capture/git.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/groups.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/mod.rs
+  - darkmatter/lib/src/markdown/compose/context/capture/snapshot.rs
+  - darkmatter/lib/src/markdown/compose/context/catalog.rs
+  - darkmatter/lib/src/markdown/compose/expression/catalog/parser.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/git.rs
+  - darkmatter/lib/src/markdown/compose/expression/functions/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/mod.rs
+  - darkmatter/lib/src/markdown/compose/expression/resolve_ctx.rs
+  - darkmatter/lib/tests/git_context_integration.rs
+  - darkmatter/lib/tests/predict_conflicts.rs
+  - sniff/cli/tests/snapshots.rs
+  - sniff/lib/src/error.rs
+  - sniff/lib/src/filesystem/git/api.rs
+  - sniff/lib/src/filesystem/git/merge_conflicts.rs
+  - sniff/lib/src/filesystem/git/mod.rs
+  - sniff/lib/src/filesystem/git/remote_refresh.rs
+  - sniff/lib/src/filesystem/git/status.rs
+  - sniff/lib/src/filesystem/git/types.rs
+  - sniff/lib/src/filesystem/git/worktree.rs
+  - sniff/lib/src/filesystem/mod.rs
+  - sniff/lib/src/filesystem/repo/area.rs
+  - sniff/lib/tests/merge_conflict_prediction.rs
+documentation:
+  - darkmatter/docs/schemas/darkmatter.yaml
+  - darkmatter/docs/schemas/expression-functions.yaml
+  - darkmatter/docs/topics/context-variables.md
+  - darkmatter/docs/topics/darkmatter-expressions.md
+  - darkmatter/features/2026-07-13-more-is-more/plan.md
+  - sniff/docs/sniff-library-architecture.md
+  - sniff/lib/README.md
+---
+
+# Execution Plan — More Is More: Git Context and Conflict Prediction
+
+Derived from [`spec.md`](./spec.md). This plan adds three Git-aware runtime
+context variables (`ctx.branch`, `ctx.worktree`, `ctx.merge_conflicts`) and one
+read-side expression function (`predict_conflicts(branch)`), with all Git
+authority living in `sniff`.
+
+## Success Criteria (goal-backward)
+
+The plan is done when all 16 spec Acceptance Criteria hold, specifically:
+
+- `sniff` exposes **one** hermetic commit-pair merge helper; `WorktreeEntry::has_conflicts`
+  and the new public branch API both derive from it (no parallel merge algorithm).
+- `ctx.branch` / `ctx.worktree` / `ctx.merge_conflicts` capture through a single
+  demand-driven `ContextGroup::Git` with independent per-field degradation.
+- `predict_conflicts(branch)` merges `theirs`→`ours` in memory, read-only, anchored
+  on the caller/launch area, valid in body/frontmatter/`$()` surfaces.
+- Authored YAML catalogs (base schema + expression-functions) are the single source;
+  `context-variables.md` catalog block is regenerated, not hand-authored.
+- `just test` passes in both `darkmatter` and `sniff`; cross-platform compile checks pass.
+
+## Cross-Cutting Rules
+
+- **US English** for all symbols/docs. **Never run `cargo fmt`.**
+- **Never `git commit`** — implementation and tests only.
+- Tests use **nextest**: `just test` (L1) / `just lint` per area. No L2 added.
+- Run `impact` (GitNexus) before editing `has_conflicts`, `ContextGroup`,
+  `ResolutionContext`, `BINDING_GROUPS`, and the capture dispatch — these have
+  known blast radius (claudine exhaustive matches, worktree consumers).
+- Portable path contract: sort/dedup once **in `sniff`** over the `/`-separated
+  string form; Darkmatter never re-orders or re-encodes.
+
+---
+
+## Phase 1 — `sniff` Hermetic Merge Primitive + Public Branch API
+
+**Goal:** Replace the boolean `has_merge_conflicts` probe with one hermetic,
+path-producing commit-pair authority, and expose a public branch-oriented
+conflict-path API. This is the foundation both Darkmatter surfaces consume.
+
+Files: `sniff/lib/src/filesystem/git/{remote_refresh.rs, api.rs, status.rs,
+worktree.rs, types.rs, mod.rs}`, `sniff/docs/`.
+
+### 1.1 — Spike: gix hermetic-boundary feasibility (BLOCKING, do first)
+
+- [x] Determine whether the pinned `gix` `Repository::merge_commits` facade can enforce
+      **all** hermetic invariants (object-memory before merge, index/attributes derived
+      from captured `ours` tree, no live-index read, rename-aware options from safe merge
+      config, `TreatAsUnresolved::git()`, `fail_on_conflict` disabled, reject external
+      driver/filter). Inspect the current call at `remote_refresh.rs:845`.
+- [x] If the facade cannot enforce them, identify the lower-level `gix::merge` plumbing
+      path (tree merge + virtual-merge-base) required. **Do not weaken an invariant to
+      keep the convenience call.**
+- [x] Record the decision inline in the helper's module doc, and if a new direct
+      `gix` plumbing surface/dependency is required, note it for the `docs/dependencies.md`
+      update in Phase 4.
+- **Checkpoint:** written decision on facade-vs-plumbing before writing 1.2.
+
+### 1.2 — Hermetic commit-pair helper `merge_conflicts_between`
+
+- [x] Implement `merge_conflicts_between(repo, ours, theirs) -> Result<Vec<PathBuf>>`
+      (private, in `remote_refresh.rs` or a focused sibling module) enforcing every
+      invariant from spec §"Hermetic merge boundary":
+      - clone/open into a probe-local view; enable `with_object_memory()` **before** merge;
+      - derive temporary index + attributes from the captured `ours` commit tree only;
+      - rename-aware options from the repo's safe merge configuration; `TreatAsUnresolved::git()`;
+      - `fail_on_conflict` disabled (collect **all** unresolved paths);
+      - never launch a merge driver / clean-smudge/process filter / hook; when an applicable
+        external driver/filter or renormalization would be required, return a dedicated
+        **unsupported-merge-configuration** error naming the setting/path.
+- [x] Materialize the merge into a temporary **in-memory** index, apply conflicts with
+      `TreatAsUnresolved::git()`, collect paths whose stage is not `Unconflicted`
+      (D7 temporary-index authority — **not** a heuristic pick of `ours`/`theirs` change locations).
+- [x] Convert byte paths via `sniff`'s existing lossy public-path helper; sort + dedup by
+      the portable `/`-separated string form; return repo-relative `PathBuf`s.
+- [x] Add a dedicated `SniffError` variant (or reuse the existing Git error taxonomy) for
+      the unsupported-merge-configuration case so it is distinguishable downstream.
+
+### 1.3 — Migrate `WorktreeEntry::has_conflicts` onto the shared helper
+
+- [x] Run `impact({target: "has_merge_conflicts", direction: "upstream"})` and record blast radius.
+- [x] Replace `has_merge_conflicts` body so `has_conflicts == !merge_conflicts_between(...).is_empty()`.
+      Delete the old `Options::default()` boolean merge path; there must be exactly one merge algorithm.
+- [x] Accept the intended rename-aware widening (update the two call sites at
+      `remote_refresh.rs:~795` and `~1198`/`~1213`). Unsafe external merge config now
+      **errors** rather than silently approximating.
+
+### 1.4 — Public branch API `merge_conflicts_with_branch_at`
+
+- [x] Add `merge_conflicts_with_branch_at(path: &Path, incoming_branch: &str) -> Result<Vec<PathBuf>>`
+      in `filesystem/git/api.rs`, re-exported from `filesystem::git` and `filesystem` per the
+      existing facade pattern.
+- [x] Implement the §"In-memory merge algorithm" resolution:
+      1. trusted `gix` discovery of the repo containing `path`;
+      2. require attached current local branch → snapshot+peel tip as **ours**;
+      3. normalize `incoming_branch` (strip at most one `refs/heads/`, validate as complete
+         local-branch name, rebuild full ref, **exact** ref lookup — no rev-parse/DWIM/prefix/tag/SHA/remote-tracking)
+         → snapshot+peel tip as **theirs**;
+      4. delegate to `merge_conflicts_between(repo, ours, theirs)`.
+- [x] Map the §"Errors versus clean results" conditions to errors (outside repo, unborn/detached
+      HEAD, unknown/invalid branch, unrelated histories, missing/corrupt objects, trust/permission
+      failure, unsupported merge config). A clean merge returns `[]`; same-branch/ancestor/already-contained
+      return `[]`.
+
+### 1.5 — `sniff` L1 tests (build fixtures with `git2` dev-dep)
+
+- [x] git2 index oracle parity: clean, content, add/add, modify/delete.
+- [x] Fixed expected-set fixtures (+ canonical-`git` oracle when the executable is present,
+      never invoked by the library): rename/rename, directory/file, multi-path, multiple-merge-base.
+- [x] Direction-sensitive fixture: reversing ours/theirs changes reported paths (AC9).
+- [x] Temporary-index authority proof: a heuristic "one side's change locations" collection
+      **fails** at least one rename/multi-path fixture (AC8/D7).
+- [x] Unsupported external merge driver/filter fixture → dedicated error **before** any command
+      launches; a safe built-in text merge remains supported.
+- [x] Live-index invariance: vary/corrupt the live index incl. staged `.gitattributes` while
+      holding tips fixed → prediction unchanged (AC11).
+- [x] Read-only regression snapshots: HEAD, all refs, index bytes, worktree status/files, and the
+      **on-disk object-ID set** unchanged before/after — including ≥1 clean auto-merge and ≥1
+      criss-cross/multiple-merge-base fixture that **synthesizes** virtual-base objects (so the
+      object-memory assertion is non-vacuous, AC7/AC13).
+- [x] Error-path tests: unborn/detached HEAD, unknown branch, invalid ref syntax, unrelated histories,
+      non-repository, missing/corrupt object → errors, never `[]` (AC10).
+
+- **Validation checkpoint P1:** `just test` and `just lint` green in `sniff/`;
+  `merge_conflicts_between` is the sole merge algorithm; `has_conflicts` derives from it.
+
+---
+
+## Phase 2 — Darkmatter Git Context Variables *(parallelizable with Phase 3 after P1)*
+
+**Goal:** Add `ctx.branch`, `ctx.worktree`, `ctx.merge_conflicts` behind a
+demand-driven `ContextGroup::Git`, wired to authored catalogs.
+
+Files: `darkmatter/lib/src/markdown/compose/context/capture/{groups.rs, mod.rs,
+snapshot.rs, git.rs (new)}`, `.../context/catalog.rs`,
+`darkmatter/docs/schemas/darkmatter.yaml`, `docs/topics/context-variables.md`.
+
+### 2.1 — Base schema descriptors (authored authority — do first)
+
+- [x] Add to `darkmatter.yaml` `ctx` mapping, in declaration order (= catalog display order):
+      - `branch` and `worktree` **with the repository identity fields** (near `repo`/`repo_root`),
+        typed `string(generated)` (optional/nullable);
+      - `merge_conflicts` **with the file-change fields** (near `dirty_files`), typed
+        `string[](generated; required)`.
+- [x] Descriptions must match spec §"Context Variables" YAML snippets (short local branch;
+      linked-worktree basename; unresolved index-stage paths).
+
+### 2.2 — `ContextGroup::Git` + capture module
+
+- [x] Run `impact({target: "ContextGroup"})` — the `all()`/`for_key`/`group_for_key` and the
+      `every_owned_key_has_exactly_one_group` test are the blast radius.
+- [x] Add `ContextGroup::Git` to the enum, `all()` array (now `[Self; 10]`), and the
+      `group_for_key` table with a new `git::KEYS = &["branch", "worktree", "merge_conflicts"]`.
+- [x] Create `capture/git.rs` with `KEYS` and `populate_git(&ContextCapture, &mut Map)` projecting
+      the three values (branch/worktree → `Value::String`/`Null`; merge_conflicts → `string_array`,
+      `[]` when absent/clean).
+- [x] Register `mod git;` in `capture/mod.rs` and dispatch `git::populate_git` under
+      `if groups.contains(&ContextGroup::Git)`.
+
+### 2.3 — Shared single-discovery capture in `ContextCapture`
+
+- [x] Extend `ContextCapture` with Git-group fields (e.g. `git_branch: Option<String>`,
+      `git_worktree: Option<String>`, `merge_conflicts: Vec<PathBuf>`) and a `need_git_group` gate.
+- [x] Perform **one** trusted repository discovery for the Git group (share the handle across
+      the three probes via handle-oriented helpers behind the existing path facades — reuse
+      `GitRepo`/`try_current_branch`, `get_current_worktree_name`, `merge_conflicts_at`). Do **not**
+      re-discover per key, and do **not** trigger monorepo/status/docs/OS probes.
+- [x] Partial-runtime policy (D9): discovery failure → one
+      `PartialRuntimeCapture { area: "git", .. }`, project `branch`/`worktree`=`null`,
+      `merge_conflicts`=`[]`. After successful discovery, probe the three fields independently;
+      a single field failure records a field-named diagnostic and substitutes only that field's
+      neutral value, preserving siblings. Repository **absence** is an ordinary value state, not a diagnostic.
+
+### 2.4 — Presentation grouping (`catalog.rs`)
+
+- [x] Add to `CONTEXT_VARIABLE_GROUPING`: `("branch", "Repository", "Git")`,
+      `("worktree", "Repository", "Git")`, `("merge_conflicts", "File Changes", "Conflicts")`.
+      (Capture grouping and presentation grouping are intentionally independent.)
+
+### 2.5 — Regenerate documentation catalog
+
+- [x] Regenerate the marked catalog block in `docs/topics/context-variables.md` via the existing
+      `md schema about --verbose` projection (do **not** hand-author). Update the capture-group table
+      to describe the new demand-driven Git group.
+
+### 2.6 — Darkmatter Git-context tests
+
+- [x] Demand-driven proof (AC2): referencing only one of the three keys performs no monorepo scan,
+      full status walk, doc scan, hardware/OS probe, subprocess, or network — and shares one discovery
+      across the three probes. Use the existing `status_walk_count`-style probes / group-scan tests.
+- [x] `ctx.branch` (AC3): short attached branch; `null` outside repo, unborn HEAD, detached HEAD.
+- [x] `ctx.worktree` (AC4): linked-worktree basename (canonicalized first); `null` in main/bare/non-repo;
+      never substitutes branch name.
+- [x] `ctx.merge_conflicts` (AC5): sorted, deduped, portable repo-relative paths; `[]` for clean/absent;
+      `[]` is falsy under `is_truthy`.
+- [x] Independent field degradation preserves sibling values (D9).
+
+- **Validation checkpoint P2:** `just test` + `just lint` green in `darkmatter/`;
+  a doc composing all three keys renders correctly; single-discovery proof passes.
+
+---
+
+## Phase 3 — Darkmatter `predict_conflicts(branch)` Expression Function *(parallelizable with Phase 2 after P1)*
+
+**Goal:** Register the read-side Git function, catalog-authored and caller-anchored.
+
+Files: `darkmatter/lib/src/markdown/compose/expression/functions/{mod.rs, git.rs (new)}`,
+`.../expression/resolve_ctx.rs`,
+`darkmatter/docs/schemas/expression-functions.yaml`.
+
+### 3.1 — `ResolutionContext::caller_dir()` accessor
+
+- [x] Run `impact({target: "ResolutionContext"})`.
+- [x] Add `pub(crate) fn caller_dir(&self) -> &Path` returning `file_ref_fallback_dir` when present,
+      else `base_dir` (spec §"Caller repository anchor"). The Git handler calls this rather than
+      reading the field directly.
+
+### 3.2 — Authored catalog entry (single authority — do before runtime)
+
+- [x] Add the `predict_conflicts` descriptor to `expression-functions.yaml` exactly as spec
+      §"Catalog entry": new **`Git`** category, **`order: 90`** (88/89 reserved by `finding-indexes`),
+      one overload `branch: string -> string[] | error`, `example` with `verification: display-only`.
+
+### 3.3 — `functions/git.rs` domain slice + registration
+
+- [x] Create `functions/git.rs` with
+      `FunctionBinding { canonical: "predict_conflicts", aliases: &["predictconflicts"],
+      evaluation: Context, handler: Some(Context(predict_conflicts_fn)) }`.
+- [x] Add `mod git;` and `git::BINDINGS` to `BINDING_GROUPS` in `functions/mod.rs`.
+- [x] Implement `predict_conflicts_fn(&[Value], &ResolutionContext) -> Result<Value, ExpressionError>`:
+      - exactly one argument; `null` → `null` (language-wide null propagation); non-string/non-null → type error;
+      - empty/whitespace-only → error; no trimming/rewrite except the one `refs/heads/` prefix handled in `sniff`;
+      - obtain `caller_dir()`, call `sniff::filesystem::git::merge_conflicts_with_branch_at`;
+      - project the already-sorted portable paths to `Value::Array` with **no** second ordering/encoding;
+      - convert `sniff` failures into the expression error model **without losing** the branch name or repo anchor.
+- [x] Confirm validity across body interpolation, frontmatter interpolation, and `$()` ternary surfaces
+      (no remote runtime, no network I/O).
+
+### 3.4 — `predict_conflicts` tests
+
+- [x] Registry parity: `catalog_and_runtime_bindings_have_bidirectional_canonical_parity` and alias
+      uniqueness still pass with the new binding (AC14).
+- [x] Direction (AC9/D2): `theirs`→`ours`; a fixture where reversing changes reported paths.
+- [x] Clean/no-op returns `[]`: same-branch, ancestor, already-contained, clean divergent (AC10).
+- [x] Error propagation (AC10): unknown branch, non-repository, detached/unborn HEAD, invalid ref
+      syntax, unrelated history, missing/corrupt object, unsupported external merge config, Git access
+      failure → expression errors, never `[]`.
+- [x] Committed-state boundary (AC11): staged/unstaged/untracked/already-conflicted index (incl. staged
+      `.gitattributes`) ignored; missing/corrupt live index does not block; tips held fixed.
+- [x] Caller anchor (AC12): repo-A prompt invoked from repo-B evaluates against repo-B; consistent across
+      body/frontmatter/`$()`.
+- [x] Read-only (AC13): snapshot HEAD/refs/index/worktree/object-ID set unchanged; no subprocess/hook/
+      driver/filter/fetch invoked.
+
+- **Validation checkpoint P3:** `just test` + `just lint` green in `darkmatter/`;
+  registry parity + read-only snapshots pass.
+
+---
+
+## Phase 4 — DMLS Parity, Documentation, Single-Sourcing & Closure
+
+**Goal:** Prove editor intelligence reaches DMLS through the shared catalogs (no Git at edit time),
+finish single-sourced docs, and verify cross-platform.
+
+Files: `darkmatter/dmls/` (parity tests), `darkmatter/docs/topics/darkmatter-expressions.md`,
+`sniff` API/Git docs, `docs/dependencies.md` (only if 1.1 added a dep), and the
+`sniff` / `rust-devops` / `darkmatter` skills.
+
+### 4.1 — DMLS catalog-parity tests (no hard-coded name lists)
+
+- [x] Assert the three `ctx.*` descriptors (with exact nullable/array types) reach DMLS completion/hover
+      through the schema-derived catalog.
+- [x] Assert the `predict_conflicts` descriptor reaches DMLS completion/signature/hover through the
+      expression-function catalog.
+- [x] Assert DMLS never evaluates the function, discovers a repo, reads the index, or simulates a merge
+      while serving requests (extend the existing `no_side_effects` posture).
+
+### 4.2 — Documentation & single-sourcing
+
+- [x] `darkmatter-expressions.md`: add Git function semantics, committed-state boundary, direction,
+      and the `as_unordered_list(predict_conflicts(...))` / ternary examples.
+- [x] `sniff` public API docs + Git docs: document actual (`merge_conflicts_at`) vs predicted
+      (`merge_conflicts_with_branch_at`) conflict APIs and the hermetic contract.
+- [x] Update `sniff`, `rust-devops`, and `darkmatter` skills where public architecture/workflow
+      descriptions need the new surface.
+- [x] Only if 1.1 required a new direct plumbing dependency: update `docs/dependencies.md` and the
+      affected area document; otherwise assert no dependency-doc change is needed.
+- [x] Confirm `context-variables.md` (2.5) and expression docs contain **no** second hand-maintained catalog.
+
+### 4.3 — Full validation & closure (AC16)
+
+- [x] `just build` + `just test` + `just lint` green in **both** `darkmatter/`
+      and `sniff/`, plus any downstream package areas selected by impact
+      analysis (including Claudine or Worktree for exhaustive consumers).
+- [x] Cross-platform compile checks for macOS, Windows, Linux (`--target` checks where the host allows;
+      otherwise assert no OS-specific/`cfg` code was introduced — every Git op is pure-Rust `gix`).
+- [x] Run `detect_changes({scope: "compare", base_ref: "main"})` and confirm only expected symbols/flows changed.
+      The branch-wide comparison includes 586 pre-existing divergent files and is therefore CRITICAL;
+      the complementary unstaged audit isolates this plan to 35 expected files at LOW risk with no
+      affected indexed execution processes.
+- [x] Walk all 16 Acceptance Criteria and check each off against a concrete test or artifact.
+
+#### Acceptance-criteria closure (AC1–AC16)
+
+- [x] **AC1:** `shipped_schema_exposes_exact_git_context_descriptors_in_declaration_order` and
+      `git_catalog_descriptors_reach_lsp_completion_and_hover` cover the shipped schema types,
+      descriptions, and editor projection.
+- [x] **AC2:** `git_group_is_demand_driven_and_populates_all_three_values` and
+      `corrupt_index_degrades_only_merge_conflicts_and_preserves_siblings` cover demand capture,
+      group isolation, and independent degradation.
+- [x] **AC3:** `branch_projects_attached_outside_unborn_and_detached_states` covers every branch state.
+- [x] **AC4:** `worktree_projects_linked_main_bare_and_non_repository_states` covers every worktree state.
+- [x] **AC5:** `merge_conflicts_are_native_sorted_deduped_portable_arrays_and_empty_is_falsy`
+      covers native arrays, portable ordering, clean/absent values, and downstream truthiness.
+- [x] **AC6:** `remote_refresh::tests::has_merge_conflicts_matches_git2_oracle` and the Worktree L1
+      suite cover the shared helper's existing boolean consumer; `api.rs` delegates the branch API
+      to the same `merge_conflicts_between` authority.
+- [x] **AC7:** `structural_conflicts_preserve_every_temporary_index_path`,
+      `live_index_and_worktree_state_do_not_affect_prediction`, and
+      `prediction_is_read_only_for_criss_cross_virtual_merge_base` cover temporary-index authority,
+      the committed-tree boundary, and non-persistence of synthesized objects.
+- [x] **AC8:** `public_api_matches_git2_index_oracle_for_core_conflicts` and
+      `structural_fixtures_match_canonical_git_when_available` cover core and structural oracle parity.
+- [x] **AC9:** `conflict_paths_are_direction_sensitive` and
+      `conflict_paths_preserve_sniff_ordering_and_merge_direction` cover the incoming/theirs into
+      current/ours direction through Sniff and Darkmatter.
+- [x] **AC10:** `clean_and_no_op_merges_return_empty_and_accept_exact_branch_spellings`,
+      `prediction_preconditions_are_errors`, `clean_merge_variants_return_empty_arrays`, and
+      `errors_preserve_branch_and_caller_anchor` cover clean boundaries and error behavior.
+- [x] **AC11:** `live_index_and_worktree_state_do_not_affect_prediction` and
+      `prediction_ignores_live_state_and_is_read_only_on_repeated_reads` cover staged, unstaged,
+      untracked, conflicted, missing-index, corrupt-index, and repeated-read variants.
+- [x] **AC12:** `caller_anchor_is_shared_by_body_frontmatter_and_shell_ternary` covers launch-area
+      anchoring through body, frontmatter, and `$()` surfaces.
+- [x] **AC13:** `prediction_is_read_only_for_a_clean_auto_merge`,
+      `prediction_is_read_only_for_criss_cross_virtual_merge_base`,
+      `unsafe_merge_configuration_is_rejected_without_launching_commands`, and
+      `dsl_requests_spawn_no_processes_and_open_no_sockets` cover repository state and side effects.
+- [x] **AC14:** `shipped_catalog_describes_predict_conflicts_exactly`,
+      `catalog_and_runtime_bindings_have_bidirectional_canonical_parity`,
+      `registration_names_aliases_and_signatures_are_unique`,
+      `shipped_catalog_descriptors_all_reach_completion`, and
+      `git_catalog_descriptors_reach_lsp_completion_and_hover` cover catalog/runtime/DMLS parity.
+- [x] **AC15:** the generated catalog blocks, Git narrative/API docs, and updated Darkmatter, Sniff,
+      and rust-devops skills document the shipped contract without duplicating an authored catalog.
+- [x] **AC16:** native macOS area gates pass; the same six affected packages compile for
+      `x86_64-pc-windows-gnu` and build for `x86_64-unknown-linux-gnu`; no L2 test was needed.
+
+- **Validation checkpoint P4 (final):** every spec Acceptance Criterion maps to a passing
+  test/artifact; both package areas green; workspace compiles cross-platform.
+
+---
+
+## Dependency & Parallelization Summary
+
+```
+Phase 1 (sniff foundation)
+        │
+        ├────────────► Phase 2 (ctx.* Git variables)   ┐
+        │                                                ├─ parallel after P1
+        └────────────► Phase 3 (predict_conflicts fn)   ┘
+                                 │
+                                 ▼
+                        Phase 4 (DMLS parity + docs + closure)
+```
+
+- **Phase 1 is a hard prerequisite** for Phases 2 and 3 (both call the new `sniff` API).
+- **Phases 2 and 3 are independent** and may run concurrently once Phase 1's public
+  `merge_conflicts_with_branch_at` signature is landed. They touch disjoint Darkmatter
+  modules (capture vs expression/functions) except for the shared authored YAML files —
+  coordinate the two YAML edits (`darkmatter.yaml` in P2, `expression-functions.yaml` in P3)
+  as separate files to avoid conflict.
+- **Phase 4 requires both** Phase 2 and Phase 3 complete (parity tests reference both catalogs).
+- Within Phase 1, **task 1.1 (spike) is blocking** — it decides facade-vs-plumbing before 1.2.
+
+## Risk Notes
+
+- **gix facade limitation (1.1):** highest-uncertainty item. If `merge_commits` cannot enforce
+  the hermetic invariants, dropping to `gix::merge` tree plumbing enlarges Phase 1 scope and may
+  add a dependency (handle in 4.2). Resolve before committing to 1.2's shape.
+- **Rename-aware widening (1.3):** `has_conflicts` answers may change vs the old `Options::default()`
+  probe. This is an intended correctness fix — verify existing `remote_refresh` worktree tests are
+  updated to the widened expectation, not silently broken.
+- **New enum variant drift (2.2):** `ContextGroup::Git` and any new `SniffError`
+  variant can break exhaustive matches downstream (Claudine). The scoped
+  downstream build/test/lint matrix in 4.3 catches this.

@@ -6,9 +6,9 @@
 //! > The metadata table includes Document (with OSC8 link), Description,
 //! > Agent, Model, YOLO, and Area … rendered in blue / italic+dim / green+red.
 //!
-//! The L1 unit tests in `dry_run.rs` and the CLI integration tests in
-//! `wrap_commands.rs` assert the table's *semantics* after stripping escape
-//! codes, so they cannot catch broken SGR/OSC8 emission. These tests drive the
+//! The L1 unit tests in `dry_run.rs` and the CLI integration tests in the
+//! `wrap_compose_*.rs` binaries assert the table's *semantics* after stripping
+//! escape codes, so they cannot catch broken SGR/OSC8 emission. These tests drive the
 //! real `claudine compose --dry-run` binary inside a real terminal emulator and
 //! assert against the bytes the terminal actually displayed (`frame.raw`):
 //!
@@ -43,10 +43,10 @@ use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use std::fs;
 use std::time::Duration;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 mod common;
-use common::{TestWorkspace, augmented_path, write_executable};
+use common::{TestWorkspace, clear_no_color, write_executable};
 
 /// The composition fixture: a `name`/`description` frontmatter (so the Document
 /// cell uses the name and the Description row is present) and a body with no
@@ -69,11 +69,11 @@ Just a body.
 ";
 
 /// Fixture with a valid but not-installed `agent` frontmatter value.
-/// The test harness only stubs `goose` on PATH, so `roo` is not installed.
+/// The test harness only stubs `goose` on PATH, so `qwen` is not installed.
 const FIXTURE_NOT_INSTALLED: &str = "\
 ---
 name: Not Installed Doc
-agent: roo
+agent: qwen
 ---
 Just a body.
 ";
@@ -103,6 +103,12 @@ struct DryRunCapture {
 /// metadata table and frontmatter land on the pane via stderr; the composed
 /// body via stdout.
 fn run_dry_run_compose<H: TerminalHarness>(harness: &mut H) -> DryRunCapture {
+    // Every fixture in this file asserts a *colored* surface (256-color YAML
+    // highlighting, bold/italic headings, table cell colors). An ambient
+    // `NO_COLOR` out-votes both `FORCE_COLOR=1` and the plain fixture's real
+    // capability detection — see `common::clear_no_color`.
+    clear_no_color(harness);
+
     let workspace = TestWorkspace::named("claudine-dryrun-l2");
     let bin_dir = workspace.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
@@ -118,9 +124,11 @@ fn run_dry_run_compose<H: TerminalHarness>(harness: &mut H) -> DryRunCapture {
     let doc = workspace.path().join("doc.md");
     fs::write(&doc, FIXTURE_DOC).unwrap();
 
-    let claudine = cargo_bin!("claudine").display().to_string();
-    let path = augmented_path(&bin_dir);
-    let path = path.to_string_lossy().into_owned();
+    let claudine = cargo_bin("claudine").display().to_string();
+    // Hermetic PATH: exactly the stub bin dir, so installed/not-installed is
+    // a fact of the fixture, never of the host (a host-installed provider
+    // must not flip the resolution state under test).
+    let path = bin_dir.to_string_lossy().into_owned();
     let home = workspace.path().to_string_lossy().into_owned();
 
     // Run from the (non-repo) workspace so no monorepo `Area` row appears and
@@ -164,6 +172,12 @@ fn run_dry_run_compose_with_doc<H: TerminalHarness>(
     doc_content: &str,
     workspace_name: &str,
 ) -> DryRunCapture {
+    // Every fixture in this file asserts a *colored* surface (256-color YAML
+    // highlighting, bold/italic headings, table cell colors). An ambient
+    // `NO_COLOR` out-votes both `FORCE_COLOR=1` and the plain fixture's real
+    // capability detection — see `common::clear_no_color`.
+    clear_no_color(harness);
+
     let workspace = TestWorkspace::named(workspace_name);
     let bin_dir = workspace.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
@@ -178,9 +192,11 @@ fn run_dry_run_compose_with_doc<H: TerminalHarness>(
     let doc = workspace.path().join("doc.md");
     fs::write(&doc, doc_content).unwrap();
 
-    let claudine = cargo_bin!("claudine").display().to_string();
-    let path = augmented_path(&bin_dir);
-    let path = path.to_string_lossy().into_owned();
+    let claudine = cargo_bin("claudine").display().to_string();
+    // Hermetic PATH: exactly the stub bin dir, so installed/not-installed is
+    // a fact of the fixture, never of the host (a host-installed provider
+    // must not flip the resolution state under test).
+    let path = bin_dir.to_string_lossy().into_owned();
     let home = workspace.path().to_string_lossy().into_owned();
 
     harness
@@ -556,7 +572,7 @@ fn assert_agent_cell_alignment(frame: &CapturedFrame, agent_label: &str) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_dry_run_metadata_table_renders_styled_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let capture = run_dry_run_compose(&mut harness);
@@ -569,11 +585,7 @@ fn level2_dry_run_metadata_table_renders_styled_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_dry_run_document_cell_renders_osc8_link_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
     let capture = run_dry_run_compose(&mut harness);
@@ -610,6 +622,12 @@ fn level2_dry_run_document_cell_renders_osc8_link_in_wezterm() {
 /// 256-color SGR (YAML highlighting, bold/italic heading) is keyed off `TERM` /
 /// `COLORTERM` and is unaffected.
 fn run_dry_run_compose_plain<H: TerminalHarness>(harness: &mut H) -> DryRunCapture {
+    // Every fixture in this file asserts a *colored* surface (256-color YAML
+    // highlighting, bold/italic headings, table cell colors). An ambient
+    // `NO_COLOR` out-votes both `FORCE_COLOR=1` and the plain fixture's real
+    // capability detection — see `common::clear_no_color`.
+    clear_no_color(harness);
+
     let workspace = TestWorkspace::named("claudine-dryrun-l2-plain");
     let bin_dir = workspace.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
@@ -623,9 +641,11 @@ fn run_dry_run_compose_plain<H: TerminalHarness>(harness: &mut H) -> DryRunCaptu
     let doc = workspace.path().join("doc.md");
     fs::write(&doc, FIXTURE_DOC).unwrap();
 
-    let claudine = cargo_bin!("claudine").display().to_string();
-    let path = augmented_path(&bin_dir);
-    let path = path.to_string_lossy().into_owned();
+    let claudine = cargo_bin("claudine").display().to_string();
+    // Hermetic PATH: exactly the stub bin dir, so installed/not-installed is
+    // a fact of the fixture, never of the host (a host-installed provider
+    // must not flip the resolution state under test).
+    let path = bin_dir.to_string_lossy().into_owned();
     let home = workspace.path().to_string_lossy().into_owned();
 
     harness
@@ -679,7 +699,7 @@ fn run_dry_run_compose_plain<H: TerminalHarness>(harness: &mut H) -> DryRunCaptu
 #[test]
 #[serial(level2_terminal)]
 fn level2_dry_run_yaml_heading_structure_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let capture = run_dry_run_compose_plain(&mut harness);
@@ -697,7 +717,7 @@ fn level2_dry_run_yaml_heading_structure_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_dry_run_invalid_agent_renders_red_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let capture = run_dry_run_compose_with_doc(
@@ -730,7 +750,7 @@ fn level2_dry_run_invalid_agent_renders_red_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_dry_run_not_installed_renders_yellow_dim_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let capture = run_dry_run_compose_with_doc(
@@ -745,7 +765,7 @@ fn level2_dry_run_not_installed_renders_yellow_dim_in_tmux() {
         "expected 'Agent Not Installed' in Agent cell.\nplain:\n{plain}",
     );
     assert!(
-        plain.contains("Roo"),
+        plain.contains("Qwen"),
         "expected the not-installed provider name in Agent cell.\nplain:\n{plain}",
     );
 
@@ -768,7 +788,7 @@ fn level2_dry_run_not_installed_renders_yellow_dim_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_dry_run_no_agent_multiline_alignment_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
     let capture = run_dry_run_compose_with_doc(

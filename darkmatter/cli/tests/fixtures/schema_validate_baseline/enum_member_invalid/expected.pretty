@@ -1,0 +1,2 @@
+- ✗ the document [doc.md]({DOC_URL}) failed schema validation:
+    - status "orange" is not one of "draft", "published" or "archived" (at line 4 of frontmatter)

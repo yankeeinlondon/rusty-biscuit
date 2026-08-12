@@ -72,7 +72,7 @@ pub fn map_auth(strategy: &AuthStrategy) -> ExportAuth {
                 }
             }
         }
-        AuthStrategy::ApiKey { header } => ExportAuth::ApiKey {
+        AuthStrategy::ApiKey { header, .. } => ExportAuth::ApiKey {
             header: header.clone(),
             variable: "apiKey".to_string(),
             location: ApiKeyLocation::Header,
@@ -135,7 +135,8 @@ mod tests {
     fn map_auth_api_key() {
         assert_eq!(
             map_auth(&AuthStrategy::ApiKey {
-                header: "X-API-Key".to_string()
+                header: "X-API-Key".to_string(),
+                value_prefix: None,
             }),
             ExportAuth::ApiKey {
                 header: "X-API-Key".to_string(),

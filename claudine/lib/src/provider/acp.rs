@@ -7,25 +7,14 @@
 //! captured via ACP queryable from [`ProviderInfo`](super::ProviderInfo).
 //!
 //! The [`EventSupportLevel::Acp`](crate::provider::EventSupportLevel) variant
-//! tags individual event mapping rows whose capture mechanism is ACP. The
-//! library guarantees (via tests) that any provider with at least one
-//! `EventSupportLevel::Acp` row reports a non-`NotSupported` ACP server
-//! mode.
+//! tags individual event mapping rows whose capture mechanism is ACP.
+//! `server_mode` is a provider-capability fact (research-fed, acp topic),
+//! deliberately decoupled from Claudine's own event wiring: a provider can
+//! speak ACP without Claudine capturing any events through it.
 
 use serde::Serialize;
 
-/// ACP server posture for a provider.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AcpServerMode {
-    /// The provider does not expose an ACP server surface.
-    NotSupported,
-    /// The provider exposes ACP as a first-class server.
-    Native,
-    /// ACP is reachable via Claudine's wire-mode JSON-RPC proxy
-    /// (currently Kimi `--wire`).
-    AvailableViaWireProxy,
-}
+pub use claudine_catalog_types::AcpServerMode;
 
 /// Canonical ACP events Claudine cares about.
 ///
@@ -51,7 +40,7 @@ pub enum AcpEvent {
 /// Provider ACP capability descriptor.
 #[derive(Debug, Clone, Copy, Serialize)]
 pub struct AcpSupport {
-    /// ACP server mode for this provider.
+    /// ACP server posture the provider itself offers (research-fed).
     pub server_mode: AcpServerMode,
     /// Whether the provider can act as an ACP client.
     pub client_supported: bool,
@@ -60,15 +49,16 @@ pub struct AcpSupport {
 }
 
 impl AcpSupport {
-    /// `AcpSupport` value for providers without ACP integration.
-    pub const NOT_SUPPORTED: AcpSupport = AcpSupport {
-        server_mode: AcpServerMode::NotSupported,
-        client_supported: false,
-        events_via_acp: &[],
-    };
-
-    /// Returns whether this provider exposes any ACP server surface.
+    /// Returns whether the provider speaks ACP (native or adapter,
+    /// including partial support).
+    ///
+    /// Semantic shift with the 2026-07-05 `server_mode` graduation: this
+    /// reports the PROVIDER's ACP capability, no longer whether Claudine
+    /// has an ACP/wire capture path (see `events_via_acp` for that).
     pub fn is_supported(&self) -> bool {
-        !matches!(self.server_mode, AcpServerMode::NotSupported)
+        !matches!(
+            self.server_mode,
+            AcpServerMode::None | AcpServerMode::Unknown
+        )
     }
 }

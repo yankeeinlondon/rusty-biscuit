@@ -23,9 +23,10 @@ fn test_detect_returns_hardware_info() {
 
 #[test]
 fn test_detect_with_custom_base_dir() {
+    let temp_dir = tempfile::TempDir::new().unwrap();
     let result = sniff::detect_with_plan(
         DetectionPlan::new()
-            .base_dir(PathBuf::from("."))
+            .base_dir(temp_dir.path().to_path_buf())
             .without_os()
             .without_hardware()
             .without_network(),
@@ -538,6 +539,108 @@ fn test_nested_only_workspace_full_detection_does_not_panic() {
         .expect("nested pnpm workspace must produce its own layer");
     assert_eq!(pnpm_layer.root, path.join("web"));
     assert_eq!(pnpm_layer.packages.len(), 2);
+}
+
+#[test]
+fn test_nested_pnpm_and_dotnet_both_discovered_via_single_pass() {
+    // Single-pass entry inspection must surface both a pnpm layer at `web/`
+    // and a .NET solution layer at `dotnet/` from one `ignore` walk over a
+    // bare-root repo. The deep `web/packages/app/package.json` exercises the
+    // second-level depth so the walker's pruning does not over-eagerly
+    // truncate the pnpm membership glob.
+    use sniff::filesystem::MonorepoStandard;
+
+    let (_dir, path) = fixtures::create_nested_pnpm_and_dotnet_repo();
+    let repo = sniff::filesystem::detect_repo_structure(&path)
+        .unwrap()
+        .expect("nested pnpm + dotnet forest should be detected");
+
+    assert!(repo.is_monorepo);
+
+    let pnpm_layer = repo
+        .monorepo_layers
+        .iter()
+        .find(|l| l.authority == MonorepoStandard::PnpmWorkspaces)
+        .expect("nested pnpm workspace must produce its own layer");
+    assert_eq!(pnpm_layer.root, path.join("web"));
+    assert_eq!(pnpm_layer.packages.len(), 2);
+
+    let dotnet_layer = repo
+        .monorepo_layers
+        .iter()
+        .find(|l| l.authority == MonorepoStandard::DotNetSolution)
+        .expect("nested .NET solution must produce its own layer");
+    assert_eq!(dotnet_layer.root, path.join("dotnet"));
+    assert_eq!(
+        dotnet_layer.packages.len(),
+        1,
+        "dotnet layer must resolve the single .csproj listed by MyApp.sln"
+    );
+}
+
+#[test]
+fn test_root_marker_is_not_registered_as_nested_candidate() {
+    // Nested discovery is non-root only: a marker placed directly at the repo
+    // root must not register the root itself as a `Candidate` (its parent is
+    // `root`, which the new walk skips). A repo whose only marker sits at the
+    // root resolves to at most a single-package repo, never a nested layer.
+    let (_dir, path) = fixtures::create_nested_marker_at_root_to_be_ignored();
+    let repo = sniff::filesystem::detect_repo_structure(&path).unwrap();
+    match repo {
+        None => {}
+        Some(repo) => {
+            assert!(
+                repo.monorepo_layers.is_empty(),
+                "root marker must not register a nested candidate, got layers: {:?}",
+                repo.monorepo_layers
+            );
+        }
+    }
+}
+
+#[test]
+fn test_node_modules_package_json_is_pruned() {
+    // `node_modules` is in the prune list (`should_skip_directory_name`), so
+    // `filter_entry` keeps the walker from descending into it. The fixture
+    // buries a real pnpm workspace (with a resolvable `packages/app` member)
+    // inside `node_modules`: a regressed prune would walk it, dispatch to
+    // `detect_pnpm_workspace`, and produce a PnpmWorkspaces layer rooted under
+    // `node_modules`. The top-level `app/package.json` has no `workspaces`
+    // field, so it produces no layer of its own. A working prune therefore
+    // leaves zero monorepo layers, making this assertion fail loudly if the
+    // node_modules workspace is ever detected.
+    let (_dir, path) = fixtures::create_pruned_node_modules_with_package_json();
+    let repo = sniff::filesystem::detect_repo_structure(&path).unwrap();
+    let Some(repo) = repo else {
+        return;
+    };
+    assert!(
+        repo.monorepo_layers.is_empty(),
+        "pruned node_modules subtree must not register a nested candidate, got layers: {:?}",
+        repo.monorepo_layers
+    );
+}
+
+#[test]
+fn test_gitignored_nested_marker_is_not_detected() {
+    // Intentional behavior change from the old per-directory
+    // `Path::exists()` probe: the single-pass `ignore` walker honors
+    // `git_ignore`, so a gitignored `pnpm-workspace.yaml` is no longer
+    // detected. The fixture's ignored marker declares a real member, so the
+    // old `exists()` probe WOULD have produced a PnpmWorkspaces layer here —
+    // making the empty-layers assertion discriminate the two implementations.
+    // See the spec's "Intentional Behavior Change" section. Marker files are
+    // conventionally committed, so the risk is judged negligible.
+    let (_dir, path) = fixtures::create_gitignored_nested_marker();
+    let repo = sniff::filesystem::detect_repo_structure(&path).unwrap();
+    let Some(repo) = repo else {
+        return;
+    };
+    assert!(
+        repo.monorepo_layers.is_empty(),
+        "gitignored nested marker must not register a candidate, got layers: {:?}",
+        repo.monorepo_layers
+    );
 }
 
 #[test]
@@ -1695,7 +1798,7 @@ fn test_linux_package_managers_finds_at_least_one() {
 
     // Get distro info to determine family
     let linux_family = detect_linux_distro().map(|d| d.family);
-    let managers = detect_linux_package_managers(linux_family);
+    let managers = detect_linux_package_managers(linux_family, None);
 
     // On any real Linux system, at least one package manager should be found
     // This may fail in extremely minimal containers, which is acceptable
@@ -2046,6 +2149,9 @@ fn create_merge_conflict_repo() -> (tempfile::TempDir, PathBuf) {
         let status = Command::new("git")
             .args(args)
             .current_dir(dir)
+            .env("GIT_CONFIG_COUNT", "1")
+            .env("GIT_CONFIG_KEY_0", "commit.gpgsign")
+            .env("GIT_CONFIG_VALUE_0", "false")
             .status()
             .unwrap();
         assert!(status.success(), "git {:?} failed with {:?}", args, status);
@@ -3330,8 +3436,12 @@ fn test_performance_collector_thread_local_aggregation() {
         increment_counter("test.counter.x", 5);
         increment_counter("test.counter.y", 7);
 
-        // Spawn additional threads that each install the same collector
-        // and record data into their own thread-local buffers.
+        // Spawn additional threads that each install the same collector and
+        // record data into their own thread-local buffers. Recording writes to
+        // a thread-local buffer, so a thread that exits without draining it
+        // would silently discard everything it recorded; these threads rely on
+        // `with_current_collector` flushing before it restores the previous
+        // collector.
         let handles: Vec<_> = (0..3)
             .map(|i| {
                 let c = Arc::clone(&collector);
@@ -3340,38 +3450,6 @@ fn test_performance_collector_thread_local_aggregation() {
                         record_stage("test.stage.a", Duration::from_millis((i + 1) as u64));
                         increment_counter("test.counter.x", 1);
                     });
-                })
-            })
-            .collect();
-
-        for h in handles {
-            h.join().unwrap();
-        }
-
-        // After worker threads finish, their thread-local buffers may still
-        // hold data (thread pools park rather than exit).  We must flush
-        // each worker thread's buffer before snapshotting.  In production
-        // this is done by the parallel walker callbacks; here we simulate
-        // it by flushing the current thread only (the workers already
-        // flushed when with_current_collector restored the previous collector).
-        //
-        // Actually, with_current_collector does NOT flush on exit — it only
-        // restores the previous collector.  So the worker threads' data is
-        // still in their thread-local buffers.  For this test to pass we
-        // need to ensure the workers flush.  We do that by having each
-        // worker call flush_thread_local before exiting.
-        //
-        // Re-spawn with explicit flush:
-        let handles: Vec<_> = (0..3)
-            .map(|i| {
-                let c = Arc::clone(&collector);
-                std::thread::spawn(move || {
-                    with_current_collector(Some(Arc::clone(&c)), || {
-                        record_stage("test.stage.a", Duration::from_millis((i + 1) as u64));
-                        increment_counter("test.counter.x", 1);
-                    });
-                    // Flush after the scope so data is merged into central state.
-                    c.flush_thread_local();
                 })
             })
             .collect();

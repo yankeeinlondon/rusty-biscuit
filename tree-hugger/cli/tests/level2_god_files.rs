@@ -29,12 +29,18 @@ use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
-/// Absolute path to the built `hug` binary, injected by cargo for this crate's
-/// integration tests. Driving the real binary keeps the test honest about the
-/// production rendering path.
-const HUG: &str = env!("CARGO_BIN_EXE_hug");
+/// Absolute path to the built `hug` binary. Driving the real binary keeps the
+/// test honest about the production rendering path.
+fn hug() -> &'static str {
+    static BIN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BIN.get_or_init(|| {
+        biscuit_test_harness::bin_exe!("hug")
+            .to_string_lossy()
+            .into_owned()
+    })
+}
 
 static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
@@ -74,13 +80,30 @@ fn write_moderate_fixture(dir: &Path) {
     std::fs::write(dir.join("god_moderate.py"), src).expect("write moderate fixture");
 }
 
+/// Render `path` as a single shell word for the POSIX shell running in the
+/// pane.
+///
+/// The harness types its command line into a shell, so a Windows path reaches
+/// it as a string full of `\` escapes — bash silently swallows them and looks
+/// up `W:rusty-biscuit-targetdebughug.exe`. Slash separators are what that
+/// shell (Git Bash / MSYS) expects on Windows; single quotes then keep spaces
+/// in a temp-dir path from splitting the word.
+fn shell_word(path: &Path) -> String {
+    let portable = biscuit_file::to_portable_string(path);
+    format!("'{}'", portable.replace('\'', "'\\''"))
+}
+
 /// Drive `hug god-files <dir>` in the pane (forcing color + OSC8 via
 /// `CLICOLOR_FORCE`) and capture the rendered frame.
 fn run_god_files<H: TerminalHarness>(harness: &mut H, dir: &Path) -> CapturedFrame {
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
 
-    let cmd = format!("{HUG} god-files {}", dir.display());
+    let cmd = format!(
+        "{} god-files {}",
+        shell_word(Path::new(hug())),
+        shell_word(dir)
+    );
     harness
         .send_command_with_env(&cmd, &[("CLICOLOR_FORCE", "1")])
         .expect("send_command_with_env failed");
@@ -232,7 +255,7 @@ fn assert_moderate_report(frame: &CapturedFrame, expect_osc8: bool) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_god_files_pretty_report_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let dir = tempfile::TempDir::new().unwrap();
     write_god_fixture(dir.path());
@@ -254,11 +277,7 @@ fn level2_god_files_pretty_report_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_god_files_pretty_report_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let dir = tempfile::TempDir::new().unwrap();
     write_god_fixture(dir.path());
@@ -282,11 +301,7 @@ fn level2_god_files_pretty_report_in_wezterm() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_god_files_pretty_report_in_kitty() {
-    require_level!(
-        Level::L2,
-        KittyHarness::available(),
-        "Kitty remote control (set KITTY_LISTEN_ON)",
-    );
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let dir = tempfile::TempDir::new().unwrap();
     write_god_fixture(dir.path());

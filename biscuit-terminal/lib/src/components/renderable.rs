@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::rc::Rc;
 
+use renderable::style::Style;
 use renderable::tree::RenderNode;
 
 use crate::terminal::Terminal;
@@ -118,6 +119,57 @@ pub trait TerminalRenderable: std::fmt::Debug + Any {
         self
     }
 
+    /// Returns the component's appearance attributes.
+    ///
+    /// ## Default
+    ///
+    /// Returns [`Style::default`] (an empty style). Components that carry
+    /// appearance — typically those that route `render(&term)` through the
+    /// canonical render tree — override this and [`style_mut`] to expose their
+    /// stored style so the bespoke `render(&term)` surface and the
+    /// `render_tree` fold surface agree.
+    ///
+    /// [`style_mut`]: TerminalRenderable::style_mut
+    fn style(&self) -> Style {
+        Style::default()
+    }
+
+    /// Returns a mutable reference to the component's stored appearance, when
+    /// it carries one.
+    ///
+    /// ## Default
+    ///
+    /// Returns `None`. Components that store a `Style` field override this to
+    /// return `Some(&mut <field>)`, which lets the provided [`with_style`]
+    /// builder store a caller-supplied style. Components that do not carry
+    /// appearance leave the default; [`with_style`] is then a no-op for them.
+    ///
+    /// [`with_style`]: TerminalRenderable::with_style
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        None
+    }
+
+    /// Overlays `style` onto the component's stored appearance.
+    ///
+    /// Provided method: delegates to [`style_mut`] and merges `style` onto the
+    /// stored value via [`Style::overlay_onto`], so a component's own defaults
+    /// (for example `BlockQuote`'s left border) survive a caller setting a
+    /// single property such as `background`. Components without a stored
+    /// appearance (the [`style_mut`] default returns `None`) keep the input
+    /// unchanged — the style is silently dropped, matching the pre-feature
+    /// behavior for components that have no appearance surface.
+    ///
+    /// [`style_mut`]: TerminalRenderable::style_mut
+    fn with_style(mut self, style: Style) -> Self
+    where
+        Self: Sized,
+    {
+        if let Some(slot) = self.style_mut() {
+            *slot = style.overlay_onto(slot);
+        }
+        self
+    }
+
     /// Whether this component is block-level (occupies the full width).
     ///
     /// Block-level components are treated differently during composition;
@@ -228,6 +280,22 @@ pub trait TerminalRenderable: std::fmt::Debug + Any {
 /// The trait moved to the `renderable` crate so non-terminal render
 /// targets can depend on it without depending on `biscuit-terminal`.
 pub use renderable::browser::BrowserRenderable;
+
+/// Overlays `overlay` onto the style already carried by `node`.
+///
+/// Used by component projection helpers to merge a caller-supplied style
+/// (set via [`TerminalRenderable::with_style`]) onto the root node they
+/// return, so both the bespoke `render(&term)` path (which routes through
+/// the projection) and the `render_tree` fold path carry the same
+/// appearance. A component that already sets a style on the node keeps it:
+/// `overlay` wins per field and unions `emphasis`.
+pub(crate) fn overlay_style_onto_node(node: &mut RenderNode, overlay: &Style) {
+    if overlay.is_empty() {
+        return;
+    }
+    let base = node.attrs.style_ref().cloned().unwrap_or_default();
+    node.attrs.set_style(&overlay.overlay_onto(&base));
+}
 
 /// Content that can be rendered as either plain text or a component.
 ///

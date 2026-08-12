@@ -106,7 +106,9 @@ pub fn validate_state(
             "repo",
             &repo_defaults.defaults,
             catalog,
-            Some(repo_root.join(".claudine/mcp.json").display().to_string()),
+            Some(biscuit_file::to_portable_string(
+                &repo_root.join(".claudine/mcp.json"),
+            )),
         );
     }
 

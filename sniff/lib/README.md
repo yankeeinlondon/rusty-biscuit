@@ -9,7 +9,7 @@
 - **Network Detection**: Interface enumeration with IPv4/IPv6 addresses, flags, and WAN IP lookup
 - **Filesystem Analysis**: Git repositories, monorepo tools, structured language detection, broad file associations, EditorConfig, blast radius, justfile detection, recent commits
 - **Package Management**: Unified abstraction for 110+ OS and language package managers
-- **Programs Detection**: 9 categories (editors, utilities, package managers, TTS, terminals, AI tools, test runners)
+- **Programs Detection**: 10 categories (editors, utilities, package managers, TTS, terminals, headless audio, AI tools, notification helpers, test runners)
 - **Services Detection**: Init system detection and service listing across systemd, launchd, OpenRC, etc.
 - **Dependency Enrichment**: Network-based registry queries for latest versions
 - **Type-Safe Errors**: Structured error types with `thiserror`
@@ -97,8 +97,8 @@ use sniff::{
     network::detect_network,
     os::{detect_os, detect_os_with_request},
     filesystem::git::GitRepo,
-    filesystem::repo::detect_repo_structure,
-    request::OsRequest,
+    filesystem::repo::{detect_repo_structure, detect_repo_with_request},
+    request::{OsRequest, RepoDetailRequest, RepoRequest},
 };
 use std::path::Path;
 
@@ -115,13 +115,20 @@ for iface in &net.interfaces {
     println!("Interface: {}", iface.name);
 }
 
-// OS with tuned detail level (skip NTP which can take up to 10s on Linux)
+// OS with tuned detail level: core identity only, no package-manager scan.
+// (NTP is already off in the default plan; `full()` opts back into it.)
 let os = detect_os_with_request(&OsRequest::summary())?;
 println!("OS: {} {}", os.name, os.version);
 
 // Expert composition: discover a git repo and sniff workspace structure only
 let git = GitRepo::discover(Path::new("."))?;
 let repo = detect_repo_structure(Path::new("."))?;
+
+// Add one manifest-backed fact without enabling full inventory enrichment.
+let managers = detect_repo_with_request(
+    Path::new("."),
+    &RepoRequest::focused(RepoDetailRequest::package_managers()),
+)?;
 ```
 
 See [../docs/sniff-library-architecture.md](../docs/sniff-library-architecture.md) for a full breakdown of per-subsection costs, shared-work strategies, and common caller profiles.
@@ -137,7 +144,7 @@ sniff/
 ├── network/        # Network interfaces
 ├── filesystem/     # Git, monorepo, languages, file types, docs, blast radius, just
 ├── package/        # Package manager abstraction (110+)
-├── programs/       # Installed program detection and install (9 categories)
+├── programs/       # Program detection (10 categories; 8 installable)
 ├── remote/         # Remote repo inspection (GitHub, GitLab, Gitea, Bitbucket)
 ├── services/       # System service and init system detection
 ├── request         # Fine-grained detection control (DetectionPlan, request types)
@@ -214,6 +221,13 @@ Detects operating system information across Windows, macOS, Linux, and BSD syste
 4. **Locale**: Parses `LC_ALL`, `LANG` environment variables
 5. **Timezone**: System API queries for timezone, offset, DST
 6. **NTP Status**: Platform-specific detection (macOS: `sntp`, Windows: `w32tm`, Linux: `timedatectl`)
+
+**Timezone API cost:** `detect_timezone()` reports the **full** `TimeInfo`,
+which means it runs the NTP probe in step 6 — a network round-trip that can take
+several seconds (up to ~10 s on Linux). Callers that need only local timezone
+data should call `detect_timezone_with_options(false)`, which returns
+immediately with `ntp_status: NtpStatus::Unknown` and spawns no external
+command. Steps 1–5 are identical either way.
 
 **Example:**
 
@@ -383,6 +397,8 @@ remote-tracking refresh.
 - `WorktreeInfo` - Linked worktree information
 - `WorktreeEntry` - Worktree name, branch, path, current flag, and detached-HEAD state
 - `list_worktrees` - List all worktrees including the main worktree (sorted alphabetically)
+- `merge_conflicts_at` - Actual unresolved paths from the live repository index
+- `merge_conflicts_with_branch_at` - Read-only committed-tip prediction for merging a local branch into the current branch
 
 **Detection Strategy:**
 
@@ -441,7 +457,109 @@ if let Some(worktrees) = sniff::filesystem::git::list_worktrees(Path::new("."))?
         println!("{}{} (on {})", marker, wt.name, branch);
     }
 }
+
+// Actual conflict state from an in-progress merge/rebase/cherry-pick/revert.
+let actual = sniff::filesystem::git::merge_conflicts_at(Path::new("."))?;
+
+// Predicted conflicts from merging local `feature/api` into the current branch.
+// This ignores the live index/worktree and never fetches or runs Git commands.
+let predicted = sniff::filesystem::git::merge_conflicts_with_branch_at(
+    Path::new("."),
+    "feature/api",
+)?;
 ```
+
+Conflict prediction captures both local commit tips before the merge, derives
+attributes from the current (`ours`) commit tree, and keeps synthesized merge
+objects in probe-local memory. It rejects applicable external merge drivers,
+filters, and renormalization rather than executing or silently approximating
+them. Empty output means the requested observation or prediction completed and
+found no conflict; missing prediction prerequisites remain errors.
+
+#### Live Remote Observation and Focused Provider Queries
+
+With the `remote` feature, `resolve_remote_at` is the shared configured-remote
+authority used by live branch checks and provider queries. It selects `origin`,
+then the alphabetically first URL-bearing non-`upstream` remote, then
+`upstream`; an explicitly named remote is exact and case-sensitive. The
+resolved remote retains the configured endpoint origin (scheme, host, and any
+non-default port) so self-managed servers on `http://` or a custom port derive
+a correct API base; SSH transports keep the canonical `https://{host}`
+assumption.
+
+`branch_exists_on_remote_at` reads an HTTP(S) Git ref advertisement without
+fetching or changing local state. Supported SSH-only remotes use an
+authoritative provider branch endpoint or the provider's canonical HTTPS Git
+endpoint; Azure DevOps accepts `AZURE_DEVOPS_TOKEN`, SourceHut accepts
+`SOURCEHUT_TOKEN`, and AWS CodeCommit HTTPS Git credentials are read from
+`AWS_CODECOMMIT_GIT_USERNAME` plus `AWS_CODECOMMIT_GIT_PASSWORD`. Unsupported
+transports return a capability error rather than a false absence.
+`FocusedProviderClient` provides bounded,
+paginated pull-request and CI/CD-job lookup for GitHub, GitLab, Gitea, Forgejo,
+and Bitbucket while preserving repository/provider identity and focused policy,
+credential, authorization, rate-limit, malformed-response, and transport
+errors. `FocusedProviderClient::discover` is the production constructor for
+ordinary self-managed servers: a neutral-hostname remote is identified through
+the same allowlisted, bounded identity probe `remote_vendor_at` uses
+(GitHub Enterprise, GitLab, Gitea/Forgejo, Bitbucket Data Center, and Azure
+DevOps Server; exact-host consent before any request). Flavors supported by the
+focused query model are then queried against the endpoint origin their remote
+URL was configured with; recognized but unsupported flavors return a capability
+error. Candidate signature
+requests are anonymous, so global provider tokens are never disclosed to an
+unidentified host. When an anonymous response establishes provider identity but
+requires authentication, discovery retries only that route and reads only the
+exact-host credential `SNIFF_{PROVIDER}_{ENCODED_HOST}_TOKEN`. The host encoding
+uppercases ASCII letters and renders every non-alphanumeric byte as `_XX_`
+(for example, `git.example` becomes `GIT_2E_EXAMPLE`). If anonymous probing
+returns only unsigned authentication challenges, exactly one configured
+exact-host provider credential identifies the sole route eligible for retry;
+multiple configured candidates are rejected as ambiguous, and global tokens
+are never considered. A client produced by
+ambiguous-host discovery retains that exact-host credential scope for subsequent
+provider queries; explicit known-provider clients keep the ordinary global-token
+contract. The client retains a reported server version when the provider's
+documented identity response supplies one and derives operation capabilities
+conservatively from the concrete flavor/version pair. Gitea job lookup and
+listing require stable 1.25.0
+or newer; Forgejo releases through 14.0 do not expose the required job endpoint
+pair. Unsupported job operations fail before provider I/O with the provider,
+flavor, and detected version in the error. SSH and SCP remotes derive a
+policy-checked `https://{host}` discovery origin and never reinterpret an SSH
+port as an HTTP port. Exact-host policy is checked before credentials or
+requests; redirects are disabled, with
+only the official GitHub and Bitbucket API-host mappings accepted as cross-host
+provider endpoints.
+
+`FocusedProviderClient::from_pull_request_url` and
+`job_reference_from_url` accept a canonical provider **web or API** URL. Route
+grammars are matched per flavor rather than by scanning for a shared marker
+segment, because several providers spell the same token at different positions —
+GitHub's API `/repos/{owner}/{repo}/pulls/{n}` and Gitea's web
+`/{owner}/{repo}/pulls/{n}` are otherwise indistinguishable. GitHub is
+recognized by `api.github.com` or an `/api/v3/` prefix, GitLab by `/api/v4/`,
+Gitea/Forgejo by `/api/v1/`, and Bitbucket Cloud by `/2.0/`; GitLab's encoded
+API project path is decoded exactly once and split into namespace and
+repository. A hostname that pins a provider (`github.com`, `gitlab.com`,
+`bitbucket.org`, and their API hosts) accepts only that provider's routes, so a
+route shape borrowed from another forge is rejected instead of resolving to the
+wrong flavor. Official API hostnames resolve back to the repository's web host,
+and the URL's own scheme and non-default port are retained so an enterprise or
+self-managed reference derives the API base it was addressed by. Decoded
+repository identities reject reserved URL delimiters, backslashes, controls,
+and dot segments, while valid Unicode identities are retained. Provider request
+paths independently percent-encode every repository and item segment, so an
+identity cannot become a query, fragment, or path traversal during URL joining.
+
+Link fields a provider *returns* pass the opposite direction of the same trust
+boundary. A projected `web_url` (on pull requests, jobs, and parent runs) is
+published only when it parses as an absolute `http(s)` URL, carries no
+credentials, and sits on the repository's own host — the same relation the API
+endpoint must satisfy. Look-alike, subdomain, and suffix hosts are refused, and
+the surviving value is WHATWG-normalized, so whitespace and control characters
+cannot reach a consumer. A link that fails any check is dropped rather than
+raised as an error: an absent link is a supported projection shape, so one
+unusable URL in a page costs the link and not the query.
 
 #### Repository Detection
 
@@ -612,7 +730,7 @@ for dep in &enriched {
 
 ### Programs Module
 
-Detects installed programs across 9 categories with parallel execution, macOS app bundle support, and cwd-aware test-runner availability.
+Detects installed programs across 10 categories with parallel execution, macOS app bundle support, and cwd-aware test-runner availability.
 
 **Key Types:**
 
@@ -620,6 +738,17 @@ Detects installed programs across 9 categories with parallel execution, macOS ap
 - `ProgramMetadata` - Trait for program metadata (display name, description, website)
 - `ExecutableSource` - How program was discovered (PATH, project-local bin, macOS bundle, or not found)
 - `InstallOptions`, `InstallResult` - Installation infrastructure types
+- `InstallCapturedResult` - Captured install run; `timed_out` marks a command killed at its deadline
+- `SniffInstallationError::InstallationTimedOut { pkg, manager, timeout_secs }` - Returned by `execute_install` / `execute_versioned_install` on deadline kill, never conflated with `PackageManagerFailed`
+- `InstallInterviewEvent::TimeoutWarning` - Emitted after the failure status and before any retry prompt
+- `InstallInterviewOutcome::TimedOut` - Every attempt failed and the last was killed at its deadline
+
+Installation timeout is a first-class outcome, not an ordinary failure. On Unix a
+timed-out install may leave a **partial install** behind: process-tree
+termination is best-effort there, so a descendant that forks and calls
+`setsid()` between sniff's samples can survive and keep modifying the host.
+Windows containment is kernel-enforced via Job Objects and total. See the
+`process` module documentation for the exact per-platform guarantee.
 
 **Categories:**
 
@@ -633,11 +762,12 @@ Detects installed programs across 9 categories with parallel execution, macOS ap
 | Terminal Apps | alacritty, wezterm, kitty | PATH + macOS bundles |
 | Headless Audio | afplay, pacat, aplay | PATH lookup |
 | AI CLI | claude, aider, goose | PATH lookup |
+| Notification Helpers | notify-send, terminal-notifier | PATH lookup |
 | Test Runners | cargo test, vitest, pytest, go test | project-local bins + PATH + parent binaries |
 
 **Performance notes:**
 
-`ProgramsInfo::detect()` builds a single shared `ExecutableIndex` by scanning every `PATH` directory and macOS app bundle location once, then runs all 9 categories in parallel. Per-program lookups are O(1) HashMap hits rather than repeated filesystem traversals, so the total cost is dominated by the one-time index build. Test runners also consult project-local bin directories and parent binaries, reporting whether each runner is installed, local, available via a parent, or not found.
+`ProgramsInfo::detect()` builds a single shared `ExecutableIndex` by scanning every `PATH` directory and macOS app bundle location once, then runs all 10 categories in parallel. Per-program lookups are O(1) HashMap hits rather than repeated filesystem traversals, so the total cost is dominated by the one-time index build. Test runners also consult project-local bin directories and parent binaries, reporting whether each runner is installed, local, available via a parent, or not found.
 
 **Example:**
 
@@ -689,7 +819,7 @@ GUI apps and traditional installers:
    user-scope installers that never register with App Paths.
 
 The combined Windows scan costs 40–80 ms on a warm filesystem. It runs once
-inside `ExecutableIndex::build()`, so the eight program-detection categories
+inside `ExecutableIndex::build()`, so the ten program-detection categories
 amortize the cost.
 
 ### Services Module
@@ -856,6 +986,10 @@ let metadata = provider.get_repo_metadata("rust-lang", "cargo").await?;
 - Audio device detection uses platform-specific APIs (Core Audio, PulseAudio/ALSA, PowerShell)
 - Network interface detection requires appropriate permissions
 - Git operations require valid repository
+- **WSL** is treated as the Linux compile and runtime path: under WSL, sniff
+  uses the same `/proc`-backed detectors as native Linux, and `HostCapabilities`
+  surfaces an `is_wsl` flag. No detector crosses into native Windows behavior
+  when running inside WSL.
 
 ## Dependencies
 

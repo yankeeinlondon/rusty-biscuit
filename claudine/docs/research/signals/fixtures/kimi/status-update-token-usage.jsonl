@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","method":"event","params":{"type":"StatusUpdate","payload":{"context_usage":0.060916900634765625,"context_tokens":15969,"max_context_tokens":262144,"token_usage":{"input_other":10081,"output":52,"input_cache_read":5888,"input_cache_creation":0},"message_id":"chatcmpl-rvcJx2GEEmn1ksnlzVnW0r2Z","plan_mode":false,"mcp_status":null}}}

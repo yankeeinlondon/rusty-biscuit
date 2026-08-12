@@ -9,14 +9,13 @@ The library is organized into eighteen top-level modules plus the shared error t
 ```
 claudine/lib/src/
 ├── actions/        → Hook action types and response model
-├── adapters/       → Provider-specific event parsers
-├── agents/         → Agent capability catalog and registry (forwarding facades over `provider/`)
 ├── badges.rs       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
 ├── composition/    → Markdown frontmatter composition (inline, direct, and sequence pipelines)
 ├── config/         → Agent detection and hook registration
 ├── dispatch/       → Event processing pipeline
 ├── events/         → Normalized 16-event lifecycle model (`AgenticEvent`, `EventMeta`, matrices)
-├── harness/        → Typed pre/post validations, timeouts, handlers, and shell policy
+├── harness/        → Timeouts, shell audit, attempt classification, and lifecycle recovery infrastructure
+├── hook_adapters/  → Native hook request/response adapters (parse provider hook payloads; distinct from stream/providers)
 ├── linking/        → Cross-provider skill and command synchronization
 ├── messaging/      → Outbound messaging routes, resolution, and provider dispatch
 ├── mcp/            → MCP catalog, defaults, import/export, session, and injection
@@ -42,7 +41,7 @@ Types for hook actions that execute when events fire, and response types for blo
 
 ### Event Model (`events`)
 
-16 normalized lifecycle events that abstract across all 8 provider APIs:
+16 normalized lifecycle events that abstract across all 7 provider APIs:
 
 | Category | Events |
 |----------|--------|
@@ -69,30 +68,24 @@ The `Provider` enum and `EventSupportLevel` type are owned by [`crate::provider`
 
 ### Provider Catalog (`provider`)
 
-Central catalog for the 8-variant `Provider` enum and all per-provider static facts. `provider_info(p) -> &'static ProviderInfo` is the single registry every per-domain dispatch flows through.
+Central catalog for the 7-variant `Provider` enum and all per-provider static facts. `provider_info(p) -> &'static ProviderInfo` is the single registry every per-domain dispatch flows through.
 
 Key types:
-- `Provider` — 8-variant enum (Claude, Codex, Gemini, Goose, KimiCode, OpenCode, QwenCode, RooCode)
-- `PROVIDERS_DISPLAY_ORDER` — `[Provider; 8]` array used by every matrix-style report
+- `Provider` — 7-variant enum (Claude, Codex, Gemini, Goose, KimiCode, OpenCode, QwenCode); serde snake_case identifiers remain `kimi_code` / `open_code` / `qwen_code`, while the catalog `slug` values are the canonical short forms `kimi` / `opencode` / `qwen`
+- `PROVIDERS_DISPLAY_ORDER` — `[Provider; PROVIDER_COUNT]` array (7 entries) used by every matrix-style report
 - `ProviderInfo` — full per-provider record: identity (`display_name`, `slug`, `binary`, `agent_offset`, `cli_aliases`, `docs_url`, `usage_dashboard_url`, `sniff_binding`), event mapping, four behavior trait objects, agent and resource accessors, and the Phase 5 typed catalog (`PathTemplate`, `OutputFormatSupport`, `EntrypointSpec`, `SystemPromptSpec`, `YoloSupport`, `ReasoningSupport`, `KnownGap`, `AcpSupport`, `PromptArgConventions`)
 - `EventSupportLevel` — `Hook` | `NonHook` | `Acp` | `NotSupported` per provider-event pair
 - `EventMappingTable` / `EventMapping` — per-provider event row table; the source of truth for support level, native names, parse aliases, and which rows participate in standard hook registration
 - `ProviderBehavior`, `McpBehavior`, `AdapterBehavior`, `ConfiguratorBehavior` — focused behavior traits implemented as zero-sized provider structs and stored as `&'static dyn Trait` on `ProviderInfo`
 - `AcpSupport`, `AcpServerMode`, `AcpEvent` — typed ACP capability descriptor surfaced by `claudine hooks --capture-method`
 
-Adding a ninth provider is a matter of: adding the `Provider` variant, creating one `provider/<name>.rs` file with a `<NAME>_INFO: ProviderInfo` constant, registering it in `provider/registry.rs`, and adding a CLI-side `WrapperProfile` entry. See [`docs/topics/building-an-agent-wrapper.md`](../docs/topics/building-an-agent-wrapper.md) for the full checklist.
+Adding an eighth provider is a matter of: adding the `Provider` variant, creating one `provider/<name>.rs` file with a `<NAME>_INFO: ProviderInfo` constant, registering it in `provider/registry.rs`, and adding a CLI-side `WrapperProfile` entry. See [`docs/topics/building-an-agent-wrapper.md`](../docs/topics/building-an-agent-wrapper.md) for the full checklist.
 
-### Agents (`agents`)
+### Hook Adapters (`hook_adapters`)
 
-Capability model shared across all 8 supported agentic CLIs. After Phase 8 of the centralized-providers refactor this module is a thin forwarding layer over [`crate::provider`](#provider-catalog-provider):
-
-- `Agent` trait — shared interface for capability descriptors (`id()`, `capabilities()`, `supports_skills()`, `supports_custom_slash_commands()`, `supports_subagents()`, `validate()`). Implemented directly on `crate::provider::ProviderInfo` so `agent_for(provider)` and `provider_info(provider)` return references to the same `'static` record.
-- `AgentCapabilities` — full capability model covering meta, docs, config, runtime, skills, commands, subagents, scripts, and confidence
-- `agent_for(provider)` / `all_agents()` / `parse_agent_id(input)` — forwarding facades over `crate::provider::provider_info(provider)` and `Provider::parse_cli_name(input)`
-
-### Adapters (`adapters`)
-
-Each provider has its own adapter implementing the `ProviderAdapter` trait:
+Each provider has its own adapter implementing the `ProviderAdapter` trait. These
+parse native hook request/response payloads — distinct from `stream/providers`,
+which parse stdout NDJSON:
 
 | Adapter | Parses | Status |
 |---------|--------|--------|
@@ -103,7 +96,6 @@ Each provider has its own adapter implementing the `ProviderAdapter` trait:
 | `goose` | Stream-json + env var (type/event field) | Implemented (non-blocking) |
 | `kimicode` | Wire mode JSON-RPC (event_name/method field) | Implemented (blocking: tool, permission) |
 | `qwen` | Stream-json output (event_name/type field) | Implemented (blocking: permission) |
-| `roo` | Stream-json event emitter (event_name/type field) | Implemented (non-blocking) |
 
 The `adapter_for(provider)` factory returns the appropriate adapter singleton. Each adapter normalizes the provider's native JSON payload into `(AgenticEvent, EventMeta)` and can format `HookResponse` back into provider-native response payloads.
 
@@ -144,10 +136,10 @@ Unknown placeholders are left as-is. `None` values render as empty strings.
 
 ### Configuration (`config`)
 
-Agent detection and hook registration for all 8 providers:
+Agent detection and hook registration for all 7 providers:
 
 - `detect_agents()` — returns detected providers with their configurators
-- `discover_agents_full()` — all 8 providers with install/registration status (`AgentInfo`)
+- `discover_agents_full()` — all 7 providers with install/registration status (`AgentInfo`)
 - `get_configurator(provider)` — returns the configurator for a specific provider
 - `AgentConfigurator` trait — `register()`, `deregister()`, `is_registered()`, `registered_events()`, `create_minimal_config()`, `supports_config_registration()`, `registerable_events()`, `is_cli_installed()`
 
@@ -155,7 +147,7 @@ Configurators handle each provider's config format:
 - **Claude/Gemini**: JSON `settings.json` with hooks array
 - **Codex**: TOML `config.toml` with notify section
 - **OpenCode**: JSON `opencode.json` with plugins
-- **Goose/KimiCode/Qwen/Roo**: Wrapper-only (no config-based registration)
+- **Goose/KimiCode/Qwen**: Wrapper-only (no config-based registration)
 
 Atomic file writes (`config::atomic`) prevent corruption during concurrent access. Config backup utilities (`config::backup`) preserve originals before modification.
 
@@ -169,7 +161,7 @@ Cross-provider resource synchronization via symlinks and format-converted derive
 
 **Sync strategies**:
 - **Direct symlinks** for same-format providers (Markdown to Markdown)
-- **Derived artifacts** for different-format providers (Markdown to TOML for Gemini commands, Markdown to YAML for Goose/KimiCode/Roo agents), with embedded hash markers for staleness detection
+- **Derived artifacts** for different-format providers (Markdown to TOML for Gemini commands, Markdown to YAML for Goose/KimiCode agents), with embedded hash markers for staleness detection
 
 **Algorithm** (6 phases):
 1. **Canonical selection** — elect one provider as the source of truth per `(scope, resource_type)` pair, preferring providers with existing valid assets
@@ -179,7 +171,7 @@ Cross-provider resource synchronization via symlinks and format-converted derive
 5. **Compatibility classification** — parse canonical frontmatter, apply deterministic upgrades (alias duplication, name derivation), check required properties per target provider
 6. **Apply** — create symlinks (absolute for user scope, relative for repo scope) or generate format-converted derived artifacts; never overwrites real directories
 
-**Provider skill paths** (all 8 providers):
+**Provider skill paths** (all 7 providers):
 
 | Provider | User scope | Repo scope | Also reads from |
 |----------|-----------|------------|-----------------|
@@ -190,7 +182,6 @@ Cross-provider resource synchronization via symlinks and format-converted derive
 | KimiCode | `~/.config/agents/skills/` | `.kimi/skills/` | `.claude/skills`, `.agents/skills`, `.codex/skills` |
 | OpenCode | `~/.config/opencode/skills/` | `.opencode/skills/` | `.claude/skills`, `.agents/skills` |
 | QwenCode | `~/.qwen/skills/` | `.qwen/skills/` | -- |
-| RooCode | `~/.roo/skills/` | `.roo/skills/` | -- |
 
 Additional sub-modules: `canonical` (canonical provider selection), `capabilities` (provider resource support metadata with required/optional property schemas), `compatibility` (candidate/reference classification with alias duplication and name derivation), `conflict` (sync status analysis with also-reads-from awareness), `detector` (per-resource-type detectors via `LinkDetector` trait), `discovery` (legacy skill and command discovery), `execution` (analyze and apply resource links with derived artifact generation), `hashing` (xxHash content dedup with symlink resolution), `model` (data types including `ResourceReference` 9-variant state machine), `paths` (provider path resolution with repo-root awareness), `report` (link report types), `symlink` (symlink creation with relative path support).
 
@@ -201,12 +192,12 @@ Provider-agnostic MCP storage and provider-specific import/export/runtime integr
 - `catalog` - normalized server storage plus 5-tier ID/alias/query resolution
 - `defaults` - user defaults (`~/.claudine/mcp/defaults.json`) and repo defaults (`<repo>/.claudine/mcp.json`), where repo replaces user
 - `state` - provenance and managed ownership in `~/.claudine/mcp/provider-state.json`
-- `import` - scans Claude, Codex, Gemini, OpenCode, and Roo native configs into the catalog with fingerprint dedupe
+- `import` - scans Claude, Codex, Gemini, and OpenCode native configs into the catalog with fingerprint dedupe
 - `export` - dry-run/apply sync back to native configs with backups and managed-entry tracking
 - `session` - computes runtime server sets from defaults, explicit `--use`, and non-interactive prompt `#tags`
 - `inject` - runtime injection for OpenCode (env var) and Codex/Gemini (shadow-home config files)
 
-Current runtime injection is intentionally narrower than import/export: Claude, Goose, Kimi, Qwen, and Roo do not have injectors yet. See [mcp-support.md](../docs/mcp-support.md) for the exact CLI-facing behavior and limits.
+Current runtime injection is intentionally narrower than import/export: Claude, Goose, Kimi, and Qwen do not have injectors yet. See [mcp-support.md](../docs/mcp-support.md) for the exact CLI-facing behavior and limits.
 
 ### Stream Parsing (`stream`)
 
@@ -266,14 +257,14 @@ Sub-modules:
 - `resolve` — source resolution via `biscuit-file::FileReference` with read/write permission validation
 - `prepare` — builds a `PreparedComposition` (effective frontmatter, composed body, pre-execution hashes) via `prepare_direct()` / `prepare_inline()` with `PrepareOptions`
 - `select` — deterministic provider selection (explicit flag → single-installed → frontmatter hint → config favorite → interactive chooser)
-- `preflight` — shell approval collection and execution for `::shell` directives, top-level frontmatter `$(...)` expressions, `shell_command` validations, and `deviate`/`handle` commands
+- `preflight` — shell approval collection and execution for source `::shell` directives and lifecycle stack `shell` actions
 - `closure` — inline closure plan that merges provider-returned content back into the source file atomically (preserves frontmatter, updates `last_updated`)
 - `sequence` — sequence plan parser, normalizer, and per-step overlay builder for `claudine sequence`
-- `lifecycle` — `LifecycleEmitter` trait and `LifecycleRunGuard` RAII guard that emit lifecycle signals (start/success/failure) to external observers; includes `DefaultLifecycleEmitter` and programmatic handler hook integration
+- `lifecycle` — `LifecycleEmitter` trait and `LifecycleRunGuard` RAII guard that emit the seven composition lifecycle signals (`initialize`/`start`/`success`/`blocked`/`failure`/`finalize`/`loop`) to external observers; includes `DefaultLifecycleEmitter`, the per-event stack model, and the static lifecycle validators
 - `guardrails` — inline composition guardrails appended to prompts to constrain output shape
 - `types` — shared types including `PreparedComposition`, `SelectedProvider`, `SequencePlan`, `SequenceStep`, `SharedApprovalCache`, `CompositionMode`, and `SystemPromptInput`
 
-Execution parity note (2026-06-16): the CLI-side execution of `compose` and `inline-compose` now flows through a single `run_harness_loop` path with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. Bare documents (no harness frontmatter) yield the empty plan; inline documents get the system-owned writability pre-check injected once by `finalize_effective_plan`. The loop handles structured streaming, captured/non-structured fallback, inline closure, summary emission, and handler-driven recovery in one place.
+Execution parity note (2026-06-16): the CLI-side execution of `compose` and `inline-compose` flows through a single `run_harness_loop` path with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. Bare documents (no harness frontmatter) yield the empty plan. The loop handles structured streaming, captured/non-structured fallback, inline closure, summary emission, and lifecycle-driven recovery in one place.
 
 ### Badges (`badges`)
 
@@ -331,17 +322,18 @@ Library-first reporting over Claudine's JSONL event logs:
 
 ### Harness (`harness`)
 
-Typed pre/post validations, timeouts, handler resolution, and shell policy for composed prompt pipelines:
+Timeouts, shell policy, and runtime attempt classification for composed prompt pipelines:
 
-- `model` — core data types: `HarnessPlan`, `ValidationRule`, `ValidationKind` (19 validation types), `HandlerAction` (retry/resume/redirect/deviate), `HandlerTable`, `ProcessTermination`, `AttemptOutcome`
-- `error` — `HarnessError` enum covering parse, runtime, handler, shell, and path resolution failures
-- `parse` — frontmatter-to-plan parser with phase constraint enforcement; accepts list and map forms for checks
-- `validate` — pre/post-check execution engine with BLAKE3 file fingerprinting, git status integration, and template-based message rendering
-- `handlers` — handler resolution (subject-specific > generic > programmatic), failure classification, programmatic handler execution with JSON stdin/stdout protocol, and deviate command execution
+- `model` — core data types: `HarnessPlan`, `ProcessTermination`, `AttemptOutcome`, `FailureEvent`, `GuardContext`, and shell-audit reporting types (`AuditedCommand`, `ShellAuditReport`)
+- `error` — `HarnessError` enum covering parse, runtime, shell, shell-audit, and path resolution failures
+- `parse` — frontmatter-to-plan parser accepting `timeout`, `step_timeout`, `timeout_warn`, and `step_timeout_warn`
+- `audit` — shell command collection across lifecycle stacks for pre-flight approval
 - `shell` — shell policy adapter reusing Darkmatter's tokenizer, blacklist/whitelist, and approval handler infrastructure
 - `resolve` — source-relative path resolution (`@repo/path`, `./local`, `/absolute`)
 - `timeout` — human-friendly duration parser (`30s`, `5m`, `2h`)
-- `runtime` — `build_attempt_outcome()` for mapping stream summaries to harness outcomes
+- `runtime` — `build_attempt_outcome()` and `classify_failure()` for mapping stream summaries to harness outcomes
+- `report` — stderr status emitters used by the harness loop and lifecycle recovery routing
+- `speech` — best-effort TTS helpers for runtime lifecycle side effects
 
 ## Action Execution
 
@@ -382,7 +374,7 @@ Typed pre/post validations, timeouts, handler resolution, and shell policy for c
 - **Hook handlers must respond fast**: Providers in non-interactive mode (`--print`, `--prompt`) may cancel hooks that don't produce stdout output within their shutdown window. `claudine handle` enforces a hard **5-second execution deadline** by default to prevent blocking the parent agent session. Individual `Bash` and `Message` actions also have tighter 3s timeouts when running inside a hook handler. Non-blocking events return a `{}` JSON acknowledgment via the adapter's `non_blocking_ack()` method — silent stdout is interpreted as "hook cancelled" by Claude Code, Gemini, and others.
 - **Refined structured output**: Wrapped non-interactive sessions follow a **9-section model** (execution line, env, system prompt, agent prompt, session ID, thinking prose, tool/info events, final STDOUT, and metadata) with strictly enforced spacing. Thinking prose is rendered as a `BlockQuote` on stderr. Tool calls use a canonical `ToolCallDisplay` contract (`🔧 →` / `🔧 ←`) with humanized names and summarized inputs/results, managed by `LiveSemanticSink`.
 - **Config merge is intentionally asymmetric**: repo provider configs fully replace user-level (not merged per-event) to give projects complete control. Settings merge field-by-field because they're global preferences. Nested structs like `linking` and `canonical_provider` also merge field-by-field — repo non-`None` values override user, but user-only fields (e.g. `user_skill`) survive when the repo config doesn't set them.
-- **All 8 adapters are implemented**: each provider adapter has full event mapping, metadata extraction, and tests. Claude, Gemini, OpenCode, and Codex use config-based hooks; Goose, KimiCode, Qwen, and Roo parse stream-json or wire-mode payloads directly. KimiCode and Qwen support blocking responses; Goose and Roo are observation-only.
+- **All 7 adapters are implemented**: each provider adapter has full event mapping, metadata extraction, and tests. Claude, Gemini, OpenCode, and Codex use config-based hooks; Goose, KimiCode, and Qwen parse stream-json or wire-mode payloads directly. KimiCode and Qwen support blocking responses; Goose is observation-only.
 - **Template regex is lazy-compiled**: `LazyLock<Regex>` ensures the Handlebars `\{\{\s*([^{}]+?)\s*\}\}` pattern compiles once across all interpolation calls.
 - **Sound effects are fire-and-forget**: TTS and sound playback spawn tokio tasks to avoid blocking the event pipeline. Log and report actions run inline because they're fast.
 - **Atomic writes prevent config corruption**: all config file mutations go through `config::atomic` to handle concurrent hook firings safely.

@@ -1,12 +1,20 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 140
 expression: "convert_atom(\"any\")"
 ---
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
-    "field": {}
+    "field": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {}
+      ]
+    }
   },
   "type": "object"
 }

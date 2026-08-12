@@ -6,6 +6,7 @@ use super::model::{
 use super::registry;
 use crate::Result;
 use crate::performance;
+use crate::performance::counters;
 use ignore::{DirEntry, WalkBuilder};
 use std::fs::File;
 use std::io::Read;
@@ -41,8 +42,9 @@ pub fn scan_file_inventory_with_exclusions(
     };
 
     // Use parallel walker with Drop-based flush (same pattern as system_view.rs).
-    // The parallel path sorts output so results are deterministic.
-    let (classifications, total_files_scanned) =
+    // Output is sorted by path, so ordering is deterministic — but see
+    // `FileInventory::truncated`: which files fill the bounded slots is not.
+    let (classifications, total_files_scanned, truncated) =
         scan_inventory_parallel(root, &scope.exclude_roots);
 
     performance::record_logged_stage(
@@ -55,13 +57,29 @@ pub fn scan_file_inventory_with_exclusions(
         scope,
         total_files_scanned,
         classifications: Arc::new(classifications),
+        truncated,
+        limit: truncated.then_some(MAX_FILES),
     })
 }
 
+/// Walk `root` in parallel, classifying up to [`MAX_FILES`] files.
+///
+/// ## Returns
+///
+/// The sorted classifications, the number represented, and whether the cap was
+/// reached (leaving files in the tree unrepresented).
+///
+/// ## Notes
+///
+/// This is the inventory-*only* walker: no other observer rides along, so
+/// reaching the cap means there is no remaining work and the walk quits
+/// globally rather than enumerating the rest of the tree to throw it away.
+/// The combined walk in `system_view` cannot do this — it must keep going for
+/// its manifest and docs observers.
 fn scan_inventory_parallel(
     root: &Path,
     exclude_roots: &[PathBuf],
-) -> (Vec<FileClassification>, usize) {
+) -> (Vec<FileClassification>, usize, bool) {
     use ignore::WalkState;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Mutex};
@@ -71,9 +89,12 @@ fn scan_inventory_parallel(
     ///
     /// This mirrors the pattern in `system_view::WorkerBuffers` and ensures
     /// that classifications recorded on each walker thread are visible after
-    /// the parallel walk completes, even if a worker panics.
+    /// the parallel walk completes, even if a worker panics. `collector` rides
+    /// along so the worker's counters land with its classifications rather
+    /// than dying in a parked thread's buffers.
     struct LocalClassifications {
         shared: Arc<Mutex<Vec<FileClassification>>>,
+        collector: performance::WorkerCollector,
         local: Vec<FileClassification>,
     }
 
@@ -92,6 +113,7 @@ fn scan_inventory_parallel(
 
     let shared: Arc<Mutex<Vec<FileClassification>>> = Arc::new(Mutex::new(Vec::new()));
     let scanned = Arc::new(AtomicUsize::new(0));
+    performance::increment_counter(counters::FS_WALK_STARTS, 1);
 
     WalkBuilder::new(root)
         .hidden(false)
@@ -108,9 +130,15 @@ fn scan_inventory_parallel(
             let scan_root = root.to_path_buf();
             let mut buffer = LocalClassifications {
                 shared: Arc::clone(&shared),
+                collector: performance::WorkerCollector::inherit(),
                 local: Vec::new(),
             };
             Box::new(move |result| {
+                // First callback on this worker's own thread: the only place
+                // the inherited collector can be installed.
+                buffer.collector.activate();
+                performance::increment_counter(counters::FS_WALK_ENTRIES, 1);
+
                 let Ok(entry) = result else {
                     return WalkState::Continue;
                 };
@@ -119,24 +147,27 @@ fn scan_inventory_parallel(
                 }
                 let idx = scanned.fetch_add(1, Ordering::Relaxed);
                 if idx >= MAX_FILES {
-                    return WalkState::Continue;
+                    performance::increment_counter(counters::FS_INVENTORY_SATURATED, 1);
+                    return WalkState::Quit;
                 }
-                // Only record per-file counters when metrics feature is enabled
-                // to reduce atomic overhead in the hot path.
-                #[cfg(feature = "metrics")]
-                performance::increment_counter("filesystem.file_inventory.files_scanned", 1);
+                performance::increment_counter(counters::FS_INVENTORY_ACCEPTED, 1);
                 buffer.local.push(classify_file(&scan_root, entry.path()));
                 WalkState::Continue
             })
         });
 
-    let total = scanned.load(Ordering::Relaxed).min(MAX_FILES);
+    // A file that observed `idx >= MAX_FILES` pushed the count past the cap, so
+    // exceeding it is exactly the condition under which some file went
+    // unrepresented. A tree holding precisely `MAX_FILES` files is complete.
+    let scanned_total = scanned.load(Ordering::Relaxed);
+    let truncated = scanned_total > MAX_FILES;
+    let total = scanned_total.min(MAX_FILES);
     let mut classifications = match Arc::try_unwrap(shared) {
         Ok(mutex) => mutex.into_inner().unwrap_or_default(),
         Err(arc) => arc.lock().unwrap_or_else(|e| e.into_inner()).clone(),
     };
     classifications.sort_by(|a, b| a.path.cmp(&b.path));
-    (classifications, total)
+    (classifications, total, truncated)
 }
 
 #[allow(dead_code)]
@@ -164,10 +195,8 @@ fn scan_inventory_sequential(
         .take(MAX_FILES)
     {
         total_files_scanned += 1;
-        // Only record per-file counters when metrics feature is enabled
-        // to reduce overhead in the hot path.
-        #[cfg(feature = "metrics")]
-        performance::increment_counter("filesystem.file_inventory.files_scanned", 1);
+        performance::increment_counter(counters::FS_WALK_ENTRIES, 1);
+        performance::increment_counter(counters::FS_INVENTORY_ACCEPTED, 1);
         classifications.push(classify_file(root, entry.path()));
     }
 
@@ -229,9 +258,10 @@ pub(crate) fn should_skip_directory_name(name: &str) -> bool {
 }
 
 pub(crate) fn classify_file(root: &Path, path: &Path) -> FileClassification {
-    // Start timing unconditionally; the overhead of Instant::now() is ~10-30ns
-    // and is only used when metrics feature is enabled.
-    let started = Instant::now();
+    // No clock is read on the default path: this runs once per accepted file,
+    // so an unconditional `Instant::now()` here is pure overhead for the
+    // overwhelmingly common case where nothing is collecting.
+    let started = performance::is_collecting().then(Instant::now);
     let relative_path = path.strip_prefix(root).unwrap_or(path).to_path_buf();
     let file_name = path
         .file_name()
@@ -290,15 +320,11 @@ pub(crate) fn classify_file(root: &Path, path: &Path) -> FileClassification {
         if descriptor.association == FileAssociation::FrameworkFile
             && let Some(framework) = descriptor.framework
         {
-            #[cfg(feature = "metrics")]
-            let framework_started = Instant::now();
+            let framework_timer =
+                performance::StageTimer::start("filesystem.file_inventory.classify.framework");
             let (related_languages, confidence, source) =
                 framework::related_languages(framework, path);
-            #[cfg(feature = "metrics")]
-            performance::record_stage(
-                "filesystem.file_inventory.classify.framework",
-                framework_started.elapsed(),
-            );
+            framework_timer.finish();
             classification.related_languages = related_languages;
             classification.confidence = confidence;
             classification.source = source;
@@ -316,39 +342,24 @@ pub(crate) fn classify_file(root: &Path, path: &Path) -> FileClassification {
             return finish_classification(relative_path, classification, started);
         }
         if is_probably_text(bytes) && extension.is_some_and(is_hyperpolyglot_worthwhile) {
-            #[cfg(feature = "metrics")]
-            performance::increment_counter(
-                "filesystem.file_inventory.files_classified_by_content",
-                1,
-            );
-            #[cfg(feature = "metrics")]
-            let hyperpolyglot_started = Instant::now();
+            performance::increment_counter("filesystem.file_inventory.files_classified_by_content", 1);
+            // `hyperpolyglot::detect` re-reads the file itself, so this probe
+            // is both a file open and the dominant per-file classification
+            // cost — worth its own stage even though the walk already timed
+            // the entry.
+            let hyperpolyglot_timer =
+                performance::StageTimer::start("filesystem.file_inventory.classify.hyperpolyglot");
+            performance::increment_counter(counters::FS_FILE_OPENS, 1);
             let detection = hyperpolyglot::detect(path);
-            #[cfg(feature = "metrics")]
-            {
-                let hyperpolyglot_elapsed = hyperpolyglot_started.elapsed();
-                performance::record_stage(
-                    "filesystem.file_inventory.classify.hyperpolyglot",
-                    hyperpolyglot_elapsed,
-                );
-                trace!(
-                    path = %relative_path.display(),
-                    duration_ms = performance::duration_ms(hyperpolyglot_elapsed),
-                    "hyperpolyglot probe complete"
-                );
-            }
-            #[cfg(not(feature = "metrics"))]
-            {
-                trace!(
-                    path = %relative_path.display(),
-                    "hyperpolyglot probe complete"
-                );
-            }
+            hyperpolyglot_timer.finish();
+            trace!(
+                path = %relative_path.display(),
+                "hyperpolyglot probe complete"
+            );
             if let Ok(Some(detection)) = detection
                 && let Some(language) =
                     ProgrammingLanguage::from_hyperpolyglot(detection.language())
             {
-                #[cfg(feature = "metrics")]
                 performance::increment_counter(
                     "filesystem.file_inventory.files_classified_by_hyperpolyglot",
                     1,
@@ -387,43 +398,32 @@ pub(crate) fn classify_file(root: &Path, path: &Path) -> FileClassification {
     )
 }
 
+/// Attaches the relative path and records how the classification was reached.
+///
+/// `started` is `None` when nothing was collecting at the top of
+/// [`classify_file`], which is what keeps per-file breakdown recording — a
+/// dynamic counter name plus a stage — off the default path.
 fn finish_classification(
     relative_path: PathBuf,
     mut classification: FileClassification,
-    started: Instant,
+    started: Option<Instant>,
 ) -> FileClassification {
     classification.path = relative_path;
-    // Only record detailed per-file metrics when the metrics feature is enabled.
-    // This avoids mutex contention and counter overhead in the hot path for
-    // the default build.
-    #[cfg(feature = "metrics")]
-    {
+    if let Some(started) = started {
         let duration = started.elapsed();
         performance::increment_counter("filesystem.file_inventory.files_classified", 1);
         performance::increment_counter_dynamic(classification_counter_name(&classification), 1);
         performance::record_stage(classification_stage_name(&classification), duration);
-        trace!(
-            path = %classification.path.display(),
-            source = ?classification.source,
-            association = ?classification.association,
-            duration_ms = performance::duration_ms(duration),
-            "file classified"
-        );
     }
-    #[cfg(not(feature = "metrics"))]
-    {
-        let _ = started; // suppress unused warning when metrics is off
-        trace!(
-            path = %classification.path.display(),
-            source = ?classification.source,
-            association = ?classification.association,
-            "file classified"
-        );
-    }
+    trace!(
+        path = %classification.path.display(),
+        source = ?classification.source,
+        association = ?classification.association,
+        "file classified"
+    );
     classification
 }
 
-#[cfg(feature = "metrics")]
 fn classification_stage_name(classification: &FileClassification) -> &'static str {
     match classification.source {
         ClassificationSource::ExactFilename => "filesystem.file_inventory.classify.exact_filename",
@@ -439,7 +439,6 @@ fn classification_stage_name(classification: &FileClassification) -> &'static st
     }
 }
 
-#[cfg(feature = "metrics")]
 fn classification_counter_name(classification: &FileClassification) -> &'static str {
     match classification.source {
         ClassificationSource::ExactFilename => {
@@ -458,9 +457,11 @@ fn classification_counter_name(classification: &FileClassification) -> &'static 
 }
 
 fn read_prefix(path: &Path, limit: usize) -> Option<Vec<u8>> {
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
     let mut file = File::open(path).ok()?;
     let mut buffer = vec![0_u8; limit];
     let bytes_read = file.read(&mut buffer).ok()?;
+    performance::increment_counter(counters::FS_BYTES_READ, bytes_read as u64);
     buffer.truncate(bytes_read);
     Some(buffer)
 }
@@ -643,6 +644,10 @@ pub fn project_package_inventory(
         },
         total_files_scanned: classifications.len(),
         classifications: Arc::new(classifications),
+        // A subset of a truncated repo inventory is itself incomplete: the
+        // files the cap discarded may well have been under `package_path`.
+        truncated: repo_inventory.truncated,
+        limit: repo_inventory.limit,
     }
 }
 
@@ -806,7 +811,7 @@ mod tests {
         fs::write(dir.path().join("Cargo.toml"), "[package]\nname = 'x'\n").unwrap();
 
         // Call the parallel path directly
-        let (classifications, total) = scan_inventory_parallel(dir.path(), &[]);
+        let (classifications, total, truncated) = scan_inventory_parallel(dir.path(), &[]);
 
         assert!(
             !classifications.is_empty(),
@@ -815,6 +820,7 @@ mod tests {
             classifications.len()
         );
         assert_eq!(classifications.len(), total);
+        assert!(!truncated, "a 5-file fixture is far below the cap");
 
         // Verify expected file types are present
         let rust_count = classifications

@@ -10,7 +10,7 @@ matters.
 |-----------------|---------|
 | `_small_repo` | Synthetic git repo with ~5 commits |
 | `_monorepo` | Synthetic monorepo with ~50 packages |
-| `_huge` | Synthetic monorepo with 500 packages |
+| `_huge` | Synthetic monorepo with 375 packages (200 Rust, 100 JS, 50 Python, 25 Go) |
 | `_only` | A single subsystem is exercised in isolation |
 | `_isolated` | Request-level bench with all other flags disabled |
 | `_lazy` / `_eager` | Which `ExecutableIndex` build strategy is used |
@@ -66,9 +66,9 @@ matters.
 | `repo_structure_monorepo_manifest_discovery` | `detect_repo_structure()` on a large monorepo. Manifest discovery (Cargo.toml, package.json, etc.) without per-package language scanning. |
 | `repo_with_shared_inventory_monorepo` | `detect_repo_with_inventory()` — structure + file inventory in one pass. Measures the shared-work path that avoids re-walking the tree. |
 | `repo_full_monorepo_language_scan` | `detect_repo()` — structure + per-package language detection + framework heuristics + dependency parsing. The dominant cost of `RepoRequest::full()`. |
-| `repo_structure_huge_500_packages` | Structure-only on a 500-package monorepo. Stresses manifest caching and index normalization. |
-| `repo_full_huge_500_packages` | Full repo detection on 500 packages. Worst-case language-scan cost. |
-| `package_boundary_refresh_huge` | Isolated `refresh_package_boundaries()` on 500 packages with a pre-built inventory. Measures only the boundary-assignment logic. |
+| `repo_structure_huge_375_packages` | Structure-only on the 375-package monorepo fixture (200 Rust, 100 JS, 50 Python, 25 Go). Stresses manifest caching and index normalization. |
+| `repo_full_huge_375_packages` | Full repo detection on the 375-package fixture. Worst-case language-scan cost. |
+| `package_boundary_refresh_huge` | Isolated `refresh_package_boundaries()` on the 375-package fixture with a pre-built inventory. Measures only the boundary-assignment logic. |
 
 ## filesystem_inventory
 
@@ -123,6 +123,18 @@ Parameterised by remote-tracking branch count (1, 5, 10, 25).
 | `programs_detect_all_8_categories` | `ProgramsInfo::detect()` — full 8-category fan-out using Rayon + shared `ExecutableIndex`. End-to-end parallelism test. |
 | `services_detect_init_system` | `detect_services()` — init-system detection + service listing. Platform-dependent cost (launchctl, systemctl, etc.). |
 
+## workloads_service_listing
+
+Requires `--features bench-internals`. Fixture strings and per-iteration runner
+state are prepared outside Criterion's timed section. The measured call uses the
+same systemd listing parser, running-service selection, 128-unit chunk builder,
+runner dispatch, show-block parser, and PID projection as production.
+
+| Benchmark | What it measures |
+|-----------|------------------|
+| `500` | Deterministic listing and enrichment of 500 running services. One listing plus four enrichment chunks. Throughput: 500 elements. |
+| `2000` | Deterministic listing and enrichment of 2,000 running services. One listing plus 16 enrichment chunks. Throughput: 2,000 elements. |
+
 ## executable_index
 
 | Benchmark | What it measures |
@@ -170,6 +182,27 @@ Parameterised by package count (10, 100, optionally 500).
 |-----------|------------------|
 | `package_boundary_refresh/<count>` | `refresh_package_boundaries()` on a Cargo workspace with `<count>` packages. Structure and inventory are prepared outside the timed loop. Measures only boundary-assignment logic. Throughput: `<count>` elements. |
 
+## specification workload matrix
+
+The `workloads_*` groups are the production-shaped families required by the
+2026-07-16 performance specification. Their fixtures are constructed lazily by
+the selected benchmark and outside its timed `b.iter` loop.
+
+| Specification family | Benchmark definition | Deterministic work bound |
+|----------------------|----------------------|--------------------------|
+| Formatting-only, deep/wide | `workloads_filesystem/formatting_only_deep_24_wide_32` | `formatting_only_request_starts_no_walker` pins zero walker starts and entries. |
+| Package-scoped inventory + Git in a large monorepo | `workloads_filesystem/package_scoped_git_inventory_in_500_package_monorepo` | `walk_scope_table` pins Git + inventory to `WalkScope::Package`; Git is not a repository-wide walk consumer. |
+| Standalone versus integrated observation; nested discovery with/without supplied evidence | `workloads_repo_observation/{standalone_detect_repo_nested_500,integrated_full_supplied_observation_nested_500}` | `standalone_full_detection_enumerates_the_tree_once`, `integrated_and_standalone_full_detection_agree`, and `nested_workspaces_are_discovered_from_observed_markers` pin one observation and output parity. |
+| Mixed-ecosystem structure-only scaling | `workloads_repo_structure_mixed/{100,500,2000}` | Structure-mode tests pin zero package enrichments and inventory acceptance. |
+| Inventory-only and inventory+docs above the cap | `workloads_inventory_over_cap/{inventory_only_10500_files,inventory_and_docs_10500_files_2000_docs}` | `inventory_only_walk_stops_at_the_cap_and_reports_truncation` and `combined_walk_keeps_going_past_saturation_for_its_other_observers` pin the 10,000 accepted-file cap and observer behavior. |
+| Final assembly and Markdown package-prefix assignment | `workloads_final_assembly/full_500_packages_2000_docs`, `workloads_document_attribution/package_prefix_assignment/{500,2000}` | Ownership/document tests pin deepest component-prefix selection and zero lookup canonicalizations. |
+| Dirty Git payload sizes | `workloads_git_dirty_sizes/100_files/{1024,102400,2097152}` | `each_dirty_side_loads_and_diffs_once` pins one blob load and diff per dirty side independent of payload size. |
+| Branch-heavy/divergent and many-tip containment | `workloads_git_branches/{branch_heavy_divergent_32_tips,deep_containment_100_remote_tips}` | `focused_ref_consumers_share_one_observation` pins one ref snapshot; containment shares the `git.commit_visits` bound used by the path-history and ref-walk tests. |
+| Sparse path history | `workloads_git_path_history/2000_commits_sparse_prefix_every_200` | `commit_visits_are_bounded_by_the_scan_limit` pins visits at the explicit scan bound. |
+| Remote provider request counts | `workloads_remote_report/github_provider_request_count_fixture` (requires `remote`) | `github_fetch_report_resolves_metadata_and_tree_once` pins one metadata and one root-tree request. |
+| Large synthetic service listing | `workloads_service_listing/{500,2000}` (requires `bench-internals`) | `large_service_workloads_preserve_cardinality_and_chunk_bounds` pins output cardinality and `1 + ceil(N / 128)` runner calls; `pid_enrichment_costs_one_subprocess_per_chunk_not_per_service` maps the same bound to `process.spawns` through the real bounded subprocess runner. |
+| Case-sensitive/case-insensitive, warm/cold-ish | `workloads_filesystem_case/{warm_case_variant_tree,coldish_fresh_case_variant_tree}` | The fixture uses native `Path` components and therefore exercises the host filesystem's actual case behavior without emulation. |
+
 ---
 
 ## Environment Variables
@@ -178,6 +211,33 @@ Parameterised by package count (10, 100, optionally 500).
 |----------|--------|
 | `SNIFF_BENCH_DEEP_DIRTY=1` | Includes the `1000` dirty-file row in `git_dirty_scaling` |
 | `SNIFF_BENCH_DEEP_REPO=1` | Includes the `500` package row in `repo_package_boundaries` |
+
+## What These Timings Are Worth
+
+**Criterion timings here are directional evidence, not acceptance evidence.** Work
+counters are what performance claims in sniff are judged on — see
+`sniff/lib/src/performance/counters.rs` and
+`cargo run -p sniff --release --example work_counts`.
+
+Read this before quoting a number from a report:
+
+- **Only compare within one OS and runner class.** No universal cross-OS
+  wall-clock threshold exists, and none should be added.
+- **Always include an unchanged case as a drift bracket.** On a loaded host these
+  benches are worthless without one: a run at load 57–87 on 16 cores reported
+  **+330%** for a case whose counters were byte-identical.
+- **Case order matters within a run.** `repo_structure_huge_375_packages` runs
+  before `repo_full_huge_375_packages` over the *same* fixture, so the full case
+  reads a page cache the structure case warmed. Do not read a structure-vs-full
+  ratio off one sequential run.
+- **`_huge` is 375 packages but only ~3,755 files** (10 per package). It is
+  package-dense and file-sparse, which is precisely the shape where
+  `structure()` and `full()` converge. It is not a general model of "a big repo".
+
+The fixture was previously described as "500 packages" in benchmark IDs while the
+builder created 375. The IDs were renamed to match the code in Phase 1 of the
+2026-07-16 performance feature; **never compare against an archived `huge_500`
+result** — the workload never changed, but only post-rename runs are on record.
 
 ## How to Read Reports
 

@@ -1,0 +1,64 @@
+[package]
+name = "claudine-gen"
+version = "0.1.0"
+edition = "2024"
+license = "AGPL-3.0-only"
+description = "Deterministic provider-catalog generator for Claudine (roster + research + facts + overrides -> data.rs fragments)"
+
+# Bootstrap rule (design/catalog-generation.md F1): this crate MUST NOT
+# depend on the `claudine` lib or `claudine-cli` — a stale or broken
+# generated catalog must never block building the tool that regenerates it.
+
+[lib]
+name = "claudine_gen"
+
+[[bin]]
+name = "claudine-gen"
+path = "src/main.rs"
+
+[dependencies]
+# Internal
+claudine-catalog-types = { path = "../catalog-types" }
+biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"] }
+darkmatter = { path = "../../darkmatter/lib" }
+# Human-facing report rendering (Phase 10). biscuit-terminal is already in the
+# dependency tree transitively via darkmatter and does not depend on the
+# `claudine` lib/CLI, so the bootstrap boundary is preserved.
+biscuit-terminal = { path = "../../biscuit-terminal/lib" }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml_ng = "0.10"
+
+# CLI
+clap = { version = "4.5", features = ["derive"] }
+
+# Error handling
+thiserror = "2.0"
+
+# Artifact `generated_at` staleness check (RFC3339 parse + now)
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# Generate-time compilation check for `match_op: regex` detection records
+regex = "1.11"
+
+tempfile = "3"
+
+# Variant-name introspection for the schema<->catalog compatibility gate
+strum = "0.28"
+
+[dev-dependencies]
+biscuit-hash = { path = "../../biscuit-hash/lib" }
+# Level-2 real-terminal report tests. Neither crate is `claudine`/`claudine-cli`,
+# so the bootstrap rule above still holds.
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
+test-toolkit = { path = "../../tools/test-toolkit" }
+serial_test = "3"
+
+# CI policy: this package owns real L2 tests (`tests/level2_report_terminal.rs`
+# — tmux-driven report rendering), so the tier must be declared here or those
+# tests run in NO tier anywhere (AC12).
+[package.metadata.ci.tests]
+tiers = ["L1", "L2"]
+l2-backends = ["tmux"]

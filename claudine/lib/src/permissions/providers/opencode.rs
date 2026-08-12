@@ -5,7 +5,8 @@ use async_trait::async_trait;
 use serde_json::{Map, Value, json};
 use tokio::fs;
 
-use crate::error::{ClaudineError, Result};
+use crate::error::{ClaudineError, PolicyParseCause, Result};
+use crate::opencode_config::{deep_merge, merge_overlay, yolo_permission_block};
 use crate::permissions::backend::{BackendCapabilities, BackendFidelity, ProviderPolicyBackend};
 use crate::permissions::canonical::{
     CanonicalApprovalMode, CanonicalPolicy, CanonicalRuleProvenance, CommandAccessRule,
@@ -124,6 +125,7 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
                 ClaudineError::PolicyNativeParse {
                     source_id: source.id.clone(),
                     message: error.to_string(),
+                    source: Some(PolicyParseCause::Json(error)),
                 }
             })?;
             layers.push(NativePolicyLayer::new(
@@ -149,6 +151,7 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
                     return Err(ClaudineError::PolicyCliParse {
                         provider: Provider::OpenCode,
                         message: "parsed CLI overrides belong to another provider".to_owned(),
+                        source: None,
                     });
                 }
                 let typed = parsed
@@ -157,6 +160,7 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
                     .ok_or_else(|| ClaudineError::PolicyCliParse {
                         provider: Provider::OpenCode,
                         message: "parsed CLI overrides had an unexpected payload type".to_owned(),
+                        source: None,
                     })?;
                 Ok(ProviderCliOverrides::new(Provider::OpenCode, typed))
             }
@@ -164,7 +168,12 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
                 let mut overrides = OpenCodeCliOverrides::default();
                 let mut i = 0;
                 while i < argv.len() {
-                    if argv[i].as_str() == "--yolo" {
+                    // `--dangerously-skip-permissions` is the canonical OpenCode
+                    // auto-approve flag; `--yolo` is still recognized for
+                    // backward compatibility of parsed inputs.
+                    if argv[i].as_str() == "--dangerously-skip-permissions"
+                        || argv[i].as_str() == "--yolo"
+                    {
                         overrides.yolo = true
                     }
                     i += 1;
@@ -187,6 +196,7 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
                     ClaudineError::PolicyNativeParse {
                         source_id: layer.source.id.clone(),
                         message: "OpenCode layer payload type mismatch".to_owned(),
+                        source: None,
                     }
                 })?;
                 Ok((layer.source.clone(), config))
@@ -229,6 +239,7 @@ impl ProviderPolicyBackend for OpenCodePolicyBackend {
                 .ok_or_else(|| ClaudineError::PolicyNativeParse {
                     source_id: "opencode-effective".to_owned(),
                     message: "OpenCode effective policy payload type mismatch".to_owned(),
+                    source: None,
                 })?;
 
         let mut policy = CanonicalPolicy::empty(
@@ -584,7 +595,13 @@ fn build_one_shot_plan(change: &PolicyChange) -> Result<Option<OneShotMutationPl
     for operation in &change.operations {
         match operation {
             PolicyChangeOp::SetApprovalMode(CanonicalApprovalMode::AutoApprove) => {
-                argv.push("--yolo".to_owned());
+                // `--dangerously-skip-permissions` only auto-approves the parent
+                // session; the merged permission block makes auto-approve
+                // authoritative session-wide (subagents included), matching the
+                // wrapper path. `--yolo` is not a `run` subcommand flag.
+                argv.push("--dangerously-skip-permissions".to_owned());
+                deep_merge(&mut overlay, yolo_permission_block());
+                needs_overlay = true;
             }
             PolicyChangeOp::SetApprovalMode(_) => {
                 apply_opencode_operation(&mut overlay, operation)?;
@@ -600,7 +617,7 @@ fn build_one_shot_plan(change: &PolicyChange) -> Result<Option<OneShotMutationPl
     if needs_overlay {
         env.insert(
             "OPENCODE_CONFIG_CONTENT".to_owned(),
-            serde_json::to_string(&overlay)?,
+            merge_overlay(None, overlay)?,
         );
     }
 
@@ -714,7 +731,89 @@ mod tests {
         let plan = backend.plan_change(&ctx, &current, &change).await.unwrap();
         let one_shot = plan.one_shot_plan.unwrap();
 
-        assert!(one_shot.argv.contains(&"--yolo".to_owned()));
-        assert!(one_shot.env.contains_key("OPENCODE_CONFIG_CONTENT"));
+        assert!(
+            one_shot
+                .argv
+                .contains(&"--dangerously-skip-permissions".to_owned())
+        );
+        assert!(!one_shot.argv.contains(&"--yolo".to_owned()));
+        let overlay: Value =
+            serde_json::from_str(one_shot.env.get("OPENCODE_CONFIG_CONTENT").unwrap()).unwrap();
+        assert_eq!(overlay["permission"]["*"], json!("allow"));
+    }
+
+    #[test]
+    fn opencode_parse_cli_overrides_recognizes_dangerous_skip() {
+        let ctx = PolicyContext::new(std::path::PathBuf::from("/tmp"));
+        let backend = OpenCodePolicyBackend;
+        let argv = vec!["--dangerously-skip-permissions".to_owned()];
+        let overrides = backend
+            .parse_cli_overrides(&ctx, CliPolicyInput::Argv(&argv))
+            .unwrap();
+        let typed = overrides.payload::<OpenCodeCliOverrides>().unwrap();
+        assert!(typed.yolo);
+    }
+
+    #[tokio::test]
+    async fn opencode_one_shot_auto_approve_emits_merged_permission_block() {
+        let (_dir, ctx) = setup_ctx();
+        let backend = OpenCodePolicyBackend;
+        let current = NativeEffectivePolicy::new(
+            Provider::OpenCode,
+            Vec::new(),
+            OpenCodeState {
+                layers: Vec::new(),
+                cli: OpenCodeCliOverrides::default(),
+            },
+        );
+        let change =
+            PolicyChange::one_shot(vec![PolicyChangeOp::SetApprovalMode(
+                CanonicalApprovalMode::AutoApprove,
+            )]);
+
+        let plan = backend.plan_change(&ctx, &current, &change).await.unwrap();
+        let one_shot = plan.one_shot_plan.unwrap();
+
+        assert!(
+            one_shot
+                .argv
+                .contains(&"--dangerously-skip-permissions".to_owned())
+        );
+        assert!(!one_shot.argv.contains(&"--yolo".to_owned()));
+        let overlay: Value =
+            serde_json::from_str(one_shot.env.get("OPENCODE_CONFIG_CONTENT").unwrap()).unwrap();
+        assert_eq!(overlay["permission"]["*"], json!("allow"));
+        assert_eq!(overlay["permission"]["external_directory"], json!("allow"));
+        assert_eq!(overlay["permission"]["doom_loop"], json!("allow"));
+    }
+
+    #[tokio::test]
+    async fn opencode_one_shot_merges_operation_and_yolo_into_one_config() {
+        let (_dir, ctx) = setup_ctx();
+        let backend = OpenCodePolicyBackend;
+        let current = NativeEffectivePolicy::new(
+            Provider::OpenCode,
+            Vec::new(),
+            OpenCodeState {
+                layers: Vec::new(),
+                cli: OpenCodeCliOverrides::default(),
+            },
+        );
+        let change = PolicyChange::one_shot(vec![
+            PolicyChangeOp::AllowCommand(CommandPattern::new("git status")),
+            PolicyChangeOp::SetApprovalMode(CanonicalApprovalMode::AutoApprove),
+        ]);
+
+        let plan = backend.plan_change(&ctx, &current, &change).await.unwrap();
+        let one_shot = plan.one_shot_plan.unwrap();
+        let overlay: Value =
+            serde_json::from_str(one_shot.env.get("OPENCODE_CONFIG_CONTENT").unwrap()).unwrap();
+
+        // The command operation's pattern and the YOLO permission keys coexist
+        // in one config object — no clobber within the policy path.
+        assert_eq!(overlay["permission"]["bash"]["git status"], json!("allow"));
+        assert_eq!(overlay["permission"]["*"], json!("allow"));
+        assert_eq!(overlay["permission"]["external_directory"], json!("allow"));
+        assert_eq!(overlay["permission"]["doom_loop"], json!("allow"));
     }
 }

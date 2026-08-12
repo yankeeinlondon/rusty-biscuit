@@ -9,7 +9,9 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use super::{Candidate, REPO_DIR_WALK_RANK, display_name, name_stem};
+use biscuit_file::to_portable_string;
+
+use super::{Candidate, REPO_DIR_WALK_RANK, display_name, file_name_matches};
 use crate::completion::frontmatter;
 use crate::completion::fuzzy::{self, DirMatchMode, PartialLen};
 use crate::completion::scopes::{self, ComposeMode, Scope, ScopeContext, ScopeKind, ScopeSet};
@@ -122,9 +124,7 @@ pub(super) fn gather_repo_dirs(
         let Ok(rel) = entry_path.strip_prefix(render_base) else {
             continue;
         };
-        let Some(rel_str) = rel.to_str() else {
-            continue;
-        };
+        let rel_str = to_portable_string(rel);
         if rel_str.is_empty() {
             continue;
         }
@@ -196,15 +196,14 @@ fn render_entry_word(
     };
 
     if ctx.partial_len.matching_enabled() {
-        // Match against the stem for files and the directory name for
-        // directories. The stem is a more natural target — users type
-        // `plan` intending `plan.md`, not `plan.md` literally.
-        let target = if is_dir {
-            name_cmp.as_str()
+        // Files match the stem OR the full basename (so `plan` and `plan.`
+        // both hit `plan.md`); directories match their full leaf name.
+        let matched = if is_dir {
+            fuzzy::fuzzy_match(&name_cmp, ctx.active)
         } else {
-            name_stem(&name_cmp)
+            file_name_matches(&name_cmp, ctx.active)
         };
-        if !fuzzy::fuzzy_match(target, ctx.active) {
+        if !matched {
             return;
         }
     }
@@ -252,9 +251,9 @@ pub(super) fn format_relative_insert(
     if let Some(root) = scopes::effective_repo_root(ctx)
         && let Ok(rel) = entry.strip_prefix(root)
     {
-        let rel_str = rel.to_str()?;
+        let rel_str = to_portable_string(rel);
         if !rel_str.is_empty() {
-            return Some(rel_str.to_string());
+            return Some(rel_str);
         }
     }
     // 2. Home-relative rendering (user-global `~/.claudine/...`).
@@ -262,13 +261,13 @@ pub(super) fn format_relative_insert(
         return Some(insert);
     }
     // 3. Fallback: scope-leaf-relative rendering.
-    let leaf = scope.path.file_name()?.to_str()?;
+    let leaf = scope.path.file_name()?;
     let rel = entry.strip_prefix(&scope.path).ok()?;
-    let rel_str = rel.to_str()?;
+    let rel_str = to_portable_string(rel);
     if rel_str.is_empty() {
         return None;
     }
-    Some(format!("{leaf}/{rel_str}"))
+    Some(format!("{}/{rel_str}", to_portable_string(Path::new(leaf))))
 }
 
 fn format_home_relative_insert(entry: &Path, ctx: &ScopeContext) -> Option<String> {
@@ -276,9 +275,52 @@ fn format_home_relative_insert(entry: &Path, ctx: &ScopeContext) -> Option<Strin
     if !entry.starts_with(home) {
         return None;
     }
-    let rel = entry.strip_prefix(home).ok()?.to_str()?;
-    if rel.is_empty() {
+    let rel = entry.strip_prefix(home).ok()?;
+    let rel_text = to_portable_string(rel);
+    if rel_text.is_empty() {
         return None;
     }
-    Some(format!("~/{rel}"))
+    Some(format!("~/{rel_text}"))
+}
+
+#[cfg(test)]
+mod portable_tests {
+    use super::*;
+
+    fn context() -> ScopeContext {
+        ScopeContext {
+            cwd: PathBuf::from("elsewhere"),
+            home: None,
+            repo_info: None,
+            git_root: None,
+        }
+    }
+
+    #[test]
+    fn relative_insert_portably_renders_windows_shaped_segments() {
+        let scope = Scope {
+            kind: ScopeKind::RepoDocs,
+            path: PathBuf::from("repo").join("docs"),
+            follow_links: true,
+        };
+        let entry = scope.path.join(r"nested\plan.md");
+
+        assert_eq!(
+            format_relative_insert(&scope, &entry, &context()),
+            Some("docs/nested/plan.md".to_string())
+        );
+    }
+
+    #[test]
+    fn home_insert_portably_renders_windows_shaped_segments() {
+        let home = PathBuf::from("home");
+        let entry = home.join(r".claudine\prompts\plan.md");
+        let mut ctx = context();
+        ctx.home = Some(home);
+
+        assert_eq!(
+            format_home_relative_insert(&entry, &ctx),
+            Some("~/.claudine/prompts/plan.md".to_string())
+        );
+    }
 }

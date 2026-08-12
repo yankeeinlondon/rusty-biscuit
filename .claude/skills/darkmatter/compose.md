@@ -1,4 +1,25 @@
+---
+hash: ef46db3751d8e999-1f17b774a5a1ed90
+last_updated: 2026-08-01
+---
 # Compose Pipeline
+
+## Contents
+
+- Pipeline Overview
+- API
+- Demand-Driven Runtime Context Evidence
+- Text Replacement
+- Interpolation
+- ComposeReport
+- Pre-Flight Shell Approval
+- Shell Command Caching
+- Error Handling
+- Transclusion
+- Module Structure
+
+Use heading search to jump to the listed subsystem.
+
 
 The darkmatter compose pipeline provides document preparation through four phases:
 Inline Pre, Transclusion, Inline Post, and Finalization.
@@ -30,7 +51,14 @@ Inline Pre, Transclusion, Inline Post, and Finalization.
 
 **Inline Post** (serial):
 
-- **Cleanup** - Normalizes markdown formatting
+- **Cleanup** - Normalizes markdown formatting. It strips incidental single
+  newlines from top-level and list-item prose by default, removing source-only
+  list continuation indentation before applying list/indent cleanup. It can
+  reflow complete logical prose blocks with
+  `ComposeOptions::with_fixed_width(...)`; newly wrapped list continuations
+  retain their complete list and blockquote container prefix. Use
+  `ComposeOptions::with_incidental_newline_mode(IncidentalNewlineMode::Preserve)`
+  to keep source single newlines.
 - **Normalization** - Adjusts heading levels
 
 **Finalization** (root-only serial):
@@ -65,6 +93,13 @@ let baseline: darkmatter::markdown::schemas::SimplifiedSchema = /* ... */;
 let options = ComposeOptions::new()
     .with_baseline_schema(baseline);
 
+// Cleanup options
+let options = ComposeOptions::new()
+    .with_incidental_newline_mode(
+        darkmatter::markdown::cleanup::IncidentalNewlineMode::Preserve,
+    )
+    .with_fixed_width(80);
+
 // In-place mutation (no clone)
 let report = md.compose_mut()?;
 
@@ -75,6 +110,64 @@ let options = ComposeOptions::new()
 let (composed, report) = md.compose_with(options)?;
 println!("{}", report.summary());
 ```
+
+## Demand-Driven Runtime Context Evidence
+
+Darkmatter exposes the capture requirements separately from population:
+
+```rust
+use darkmatter::markdown::compose::{
+    ComposeContext, ContextCaptureEvidence, ContextGroup, ContextRequirements,
+};
+
+let requirements = ContextRequirements::for_document(&markdown);
+if requirements.contains(ContextGroup::Git) {
+    // Ask the invocation owner for its retained Git evidence.
+}
+let evidence = ContextCaptureEvidence::new(invocation_environment)
+    .with_git(git_info)
+    .with_repository(repository_root, repo_info)
+    .with_file_changes(file_changes);
+let context = ComposeContext::capture_with_evidence(
+    source_base_dir,
+    &requirements,
+    &evidence,
+);
+```
+
+`ContextRequirements::for_content` scans active `ctx.*` references in one
+content fragment. `for_document` scans both authored frontmatter values and the
+body, preserving interpolation-literal masking and date/time aliases. `all`,
+`contains`, and `iter` support explicit orchestration without exposing the
+population modules. Date/time is always present in a requirements set.
+
+`ContextCaptureEvidence` carries the invocation environment plus optional
+Sniff-owned `GitInfo`, file changes, `RepoInfo`, `LanguageBreakdown`, Markdown
+metadata, `OsInfo`, `HardwareInfo`, and GPU observations. Its builders
+distinguish **not supplied** from an explicitly observed absence (`None` or an
+empty vector). `with_documents_for_source` derives the canonical best matching
+skill from a supplied repository root/topology and source directory without
+performing Git or topology discovery.
+
+Supplied capture is fail-closed. If a requested fact was not supplied,
+Darkmatter emits the existing `PartialRuntimeCapture` diagnostic and populates
+the group's empty/null projection. It never fills the gap by reading ambient
+CWD, HOME, environment, Git, repository topology, OS, hardware, or GPU state.
+The injected environment is used for both `env.*` and the `ctx.agent` /
+`ctx.model` projection, so later process-environment mutation cannot change the
+capture.
+
+The supplied entry points are:
+
+- `ComposeContext::capture_with_evidence`
+- `ComposeContext::capture_for_content_with_evidence`
+- `ComposeContext::capture_for_document_with_evidence`
+
+Existing `ComposeContext::capture_for_content`,
+`ComposeContext::capture_for_document`, and `ComposeOptions::new()` remain
+ambient compatibility APIs and use the same `populate_*` code. Ambient capture
+snapshots the environment once and reuses its original `GitRepo` handle for
+file changes rather than discovering the repository a second time.
 
 ## Text Replacement
 
@@ -101,7 +194,7 @@ Version: VERSION
 
 ## Interpolation
 
-Expressions between `{{ }}` are evaluated and replaced with values.
+Expressions between `{{ }}` are evaluated and replaced with values. To render `{{ ... }}` literally instead of evaluating it, use the interpolation-literal syntax `{{{ ... }}}`; the content is never evaluated and composes down to `{{ ... }}`. See `darkmatter/docs/inline/interpolation.md`.
 
 ### Variable Resolution
 
@@ -162,26 +255,24 @@ properties are computed.
 | `ctx.current_package_area` | Current package area; null if not in a monorepo area |
 | `ctx.area` | Scope name (package or area); empty string at root |
 | `ctx.area_description` | Human-readable scope description |
-| `ctx.current_packages` | Markdown bullet list of packages under CWD |
-| `ctx.depends_on` | Markdown list of internal dependencies |
-| `ctx.used_by` | Markdown list of internal dependents |
-| `ctx.packages` | Comma-separated package names |
-| `ctx.package_areas` | Comma-separated package area names |
-| `ctx.dirty_files` | Comma-separated dirty file paths |
-| `ctx.staged_files` | Comma-separated staged file paths |
-| `ctx.untracked_files` | Comma-separated untracked file paths |
-| `ctx.dirty_files_list` | Markdown bullet list of dirty files |
-| `ctx.staged_files_list` | Markdown bullet list of staged files |
-| `ctx.dirty_packages` | Comma-separated dirty package names |
-| `ctx.staged_packages` | Comma-separated staged package names |
+| `ctx.current_packages` | `string[]` of packages under CWD (`name (relative)`) |
+| `ctx.depends_on` | `object[]` of internal dependencies (`{ package, dependencies }`) |
+| `ctx.used_by` | `object[]` of internal dependents (`{ package, users }`) |
+| `ctx.packages` | `string[]` of package names |
+| `ctx.package_areas` | `string[]` of package area names |
+| `ctx.dirty_files` | `string[]` of dirty file paths |
+| `ctx.staged_files` | `string[]` of staged file paths |
+| `ctx.untracked_files` | `string[]` of untracked file paths |
+| `ctx.dirty_packages` | `string[]` of dirty package names |
+| `ctx.staged_packages` | `string[]` of staged package names |
 | `ctx.current_package_has_dirty_files` | Whether current package has dirty files |
 | `ctx.current_package_has_staged_files` | Whether current package has staged files |
-| `ctx.programming_languages_in_repo` | Comma-separated unique languages; null if not in a repo |
+| `ctx.programming_languages_in_repo` | `string[]` of unique languages; null if not in a repo |
 | `ctx.programming_language` | Context-sensitive primary language |
 | `ctx.package_manager` | Context-sensitive package manager |
-| `ctx.docs_readme` | Comma-separated README paths, scope-filtered |
-| `ctx.docs_blast_radius` | Comma-separated docs with blast_radius frontmatter |
-| `ctx.docs_drift` | Comma-separated docs at risk of drift |
+| `ctx.docs_readme` | `string[]` of README paths, scope-filtered |
+| `ctx.docs_blast_radius` | `string[]` of docs with blast_radius frontmatter |
+| `ctx.docs_drift` | `string[]` of docs at risk of drift |
 | `ctx.docs_skill` | Repo-relative path to best matching SKILL.md; null if none |
 | `ctx.os` | "Windows", "macOS", or "Linux"; null for other |
 | `ctx.os_distro` | Linux distribution name; empty on macOS/Windows |
@@ -200,6 +291,14 @@ All date/time variables have `_utc` variants (e.g., `today_utc`, `day_utc`,
 `year_utc`). Week boundary variables are also available:
 `start_of_week_sun`, `end_of_week_sun`, `start_of_week_mon`, `end_of_week_mon`
 (plus UTC variants).
+
+List-valued variables (`string[]` / `object[]`) are real arrays. A bare
+`{{ ctx.foo }}` renders an array **line-separated** (one element per line). For
+other shapes use the list-formatting functions: `as_csv`, `as_tsv`,
+`as_space_separated`, `as_line_separated`, `as_unordered_list`, and
+`as_ordered_list` (the Markdown-list renderers auto-nest nested arrays and the
+`depends_on` / `used_by` object shape). The former `_list` twin variables (e.g.
+`ctx.dirty_files_list`) are removed — use `{{ as_unordered_list(ctx.dirty_files) }}`.
 
 Full specification lives in `darkmatter/docs/topics/context-variables.md`.
 
@@ -311,12 +410,32 @@ Shell approval and shell execution are separate concerns:
   frontmatter-shell expansion is rejected up front as
   `ShellExpansionError::DynamicCommandShape` (never a late `NotPreApproved`).
 
+### Interactive approval: the stage policy snapshot
+
+When no pre-approved set is supplied and an `approval_handler` drives approval
+interactively, policy is snapshotted **once per stage**, not per directive. Each
+of the three shell stages (frontmatter `$()`, body `::shell`, `::shell-block`)
+takes one `ShellRuntimeSnapshot` of the whitelist/blacklist/allow-once state at
+stage open, and every directive that stage admits is judged against it. This
+keeps the policy mutex out of parsing, approval, and execution.
+
+Two consequences:
+
+- A rule **persisted** by an `AllowExactPersist` / `AllowCommandPersist`
+  decision is written to the runtime immediately but becomes *policy input*
+  only for a **subsequent** stage (or run). A later directive in the same stage
+  matching that fresh rule therefore prompts again. This is conservative by
+  construction — it can over-prompt, never under-authorize.
+- **Allow-once is exempt.** It is arbitrated live against shared runtime state,
+  so one approval covers repeats of that exact command for the rest of the
+  stage and across concurrently composed sibling transclusions.
+
 Orchestrators (Claudine) call `compose_preflight`, merge in their own harness
 commands, authorize the union once, and pass the merged set back via
 `with_pre_approved_commands`. `md compose --shell` reports the condition-blind
 candidates. The lower-level `collect_shell_commands(&md, &options)` returns the
 raw `ShellCommandEntry` list. See
-[`docs/inline/preflight-checks.md`](../../../darkmatter/docs/inline/preflight-checks.md).
+`docs/inline/preflight-checks.md`.
 
 ## Shell Command Caching
 
@@ -334,7 +453,7 @@ own spelling:
 A repeated command whose executable is on the built-in volatile allowlist
 (`uuidgen`, `date`, `openssl`) emits a one-time discoverability warning
 suggesting `--no-cache`. See
-[`docs/inline/shell-expansion.md`](../../../darkmatter/docs/inline/shell-expansion.md).
+`docs/inline/shell-expansion.md`.
 
 ## Error Handling
 
@@ -429,7 +548,7 @@ darkmatter/lib/src/
     │   ├── runtime.rs   # ComposeContext (the ctx namespace)
     │   ├── report.rs    # ComposeReport, ComposeWarning, SourceRange
     │   ├── effective_state.rs # EffectiveState, builder, merge logic
-    │   ├── capture.rs   # Raw fact capture from sniff, chrono, std::env
+    │   ├── capture/     # Requirements, ambient/supplied snapshots, and group populators
     │   ├── format.rs    # CSV, markdown list, byte, ordinal formatters
     │   ├── merge.rs     # User ctx + runtime ctx merge policy
     │   └── diagnostics.rs # ContextMergeDiagnostic types
@@ -438,7 +557,7 @@ darkmatter/lib/src/
     │   ├── lexer.rs     # Tokenizer
     │   ├── ast.rs       # AST types
     │   ├── parser.rs    # Expression parser
-    │   ├── functions.rs # PURE_FUNCTIONS + FS_FUNCTIONS dispatch (read-side fns)
+    │   ├── functions/   # domain-owned registrations and dispatch
     │   ├── catalog.rs   # Descriptor catalog (parity-tested against functions)
     │   ├── ctx.rs       # CtxLookup (ctx.* runtime context)
     │   ├── doc_namespace.rs # Reserved doc / doc.* namespace resolution

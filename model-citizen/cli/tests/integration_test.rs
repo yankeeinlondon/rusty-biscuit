@@ -1,10 +1,10 @@
 use assert_cmd::Command;
-use assert_cmd::cargo_bin;
+use assert_cmd::cargo::cargo_bin;
 use predicates::prelude::*;
 
 #[test]
 fn test_help() {
-    let mut cmd = Command::new(cargo_bin!("model"));
+    let mut cmd = Command::new(cargo_bin("model"));
     cmd.arg("--help")
         .assert()
         .success()
@@ -15,7 +15,7 @@ fn test_help() {
 
 #[test]
 fn test_list_unknown_runner() {
-    let mut cmd = Command::new(cargo_bin!("model"));
+    let mut cmd = Command::new(cargo_bin("model"));
     cmd.arg("list")
         .arg("--runner")
         .arg("unknown_runner")
@@ -26,7 +26,7 @@ fn test_list_unknown_runner() {
 
 #[test]
 fn test_list_json() {
-    let mut cmd = Command::new(cargo_bin!("model"));
+    let mut cmd = Command::new(cargo_bin("model"));
     cmd.arg("--json")
         .arg("list")
         .assert()
@@ -37,7 +37,7 @@ fn test_list_json() {
 
 #[test]
 fn test_completions() {
-    let mut cmd = Command::new(cargo_bin!("model"));
+    let mut cmd = Command::new(cargo_bin("model"));
     cmd.arg("completions")
         .assert()
         .success()
@@ -48,7 +48,7 @@ fn test_completions() {
 // would require a mocked backend because system models differ.
 #[test]
 fn test_search_no_results() {
-    let mut cmd = Command::new(cargo_bin!("model"));
+    let mut cmd = Command::new(cargo_bin("model"));
     let assert = cmd
         .arg("search")
         .arg("nonexistent_model_1234567890_impossible")

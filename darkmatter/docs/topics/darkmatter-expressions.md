@@ -29,10 +29,9 @@ surface that runs it:
 | Claudine hook conditions | `when=` |
 
 This is the **availability invariant**: a read-side function or `doc.*`
-reference resolves on every surface above. (The historical asymmetry — where
-read-side functions worked only in body interpolation — is gone.) The single
-documented exception is the `markdown::transform` pipeline, which uses a bare
-state and is not in scope.
+reference resolves on every surface above. The historical asymmetry — where
+read-side functions worked only in body interpolation — is gone; the compose
+pipeline and public condition API use the same evaluation contract.
 
 > Earlier docs called this "Boolean Conditional Logic". The language is now
 > general-purpose and supports arithmetic, member/index access, type
@@ -118,6 +117,17 @@ flags.
 - numeric literals: `0`, `1`, `3.14`, `-2`
 - boolean literals: `true`, `false`
 - parentheses for grouping: `(env.AGENT == "claude" || env.AGENT == "opencode")`
+
+## Interpolation Literals
+
+A triple-brace span `{{{ ... }}}` is an **interpolation literal**. It is recognized on every expression-scanning surface but is **inert**: the content is never lexed, parsed, or evaluated, and it produces no diagnostic.
+
+- `{{{ name }}}` composes to the literal text `{{ name }}`.
+- `{{{ {{ x }} }}}` composes to `{{ {{ x }} }}` with `x` unevaluated.
+- The literal closes at the first subsequent `}}}`; an unclosed `{{{` falls back to legacy `{{` scanning.
+- Literals are inert on every scanner consumer: interpolation, DMLS diagnostics, demand-driven context capture, and remote-reference discovery.
+
+Use interpolation literals when documentation needs to display `{{ ... }}` syntax rather than evaluate it. The fenced-code-block alternative remains the way to show literal `{{{ ... }}}` syntax itself.
 
 ## Variable Access
 
@@ -262,12 +272,15 @@ For `>`, `>=`, `<`, and `<=`, both sides are coerced to numbers.
 
 ## Arithmetic Operators
 
-All arithmetic operators (`+`, `-`, `*`, `/`, `%`) require numeric operands,
-with one exception: `+` performs **string concatenation** when either operand
-is a string.
+All arithmetic operators (`+`, `-`, `*`, `/`, `%`) accept numbers and numeric
+strings. For `+`, a numeric string paired with a number is coerced before
+addition. Other string combinations use **string concatenation**, including
+two numeric strings.
 
 ```md
 {{ 5 + 3 }}            ⇒ 8
+{{ "2" + 1 }}          ⇒ 3
+{{ "2" + "1" }}        ⇒ "21"
 {{ "count: " + 5 }}    ⇒ "count: 5"
 {{ 10 * (1 + 2) }}     ⇒ 30
 {{ 7 % 3 }}            ⇒ 1
@@ -279,7 +292,7 @@ Arithmetic errors fail composition:
 
 - **Division by zero** — `x / 0` and `x % 0` raise an error
 - **Non-numeric operands** — using `-`, `*`, `/`, or `%` on `null`, booleans,
-  arrays, or objects raises an error; same for `+` when neither side is a string
+  arrays, or objects raises an error
 
 ### Remainder Semantics
 
@@ -301,92 +314,120 @@ Arithmetic errors fail composition:
 Function names are **case-insensitive**: `has_key`, `HasKey`, and `haskey` all
 resolve to the same function.
 
-### Logical Helpers
+The authored source for this table is
+[`docs/schemas/expression-functions.yaml`](../schemas/expression-functions.yaml),
+projected through `expression_function_descriptors()`. Do not edit the generated
+table directly; run `just darkmatter regen-expr-doc` from the repository root to
+refresh it after changing the catalog.
 
-- `and(a, b, c, ...)` — all arguments truthy; left-to-right short-circuit
-- `or(a, b, c, ...)` — any argument truthy; left-to-right short-circuit
-- `has_key(object, key)` — `true` when the first argument is an object containing `key`
-- `contains(collection, value)` — substring/array/object/scalar containment
+<!-- BEGIN GENERATED FUNCTION TABLE -->
 
-### Length and Numbers
+| Category | Function | Description | Example |
+| --- | --- | --- | --- |
+| Type Predicates | `is_string(x)` | Returns true when the value is a string. | `is_string("hello")` ⇒ `true` |
+| Type Predicates | `is_number(x)` | Returns true when the value is a number. | `is_number(42)` ⇒ `true` |
+| Type Predicates | `is_array(x)` | Returns true when the value is an array. | `is_array(items)` ⇒ `true` |
+| Type Predicates | `is_null(x)` | Returns true when the value is null. | `is_null(null)` ⇒ `true` |
+| Type Predicates | `is_object(x)` | Returns true when the value is an object. | `is_object(obj)` ⇒ `true` |
+| Type Predicates | `is_empty(x)` | Returns true when the value is null, empty string, empty array, or empty object. | `is_empty("")` ⇒ `true` |
+| Type Predicates | `is_positive(val)` | Returns true when the coerced value is greater than zero. | `is_positive(5)` ⇒ `true` |
+| Type Predicates | `is_negative(val)` | Returns true when the coerced value is less than zero. | `is_negative(-3)` ⇒ `true` |
+| Type Predicates | `is_integer(val)` | Returns true when the value is a JSON number with no fractional component. | `is_integer(7)` ⇒ `true` |
+| Math | `min(a, b)` | Returns the smaller of two numbers. | `min(2, 5)` ⇒ `2` |
+| Math | `max(a, b)` | Returns the larger of two numbers. | `max(2, 5)` ⇒ `5` |
+| Math | `abs(x)` | Returns the absolute value of a number. | `abs(-3)` ⇒ `3` |
+| Collection | `first(x)` | Returns the first element of an array, or null when empty. | `first(items)` ⇒ `1` |
+| Collection | `last(x)` | Returns the last element of an array, or null when empty. | `last(items)` ⇒ `3` |
+| String Predicates | `starts_with(x, find)` | Returns true when the string starts with the given prefix (case-sensitive). | `starts_with("hello", "he")` ⇒ `true` |
+| String Predicates | `ends_with(x, find)` | Returns true when the string ends with the given suffix (case-sensitive). | `ends_with("hello", "lo")` ⇒ `true` |
+| String Mutations | `lower(x)` | Converts a string to lowercase. | `lower("HELLO")` ⇒ `hello` |
+| String Mutations | `upper(x)` | Converts a string to uppercase. | `upper("hello")` ⇒ `HELLO` |
+| String Mutations | `capitalize(x)` | Capitalizes the first character of a string. | `capitalize("hello")` ⇒ `Hello` |
+| String Mutations | `kebab_case(x)` | Converts a string to kebab-case. | `kebab_case("Hello World")` ⇒ `hello-world` |
+| String Mutations | `snake_case(x)` | Converts a string to snake_case. | `snake_case("Hello World")` ⇒ `hello_world` |
+| String Mutations | `camel_case(x)` | Converts a string to camelCase. | `camel_case("hello world")` ⇒ `helloWorld` |
+| String Mutations | `pascal_case(x)` | Converts a string to PascalCase. | `pascal_case("hello world")` ⇒ `HelloWorld` |
+| String Mutations | `title_case(x)` | Converts a string to Title Case. | `title_case("hello world")` ⇒ `Hello World` |
+| String Mutations | `without_date(string)` | Removes substrings that are real YYYY-MM-DD calendar dates, leaving surrounding text untouched. | `without_date("Note 2024-06-15")` ⇒ `Note ` |
+| String Mutations | `ensure_leading(var, prefix)` | Ensures the string form of a value starts with a prefix. | `ensure_leading("world", "hello ")` ⇒ `hello world` |
+| String Mutations | `ensure_trailing(var, postfix)` | Ensures the string form of a value ends with a postfix. | `ensure_trailing("hello", " world")` ⇒ `hello world` |
+| String Mutations | `replace(x, find, replacement)` | Replaces every literal occurrence of a substring; empty find is a no-op. | `replace("a.b.c", ".", "/")` ⇒ `a/b/c` |
+| String Mutations | `replace_first(x, find, replacement)` | Replaces the first literal occurrence of a substring; empty find is a no-op. | `replace_first("a.b.c", ".", "/")` ⇒ `a/b.c` |
+| String Mutations | `replace_last(x, find, replacement)` | Replaces the last literal occurrence of a substring; empty find is a no-op. | `replace_last("a.b.c", ".", "/")` ⇒ `a.b/c` |
+| Rendering | `terminal(string)` | Renders Prose markup to a terminal string with ANSI SGR sequences. | `terminal("hello")` ⇒ `hello` |
+| Date Formatting | `date(iso, fmt)` | Reformats an ISO date/datetime string into a named human format. | `date("2024-06-15", "long")` ⇒ `Sat, June 15th, 2024` |
+| Date Validators | `is_date(x)` | Returns true when the string is a valid ISO date (YYYY-MM-DD). | `is_date("2024-06-15")` ⇒ `true` |
+| Date Validators | `is_date_utc(x)` | Same as is_date (the format itself is timezone-agnostic). | `is_date_utc("2024-06-15")` ⇒ `true` |
+| Date Validators | `is_date_time(x)` | Returns true when the string is a valid ISO datetime. | `is_date_time("2024-06-15T12:30:00")` ⇒ `true` |
+| Date Validators | `is_date_time_utc(x)` | Same parse contract as is_date_time. | `is_date_time_utc("2024-06-15T12:30:00Z")` ⇒ `true` |
+| Date Validators | `is_today(x)` | Returns true when the date/datetime is today (local). |  |
+| Date Validators | `is_today_utc(x)` | Returns true when the date/datetime is today (UTC). |  |
+| Date Validators | `is_yesterday(x)` | Returns true when the date/datetime is yesterday (local). |  |
+| Date Validators | `is_yesterday_utc(x)` | Returns true when the date/datetime is yesterday (UTC). |  |
+| Date Validators | `is_tomorrow(x)` | Returns true when the date/datetime is tomorrow (local). |  |
+| Date Validators | `is_tomorrow_utc(x)` | Returns true when the date/datetime is tomorrow (UTC). |  |
+| Date Validators | `is_this_month(x)` | Returns true when the date/datetime is in the current month (local). |  |
+| Date Validators | `is_this_month_utc(x)` | Returns true when the date/datetime is in the current month (UTC). |  |
+| Date Validators | `is_this_year(x)` | Returns true when the date/datetime is in the current year (local). |  |
+| Date Validators | `is_this_year_utc(x)` | Returns true when the date/datetime is in the current year (UTC). |  |
+| Date Arithmetic | `date_delta(date1, date2, diff)` | Returns true when the two dates are at least the given duration apart, ignoring order (duration like 14d, 2mo, 1 hour). | `date_delta("2024-06-01", "2024-06-20", "14d")` ⇒ `true` |
+| Date Arithmetic | `older_than(date1, date2, diff)` | Returns true when date1 is at least the given duration older (earlier) than date2. | `older_than("2024-06-01", "2024-06-20", "14d")` ⇒ `true` |
+| Date Arithmetic | `newer_than(date1, date2, diff)` | Returns true when date1 is at least the given duration newer (later) than date2. | `newer_than("2024-06-20", "2024-06-01", "14d")` ⇒ `true` |
+| Logical | `and(...)` | Logical AND of all arguments. Short-circuits on first falsy value. | `and(true, true)` ⇒ `true` |
+| Logical | `or(...)` | Logical OR of all arguments. Short-circuits on first truthy value. | `or(false, true)` ⇒ `true` |
+| Collection | `has_key(obj, key)` | Returns true when the object contains the given key. | `has_key(obj, "a")` ⇒ `true` |
+| Collection | `contains(haystack, needle)` | Returns true when haystack contains needle (array, object, or string). | `contains("hello", "ell")` ⇒ `true` |
+| Collection | `length(x)` | Returns the length of a string, array, or object. | `length("hello")` ⇒ `5` |
+| Type Conversion | `number(x, [default])` | Converts a value to a number, with an optional default. | `number("42")` ⇒ `42` |
+| Math | `round(x, [default])` | Rounds a value to the nearest integer, with an optional default. | `round(3.7)` ⇒ `4` |
+| Filesystem | `absolute(file)` | Resolves a file path to an absolute path. |  |
+| Filesystem | `relative(file)` | Returns a best-effort relative path from the document base directory. | `relative("fixture.md")` ⇒ `fixture.md` |
+| Filesystem | `file_exists(file)` | Returns true when the file exists (local or remote URL). | `file_exists("fixture.md")` ⇒ `true` |
+| Filesystem | `frontmatter(file)` | Reads the frontmatter of a Markdown file as an object. | `frontmatter("fixture.md")` ⇒ `{"title":"Fixture Title"}` |
+| Filesystem | `frontmatter(file, prop)` | Reads the frontmatter of a Markdown file as an object. | `frontmatter("fixture.md", "title")` ⇒ `Fixture Title` |
+| Filesystem | `markdown_body_empty(file)` | Returns true when the Markdown body has only whitespace. | `markdown_body_empty("fixture.md")` ⇒ `false` |
+| Filesystem | `markdown_title(file)` | Returns the title from frontmatter or the first H1 heading. | `markdown_title("fixture.md")` ⇒ `Fixture Title` |
+| Filesystem | `validate_schema(file)` | Validates a Markdown document against its declared schema. | `validate_schema("fixture.md")` ⇒ `true` |
+| Filesystem | `validate_schema(file, obj)` | Validates a Markdown document against its declared schema. | `validate_schema("fixture.md", {})` ⇒ `true` |
+| Filesystem | `is_indexed_file(file)` | Returns true when the filename stem matches the indexed grammar (base-NNN). | `is_indexed_file("review-1.md")` ⇒ `true` |
+| Filesystem | `file_index(file)` | Returns the parsed index suffix, or -1 when non-indexed. | `file_index("review-1.md")` ⇒ `1` |
+| Filesystem | `increment_file_index(file)` | Increments the numeric index suffix, preserving zero-padding width. | `increment_file_index("review-1.md")` ⇒ `review-2.md` |
+| Filesystem | `decrement_file_index(file)` | Decrements the numeric index suffix, clamped at 0. | `decrement_file_index("review-2.md")` ⇒ `review-1.md` |
+| Filesystem | `basename(file)` | Returns the final path component including extension. | `basename("sub/note.md")` ⇒ `note.md` |
+| Filesystem | `basename_without_index(file)` | Returns the basename with any indexed suffix removed from the stem. | `basename_without_index("review-1.md")` ⇒ `review.md` |
+| Filesystem | `dirname(file)` | Returns the directory portion of the display path. | `dirname("sub/note.md")` ⇒ `sub` |
+| Filesystem | `ext(file)` | Returns the final extension without the leading dot. | `ext("sub/note.md")` ⇒ `md` |
+| Filesystem | `parent_dir(file)` | Returns the directory segment immediately above the basename. | `parent_dir("sub/note.md")` ⇒ `sub` |
+| Filesystem | `file_trailing(file)` | Returns the last directory segment plus the basename. | `file_trailing("sub/note.md")` ⇒ `sub/note.md` |
+| Filesystem | `dir_leading(file)` | Returns the directory path above the last directory segment, dropping the basename and its parent (the complement of file_trailing). | `dir_leading("sub/note.md")` ⇒ `` |
+| Filesystem | `join(left, right)` | Joins two path strings with normalized separators. | `join("sub", "note.md")` ⇒ `sub/note.md` |
+| Filesystem | `link(file)` | Creates a Markdown link to a local file, using its relative path as the link text. |  |
+| Filesystem | `link(target, desc)` | Creates a Markdown link to a local file, using its relative path as the link text. |  |
+| Filesystem | `has_command(cmd)` | Returns true when the command is found on PATH or is an existing executable absolute path. |  |
+| Context | `has_skill(name)` | Returns true when a skill directory exists in a user-scoped or local-scoped skill root. |  |
+| Context | `has_local_skill(name)` | Returns true when a skill directory exists in a local-scoped skill root. |  |
+| List Formatting | `as_line_separated(list)` | Joins a list into a newline-separated string (the default bare-array rendering). |  |
+| List Formatting | `as_csv(list)` | Joins a list into a comma-separated string. | `as_csv(items)` ⇒ `1, 2, 3` |
+| List Formatting | `as_tsv(list)` | Joins a list into a tab-separated string. |  |
+| List Formatting | `as_space_separated(list)` | Joins a list into a space-separated string. | `as_space_separated(items)` ⇒ `1 2 3` |
+| List Formatting | `as_unordered_list(list)` | Renders a list as a Markdown unordered list, auto-nesting nested arrays and object-array shapes as indented sublists. |  |
+| List Formatting | `as_ordered_list(list)` | Renders a list as a Markdown ordered list, auto-nesting nested arrays and object-array shapes as indented sublists. |  |
+| Filesystem | `find_first_index(file)` | Returns the lowest-indexed existing sibling in the file's directory, with the unindexed base sorting first; returns the input when the family has no existing member. | `find_first_index("review-2.md")` ⇒ `review-1.md` |
+| Filesystem | `find_last_index(file)` | Returns the highest-indexed existing sibling in the file's directory; returns the input when the family has no existing member. | `find_last_index("review-1.md")` ⇒ `review-2.md` |
+| Git | `predict_conflicts(branch)` | Returns the repository-relative paths that would conflict if the named local branch were merged into the caller's current branch. |  |
+| Git | `branch_exists_on_remote()` | Returns whether an exact branch exists in the selected remote's live ref advertisement or authoritative provider API. |  |
+| Git | `branch_exists_on_remote(branch)` | Returns whether an exact branch exists in the selected remote's live ref advertisement or authoritative provider API. |  |
+| Git | `branch_exists_on_remote(branch, remote)` | Returns whether an exact branch exists in the selected remote's live ref advertisement or authoritative provider API. |  |
+| Git | `remote_vendor([remote])` | Returns the canonical provider token for the selected configured remote, probing an ambiguous self-hosted server only when allowlisted. |  |
+| Pull Requests | `pr(id)` | Returns one provider pull or merge request in canonical Markdown form. |  |
+| Pull Requests | `pr_list(query)` | Queries pull or merge requests with the canonical bounded filter vocabulary. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
+| Pull Requests | `pr_list(count)` | Queries pull or merge requests with the canonical bounded filter vocabulary. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
+| CI/CD | `cicd(id)` | Returns one provider-addressable CI/CD job in canonical Markdown form. |  |
+| CI/CD | `cicd_list(query)` | Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
+| CI/CD | `cicd_list(count)` | Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
+<!-- END GENERATED FUNCTION TABLE -->
 
-- `length(value)` — string char count, array length, object key count, number's character count, `0` for `null`/booleans
-- `number(value, default?)` — parses as number; falls back to `default` (or `0`)
-- `round(value, default?)` — rounds the parsed number to an integer
-
-### Math
-
-- `min(a, b)` — minimum of two numbers
-- `max(a, b)` — maximum of two numbers
-- `abs(x)` — absolute value
-
-Math helpers require numeric arguments. Booleans, strings, arrays, objects,
-and `null` all produce a type-mismatch error (`null` propagates to `null` when
-null-safety applies — see [Function Contracts](#function-contracts)).
-
-### Type Predicates
-
-- `is_string(x)`, `is_number(x)`, `is_array(x)`, `is_null(x)`, `is_object(x)`
-- `is_empty(x)` — `true` for `null`, `""`, `[]`, `{}`; `false` for numbers (including `0`), booleans, and non-empty containers
-- `is_integer(val)` — `true` only for JSON numbers with no fractional component; never errors and does not null-propagate
-
-### Numeric Predicates
-
-- `is_positive(val)` — `true` when the value coerces to a number greater than zero
-- `is_negative(val)` — `true` when the value coerces to a number less than zero
-
-Both predicates use the same coercion as `number()`. `0` is neither positive nor
-negative. Non-numeric values (including `null`) return an error rather than
-propagating.
-
-### Collection Helpers
-
-- `first(x)` — first element of array `x`, or `null` if empty
-- `last(x)` — last element of array `x`, or `null` if empty
-
-### String Predicates
-
-- `starts_with(x, find)` — case-sensitive prefix test
-- `ends_with(x, find)` — case-sensitive suffix test
-
-### String Mutations
-
-- `lower(x)`, `upper(x)`, `capitalize(x)`
-- `kebab_case(x)`, `snake_case(x)`, `camel_case(x)`, `pascal_case(x)`, `title_case(x)`
-- `without_date(string)` — removes valid `YYYY-MM-DD` substrings; invalid dates such as `2026-02-30` are left untouched
-- `ensure_leading(var, prefix)` — ensures the string form of `var` starts with `prefix`
-- `ensure_trailing(var, postfix)` — ensures the string form of `var` ends with `postfix`
-
-`ensure_leading` and `ensure_trailing` accept strings or numbers. If `var`
-already has the prefix/suffix, the original value is returned unchanged
-(including its JSON type). When `var` is a number and the result is
-representable as a number, a JSON number is returned; otherwise a string is
-returned.
-
-```md
-{{ ensure_leading("foobar", "foo") }}    ⇒ "foobar"
-{{ ensure_leading("bar", "foo") }}       ⇒ "foobar"
-{{ ensure_leading(123, 4) }}             ⇒ 4123
-{{ ensure_leading("123", 4) }}           ⇒ "4123"
-```
-
-### Date Validators
-
-Strict format validators (strings only, exact format required):
-
-- `is_date(x)` — `YYYY-MM-DD`
-- `is_date_utc(x)` — same format
-- `is_date_time(x)` — ISO 8601 datetime (also accepted as `is_datetime(x)`)
-- `is_date_time_utc(x)` — same format (also accepted as `is_datetime_utc(x)`)
-
-Relative validators (accept date *and* datetime strings):
-
-- Local: `is_today(x)`, `is_yesterday(x)`, `is_tomorrow(x)`, `is_this_month(x)`, `is_this_year(x)`
-- UTC:   `is_today_utc(x)`, `is_yesterday_utc(x)`, `is_tomorrow_utc(x)`, `is_this_month_utc(x)`, `is_this_year_utc(x)`
-
-All return `false` for non-string inputs and unparseable strings.
-
-### Date Formatting
+### `date()` format tokens
 
 `date(iso, format)` reformats an ISO date or datetime string into a named
 human format. The date portion is extracted from datetime inputs.
@@ -406,14 +447,6 @@ The `[YYYY]` token includes the year only when it differs from the current
 year. Invalid ISO input or an unknown format token returns an error; a `null`
 argument propagates as `null`.
 
-### Rendering
-
-- `terminal(string)` — renders the input as **Prose markup** and returns the
-  resulting terminal string, including ANSI SGR sequences. The input is markup,
-  not literal text, so angle brackets that should appear literally must be
-  escaped before calling. Rendering uses deterministic, non-interactive
-  terminal settings and does not probe the live terminal. `null` propagates.
-
 ### Read-Side Functions
 
 Read-side functions report on the filesystem — and, for some, remote URLs. They
@@ -423,13 +456,15 @@ path arguments. The context is supplied automatically on every
 [surface](#availability-across-every-surface).
 
 All path arguments are resolved through the shared rules below. With the
-exception of `file_exists`, read-side functions do not check whether a local
-path exists; they operate on the resolved path shape.
+exception of `file_exists` and `has_command`, read-side functions do not check
+whether a local path exists; they operate on the resolved path shape.
 
 #### Shared Path Rules
 
-- Paths are resolved through `FileReference` plus the document's magic paths,
-  package paths, and git-root fallbacks.
+- Paths are resolved through `FileReference` against the document resolution
+  context: explicit `./`/`../` paths from the source document's directory only,
+  bare implicit paths repository-root first then the source directory, plus the
+  document's magic (`@`) and package (`!`) roots for those reference forms.
 - Output paths use `/` as the separator, regardless of platform.
 - Missing local files are generally **not** an error for path helpers; existence
   is checked only when the operation genuinely needs it.
@@ -453,6 +488,25 @@ path exists; they operate on the resolved path shape.
 | `validate_schema(path, obj)` | accepted for forward compatibility | yes (body only) |
 | `absolute(path)` | the absolute form of a path | **no** |
 | `relative(path)` | a path relative to the base dir | **no** |
+| `has_command(cmd)` | whether a command is runnable on the host | **no** |
+
+`has_command(cmd)` is a `PATH`/executable existence probe: it reports whether
+`cmd` can be run on the host and **never executes** it, so it needs no command
+whitelisting. A bare name (`git`) triggers an OS-native `PATH` search; an
+absolute path (`/usr/bin/git`) must both exist and be executable. On Windows the
+search honors `PATHEXT`; on Unix the executable bit is required. Symlinked
+executables are followed, and directories are rejected.
+
+Unlike the document-reading helpers, `has_command` takes **no** remote URL
+argument and does not use the shared path-resolution rules. Two path shapes are
+intentionally **not** resolved and always return `false` by design:
+
+- **Tilde** — `~` is not expanded, so `has_command("~/bin/mytool")` is `false`.
+- **Relative paths** — `./mytool` and `bin/foo` are not resolved against `PATH`,
+  a base directory, or the CWD.
+
+Both follow the never-error contract — they return `false` rather than raising —
+and can be addressed later without an API change.
 
 #### Indexed and Path Helpers
 
@@ -469,12 +523,47 @@ one or more digits, where the hyphen is not preceded by another hyphen:
 | `decrement_file_index(file)` | decrements the index, clamped at `0`; non-indexed files start at `0` |
 | `basename(file)` | final component including extension |
 | `basename_without_index(file)` | basename with any indexed suffix removed from the stem |
-| `dir(file)` | directory portion of the display path |
+| `dirname(file)` | directory portion of the display path |
 | `ext(file)` | final extension without the leading dot; `""` when none |
 | `parent_dir(file)` | directory segment immediately above the basename |
 | `file_trailing(file)` | last directory segment plus basename |
 | `dir_leading(file)` | directory path above the last directory segment, dropping the basename and its parent (complement of `file_trailing`) |
 | `join(left, right)` | joins two path strings, normalizing separators |
+
+#### Git Helpers
+
+`predict_conflicts(branch)` predicts the unresolved paths produced by merging
+the named local branch into the caller's current local branch. The named branch
+is incoming (`theirs`); the current branch is the destination (`ours`). The
+repository is resolved from the caller or launch-area anchor, not from the
+Markdown document's directory.
+
+Prediction uses only the two captured committed branch tips. Staged, unstaged,
+untracked, and already-conflicted index state do not affect it, including staged
+`.gitattributes`. It performs no fetch, network request, hook, merge driver,
+filter, or subprocess, and it does not change HEAD, refs, the index, worktree,
+or on-disk object database. A clean merge returns `[]`; missing prerequisites
+such as a repository, attached current branch, exact incoming local branch, or
+supported merge configuration return an error.
+
+Render predicted paths as a Markdown list:
+
+```md
+{{ as_unordered_list(predict_conflicts("feature/api")) }}
+```
+
+Branch on the result in an ordinary interpolation:
+
+```md
+{{ is_truthy(predict_conflicts("feature/api")) ? "Conflicts need resolution" : "Merge is clean" }}
+```
+
+The same function is available in frontmatter interpolation and `$()` ternary
+conditions or branches:
+
+```yaml
+merge_status: '$( is_truthy(predict_conflicts("feature/api")) ? "conflicted" : "clean" )'
+```
 
 #### Link Helpers
 
@@ -510,7 +599,7 @@ This applies to:
 - math: `min`, `max`, `abs`
 - collections: `first`, `last`
 - string predicates: `starts_with`, `ends_with`
-- string mutations: `lower`, `upper`, `capitalize`, `kebab_case`, `camel_case`, `pascal_case`, `snake_case`, `title_case`, `without_date`, `ensure_leading`, `ensure_trailing`
+- string mutations: `lower`, `upper`, `capitalize`, `kebab_case`, `camel_case`, `pascal_case`, `snake_case`, `title_case`, `without_date`, `ensure_leading`, `ensure_trailing`, `replace`, `replace_first`, `replace_last`
 - rendering: `terminal`
 - date formatting: `date`
 
@@ -518,6 +607,107 @@ This applies to:
 are inspecting predicates and never error or null-propagate; they always return
 a boolean. `is_positive` and `is_negative` are coercing predicates: they error
 when their argument cannot be coerced to a number (including `null`).
+
+## Provider Query Vocabulary
+
+`pr_list()` and `cicd_list()` accept a structured query object drawn from a
+closed, canonical vocabulary. This section is the authority for that
+vocabulary; the catalog descriptions for both functions link here, so editor
+hover and completion reach the same tables.
+
+### Shared rules
+
+- **Repository-only scope.** A query is scoped to the repository identified by
+  the selected configured remote. Organization, group, workspace, account, and
+  all-visible scopes are not available.
+- **No provider-native escape hatch.** Only the canonical keys below are
+  accepted. Adapter-native query syntax stays internal to Sniff. A canonical
+  field the selected provider cannot honor exactly fails with an
+  unsupported-filter error naming the field and the provider flavor — it is
+  never ignored, approximated, or silently downgraded.
+- **Limits.** An omitted `limit` means 20; the hard maximum is 100. A
+  non-positive or over-maximum limit is an invalid-query error.
+- **Ordering.** Both functions return newest-first by default. `pr_list`'s
+  `sort: "provider-default"` preserves the provider's own result order
+  verbatim; because `direction` only orders a sort key, combining it with
+  `provider-default` is an invalid-query error rather than an ignored field.
+- **Provider-capability filters.** `stage` is honored only where the provider
+  exposes stage data (GitLab); on any other provider it fails with the
+  unsupported-filter error before any request. `workflow` matches the parent
+  workflow/pipeline name, its definition ID, or its definition path (for
+  example `.github/workflows/ci.yml`) where the provider has workflow
+  definitions.
+- **Empty results.** A successful query with no matches returns `[]`.
+- **Datetimes.** `*_after` / `*_before` values are RFC 3339 / ISO 8601 strings
+  (for example `2026-07-13T00:00:00Z`). Both bounds are inclusive; an inverted
+  range is an invalid-query error.
+- **Validation is pre-network.** Unknown keys, wrong types, invalid enum
+  values, inverted ranges, and invalid filter combinations are rejected before
+  any provider request.
+- **Integer overload.** `pr_list(count)` and `cicd_list(count)` are shorthand
+  for the newest `count` items — open pull requests for `pr_list`, jobs of any
+  status for `cicd_list`. `count` must be a positive integer and is capped by
+  the same hard maximum of 100.
+
+### `pr_list(query)` keys
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `remote` | string | Exact configured remote name; preferred remote when absent |
+| `state` | string or string[] | Any of `open`, `closed`, `merged`; defaults to `open` |
+| `draft` | boolean | Independently select draft/non-draft state |
+| `source_branch` | string | Exact source branch |
+| `target_branch` | string | Exact destination branch |
+| `author` | string | Provider login/username |
+| `assignee` | string | Provider login/username |
+| `reviewer` | string | Provider login/username |
+| `labels` | string[] | Require all listed labels |
+| `milestone` | string | Provider milestone title/identifier |
+| `search` | string | Portable title/body search term |
+| `commit` | string | Pull requests associated with a commit SHA |
+| `created_after` / `created_before` | datetime | Inclusive creation window |
+| `updated_after` / `updated_before` | datetime | Inclusive update window |
+| `sort` | string | `created`, `updated`, or `provider-default` |
+| `direction` | string | `ascending` or `descending` |
+| `limit` | number(integer) | Maximum returned items; default 20, maximum 100 |
+
+### `cicd_list(query)` keys
+
+| Key | Type | Meaning |
+|-----|------|---------|
+| `remote` | string | Exact configured remote name; preferred remote when absent |
+| `statuses` | string or string[] | Normalized lifecycle states; defaults to all statuses |
+| `name` | string | Exact or provider-supported job-name match |
+| `stage` | string | Pipeline stage when the provider exposes stages |
+| `workflow` | string | Parent workflow/pipeline name, definition ID, or path |
+| `parent` | number(integer) or string | Exact parent workflow-run/pipeline identity |
+| `branch` | string | Exact branch/ref |
+| `commit` | string | Exact commit SHA |
+| `actor` | string | Triggering provider login/username |
+| `trigger` | string | Push, PR/MR, schedule, manual, parent, or provider event |
+| `created_after` / `created_before` | datetime | Inclusive creation window |
+| `updated_after` / `updated_before` | datetime | Inclusive update window |
+| `direction` | string | `ascending` or `descending` |
+| `limit` | number(integer) | Maximum returned jobs; default 20, maximum 100 |
+
+### Closed enum values
+
+| Enum | Accepted values |
+|------|-----------------|
+| `state` (`pr_list`) | `open`, `closed`, `merged` |
+| `statuses` (`cicd_list`) | `success`, `failed`, `cancelled`, `queued`, `running`, `manual`, `skipped` |
+| `sort` (`pr_list`) | `created`, `updated`, `provider-default` |
+| `direction` | `ascending`, `descending` |
+
+The `statuses` values are Darkmatter's *normalized* vocabulary. Provider-native
+spellings are mapped onto it (for example GitHub's `completed` and Bitbucket's
+`successful` both normalize to `success`); the provider's raw state is retained
+in the structured record alongside the normalized one.
+
+```text
+pr_list({ state: ["open", "merged"], target_branch: "main", limit: 10 })
+cicd_list({ statuses: ["failed", "cancelled"], branch: "main", limit: 10 })
+```
 
 ## Null Propagation Summary
 
@@ -787,14 +977,14 @@ Unsupported or easy-to-misread forms:
 
 ## Authoring a New Expression Function
 
-Expression functions live in
-[`expression/functions.rs`](../../lib/src/markdown/compose/expression/functions.rs)
-and split into two registries:
+Expression functions live in domain modules under
+[`expression/functions/`](../../lib/src/markdown/compose/expression/functions)
+and share one registration model:
 
-- **Pure functions** (`PURE_FUNCTIONS`) — depend only on their arguments. Most
+- **Pure functions** — depend only on their arguments. Most
   helpers (`length`, `min`, `kebab_case`, `is_today`, …) are pure. Dispatched by
   `dispatch`, which needs no context.
-- **Context-aware / read-side functions** (`FS_FUNCTIONS`) — need a
+- **Context-aware / read-side functions** — need a
   [`ResolutionContext`](../../lib/src/markdown/compose/expression/resolve_ctx.rs)
   to resolve path arguments. The [read-side functions](#read-side-functions)
   live here. Dispatched by `dispatch_fs`, which receives the context; `is_fs_function`
@@ -803,13 +993,13 @@ and split into two registries:
 
 To add a function:
 
-1. Implement it and register it in the correct slice (`PURE_FUNCTIONS` or
-   `FS_FUNCTIONS`).
-2. Add a matching descriptor to `EXPRESSION_FUNCTION_DESCRIPTORS` in
-   [`catalog.rs`](../../lib/src/markdown/compose/expression/catalog.rs). This is
-   **mandatory**: parity tests enforce exact bidirectional set equality between
-   the registered functions and the descriptor catalog, so a missing or extra
-   descriptor fails the build.
+1. Add its signatures, description, ordering, and examples to the authored
+   [`expression-functions.yaml`](../schemas/expression-functions.yaml) catalog.
+2. In the owning domain module, implement the handler and add one runtime binding
+   containing its canonical name, aliases, evaluation mode, and handler kind.
+   Consumers read the projected catalog through
+   `expression_function_descriptors()`; runtime bindings do not repeat authored
+   metadata.
 
 For a read-side function, obtain paths through the `ResolutionContext`
 (`base_dir`, magic search paths, optional remote runtime) rather than the

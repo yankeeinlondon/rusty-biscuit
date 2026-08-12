@@ -5,12 +5,33 @@
 //! that the CLI's top-level cause-chain walker surfaces a rich darkmatter
 //! `BlockError` report (path, line number, hint) instead of flat text.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 
 mod common;
+#[cfg(unix)]
+use common::CliProcessFixture;
 use common::{augmented_path, strip_ansi, write_executable};
+
+#[cfg(windows)]
+fn shim_name(name: &str) -> String {
+    format!("{name}.cmd")
+}
+
+#[cfg(not(windows))]
+fn shim_name(name: &str) -> String {
+    name.to_string()
+}
+
+#[cfg(windows)]
+fn successful_provider_shim() -> &'static str {
+    "@echo off\r\nexit /b 0\r\n"
+}
+
+#[cfg(not(windows))]
+fn successful_provider_shim() -> &'static str {
+    "#!/bin/sh\nexit 0\n"
+}
 
 /// Shell-expansion failure during `claudine compose`.
 ///
@@ -33,9 +54,12 @@ fn compose_shell_expansion_failure_renders_rich_block() {
 
     // Fake claude binary so the wrapper pipeline picks a provider and
     // reaches shell-expansion resolution.
-    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+    write_executable(
+        &path_dir.join(shim_name("claude")),
+        successful_provider_shim(),
+    );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("PATH", augmented_path(&path_dir))
         .args(["compose", "--claude", md_file.to_str().unwrap()])
@@ -59,6 +83,71 @@ fn compose_shell_expansion_failure_renders_rich_block() {
     );
 }
 
+/// Real `ExecutionFailed` shell-expansion failure during `claudine compose`.
+///
+/// Uses a portable failing command (`rustc --edition=invalid`) so the test
+/// exercises the full boundary from Markdown composition through the CLI's
+/// top-level error walker, not just the preflight `Blacklisted` path.
+#[test]
+fn compose_shell_execution_failure_renders_rich_block() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let md_file = workspace.path().join("compose.md");
+    fs::write(
+        &md_file,
+        "---\ntitle: Shell demo\n---\n\nPre.\n\n::shell rustc --edition=invalid\n\nPost.\n",
+    )
+    .unwrap();
+
+    // Fake claude binary so the wrapper pipeline picks a provider and
+    // reaches shell-expansion resolution.
+    write_executable(
+        &path_dir.join(shim_name("claude")),
+        successful_provider_shim(),
+    );
+
+    // `--silent` suppresses the execution header so the only stderr output
+    // is the structured error block, letting us assert the full captured
+    // stderr is ANSI-free under `NO_COLOR=1`.
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .env("NO_COLOR", "1")
+        .env("PATH", augmented_path(&path_dir))
+        .args(["compose", "--yolo", "--silent", "--claude", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let stderr_raw = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
+
+    assert!(
+        !stderr_raw.contains('\x1b'),
+        "raw stderr must contain no ANSI escape bytes under NO_COLOR=1; got:\n{stderr_raw:?}"
+    );
+
+    let plain = strip_ansi(&stderr_raw);
+
+    assert!(
+        plain.contains("line 7") || plain.contains("> 7 │"),
+        "expected file-relative line in diagnostic; got:\n{plain}"
+    );
+    assert!(
+        plain.contains("error:"),
+        "expected captured rustc stderr text in diagnostic; got:\n{plain}"
+    );
+    assert!(
+        plain.contains("::shell"),
+        "expected source excerpt in diagnostic; got:\n{plain}"
+    );
+    assert!(
+        plain.contains("title:") || plain.contains("---"),
+        "expected frontmatter block in diagnostic; got:\n{plain}"
+    );
+    assert!(
+        !plain.contains("__claudine_pre_rendered__"),
+        "legacy pre-render marker must never reach the user; got:\n{plain}"
+    );
+}
+
 /// System-prompt composition failure via `--append-system-prompt`.
 ///
 /// The system prompt file contains a blacklisted `::shell` directive.
@@ -68,24 +157,21 @@ fn compose_shell_expansion_failure_renders_rich_block() {
 #[cfg(unix)]
 #[test]
 fn compose_system_prompt_shell_failure_renders_rich_block() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("compose-system-prompt-shell-failure");
 
-    let md_file = workspace.path().join("prompt.md");
+    let md_file = fixture.cwd().join("prompt.md");
     fs::write(&md_file, "---\ntitle: demo\n---\nHello compose\n").unwrap();
 
     // Broken system prompt: ::shell with a blacklisted command.
-    let sp_file = workspace.path().join("append-system-prompt.md");
+    let sp_file = fixture.cwd().join("append-system-prompt.md");
     fs::write(&sp_file, "Base system prompt.\n\n::shell rm -rf /\n").unwrap();
 
     // Fake codex binary so the wrapper pipeline picks a provider and
     // reaches system-prompt resolution.
-    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("codex"), "#!/bin/sh\nexit 0\n");
 
-    let assert = cargo_bin_cmd!("claudine")
-        .env("NO_COLOR", "1")
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .args([
             "compose",
             "--codex",
@@ -132,7 +218,7 @@ fn compose_transclusion_cycle_renders_file_chain() {
     // reaches transclusion resolution.
     write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("PATH", augmented_path(&path_dir))
         .args(["compose", "--claude", a.to_str().unwrap()])

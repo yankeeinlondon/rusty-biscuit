@@ -1,0 +1,2 @@
+timestamp=2026-06-10T16:11:27.352Z level=INFO service=default version=1.14.48 message=opencode
+timestamp=2026-06-10T16:11:27.352Z level=INFO run=df5a9474 version=1.14.48 message=opencode

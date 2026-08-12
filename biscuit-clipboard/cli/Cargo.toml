@@ -17,9 +17,22 @@ thiserror = "2"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
+# `bin_exe!`: resolves the `clip` path at run time so the integration tests
+# survive execution from a relocated nextest archive (the wsl2 leg).
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
 assert_cmd = "2"
 predicates = "3"
 serde_json = "1"
 tempfile = "3"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 wiremock = "0.6"
+
+# CI exclusion: ~17 CLI tests that currently run in no CI job. Promotion is
+# blocked on the canonical just recipe set and on confirming headless-runner
+# clipboard behavior.
+[package.metadata.ci]
+gates = false
+exclusion-class = "promotion-pending"
+owner = "@yankeeinlondon"
+reason = "~17 clipboard CLI tests that currently run in NO CI job. Promotion is blocked on the canonical just recipe set and on confirming headless-runner clipboard behavior (no X11/Wayland display) — the CLI exercises the library's display probing end to end."
+expiry = "2026-10-31"

@@ -39,8 +39,10 @@
 
 pub mod cell;
 pub mod column;
+pub mod error;
 pub mod table;
 
 pub use cell::{CellState, CellValue, Row, RowCell};
 pub use column::{BooleanSwitchConfig, InputTableColumn, TextAreaInputConfig, TextInputConfig};
+pub use error::InputTableError;
 pub use table::{InputTable, InputTableState};

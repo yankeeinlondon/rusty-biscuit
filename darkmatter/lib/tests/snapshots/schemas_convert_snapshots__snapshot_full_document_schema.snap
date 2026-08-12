@@ -10,6 +10,9 @@ expression: convert_yaml(yaml)
     "author": {
       "anyOf": [
         {
+          "type": "null"
+        },
+        {
           "pattern": "\\S",
           "type": "string"
         },
@@ -22,51 +25,78 @@ expression: convert_yaml(yaml)
     "hero": {
       "anyOf": [
         {
+          "type": "null"
+        },
+        {
           "const": ""
         },
         {
-          "format": "darkmatter-file",
-          "type": "string",
-          "x-darkmatter-match": [
-            "*.png",
-            "*.jpg"
-          ]
+          "format": "darkmatter-file-reference",
+          "type": "string"
         }
       ]
     },
     "homepage": {
-      "format": "uri",
-      "type": "string",
-      "x-darkmatter-url-scheme": [
-        "https"
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "format": "uri",
+          "type": "string",
+          "x-darkmatter-url-scheme": [
+            "https"
+          ]
+        }
       ]
     },
     "rating": {
-      "default": 3,
-      "maximum": 5,
-      "minimum": 0,
-      "type": "number"
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "maximum": 5,
+          "minimum": 0,
+          "type": "number"
+        }
+      ],
+      "default": 3
     },
     "slug": {
       "pattern": "^[a-z0-9-]+$",
       "type": "string"
     },
     "status": {
-      "default": "draft",
-      "enum": [
-        "draft",
-        "published",
-        "archived"
-      ]
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "enum": [
+            "draft",
+            "published",
+            "archived"
+          ]
+        }
+      ],
+      "default": "draft"
     },
     "tags": {
-      "items": {
-        "type": "string"
-      },
-      "maxItems": 5,
-      "minItems": 1,
-      "type": "array",
-      "uniqueItems": true
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 1,
+          "type": "array",
+          "uniqueItems": true
+        }
+      ]
     },
     "title": {
       "pattern": "\\S",

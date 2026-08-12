@@ -31,7 +31,7 @@ A comprehensive Rust library for system detection:
 - **Hardware Detection**: CPU (with SIMD), GPU (Metal support), memory, storage, audio devices
 - **Network Detection**: Interface enumeration with IPv4/IPv6 addresses plus WAN IP lookup (TTL-cached)
 - **Filesystem Analysis**: Git repos, monorepo tools, language detection, file type classification, EditorConfig, document discovery, blast radius, justfile detection, recent commits
-- **Programs Module**: Detect installed software across 9 categories with install support, test-runner availability, and remote-bash consent gating
+- **Programs Module**: Detect installed software across 10 categories, with installation support for 8, test-runner availability, and remote-bash consent gating
 - **Services Module**: Detect and list system services across 10+ init systems
 - **Remote Inspection**: Query GitHub, GitLab, Gitea, and Bitbucket APIs for repository metadata
 
@@ -44,7 +44,7 @@ A feature-rich CLI exposing all library capabilities:
 - **Flexible Output**: Text (with verbosity levels), JSON, or plain text
 - **Subcommand Filtering**: Use subcommands to show specific sections
 - **Scoped Enrichment**: `--refresh-remotes` for git sync, `--latest-versions` for dependency updates
-- **Software Detection**: List and install programs across 9 categories
+- **Software Detection**: List programs across 10 categories; install across the 8 that support installation
 - **Repository Queries**: Recent commits, source code changes, blast radius analysis
 
 See [sniff/cli/README.md](cli/README.md) for complete CLI documentation.
@@ -135,7 +135,7 @@ sniff/
 │   │   ├── network/          # Network interfaces
 │   │   ├── filesystem/       # Git, repo, languages, docs, blast radius, file types, just
 │   │   ├── package/          # Package manager abstraction (110+)
-│   │   ├── programs/         # Program detection and install (9 categories)
+│   │   ├── programs/         # Program detection (10 categories; 8 installable)
 │   │   ├── remote/           # Remote repo inspection (GitHub, GitLab, Gitea, Bitbucket)
 │   │   └── services/         # System service detection (10+ init systems)
 │   └── Cargo.toml

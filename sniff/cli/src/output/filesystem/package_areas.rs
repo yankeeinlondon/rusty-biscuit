@@ -416,7 +416,12 @@ pub fn render_repo_package_area_root(
             // Root-level packages have no real package area directory
             String::new()
         } else {
-            repo.unwrap().root.join(area).display().to_string()
+            repo.unwrap()
+                .root
+                .join(area)
+                .display()
+                .to_string()
+                .replace(std::path::MAIN_SEPARATOR, "/")
         }
     } else {
         String::new()

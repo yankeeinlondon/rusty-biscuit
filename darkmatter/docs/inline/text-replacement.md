@@ -16,7 +16,7 @@ Text Replacement allows us to find/replace a string pairing in the document body
 
     > **Note:** if `replace` is defined but is NOT a dictionary, it is simply ignored from a Text Replacement standpoint
 
-- Calling `.transform()` on a Markdown struct kicks off markdown pipelining features
+- Calling `.compose()` on a Markdown struct kicks off Markdown composition features
     - this has nothing to do with exporting to a target output like HTML, terminal, AST, etc.
     - this is the trigger which will update the content based on the Darkmatter DSL found on the page
 - When we transform content with the `replace` property a dictionary we will find all _keys_ in the dictionary and replace them with the _value_ for the given _key_.
@@ -38,7 +38,7 @@ Refer to the [Darkmatter Pipeline](./darkmatter-compose-pipeline.md) document fo
 
 Regardless of implementation path, the replacement step should resolve inputs in a single predictable way:
 
-- At transform pipeline entry, create an **effective state** by merging:
+- At compose pipeline entry, create an **effective state** by merging:
     - the optional incoming state map, and
     - the document's parsed frontmatter
 - Make merge precedence explicit in implementation (recommended for runtime use cases: incoming state overrides on conflict, equivalent to `PreferExternal`)

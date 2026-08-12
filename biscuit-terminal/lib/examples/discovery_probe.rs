@@ -1,8 +1,15 @@
-//! Discovery probe — example binary for Level-1 PTY tests.
+//! Discovery probe — example binary for the PTY and real-terminal tests.
 //!
-//! Called inside a pseudoterminal by the test suite.  Accepts environment
-//! variables that control which discovery routines are exercised and prints
-//! machine-readable `key=value` lines.
+//! Accepts environment variables that control which discovery routines are
+//! exercised and prints machine-readable `key=value` lines. Two suites drive it:
+//!
+//! * Level 1 (`tests/level1_*.rs`) runs it inside a pseudoterminal and
+//!   manufactures the OSC reply bytes itself.
+//! * Level 2 (`tests/level2_terminal_osc_wezterm.rs`) runs it inside a real
+//!   WezTerm pane, where the emulator supplies the replies.
+//!
+//! Output is read back off the terminal, so keep stdout on the tty: `is_tty()`
+//! keys on stdout and a redirect suppresses the OSC queries entirely.
 //!
 //! ## Environment variables
 //!
@@ -11,6 +18,7 @@
 //! | `PROBE` | Selects the probe mode (see below). Defaults to `all`. |
 //! | `PROBE_TERM_PROGRAM` | Overrides `TERM_PROGRAM` for the duration of the probe. |
 //! | `PROBE_TERM` | Overrides `TERM` for the duration of the probe. |
+//! | `PROBE_FORCE_TTY` | Overrides TTY detection for PTY hosts whose child handles are not recognized by `IsTerminal`. |
 //!
 //! ## Probe modes
 //!
@@ -31,6 +39,15 @@
 //! * `cursor` — Query cursor position (DSR).
 //! * `cursor_timeout` — Query cursor position with custom timeout.
 //! * `terminal` — Build a `Terminal` instance and print its fields.
+//! * `terminal_cache` — Construct `PROBE_TERM_CONSTRUCTIONS` (default 3)
+//!   `Terminal` values in one process and print each one's `text_color`.
+//!   Because the OSC 10 foreground query is cached per process, every printed
+//!   `text_color` is the same cached value. Finding 2/21 cache-reuse evidence.
+//! * `terminal_latency` — Construct `PROBE_TERM_WARMUP` (default 3) warm-up
+//!   `Terminal` values (untimed, to absorb the one-time cold OSC round-trip),
+//!   then time `PROBE_TERM_SAMPLES` (default 50) repeated constructions and
+//!   print min/median/mean/max/stddev (nanoseconds) plus the raw sample
+//!   vector. Finding 2/3 repeated-construction latency evidence.
 //! * `prose` — Render a [`Prose`] string against the detected (or
 //!   override-built) terminal and print the raw bytes between
 //!   `---PROSE---` / `---END---` markers.
@@ -55,12 +72,105 @@
 //! the result.  `Option::None` is printed as `None` so tests can assert with
 //! simple string containment.
 //!
+//! The `terminal_cache` and `terminal_latency` modes additionally print
+//! `osc10_actual_queries=` / `osc11_actual_queries=` — this probe's count of
+//! real tty round-trips. A real emulator consumes the query and answers on the
+//! wire, so there is no master side for a Level-2 test to count bytes on; the
+//! count has to come from inside the process. The probe therefore counts them
+//! itself, off the library's OSC-attempt tracing event, so the library exports
+//! no counter of its own. See [`OSC_QUERY_ATTEMPT_TARGET`].
+//!
 //! ```text
 //! bg_color=Some(RgbValue { r: 128, g: 128, b: 128 })
 //! bg_color=None
 //! ```
 
+// ---------------------------------------------------------------------------
+// OSC round-trip counting
+// ---------------------------------------------------------------------------
+
+/// Tracing target of the library's per-round-trip OSC attempt event.
+///
+/// Duplicated from `discovery::osc_queries::query::OSC_QUERY_ATTEMPT_TARGET`,
+/// which is crate-private on purpose: counting round-trips is test scaffolding,
+/// not library API, so the library does not export a counter for this probe to
+/// read. Drift is not silent — the target no longer matching makes every count
+/// zero, and the Level-2 proof asserts an exact count of 1.
+const OSC_QUERY_ATTEMPT_TARGET: &str = "biscuit_terminal::osc_query_attempt";
+
+static OSC_ATTEMPTS: [std::sync::atomic::AtomicUsize; 3] = [
+    std::sync::atomic::AtomicUsize::new(0),
+    std::sync::atomic::AtomicUsize::new(0),
+    std::sync::atomic::AtomicUsize::new(0),
+];
+
+/// Slot index for OSC codes 10/11/12.
+fn osc_slot(code: u64) -> Option<usize> {
+    match code {
+        10 => Some(0),
+        11 => Some(1),
+        12 => Some(2),
+        _ => None,
+    }
+}
+
+fn osc_attempts(code: u64) -> usize {
+    match osc_slot(code) {
+        Some(slot) => OSC_ATTEMPTS[slot].load(std::sync::atomic::Ordering::Relaxed),
+        None => 0,
+    }
+}
+
+/// Pulls the `code` field out of an OSC attempt event.
+#[derive(Default)]
+struct CodeVisitor(Option<u64>);
+
+impl tracing::field::Visit for CodeVisitor {
+    fn record_u64(&mut self, field: &tracing::field::Field, value: u64) {
+        if field.name() == "code" {
+            self.0 = Some(value);
+        }
+    }
+
+    fn record_debug(&mut self, _field: &tracing::field::Field, _value: &dyn std::fmt::Debug) {}
+}
+
+/// Counts one OSC round-trip attempt per [`OSC_QUERY_ATTEMPT_TARGET`] event.
+struct OscAttemptCounter;
+
+impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for OscAttemptCounter {
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        if event.metadata().target() != OSC_QUERY_ATTEMPT_TARGET {
+            return;
+        }
+        let mut visitor = CodeVisitor::default();
+        event.record(&mut visitor);
+        if let Some(slot) = visitor.0.and_then(osc_slot) {
+            OSC_ATTEMPTS[slot].fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
+}
+
+/// Install the counter before any `Terminal` is built, or the first — and only,
+/// when the cache works — round-trip goes uncounted.
+fn install_osc_attempt_counter() {
+    use tracing_subscriber::layer::SubscriberExt;
+    use tracing_subscriber::util::SubscriberInitExt;
+
+    // No filter layer: an unfiltered `Layer` hints no maximum level, so the
+    // registry admits the library's `debug`-level attempt event.
+    let _ = tracing_subscriber::registry()
+        .with(OscAttemptCounter)
+        .try_init();
+}
+
 fn main() {
+    install_osc_attempt_counter();
+
     // Apply env overrides so the library sees the terminal we want.
     if let Ok(v) = std::env::var("PROBE_TERM_PROGRAM") {
         // SAFETY: this is a single-threaded example binary; no other
@@ -70,6 +180,9 @@ fn main() {
     if let Ok(v) = std::env::var("PROBE_TERM") {
         // SAFETY: single-threaded example binary.
         unsafe { std::env::set_var("TERM", v) };
+    }
+    if let Some(value) = parse_bool_env("PROBE_FORCE_TTY") {
+        biscuit_terminal::discovery::detection::set_tty_override(Some(value));
     }
 
     let mode = std::env::var("PROBE").unwrap_or_else(|_| "all".to_string());
@@ -91,6 +204,8 @@ fn main() {
         "cursor" => probe_cursor(),
         "cursor_timeout" => probe_cursor_timeout(),
         "terminal" => probe_terminal(),
+        "terminal_cache" => probe_terminal_cache(),
+        "terminal_latency" => probe_terminal_latency(),
         "prose" => probe_prose(),
         _ => probe_all(),
     }
@@ -239,6 +354,113 @@ fn probe_terminal() {
     println!("underline_support={:?}", term.underline_support);
     println!("osc_link_support={}", term.osc_link_support);
     println!("is_ci={}", term.is_ci);
+}
+
+// ---------------------------------------------------------------------------
+// Terminal construction cache proof (Finding 2/21)
+// ---------------------------------------------------------------------------
+
+/// Read `PROBE_TERM_CONSTRUCTIONS` (default 3, floored at 2).
+fn construction_count() -> usize {
+    std::env::var("PROBE_TERM_CONSTRUCTIONS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(3)
+        .max(2)
+}
+
+/// Print the actual-OSC-round-trip counts this process observed.
+///
+/// Under a manufactured PTY the test can count `\x1b]10;?\x07` on the master
+/// side directly; under a real emulator it cannot (the terminal consumes the
+/// query and answers on the wire), so the count has to be taken from inside the
+/// process. [`OscAttemptCounter`] does that; the library exports no counter.
+fn print_osc_query_counts() {
+    println!("osc10_actual_queries={}", osc_attempts(10));
+    println!("osc11_actual_queries={}", osc_attempts(11));
+}
+
+/// Construct N `Terminal` values in one process and print each one's
+/// `text_color`. The OSC 10 foreground query is cached per process, so the
+/// master side sees exactly one `\x1b]10;?\x07` request across every
+/// construction, and every printed value equals the single cached first
+/// response — proving reuse rather than coincidental equality.
+fn probe_terminal_cache() {
+    use biscuit_terminal::terminal::Terminal;
+
+    let n = construction_count();
+    println!("terminal_cache_count={n}");
+    for i in 0..n {
+        let term = Terminal::new();
+        // Debug of `Option<RgbValue>`; identical across constructions when the
+        // cached response is reused.
+        println!("terminal_text_color[{i}]={:?}", term.text_color);
+    }
+    print_osc_query_counts();
+    println!("terminal_cache_done");
+}
+
+// ---------------------------------------------------------------------------
+// Repeated-construction latency (Finding 2/3)
+// ---------------------------------------------------------------------------
+
+fn usize_env(name: &str, default: usize) -> usize {
+    std::env::var(name)
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .unwrap_or(default)
+}
+
+/// Warm up (untimed) to absorb the one-time cold OSC round-trip, then time
+/// repeated `Terminal` constructions and print the summary statistics plus the
+/// raw nanosecond samples for retention in the feature-local evidence index.
+fn probe_terminal_latency() {
+    use biscuit_terminal::terminal::Terminal;
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    let warmup = usize_env("PROBE_TERM_WARMUP", 3).max(1);
+    let samples = usize_env("PROBE_TERM_SAMPLES", 50).max(1);
+
+    for _ in 0..warmup {
+        black_box(Terminal::new());
+    }
+
+    let mut ns: Vec<u128> = Vec::with_capacity(samples);
+    for _ in 0..samples {
+        let start = Instant::now();
+        black_box(Terminal::new());
+        ns.push(start.elapsed().as_nanos());
+    }
+
+    let count = ns.len() as f64;
+    let sum: u128 = ns.iter().sum();
+    let mean = sum as f64 / count;
+    let variance = ns
+        .iter()
+        .map(|&v| {
+            let d = v as f64 - mean;
+            d * d
+        })
+        .sum::<f64>()
+        / count;
+    let stddev = variance.sqrt();
+
+    let mut sorted = ns.clone();
+    sorted.sort_unstable();
+    let median = sorted[sorted.len() / 2];
+
+    println!("terminal_latency_warmup={warmup}");
+    println!("terminal_latency_samples={samples}");
+    println!("terminal_latency_min_ns={}", sorted[0]);
+    println!("terminal_latency_median_ns={median}");
+    println!("terminal_latency_mean_ns={mean:.1}");
+    println!("terminal_latency_max_ns={}", sorted[sorted.len() - 1]);
+    println!("terminal_latency_stddev_ns={stddev:.1}");
+    let raw: Vec<String> = ns.iter().map(|v| v.to_string()).collect();
+    println!("terminal_latency_raw_ns={}", raw.join(","));
+    print_osc_query_counts();
+    println!("terminal_latency_done");
 }
 
 // ---------------------------------------------------------------------------

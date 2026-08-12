@@ -74,7 +74,7 @@ pub enum ProviderModel {
 
 **Key methods**:
 - `model_id() -> &str` - canonical model ID
-- `metadata() -> Option<&'static ModelMetadata>` - Parsera-sourced metadata
+- `metadata() -> Option<&'static ModelMetadata>` - generated metadata from models.dev and provider-native sources
 - `context_window() -> Option<u32>`
 - `max_output_tokens() -> Option<u32>`
 - `supports_input(Modality) -> bool`
@@ -109,7 +109,7 @@ Serializes as strings (`"Fast"`, `"SmartThink"`) or `"Specific:provider/model-id
 
 ### ModelMetadata (`models/model_metadata.rs`)
 
-Runtime model specs merged from Parsera LLM Specs API and provider-native APIs (e.g., OpenRouter):
+Runtime model specs merged from models.dev and provider-native APIs (e.g., OpenRouter):
 
 ```rust
 pub struct ProviderModelMetadata {
@@ -125,6 +125,7 @@ pub struct ProviderModelMetadata {
     pub default_parameters: Option<ModelDefaultParameters>,
     pub knowledge_cutoff: Option<String>,
     pub created: Option<u32>,
+    pub release_date: Option<String>,
 }
 ```
 
@@ -160,6 +161,24 @@ pub struct ModelDefaultParameters {
 ```
 
 `Modality` enum: `Text`, `Image`, `Audio`, `Video`, `Embeddings`.
+
+### ModelIdentity (`models/identity.rs`)
+
+Wire-id identity grammar: `[source /] vendor / model-id`, with the model-id decomposed
+into family + version + variants + size + date-pin + serving tag.
+
+- `ModelIdentity::parse(wire)` — infallible; unmatched tokens land in `family`
+- `family_key()` — `vendor/family` grouping key for cross-source identity (the same
+  model offered directly and via an aggregator groups together)
+- `latest_in_family(ids, family)` — newest release by version segments, date-pin
+  tiebreak; rolling aliases (`-latest`) are excluded
+- Curated tables: variant vocabulary, vendor aliases (`z-ai`→`zai`, source `gemini`→
+  vendor `google`, …)
+- `gen-models` uses parsed identity to fill `family` when neither models.dev nor
+  provider-native data supplies one
+
+Validated against the full generated catalog (99.9% family inference); design record in
+`claudine/features/2026-07-02-provider-metadata/spec.md` (spike-model-identity).
 
 ## Client Adaptors (`providers/client_adaptors/`)
 

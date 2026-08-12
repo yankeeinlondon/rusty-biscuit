@@ -1,7 +1,7 @@
 ---
 area: "{{ctx.current_package_area || ''}}"
 today: "{{ctx.today}}"
-packages: "{{ctx.packages || '' }}"
+packages: "{{ as_csv(ctx.packages) || '' }}"
 start:
     message: "🏃‍♂️ starting a performance review for {{bold}}{{area}}{{reset}} package area"
 success:

@@ -3,6 +3,7 @@ use super::*;
 use crate::core::{Label, LabelPosition, NerdFontStatus, TerminalBackground};
 use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::style::Color;
+use std::collections::HashMap;
 use std::time::Duration;
 
 fn press(code: KeyCode) -> KeyEvent {
@@ -409,6 +410,93 @@ fn explicit_hotkey_is_case_insensitive() {
     let event = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
     let outcome = ChooseOne::new().handle_event(&mut state, event);
     assert_eq!(outcome, EventOutcome::Submitted);
+}
+
+#[test]
+fn ctrl_shift_chord_matches_ctrl_hotkey() {
+    // A terminal that reports CONTROL|SHIFT for an uppercase chord
+    // must still match the ctrl-hotkey map.
+    let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+        ChoiceOption::new("a", "Apple", "apple").with_hotkey(HotkeySpec::Ctrl('a')),
+        ChoiceOption::new("b", "Banana", "banana"),
+    ]);
+    let mut state = ChooseOneState::new(input);
+    let event = KeyEvent::new(
+        KeyCode::Char('a'),
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    );
+    let outcome = ChooseOne::new().handle_event(&mut state, event);
+    assert_eq!(outcome, EventOutcome::Submitted);
+    assert_eq!(state.selected_index(), Some(0));
+}
+
+#[test]
+fn alt_shift_chord_matches_alt_hotkey() {
+    let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+        ChoiceOption::new("a", "Apple", "apple"),
+        ChoiceOption::new("b", "Banana", "banana").with_hotkey(HotkeySpec::Alt('b')),
+    ]);
+    let mut state = ChooseOneState::new(input);
+    let event = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT | KeyModifiers::SHIFT);
+    let outcome = ChooseOne::new().handle_event(&mut state, event);
+    assert_eq!(outcome, EventOutcome::Submitted);
+    assert_eq!(state.selected_index(), Some(1));
+}
+
+#[test]
+fn ctrl_alt_chord_matches_neither_hotkey() {
+    // CONTROL|ALT is treated as ambiguous (AltGr-style) and must not
+    // be hijacked by either hotkey map.
+    let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+        ChoiceOption::new("a", "Apple", "apple").with_hotkey(HotkeySpec::Ctrl('a')),
+        ChoiceOption::new("b", "Banana", "banana").with_hotkey(HotkeySpec::Alt('b')),
+    ]);
+    let mut state = ChooseOneState::new(input);
+
+    let ctrl_chord = KeyEvent::new(
+        KeyCode::Char('a'),
+        KeyModifiers::CONTROL | KeyModifiers::ALT,
+    );
+    assert_eq!(
+        ChooseOne::new().handle_event(&mut state, ctrl_chord),
+        EventOutcome::Ignored
+    );
+    assert_eq!(state.selected_index(), None);
+
+    let alt_chord = KeyEvent::new(
+        KeyCode::Char('b'),
+        KeyModifiers::CONTROL | KeyModifiers::ALT,
+    );
+    assert_eq!(
+        ChooseOne::new().handle_event(&mut state, alt_chord),
+        EventOutcome::Ignored
+    );
+    assert_eq!(state.selected_index(), None);
+}
+
+#[test]
+fn bare_ctrl_and_alt_hotkeys_still_match() {
+    // Regression guard: the relaxed modifier matching must not change
+    // bare-CONTROL or bare-ALT behavior.
+    let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+        ChoiceOption::new("a", "Apple", "apple").with_hotkey(HotkeySpec::Ctrl('a')),
+        ChoiceOption::new("b", "Banana", "banana").with_hotkey(HotkeySpec::Alt('b')),
+    ]);
+    let mut state = ChooseOneState::new(input);
+
+    let ctrl = KeyEvent::new(KeyCode::Char('a'), KeyModifiers::CONTROL);
+    assert_eq!(
+        ChooseOne::new().handle_event(&mut state, ctrl),
+        EventOutcome::Submitted
+    );
+    assert_eq!(state.selected_index(), Some(0));
+
+    let alt = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::ALT);
+    assert_eq!(
+        ChooseOne::new().handle_event(&mut state, alt),
+        EventOutcome::Submitted
+    );
+    assert_eq!(state.selected_index(), Some(1));
 }
 
 #[test]
@@ -1544,4 +1632,117 @@ fn lone_release_without_prior_press_is_a_safe_clear() {
     };
     ChooseOne::new().handle_event(&mut state, release);
     assert_eq!(state.hotkey_display_sticky(), None);
+}
+
+// -----------------------------------------------------------------
+// Active-item accessors (master/detail companion work)
+//
+// `active_option` / `active_value` / `active_description` mirror
+// `hover()`: they read the highlighted row, NOT the submitted
+// selection, and return it as-is (including a `disabled` option).
+// They are the entry point for a derived detail pane.
+// -----------------------------------------------------------------
+
+#[test]
+fn active_option_is_none_when_options_empty() {
+    let state = ChooseOneState::new(ChoiceInput::<String>::new("x", "P"));
+    assert!(state.active_option().is_none());
+    assert!(state.active_value().is_none());
+    assert!(state.active_description(&HashMap::new()).is_none());
+}
+
+#[test]
+fn active_option_returns_first_option_on_initial_state() {
+    let state = ChooseOneState::new(fixture_input());
+    // hover defaults to the first enabled option (index 0 here).
+    assert_eq!(state.hover(), Some(0));
+    let active = state.active_option().expect("non-empty list has an active row");
+    assert_eq!(active.id, "r");
+    assert_eq!(active.label, "Red");
+    assert_eq!(state.active_value(), Some(&"red".to_string()));
+}
+
+#[test]
+fn active_option_tracks_navigation() {
+    let mut state = ChooseOneState::new(fixture_input());
+    ChooseOne::new().handle_event(&mut state, press(KeyCode::Down));
+    assert_eq!(state.active_value(), Some(&"green".to_string()));
+    assert_eq!(state.active_option().unwrap().id, "g");
+
+    ChooseOne::new().handle_event(&mut state, press(KeyCode::Down));
+    assert_eq!(state.active_value(), Some(&"blue".to_string()));
+
+    // Up moves the active row back.
+    ChooseOne::new().handle_event(&mut state, press(KeyCode::Up));
+    assert_eq!(state.active_value(), Some(&"green".to_string()));
+}
+
+#[test]
+fn active_option_is_distinct_from_selected_value() {
+    // The active (highlighted) row is independent of the submitted
+    // selection: navigate the highlight without selecting, and the
+    // two diverge. This is the load-bearing distinction for the
+    // master/detail pattern.
+    let mut state = ChooseOneState::new(fixture_input());
+    // Select "red" (the hovered first row).
+    ChooseOne::new().handle_event(&mut state, press(KeyCode::Char(' ')));
+    assert_eq!(state.selected_value(), Some(&"red".to_string()));
+
+    // Move the highlight onto "green" WITHOUT selecting it.
+    ChooseOne::new().handle_event(&mut state, press(KeyCode::Down));
+    assert_eq!(state.active_value(), Some(&"green".to_string()));
+    // Submitted selection is unchanged.
+    assert_eq!(state.selected_value(), Some(&"red".to_string()));
+}
+
+#[test]
+fn active_option_passes_through_disabled_highlight() {
+    // When the highlight rests on a disabled option, the accessors
+    // still return it as-is. Navigation normally skips disabled
+    // options, so we place the highlight directly (mirroring the
+    // existing `space_on_disabled_option_is_ignored` / fallback-
+    // submit fixtures) rather than inventing a new focus rule.
+    let input = ChoiceInput::<String>::new("x", "P").with_options(vec![
+        ChoiceOption::new("a", "A", "a"),
+        ChoiceOption::new("d", "Disabled", "disabled").disabled(),
+    ]);
+    let mut state = ChooseOneState::new(input);
+    state.hover = 1;
+
+    let active = state.active_option().expect("disabled row is still active");
+    assert!(active.disabled);
+    assert_eq!(active.id, "d");
+    assert_eq!(state.active_value(), Some(&"disabled".to_string()));
+}
+
+#[test]
+fn active_description_looks_up_by_active_option_id() {
+    let state = ChooseOneState::new(fixture_input());
+    let mut descriptions = HashMap::new();
+    descriptions.insert("r".to_string(), "Ruby red".to_string());
+    descriptions.insert("g".to_string(), "Grass green".to_string());
+
+    // Active row is "r" initially.
+    assert_eq!(state.active_description(&descriptions), Some("Ruby red"));
+
+    // Missing id → None (the map is caller-owned; no entry, no value).
+    let only_blue = HashMap::from([("b".to_string(), "Sky blue".to_string())]);
+    assert_eq!(state.active_description(&only_blue), None);
+}
+
+#[test]
+fn active_description_tracks_navigation() {
+    let mut state = ChooseOneState::new(fixture_input());
+    let descriptions = HashMap::from([
+        ("r".to_string(), "Ruby red".to_string()),
+        ("g".to_string(), "Grass green".to_string()),
+        ("b".to_string(), "Sky blue".to_string()),
+    ]);
+    assert_eq!(state.active_description(&descriptions), Some("Ruby red"));
+
+    ChooseOne::new().handle_event(&mut state, press(KeyCode::Down));
+    assert_eq!(state.active_description(&descriptions), Some("Grass green"));
+
+    ChooseOne::new().handle_event(&mut state, press(KeyCode::Down));
+    assert_eq!(state.active_description(&descriptions), Some("Sky blue"));
 }

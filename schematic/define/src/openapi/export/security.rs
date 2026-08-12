@@ -31,7 +31,7 @@ pub fn map_security(auth: &AuthStrategy) -> Option<(String, SecurityScheme)> {
                 ))
             }
         }
-        AuthStrategy::ApiKey { header } => Some((
+        AuthStrategy::ApiKey { header, .. } => Some((
             "apiKeyAuth".to_string(),
             SecurityScheme::APIKey {
                 location: openapiv3::APIKeyLocation::Header,
@@ -120,7 +120,7 @@ pub(super) fn map_security_requirements(api: &RestApi) -> Vec<SecurityRequiremen
             req.insert("bearerAuth".to_string(), vec![]);
             vec![req]
         }
-        AuthStrategy::ApiKey { header: _ } => {
+        AuthStrategy::ApiKey { .. } => {
             let mut req = IndexMap::new();
             req.insert("apiKeyAuth".to_string(), vec![]);
             vec![req]
@@ -188,6 +188,7 @@ mod tests {
     fn map_security_api_key_returns_api_key_scheme() {
         let auth = AuthStrategy::ApiKey {
             header: "X-API-Key".to_string(),
+            value_prefix: None,
         };
         let (name, scheme) = map_security(&auth).unwrap();
 

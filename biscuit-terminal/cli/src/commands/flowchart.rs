@@ -94,6 +94,7 @@ impl Run for FlowchartArgs {
             width_str.as_deref(),
             &self.layout,
         )?;
+        let terminal = terminal_for_render(ctx.plain);
         display_mermaid(
             &diagram,
             &instructions,
@@ -101,14 +102,15 @@ impl Run for FlowchartArgs {
             &self.layout,
             self.meta,
             false,
+            &terminal,
         )?;
 
         if self.example {
-            print_example_command(FLOWCHART_EXAMPLE_CMD);
+            print_example_command_with_terminal(FLOWCHART_EXAMPLE_CMD, &terminal);
         }
 
         Ok(())
     }
 }
 
-use crate::commands::shared::print_example_command;
+use crate::commands::shared::{print_example_command_with_terminal, terminal_for_render};

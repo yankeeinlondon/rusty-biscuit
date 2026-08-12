@@ -1,6 +1,7 @@
 ---
 name: biscuit-terminal
 description: Expert knowledge for the biscuit-terminal Rust library - terminal capability detection, rich terminal rendering, terminal components, inline image rendering, Mermaid/graph adapters, `TerminalRenderable`, `Prose`, and the terminal renderer for the renderable tree. Use when building CLI terminal output, using terminal-aware components, rendering images or diagrams, detecting color/underline/italics support, or folding `renderable::tree` nodes to terminal text.
+hash: a552a21dc0a66232-95f568f032e66a02
 ---
 
 # biscuit-terminal
@@ -55,12 +56,15 @@ let rendered = render_terminal_node(&node, &TerminalRenderOptions::default())?;
 The terminal tree renderer consumes `renderable::layout::Layout` and
 `renderable::style::Style`:
 
-- layout margins/alignment are applied around block nodes
+- layout margins/alignment/`max_width`/padding/width are applied around block nodes
 - `Style` color/background/emphasis lower to SGR with terminal capability
   degradation
 - `Style` border/fill render as terminal box glyphs and painted bands
 - `bt block`, `bt progress`, and `bt table` provide CLI coverage for
   render-tree style behavior
+
+The full per-component, per-target support contract is published in the
+[Style Everywhere matrix](../../../renderable/features/2026-06-30-style-everywhere/matrix.md).
 
 Browser and Markdown lowering for the same render tree are owned by
 `renderable`, not this crate.

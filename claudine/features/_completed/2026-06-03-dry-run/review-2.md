@@ -34,6 +34,10 @@ Finding 1 is closed.
 
 The functional dry-run seam looks aligned with the spec: shell approval and harness preflight run before the dry-run return, and provider launch is skipped at the post-preflight seam. The prior metadata-rendering gap appears addressed by real tmux/WezTerm capture tests, and those tests passed locally.
 
+> **Superseded:** the current seam is immediately after provider/model
+> resolution and before selected-executable validation or launch wiring. This
+> paragraph records the implementation reviewed at the time.
+
 ## Tests Run
 
 - `cargo test -p claudine-cli compose_dry_run --no-default-features --color=never`

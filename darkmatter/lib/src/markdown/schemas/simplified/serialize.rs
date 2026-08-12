@@ -50,6 +50,22 @@ pub fn serialize_property_atom(atom: &PropertyAtom) -> String {
                 out.push(')');
             }
         }
+        // Imported type reference: `name ('[]')? ('(' constraints ')')? '@' ref`
+        // — the terminal-`@` grammar (O-B1). Postfix `[]`/constraints ride on
+        // the enclosing atom.
+        TypeExpr::Imported { name, reference } => {
+            out.push_str(name);
+            if atom.is_array {
+                out.push_str("[]");
+            }
+            if !atom.constraints.is_empty() {
+                out.push('(');
+                write_constraints(&mut out, &atom.constraints, SimplifiedType::Any);
+                out.push(')');
+            }
+            out.push('@');
+            out.push_str(reference);
+        }
     }
 
     if let Some(desc) = &atom.description {
@@ -107,9 +123,11 @@ fn write_constraints(out: &mut String, constraints: &[Constraint], ty: Simplifie
 fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
     match c {
         Constraint::Required => out.push_str("required"),
+        Constraint::Eager => out.push_str("eager"),
         Constraint::NotEmpty => out.push_str("not-empty"),
         Constraint::Integer => out.push_str("integer"),
         Constraint::Unique => out.push_str("unique"),
+        Constraint::Generated => out.push_str("generated"),
 
         Constraint::Min(n) => {
             let _ = write!(out, "min({})", format_number(*n));
@@ -129,10 +147,34 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
         Constraint::MaxItems(n) => {
             let _ = write!(out, "max({n})");
         }
+        Constraint::MinKeys(n) => {
+            let _ = write!(out, "min-keys({n})");
+        }
+        Constraint::MaxKeys(n) => {
+            let _ = write!(out, "max-keys({n})");
+        }
 
         Constraint::Pattern(p) => {
             out.push_str("pattern(");
             write_arg(out, p);
+            out.push(')');
+        }
+        Constraint::Suggest(candidates) => {
+            out.push_str("suggest(");
+            for (i, candidate) in candidates.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                let value = if matches!(ty, SimplifiedType::Number) {
+                    candidate
+                        .canonical_decimal
+                        .as_deref()
+                        .unwrap_or(&candidate.decoded)
+                } else {
+                    &candidate.decoded
+                };
+                write_arg(out, value);
+            }
             out.push(')');
         }
         Constraint::Members(members) => {
@@ -144,6 +186,7 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
                 write_arg(out, m);
             }
         }
+        Constraint::LiteralValue(value) => write_literal_value(out, value),
         Constraint::Match(globs) => {
             out.push_str("match(");
             for (i, g) in globs.iter().enumerate() {
@@ -161,6 +204,16 @@ fn write_constraint(out: &mut String, c: &Constraint, ty: SimplifiedType) {
                     out.push(',');
                 }
                 write_arg(out, s);
+            }
+            out.push(')');
+        }
+        Constraint::Example(refs) => {
+            out.push_str("example(");
+            for (i, r) in refs.iter().enumerate() {
+                if i > 0 {
+                    out.push(',');
+                }
+                write_arg(out, r);
             }
             out.push(')');
         }
@@ -193,17 +246,51 @@ fn write_default_value(out: &mut String, value: &serde_json::Value, _ty: Simplif
 /// terminate a bare word.
 fn write_arg(out: &mut String, value: &str) {
     if needs_quoting(value) {
-        out.push('\'');
-        for c in value.chars() {
-            if c == '\\' || c == '\'' {
-                out.push('\\');
-            }
-            out.push(c);
-        }
-        out.push('\'');
+        write_quoted(out, value);
     } else {
         out.push_str(value);
     }
+}
+
+/// Serialize a `literal(...)` positional value with its lexed type, so it
+/// re-parses to the same JSON value. Numbers/booleans emit their canonical
+/// spelling; strings are quoted when a bare form would either terminate the
+/// token or re-type on re-parse (`'2'`, `'true'`, `'a, b'`).
+fn write_literal_value(out: &mut String, value: &serde_json::Value) {
+    match value {
+        serde_json::Value::Bool(b) => {
+            let _ = write!(out, "{b}");
+        }
+        serde_json::Value::Number(n) => {
+            let _ = write!(out, "{n}");
+        }
+        serde_json::Value::String(s) => {
+            if needs_quoting(s) || !super::grammar::bare_literal_round_trips_as_string(s) {
+                write_quoted(out, s);
+            } else {
+                out.push_str(s);
+            }
+        }
+        // A literal value is only ever a scalar (string / number / boolean);
+        // any other JSON shape is unreachable from the grammar. Serialize
+        // defensively so the function stays total.
+        other => {
+            let _ = write!(out, "\"{other}\"");
+        }
+    }
+}
+
+/// Write `value` as a single-quoted SimplifiedSchema argument, escaping `\`
+/// and `'`.
+fn write_quoted(out: &mut String, value: &str) {
+    out.push('\'');
+    for c in value.chars() {
+        if c == '\\' || c == '\'' {
+            out.push('\\');
+        }
+        out.push(c);
+    }
+    out.push('\'');
 }
 
 fn needs_quoting(value: &str) -> bool {
@@ -245,6 +332,28 @@ mod tests {
             ty: TypeExpr::Primitive(SimplifiedType::String),
             is_array: false,
             constraints: vec![Constraint::Required],
+            array_constraints: vec![],
+            description: None,
+        });
+    }
+
+    #[test]
+    fn round_trip_generated_string() {
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::String),
+            is_array: false,
+            constraints: vec![Constraint::Generated],
+            array_constraints: vec![],
+            description: None,
+        });
+    }
+
+    #[test]
+    fn round_trip_generated_with_required() {
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::String),
+            is_array: false,
+            constraints: vec![Constraint::Generated, Constraint::Required],
             array_constraints: vec![],
             description: None,
         });
@@ -305,6 +414,108 @@ mod tests {
         });
     }
 
+    fn literal_atom(value: serde_json::Value) -> PropertyAtom {
+        PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::Literal),
+            is_array: false,
+            constraints: vec![Constraint::LiteralValue(value)],
+            array_constraints: vec![],
+            description: None,
+        }
+    }
+
+    #[test]
+    fn serializes_string_literal() {
+        assert_eq!(
+            serialize_property_atom(&literal_atom(serde_json::json!("spec"))),
+            "literal(spec)"
+        );
+    }
+
+    #[test]
+    fn serializes_typed_literals() {
+        assert_eq!(
+            serialize_property_atom(&literal_atom(serde_json::json!(2))),
+            "literal(2)"
+        );
+        assert_eq!(
+            serialize_property_atom(&literal_atom(serde_json::json!(false))),
+            "literal(false)"
+        );
+    }
+
+    #[test]
+    fn quotes_literal_strings_that_would_re_type() {
+        // A string that looks like a number / boolean / null must be quoted so
+        // it re-parses as a string rather than the scalar it resembles.
+        assert_eq!(
+            serialize_property_atom(&literal_atom(serde_json::json!("2"))),
+            "literal('2')"
+        );
+        assert_eq!(
+            serialize_property_atom(&literal_atom(serde_json::json!("true"))),
+            "literal('true')"
+        );
+        assert_eq!(
+            serialize_property_atom(&literal_atom(serde_json::json!("a, b"))),
+            "literal('a, b')"
+        );
+    }
+
+    #[test]
+    fn round_trip_literals() {
+        for value in [
+            serde_json::json!("spec"),
+            serde_json::json!("2"),
+            serde_json::json!("true"),
+            serde_json::json!("a, b"),
+            serde_json::json!(2),
+            serde_json::json!(-5),
+            serde_json::json!(2.5),
+            serde_json::json!(true),
+            serde_json::json!(false),
+        ] {
+            round_trip(literal_atom(value));
+        }
+    }
+
+    #[test]
+    fn round_trip_literal_with_required() {
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::Literal),
+            is_array: false,
+            constraints: vec![
+                Constraint::LiteralValue(serde_json::json!("spec")),
+                Constraint::Required,
+            ],
+            array_constraints: vec![],
+            description: None,
+        });
+    }
+
+    #[test]
+    fn round_trip_literal_array() {
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::Literal),
+            is_array: true,
+            constraints: vec![Constraint::LiteralValue(serde_json::json!("auto"))],
+            array_constraints: vec![Constraint::MinItems(1)],
+            description: None,
+        });
+    }
+
+    #[test]
+    fn round_trip_expression() {
+        round_trip(PropertyAtom::bare(SimplifiedType::Expression));
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::Expression),
+            is_array: false,
+            constraints: vec![Constraint::Required],
+            array_constraints: vec![],
+            description: None,
+        });
+    }
+
     #[test]
     fn round_trip_url_with_scheme() {
         round_trip(PropertyAtom {
@@ -322,6 +533,28 @@ mod tests {
             ty: TypeExpr::Primitive(SimplifiedType::File),
             is_array: true,
             constraints: vec![Constraint::Match(vec!["*.png".into(), "!_*.png".into()])],
+            array_constraints: vec![Constraint::MinItems(1)],
+            description: None,
+        });
+    }
+
+    #[test]
+    fn round_trip_file_eager() {
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::File),
+            is_array: false,
+            constraints: vec![Constraint::Eager, Constraint::Required],
+            array_constraints: vec![],
+            description: None,
+        });
+    }
+
+    #[test]
+    fn round_trip_file_eager_array_with_match() {
+        round_trip(PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::File),
+            is_array: true,
+            constraints: vec![Constraint::Eager, Constraint::Match(vec!["*.png".into()])],
             array_constraints: vec![Constraint::MinItems(1)],
             description: None,
         });
@@ -356,7 +589,9 @@ mod tests {
         round_trip(PropertyAtom {
             ty: TypeExpr::Primitive(SimplifiedType::Number),
             is_array: false,
-            constraints: vec![Constraint::Default(serde_json::json!(3.0))],
+            // An integer default parses back as an integer (exact-lexeme parse),
+            // so the round-trip fixture must itself be an integer.
+            constraints: vec![Constraint::Default(serde_json::json!(3))],
             array_constraints: vec![],
             description: None,
         });
@@ -371,5 +606,110 @@ mod tests {
             array_constraints: vec![],
             description: None,
         });
+    }
+
+    #[test]
+    fn round_trip_string_suggest() {
+        let atom = PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::String),
+            is_array: false,
+            constraints: vec![Constraint::Suggest(vec![
+                super::super::types::SuggestionCandidate {
+                    decoded: "red".into(),
+                    interpreted: serde_json::Value::String("red".into()),
+                    canonical_decimal: None,
+                    span: 0..0,
+                },
+                super::super::types::SuggestionCandidate {
+                    decoded: "blue gray".into(),
+                    interpreted: serde_json::Value::String("blue gray".into()),
+                    canonical_decimal: None,
+                    span: 0..0,
+                },
+            ])],
+            array_constraints: vec![],
+            description: None,
+        };
+        let s = serialize_property_atom(&atom);
+        let parsed = parse_type_expr("test", &s)
+            .unwrap_or_else(|e| panic!("re-parse of {s:?} failed: {e:?}"));
+        let parsed_candidates = parsed.constraints.iter().find_map(|c| match c {
+            Constraint::Suggest(cands) => Some(cands),
+            _ => None,
+        });
+        let orig_candidates = atom.constraints.iter().find_map(|c| match c {
+            Constraint::Suggest(cands) => Some(cands),
+            _ => None,
+        });
+        let (parsed_candidates, orig_candidates) =
+            (parsed_candidates.unwrap(), orig_candidates.unwrap());
+        assert_eq!(parsed_candidates.len(), orig_candidates.len());
+        assert_eq!(parsed_candidates[0].decoded, "red");
+        assert_eq!(parsed_candidates[0].interpreted, serde_json::json!("red"));
+        assert_eq!(parsed_candidates[1].decoded, "blue gray");
+        assert_eq!(parsed_candidates[1].interpreted, serde_json::json!("blue gray"));
+    }
+
+    #[test]
+    fn round_trip_number_suggest() {
+        let atom = PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::Number),
+            is_array: false,
+            constraints: vec![Constraint::Suggest(vec![
+                super::super::types::SuggestionCandidate {
+                    decoded: "1".into(),
+                    interpreted: serde_json::json!(1),
+                    canonical_decimal: Some("1".into()),
+                    span: 0..0,
+                },
+                super::super::types::SuggestionCandidate {
+                    decoded: "2.5".into(),
+                    interpreted: serde_json::json!(2.5),
+                    canonical_decimal: Some("2.5".into()),
+                    span: 0..0,
+                },
+            ])],
+            array_constraints: vec![],
+            description: None,
+        };
+        let s = serialize_property_atom(&atom);
+        let parsed = parse_type_expr("test", &s)
+            .unwrap_or_else(|e| panic!("re-parse of {s:?} failed: {e:?}"));
+        let parsed_candidates = parsed.constraints.iter().find_map(|c| match c {
+            Constraint::Suggest(cands) => Some(cands),
+            _ => None,
+        });
+        let parsed_candidates = parsed_candidates.unwrap();
+        assert_eq!(parsed_candidates.len(), 2);
+        assert_eq!(parsed_candidates[0].decoded, "1");
+        assert_eq!(parsed_candidates[0].interpreted, serde_json::json!(1));
+        assert_eq!(parsed_candidates[0].canonical_decimal.as_deref(), Some("1"));
+        assert_eq!(parsed_candidates[1].decoded, "2.5");
+        assert_eq!(parsed_candidates[1].interpreted, serde_json::json!(2.5));
+        assert_eq!(parsed_candidates[1].canonical_decimal.as_deref(), Some("2.5"));
+    }
+
+    #[test]
+    fn round_trip_number_suggest_array() {
+        let atom = PropertyAtom {
+            ty: TypeExpr::Primitive(SimplifiedType::Number),
+            is_array: true,
+            constraints: vec![Constraint::Suggest(vec![
+                super::super::types::SuggestionCandidate {
+                    decoded: "1".into(),
+                    interpreted: serde_json::json!(1),
+                    canonical_decimal: Some("1".into()),
+                    span: 0..0,
+                },
+            ])],
+            array_constraints: vec![],
+            description: None,
+        };
+        let s = serialize_property_atom(&atom);
+        let parsed = parse_type_expr("test", &s)
+            .unwrap_or_else(|e| panic!("re-parse of {s:?} failed: {e:?}"));
+        assert!(parsed.is_array);
+        let has_suggest = parsed.constraints.iter().any(|c| matches!(c, Constraint::Suggest(_)));
+        assert!(has_suggest, "parsed atom must retain suggest constraint");
     }
 }

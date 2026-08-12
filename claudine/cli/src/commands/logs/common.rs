@@ -1,9 +1,7 @@
-use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
-use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
-use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use claudine::provider::Provider;
-use claudine::reporting::{LabeledCount, ProviderSplit, UsageTotals};
+use claudine::reporting::{LabeledCount, ProviderSplit};
 
 use crate::log;
 
@@ -96,14 +94,6 @@ pub(super) fn render_repo_entry(repo: &str, compact: bool) -> String {
     }
 }
 
-pub(super) fn render_error_hint(term: &Terminal, window: &str) {
-    let list = UnorderedList::from(vec![RenderableTerminalContent::from(Prose::new(
-        error_hint_markup(window),
-    ))])
-    .with_bullet("  ");
-    log::data(&list.render(term));
-}
-
 pub(super) fn error_hint_markup(window: &str) -> String {
     format!(
         "<i><dim>use the <red>claudine logs {window} errors</red> command to list the errors</dim></i>"
@@ -150,34 +140,6 @@ pub(super) fn format_duration(seconds: i64) -> String {
     } else {
         format!("{minutes}m")
     }
-}
-
-pub(super) fn render_usage_line(usage: &UsageTotals) {
-    if usage.total_tokens == 0 && usage.total_cost_usd == 0.0 {
-        return;
-    }
-
-    let mut parts = Vec::new();
-    if usage.total_tokens > 0 {
-        parts.push(format!("tokens {}", format_tokens(usage.total_tokens)));
-    }
-    if usage.total_input_tokens > 0 {
-        parts.push(format!("in {}", format_tokens(usage.total_input_tokens)));
-    }
-    if usage.total_output_tokens > 0 {
-        parts.push(format!("out {}", format_tokens(usage.total_output_tokens)));
-    }
-    if usage.total_cache_read_tokens > 0 {
-        parts.push(format!(
-            "cached {}",
-            format_tokens(usage.total_cache_read_tokens)
-        ));
-    }
-    if usage.total_cost_usd > 0.0 {
-        parts.push(format!("cost {}", format_cost(usage.total_cost_usd)));
-    }
-
-    log::data(&format!("Usage: {}", parts.join("  ")));
 }
 
 pub(super) fn format_tokens(count: u64) -> String {

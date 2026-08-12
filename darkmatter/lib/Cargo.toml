@@ -45,8 +45,19 @@ dashmap = "6.1"
 # Utilities
 lazy_static = "1.5"
 regex = "1.11"
+# Exact multi-pattern (leftmost-longest) automaton for `replace:` text
+# replacement (Finding 13). Already compiled transitively via `regex`, so no
+# added build cost.
+aho-corasick = "1.1"
 tempfile = "3.8"
 globset = "0.4"
+# Blocking child-process wait that stays killable from another thread, so shell
+# directives wait on an OS event instead of a 10ms poll loop (Finding 17).
+# `default-features = false` drops the `timeout` feature: its `wait_timeout` is
+# built on a process-wide SIGCHLD handler (via `sigchld`/`signal-hook`), and
+# Darkmatter is a library that must not hijack a host's signal disposition. The
+# ungated `wait`/`kill` core we use is `waitid`-based and installs nothing.
+shared_child = { version = "1.1", default-features = false }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock", "now"] }
 which = "7"
 dirs = "6"
@@ -87,12 +98,28 @@ biscuit-terminal = { path = "../../biscuit-terminal/lib", features = ["image"] }
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 
 # System detection (OS, hardware, repo, docs)
-sniff = { path = "../../sniff/lib" }
+sniff = { path = "../../sniff/lib", features = ["remote"] }
 serde_yaml_ng = "0.10"
+
+# Unicode Script lookup for cleanup's join-separator decision (spaceless scripts
+# such as Han/Thai join without a space; space-delimited scripts keep one).
+# Already resolved transitively via biscuit-terminal, so no added build cost.
+unicode-script = "0.5"
 
 # JSON Schema validation
 jsonschema = { version = "0.42", default-features = false }
-sha2 = "0.10"
+# Backtracking regex engine for SimplifiedSchema pattern-key literal precedence
+# (Feature C emits negative-lookahead `patternProperties`, which the linear
+# `regex` engine rejects). Already compiled transitively via `jsonschema`, so no
+# added build cost; used both to select `jsonschema`'s fancy-regex pattern engine
+# for such schemas and to validate emitted patterns at conversion time.
+fancy-regex = "0.17"
+
+[target.'cfg(unix)'.dependencies]
+# `setsid` for the alias-lookup child in
+# `markdown/compose/shell_expansion/alias.rs`. Only the raw syscall is needed,
+# so `libc` rather than a wrapper crate; already compiled transitively.
+libc = "0.2"
 
 [dev-dependencies]
 # Re-declares the renderable path dep with the test-only `hint-access-counter`
@@ -107,6 +134,11 @@ insta = "1.41"
 serial_test = "3.0"
 # Only used to `init` a throwaway repo in transclusion tests; pure-Rust, no libgit2.
 gix = { version = "=0.84.0", default-features = false, features = ["sha1"] }
+# Builds committed branch-tip fixtures for `predict_conflicts()` integration tests.
+git2 = "0.20.3"
+# libgit2-sys >= 0.18.6 bundles PCRE2 with unprefixed symbols, which collide at MSVC
+# link time with pcre2-sys (reached via sniff -> hyperpolyglot). See sniff-lib's note.
+libgit2-sys = ">=0.18.3, <0.18.6"
 proptest = "1.6"
 criterion = { version = "0.5", features = ["html_reports"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
@@ -129,6 +161,10 @@ name = "schema_validation"
 harness = false
 
 [[bench]]
+name = "effective_schema_ownership"
+harness = false
+
+[[bench]]
 name = "render_tree"
 harness = false
 
@@ -147,3 +183,48 @@ harness = false
 [[bench]]
 name = "render_pipeline_steps"
 harness = false
+
+[[bench]]
+name = "compose_schema_transclusion"
+harness = false
+
+[[bench]]
+name = "render_code_heavy"
+harness = false
+
+[[bench]]
+name = "reference_graph"
+harness = false
+
+[[bench]]
+name = "phase6_interpolation"
+harness = false
+
+[[bench]]
+name = "phase8_render"
+harness = false
+
+[[bench]]
+name = "phase9_remote"
+harness = false
+
+[[bench]]
+name = "phase10_residuals"
+harness = false
+
+[[bench]]
+name = "phase11_evidence"
+harness = false
+
+[[bench]]
+name = "clean_hot_paths"
+harness = false
+
+# CI policy: darkmatter's L1 contract keeps `slow_` tests, and the library owns
+# L2 (render-tree terminal) and browser (headless) tier tests. Its L2 suite
+# drives WezTerm only (tmux is the CLI's backend); a backend declared here
+# that no lib test executes fails backend-proof.
+[package.metadata.ci.tests]
+tiers = ["L1", "L2", "browser"]
+l2-backends = ["wezterm"]
+l1-include-slow = true

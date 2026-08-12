@@ -515,7 +515,7 @@ pub fn detect_color_mode() -> ColorMode {
 /// ## Panics
 ///
 /// Panics if the theme cannot be loaded (should never happen with valid Theme variants).
-pub(crate) fn load_theme(theme_pair: ThemePair, color_mode: ColorMode) -> SyntectTheme {
+pub(crate) fn load_theme(theme_pair: ThemePair, color_mode: ColorMode) -> &'static SyntectTheme {
     let resolved = theme_pair.resolve_for_surface(
         crate::markdown::highlighting::Surface::Mode(color_mode),
         Some(theme_pair),
@@ -524,10 +524,16 @@ pub(crate) fn load_theme(theme_pair: ThemePair, color_mode: ColorMode) -> Syntec
     load_resolved_theme(resolved.theme)
 }
 
-pub(crate) fn load_resolved_theme(theme: Theme) -> SyntectTheme {
+/// Borrows the embedded syntect theme for `theme` from the process-wide
+/// [`struct@THEME_SET`].
+///
+/// The theme is returned by reference rather than cloned: the scope-selector
+/// tables are large and a code block only ever reads them, so a per-block clone
+/// was pure waste on the render hot path (finding 23).
+pub(crate) fn load_resolved_theme(theme: Theme) -> &'static SyntectTheme {
     let embedded_name = theme.to_embedded_name();
 
-    THEME_SET.get(embedded_name).clone()
+    THEME_SET.get(embedded_name)
 }
 
 /// Resolves the theme's inline-code foreground and background for one color mode.
@@ -548,7 +554,7 @@ pub(crate) fn inline_code_colors(
     use super::prose::ProseHighlighter;
 
     let syntect = load_theme(theme_pair, color_mode);
-    let highlighter = ProseHighlighter::new(&syntect);
+    let highlighter = ProseHighlighter::new(syntect);
     let style = highlighter.style_for_inline_code(&[highlighter.base_scope()]);
     let fg = style.foreground;
     let bg = style.background;

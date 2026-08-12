@@ -45,7 +45,7 @@ fn replay_fixture(name: &str) -> (Vec<SemanticEvent>, Box<dyn SemanticStreamPars
     };
     let mut parser = create_semantic_parser(Provider::KimiCode, sink, ParserConfig::default());
     for line in load_fixture(name) {
-        parser.feed_line(&line).unwrap();
+        parser.feed_line(&line);
     }
     let collected = events.lock().unwrap().clone();
     (collected, parser)
@@ -227,8 +227,7 @@ fn unknown_event_type_falls_back_to_provider_extension() {
     parser
         .feed_line(
             r#"{"jsonrpc":"2.0","method":"event","params":{"type":"BrandNewEvent","payload":{"x":1}}}"#,
-        )
-        .unwrap();
+        );
     let collected = events.lock().unwrap().clone();
     assert!(matches!(
         collected[0],

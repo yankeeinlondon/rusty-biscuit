@@ -1,0 +1,22 @@
+terminal_cache_count=3
+terminal_text_color[0]=Some(RgbValue { r: 59, g: 127, b: 92 })
+terminal_text_color[1]=Some(RgbValue { r: 59, g: 127, b: 92 })
+terminal_text_color[2]=Some(RgbValue { r: 59, g: 127, b: 92 })
+osc10_actual_queries=1
+osc11_actual_queries=1
+terminal_cache_done
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

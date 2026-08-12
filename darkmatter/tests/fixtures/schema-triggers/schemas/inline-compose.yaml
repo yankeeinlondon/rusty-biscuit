@@ -1,0 +1,2 @@
+$schema:
+  output: string(required)

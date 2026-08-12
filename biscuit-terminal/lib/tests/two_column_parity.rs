@@ -30,7 +30,7 @@ use biscuit_terminal::components::renderable::{BrowserRenderable, TerminalRender
 use biscuit_terminal::components::terminal_image::TerminalImage;
 use biscuit_terminal::components::two_column::{ColumnWidth, TwoColumn};
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
-use biscuit_terminal::utils::layout::{Alignment, Length, TargetValue};
+use biscuit_terminal::utils::layout::{Alignment, Layout, Length, TargetValue, Width};
 use renderable::markdown::MarkdownRenderable;
 use renderable::tree::render::{MarkdownDialect, MarkdownRenderOptions as MdOpts};
 use renderable::tree::{
@@ -848,5 +848,130 @@ fn markdown_plus_unsupported_image_column_under_strict_yields_unsupported_diagno
     assert!(
         matches!(strict, Err(RenderError::InvalidTree { .. })),
         "unsupported image column is an error under Strict in MarkdownPlus too: {strict:?}",
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Width-mode fill semantics (style-everywhere Phase 2, Task 2.1).
+//
+// The render-tree fold resolves the outer box from `Layout::width`, then
+// `render_columns` PADS both columns to fill the resolved content width with
+// the RIGHT column absorbing slack. `Auto` and `Fixed` FILL; on the terminal
+// target `FitContent` is observationally identical to `Auto` (the box always
+// pads to the handed width — see the ratified "terminal FitContent == Auto"
+// decision).
+// ---------------------------------------------------------------------------
+
+/// Returns the max char-count over the ANSI-stripped lines of `rendered`.
+fn widest_visible_line(rendered: &str) -> usize {
+    strip_ansi(rendered)
+        .lines()
+        .map(|line| line.chars().count())
+        .max()
+        .unwrap_or(0)
+}
+
+#[test]
+fn width_auto_fills_available_at_80() {
+    let layout = Layout {
+        width: Width::Auto,
+        ..Layout::default()
+    };
+    let cols =
+        TwoColumn::new("Left column content.", "Right column content.").with_layout(layout);
+    let node = cols.render_tree_node().expect("tree node");
+    let out = render_tree(&node, 80);
+    assert_eq!(
+        widest_visible_line(&out),
+        80,
+        "Width::Auto pads the columns box to fill the full handed width"
+    );
+}
+
+#[test]
+fn width_fixed_percent_50_does_not_double_apply() {
+    let layout = Layout {
+        width: Width::Fixed(TargetValue::universal(Length::Percent(50.0))),
+        ..Layout::default()
+    };
+    let cols =
+        TwoColumn::new("Left column content.", "Right column content.").with_layout(layout);
+    let node = cols.render_tree_node().expect("tree node");
+    let out = render_tree(&node, 80);
+    // 50% of 80 == 40. A widest line near ~20 would mean the `Fixed(50%)`
+    // percentage was resolved twice (once resolving the box, then again inside
+    // the fold) — this guards against that double-application bug.
+    assert_eq!(
+        widest_visible_line(&out),
+        40,
+        "Width::Fixed(50%) resolves the box to 50% of 80 exactly once"
+    );
+}
+
+#[test]
+fn width_fit_content_matches_auto_on_terminal() {
+    let layout = Layout {
+        width: Width::FitContent,
+        ..Layout::default()
+    };
+    let cols =
+        TwoColumn::new("Left column content.", "Right column content.").with_layout(layout);
+    let node = cols.render_tree_node().expect("tree node");
+    let out = render_tree(&node, 80);
+    // Ratified repo behavior: on the terminal target `FitContent` is
+    // observationally identical to `Auto` — the box always pads to fill the
+    // handed width, so FitContent fills to 80 just like Auto.
+    assert_eq!(
+        widest_visible_line(&out),
+        80,
+        "terminal FitContent == Auto: the box pads to fill the handed width"
+    );
+}
+
+#[test]
+fn width_fixed_full_fills_available_at_80() {
+    // Width::Fixed(100%) is the explicit "fill the parent's available width"
+    // contract (spec C2). The columns pad so the widest visible line is the
+    // full handed width, and the right column absorbs the slack.
+    let layout = Layout {
+        width: Width::Fixed(TargetValue::universal(Length::Percent(100.0))),
+        ..Layout::default()
+    };
+    let cols =
+        TwoColumn::new("Left column content.", "Right column content.").with_layout(layout);
+    let node = cols.render_tree_node().expect("tree node");
+    let out = render_tree(&node, 80);
+    assert_eq!(
+        widest_visible_line(&out),
+        80,
+        "Width::Fixed(100%) must fill the full handed width"
+    );
+}
+
+#[test]
+fn right_column_is_the_slack_sink() {
+    // D2 slack sink: after honoring explicit/fractional left width and gap,
+    // the RIGHT column absorbs the slack. With a fixed `left_width` of 10 and
+    // a default gap, the right column grows to fill the remaining width.
+    use biscuit_terminal::components::two_column::ColumnWidth;
+    let cols = TwoColumn::new("L", "R")
+        .with_left_width(ColumnWidth::Fixed(10))
+        .with_gap(2);
+    let node = cols.render_tree_node().expect("tree node");
+    let out = render_tree(&node, 80);
+
+    // The first 10 columns hold the left content; the gutter occupies columns
+    // 11–12; the right column spans columns 13..80 (the slack sink).
+    let stripped = strip_ansi(&out);
+    let line = stripped.lines().next().expect("at least one rendered line");
+    assert!(
+        line.chars().count() == 80,
+        "line must fill the full 80-column handed width: {line:?}"
+    );
+    let left_cell: String = line.chars().take(10).collect();
+    assert_eq!(
+        left_cell.trim(),
+        "L",
+        "left column is fixed at 10 cells: {left_cell:?}"
     );
 }

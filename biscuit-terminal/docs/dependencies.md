@@ -45,6 +45,17 @@
 
     _Tags: filesystem, temporary_
 
+### Config Parsing
+
+- [plist](https://github.com/ebarnard/rust-plist) _v1_
+
+    _Apple property-list (XML and binary) reader. Used by the app-metadata value
+    extractor to read iTerm2 / Apple Terminal config settings. This is the only
+    structured-format parser added directly to biscuit-terminal (spec §6/§10);
+    TOML/YAML/JSON5 go through `biscuit-file` instead._
+
+    _Tags: config, plist, macos, parsing_
+
 ### Image Processing
 
 - [image](https://github.com/image-rs/image) _v0.25_
@@ -81,6 +92,15 @@
 
     _Tags: regex, parsing_
 
+### URL Handling
+
+- [url](https://github.com/servo/rust-url) _v2.5_
+
+    _Standards-compliant file URL construction for filesystem hyperlinks,
+    including Windows drive-letter and separator normalization._
+
+    _Tags: url, filesystem, hyperlinks_
+
 ### Serialization
 
 - [serde](https://github.com/serde-rs/serde) _v1.0_ [docs](https://serde.rs)
@@ -95,11 +115,6 @@
 
     _Tags: json, serialization_
 
-- [serde_yaml](https://github.com/dtolnay/serde-yaml) _v0.9_
-
-    _YAML serialization/deserialization._
-
-    _Tags: yaml, serialization_
 
 ### Terminal
 
@@ -133,6 +148,17 @@
 
 ## Workspace Dependencies
 
+- [biscuit-file](../../biscuit-file/lib) _v0.1.0_ (features: `toml`, `yaml`, `json5`; `default-features = false`)
+
+    _In-repo format layer used by the app-metadata value extractor. Parses
+    TOML/YAML/JSON5 config files and normalizes each to a single
+    `serde_json::Value`, so one shared dot-path resolver reads all structured
+    formats. Chosen over depending on `toml` / `serde_yaml_ng` / `json-five`
+    directly (spec §6). `default-features = false` keeps its heavy PDF/gix tree
+    out. No dependency cycle — `biscuit-file` does not depend on biscuit-terminal._
+
+    _Tags: workspace, config, parsing_
+
 - [biscuit-visualized](../../biscuit-visualized) _v0.1.0_
 
     _Shared visualization library for Mermaid diagrams and graph rendering. Delegates to mermaid-rs-renderer and layout-rs._
@@ -141,7 +167,9 @@
 
 - [sniff](../../sniff/lib) _v0.1.0_
 
-    _Git/repo/monorepo detection used by Terminal::new()._
+    _Git/repo/monorepo detection used by `Terminal::new()`. The CLI also uses
+    `sniff::programs::find_program_with_source` for install detection in
+    `bt about [APP]`; the library itself stays sniff-free._
 
     _Tags: workspace, detection_
 

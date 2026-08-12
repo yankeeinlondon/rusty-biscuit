@@ -4,6 +4,8 @@
 //! [`EffectEngine`]. The catalog is a static, compile-time constant —
 //! constructing or reading it performs no host probes, no I/O, and no runtime
 //! context capture.
+use crate::catalog::{Described, Example, ExampleVerification};
+
 
 /// Safety classification for a side-effect capability.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -14,11 +16,14 @@ pub enum EffectSafety {
     Network,
     /// Markdown mutation that honors auto-rehash.
     MarkdownMutation,
+    /// In-memory state mutation only; performs no filesystem or network I/O.
+    InMemoryState,
 }
 
 /// Descriptor for a single side-effect capability.
 #[derive(Debug, Clone, PartialEq)]
 pub struct EffectDescriptor {
+
     /// Canonical signature including arity (e.g., `ensure_file(file)` or
     /// `ensure_file(file, content)`).
     pub signature: &'static str,
@@ -30,10 +35,40 @@ pub struct EffectDescriptor {
     pub category: &'static str,
     /// Stable display order within the category.
     pub order: usize,
+    /// Optional verified example.
+    pub example: Option<Example>,
 }
+impl Described for EffectDescriptor {
+    fn key(&self) -> &'static str {
+        self.signature
+    }
+    fn description(&self) -> &'static str {
+        self.description
+    }
+    fn category(&self) -> &'static str {
+        self.category
+    }
+    fn order(&self) -> usize {
+        self.order
+    }
+    fn example(&self) -> Option<&Example> {
+        self.example.as_ref()
+    }
+}
+
 
 /// All side-effect capability descriptors, in display order.
 pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
+    // ── State Mutation ──────────────────────────────────────────────
+    EffectDescriptor {
+        signature: "set(key, value)",
+        description: "Sets a top-level key in the in-memory state map (no disk write). Returns the prior value (or null).",
+        safety: EffectSafety::InMemoryState,
+        category: "State Mutation",
+        order: 1,
+
+        example: Some(Example { invocation: "set(\"ready\", true)", result: "null", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
+    },
     // ── Frontmatter Mutations ───────────────────────────────────────
     EffectDescriptor {
         signature: "set_frontmatter(file, prop, value)",
@@ -41,94 +76,154 @@ pub const EFFECT_DESCRIPTORS: &[EffectDescriptor] = &[
         safety: EffectSafety::MarkdownMutation,
         category: "Frontmatter Mutations",
         order: 1,
-    },
+
+        example: Some(Example { invocation: "set_frontmatter(\"d.md\", \"status\", \"x\")", result: "null", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
+ },
     EffectDescriptor {
+
         signature: "merge_frontmatter(file, obj)",
         description: "Shallow-merges an object into the document's frontmatter. Returns the merged object.",
         safety: EffectSafety::MarkdownMutation,
         category: "Frontmatter Mutations",
         order: 2,
+
+        example: Some(Example { invocation: "merge_frontmatter(\"d.md\", {\"owner\": \"ken\"})", result: "{\"owner\":\"ken\"}", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
+
     },
     EffectDescriptor {
+
         signature: "delete_frontmatter(file, prop)",
         description: "Removes a frontmatter property. Returns the removed value (or null).",
         safety: EffectSafety::MarkdownMutation,
         category: "Frontmatter Mutations",
         order: 3,
+
+        example: Some(Example { invocation: "delete_frontmatter(\"d.md\", \"owner\")", result: "ken", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
+
     },
     EffectDescriptor {
+
         signature: "increment_frontmatter(file, prop)",
         description: "Increments a numeric frontmatter property. Missing becomes 1. Returns the new number.",
         safety: EffectSafety::MarkdownMutation,
         category: "Frontmatter Mutations",
         order: 4,
+
+        example: Some(Example { invocation: "increment_frontmatter(\"d.md\", \"phase\")", result: "2", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
+
     },
     EffectDescriptor {
+
         signature: "decrement_frontmatter(file, prop)",
         description: "Decrements a numeric frontmatter property. Missing becomes -1. Returns the new number.",
         safety: EffectSafety::MarkdownMutation,
         category: "Frontmatter Mutations",
         order: 5,
+
+        example: Some(Example { invocation: "decrement_frontmatter(\"d.md\", \"phase\")", result: "0", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
+
     },
     EffectDescriptor {
+
         signature: "append_frontmatter(file, prop, value)",
         description: "Appends a value to a frontmatter array property. Returns the new array.",
         safety: EffectSafety::MarkdownMutation,
         category: "Frontmatter Mutations",
         order: 6,
+
+        example: Some(Example { invocation: "append_frontmatter(\"d.md\", \"tags\", \"b\")", result: "[\"a\",\"b\"]", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
+
     },
     EffectDescriptor {
+
         signature: "prepend_frontmatter(file, prop, value)",
         description: "Prepends a value to a frontmatter array property. Returns the new array.",
         safety: EffectSafety::MarkdownMutation,
         category: "Frontmatter Mutations",
         order: 7,
+
+        example: Some(Example { invocation: "prepend_frontmatter(\"d.md\", \"tags\", \"z\")", result: "[\"z\",\"a\",\"b\"]", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
+
     },
     // ── File & Directory ────────────────────────────────────────────
     EffectDescriptor {
+
         signature: "ensure_file(file)",
         description: "Creates an empty file if missing. Returns the absolute path.",
         safety: EffectSafety::FilesystemWrite,
         category: "File & Directory",
         order: 1,
+
+        example: Some(Example { invocation: "ensure_file(\"new.txt\")", result: "/path/to/new.txt", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
+
     },
     EffectDescriptor {
+
         signature: "ensure_file(file, content)",
         description: "Creates a file with content if missing. Existing files are unchanged. Returns the absolute path.",
         safety: EffectSafety::FilesystemWrite,
         category: "File & Directory",
         order: 2,
+
+        example: Some(Example { invocation: "ensure_file(\"new.txt\", \"hello\")", result: "/path/to/new.txt", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
+
     },
     EffectDescriptor {
+
         signature: "ensure_dir(dir)",
         description: "Creates a directory and all parents if missing. Returns the absolute path.",
         safety: EffectSafety::FilesystemWrite,
         category: "File & Directory",
         order: 3,
+
+        example: Some(Example { invocation: "ensure_dir(\"sub\")", result: "/path/to/sub", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
+
     },
     EffectDescriptor {
+
         signature: "append_line(file, text)",
         description: "Appends text and a newline to a file. Returns the absolute path.",
         safety: EffectSafety::FilesystemWrite,
         category: "File & Directory",
         order: 4,
+
+        example: Some(Example { invocation: "append_line(\"log.txt\", \"entry\")", result: "/path/to/log.txt", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
+
     },
     EffectDescriptor {
+
         signature: "append_jsonl(file, obj)",
         description: "Serializes an object as JSON and appends it as a line. Returns the absolute path.",
         safety: EffectSafety::FilesystemWrite,
         category: "File & Directory",
         order: 5,
+
+        example: Some(Example { invocation: "append_jsonl(\"log.jsonl\", {\"k\": 1})", result: "/path/to/log.jsonl", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
+
     },
     // ── Network ─────────────────────────────────────────────────────
     EffectDescriptor {
+
         signature: "http_post(url, body)",
         description: "Sends an HTTP POST request. Returns an object with status and body.",
         safety: EffectSafety::Network,
         category: "Network",
         order: 1,
+
+        example: Some(Example { invocation: "http_post(\"https://example.com/hook\", \"{}\")", result: "{\"status\":403,\"body\":\"\"}", verification: ExampleVerification::DisplayOnly("side-effect descriptions are proven by the sandbox verb harness") }),
+
     },
 ];
+
+/// Public [`EffectEngine`] methods that are intentionally outside the
+/// capability surface described by [`EFFECT_DESCRIPTORS`].
+///
+/// The descriptor catalog is the authoritative capability surface: a method
+/// without a descriptor is not a catalogued capability. This list is empty
+/// because every public mutating method on [`EffectEngine`] currently has a
+/// matching descriptor.
+pub const INTENTIONALLY_UNCATALOGUED: &[&str] = &[];
+
 
 /// Returns all side-effect capability descriptors in display order.
 pub fn effect_descriptors() -> &'static [EffectDescriptor] {
@@ -172,6 +267,13 @@ pub struct EffectVerb {
 /// [`EffectEngine`](super::EffectEngine) method. See [`EffectVerb`].
 #[cfg(test)]
 pub const EFFECT_VERBS: &[EffectVerb] = &[
+    EffectVerb {
+        signature: "set(key, value)",
+        exercise: |e| {
+            let mut state = crate::markdown::FrontmatterMap::new();
+            e.set(&mut state, "ready", serde_json::json!(true))
+        },
+    },
     EffectVerb {
         signature: "set_frontmatter(file, prop, value)",
         exercise: |e| e.set_frontmatter("d.md", "status", serde_json::json!("x")),
@@ -269,6 +371,14 @@ mod tests {
             descriptors_without_verbs.is_empty(),
             "descriptors without verbs: {descriptors_without_verbs:?}"
         );
+
+        for d in EFFECT_DESCRIPTORS {
+            assert!(
+                d.example().is_some(),
+                "descriptor `{}` must carry an example",
+                d.signature
+            );
+        }
     }
 
     /// Every registered verb must invoke a real, reachable `EffectEngine`

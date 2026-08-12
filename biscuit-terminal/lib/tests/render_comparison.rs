@@ -268,6 +268,18 @@ fn via_render_matches_via_tree_direct() {
     let mut live = BTreeSet::<DriftKey>::new();
     for case in component_cases() {
         for scenario in scenarios() {
+            // This oracle compares the two public entry points on identical
+            // input. A style scenario injects its `Style` onto the render-tree
+            // node only (no component exposes a `with_style` API yet — that is
+            // later-phase work), so `via_render` and `via_tree_direct` receive
+            // different input by construction and their divergence is a harness
+            // artifact, not a component drift. Style scenarios are validated by
+            // the `layout_matrix` snapshot and the baseline-fold reference
+            // tests instead. Layout scenarios reach both paths identically via
+            // `with_layout`, so they remain a meaningful oracle here.
+            if !scenario.style.is_empty() {
+                continue;
+            }
             let (via_render, via_tree_direct) = (case.render)(&scenario);
             for facet in ALL_FACETS {
                 let drifts = match facet {

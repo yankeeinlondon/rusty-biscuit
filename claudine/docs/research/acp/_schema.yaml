@@ -1,0 +1,78 @@
+# SimplifiedSchema for the ACP research topic.
+#
+# Captures provider-specific Agent Client Protocol support for Claudine's future
+# ACP client/adapter work: launch mode, protocol coverage, reverse requests,
+# permissions, filesystem/terminal delegation, streaming, and Rust integration.
+$schema:
+    # Date the research file was first created.
+    created: date
+
+    # Date the provider ACP behavior was last verified.
+    last_updated: date(required)
+
+    # Agent/model that produced the research.
+    agent: string(required)
+    model: string(required)
+
+    # Primary provider and ACP documentation URLs.
+    docs: url
+    acp_docs: url
+    repo: url
+
+    # Overall support classification: native CLI ACP mode, adapter package, partial
+    # support, no support, or unknown.
+    support: enum(native,adapter,partial,none,unknown; required)
+
+    # How to launch the provider as an ACP agent.
+    launch_modes: "{ command: string(required), args: string[], transport: enum(stdio,http,websocket,unix_socket,tcp,other,unknown; required), adapter: string, notes: string }[]"
+
+    # ACP protocol versions or schema releases explicitly supported.
+    protocol_versions: string[]
+
+    # ACP capabilities observed or documented for this provider.
+    capabilities: "{ capability: enum(initialize,authenticate,session_new,session_load,session_prompt,session_cancel,session_modes,streaming,permissions,fs_read,fs_write,terminal,mcp,media,plans,extensions,other,unknown; required), support: enum(supported,partial,unsupported,unknown; required), notes: string }[]"
+
+    # Agent-to-client reverse requests that the client must be prepared to fulfill.
+    reverse_requests: "{ method: string(required), purpose: enum(permission,fs_read,fs_write,terminal_create,terminal_output,terminal_wait,terminal_kill,mcp,tool,auth,other,unknown; required), client_must_handle: boolean, notes: string }[]"
+
+    # Permission and approval behavior in ACP mode.
+    permission_model: "{ mechanism: string, timeout: string, default_policy: string, approval_values: string[], notes: string }"
+
+    # Filesystem request behavior when the agent is not allowed to read/write directly.
+    filesystem_model: "{ read_methods: string[], write_methods: string[], path_base: string, sandboxing: string, notes: string }"
+
+    # Host command execution behavior through ACP terminal requests.
+    terminal_model: "{ supported: boolean(required), methods: string[], shell: string, cwd: string, streaming: string, cancellation: string, notes: string }"
+
+    # Streaming updates emitted by the provider or adapter.
+    streaming_model: "{ update_methods: string[], text_events: string[], tool_events: string[], plan_events: string[], error_events: string[], notes: string }"
+
+    # Authentication and setup required before an ACP client can launch the agent.
+    auth_setup: "{ required: boolean(required), mechanisms: string[], headless_notes: string, notes: string }"
+
+    # Environment variables that affect ACP launch, auth, transport, or behavior.
+    env_vars: "{ name: string(required), effect: string(required) }[]"
+
+    # Rust client integration guidance specific to this provider.
+    rust_client: "{ crate: string, connection_type: string, localset_required: boolean, reverse_request_handlers: string[], desktop_streaming_pattern: string, notes: string }"
+
+    # Known adapter/client compatibility issues.
+    compatibility: "{ client: string(required), status: enum(works,partial,broken,unknown; required), issue: string, workaround: string }[]"
+
+    # Recent provider or adapter changes that affect ACP behavior.
+    recent_changes: "{ date: string, version: string, change: string(required), impact: string }[]"
+
+    # Provider quirks, gotchas, and workarounds.
+    quirks: string[]
+
+    # Research gaps or claims needing follow-up.
+    gaps: string[]
+
+    # Update-mode changelog entries.
+    changes: string[]
+
+    # Whether the discovered behavior requires Claudine implementation or metadata changes.
+    requires_claudine_update: boolean(required)
+
+    # Short explanation for `requires_claudine_update`.
+    reason: string

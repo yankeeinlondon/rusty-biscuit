@@ -118,8 +118,12 @@ fn generate_request_method_no_auth() {
     assert!(code.contains("SchematicError::UnsupportedMethod"));
     assert!(code.contains("SchematicError::ApiError"));
 
-    // Check body handling
-    assert!(code.contains("if let Some(body) = body"));
+    // Check body handling: every RequestBody variant is dispatched
+    assert!(code.contains("crate::shared::RequestBody::Empty => req_builder"));
+    assert!(code.contains("crate::shared::RequestBody::Json(json)"));
+    assert!(code.contains("crate::shared::RequestBody::Multipart(parts)"));
+    assert!(code.contains("crate::shared::RequestBody::UrlEncoded(pairs)"));
+    assert!(code.contains("reqwest::multipart::Form::new()"));
     assert!(code.contains(r#"header("Content-Type", "application/json")"#));
 
     // Check response handling with hook support
@@ -168,6 +172,7 @@ fn generate_request_method_api_key_uses_self_env_auth() {
         "ApiKey",
         AuthStrategy::ApiKey {
             header: "X-API-Key".to_string(),
+            value_prefix: None,
         },
         vec!["X_API_KEY".to_string()],
     );
@@ -175,7 +180,7 @@ fn generate_request_method_api_key_uses_self_env_auth() {
     let code = format_generated_code(&tokens).expect("Failed to format code");
 
     assert!(code.contains("EnvAuthStrategy::ApiKey"));
-    assert!(code.contains("headers.header(header.clone(), key)"));
+    assert!(code.contains("headers.header(header.clone(), value)"));
     assert!(code.contains("let env_mapping = self.headers.env_mapping().clone();"));
     assert!(code.contains(".api_key"));
     assert!(code.contains("AuthenticationRequired"));
@@ -230,6 +235,7 @@ fn generate_request_method_all_auth_strategies_validate() {
         "Test",
         AuthStrategy::ApiKey {
             header: "X-Key".to_string(),
+            value_prefix: None,
         },
         vec!["KEY".to_string()],
     );

@@ -62,6 +62,11 @@ pub struct OutputFormatSupport {
     pub stdin_supported: bool,
     /// How the provider CLI selects this output format.
     pub selector: OutputFormatSelector,
+    /// Extra argv the provider needs alongside the stream selector for
+    /// reliable structured output (e.g. Claude's `--print --verbose`).
+    /// Empty for most records. Serialized in the describe/catalog
+    /// surfaces like every other catalog field.
+    pub companion_flags: &'static [&'static str],
 }
 
 /// Whether an entrypoint is available in interactive mode, non-interactive

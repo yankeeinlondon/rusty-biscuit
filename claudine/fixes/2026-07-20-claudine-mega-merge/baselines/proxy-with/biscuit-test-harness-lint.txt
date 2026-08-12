@@ -1,0 +1,23 @@
+Revision: e348486c810969abe87a6b7209979034f5454b07
+Detached worktree: /tmp/claudine-mega-proxy.InQb45/tree
+Working directory: .
+Command: just _lint biscuit-test-harness
+Timeout policy: SIGINT at 60s; SIGKILL 5s later
+Exit status: 0
+Classification: passed
+Elapsed seconds: 1.463887416
+
+[[STDOUT]]
+
+Linting [1mbiscuit-test-harness[0m
+
+[[STDERR]]
+    Blocking waiting for file lock on package cache
+    Blocking waiting for file lock on package cache
+    Checking memchr v2.8.3
+    Checking once_cell v1.21.4
+    Checking serde_core v1.0.229
+    Checking tempfile v3.27.0
+    Checking serde_json v1.0.151
+    Checking biscuit-test-harness v0.1.0 (/private/tmp/claudine-mega-proxy.InQb45/tree/biscuit-test-harness)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1.51s

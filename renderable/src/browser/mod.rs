@@ -3,6 +3,10 @@ pub mod fragment;
 pub mod renderable;
 pub mod utils;
 
+pub use feature::{
+    DefaultFeatureResolver, FeatureAssets, FeatureContext, FeatureResolveError, FeatureResolver,
+    FeatureScript, PageFeature,
+};
 pub use renderable::BrowserRenderable;
 
 use std::path::{Path, PathBuf};
@@ -122,7 +126,7 @@ impl RelativeAssetPath {
     /// absolute — external asset paths must be relative.
     pub fn new(path: impl Into<PathBuf>) -> Result<RelativeAssetPath, PageOptionsError> {
         let path = path.into();
-        if path.is_absolute() {
+        if path.has_root() {
             return Err(PageOptionsError::AbsoluteAssetPath(path));
         }
         Ok(RelativeAssetPath(path))

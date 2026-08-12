@@ -716,10 +716,21 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(20));
                 fake_clone.set_empty();
             });
+            // The stall window is 2s against 20ms progress ticks — a ~100x
+            // margin. It was 40ms, giving 2x, which is below scheduler jitter on
+            // a loaded CI runner: the macOS canary reported "no progress for 0s"
+            // and failed on the first CI run that ever executed this test.
+            //
+            // The assertion is that progress RESETS the clock, not that it does
+            // so within any particular window, so the margin costs nothing. A
+            // regression still fails, just after 2s instead of 40ms. That the
+            // clock fires at all when progress stops is covered by
+            // `trips_breaker_on_stall` above, which keeps a tight window
+            // because it wants the stall.
             let result = wait_with_progress(
                 fake.as_ref(),
-                Duration::from_secs(5),
-                Duration::from_millis(40),
+                Duration::from_secs(30),
+                Duration::from_secs(2),
                 Duration::from_millis(1),
             );
             handle.join().unwrap();

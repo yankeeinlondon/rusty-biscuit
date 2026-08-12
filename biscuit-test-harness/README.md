@@ -21,7 +21,7 @@ Levels 2 and 3.
 |-------|------------|-------------------|
 | **Level 1** | PTY-based tests. The test generates input bytes; the binary parses them. No real terminal involved. Use `expectrl` directly. | No |
 | **Level 2** | Run-in-real-terminal with IPC. The binary renders through a real terminal's display path; input is injected as bytes via the terminal's own CLI. | **Yes** — the `TerminalHarness` implementations. |
-| **Level 3** | OS-level keyboard injection. Real `CGEvent`/X11 key presses, so the *terminal's input encoder* fires. | **Yes** — the [`cliclick`](src/cliclick.rs) module (macOS). |
+| **Level 3** | OS-level keyboard injection. Real `CGEvent` / X11 XTEST / `SendInput` key presses, so the *terminal's input encoder* fires. | **Yes** — one injector module per platform: [`cliclick`](src/cliclick.rs) (macOS), [`xdotool`](src/xdotool.rs) (Linux/X11), [`win_input`](src/win_input.rs) (Windows). |
 
 **Why Level 2/3 exist:** a Level 1 test can never catch a bug in the
 *terminal's* encoder or display path, because the test itself produces
@@ -62,6 +62,24 @@ fn level2_prose_emits_sgr() {
     assert!(frame.plain.contains('x'));        // escapes stripped
 }
 ```
+
+## Locating the binary under test — `bin_exe!`
+
+Any test that spawns a workspace binary should take its path from
+[`bin_exe!`](src/bin_exe.rs) rather than `env!("CARGO_BIN_EXE_<name>")`:
+
+```rust
+use biscuit_test_harness::bin_exe;
+
+let output = Command::new(bin_exe!("so-you-say")).arg("--help").output()?;
+```
+
+The `env!` form bakes in an absolute path under the *build* host's target
+directory. That is fine wherever the runner built the binary, and wrong for the
+`wsl2-ubuntu` CI leg, which executes a `cargo nextest archive` built elsewhere
+and extracted into a temp directory — every spawn there fails with
+`NotFound`. `bin_exe!` reads nextest's run-time republication of the path first
+and keeps the compile-time value as the fallback.
 
 ## The `TerminalHarness` trait
 
@@ -144,7 +162,8 @@ Rules of thumb:
   runs its real detection instead of the force-color "everything
   supported" path.
 - **Verifying chords / key handling?** `TmuxHarness::send_key` for
-  portable chords; Level 3 (`cliclick`) for true OS key injection.
+  portable chords; Level 3 (`cliclick` / `xdotool` / `win_input`) for
+  true OS key injection.
 
 ### `SpawnVisibility` — background vs foreground
 
@@ -301,7 +320,9 @@ required tooling is missing — the test then skips rather than fails.
 | `WezTermHarness` | `wezterm` on `$PATH` **and** `WEZTERM_UNIX_SOCKET` set. |
 | `KittyHarness` | `kitty` on `$PATH` **and** `KITTY_LISTEN_ON` set. |
 | `AppleTerminalHarness` | macOS, `CI != 1`, and `osascript` can address Terminal.app. |
-| `cliclick` (Level 3) | `cliclick` on `$PATH` (macOS only). |
+| `cliclick` (Level 3, macOS) | `cliclick` on `$PATH`. Gate *additionally* on `cliclick::accessibility_trusted()` — cliclick can be installed yet have every event dropped by the WindowServer when the runner lacks macOS Accessibility trust. |
+| `xdotool` (Level 3, Linux) | Linux, `xdotool` on `$PATH`, **and** `DISPLAY` set. Wayland has no reachable XTEST equivalent, so a Wayland session reports unavailable and skips. |
+| `win_input` (Level 3, Windows) | Windows and a working `powershell`. |
 
 ### The "which terminal am I running inside" gotcha
 
@@ -343,30 +364,81 @@ Once the instance exists, the harness's `SpawnVisibility::Background`
 (`--keep-focus`) handles the *per-test* windows — the bootstrap step
 above only brings the terminal itself into existence.
 
-## Level 3 — OS keyboard injection (`cliclick`)
+## Level 3 — OS keyboard injection
 
-The [`cliclick`](src/cliclick.rs) module wraps the `cliclick` Homebrew
-utility to synthesize real macOS Quartz keyboard events. Unlike
-`send_text` (which writes bytes straight to the pane's stdin and bypasses
-the terminal's input encoder), `cliclick` emits OS-level key presses that
-the *terminal itself* must encode and forward — the only way to verify
-"what bytes does the terminal emit when the user presses bare Ctrl?".
+Unlike `send_text` (which writes bytes straight to the pane's stdin and
+bypasses the terminal's input encoder), a Level-3 injector emits OS-level
+key presses that the *terminal itself* must encode and forward — the only
+way to verify "what bytes does the terminal emit when the user presses
+Ctrl+C?". There is one module per platform; each exposes its own
+`available()` and skips cleanly off its platform.
 
-Free functions: `available`, `key_down`, `key_up`, `press`,
-`hold_modifier`, `type_text`, `click_at`, `click_then_press`,
-`click_then_ctrl_chord`, `system_events_key_down` / `_up`, `activate_app`.
+| Module | Platform | Mechanism |
+|--------|----------|-----------|
+| [`cliclick`](src/cliclick.rs) | macOS | The `cliclick` Homebrew utility (`CGEventCreateKeyboardEvent`), plus `osascript` / System Events for the cases cliclick cannot express. |
+| [`xdotool`](src/xdotool.rs) | Linux / X11 | `xdotool key` via the X11 **XTEST** extension — the same server input pipeline a physical keyboard uses. |
+| [`win_input`](src/win_input.rs) | Windows | A PowerShell driver over `SendKeys.SendWait` (`keybd_event`/`SendInput`). |
 
-Level-3 practices:
+### `cliclick` (macOS)
+
+Free functions: `available`, `accessibility_trusted`, `key_down`,
+`key_up`, `press`, `hold_modifier`, `type_text`, `move_to`, `click_at`,
+`click_then_keys`, `click_then_text`, `click_then_move`,
+`click_then_press`, `click_then_ctrl_chord`, `click_then_alt_chord`,
+`system_events_key_down` / `_up`, `activate_app`,
+`activate_process_window`, `process_id_for_window`.
+
+`available()` only proves the binary is on `$PATH`. Fold
+`accessibility_trusted()` into the gate as well: without macOS
+Accessibility trust the WindowServer silently drops every injected event,
+which would red-fail as though the *product* were broken.
+
+Modified chords (`click_then_ctrl_chord`, `click_then_alt_chord`) route
+through System Events rather than cliclick — cliclick cannot carry a
+modifier flag on the same event as a letter, so the flag races the letter
+and the terminal intermittently receives the unmodified character.
+
+### `xdotool` (Linux / X11)
+
+Free functions: `available`, `window_id_for_title`, `activate_window`,
+`chord`, `focus_then_ctrl_chord`.
+
+`available()` requires the binary **and** a live `DISPLAY`; Wayland
+sessions report unavailable and skip.
+
+`--window` is deliberately never passed: it switches `xdotool` from XTEST
+to `XSendEvent`, whose events carry the `send_event` flag that terminals
+ignore as untrusted input. That would inject nothing and then fail as
+though the product were broken. Focus the window first, inject globally.
+
+### `win_input` (Windows)
+
+Free functions: `available`, `focus_then_ctrl_chord`.
+
+`GenerateConsoleCtrlEvent` is *not* Level 3 — it posts a console-control
+notification downstream of both the keyboard and the terminal's encoder.
+It remains useful as the lower-level diagnostic that isolates the signal
+path when a Level-3 test fails.
+
+`focus_then_ctrl_chord` taps ALT immediately before `SetForegroundWindow`
+because Windows refuses foreground activation from a process that does
+not already own it; without the tap, activation is silently downgraded to
+a flashing taskbar button and the chord lands in the user's real window.
+
+### Level-3 practices
 
 - The spawned window must be **focused** — use
   `SpawnVisibility::Foreground` and `focus_spawned_pane()`.
-- macOS focus is a shared global resource — gate Level-3 tests behind an
-  env flag (convention: `RUN_LEVEL3=1`) and run them with
-  `--test-threads=1` so parallel windows don't steal focus mid-injection.
-- **Bare-modifier press** events are structurally unreliable on macOS
-  via `cliclick`. *Chord* injection (`Ctrl+R`) works reliably; bare
-  modifiers need a Level-2 raw-kitty-bytes test instead. macOS-only —
-  Linux callers would need `xdotool` (not implemented here).
+- Window selection is by **unique** title match on all three platforms.
+  Zero or several matches is an error rather than a first-match guess:
+  injecting Ctrl+C into the wrong window looks identical to a broken
+  product.
+- Focus is a shared global resource — gate Level-3 tests behind an env
+  flag (convention: `RUN_LEVEL3=1`) and run them with `--test-threads=1`
+  so parallel windows don't steal focus mid-injection.
+- **Bare-modifier press** events are structurally unreliable on macOS via
+  `cliclick`. *Chord* injection (`Ctrl+R`) works reliably; bare modifiers
+  need a Level-2 raw-kitty-bytes test instead.
 
 ## Utilities
 
@@ -390,8 +462,9 @@ Re-exported from the crate root:
 
 Every Level-2/3 test **must** check `available()` first and early-return
 via `skip_with_reason` when it returns `false`. No `#[ignore]` markers.
-On GitHub-hosted CI runners — which lack WezTerm, Kitty, and `cliclick` —
-the tests print `skipping: requires <X>` and exit `ok`, keeping CI green
+On GitHub-hosted CI runners — which lack WezTerm and Kitty, and offer no
+focusable window for a Level-3 injector to target — the tests print
+`skipping: requires <X>` and exit `ok`, keeping CI green
 while still acting as a local regression net. (Level-2 tests are not a
 PR gate; that would need a self-hosted runner with the emulators
 installed.)

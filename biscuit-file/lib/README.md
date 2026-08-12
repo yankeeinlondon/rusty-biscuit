@@ -141,6 +141,74 @@ YAML-to-JSON conversion supports configurable policies for edge cases via `as_js
 - `NonStringKeyPolicy` -- handling of non-string map keys
 - `NonFiniteFloatPolicy` -- handling of NaN/Infinity values
 
+#### YAML Source Analysis and Repair
+
+Use `analyze_yaml` when the source may be invalid. Unlike `Yaml::from_str`, the
+source-first analyzer always returns a `YamlAnalysis`; its retained parse
+outcome is either `YamlParseOutcome::Parsed` or `YamlParseOutcome::Failed` with
+an optional structured byte/line/column location. Diagnostics and repair spans
+index the exact source passed to the analyzer.
+
+```rust
+use biscuit_file::{YamlCertainty, analyze_yaml};
+
+let analysis = analyze_yaml("title: @daily-report\n");
+assert!(!analysis.is_parseable());
+
+let diagnostic = &analysis.diagnostics()[0];
+assert_eq!(diagnostic.code.to_string(), "yaml.reserved-indicator");
+assert_eq!(diagnostic.classification, YamlCertainty::Deterministic);
+
+let outcome = analysis.apply();
+assert_eq!(outcome.source, "title: \"@daily-report\"\n");
+assert_eq!(outcome.audit.applied.len(), 1);
+assert!(outcome.audit.rejected.is_empty());
+```
+
+If valid YAML was loaded through `Yaml::new`, `Yaml::from_str`, or
+`Yaml::from_bytes`, the value retains the authored text captured by that
+constructor. Prefer `Yaml::analyze()` and keep the returned `YamlAnalysis` when
+you need more than one view:
+
+```rust
+use biscuit_file::Yaml;
+
+let yaml = Yaml::from_str("name: example  \n")?;
+let analysis = yaml.analyze().expect("parsed constructors retain source");
+
+let diagnostic_count = analysis.diagnostics().len();
+let repair_count = analysis.repairs().count();
+let outcome = analysis.apply();
+
+assert!(diagnostic_count > 0);
+assert!(repair_count > 0);
+assert_eq!(outcome.source, "name: example\n");
+# Ok::<(), biscuit_file::YamlError>(())
+```
+
+`Yaml::source_text()` returns that retained source without rereading a
+path-backed file, avoiding a time-of-check/time-of-use race. `Yaml::from_value`
+has no authored source, so `source_text()` and `analyze()` return `None`.
+`Yaml::diagnose()` and `Yaml::repair_candidates()` are convenient single-view
+shorthands, but each performs a scan; do not call both when one retained
+analysis can supply both views.
+
+Every diagnostic has a stable code, byte span, certainty classification,
+message, and zero or more candidate repairs. Certainty controls behavior:
+
+- `Deterministic`: the finding and repair are proven; `YamlAnalysis::apply()`
+  may apply its candidates.
+- `DeterministicFindNonDeterministicSolution`: the problem is certain but a
+  repair requires an intent decision; report only.
+- `NonDeterministicFind`: the finding is heuristic; report only.
+
+Candidate repairs have already passed their class-specific safety proof, but
+only candidates attached to deterministic diagnostics are eligible for
+automatic application. `YamlAnalysis::apply()` returns `EditSetOutcome`: the
+patched `source` plus an `audit` of accepted and rejected edits. Report-only
+diagnostics never contribute edits. When nothing applies, the returned source
+is byte-identical to `YamlAnalysis::source()`.
+
 ### `Pdf`
 
 Extract text, Markdown, or table-of-contents from PDFs.
@@ -245,4 +313,3 @@ use biscuit_file::Toml;
 let toml = Toml::from_str(&content)?;
 let value = toml.value();
 ```
-

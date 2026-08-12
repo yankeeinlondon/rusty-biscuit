@@ -1,0 +1,32 @@
+# SimplifiedSchema for the hooks research topic.
+#
+# Captures provider hook systems for Claudine's unified lifecycle events,
+# adapters, hook installation, and blocking/permission behavior.
+$schema:
+    created: date
+    last_updated: date(required)
+    agent: string(required)
+    model: string(required)
+
+    homepage: url
+    docs: url
+    hooks_docs: url
+
+    # Native hook/event inventory.
+    hooks: "{ native_event: string(required), claudine_event: enum(initialize,start,prompt,tool_call,tool_result,permission,subagent_start,subagent_stop,notification,success,failure,finalize,loop,blocked,unknown,none; required), timing: enum(pre,post,around,async,unknown), blocking: boolean, payload_schema: string, return_contract: string, notes: string }[]"
+
+    # How hooks are configured/installed.
+    config_files: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,system,managed,other; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other), notes: string }[]"
+    cli_params: "{ flag: string(required), description: string(required), example: string }[]"
+
+    # Payload and response semantics that adapters must model.
+    payload_fields: "{ native_event: string(required), field: string(required), type: string, meaning: string }[]"
+    response_actions: "{ action: enum(allow,deny,ask,block,modify,replace,continue,stop,unknown,other; required), native_value: string, effect: string }[]"
+
+    # Hook execution constraints and platform caveats.
+    execution: "{ shell: string, cwd: string, env: string, timeout: string, stdin: string, stdout: string, stderr: string, notes: string }"
+
+    gaps: string[]
+    changes: string[]
+    requires_claudine_update: boolean(required)
+    reason: string

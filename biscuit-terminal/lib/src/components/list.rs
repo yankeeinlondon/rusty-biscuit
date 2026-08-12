@@ -9,6 +9,7 @@ use renderable::tree::render::{
     BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
     render_markdown_node,
 };
+use renderable::style::Style;
 use renderable::tree::{ListRenderHints, RenderNode, RenderStrictness, TreeRenderable};
 
 use crate::{
@@ -83,10 +84,37 @@ fn force_component_hanging_indent(content: &mut RenderableTerminalContent, hangi
 /// let list = OrderedList::new(vec!["Parent item"])
 ///     .with_indent_children(8);  // 8 spaces for nested content
 /// ```
+///
+/// ## Layout & Style Contract
+///
+/// `OrderedList` is an internal-layout component (spec C2). It projects to a
+/// [`List`](renderable::tree::NodeKind::List) node carrying
+/// [`ListRenderHints`] and the configured [`Layout`]; the shared render-tree
+/// fold resolves the outer box, and the list renderer fills the resolved
+/// content width:
+///
+/// - [`Width::Auto`] (default) and [`Width::Fixed`] **fill** the available
+///   width by wrapping the item body; [`Width::FitContent`] hugs the widest
+///   item (short items stay short).
+/// - **Slack sink** (spec D2): the item body text column. The numeric marker
+///   (`"1. "`) and the hanging indent stay fixed across width modes, so a
+///   narrower or wider box only reflows the body text.
+/// - A fractional `Fixed(50%)` is resolved exactly once by the fold; the
+///   list renderer wraps the body to the resolved content width and never
+///   re-resolves the raw percentage (the `Fixed(50%) → 25%`
+///   double-application bug).
+/// - The projected [`ListRenderHints`] round-trip carries the [`Layout`] onto
+///   the list node (C4), so the wrapping policy and hanging-indent contract
+///   survive a second render pass.
+///
+/// [`Width::Auto`]: renderable::layout::Width::Auto
+/// [`Width::Fixed`]: renderable::layout::Width::Fixed
+/// [`Width::FitContent`]: renderable::layout::Width::FitContent
 #[derive(Debug)]
 pub struct OrderedList {
     items: Vec<RenderableTerminalContent>,
     layout: Layout,
+    style: Style,
     indent_children: u32,
 }
 
@@ -95,6 +123,7 @@ impl Default for OrderedList {
         OrderedList {
             items: vec![],
             layout: Layout::default(),
+            style: Style::default(),
             indent_children: 4,
         }
     }
@@ -214,6 +243,7 @@ impl OrderedList {
         if self.layout != Layout::default() {
             node.attrs.set_layout(&self.layout);
         }
+        crate::components::renderable::overlay_style_onto_node(&mut node, &self.style);
         node
     }
 
@@ -279,6 +309,14 @@ impl TerminalRenderable for OrderedList {
         &mut self.layout
     }
 
+    fn style(&self) -> Style {
+        self.style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.style)
+    }
+
     fn is_block_level(&self) -> bool {
         true
     }
@@ -309,6 +347,15 @@ impl TreeRenderable for OrderedList {
     /// per source item. A non-default [`Layout`] is recorded on the root
     /// node's attributes; typed [`ListRenderHints`] carry `hanging_indent` and
     /// `indent_children` so the renderers can lower the list correctly.
+    ///
+    /// ## Notes
+    ///
+    /// When `Layout.width` resolves the outer list box, the terminal fold
+    /// narrows `available_width`; the **item body text column** is the
+    /// documented slack sink (spec decision D2) — the number marker and its
+    /// hanging indent stay fixed while only the body text reflows to the
+    /// narrowed width. `Layout.word_wrap` is a default fed to item text only
+    /// where a per-item wrap policy is absent (spec decision D4).
     fn render_tree(&self) -> RenderNode {
         self.to_render_tree_node()
     }
@@ -487,12 +534,39 @@ fn project_list_items(
 /// - **Custom bullets**: Use any character or string as the bullet marker
 /// - **Nested content**: Block-level children are indented without bullets
 /// - **Mixed content**: Supports both string items and renderable components
+///
+/// ## Layout & Style Contract
+///
+/// `UnorderedList` is an internal-layout component (spec C2). It projects to
+/// a [`List`](renderable::tree::NodeKind::List) node carrying
+/// [`ListRenderHints`] and the configured [`Layout`]; the shared render-tree
+/// fold resolves the outer box, and the list renderer fills the resolved
+/// content width:
+///
+/// - [`Width::Auto`] (default) and [`Width::Fixed`] **fill** the available
+///   width by wrapping the item body; [`Width::FitContent`] hugs the widest
+///   item (short items stay short).
+/// - **Slack sink** (spec D2): the item body text column. The bullet (`"- "`)
+///   and the hanging indent stay fixed across width modes, so a narrower or
+///   wider box only reflows the body text.
+/// - A fractional `Fixed(50%)` is resolved exactly once by the fold; the
+///   list renderer wraps the body to the resolved content width and never
+///   re-resolves the raw percentage (the `Fixed(50%) → 25%`
+///   double-application bug).
+/// - The projected [`ListRenderHints`] round-trip carries the [`Layout`] onto
+///   the list node (C4), so the wrapping policy and hanging-indent contract
+///   survive a second render pass.
+///
+/// [`Width::Auto`]: renderable::layout::Width::Auto
+/// [`Width::Fixed`]: renderable::layout::Width::Fixed
+/// [`Width::FitContent`]: renderable::layout::Width::FitContent
 #[derive(Debug)]
 pub struct UnorderedList {
     items: Vec<RenderableTerminalContent>,
     bullet: String,
     hanging_indent: bool,
     layout: Layout,
+    style: Style,
     indent_children: Option<u32>,
 }
 
@@ -503,6 +577,7 @@ impl Default for UnorderedList {
             bullet: "- ".to_string(),
             hanging_indent: true,
             layout: Layout::default(),
+            style: Style::default(),
             indent_children: None,
         }
     }
@@ -693,6 +768,7 @@ impl UnorderedList {
         if self.layout != Layout::default() {
             node.attrs.set_layout(&self.layout);
         }
+        crate::components::renderable::overlay_style_onto_node(&mut node, &self.style);
         node
     }
 
@@ -758,6 +834,14 @@ impl TerminalRenderable for UnorderedList {
         &mut self.layout
     }
 
+    fn style(&self) -> Style {
+        self.style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.style)
+    }
+
     fn is_block_level(&self) -> bool {
         true
     }
@@ -796,6 +880,15 @@ impl TreeRenderable for UnorderedList {
     /// Note that the bullet hint is a **terminal-rendering concern only**.
     /// The Markdown and Browser renderers ignore it — Markdown always emits
     /// standard `- ` markers and Browser always emits `<ul>`/`<li>`.
+    ///
+    /// ## Notes
+    ///
+    /// When `Layout.width` resolves the outer list box, the terminal fold
+    /// narrows `available_width`; the **item body text column** is the
+    /// documented slack sink (spec decision D2) — the bullet and its hanging
+    /// indent stay fixed while only the body text reflows to the narrowed
+    /// width. `Layout.word_wrap` is a default fed to item text only where a
+    /// per-item wrap policy is absent (spec decision D4).
     fn render_tree(&self) -> RenderNode {
         self.to_render_tree_node()
     }

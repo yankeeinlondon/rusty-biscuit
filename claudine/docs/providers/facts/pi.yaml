@@ -1,0 +1,318 @@
+# Topic-less catalog facts for the pi provider.
+#
+# Field-source matrix (design/catalog-generation.md): this file owns values
+# whose research topic has not landed yet. Keys are catalog field names.
+#
+# Pi (earendil-works/pi) is a NO-HOOK provider: it ships no native hook /
+# registration system, so every lifecycle event Claudine sees is DERIVED from
+# Pi's `--mode json` NDJSON stdout stream (top-level `type` discriminator).
+# This file mirrors qwen.yaml (the other stream-derived no-hook provider):
+# every event_mapping entry is `not_supported` or a `stream_parse` (protocol
+# ndjson) — never a `hook:` form — and `registration_target` is always false.
+stream_protocol: ndjson
+event_mapping:
+  mappings:
+  - event: session_start
+    parse_aliases: []
+    registration_target: false
+    # First NDJSON line `{"type":"session",...}` (id + cwd). Absent under
+    # --no-session; agent_start is the always-present fallback marker.
+    support_level:
+      stream_parse:
+        native_name: session
+        protocol: ndjson
+  - event: session_end
+    parse_aliases: []
+    registration_target: false
+    # Pi's --mode json stream has no session-end record; agent_end (the run
+    # terminal) is claimed by turn_complete.
+    support_level: not_supported
+  - event: before_prompt
+    parse_aliases: []
+    registration_target: false
+    # No pre-prompt stream event; Pi's `input`/`before_agent_start` are
+    # in-process extension hooks, not --mode json stdout records.
+    support_level: not_supported
+  - event: before_tool
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: tool_execution_start
+        protocol: ndjson
+  - event: after_tool
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: tool_execution_end
+        protocol: ndjson
+  - event: tool_error
+    parse_aliases: []
+    registration_target: false
+    # No dedicated tool-error event; failures ride tool_execution_end.isError.
+    support_level: not_supported
+  - event: permission_request
+    parse_aliases: []
+    registration_target: false
+    # Pi has no native permission system and emits no per-tool approval event.
+    support_level: not_supported
+  - event: human_in_the_loop
+    parse_aliases: []
+    registration_target: false
+    # Only RPC mode emits extension_ui_request; --mode json sets hasUI=false
+    # and exposes no human-input record.
+    support_level: not_supported
+  - event: turn_complete
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: agent_end
+        protocol: ndjson
+  - event: turn_error
+    parse_aliases: []
+    registration_target: false
+    # Pi normalizes provider failures into the assistant message
+    # (stopReason:"error" + errorMessage) on message_end; no error event exists.
+    support_level:
+      stream_parse:
+        native_name: message_end
+        protocol: ndjson
+  - event: subagent_start
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: subagent_stop
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: before_model
+    parse_aliases: []
+    registration_target: false
+    # No pre-model stream event; before_provider_request is an extension hook.
+    support_level: not_supported
+  - event: after_model
+    parse_aliases: []
+    registration_target: false
+    # Completed assistant message snapshot; carries usage/cost/stopReason.
+    support_level:
+      stream_parse:
+        native_name: message_end
+        protocol: ndjson
+  - event: before_compact
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: compaction_start
+        protocol: ndjson
+  - event: notification
+    parse_aliases: []
+    registration_target: false
+    # Pi's --mode json stream has no generic notification/system record.
+    support_level: not_supported
+resource_support:
+  agents:
+    also_reads_from: []
+    format: null
+    level: None
+    notes: No native subagents; the optional example `subagent` extension reads ~/.pi/agent/agents/*.md and .pi/agents/*.md but is not in the default install.
+    properties: null
+    repo_path: null
+    user_path: null
+  commands:
+    also_reads_from: []
+    format: Markdown
+    level: Full
+    notes: Prompt templates; the filename (minus .md) becomes the /command name. Shell-style $1/$@/$ARGUMENTS substitution.
+    properties:
+      optional:
+      - description
+      - argument-hint
+      required: []
+      source_doc: claudine/docs/research/slash-commands/pi.md
+    repo_path: .pi/prompts
+    user_path: .pi/agent/prompts
+  provider: pi
+  scripts:
+    also_reads_from: []
+    format: null
+    level: None
+    notes: Scripts are stored within skill directories (freeform sibling files resolved relative to the skill dir); Pi has no dedicated scripts resource directory.
+    properties: null
+    repo_path: null
+    user_path: null
+  skill_frontmatter:
+    allowed_tools: true
+    compatibility: true
+    description: true
+    disable_model_invocation: true
+    license: true
+    metadata: true
+    name: true
+    user_invocable: false
+  skills:
+    also_reads_from:
+    - .agents/skills
+    format: Markdown
+    level: Full
+    notes: Agent Skills standard; Pi does not enforce name == directory name and also accepts Pi-native direct root *.md skills.
+    properties:
+      optional:
+      - license
+      - compatibility
+      - metadata
+      required:
+      - name
+      - description
+      source_doc: claudine/docs/research/skills/pi.md
+    repo_path: .pi/skills
+    user_path: .pi/agent/skills
+memory_files:
+- raw: ~/.pi/agent/AGENTS.md
+  segments: []
+- raw: ~/.pi/agent/CLAUDE.md
+  segments: []
+- raw: AGENTS.md
+  segments: []
+- raw: CLAUDE.md
+  segments: []
+output_formats:
+# Pi's non-interactive shapes are selected by `--mode text|json|rpc` (or `-p`).
+# `--mode json` is a streaming NDJSON event stream (one object per line) -> the
+# Stream format. `--mode rpc` is a bidirectional protocol, not a plain output
+# format, so it is intentionally omitted (no OutputFormat variant covers it).
+- cli_flag: null
+  companion_flags: []
+  format: text
+  native_name: text
+  selector:
+    kind: default
+  stdin_supported: true
+# Headless determinism set (research non-interactive-sessions/pi.md): these
+# companion flags lock down the run so composed output is reproducible —
+# `--no-approve` (no project-trust prompt), `--no-extensions`/`--no-skills`/
+# `--no-prompt-templates` (no ambient behavior injection), `--no-context-files`
+# (Claudine owns the prompt; no AGENTS.md/CLAUDE.md discovery). Applied before
+# the `--mode json` selector by the shared structured-stream path.
+- cli_flag: --mode
+  companion_flags:
+  - --no-approve
+  - --no-extensions
+  - --no-skills
+  - --no-prompt-templates
+  - --no-context-files
+  format: stream
+  native_name: json
+  selector:
+    flag: --mode
+    kind: flag_value
+  stdin_supported: true
+# `-p` (--print) is Pi's non-interactive "process prompt and exit" flag — the
+# entrypoint trigger. The `--mode json` structured stream selector and its
+# determinism companion flags come from output_formats (applied separately), so
+# they are NOT repeated here. Verified against pi 0.80.3: `pi -p --mode json`
+# with the prompt on stdin runs headless; without `-p` it opens the TUI.
+entrypoints:
+- mode: non_interactive
+  required_flags:
+  - -p
+  subcommand: null
+system_prompt:
+  # Pi's --append-system-prompt / --system-prompt accept inline text (help:
+  # "Append text or file contents"). Claudine delivers the composed prompt as
+  # inline text (inline_flag) — unambiguous vs the text-or-path heuristic, and
+  # verified against pi 0.80.3. Both modes work interactive and non-interactive.
+  append:
+    interactive:
+      inline_flag:
+        flag: --append-system-prompt
+    non_interactive:
+      inline_flag:
+        flag: --append-system-prompt
+  memory_files:
+  - raw: ~/.pi/agent/AGENTS.md
+    segments: []
+  - raw: ~/.pi/agent/CLAUDE.md
+    segments: []
+  - raw: AGENTS.md
+    segments: []
+  - raw: CLAUDE.md
+    segments: []
+  replace:
+    interactive:
+      inline_flag:
+        flag: --system-prompt
+    non_interactive:
+      inline_flag:
+        flag: --system-prompt
+yolo: none
+reasoning:
+  named_levels:
+    flag: --thinking
+    levels:
+    - "off"
+    - minimal
+    - low
+    - medium
+    - high
+    - xhigh
+known_gaps: []
+acp:
+  client_supported: false
+  events_via_acp: []
+prompt_arg_conventions:
+  entrypoint: null
+  prompt_flags:
+  - -p
+  - --print
+cli_sensitive_axes:
+  # Pi has NO native permission policy engine — only tool VISIBILITY
+  # (--tools/--exclude-tools/--no-tools), no native MCP, and no native
+  # subagents. No CLI flag overrides a runtime permission-policy axis.
+  access_domain: false
+  execute_command: false
+  modify_provider_config: false
+  read_path: false
+  spawn_subagent: false
+  switch_mode: false
+  traverse_path: false
+  use_mcp_server: false
+  use_mcp_tool: false
+  write_path: false
+repo_home_root_files: []
+billing_models:
+# Pi fronts 15+ providers: API-key (per_token), OAuth /login subscriptions
+# (Claude Pro/Max, ChatGPT Plus/Pro Codex, GitHub Copilot), and credit-metered
+# providers (OpenRouter). See usage/pi.md.
+- prepaid_credits
+- subscription
+- per_token
+cap_policies: []
+allowed_env_keys:
+# Representative provider auth keys Pi reads (documented in the research); Pi
+# aggregates many more provider-specific *_API_KEY vars — a wrapper preserves
+# whichever matches the selected provider. ANTHROPIC_OAUTH_TOKEN outranks
+# ANTHROPIC_API_KEY in Pi's env-key map.
+- ANTHROPIC_API_KEY
+- ANTHROPIC_OAUTH_TOKEN
+- OPENAI_API_KEY
+- GEMINI_API_KEY
+display_policy:
+  tool_result_summary: show
+  info_event_suppression: []
+  collapse_task_progress: false
+  suppress_subscription_rate_limit: false
+  silent_extension_kinds: []
+  stdout_noise_prefixes: []
+  stderr_noise_prefixes: []
+suppress_structured_stderr_on_success: false
+supports_interactive_inline_closure: false
+model_required_in_non_tty: false
+platform_kind: agent_aggregator
+unmapped_native_events: []
+# Ordered error-classification vocabulary (Phase A seed, transcribed verbatim
+# from lib/src/stream/providers/pi.rs::ERROR_KEYWORDS). Pi is a message-only
+# classifier (no structured error kind), so `kind_buckets` is omitted. Sequence
+# order IS the cascade order (first substring hit wins).

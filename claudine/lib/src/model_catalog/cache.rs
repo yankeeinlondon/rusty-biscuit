@@ -1,8 +1,9 @@
-//! Cache read/write for provider model catalogs.
+//! Cache read/write for provider model listings.
 //!
-//! Cached catalogs live under `~/.claudine/cache/models/<provider>.json`.
-//! Each entry stores the model list plus a timestamp so stale-cache
-//! fallback can be implemented by callers.
+//! Cached listings live under `~/.claudine/cache/models/<provider>.json`.
+//! Each entry stores the model list plus a fetch timestamp. Listings are
+//! drift-channel input (diffed against the expected-offering baseline);
+//! they do not feed model validation.
 
 use std::collections::HashSet;
 use std::path::PathBuf;

@@ -3,14 +3,14 @@
 //!
 //! Structurally similar to Gemini but tolerates Qwen-specific event names
 //! (`tool_call`/`tool_response`, `assistant_message`, `summary` in place of
-//! `result`, `system/session_start` in place of `init`, etc.).
+//! `result`, `system/session_start` or `system/init` in place of `init`,
+//! etc.).
 
 use std::collections::HashMap;
 
 use serde_json::{Map, Value};
-use tracing::debug;
 
-use super::parser::{SemanticStreamParser, StreamParseError};
+use super::parser::SemanticStreamParser;
 use super::protocol::qwen::{
     QwenErrorEvent, QwenEvent, QwenInit, QwenMessage, QwenResult, QwenTool,
 };
@@ -60,11 +60,7 @@ impl<S: SemanticEventSink> QwenSemanticStreamParser<S> {
     }
 
     fn base_extra(&self, raw_kind: &str) -> Map<String, Value> {
-        let mut m = Map::new();
-        m.insert("provider".into(), Value::from("qwen"));
-        m.insert("line_num".into(), Value::from(self.line_num));
-        m.insert("raw_kind".into(), Value::from(raw_kind));
-        m
+        super::common::base_extra(Provider::QwenCode, self.line_num, raw_kind)
     }
 
     fn handle_init(&mut self, init: QwenInit, raw_kind: &str) {
@@ -214,35 +210,20 @@ impl<S: SemanticEventSink> QwenSemanticStreamParser<S> {
     }
 
     fn emit_provider_extension(&mut self, kind: &str, payload: Value) {
-        debug!(
-            provider = "qwen",
-            event_type = %kind,
-            "qwen parser falling back to provider extension for unknown event type"
-        );
-        self.sink
-            .on_semantic_event(SemanticEvent::ProviderExtension {
-                provider: Provider::QwenCode,
-                kind: kind.to_string(),
-                payload,
-            });
+        super::common::emit_provider_extension(&mut self.sink, Provider::QwenCode, kind, payload);
     }
 
     fn emit_malformed_warning(&mut self, err: &str) {
-        let mut extra = self.base_extra("malformed_json");
-        extra.insert("line_num".into(), Value::from(self.line_num));
-        self.sink.on_semantic_event(SemanticEvent::Warning {
-            message: format!("Malformed JSON on line {}: {err}", self.line_num),
-            extra: Value::Object(extra),
-        });
+        super::common::emit_malformed_warning(&mut self.sink, Provider::QwenCode, self.line_num, err);
     }
 }
 
 impl<S: SemanticEventSink> SemanticStreamParser for QwenSemanticStreamParser<S> {
-    fn feed_line(&mut self, line: &str) -> Result<(), StreamParseError> {
+    fn feed_line(&mut self, line: &str) {
         self.line_num += 1;
         let line = line.trim();
         if line.is_empty() {
-            return Ok(());
+            return;
         }
 
         // Try typed deserialization first to avoid `serde_json::Value` DOM
@@ -301,7 +282,7 @@ impl<S: SemanticEventSink> SemanticStreamParser for QwenSemanticStreamParser<S> 
                             &e.to_string(),
                         );
                         self.emit_malformed_warning(&e.to_string());
-                        return Ok(());
+                        return;
                     }
                 };
                 let raw_kind = raw
@@ -313,82 +294,40 @@ impl<S: SemanticEventSink> SemanticStreamParser for QwenSemanticStreamParser<S> 
                 self.emit_provider_extension(&raw_kind, Value::Object(raw));
             }
         }
-        Ok(())
     }
 
     fn finish(self: Box<Self>, exit_code: i32) -> StreamExecutionSummary {
-        let mut summary = StreamExecutionSummary {
-            provider: Provider::QwenCode,
-            session_id: self.session_id,
-            model: self.model,
-            assistant_text: self.assistant_text,
-            provider_status: self.provider_status,
-            exit_code,
-            is_error: self.is_error,
-            error_kind: self.error_kind,
-            error_message: self.error_message,
-            duration_ms: self.duration_ms,
-            duration_api_ms: None,
-            num_turns: self.num_turns,
-            token_usage: self.token_usage,
-            cost_usd: self.cost_usd,
-            tool_calls: if self.tool_calls > 0 {
-                Some(self.tool_calls)
-            } else {
-                None
+        super::common::finish_summary(
+            Provider::QwenCode,
+            StreamExecutionSummary {
+                session_id: self.session_id,
+                model: self.model,
+                assistant_text: self.assistant_text,
+                provider_status: self.provider_status,
+                exit_code,
+                is_error: self.is_error,
+                error_kind: self.error_kind,
+                error_message: self.error_message,
+                duration_ms: self.duration_ms,
+                num_turns: self.num_turns,
+                token_usage: self.token_usage,
+                cost_usd: self.cost_usd,
+                tool_calls: (self.tool_calls > 0).then_some(self.tool_calls),
+                raw_summary: self.raw_summary,
+                ..Default::default()
             },
-            permission_prompts: None,
-            user_input_prompts: None,
-            rate_limit: None,
-            context_usage: None,
-            badges: Vec::new(),
-            raw_summary: self.raw_summary,
-            stderr_text: None,
-            stderr_diagnostics: None,
-        };
-        summary.badges = crate::stream::badges::derive_badges(&summary, Provider::QwenCode);
-        summary
+        )
     }
 }
 
 /// Map a Qwen Code error envelope onto a typed [`SemanticErrorKind`].
 fn classify_error(error_kind: Option<&str>, message: Option<&str>) -> SemanticErrorKind {
-    if let Some(kind) = error_kind {
-        let lower = kind.to_ascii_lowercase();
-        if lower.contains("rate") || lower.contains("quota") || lower.contains("billing") {
-            return SemanticErrorKind::ApiRemote;
-        }
-        if lower.contains("auth") || lower.contains("config") || lower.contains("permission") {
-            return SemanticErrorKind::Configuration;
-        }
-        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("abort") {
-            return SemanticErrorKind::Interrupted;
-        }
-        if lower.contains("api") || lower.contains("upstream") || lower.contains("server") {
-            return SemanticErrorKind::ApiRemote;
-        }
-    }
-    if let Some(msg) = message {
-        let lower = msg.to_ascii_lowercase();
-        if lower.contains("rate limit")
-            || lower.contains("quota")
-            || lower.contains("billing")
-            || lower.contains("api error")
-        {
-            return SemanticErrorKind::ApiRemote;
-        }
-        if lower.contains("api key")
-            || lower.contains("authentication")
-            || lower.contains("not authorized")
-            || lower.contains("permission denied")
-        {
-            return SemanticErrorKind::Configuration;
-        }
-        if lower.contains("interrupt") || lower.contains("cancel") || lower.contains("aborted") {
-            return SemanticErrorKind::Interrupted;
-        }
-    }
-    SemanticErrorKind::AgentNative
+    super::common::classify_error_by_keywords(
+        super::vocabulary::error_keywords(Provider::QwenCode),
+        None,
+        error_kind,
+        message,
+    )
 }
 
 #[cfg(test)]
@@ -396,6 +335,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     use super::*;
+    use serde_json::json;
 
     struct Recording {
         events: Arc<Mutex<Vec<SemanticEvent>>>,
@@ -425,8 +365,7 @@ mod tests {
     fn init_emits_session_start() {
         let (events, mut parser) = new_parser();
         parser
-            .feed_line(r#"{"type":"init","session_id":"q1","model":"qwen-coder"}"#)
-            .unwrap();
+            .feed_line(r#"{"type":"init","session_id":"q1","model":"qwen-coder"}"#);
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::SessionStart { .. }
@@ -439,8 +378,7 @@ mod tests {
         parser
             .feed_line(
                 r#"{"type":"message","role":"assistant","content":[{"text":"Hello from Qwen"}]}"#,
-            )
-            .unwrap();
+            );
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::OutputText { ref text, .. } if text == "Hello from Qwen\n"
@@ -453,13 +391,11 @@ mod tests {
         parser
             .feed_line(
                 r#"{"type":"tool_call","id":"q1","name":"bash","input":{"command":"git status"}}"#,
-            )
-            .unwrap();
+            );
         parser
             .feed_line(
                 r#"{"type":"tool_response","tool_use_id":"q1","status":"success","content":"clean"}"#,
-            )
-            .unwrap();
+            );
         assert_eq!(
             kinds(&events.lock().unwrap()),
             vec!["tool_call", "tool_result"]
@@ -472,8 +408,7 @@ mod tests {
         parser
             .feed_line(
                 r#"{"type":"summary","duration_ms":3000,"token_usage":{"input_tokens":100,"output_tokens":50}}"#,
-            )
-            .unwrap();
+            );
         match &events.lock().unwrap()[0] {
             SemanticEvent::TurnComplete {
                 duration_ms,
@@ -493,8 +428,7 @@ mod tests {
         parser
             .feed_line(
                 r#"{"type":"system","subtype":"session_start","session_id":"q2","model":"qwen3-coder"}"#,
-            )
-            .unwrap();
+            );
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::SessionStart { .. }
@@ -504,11 +438,39 @@ mod tests {
     }
 
     #[test]
+    fn system_init_maps_to_session_start() {
+        // Serializer-faithful wire sample from the signals corpus
+        // (qwen.md record `stream-model_resolved-system-init`, since 0.19.6).
+        const QWEN_SYSTEM_INIT: &str = include_str!(
+            "../../../../docs/research/signals/fixtures/qwen/system-init-model-version.jsonl"
+        );
+        let (events, mut parser) = new_parser();
+        parser.feed_line(QWEN_SYSTEM_INIT.trim());
+        assert!(matches!(
+            events.lock().unwrap()[0],
+            SemanticEvent::SessionStart { .. }
+        ));
+        let summary = parser.finish(0);
+        assert_eq!(summary.session_id.as_deref(), Some("qw-1"));
+        assert_eq!(summary.model.as_deref(), Some("qwen3-coder-plus"));
+    }
+
+    #[test]
+    fn system_unknown_subtype_stays_provider_extension() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"system","subtype":"telemetry","session_id":"qx"}"#);
+        assert!(matches!(
+            events.lock().unwrap()[0],
+            SemanticEvent::ProviderExtension { .. }
+        ));
+    }
+
+    #[test]
     fn error_event_emits_terminal_error() {
         let (events, mut parser) = new_parser();
         parser
-            .feed_line(r#"{"type":"error","error":{"type":"rate_limit","message":"slow down"}}"#)
-            .unwrap();
+            .feed_line(r#"{"type":"error","error":{"type":"rate_limit","message":"slow down"}}"#);
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::Error { terminal: true, .. }
@@ -518,7 +480,7 @@ mod tests {
     #[test]
     fn unknown_event_becomes_provider_extension() {
         let (events, mut parser) = new_parser();
-        parser.feed_line(r#"{"type":"something.new"}"#).unwrap();
+        parser.feed_line(r#"{"type":"something.new"}"#);
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::ProviderExtension { ref kind, .. } if kind == "something.new"
@@ -528,11 +490,46 @@ mod tests {
     #[test]
     fn malformed_json_emits_warning() {
         let (events, mut parser) = new_parser();
-        assert!(parser.feed_line("x").is_ok());
+        parser.feed_line("x");
         assert!(matches!(
             events.lock().unwrap()[0],
             SemanticEvent::Warning { .. }
         ));
+    }
+
+    #[test]
+    fn tool_input_string_fallback_parses_without_panic() {
+        let (events, mut parser) = new_parser();
+        parser
+            .feed_line(r#"{"type":"tool_call","id":"t","name":"b","input":"ls -la"}"#);
+        let collected = events.lock().unwrap().clone();
+        assert_eq!(kinds(&collected), vec!["tool_call"]);
+        match &collected[0] {
+            SemanticEvent::ToolCall { input, .. } => {
+                assert_eq!(input.as_ref().and_then(Value::as_str), Some("ls -la"));
+            }
+            other => panic!("expected ToolCall, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn missing_discriminator_falls_through_to_provider_extension() {
+        let (events, mut parser) = new_parser();
+        parser.feed_line(r#"{"payload":{"k":1}}"#);
+        let collected = events.lock().unwrap().clone();
+        assert_eq!(collected.len(), 1);
+        match &collected[0] {
+            SemanticEvent::ProviderExtension {
+                provider,
+                kind,
+                payload,
+            } => {
+                assert_eq!(*provider, Provider::QwenCode);
+                assert_eq!(kind, "");
+                assert_eq!(payload.get("payload"), Some(&json!({"k": 1})));
+            }
+            other => panic!("expected ProviderExtension, got {other:?}"),
+        }
     }
 
     #[test]
@@ -546,7 +543,7 @@ mod tests {
             r#"{"type":"summary","duration_ms":1,"usage":{"input_tokens":1,"output_tokens":2}}"#,
             r#"{"type":"future.unknown"}"#,
         ] {
-            parser.feed_line(line).unwrap();
+            parser.feed_line(line);
         }
         for event in events.lock().unwrap().iter() {
             let v = serde_json::to_value(event).unwrap();

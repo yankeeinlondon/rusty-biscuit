@@ -29,6 +29,7 @@ clap = { version = "4.5", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 color-eyre = "0.6"
 rayon = "1.11.0"
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
 serde_yaml_ng = "0.10"
@@ -49,3 +50,10 @@ serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 tracing-test = "0.2"
 syntect = "5.2"
+
+# CI policy: darkmatter's L1 contract keeps `slow_` tests, and the CLI owns L2
+# (render-tree terminal) tier tests.
+[package.metadata.ci.tests]
+tiers = ["L1", "L2"]
+l2-backends = ["tmux", "wezterm"]
+l1-include-slow = true

@@ -1,6 +1,8 @@
+use biscuit_file::serde_yaml_ng;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
-use tracing::info_span;
+use darkmatter::markdown::schemas::{SimplifiedSchema, parse_yaml_schema};
+use tracing::{info_span, warn};
 
 use crate::system_prompt::types::*;
 
@@ -13,43 +15,123 @@ fn source_path(source: &SystemPromptSource) -> Option<&std::path::Path> {
     }
 }
 
-fn mode_for_source(source: &SystemPromptSource) -> SystemPromptMode {
+fn invocation_context_error(
+    error: crate::invocation_context::InvocationContextError,
+) -> crate::error::ClaudineError {
+    crate::error::ClaudineError::Io(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        error,
+    ))
+}
+
+struct ResolvedPromptInput {
+    source: SystemPromptSource,
+    raw_text: String,
+    source_context: Option<crate::invocation_context::SourceContext>,
+}
+
+impl ResolvedPromptInput {
+    fn capture(
+        resolved: (SystemPromptSource, String),
+        invocation: &crate::invocation_context::InvocationContext,
+    ) -> Result<Self, crate::error::ClaudineError> {
+        let (source, raw_text) = resolved;
+        let source_context = source_path(&source)
+            .map(|path| invocation.derive_source(path).map_err(invocation_context_error))
+            .transpose()?;
+        Ok(Self {
+            source,
+            raw_text,
+            source_context,
+        })
+    }
+}
+
+/// Baseline [`SimplifiedSchema`] claudine attaches to discovered
+/// `system-prompt.md` files so the `mode` frontmatter key is validated
+/// during Darkmatter compose.
+///
+/// The schema declares a single optional property:
+///
+/// - `mode: enum(append, replace; default(append))`
+///
+/// The `default(append)` is annotation-only — Darkmatter does not
+/// backfill an absent key into the composed frontmatter — so
+/// [`mode_from_composed`] still treats an absent `mode` as `Append`.
+///
+/// Constructed once per discovered-source compose call from a
+/// compile-controlled literal; a parse failure here is a programmer
+/// error, not a runtime condition, hence the panic over the grammar
+/// constant.
+fn discovered_baseline_schema() -> SimplifiedSchema {
+    const MODE_GRAMMAR: &str = "enum(append, replace; default(append))";
+    let mut mapping = serde_yaml_ng::Mapping::new();
+    mapping.insert(
+        serde_yaml_ng::Value::String("mode".to_string()),
+        serde_yaml_ng::Value::String(MODE_GRAMMAR.to_string()),
+    );
+    parse_yaml_schema(&serde_yaml_ng::Value::Mapping(mapping)).unwrap_or_else(|err| {
+        panic!(
+            "discovered system-prompt baseline schema must parse (grammar: `{MODE_GRAMMAR}`): {err}"
+        )
+    })
+}
+
+/// Read the effective delivery mode for a discovered system-prompt from
+/// its **composed** frontmatter.
+///
+/// The baseline schema attached during compose (`mode` enum of
+/// `append`/`replace`) validates the value, so the common path is an
+/// enum-validated string. The one way an unexpected value can still
+/// arrive is if the document declares its own `$schema` that redefines
+/// `mode` (merge rule: document-side-wins). The read-back stays
+/// defensive in that override case: any non-`replace` result (including
+/// `Ok(None)` for an absent key and `Err(_)` for a non-string that
+/// escaped validation) resolves to `Append`, the backwards-compatible
+/// default — never a panic, never a bespoke mode.
+fn mode_from_composed(composed: &Markdown) -> SystemPromptMode {
+    match composed.fm_get::<String>("mode") {
+        Ok(Some(value)) if value == "replace" => SystemPromptMode::Replace,
+        Ok(_) => SystemPromptMode::Append,
+        Err(err) => {
+            warn!(
+                error = %err,
+                "system-prompt `mode` read-back failed; falling back to Append"
+            );
+            SystemPromptMode::Append
+        }
+    }
+}
+
+/// Resolve the effective delivery mode after compose.
+///
+/// Discovered files read their mode from the composed frontmatter
+/// ([`mode_from_composed`]). Explicit-flag files carry their mode on
+/// the source itself, and the non-interactive sources are always
+/// `Append` (their content is appended regardless of any frontmatter).
+fn effective_mode(source: &SystemPromptSource, composed: &Markdown) -> SystemPromptMode {
     match source {
-        SystemPromptSource::StandardDiscovered { .. }
-        | SystemPromptSource::NonInteractiveFile { .. }
-        | SystemPromptSource::BuiltInNonInteractive => SystemPromptMode::Append,
+        SystemPromptSource::StandardDiscovered { .. } => mode_from_composed(composed),
         SystemPromptSource::ExplicitFile { mode, .. } => *mode,
+        SystemPromptSource::NonInteractiveFile { .. }
+        | SystemPromptSource::BuiltInNonInteractive => SystemPromptMode::Append,
     }
 }
 
 fn compose_prompt_markdown(
     source: &SystemPromptSource,
     raw_text: &str,
-    shared_ctx: Option<&ComposeContext>,
+    shared_ctx: Option<&SharedComposeContext>,
+    source_context: Option<&crate::invocation_context::SourceContext>,
     shell_cwd: Option<&std::path::Path>,
-) -> Result<String, crate::error::ClaudineError> {
+) -> Result<Markdown, crate::error::ClaudineError> {
     let md: Markdown = raw_text.into();
 
-    // Demand-driven runtime-context capture (perf, 2026-05-10).
-    //
-    // The default `ComposeOptions::new()` calls `ComposeContext::capture()`
-    // which runs the full `ContextGroup::all()` pipeline: git, repo, file
-    // changes, languages, document discovery, OS detection, hardware
-    // summary, and a GPU subprocess on macOS. On a representative
-    // worktree this measures ~150 ms per call. The system-prompt path
-    // does this twice (system prompt + non-interactive appendix), turning
-    // a sub-second prep phase into a 300+ ms tax on every compose run.
-    //
-    // System prompts and non-interactive appendices rarely reference
-    // `ctx.*` at all. `ComposeContext::capture_for_content` scans the
-    // raw text for `ctx.*` tokens and only captures the groups whose
-    // variables are referenced — DateTime is free, the rest is skipped
-    // entirely when the file has no `ctx.*` references. When the caller
-    // already has a context covering the union of all relevant content
-    // (e.g. system-prompt + non-interactive appendix), it can pass it
-    // through `shared_ctx` so the per-call capture is skipped.
+    // Canonical session preparation supplies one context covering the union of
+    // the primary and appendix requirements. The ambient branch remains for
+    // library compatibility and captures only groups referenced by this file.
     let ctx = match shared_ctx {
-        Some(c) => c.clone(),
+        Some(c) => c.runtime.clone(),
         None => {
             let base_dir = match source_path(source).and_then(|p| p.parent()) {
                 Some(parent) => parent.to_path_buf(),
@@ -58,7 +140,7 @@ fn compose_prompt_markdown(
             ComposeContext::capture_for_content(&base_dir, raw_text)
         }
     };
-    let options = match source_path(source) {
+    let mut options = match source_path(source) {
         Some(path) => crate::composition::bind_agent_workspace(
             ComposeOptions::new_with_context(ctx),
             path,
@@ -66,10 +148,28 @@ fn compose_prompt_markdown(
         ),
         None => ComposeOptions::new_with_context(ctx),
     };
+    if let Some(invocation) = shared_ctx.and_then(|shared| shared.invocation.as_ref()) {
+        invocation.record_compose_operation();
+    }
+    if let Some(source_context) = source_context {
+        options = options.with_file_resolution_context(
+            source_context.file_resolution_context().clone(),
+        );
+    }
+    // Attach the baseline schema for discovered `system-prompt.md` files
+    // only — explicit flags carry their own mode and the non-interactive
+    // appendix is always appended, so neither runs `mode` validation.
+    // The returned `Markdown` carries the composed frontmatter, from
+    // which the discovered mode is read back by `mode_from_composed`.
+    let options = if matches!(source, SystemPromptSource::StandardDiscovered { .. }) {
+        options.with_baseline_schema(discovered_baseline_schema())
+    } else {
+        options
+    };
 
     let (composed, _report) = md.compose_with(options)?;
 
-    Ok(composed.content().to_string())
+    Ok(composed)
 }
 
 fn merge_prompt_sections(base: &str, appendix: &str) -> String {
@@ -85,70 +185,100 @@ fn merge_prompt_sections(base: &str, appendix: &str) -> String {
     }
 }
 
-/// Capture a single `ComposeContext` covering every text body that the
-/// caller will compose this session.
-///
-/// Scans the union of all bodies for `ctx.*` references via
-/// [`ComposeContext::capture_for_content`] so each runtime-context
-/// group (Repo, OS, Hardware, etc.) is captured at most once even when
-/// the system prompt and the non-interactive appendix together
-/// reference fields from several groups.
-fn build_shared_compose_context(
-    primary: Option<(&SystemPromptSource, &str)>,
-    appendix_candidates: Option<&[(&SystemPromptSource, &str)]>,
+struct SharedComposeContext {
+    runtime: ComposeContext,
+    invocation: Option<crate::invocation_context::InvocationContext>,
+}
+
+fn build_shared_compose_context_with_invocation(
+    primary: Option<&ResolvedPromptInput>,
+    appendix_candidates: Option<&[ResolvedPromptInput]>,
     launch_context: &crate::system_prompt::context::LaunchContext,
-) -> ComposeContext {
+    invocation: &crate::invocation_context::InvocationContext,
+) -> Result<SharedComposeContext, crate::error::ClaudineError> {
     let mut combined = String::new();
-    if let Some((_, text)) = primary {
-        combined.push_str(text);
+    if let Some(input) = primary {
+        combined.push_str(&input.raw_text);
         combined.push('\n');
     }
     if let Some(candidates) = appendix_candidates {
-        for (_, text) in candidates {
-            combined.push_str(text);
+        for input in candidates {
+            combined.push_str(&input.raw_text);
             combined.push('\n');
         }
     }
 
-    // Anchor the capture to a directory that exists. Prefer the launch
-    // context's CWD because resolution is most often rooted there;
-    // falling back to the source file's parent or the process CWD
-    // mirrors the pre-shared-context behaviour for callers that don't
-    // pass a primary source.
-    let base_dir = if launch_context.cwd.exists() {
-        launch_context.cwd.clone()
-    } else if let Some(parent) = primary.and_then(|(s, _)| source_path(s).and_then(|p| p.parent()))
-    {
-        parent.to_path_buf()
-    } else {
-        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
+    let source_context = primary
+        .and_then(|input| input.source_context.clone())
+        .or_else(|| {
+            appendix_candidates.and_then(|candidates| {
+                candidates
+                    .iter()
+                    .find_map(|input| input.source_context.clone())
+            })
+        });
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(&combined);
+    let mut runtime = match source_context.as_ref() {
+        Some(source_context) => {
+            let evidence = invocation.runtime_evidence(source_context, &requirements);
+            ComposeContext::capture_with_evidence(
+                source_context.base_dir(),
+                &requirements,
+                &evidence,
+            )
+        }
+        // Built-in appendix only: neither the primary prompt nor any
+        // appendix candidate has a file source to derive from. This stays
+        // on the request-owned evidence path (D4/D6): no fabricated
+        // `source_path` is invented to feed `derive_source`, and no ambient
+        // `std::env::vars()`/CWD read is substituted either — the evidence
+        // bundle carries only the invocation's captured environment, so any
+        // Git/repo/OS/etc. group a future built-in appendix might reference
+        // resolves to null rather than a live ambient read.
+        None => {
+            let evidence = darkmatter::markdown::compose::ContextCaptureEvidence::new(
+                invocation.environment().clone(),
+            );
+            ComposeContext::capture_with_evidence(invocation.launch_cwd(), &requirements, &evidence)
+        }
     };
-
-    let mut ctx = ComposeContext::capture_for_content(&base_dir, &combined);
-    if let Some(ref agent) = launch_context.agent {
-        ctx.env_mut().insert("AGENT".to_string(), agent.clone());
+    if let Some(agent) = launch_context.agent.as_ref() {
+        runtime.env_mut().insert("AGENT".to_string(), agent.clone());
     }
-    ctx
+
+    Ok(SharedComposeContext {
+        runtime,
+        invocation: Some(invocation.clone()),
+    })
 }
 
-/// Internal variant of [`prepare_system_prompt`] that accepts a
-/// pre-captured shared context. The public entrypoint passes `None`
-/// to preserve its original capture semantics.
+/// Prepare a resolved input with its request-owned source and compose context.
 fn prepare_system_prompt_with_ctx(
-    source: SystemPromptSource,
-    raw_text: &str,
-    shared_ctx: Option<&ComposeContext>,
+    input: ResolvedPromptInput,
+    shared_ctx: Option<&SharedComposeContext>,
     shell_cwd: Option<&std::path::Path>,
 ) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
-    let mode = mode_for_source(&source);
-    let composed_markdown = compose_prompt_markdown(&source, raw_text, shared_ctx, shell_cwd)?;
+    let ResolvedPromptInput {
+        source,
+        raw_text,
+        source_context,
+    } = input;
+    let composed_md = compose_prompt_markdown(
+        &source,
+        &raw_text,
+        shared_ctx,
+        source_context.as_ref(),
+        shell_cwd,
+    )?;
+    let composed_markdown = composed_md.content().to_string();
     if composed_markdown.trim().is_empty() {
         return Ok(ResolvedSystemPrompt::Disabled { source });
     }
+    let mode = effective_mode(&source, &composed_md);
     Ok(ResolvedSystemPrompt::Ready(PreparedSystemPrompt {
         mode,
         source,
-        raw_text: raw_text.to_string(),
+        raw_text,
         composed_markdown,
         non_interactive_appendix: None,
     }))
@@ -157,13 +287,24 @@ fn prepare_system_prompt_with_ctx(
 /// Variant of [`prepare_non_interactive_appendix`] that consumes an
 /// already-resolved candidate list and an optional shared context.
 fn prepare_non_interactive_appendix_from(
-    candidates: Vec<(SystemPromptSource, String)>,
-    shared_ctx: Option<&ComposeContext>,
+    candidates: Vec<ResolvedPromptInput>,
+    shared_ctx: Option<&SharedComposeContext>,
     shell_cwd: Option<&std::path::Path>,
 ) -> Result<PreparedNonInteractiveAppendix, crate::error::ClaudineError> {
-    for (source, raw_text) in candidates {
-        let composed_markdown = compose_prompt_markdown(&source, &raw_text, shared_ctx, shell_cwd)?;
-        let normalized = composed_markdown.trim().to_string();
+    for input in candidates {
+        let ResolvedPromptInput {
+            source,
+            raw_text,
+            source_context,
+        } = input;
+        let composed_md = compose_prompt_markdown(
+            &source,
+            &raw_text,
+            shared_ctx,
+            source_context.as_ref(),
+            shell_cwd,
+        )?;
+        let normalized = composed_md.content().trim().to_string();
         if normalized.is_empty() {
             continue;
         }
@@ -185,17 +326,18 @@ pub fn prepare_system_prompt(
     source: SystemPromptSource,
     raw_text: &str,
 ) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
-    let mode = mode_for_source(&source);
     // No launch context here, so shell directives fall back to Darkmatter's
     // source-relative default. The session-aware path supplies a working
     // directory via `resolve_and_prepare_for_session`.
-    let composed_markdown = compose_prompt_markdown(&source, raw_text, None, None)?;
+    let composed_md = compose_prompt_markdown(&source, raw_text, None, None, None)?;
+    let composed_markdown = composed_md.content().to_string();
 
     // Empty-body check
     if composed_markdown.trim().is_empty() {
         return Ok(ResolvedSystemPrompt::Disabled { source });
     }
 
+    let mode = effective_mode(&source, &composed_md);
     Ok(ResolvedSystemPrompt::Ready(PreparedSystemPrompt {
         mode,
         source,
@@ -220,55 +362,108 @@ pub fn resolve_and_prepare_for_session(
     context: &crate::system_prompt::context::LaunchContext,
     non_interactive: bool,
 ) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&context.cwd);
+    resolve_and_prepare_for_session_with_context(args, context, non_interactive, &invocation)
+}
+
+/// Resolve and compose session prompts using request-owned discovery evidence.
+pub fn resolve_and_prepare_for_session_with_context(
+    args: &SystemPromptArgs,
+    context: &crate::system_prompt::context::LaunchContext,
+    non_interactive: bool,
+    invocation: &crate::invocation_context::InvocationContext,
+) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
     let _span = info_span!(
         "system_prompt_prepare",
         non_interactive,
         repo = %context.repo_root.as_ref().map(|p| p.display().to_string()).unwrap_or_default(),
     )
     .entered();
+    invocation.record_system_prompt_lookup();
 
     // Resolve sources up front so we can capture the runtime context
     // once over the union of every text body that will go through
     // Darkmatter compose. Capturing per-call paid the demand-driven
     // cost twice (system prompt + appendix); a single pre-capture pays
     // it once.
-    let primary = crate::system_prompt::resolve::resolve_system_prompt_source(args, context)?;
-    let appendix_candidates = if non_interactive {
-        Some(crate::system_prompt::resolve::resolve_non_interactive_candidates(context)?)
+    let lookup_started = std::time::Instant::now();
+    let primary_result = crate::system_prompt::resolve::resolve_system_prompt_source_with_invocation(
+        args,
+        context,
+        invocation,
+    );
+    let appendix_candidates_result = if non_interactive {
+        Some(
+            crate::system_prompt::resolve::resolve_non_interactive_candidates_with_invocation(
+                context,
+                invocation,
+            ),
+        )
     } else {
         None
     };
+    invocation.record_system_prompt_timing("lookup", lookup_started.elapsed());
+    let primary = primary_result?
+        .map(|resolved| ResolvedPromptInput::capture(resolved, invocation))
+        .transpose()?;
+    let appendix_candidates = appendix_candidates_result
+        .transpose()?
+        .map(|candidates| {
+            candidates
+                .into_iter()
+                .map(|resolved| ResolvedPromptInput::capture(resolved, invocation))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
 
-    let shared_ctx = build_shared_compose_context(
-        primary.as_ref().map(|(s, t)| (s, t.as_str())),
-        appendix_candidates
-            .as_ref()
-            .map(|cs| cs.iter().map(|(s, t)| (s, t.as_str())).collect::<Vec<_>>())
-            .as_deref(),
+    let runtime_capture_started = std::time::Instant::now();
+    let shared_ctx_result = build_shared_compose_context_with_invocation(
+        primary.as_ref(),
+        appendix_candidates.as_deref(),
         context,
+        invocation,
+    );
+    invocation.record_system_prompt_timing(
+        "runtime capture",
+        runtime_capture_started.elapsed(),
+    );
+    let shared_ctx = shared_ctx_result?;
+
+    // Pin `::shell` execution to the agent's launch workspace so directives
+    // run where the agent does, not next to the template file on disk.
+    let shell_cwd = Some(
+        context
+            .repo_root
+            .as_deref()
+            .unwrap_or_else(|| invocation.launch_cwd()),
     );
 
-    // Pin `::shell` execution to the agent's launch repo root so directives
-    // in a system-prompt template run where the agent does, not next to the
-    // template file on disk.
-    let shell_cwd = context.repo_root.as_deref();
-
-    let effective = match primary {
-        Some((source, raw_text)) => {
-            prepare_system_prompt_with_ctx(source, &raw_text, Some(&shared_ctx), shell_cwd)?
-        }
-        None => ResolvedSystemPrompt::None,
+    let primary_compose_started = std::time::Instant::now();
+    let effective_result = match primary {
+        Some(input) => prepare_system_prompt_with_ctx(input, Some(&shared_ctx), shell_cwd),
+        None => Ok(ResolvedSystemPrompt::None),
     };
+    invocation.record_system_prompt_timing(
+        "primary compose",
+        primary_compose_started.elapsed(),
+    );
+    let effective = effective_result?;
 
     if !non_interactive {
         return Ok(effective);
     }
 
-    let appendix = prepare_non_interactive_appendix_from(
+    let appendix_compose_started = std::time::Instant::now();
+    let appendix_result = prepare_non_interactive_appendix_from(
         appendix_candidates.unwrap_or_default(),
         Some(&shared_ctx),
         shell_cwd,
-    )?;
+    );
+    invocation.record_system_prompt_timing(
+        "appendix compose",
+        appendix_compose_started.elapsed(),
+    );
+    let appendix = appendix_result?;
 
     Ok(match effective {
         ResolvedSystemPrompt::Ready(mut prepared) => {
@@ -279,7 +474,19 @@ pub fn resolve_and_prepare_for_session(
             ResolvedSystemPrompt::Ready(prepared)
         }
         ResolvedSystemPrompt::Disabled { source } => {
-            let mode = mode_for_source(&source);
+            let mode = match &source {
+                SystemPromptSource::ExplicitFile { mode, .. } => *mode,
+                // An empty discovered/non-interactive body makes the
+                // declared mode moot — the effective prompt becomes the
+                // appendix, which is Append-style content (matches the
+                // spec's empty-body edge case where `mode` is
+                // irrelevant). `NonInteractiveFile` / `BuiltInNonInteractive`
+                // cannot reach this arm via `resolve_system_prompt_source`
+                // but are listed for exhaustiveness.
+                SystemPromptSource::StandardDiscovered { .. }
+                | SystemPromptSource::NonInteractiveFile { .. }
+                | SystemPromptSource::BuiltInNonInteractive => SystemPromptMode::Append,
+            };
             ResolvedSystemPrompt::Ready(PreparedSystemPrompt {
                 mode,
                 source: appendix.source.clone(),
@@ -299,473 +506,4 @@ pub fn resolve_and_prepare_for_session(
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serial_test::serial;
-    use std::path::PathBuf;
-    use tempfile::TempDir;
-
-    use crate::system_prompt::context::LaunchContext;
-
-    /// Helper: create a temp file and return its path.
-    fn write_temp_file(dir: &std::path::Path, name: &str, content: &str) -> PathBuf {
-        let path = dir.join(name);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).unwrap();
-        }
-        std::fs::write(&path, content).unwrap();
-        path
-    }
-
-    #[test]
-    fn plain_markdown_composes_as_is() {
-        let tmp = TempDir::new().unwrap();
-        let path = write_temp_file(tmp.path(), "prompt.md", "# Hello World\n\nSome content.");
-
-        let source = SystemPromptSource::StandardDiscovered {
-            path,
-            scope: StandardPromptScope::Repo,
-        };
-
-        let result = prepare_system_prompt(source, "# Hello World\n\nSome content.").unwrap();
-
-        match result {
-            ResolvedSystemPrompt::Ready(prepared) => {
-                assert!(prepared.composed_markdown.contains("Hello World"));
-                assert!(prepared.composed_markdown.contains("Some content."));
-                assert_eq!(prepared.mode, SystemPromptMode::Append);
-            }
-            other => panic!("Expected Ready, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn transclusion_resolves_relative() {
-        let tmp = TempDir::new().unwrap();
-        let included_path = write_temp_file(tmp.path(), "included.md", "Included content here.");
-        let _ = &included_path; // ensure file exists
-
-        let prompt_path = write_temp_file(
-            tmp.path(),
-            "prompt.md",
-            "Before.\n\n::file ./included.md\n\nAfter.",
-        );
-
-        let source = SystemPromptSource::StandardDiscovered {
-            path: prompt_path,
-            scope: StandardPromptScope::Package,
-        };
-
-        let result =
-            prepare_system_prompt(source, "Before.\n\n::file ./included.md\n\nAfter.").unwrap();
-
-        match result {
-            ResolvedSystemPrompt::Ready(prepared) => {
-                assert!(
-                    prepared
-                        .composed_markdown
-                        .contains("Included content here."),
-                    "Expected transclusion to resolve. Got: {}",
-                    prepared.composed_markdown
-                );
-                assert!(prepared.composed_markdown.contains("Before."));
-                assert!(prepared.composed_markdown.contains("After."));
-            }
-            other => panic!("Expected Ready, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn shell_directive_executes() {
-        let tmp = TempDir::new().unwrap();
-
-        // Shell policy resolution walks up to find .git root, so create
-        // a fake git root and place the whitelist there.
-        std::fs::create_dir_all(tmp.path().join(".git")).unwrap();
-        write_temp_file(tmp.path(), ".darkmatter-shell-whitelist", "prefix echo\n");
-
-        let path = write_temp_file(
-            tmp.path(),
-            "prompt.md",
-            "Pre.\n\n::shell echo hello\n\nPost.",
-        );
-
-        let source = SystemPromptSource::StandardDiscovered {
-            path,
-            scope: StandardPromptScope::Repo,
-        };
-
-        let result = prepare_system_prompt(source, "Pre.\n\n::shell echo hello\n\nPost.").unwrap();
-
-        match result {
-            ResolvedSystemPrompt::Ready(prepared) => {
-                assert!(
-                    prepared.composed_markdown.contains("hello"),
-                    "Expected shell output. Got: {}",
-                    prepared.composed_markdown
-                );
-            }
-            other => panic!("Expected Ready, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn interpolation_expands() {
-        let tmp = TempDir::new().unwrap();
-        let path = write_temp_file(tmp.path(), "prompt.md", "Today is {{today}}.");
-
-        let source = SystemPromptSource::StandardDiscovered {
-            path,
-            scope: StandardPromptScope::Repo,
-        };
-
-        let result = prepare_system_prompt(source, "Today is {{today}}.").unwrap();
-
-        match result {
-            ResolvedSystemPrompt::Ready(prepared) => {
-                // {{today}} should be replaced with an actual date, not the literal
-                assert!(
-                    !prepared.composed_markdown.contains("{{today}}"),
-                    "Expected interpolation to expand. Got: {}",
-                    prepared.composed_markdown
-                );
-            }
-            other => panic!("Expected Ready, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn empty_body_produces_disabled() {
-        let tmp = TempDir::new().unwrap();
-        let path = write_temp_file(tmp.path(), "prompt.md", "---\ntitle: Empty\n---\n");
-
-        let source = SystemPromptSource::StandardDiscovered {
-            path,
-            scope: StandardPromptScope::Repo,
-        };
-
-        let result = prepare_system_prompt(source, "---\ntitle: Empty\n---\n").unwrap();
-
-        assert!(
-            result.is_disabled(),
-            "Expected Disabled for empty body, got {result:?}"
-        );
-    }
-
-    #[test]
-    fn whitespace_only_body_produces_disabled() {
-        let tmp = TempDir::new().unwrap();
-        let path = write_temp_file(tmp.path(), "prompt.md", "---\ntitle: Blank\n---\n\n   \n\n");
-
-        let source = SystemPromptSource::StandardDiscovered {
-            path,
-            scope: StandardPromptScope::Repo,
-        };
-
-        let result = prepare_system_prompt(source, "---\ntitle: Blank\n---\n\n   \n\n").unwrap();
-
-        assert!(
-            result.is_disabled(),
-            "Expected Disabled for whitespace-only body, got {result:?}"
-        );
-    }
-
-    #[test]
-    fn frontmatter_not_forwarded() {
-        let tmp = TempDir::new().unwrap();
-        let raw = "---\ntitle: Secret\n---\n\nVisible body.";
-        let path = write_temp_file(tmp.path(), "prompt.md", raw);
-
-        let source = SystemPromptSource::StandardDiscovered {
-            path,
-            scope: StandardPromptScope::Repo,
-        };
-
-        let result = prepare_system_prompt(source, raw).unwrap();
-
-        match result {
-            ResolvedSystemPrompt::Ready(prepared) => {
-                assert!(
-                    !prepared.composed_markdown.contains("---"),
-                    "Frontmatter delimiters should not appear in composed output. Got: {}",
-                    prepared.composed_markdown
-                );
-                assert!(
-                    !prepared.composed_markdown.contains("title: Secret"),
-                    "Frontmatter content should not appear. Got: {}",
-                    prepared.composed_markdown
-                );
-                assert!(prepared.composed_markdown.contains("Visible body."));
-            }
-            other => panic!("Expected Ready, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn standard_file_always_append() {
-        let tmp = TempDir::new().unwrap();
-        let path = write_temp_file(tmp.path(), "prompt.md", "Content.");
-
-        let source = SystemPromptSource::StandardDiscovered {
-            path,
-            scope: StandardPromptScope::Package,
-        };
-
-        let result = prepare_system_prompt(source, "Content.").unwrap();
-
-        match result {
-            ResolvedSystemPrompt::Ready(prepared) => {
-                assert_eq!(prepared.mode, SystemPromptMode::Append);
-            }
-            other => panic!("Expected Ready, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn explicit_replace_preserves_mode() {
-        let tmp = TempDir::new().unwrap();
-        let path = write_temp_file(tmp.path(), "prompt.md", "Replacement content.");
-
-        let source = SystemPromptSource::ExplicitFile {
-            path,
-            mode: SystemPromptMode::Replace,
-        };
-
-        let result = prepare_system_prompt(source, "Replacement content.").unwrap();
-
-        match result {
-            ResolvedSystemPrompt::Ready(prepared) => {
-                assert_eq!(prepared.mode, SystemPromptMode::Replace);
-            }
-            other => panic!("Expected Ready, got {other:?}"),
-        }
-    }
-
-    #[test]
-    #[serial]
-    fn non_interactive_session_uses_builtin_when_no_prompt_exists() {
-        let tmp = TempDir::new().unwrap();
-        let home = tmp.path().join("home");
-        let cwd = tmp.path().join("workspace");
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::create_dir_all(&cwd).unwrap();
-
-        unsafe {
-            std::env::set_var("HOME", &home);
-        }
-
-        let args = SystemPromptArgs::default();
-        let context = LaunchContext {
-            agent: None,
-            cwd: cwd.clone(),
-            repo_root: Some(cwd),
-            package_area_root: None,
-            package_root: None,
-        };
-
-        let result = resolve_and_prepare_for_session(&args, &context, true).unwrap();
-
-        unsafe {
-            std::env::remove_var("HOME");
-        }
-
-        match result {
-            ResolvedSystemPrompt::Ready(prepared) => {
-                assert_eq!(prepared.mode, SystemPromptMode::Append);
-                assert_eq!(
-                    prepared.composed_markdown,
-                    DEFAULT_NON_INTERACTIVE_SYSTEM_PROMPT.trim()
-                );
-                assert!(matches!(
-                    prepared.source,
-                    SystemPromptSource::BuiltInNonInteractive
-                ));
-                assert!(prepared.non_interactive_appendix.is_none());
-            }
-            other => panic!("Expected Ready, got {other:?}"),
-        }
-    }
-
-    #[test]
-    #[serial]
-    fn non_interactive_session_appends_repo_prompt() {
-        let tmp = TempDir::new().unwrap();
-        let repo = tmp.path().join("repo");
-        let home = tmp.path().join("home");
-        std::fs::create_dir_all(repo.join(".claudine")).unwrap();
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::write(repo.join("system-prompt.md"), "Base prompt.").unwrap();
-        std::fs::write(
-            repo.join(".claudine").join("non-interactive.md"),
-            "Repo appendix.",
-        )
-        .unwrap();
-
-        unsafe {
-            std::env::set_var("HOME", &home);
-        }
-
-        let args = SystemPromptArgs::default();
-        let context = LaunchContext {
-            agent: None,
-            cwd: repo.clone(),
-            repo_root: Some(repo.clone()),
-            package_area_root: None,
-            package_root: None,
-        };
-
-        let result = resolve_and_prepare_for_session(&args, &context, true).unwrap();
-
-        unsafe {
-            std::env::remove_var("HOME");
-        }
-
-        match result {
-            ResolvedSystemPrompt::Ready(prepared) => {
-                assert_eq!(prepared.mode, SystemPromptMode::Append);
-                assert_eq!(prepared.composed_markdown, "Base prompt.\n\nRepo appendix.");
-                let appendix = prepared
-                    .non_interactive_appendix
-                    .expect("missing non-interactive appendix metadata");
-                assert_eq!(appendix.composed_markdown, "Repo appendix.");
-                assert!(matches!(
-                    appendix.source,
-                    SystemPromptSource::NonInteractiveFile {
-                        scope: StandardPromptScope::Repo,
-                        ..
-                    }
-                ));
-            }
-            other => panic!("Expected Ready, got {other:?}"),
-        }
-    }
-
-    #[test]
-    #[serial]
-    fn non_interactive_session_preserves_replace_mode() {
-        let tmp = TempDir::new().unwrap();
-        let repo = tmp.path().join("repo");
-        let home = tmp.path().join("home");
-        std::fs::create_dir_all(repo.join(".claudine")).unwrap();
-        std::fs::create_dir_all(&home).unwrap();
-
-        let replace_path = write_temp_file(repo.as_path(), "replace.md", "Replacement prompt.");
-        std::fs::write(
-            repo.join(".claudine").join("non-interactive.md"),
-            "Repo appendix.",
-        )
-        .unwrap();
-
-        unsafe {
-            std::env::set_var("HOME", &home);
-        }
-
-        let args = SystemPromptArgs {
-            replace_file: Some(replace_path.display().to_string()),
-            ..Default::default()
-        };
-        let context = LaunchContext {
-            agent: None,
-            cwd: repo.clone(),
-            repo_root: Some(repo.clone()),
-            package_area_root: None,
-            package_root: None,
-        };
-
-        let result = resolve_and_prepare_for_session(&args, &context, true).unwrap();
-
-        unsafe {
-            std::env::remove_var("HOME");
-        }
-
-        match result {
-            ResolvedSystemPrompt::Ready(prepared) => {
-                assert_eq!(prepared.mode, SystemPromptMode::Replace);
-                assert_eq!(
-                    prepared.composed_markdown,
-                    "Replacement prompt.\n\nRepo appendix."
-                );
-            }
-            other => panic!("Expected Ready, got {other:?}"),
-        }
-    }
-
-    #[test]
-    #[serial]
-    fn non_interactive_session_ignores_empty_base_prompt() {
-        let tmp = TempDir::new().unwrap();
-        let repo = tmp.path().join("repo");
-        let home = tmp.path().join("home");
-        std::fs::create_dir_all(repo.join(".claudine")).unwrap();
-        std::fs::create_dir_all(&home).unwrap();
-        std::fs::write(repo.join("system-prompt.md"), "---\ntitle: Empty\n---\n").unwrap();
-        std::fs::write(
-            repo.join(".claudine").join("non-interactive.md"),
-            "Repo appendix.",
-        )
-        .unwrap();
-
-        unsafe {
-            std::env::set_var("HOME", &home);
-        }
-
-        let args = SystemPromptArgs::default();
-        let context = LaunchContext {
-            agent: None,
-            cwd: repo.clone(),
-            repo_root: Some(repo.clone()),
-            package_area_root: None,
-            package_root: None,
-        };
-
-        let result = resolve_and_prepare_for_session(&args, &context, true).unwrap();
-
-        unsafe {
-            std::env::remove_var("HOME");
-        }
-
-        match result {
-            ResolvedSystemPrompt::Ready(prepared) => {
-                assert_eq!(prepared.mode, SystemPromptMode::Append);
-                assert_eq!(prepared.composed_markdown, "Repo appendix.");
-                assert!(matches!(
-                    prepared.source,
-                    SystemPromptSource::NonInteractiveFile {
-                        scope: StandardPromptScope::Repo,
-                        ..
-                    }
-                ));
-            }
-            other => panic!("Expected Ready, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn resolve_and_prepare_none() {
-        let tmp = TempDir::new().unwrap();
-        let cwd = tmp.path().join("empty");
-        std::fs::create_dir_all(&cwd).unwrap();
-
-        let args = SystemPromptArgs::default();
-        let context = LaunchContext {
-            agent: None,
-            cwd: cwd.clone(),
-            repo_root: Some(cwd.clone()),
-            package_area_root: None,
-            package_root: None,
-        };
-
-        let result = resolve_and_prepare(&args, &context).unwrap();
-
-        // Should be None unless ~/.claudine/system-prompt.md exists on the host
-        match result {
-            ResolvedSystemPrompt::None => {} // expected in clean test environments
-            ResolvedSystemPrompt::Ready(_) => {
-                // Acceptable if user has ~/.claudine/system-prompt.md
-            }
-            ResolvedSystemPrompt::Disabled { .. } => {
-                // Acceptable if user has an empty ~/.claudine/system-prompt.md
-            }
-        }
-    }
-}
+mod tests;

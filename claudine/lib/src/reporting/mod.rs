@@ -1,3 +1,4 @@
+pub mod error;
 pub mod ingest;
 pub mod metrics;
 pub mod paths;
@@ -11,11 +12,13 @@ use rusqlite::Connection;
 
 use crate::error::Result;
 
+pub use error::IngestError;
 pub use types::{
-    DailySummary, DailyToolStat, DateRange, DerivedMetrics, ErrorRecord, ErrorsReport,
-    LabeledCount, ProviderSplit, RepoActivity, ReportingFilters, ReposReport, SessionDetailReport,
-    SessionEvent, SessionInfo, SessionsReport, SyncFailure, SyncRequest, SyncSummary,
-    ToolActionClass, ToolsReport, TrendPoint, TrendsReport, UsageTotals,
+    AliasResolution, DailySummary, DailyToolStat, DateRange, DerivedMetrics, DriftReport,
+    DriftSignalSummary, ErrorRecord, ErrorsReport, LabeledCount, ProviderSplit, RepoActivity,
+    ReportingFilters, ReposReport, SessionDetailReport, SessionEvent, SessionInfo, SessionsReport,
+    SyncFailure, SyncRequest, SyncSummary, ToolActionClass, ToolsReport, TrendPoint, TrendsReport,
+    UsageTotals,
 };
 
 /// SQLite-backed reporting index built from Claudine JSONL event logs.
@@ -100,6 +103,17 @@ impl ReportingStore {
     /// Query repository activity for an inclusive date range.
     pub fn repos(&self, range: DateRange, filters: &ReportingFilters) -> Result<ReposReport> {
         queries::repos(&self.connection, range, filters)
+    }
+
+    /// Query model-catalog signal activity (drift, resolutions,
+    /// fallbacks) and `family_latest` alias stamps for a date range.
+    pub fn drift(
+        &self,
+        range: DateRange,
+        filters: &ReportingFilters,
+        top_n: usize,
+    ) -> Result<DriftReport> {
+        queries::drift(&self.connection, range, filters, top_n)
     }
 
     /// Query full detail for a single session by key or ID.
@@ -307,5 +321,105 @@ mod tests {
         assert_eq!(error_event.claudine_pid, Some(54_321));
         assert_eq!(error_event.agent_pid, Some(12_345));
         assert_eq!(detail.errors[0].agent_pid, Some(12_345));
+    }
+
+    /// End-to-end model-catalog reporting path: a SessionEnd summary row
+    /// (built by the real summary builder, so the JSONL shape cannot
+    /// drift from what ingest expects) is exploded into `session_signals`
+    /// and its `family_latest` stamp lifted onto `sessions`, then both
+    /// surface through `ReportingStore::drift`.
+    #[test]
+    fn drift_report_surfaces_signals_and_alias_stamps() {
+        use crate::model_catalog::FamilyLatestStamp;
+        use crate::signals::{DriftObservation, ObservedSignal, SignalEvent, SignalSource};
+        use crate::stream::StreamProtocol;
+        use crate::stream::reporting::summary_to_event_meta_with_context;
+        use crate::stream::summary::StreamExecutionSummary;
+
+        let workspace = tempdir().unwrap();
+        let logs_dir = workspace.path().join("logs");
+        let db_path = workspace.path().join("metrics.db");
+        fs::create_dir_all(&logs_dir).unwrap();
+
+        let summary = StreamExecutionSummary {
+            provider: Provider::Claude,
+            session_id: Some("drift-session".to_string()),
+            ..StreamExecutionSummary::default()
+        };
+        let signals = vec![ObservedSignal {
+            event: SignalEvent::ModelCatalogDrift {
+                unexpected: vec!["mystery-model".to_string()],
+                missing: vec!["claude-legacy".to_string()],
+                observed_via: DriftObservation::Listing,
+            },
+            source: SignalSource::Wrapper,
+            first_seen: Utc.with_ymd_and_hms(2026, 3, 9, 11, 59, 0).unwrap(),
+            occurrences: 3,
+            context: Default::default(),
+        }];
+        let stamp = FamilyLatestStamp {
+            alias: "opus".to_string(),
+            identity_key: "anthropic/claude-opus@4.5".to_string(),
+            family_key: "anthropic/claude-opus".to_string(),
+            artifact_generated_at: "2026-03-01T00:00:00+00:00".to_string(),
+            stale: false,
+            age_days: None,
+        };
+        let mut meta = summary_to_event_meta_with_context(
+            &summary,
+            StreamProtocol::StreamJson,
+            &EnvironmentContext::default(),
+            None,
+            None,
+            &signals,
+            Some(&stamp),
+        );
+        meta.timestamp = Utc.with_ymd_and_hms(2026, 3, 9, 12, 0, 0).unwrap();
+
+        fs::write(
+            logs_dir.join("2026-03-09.jsonl"),
+            format!("{}\n", serde_json::to_string(&meta).unwrap()),
+        )
+        .unwrap();
+
+        let mut store = ReportingStore::open(&logs_dir, &db_path).unwrap();
+        store.sync(SyncRequest::All).unwrap();
+
+        let date = chrono::NaiveDate::from_ymd_opt(2026, 3, 9).unwrap();
+        let report = store
+            .drift(DateRange::single(date), &ReportingFilters::default(), 10)
+            .unwrap();
+
+        assert_eq!(report.signals.len(), 1);
+        let signal = &report.signals[0];
+        assert_eq!(signal.provider, Provider::Claude);
+        assert_eq!(signal.kind, "model_catalog_drift");
+        assert_eq!(signal.session_count, 1);
+        assert_eq!(signal.occurrences, 3);
+        assert_eq!(signal.unexpected, vec!["mystery-model".to_string()]);
+        assert_eq!(signal.missing, vec!["claude-legacy".to_string()]);
+        assert_eq!(signal.observed_via.as_deref(), Some("listing"));
+
+        assert_eq!(report.aliases.len(), 1);
+        let alias = &report.aliases[0];
+        assert_eq!(alias.session_id.as_deref(), Some("drift-session"));
+        assert_eq!(alias.alias, "opus");
+        assert_eq!(alias.identity_key, "anthropic/claude-opus@4.5");
+        assert_eq!(alias.family_key.as_deref(), Some("anthropic/claude-opus"));
+        assert!(!alias.stale);
+
+        // A provider filter for another provider excludes both sections.
+        let filtered = store
+            .drift(
+                DateRange::single(date),
+                &ReportingFilters {
+                    provider: Some(Provider::Gemini),
+                    ..ReportingFilters::default()
+                },
+                10,
+            )
+            .unwrap();
+        assert!(filtered.signals.is_empty());
+        assert!(filtered.aliases.is_empty());
     }
 }

@@ -1,16 +1,16 @@
 //! `rendezvous-test-client` binary.
 //!
-//! A minimal command-line client that opens a gRPC channel over the
-//! daemon's Unix Domain Socket and exercises either the Phase 1
-//! liveness RPCs (`ping` / `status`) or the Phase 2 session-log RPCs
-//! (`append-entry`, `list-chunks`, `list-entries`, `query-projection`).
+//! A minimal command-line client that opens a gRPC channel over the daemon's
+//! local endpoint and exercises either the Phase 1 liveness RPCs (`ping` /
+//! `status`) or the Phase 2 session-log RPCs (`append-entry`, `list-chunks`,
+//! `list-entries`, `query-projection`).
 
-use std::path::PathBuf;
+use std::ffi::OsString;
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
-use rendezvous_client::connect_uds;
-use rendezvous_core::socket::default_socket_path;
+use rendezvous_client::connect;
+use rendezvous_core::local_endpoint::{LocalEndpoint, LocalEndpointError, default_local_endpoint};
 use rendezvous_core::{
     AppendEntryRequest, ApprovePeerRequest, ConnectToPeerRequest, CreateInvitationRequest,
     ListChunkEntriesRequest, ListPairingsRequest, ListPeersRequest, ListSessionChunksRequest,
@@ -24,11 +24,11 @@ use tracing_subscriber::EnvFilter;
     about = "Phase 1/2 test client for rendezvous-daemon"
 )]
 struct Cli {
-    /// Override the Unix Domain Socket path. Defaults to the value
-    /// resolved by `rendezvous_core::socket::default_socket_path`
-    /// (also honouring `$RENDEZVOUS_SOCKET`).
-    #[arg(long = "socket", env = "RENDEZVOUS_SOCKET", global = true)]
-    socket: Option<PathBuf>,
+    /// Override the daemon's local endpoint: a Unix socket path on Unix, a
+    /// `\\.\pipe\...` name on Windows. Defaults to the per-user endpoint
+    /// resolved by `rendezvous_core::local_endpoint::default_local_endpoint`.
+    #[arg(long = "endpoint", env = "RENDEZVOUS_ENDPOINT", global = true)]
+    endpoint: Option<OsString>,
 
     #[command(subcommand)]
     command: Command,
@@ -142,6 +142,8 @@ async fn main() -> ExitCode {
 #[derive(Debug, thiserror::Error)]
 enum ClientError {
     #[error(transparent)]
+    Endpoint(#[from] LocalEndpointError),
+    #[error(transparent)]
     Connect(#[from] rendezvous_client::ConnectError),
     #[error("gRPC call failed: {0}")]
     Rpc(#[from] tonic::Status),
@@ -151,10 +153,13 @@ async fn run() -> Result<(), ClientError> {
     init_tracing();
 
     let cli = Cli::parse();
-    let socket = cli.socket.unwrap_or_else(default_socket_path);
-    tracing::debug!(socket = %socket.display(), "connecting to rendezvous-daemon");
+    let endpoint = match cli.endpoint.as_deref() {
+        Some(explicit) => LocalEndpoint::from_override(explicit)?,
+        None => default_local_endpoint()?,
+    };
+    tracing::debug!(%endpoint, "connecting to rendezvous-daemon");
 
-    let mut client = connect_uds(socket).await?;
+    let mut client = connect(&endpoint).await?;
 
     match cli.command {
         Command::Ping { nonce } => {
@@ -172,8 +177,11 @@ async fn run() -> Result<(), ClientError> {
         Command::Status => {
             let response = client.status(StatusRequest {}).await?.into_inner();
             println!(
-                "status daemon_version={} uptime_seconds={} started_at_unix_ms={}",
-                response.daemon_version, response.uptime_seconds, response.started_at_unix_ms,
+                "status daemon_version={} uptime_seconds={} started_at_unix_ms={} node_id={}",
+                response.daemon_version,
+                response.uptime_seconds,
+                response.started_at_unix_ms,
+                response.node_id,
             );
         }
         Command::AppendEntry {
@@ -288,12 +296,13 @@ async fn run() -> Result<(), ClientError> {
                 .into_inner();
             for peer in response.peers {
                 println!(
-                    "node_id={} socket_addr={} state={} source={} last_seen_unix_ms={} last_error={}",
+                    "node_id={} socket_addr={} state={} source={} last_seen_unix_ms={} last_synced_unix_ms={} last_error={}",
                     peer.node_id,
                     peer.socket_addr,
                     peer.state,
                     peer.source,
                     peer.last_seen_unix_ms,
+                    peer.last_synced_unix_ms,
                     peer.last_error,
                 );
             }

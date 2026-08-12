@@ -44,6 +44,7 @@ mod builder;
 mod diagnostics;
 mod mappings;
 pub mod naming;
+mod normalize;
 mod resolver;
 
 pub use builder::{
@@ -51,4 +52,5 @@ pub use builder::{
     OpenApiImportOptions, OpenApiImportResult,
 };
 pub use diagnostics::{DiagnosticSeverity, OpenApiDiagnostic};
+pub use normalize::clamp_numeric_bounds;
 pub use resolver::RefResolver;

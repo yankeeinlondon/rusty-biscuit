@@ -1,0 +1,377 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ModelsCatalog",
+  "description": "The committed model-catalog artifact.",
+  "type": "object",
+  "properties": {
+    "duplicate_groups": {
+      "description": "Identity key → wire ids, retained only when the group spans more than\none distinct source (the cross-source duplicate-offering groups).",
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        }
+      }
+    },
+    "families": {
+      "description": "Family index keyed by `vendor/family`.",
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/FamilyEntry"
+      }
+    },
+    "gaps": {
+      "description": "Wire ids that parsed to no family — identity-less offerings, carried\nthrough rather than failed on.",
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "generated_at": {
+      "description": "RFC 3339 generation time of the underlying catalog *data* (see\n[`catalog_generated_at`]), not of the artifact file. Consumers apply\ntheir staleness policy against this value.",
+      "type": "string"
+    },
+    "offerings": {
+      "description": "All catalog offerings, sorted by wire id.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/Offering"
+      }
+    },
+    "schema_version": {
+      "description": "See [`SCHEMA_VERSION`]. Consumers must treat a mismatch as a loud\ngeneration error, not a warning.",
+      "type": "integer",
+      "format": "uint32",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "schema_version",
+    "generated_at",
+    "offerings",
+    "families",
+    "duplicate_groups",
+    "gaps"
+  ],
+  "$defs": {
+    "FamilyEntry": {
+      "description": "One family's index entry: release-ordered members plus rolling aliases.",
+      "type": "object",
+      "properties": {
+        "latest": {
+          "description": "Identity key of the newest non-rolling release. Names the release, not\nan offering — consumers pick a concrete offering from the duplicate\ngroup by their own policy (Checkpoint F ruling: no canonical offering\nis elected).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "members": {
+          "description": "Member wire ids, ascending release order (rolling aliases excluded —\nthey name no release).",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rolling_aliases": {
+          "description": "Rolling-alias wire ids (`-latest` forms) that re-point over time.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "members"
+      ]
+    },
+    "Identity": {
+      "description": "Artifact mirror of the parsed [`ModelIdentity`] fields (source and vendor\nlive on [`Offering`]).",
+      "type": "object",
+      "properties": {
+        "date_pin": {
+          "type": "string"
+        },
+        "family": {
+          "type": "string"
+        },
+        "rolling": {
+          "type": "boolean"
+        },
+        "serving": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "size": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "variants": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "version": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "version_raw": {
+          "type": "string"
+        }
+      }
+    },
+    "Offering": {
+      "description": "One catalog offering: a wire id plus its parsed identity and metadata.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "description": "Wire id (`provider-slug/model-id`).",
+          "type": "string"
+        },
+        "identity": {
+          "description": "Parsed identity components.",
+          "$ref": "#/$defs/Identity"
+        },
+        "identity_key": {
+          "description": "Normalized identity key (see [`identity_key`]); `None` for\nidentity-less offerings.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OfferingMetadata"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "description": "Offering source: the first wire-id path segment (direct provider or\naggregator).",
+          "type": "string"
+        },
+        "vendor": {
+          "description": "Canonicalized model vendor; equals `source` for direct-provider ids.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "source",
+        "vendor",
+        "identity"
+      ]
+    },
+    "OfferingDefaultParameters": {
+      "description": "Provider-recommended default generation parameters.",
+      "type": "object",
+      "properties": {
+        "frequency_penalty": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "presence_penalty": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "temperature": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        },
+        "top_k": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "top_p": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "float"
+        }
+      }
+    },
+    "OfferingMetadata": {
+      "description": "Artifact mirror of [`ProviderModelMetadata`]; owned here so the lib types\nstay serde-free.",
+      "type": "object",
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "context_window": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "created": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "default_parameters": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OfferingDefaultParameters"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "display_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "family": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "knowledge_cutoff": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "max_output_tokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "modalities": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OfferingModalities"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pricing": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/OfferingPricing"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "release_date": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "supported_parameters": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "OfferingModalities": {
+      "description": "Input/output modalities as lowercase strings (`text`, `image`, `audio`,\n`video`, `embeddings`).",
+      "type": "object",
+      "properties": {
+        "input": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "output": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "OfferingPricing": {
+      "description": "Per-token and per-request pricing in USD.",
+      "type": "object",
+      "properties": {
+        "completion_per_token": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "input_cache_read_per_token": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "prompt_per_token": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        },
+        "web_search_per_request": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "format": "double"
+        }
+      }
+    }
+  }
+}

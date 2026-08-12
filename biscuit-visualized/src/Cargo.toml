@@ -26,3 +26,20 @@ layout-rs = "0.1"
 
 [dev-dependencies]
 serial_test = "3.0"
+
+# CI exclusion: 71 tests that currently run in no CI job. Promotion is blocked
+# on the canonical just recipe set.
+[package.metadata.ci]
+gates = false
+exclusion-class = "promotion-pending"
+owner = "@yankeeinlondon"
+reason = "71 tests that currently run in NO CI job. Promotion is blocked on the canonical just recipe set — biscuit-visualized/ defines only test and lint."
+expiry = "2026-10-31"
+
+# The package's test contract, recorded NOW so promotion cannot silently drop
+# it: `image` (resvg + Mermaid) gates 56 of the 71 tests, and the only
+# consumer (biscuit-terminal) enables it — so the justfile tests with
+# `--all-features` throughout, and CI must too (same shape as messenger's
+# `--features desktop`).
+[package.metadata.ci.tests]
+all-features = true

@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 130
 expression: "convert_atom(\"url(scheme(https))\")"
 ---
 {
@@ -7,10 +8,17 @@ expression: "convert_atom(\"url(scheme(https))\")"
   "additionalProperties": true,
   "properties": {
     "field": {
-      "format": "uri",
-      "type": "string",
-      "x-darkmatter-url-scheme": [
-        "https"
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "format": "uri",
+          "type": "string",
+          "x-darkmatter-url-scheme": [
+            "https"
+          ]
+        }
       ]
     }
   },

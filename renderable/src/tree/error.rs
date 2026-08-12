@@ -7,6 +7,7 @@
 
 use thiserror::Error;
 
+use crate::browser::feature::{FeatureResolveError, PageFeature};
 use crate::tree::diagnostic::Diagnostic;
 use crate::tree::validate::{ValidationError, ValidationFinding};
 
@@ -25,30 +26,42 @@ pub enum RenderStrictness {
 }
 
 /// A successful render plus any non-fatal diagnostics raised along the way.
+///
+/// [`features`](Rendered::features) is a second side channel, mirroring
+/// [`diagnostics`](Rendered::diagnostics): it carries the browser
+/// [`PageFeature`]s requested while rendering, in first-seen order, so the
+/// outermost document assembler can resolve and inject their assets exactly
+/// once. [`new`](Rendered::new) starts it empty and [`map`](Rendered::map)
+/// preserves it.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Rendered<T> {
     /// The rendered output.
     pub output: T,
     /// Non-fatal diagnostics recorded during the render.
     pub diagnostics: Vec<Diagnostic>,
+    /// Browser features requested while rendering, in first-seen order.
+    /// Non-browser render paths leave this empty.
+    pub features: Vec<PageFeature>,
 }
 
 impl<T> Rendered<T> {
-    /// Creates a [`Rendered`] with no diagnostics.
+    /// Creates a [`Rendered`] with no diagnostics and no features.
     #[must_use]
     pub fn new(output: T) -> Self {
         Self {
             output,
             diagnostics: Vec::new(),
+            features: Vec::new(),
         }
     }
 
-    /// Applies `f` to the output, preserving the diagnostics.
+    /// Applies `f` to the output, preserving the diagnostics and features.
     #[must_use]
     pub fn map<U>(self, f: impl FnOnce(T) -> U) -> Rendered<U> {
         Rendered {
             output: f(self.output),
             diagnostics: self.diagnostics,
+            features: self.features,
         }
     }
 }
@@ -78,6 +91,10 @@ pub enum RenderError {
         /// A description of the rejected conversion.
         message: String,
     },
+    /// A requested page feature could not be resolved or placed. The wrapped
+    /// [`FeatureResolveError`] names the feature and target.
+    #[error(transparent)]
+    FeatureResolution(#[from] FeatureResolveError),
 }
 
 impl From<ValidationError> for RenderError {
@@ -110,6 +127,33 @@ mod tests {
         let mapped = rendered.map(|n| n * 3);
         assert_eq!(mapped.output, 6);
         assert_eq!(mapped.diagnostics.len(), 1);
+    }
+
+    #[test]
+    fn rendered_map_preserves_features() {
+        let mut rendered = Rendered::new(2);
+        rendered.features.push(PageFeature::Popover);
+        let mapped = rendered.map(|n| n * 3);
+        assert_eq!(mapped.output, 6);
+        assert_eq!(mapped.features, vec![PageFeature::Popover]);
+    }
+
+    #[test]
+    fn feature_resolve_error_converts_and_names_feature_and_target() {
+        let source = FeatureResolveError::UnresolvedFeature {
+            feature: PageFeature::MermaidDiagram,
+            target: crate::target::RenderTarget::Browser,
+        };
+        let render_error: RenderError = source.into();
+        let message = render_error.to_string();
+        assert!(
+            message.contains("mermaid-diagram"),
+            "error must name the feature: {message}"
+        );
+        assert!(
+            message.contains("Browser"),
+            "error must name the target: {message}"
+        );
     }
 
     #[test]

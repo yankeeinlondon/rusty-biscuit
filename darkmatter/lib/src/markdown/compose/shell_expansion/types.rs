@@ -17,7 +17,11 @@ pub enum ShellCommandOrigin {
     /// Body `::shell` directive at the given 1-indexed line.
     Body { line: usize },
     /// Frontmatter property with a `$(...)` shell expression.
-    Frontmatter { key: String },
+    ///
+    /// `line` is the 1-indexed file line of the frontmatter key when it can be
+    /// resolved from the source context; it is `None` when the source context
+    /// does not include frontmatter (e.g. in-memory or body-only contexts).
+    Frontmatter { key: String, line: Option<usize> },
     /// Command inside a `::shell-block` / `::end-block` region.
     ///
     /// `start_line` is the 1-indexed line of the `::shell-block` opener.
@@ -33,7 +37,7 @@ impl fmt::Display for ShellCommandOrigin {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Body { line } => write!(f, "line {line}"),
-            Self::Frontmatter { key } => write!(f, "frontmatter.{key}"),
+            Self::Frontmatter { key, .. } => write!(f, "frontmatter.{key}"),
             Self::ShellBlock {
                 start_line,
                 command_line,
@@ -51,10 +55,33 @@ impl ShellCommandOrigin {
     pub fn line_number(&self) -> usize {
         match self {
             Self::Body { line } => *line,
-            Self::Frontmatter { .. } => 0,
+            Self::Frontmatter { line, .. } => line.unwrap_or(0),
             Self::ShellBlock { command_line, .. } => *command_line,
         }
     }
+}
+
+/// Resolves the 1-indexed file line for a frontmatter key from the source
+/// context, or `None` when the context carries no frontmatter range or the key
+/// cannot be located.
+///
+/// Handles simple top-level keys plus single- and double-quoted key forms.
+pub(crate) fn frontmatter_key_line(ctx: &SourceContext, key: &str) -> Option<usize> {
+    let range = ctx.frontmatter.as_ref()?;
+    let fm_text = &ctx.content[range.clone()];
+    let prefix_lines = ctx.content[..range.start].lines().count();
+
+    for (idx, line) in fm_text.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with(&format!("{key}:"))
+            || trimmed.starts_with(&format!("'{key}':"))
+            || trimmed.starts_with(&format!("\"{key}\":"))
+        {
+            return Some(prefix_lines + idx + 1);
+        }
+    }
+
+    None
 }
 
 /// Parsed `::shell` directive with raw command, executable, args, span, and origin.
@@ -514,8 +541,11 @@ pub enum ShellExpansionError {
     ApprovalRequired {
         ctx: Box<SourceContext>,
         command: String,
-        whitelist_path: PathBuf,
-        blacklist_path: PathBuf,
+        /// Boxed to keep `ShellExpansionError` under the `result_large_err`
+        /// threshold, matching the boxing convention of the other heavy fields.
+        whitelist_path: Box<PathBuf>,
+        /// Boxed for the same size reason as `whitelist_path`.
+        blacklist_path: Box<PathBuf>,
         origin: ShellCommandOrigin,
     },
 
@@ -580,6 +610,27 @@ pub enum ShellExpansionError {
     /// path rather than flattening it into an opaque policy error.
     #[error(transparent)]
     Preflight(Box<crate::markdown::types::MarkdownError>),
+}
+
+impl ShellExpansionError {
+    /// The authored shell command this error is about, when the variant carries
+    /// one.
+    ///
+    /// `ParseDirective`, `PolicyIo`, and `Preflight` describe failures that are
+    /// not scoped to a single resolved command, so they return `None`.
+    pub fn command(&self) -> Option<&str> {
+        match self {
+            Self::CommandNotFound { command, .. }
+            | Self::Blacklisted { command, .. }
+            | Self::ApprovalRequired { command, .. }
+            | Self::Denied { command, .. }
+            | Self::NotPreApproved { command, .. }
+            | Self::DynamicCommandShape { command, .. }
+            | Self::Timeout { command, .. }
+            | Self::ExecutionFailed { command, .. } => Some(command),
+            Self::ParseDirective { .. } | Self::PolicyIo { .. } | Self::Preflight(_) => None,
+        }
+    }
 }
 
 impl biscuit_terminal::errors::BlockError for ShellExpansionError {
@@ -731,24 +782,60 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
                 stderr,
                 origin,
             } => {
-                let stdout_section = if stdout.trim().is_empty() {
-                    String::new()
-                } else {
-                    format!("\n<dim>stdout:</dim>\n{}", truncate_output(stdout))
-                };
-                let stderr_section = if stderr.trim().is_empty() {
+                let stderr = stderr.trim_end();
+                let stdout = stdout.trim_end();
+
+                let stderr_section = if stderr.is_empty() {
                     String::new()
                 } else {
                     format!("\n<dim>stderr:</dim>\n{}", truncate_output(stderr))
                 };
+
+                let stdout_section = if stdout.is_empty() {
+                    String::new()
+                } else if stderr.is_empty() || stdout_looks_relevant(stdout) {
+                    format!("\n<dim>stdout:</dim>\n{}", truncate_output(stdout))
+                } else {
+                    String::new()
+                };
+
+                let mut body: Vec<Prose> = Vec::new();
+
+                // 1. Linked source path.
+                body.push(ctx.linked_path_prose());
+
+                // 2. Source excerpt centered on the offending line, when the
+                //    origin resolves to a real line. Frontmatter origins without
+                //    a resolved line deliberately omit the excerpt rather than
+                //    point at a misleading fallback.
+                let excerpt_line = origin.line_number();
+                let show_excerpt = match origin {
+                    ShellCommandOrigin::Frontmatter { line, .. } => line.is_some(),
+                    _ => excerpt_line > 0,
+                };
+                if show_excerpt {
+                    body.push(ctx.excerpt_prose(excerpt_line, 1, "markdown"));
+                }
+
+                // 3. Composed frontmatter block, when present.
+                if let Some(fm) = ctx.frontmatter_prose() {
+                    body.push(fm);
+                }
+
+                // 4. Captured command output (stderr, then optional stdout).
+                if !stderr_section.is_empty() || !stdout_section.is_empty() {
+                    body.push(Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Exit code:</dim> {code}{stderr_section}{stdout_section}"
+                    )));
+                } else {
+                    body.push(Prose::new(format!(
+                        "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Exit code:</dim> {code}"
+                    )));
+                }
+
                 StatusBlock::new(StatusState::Error)
                     .error_header(ErrorHeader::new("ShellExpansionError", "execution failed"))
-                    .body(vec![
-                        Prose::new(format!(
-                            "<dim>Command:</dim> <cyan>{command}</cyan>\n<dim>Origin:</dim> {origin}\n<dim>Exit code:</dim> {code}{stdout_section}{stderr_section}"
-                        )),
-                        ctx.excerpt_prose(origin.line_number(), 1, "md"),
-                    ])
+                    .body(body)
                     .hint("Run the command directly to reproduce the failure.")
             }
 
@@ -768,33 +855,68 @@ impl biscuit_terminal::errors::BlockError for ShellExpansionError {
     }
 }
 
-/// Truncate output to a maximum number of lines/bytes for block rendering.
+/// Truncate captured command output to a tail-biased budget for block rendering.
+///
+/// Keeps the final [`MAX_LINES`] lines and the final [`MAX_BYTES`] bytes,
+/// whichever is smaller after UTF-8-safe char-boundary slicing. A single
+/// truncation marker prefixes the kept tail when either limit is exceeded.
+/// Internal newlines are preserved exactly; no escaping or colorization is
+/// applied.
 fn truncate_output(text: &str) -> String {
     const MAX_LINES: usize = 20;
     const MAX_BYTES: usize = 2048;
 
-    let truncated_bytes = if text.len() > MAX_BYTES {
-        let cut = text
-            .char_indices()
+    let total_lines = text.lines().count();
+    let exceeds_lines = total_lines > MAX_LINES;
+    let exceeds_bytes = text.len() > MAX_BYTES;
+
+    if !exceeds_lines && !exceeds_bytes {
+        return text.to_string();
+    }
+
+    // Byte position where the last MAX_BYTES begins (UTF-8 safe).
+    let byte_start = if exceeds_bytes {
+        let target = text.len() - MAX_BYTES;
+        text.char_indices()
+            .find(|&(i, _)| i >= target)
             .map(|(i, _)| i)
-            .take_while(|&i| i <= MAX_BYTES)
-            .last()
-            .unwrap_or(0);
-        format!("{}\n<dim>… output truncated</dim>", &text[..cut])
+            .unwrap_or(0)
     } else {
-        text.to_string()
+        0
     };
 
-    let lines: Vec<&str> = truncated_bytes.lines().collect();
-    if lines.len() > MAX_LINES {
-        let head = lines[..MAX_LINES].join("\n");
-        format!(
-            "{head}\n<dim>… {} more lines</dim>",
-            lines.len() - MAX_LINES
-        )
+    // Byte position where the last MAX_LINES begins.
+    let line_start = if exceeds_lines {
+        let skip = total_lines - MAX_LINES;
+        let mut pos = 0usize;
+        for (idx, line) in text.split_inclusive('\n').enumerate() {
+            if idx >= skip {
+                break;
+            }
+            pos += line.len();
+        }
+        pos
     } else {
-        truncated_bytes
-    }
+        0
+    };
+
+    let start = byte_start.max(line_start);
+    let marker = if line_start >= byte_start {
+        "… output truncated; showing last 20 lines"
+    } else {
+        "… output truncated; showing last 2 KiB"
+    };
+
+    format!("{marker}\n{}", &text[start..])
+}
+
+/// Returns `true` when captured stdout likely carries diagnostic information
+/// worth showing alongside non-empty stderr.
+fn stdout_looks_relevant(stdout: &str) -> bool {
+    let lowered = stdout.to_lowercase();
+    ["error", "fail", "fatal", "warning"]
+        .iter()
+        .any(|kw| lowered.contains(kw))
 }
 
 /// Paths to whitelist and blacklist policy files.
@@ -852,10 +974,15 @@ pub struct ShellExpansionRuntime {
 
 #[derive(Debug, Clone, Default)]
 struct SharedShellExpansionRuntime {
-    allow_once: HashSet<String>,
+    /// The three policy collections below are held behind `Arc` so
+    /// [`ShellExpansionRuntime::snapshot`] is a refcount bump rather than a deep
+    /// copy of every rule — a snapshot is taken once per directive, but rules
+    /// change only on approval. Writers copy-on-write via `Arc::make_mut`, so an
+    /// outstanding snapshot keeps observing the rules it was taken with.
+    allow_once: Arc<HashSet<String>>,
     pending_allow_once: HashSet<String>,
-    whitelist: ShellRuleSet,
-    user_blacklist: ShellRuleSet,
+    whitelist: Arc<ShellRuleSet>,
+    user_blacklist: Arc<ShellRuleSet>,
     policy_paths: Option<ShellPolicyPaths>,
     /// Per-compose memoization of shell command output, keyed by the normalized
     /// command string. Shared across recursive transclusion (same `Arc`), so an
@@ -865,6 +992,16 @@ struct SharedShellExpansionRuntime {
     /// Normalized commands for which a volatile-command discoverability warning
     /// has already been emitted, so the warning fires at most once per command.
     volatile_warned: HashSet<String>,
+    /// Per-command count of threads currently enqueued on `reservation_done`
+    /// inside [`ShellExpansionRuntime::reserve_allow_once`]. Incremented under
+    /// this mutex immediately before the atomic `wait_timeout_while` park and
+    /// decremented immediately after it returns, so any thread that acquires the
+    /// mutex and observes a positive count knows the waiter is provably enqueued
+    /// on the condvar. Exists only to let a notification test synchronize on a
+    /// parked peer instead of inferring it from a sleep; `#[cfg(test)]`-gated so
+    /// production builds carry neither the field nor its bookkeeping.
+    #[cfg(test)]
+    parked_waiters: HashMap<String, usize>,
 }
 
 /// Memoized stdout/stderr for one normalized command in [`SharedShellExpansionRuntime::command_cache`].
@@ -874,11 +1011,19 @@ struct CachedCommandOutput {
     stderr: String,
 }
 
+/// An immutable read-only view of the runtime's policy collections, shared by
+/// pointer with the runtime rather than deep-copied.
+///
+/// ## Notes
+///
+/// Cloning a snapshot costs three refcount bumps. Because writers copy-on-write,
+/// a snapshot is a stable view: rules persisted after it was taken are invisible
+/// to it, and a fresh snapshot is required to observe them.
 #[derive(Debug, Clone)]
 pub(crate) struct ShellRuntimeSnapshot {
-    pub allow_once: HashSet<String>,
-    pub whitelist: ShellRuleSet,
-    pub user_blacklist: ShellRuleSet,
+    pub allow_once: Arc<HashSet<String>>,
+    pub whitelist: Arc<ShellRuleSet>,
+    pub user_blacklist: Arc<ShellRuleSet>,
 }
 
 /// Result of attempting to reserve a normalized command for allow-once
@@ -932,18 +1077,24 @@ impl ShellExpansionRuntime {
         if shared.policy_paths.is_some() {
             return Ok(());
         }
-        shared.whitelist = super::store::load_ruleset(&paths.whitelist)?;
-        shared.user_blacklist = super::store::load_ruleset(&paths.blacklist)?;
+        shared.whitelist = Arc::new(super::store::load_ruleset(&paths.whitelist)?);
+        shared.user_blacklist = Arc::new(super::store::load_ruleset(&paths.blacklist)?);
         shared.policy_paths = Some(paths.clone());
         Ok(())
     }
 
+    /// Takes an immutable view of the policy collections.
+    ///
+    /// ## Notes
+    ///
+    /// The lock is held only for three `Arc` clones — never across parsing,
+    /// approval, or command execution.
     pub(crate) fn snapshot(&self) -> ShellRuntimeSnapshot {
         let shared = self.shared.lock().unwrap();
         ShellRuntimeSnapshot {
-            allow_once: shared.allow_once.clone(),
-            whitelist: shared.whitelist.clone(),
-            user_blacklist: shared.user_blacklist.clone(),
+            allow_once: Arc::clone(&shared.allow_once),
+            whitelist: Arc::clone(&shared.whitelist),
+            user_blacklist: Arc::clone(&shared.user_blacklist),
         }
     }
 
@@ -987,6 +1138,19 @@ impl ShellExpansionRuntime {
             // waits before reserving anything), so blocking here cannot
             // deadlock. Wake when the peer either approves it (now in
             // `allow_once`) or releases it (no longer pending).
+            //
+            // The count bump happens under the still-held mutex, then
+            // `wait_timeout_while` atomically releases it as part of parking:
+            // an observer that acquires the mutex and sees a positive count has
+            // proof this thread is enqueued on the condvar. See
+            // `parked_waiters_for_test`.
+            #[cfg(test)]
+            {
+                *shared
+                    .parked_waiters
+                    .entry(normalized.to_string())
+                    .or_insert(0) += 1;
+            }
             let (guard, timeout) = self
                 .reservation_done
                 .wait_timeout_while(shared, RESERVATION_WAIT_TIMEOUT, |state| {
@@ -995,6 +1159,15 @@ impl ShellExpansionRuntime {
                 })
                 .unwrap();
             shared = guard;
+            #[cfg(test)]
+            {
+                if let Some(count) = shared.parked_waiters.get_mut(normalized) {
+                    *count -= 1;
+                    if *count == 0 {
+                        shared.parked_waiters.remove(normalized);
+                    }
+                }
+            }
             if timeout.timed_out() {
                 return ReserveOutcome::Pending;
             }
@@ -1011,32 +1184,59 @@ impl ShellExpansionRuntime {
             let mut shared = self.shared.lock().unwrap();
             shared.pending_allow_once.remove(normalized);
             if approved {
-                shared.allow_once.insert(normalized.to_string());
+                Arc::make_mut(&mut shared.allow_once).insert(normalized.to_string());
             }
         }
         self.reservation_done.notify_all();
     }
 
+    /// The normalized commands currently held as pending allow-once
+    /// reservations, sorted.
+    ///
+    /// Test seam for the exact definition of a leaked reservation: a command
+    /// left in `pending_allow_once` after the flow that reserved it has
+    /// returned, with no owner left to complete it. Asserting this set beats
+    /// timing a subsequent composition, which cannot distinguish a leak from
+    /// ordinary preparation cost.
+    #[cfg(test)]
+    pub(crate) fn pending_allow_once_for_test(&self) -> Vec<String> {
+        let shared = self.shared.lock().unwrap();
+        let mut pending: Vec<String> = shared.pending_allow_once.iter().cloned().collect();
+        pending.sort();
+        pending
+    }
+
+    /// The number of threads currently parked in [`Self::reserve_allow_once`]
+    /// waiting on `normalized`.
+    ///
+    /// Reads the count under the same mutex the waiter incremented before
+    /// parking, so a positive result proves the waiter is enqueued on
+    /// `reservation_done` — the notification test uses this to release a
+    /// reservation only once a peer is provably parked, rather than after a
+    /// sleep that merely hopes it parked.
+    #[cfg(test)]
+    pub(crate) fn parked_waiters_for_test(&self, normalized: &str) -> usize {
+        let shared = self.shared.lock().unwrap();
+        shared.parked_waiters.get(normalized).copied().unwrap_or(0)
+    }
+
     pub(crate) fn persist_whitelist_exact(&mut self, normalized: String) {
         let mut shared = self.shared.lock().unwrap();
-        shared
-            .whitelist
+        Arc::make_mut(&mut shared.whitelist)
             .entries
             .push(ShellRuleEntry::Exact(normalized));
     }
 
     pub(crate) fn persist_whitelist_prefix(&mut self, executable: String) {
         let mut shared = self.shared.lock().unwrap();
-        shared
-            .whitelist
+        Arc::make_mut(&mut shared.whitelist)
             .entries
             .push(ShellRuleEntry::Prefix(executable));
     }
 
     pub(crate) fn persist_blacklist_exact(&mut self, normalized: String) {
         let mut shared = self.shared.lock().unwrap();
-        shared
-            .user_blacklist
+        Arc::make_mut(&mut shared.user_blacklist)
             .entries
             .push(ShellRuleEntry::Exact(normalized));
     }
@@ -1206,6 +1406,13 @@ impl PipelineRuntime {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use biscuit_terminal::components::renderable::TerminalRenderable;
+    use biscuit_terminal::discovery::detection::ColorDepth;
+    use biscuit_terminal::errors::{BlockError, SourceContext};
+    use biscuit_terminal::prelude::strip_escape_codes;
+    use biscuit_terminal::terminal::Terminal;
+    use renderable::markdown::MarkdownRenderable;
 
     #[test]
     fn resolve_when_exit_code_matches() {
@@ -1421,6 +1628,7 @@ mod tests {
     fn shell_command_origin_frontmatter_display() {
         let origin = ShellCommandOrigin::Frontmatter {
             key: "files".to_string(),
+            line: Some(3),
         };
         assert_eq!(format!("{origin}"), "frontmatter.files");
     }
@@ -1444,9 +1652,19 @@ mod tests {
     }
 
     #[test]
-    fn shell_command_origin_line_number_frontmatter() {
+    fn shell_command_origin_line_number_frontmatter_with_line() {
         let origin = ShellCommandOrigin::Frontmatter {
             key: "x".to_string(),
+            line: Some(7),
+        };
+        assert_eq!(origin.line_number(), 7);
+    }
+
+    #[test]
+    fn shell_command_origin_line_number_frontmatter_without_line() {
+        let origin = ShellCommandOrigin::Frontmatter {
+            key: "x".to_string(),
+            line: None,
         };
         assert_eq!(origin.line_number(), 0);
     }
@@ -1458,5 +1676,353 @@ mod tests {
             command_line: 12,
         };
         assert_eq!(origin.line_number(), 12);
+    }
+
+    // ------------------------------------------------------------------
+    // Tail-biased output truncation
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn truncate_output_tail_keeps_last_lines() {
+        let long: String = (1..=30).map(|i| format!("line {i}\n")).collect();
+        let truncated = truncate_output(&long);
+        assert!(
+            truncated.starts_with("… output truncated; showing last 20 lines"),
+            "expected line truncation marker, got: {truncated}"
+        );
+        assert!(
+            truncated.contains("line 11\n"),
+            "missing start of tail: {truncated}"
+        );
+        assert!(truncated.contains("line 30"), "missing end of tail: {truncated}");
+        assert!(
+            !truncated.contains("line 1\n"),
+            "should not contain head: {truncated}"
+        );
+        assert!(
+            !truncated.contains("line 10\n"),
+            "should not contain line just before tail: {truncated}"
+        );
+    }
+
+    #[test]
+    fn truncate_output_tail_keeps_last_bytes() {
+        let big = "x".repeat(3000);
+        let truncated = truncate_output(&big);
+        assert!(
+            truncated.starts_with("… output truncated; showing last 2 KiB"),
+            "expected byte truncation marker, got: {truncated}"
+        );
+        assert!(truncated.ends_with('x'), "should end with content: {truncated}");
+        let content = &truncated["… output truncated; showing last 2 KiB\n".len()..];
+        assert!(
+            content.len() <= 2048,
+            "content exceeded 2 KiB: {}",
+            content.len()
+        );
+    }
+
+    #[test]
+    fn truncate_output_preserves_internal_newlines() {
+        let text = (1..=25)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let truncated = truncate_output(&text);
+        assert!(
+            truncated.contains("line 6\nline 7"),
+            "internal newlines lost: {truncated}"
+        );
+        assert_eq!(
+            truncated.lines().count(),
+            21,
+            "expected marker + 20 lines, got: {truncated}"
+        );
+    }
+
+    #[test]
+    fn truncate_output_does_not_split_utf8() {
+        let prefix = "α".repeat(500);
+        let tail = "β".repeat(2000);
+        let text = format!("{prefix}\n{tail}");
+        let truncated = truncate_output(&text);
+        assert!(truncated.contains('β'), "tail missing: {truncated}");
+        assert!(
+            truncated.is_char_boundary(truncated.len()),
+            "truncated at invalid UTF-8 boundary: {truncated:?}"
+        );
+    }
+
+    #[test]
+    fn truncate_output_does_not_add_ansi() {
+        let text = "x\n".repeat(25);
+        let truncated = truncate_output(&text);
+        assert!(
+            !truncated.contains('\x1b'),
+            "truncate_output must not add ANSI escapes: {truncated:?}"
+        );
+    }
+
+    // ------------------------------------------------------------------
+    // ExecutionFailed diagnostic rendering
+    // ------------------------------------------------------------------
+
+    #[test]
+    fn execution_failed_rendered_diagnostic_includes_stderr() {
+        let err = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(test_source_context()),
+            command: "sniff repo packages --bad-flag".to_string(),
+            code: 2,
+            stdout: "".to_string(),
+            stderr: "error: unknown flag --bad-flag".to_string(),
+            origin: ShellCommandOrigin::Body { line: 42 },
+        };
+        let term = no_color_terminal();
+        let rendered = strip_escape_codes(err.status_block(&term).render(&term));
+        assert!(
+            rendered.contains("error: unknown flag --bad-flag"),
+            "stderr missing from rendered diagnostic: {rendered}"
+        );
+        assert!(
+            rendered.contains("stderr:"),
+            "stderr label missing: {rendered}"
+        );
+    }
+
+    #[test]
+    fn execution_failed_includes_stdout_when_stderr_empty() {
+        let err = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(test_source_context()),
+            command: "echo output".to_string(),
+            code: 1,
+            stdout: "only stdout".to_string(),
+            stderr: "".to_string(),
+            origin: ShellCommandOrigin::Body { line: 42 },
+        };
+        let term = no_color_terminal();
+        let rendered = strip_escape_codes(err.status_block(&term).render(&term));
+        assert!(
+            rendered.contains("only stdout"),
+            "stdout missing when stderr empty: {rendered}"
+        );
+        assert!(rendered.contains("stdout:"), "stdout label missing: {rendered}");
+    }
+
+    #[test]
+    fn execution_failed_omits_irrelevant_stdout_when_stderr_present() {
+        let err = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(test_source_context()),
+            command: "cargo build".to_string(),
+            code: 101,
+            stdout: "   Compiling foo v0.1.0\n    Finished dev target\n".to_string(),
+            stderr: "error: could not compile".to_string(),
+            origin: ShellCommandOrigin::Body { line: 42 },
+        };
+        let term = no_color_terminal();
+        let rendered = strip_escape_codes(err.status_block(&term).render(&term));
+        assert!(
+            rendered.contains("error: could not compile"),
+            "stderr missing: {rendered}"
+        );
+        assert!(
+            !rendered.contains("Compiling foo"),
+            "irrelevant stdout should be omitted: {rendered}"
+        );
+    }
+
+    #[test]
+    fn execution_failed_includes_relevant_stdout_when_stderr_present() {
+        let err = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(test_source_context()),
+            command: "cargo test".to_string(),
+            code: 101,
+            stdout: "test foo::bar ... FAILED".to_string(),
+            stderr: "error: test failed".to_string(),
+            origin: ShellCommandOrigin::Body { line: 42 },
+        };
+        let term = no_color_terminal();
+        let rendered = strip_escape_codes(err.status_block(&term).render(&term));
+        assert!(
+            rendered.contains("test foo::bar ... FAILED"),
+            "relevant stdout missing: {rendered}"
+        );
+    }
+
+    #[test]
+    fn execution_failed_trims_trailing_whitespace() {
+        let err = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(test_source_context()),
+            command: "cmd".to_string(),
+            code: 1,
+            stdout: "".to_string(),
+            stderr: "err\n\n\t  ".to_string(),
+            origin: ShellCommandOrigin::Body { line: 42 },
+        };
+        let term = no_color_terminal();
+        let rendered = strip_escape_codes(err.status_block(&term).render(&term));
+        assert!(rendered.contains("err"), "stderr content missing: {rendered}");
+        assert!(
+            !rendered.contains("err\n\n\t  "),
+            "trailing whitespace should be trimmed: {rendered}"
+        );
+    }
+
+    #[test]
+    fn execution_failed_markdown_representation_has_no_ansi() {
+        let err = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(test_source_context()),
+            command: "cmd".to_string(),
+            code: 1,
+            stdout: "".to_string(),
+            stderr: "oops".to_string(),
+            origin: ShellCommandOrigin::Body { line: 42 },
+        };
+        let term = no_color_terminal();
+        let block = err.status_block(&term);
+        let md = block.render_markdown();
+        assert!(
+            !md.contains('\x1b'),
+            "markdown representation must contain no ANSI escapes: {md:?}"
+        );
+        assert!(md.contains("oops"), "stderr missing from markdown: {md}");
+    }
+
+    #[test]
+    fn execution_failed_rendered_diagnostic_includes_linked_path() {
+        let err = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(full_file_source_context()),
+            command: "sniff repo packages --bad-flag".to_string(),
+            code: 2,
+            stdout: "".to_string(),
+            stderr: "error: unknown flag --bad-flag".to_string(),
+            origin: ShellCommandOrigin::Body { line: 5 },
+        };
+        let term = no_color_terminal();
+        let rendered = strip_escape_codes(err.status_block(&term).render(&term));
+        assert!(
+            rendered.contains("test.md"),
+            "linked path missing from rendered diagnostic: {rendered}"
+        );
+        assert!(
+            rendered.contains("file:///test.md"),
+            "file link missing from rendered diagnostic: {rendered}"
+        );
+    }
+
+    #[test]
+    fn execution_failed_rendered_diagnostic_includes_frontmatter_block() {
+        let err = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(full_file_source_context()),
+            command: "sniff repo packages --bad-flag".to_string(),
+            code: 2,
+            stdout: "".to_string(),
+            stderr: "error: unknown flag --bad-flag".to_string(),
+            origin: ShellCommandOrigin::Body { line: 5 },
+        };
+        let term = no_color_terminal();
+        let rendered = strip_escape_codes(err.status_block(&term).render(&term));
+        assert!(
+            rendered.contains("```yaml"),
+            "frontmatter fenced block missing: {rendered}"
+        );
+        assert!(
+            rendered.contains("title: Test"),
+            "frontmatter content missing: {rendered}"
+        );
+    }
+
+    #[test]
+    fn execution_failed_frontmatter_origin_omits_excerpt_without_line() {
+        let err = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(full_file_source_context()),
+            command: "echo fail".to_string(),
+            code: 1,
+            stdout: "".to_string(),
+            stderr: "frontmatter stderr".to_string(),
+            origin: ShellCommandOrigin::Frontmatter {
+                key: "cmd".to_string(),
+                line: None,
+            },
+        };
+        let term = no_color_terminal();
+        let rendered = strip_escape_codes(err.status_block(&term).render(&term));
+        assert!(
+            rendered.contains("frontmatter.cmd"),
+            "frontmatter origin field missing: {rendered}"
+        );
+        assert!(
+            rendered.contains("frontmatter stderr"),
+            "stderr missing: {rendered}"
+        );
+        assert!(
+            !rendered.contains(" │ "),
+            "excerpt line gutter should be absent without a resolved line: {rendered}"
+        );
+    }
+
+    #[test]
+    fn execution_failed_frontmatter_origin_includes_excerpt_with_line() {
+        let err = ShellExpansionError::ExecutionFailed {
+            ctx: Box::new(full_file_source_context()),
+            command: "echo fail".to_string(),
+            code: 1,
+            stdout: "".to_string(),
+            stderr: "frontmatter stderr".to_string(),
+            origin: ShellCommandOrigin::Frontmatter {
+                key: "cmd".to_string(),
+                line: Some(3),
+            },
+        };
+        let term = no_color_terminal();
+        let rendered = strip_escape_codes(err.status_block(&term).render(&term));
+        assert!(
+            rendered.contains("frontmatter.cmd"),
+            "frontmatter origin field missing: {rendered}"
+        );
+        assert!(
+            rendered.contains("> 3 │"),
+            "excerpt gutter for frontmatter line 3 missing: {rendered}"
+        );
+        assert!(
+            rendered.contains("cmd: \"$(echo fail)\""),
+            "frontmatter key line missing from excerpt: {rendered}"
+        );
+    }
+
+    #[test]
+    fn frontmatter_key_line_resolves_quoted_and_unquoted_keys() {
+        let content = "---\nunquoted: 1\n'quoted': 2\n\"double\": 3\n---\n# Body\n";
+        let ctx = SourceContext::new(
+            std::path::PathBuf::from("/test.md"),
+            std::path::PathBuf::from("test.md"),
+            content,
+        );
+        assert_eq!(frontmatter_key_line(&ctx, "unquoted"), Some(2));
+        assert_eq!(frontmatter_key_line(&ctx, "quoted"), Some(3));
+        assert_eq!(frontmatter_key_line(&ctx, "double"), Some(4));
+        assert_eq!(frontmatter_key_line(&ctx, "missing"), None);
+    }
+
+    fn test_source_context() -> SourceContext {
+        SourceContext::new(
+            std::path::PathBuf::from("/test.md"),
+            std::path::PathBuf::from("test.md"),
+            "# Test\n::shell sniff repo packages --bad-flag\n",
+        )
+    }
+
+    fn full_file_source_context() -> SourceContext {
+        SourceContext::new(
+            std::path::PathBuf::from("/test.md"),
+            std::path::PathBuf::from("test.md"),
+            "---\ntitle: Test\ncmd: \"$(echo fail)\"\n---\n# Body\n::shell sniff repo packages --bad-flag\n",
+        )
+    }
+
+    fn no_color_terminal() -> Terminal {
+        Terminal::builder()
+            .width(80)
+            .color_depth(ColorDepth::None)
+            .build()
     }
 }

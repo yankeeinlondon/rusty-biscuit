@@ -295,9 +295,30 @@ mod tests {
         assert_eq!(result.status.as_deref(), Some("success"));
         let stats = result.stats.expect("stats");
         assert_eq!(stats.total_tokens, Some(750));
+        assert_eq!(stats.input_tokens, Some(500));
+        assert_eq!(stats.output_tokens, Some(250));
         assert_eq!(stats.cached, Some(100));
-        assert_eq!(stats.tool_calls, Some(0));
+        assert_eq!(stats.input, Some(400));
         assert_eq!(stats.duration_ms, Some(8000));
+        assert_eq!(stats.tool_calls, Some(0));
+        assert!(
+            result.extra.is_empty(),
+            "known result fields must not land in extra; extra={:?}",
+            result.extra
+        );
+    }
+
+    #[test]
+    fn gemini_result_round_trips_through_json() {
+        let line = r#"{"type":"result","status":"success","stats":{"total_tokens":10,"input_tokens":6,"output_tokens":4},"cost_usd":0.001}"#;
+        let event = parse(line);
+        let serialized = serde_json::to_string(&event).unwrap();
+        let reparsed: GeminiEvent = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(
+            serde_json::to_string(&reparsed).unwrap(),
+            serialized,
+            "parse -> serialize -> parse should be stable for a known event"
+        );
     }
 
     #[test]

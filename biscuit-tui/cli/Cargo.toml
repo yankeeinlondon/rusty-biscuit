@@ -27,7 +27,36 @@ predicates = "3"
 serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 
+# Test-only, target-scoped: in `tests/windows_captured_stdout.rs` the F2
+# boundary test self-attaches a console (`AllocConsole`), rewires the process
+# std handles onto `CONOUT$`/`CONIN$` via `CreateFileW` + `SetStdHandle`, proves
+# the attached-console precondition, then injects a deterministic Enter through
+# the console input buffer (`WriteConsoleInputW`). Scoped to `cfg(windows)`
+# dev-deps so Unix/macOS builds never pull it in. Matches the `windows` 0.62
+# workspace convention (claudine / biscuit-location / sniff / playa). Only the
+# feature subsets the test uses are enabled:
+#   - Win32_Foundation: HANDLE, CloseHandle, GENERIC_*, BOOL/TRUE.
+#   - Win32_System_Console: AllocConsole, Get/SetStdHandle, console input records.
+#   - Win32_Storage_FileSystem: CreateFileW + OPEN_EXISTING/FILE_SHARE_* to open
+#     CONOUT$/CONIN$.
+#   - Win32_Security: CreateFileW's signature references SECURITY_ATTRIBUTES, so
+#     this feature is required even though the test passes `None`.
+#   - Win32_UI_Input_KeyboardAndMouse: VK_RETURN.
+[target.'cfg(windows)'.dev-dependencies]
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_Console",
+    "Win32_Storage_FileSystem",
+    "Win32_Security",
+    "Win32_UI_Input_KeyboardAndMouse",
+] }
+
 # Opt-out of benchmarking: thin CLI wrapper around the biscuit-tui library.
 [package.metadata.benchmarks]
 required = false
 reason = "Thin CLI wrapper around biscuit-tui; no measurable hot paths."
+
+# CI policy: biscuit-tui-cli owns the area's L2 (real-terminal) tier tests.
+[package.metadata.ci.tests]
+tiers = ["L1", "L2"]
+l2-backends = ["tmux", "wezterm", "kitty"]

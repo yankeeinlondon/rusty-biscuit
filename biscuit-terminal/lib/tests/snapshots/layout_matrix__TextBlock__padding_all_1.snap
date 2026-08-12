@@ -1,0 +1,11 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: block
+---
+VIA_RENDER
+
+ TextBlock applies uniform block styling to a single piece of content.
+---
+VIA_TREE_DIRECT
+
+ TextBlock applies uniform block styling to a single piece of content.

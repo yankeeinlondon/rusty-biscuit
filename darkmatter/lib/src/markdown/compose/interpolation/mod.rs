@@ -67,17 +67,20 @@
 //! ```
 
 mod evaluator;
+#[cfg(test)]
+mod fatality_characterization;
 pub(crate) mod rewrite;
 
 // Re-export core expression types from the expression module for backward
 // compatibility. The canonical location is now `compose::expression`.
 pub use super::expression::{
-    ComparisonOp, Expr, ExpressionFinder, ExpressionLocation, Lexer, LexerError, ParseError,
-    ParseMode, Parser, Token, parse, parse_condition,
+    ArityBound, ComparisonOp, Expr, ExpressionError, ExpressionFinder, ExpressionLocation,
+    FileRefFailure, FileReferenceDiagnostic, Lexer, LexerError, ParseError, ParseMode, Parser,
+    Token, parse, parse_condition,
 };
 
 // Re-export the lookup trait with its old name for backward compatibility.
 pub use super::expression::EvaluationLookup as InterpolationLookup;
 
 pub use evaluator::{EvalResult, EvalValue, Evaluator};
-pub(crate) use rewrite::{ScanMode, interpolate_text, interpolate_value};
+pub(crate) use rewrite::{ScanMode, convert_literals, interpolate_text, interpolate_value};

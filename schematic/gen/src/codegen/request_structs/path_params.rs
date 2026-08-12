@@ -3,15 +3,19 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use crate::codegen::request_structs::shared::{QueryParamInfo, to_snake_case};
+use crate::codegen::request_structs::shared::{
+    QueryParamInfo, param_field_name, param_serde_rename, type_name_to_tokens,
+};
 
 /// Generates field declarations for path parameters.
 pub(super) fn generate_path_param_fields(path_params: &[&str]) -> TokenStream {
     let fields = path_params.iter().map(|param| {
-        let field_name = format_ident!("{}", param);
+        let field_name = format_ident!("{}", param_field_name(param));
+        let rename = param_serde_rename(param);
         let doc = format!(" Path parameter: {}", param);
         quote! {
             #[doc = #doc]
+            #rename
             pub #field_name: String,
         }
     });
@@ -37,7 +41,7 @@ pub(super) fn generate_new_method(
     let params: Vec<_> = path_params
         .iter()
         .map(|p| {
-            let name = format_ident!("{}", p);
+            let name = format_ident!("{}", param_field_name(p));
             quote! { #name: impl Into<String> }
         })
         .collect();
@@ -45,7 +49,7 @@ pub(super) fn generate_new_method(
     let path_field_inits: Vec<_> = path_params
         .iter()
         .map(|p| {
-            let name = format_ident!("{}", p);
+            let name = format_ident!("{}", param_field_name(p));
             quote! { #name: #name.into() }
         })
         .collect();
@@ -54,13 +58,13 @@ pub(super) fn generate_new_method(
     let query_field_inits: Vec<_> = query_params
         .iter()
         .map(|qp| {
-            let name = format_ident!("{}", to_snake_case(&qp.name));
+            let name = format_ident!("{}", param_field_name(&qp.name));
             quote! { #name: None }
         })
         .collect();
 
     if has_body {
-        let body_ty = format_ident!("{}", body_type.unwrap());
+        let body_ty = type_name_to_tokens(body_type.unwrap_or("Body"));
         quote! {
             /// Creates a new request with the required path parameters and body.
             pub fn new(#(#params,)* body: #body_ty) -> Self {

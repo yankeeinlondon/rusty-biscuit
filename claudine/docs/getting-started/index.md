@@ -159,7 +159,7 @@ which do the same thing regardless of the agent you are using:
     --asp <FILE>             Append a system prompt from a file
     --rsp <FILE>             Replace the providers system prompt with contents from a file
 -t, --timeout <SECONDS>   Timeout in seconds (non-interactive only)
-    --dry-run             Show what would be executed without launching the child
+    --dry-run             Show what would be executed without requiring or launching the child executable
 -q, --quiet              Suppress env details and info; still show the system prompt when set
     --silent              Suppress all Claudine preflight output
     --operation <OP>      Set the OPERATION env var for the wrapped session
@@ -425,7 +425,7 @@ favorite_color: "red"
 ```
 > found in the `tell-them-what-they-want-hear.md` prompt
 
-- these blocks can use _interpolation_ for more dynamic rules (_interpolation is guaranteed to be transformed in the pipeline before conditional logic is applied_); that means a conditional expression like `favorite_color == {{something-else}}` is perfectly valid syntax.
+- these blocks evaluate their `when` clause with Claudine's expression engine, which reads frontmatter, `ctx`, and `env` values directly; because frontmatter is fully resolved (interpolated and shell-expanded) before any `::block` is evaluated, a conditional expression like `favorite_color == 'red'` reliably sees the resolved value.
 - the `::block` directive uses the 'when' property to define the conditional clause; this is the convention ... most _directives_ will expose a 'when' property which can make it conditional
 - guess what other _directive_ can be made conditional? Did you guess the `::file` directive? If so then give yourself a pat on the back.
 

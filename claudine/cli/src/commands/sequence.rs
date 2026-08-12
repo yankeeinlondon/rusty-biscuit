@@ -1,10 +1,13 @@
 //! Top-level `claudine sequence <file>` command.
 
+use std::io::IsTerminal;
+
 use clap::Args;
 use claudine::composition::{
-    self, CompositionError, SequenceExecutionOptions, parse_interactive_hint,
+    self, CompositionError, MarkdownLoadCause, ResolvedCompositionSource, SequenceExecutionOptions,
+    SequenceShellCause, parse_interactive_hint,
 };
-use color_eyre::eyre::{Result, eyre};
+use color_eyre::eyre::{Result, WrapErr, eyre};
 use tracing::info_span;
 
 use super::compose::SharedComposeArgs;
@@ -73,6 +76,129 @@ fn reject_sequence_interactive(
     Ok(())
 }
 
+/// Resolve a sequence source, accepting both Markdown files and raw YAML
+/// sequence files.
+///
+/// Markdown files follow the standard [`composition::resolve_composition_source`]
+/// path. YAML files (`.yaml` / `.yml`) are treated as frontmatter without a
+/// Markdown body: their top-level mapping becomes the document frontmatter so
+/// that `sequence`, `prompt`, `name`, `description`, `$schema`, and other keys
+/// behave exactly as they would in a Markdown frontmatter block.
+#[allow(clippy::result_large_err)]
+fn resolve_sequence_source(
+    file_ref: &str,
+    context: &biscuit_file::FileResolutionContext,
+) -> Result<ResolvedCompositionSource, CompositionError> {
+    // Markdown files use the standard resolution path.
+    match composition::resolve_composition_source_in_context(file_ref, context) {
+        Ok(source) => return Ok(source),
+        Err(CompositionError::NotMarkdown(_)) => {}
+        Err(e) => return Err(e),
+    }
+
+    // YAML sequence files are treated as frontmatter without a Markdown body.
+    // Resolve through the SAME prompt magic roots as the Markdown path
+    // ([`composition::build_prompt_reference`]) so `@foo.yaml` and `@foo.md`
+    // resolve identically instead of the YAML fallback seeing only the
+    // package-area root.
+    let reference = biscuit_file::FileReference::new(file_ref).map_err(|source| {
+        CompositionError::InvalidReference {
+            reference: file_ref.to_string(),
+            source,
+        }
+    })?;
+    let resolved_path = reference
+        .resolve_in_context(context)
+        .map_err(|e| CompositionError::InvalidReference {
+            reference: file_ref.to_string(),
+            source: e,
+        })?
+        .ok_or_else(|| CompositionError::FileNotFound(file_ref.to_string()))?;
+
+    if !composition::is_yaml_source(&resolved_path) {
+        return Err(CompositionError::NotMarkdown(
+            biscuit_file::to_portable_string(&resolved_path),
+        ));
+    }
+
+    // The same conversion the just-in-time re-read performs, so a step composes
+    // against the document its preflight validated.
+    let markdown = composition::load_yaml_document(&resolved_path)?;
+
+    let original_text = std::fs::read_to_string(&resolved_path).map_err(|e| {
+        CompositionError::MarkdownLoad {
+            path: resolved_path.clone(),
+            source: MarkdownLoadCause::Read(e),
+        }
+    })?;
+
+    Ok(ResolvedCompositionSource {
+        original_ref: file_ref.to_string(),
+        resolved_path,
+        original_text,
+        markdown,
+    })
+}
+
+/// Report that a dynamic source resolved to no steps.
+///
+/// This is the success path, so it is a notice rather than a warning — but it
+/// goes to stderr like every other status line, leaving stdout clean for the
+/// (empty) run.
+fn emit_empty_sequence_notice(path: &std::path::Path) {
+    use biscuit_terminal::prelude::TerminalRenderable;
+
+    crate::log::message(
+        &biscuit_terminal::components::prose::Prose::new(format!(
+            "<dim>sequence</dim> <bold>{}</bold> resolved to <bold>0 steps</bold>; \
+             nothing to run.",
+            biscuit_file::to_portable_string(path)
+        ))
+        .render(&crate::log::terminal()),
+    );
+}
+
+/// Approve and execute one `$( … )` sequence source, returning its stdout.
+///
+/// The command is validated and approved through the same harness gate as
+/// every other composition shell command, so a sequence source can never reach
+/// a shell the user has not cleared.
+#[allow(clippy::result_large_err)]
+fn expand_shell_source(
+    command: &str,
+    options: &claudine::harness::ShellApprovalOptions,
+) -> std::result::Result<String, CompositionError> {
+    let approved = claudine::harness::shell::validate_and_approve_command(command, options)
+        .map_err(|e| CompositionError::SequenceShellFailed {
+            command: command.to_string(),
+            source: SequenceShellCause::Approval(e),
+        })?;
+
+    let output = std::process::Command::new(&approved.executable)
+        .args(&approved.args)
+        .output()
+        .map_err(|e| CompositionError::SequenceShellFailed {
+            command: command.to_string(),
+            source: SequenceShellCause::Spawn(e),
+        })?;
+
+    if !output.status.success() {
+        return Err(CompositionError::SequenceShellFailed {
+            command: command.to_string(),
+            source: SequenceShellCause::Exited {
+                status: output.status.to_string(),
+                stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            },
+        });
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+}
+
+// The shell-source runner returns `CompositionError` by value to satisfy the
+// library's runner signature; that enum is intentionally large and is boxed at
+// the reporting boundary, not here.
+#[allow(clippy::result_large_err)]
 fn run_sequence_inner(
     args: SequenceArgs,
     verbose: u8,
@@ -95,18 +221,60 @@ fn run_sequence_inner(
     // Early validation: both flags share the same duration grammar.
     if let Some(ref raw) = shared.timeout {
         claudine::harness::parse_timeout(raw, std::path::Path::new("<--timeout>"))
-            .map_err(|e| eyre!("invalid --timeout value: {e}"))?;
+            .wrap_err("invalid --timeout value")?;
     }
     shared.step_timeout_secs()?;
+    shared.stall_timeout_secs()?;
 
     let parsed = super::compose::parse_composition_positionals(&args)?;
     let file = parsed.file_ref.ok_or_else(|| {
         eyre!("missing file reference: expected exactly one file reference plus optional key=value setters")
     })?;
+    let stderr_is_tty = std::io::stderr().is_terminal()
+        || std::env::var_os("FORCE_COLOR").is_some();
 
-    let source = composition::resolve_composition_source(&file)?;
+    let invocation = claudine::invocation_context::InvocationContext::capture()?;
+    let file_resolution_context = invocation.launch_file_resolution_context().clone();
+    let source = match resolve_sequence_source(&file, &file_resolution_context) {
+        Ok(source) => source,
+        Err(CompositionError::FileNotFound(_)) => {
+            let selected = crate::completion::operation_file::autocomplete_operation_file(
+                &file,
+                crate::completion::scopes::ComposeMode::Sequence,
+            )?;
+            resolve_sequence_source(&selected, &file_resolution_context).map_err(|e| {
+                composition::enrich_composition_source_load_error_in_context(
+                    &selected,
+                    e,
+                    stderr_is_tty,
+                    &file_resolution_context,
+                )
+            })?
+        }
+        Err(e) => {
+            return Err(
+                composition::enrich_composition_source_load_error_in_context(
+                    &file,
+                    e,
+                    stderr_is_tty,
+                    &file_resolution_context,
+                ).into(),
+            );
+        }
+    };
+
+    // Derive the definitive source bundle from the same owner so a
+    // top-level document selected from a different repository keeps that
+    // repository's nested references (D2/D10, AC12). Downstream sequence
+    // surfaces receive the source-derived file-resolution projection.
+    let source_context = invocation.derive_source(&source.resolved_path)?;
+    let file_resolution_context = source_context.file_resolution_context().clone();
 
     reject_sequence_interactive(&source)?;
+    // A `kind: group`/`group-catalog`/`task` document is never directly
+    // executable — it runs only as (or inside) a sequence task. Catching it
+    // here names the construct instead of reporting a missing `sequence:` key.
+    composition::reject_non_sequence_kind(&source)?;
 
     let _sequence_span = info_span!(
         "sequence",
@@ -115,12 +283,41 @@ fn run_sequence_inner(
     )
     .entered();
 
-    let plan = composition::resolve_sequence_plan(&source)?.ok_or_else(|| {
-        eyre!(
-            "file '{}' does not define a `sequence` frontmatter property",
-            file
-        )
-    })?;
+    let shell_options = super::wrap::apply_composition_shell_overrides(
+        super::wrap::build_harness_shell_options_for_source(
+            &source.resolved_path,
+            source_context.repository_root(),
+        ),
+        false,
+        shared.yolo,
+    );
+    let shell_runner = |command: &str| expand_shell_source(command, &shell_options);
+    let source_options = composition::SequenceSourceOptions {
+        shell_runner: Some(&shell_runner),
+        file_resolution_context: Some(&file_resolution_context),
+    };
+
+    let plan = composition::resolve_sequence_plan_with(&source, source_options)?.ok_or_else(
+        || {
+            eyre!(
+                "file '{}' does not define a `sequence` frontmatter property",
+                file
+            )
+        },
+    )?;
+
+    // The plan now owns a formal document's `template:` and `$schema`; from here
+    // down `source` is only ever composed, and there those are not frontmatter.
+    // Every later re-read sheds them too (`reload_composition_source`).
+    let source = composition::without_formal_sequence_keys(&source);
+
+    // A dynamic source legitimately resolves to nothing — a clean repository
+    // makes `{{ ctx.dirty_files }}` empty. That is a no-op, not a failure; a
+    // static `sequence: []` is still rejected during normalization.
+    if plan.steps.is_empty() {
+        emit_empty_sequence_notice(&source.resolved_path);
+        return Ok(0);
+    }
 
     let set_overrides =
         super::compose::merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
@@ -134,8 +331,13 @@ fn run_sequence_inner(
     // for missing required values is driven by
     // `wrap::sequence::run_phase_1c_with_schema` against the
     // deduplicated cross-step set.
+    // The top-level source was resolved from launch context above. Capture that
+    // directory before `chdir` as stable `file_ref_fallback_dir` diagnostic
+    // metadata; document-authored values resolve repository-first, then
+    // source-relative, never through launch as another candidate.
+    let launch_area_fallback = Some(invocation.launch_cwd().to_path_buf());
     let (source, set_overrides, dropped_optionals) =
-        composition::drop_invalid_optionals(source, set_overrides);
+        composition::drop_invalid_optionals(source, set_overrides, launch_area_fallback.as_deref());
     emit_dropped_optional_warnings(&dropped_optionals);
 
     let execution_options = SequenceExecutionOptions {
@@ -151,6 +353,9 @@ fn run_sequence_inner(
         verbose,
         shared.perf,
         startup_timings,
+        invocation,
+        source_context,
+        file_resolution_context,
     )
 }
 
@@ -161,6 +366,46 @@ mod tests {
     use serde_json::json;
     use std::fs;
     use tempfile::TempDir;
+
+    fn shared_args() -> SharedComposeArgs {
+        SharedComposeArgs {
+            provider: None,
+            claude: false,
+            codex: false,
+            gemini: false,
+            goose: false,
+            kimicode: false,
+            opencode: false,
+            qwen: false,
+            exclude: Vec::new(),
+            yolo: false,
+            interactive: false,
+            no_interactive: false,
+            include: Vec::new(),
+            model: None,
+            output: None,
+            append_system_prompt: None,
+            replace_system_prompt: None,
+            timeout: None,
+            step_timeout: None,
+            stall_timeout: None,
+            operation: None,
+            sandbox: false,
+            repo: false,
+            dry_run: false,
+            quiet: false,
+            silent: true,
+            set: None,
+            mcp: false,
+            mcp_use: Vec::new(),
+            strict: false,
+            perf: false,
+            max_iterations: None,
+            on_rate_limit: None,
+            provider_args: Vec::new(),
+            provider_args_explicit: false,
+        }
+    }
 
     fn source_with_frontmatter(
         dir: &TempDir,
@@ -220,5 +465,36 @@ mod tests {
             matches!(err, CompositionError::InteractiveHintWrongType(_)),
             "expected InteractiveHintWrongType, got {err:?}"
         );
+    }
+
+    #[test]
+    fn sequence_source_load_error_is_frontmatter_enriched() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("malformed.md");
+        fs::write(
+            &file,
+            "----\nsequence:\n  - step.md\ndescription: near-miss fence\n----\n# Body\n",
+        )
+        .unwrap();
+
+        let args = SequenceArgs {
+            shared: shared_args(),
+            args: vec![file.to_string_lossy().into_owned()],
+            fail_fast: None,
+        };
+        let report = run_sequence_inner(args, 0, None).unwrap_err();
+        let err = report
+            .downcast::<CompositionError>()
+            .expect("report should carry CompositionError");
+
+        match err {
+            CompositionError::WithFrontmatter { inner, .. } => {
+                assert!(
+                    matches!(*inner, CompositionError::FrontmatterParse(_)),
+                    "inner error should remain FrontmatterParse"
+                );
+            }
+            other => panic!("expected WithFrontmatter, got: {other:?}"),
+        }
     }
 }

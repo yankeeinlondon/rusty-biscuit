@@ -1,0 +1,302 @@
+# Topic-less catalog facts for the antigravity provider.
+#
+# Field-source matrix (design/catalog-generation.md): this file owns values
+# whose research topic has not landed yet. Keys are catalog field names.
+#
+# Antigravity (Google) ships the headless `agy` CLI. It has TWO surfaces
+# Claudine uses: (1) a file-based HOOK system (`~/.gemini/config/hooks.json`)
+# whose subsystem is loaded during a `--print` run (verified against agy 1.1.0:
+# `hooks_manager.go` parses the config live) — five native events (PreToolUse /
+# PostToolUse / PreInvocation / PostInvocation / Stop) with command handlers,
+# camelCase JSON payloads, and stdout-JSON decisions; and (2) the
+# `--output-format json` result envelope
+# (`{conversation_id,status,response,duration_seconds,num_turns,usage,error?}`)
+# used for wrapper-mode rendering (the stream parser). So `event_mapping`
+# declares the five hook events `Hook`-level with `registration_target: true`
+# (a real `AntigravityConfigurator` writes them into hooks.json), while the
+# envelope drives wrapper-mode terminal rendering via `stream_protocol: json`.
+#
+# NOTE (verify-later, Ken-approved 2026-07-08): the hook subsystem is confirmed
+# LOADED in `--print` mode, but a hook handler's command was NOT yet observed
+# EXECUTING in one-shot print mode (probing destabilized the local agy state).
+# Wired now on the strength of the research + loaded-in-print evidence; a clean
+# single-hook firing check on a stable agy is the outstanding confirmation
+# (see known_gaps).
+stream_protocol: json
+event_mapping:
+  mappings:
+  - event: session_start
+    parse_aliases: []
+    registration_target: false
+    # The conversation_id is carried in the terminal envelope, not a
+    # mid-stream session-start record.
+    support_level: not_supported
+  - event: session_end
+    parse_aliases: []
+    registration_target: false
+    # The single JSON envelope IS the run terminal; claimed by turn_complete.
+    support_level: not_supported
+  - event: before_prompt
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: before_tool
+    parse_aliases: []
+    registration_target: true
+    # agy PreToolUse: gates a pending tool call (allow/deny/ask/force_ask).
+    support_level:
+      hook:
+        native_name: PreToolUse
+  - event: after_tool
+    parse_aliases: []
+    registration_target: true
+    # agy PostToolUse: fires after a tool completes (observational).
+    support_level:
+      hook:
+        native_name: PostToolUse
+  - event: tool_error
+    parse_aliases: []
+    registration_target: false
+    # No dedicated tool-error hook; PostToolUse carries an optional `error`.
+    support_level: not_supported
+  - event: permission_request
+    parse_aliases: []
+    registration_target: false
+    # PreToolUse carries the permission decision, mapped to before_tool; agy
+    # has no separate permission-request hook.
+    support_level: not_supported
+  - event: human_in_the_loop
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: turn_complete
+    parse_aliases: []
+    registration_target: true
+    # agy Stop: fires when the execution loop terminates.
+    support_level:
+      hook:
+        native_name: Stop
+  - event: turn_error
+    parse_aliases: []
+    registration_target: false
+    # No error-specific hook; the `--output-format json` envelope carries the
+    # non-SUCCESS status for wrapper-mode rendering.
+    support_level: not_supported
+  - event: subagent_start
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: subagent_stop
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: before_model
+    parse_aliases: []
+    registration_target: true
+    # agy PreInvocation: fires before each model call (can inject steps).
+    support_level:
+      hook:
+        native_name: PreInvocation
+  - event: after_model
+    parse_aliases: []
+    registration_target: true
+    # agy PostInvocation: fires after tool calls finish (loop-control point;
+    # can inject steps / force continue or terminate).
+    support_level:
+      hook:
+        native_name: PostInvocation
+  - event: before_compact
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: notification
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+resource_support:
+  agents:
+    also_reads_from: []
+    format: null
+    level: None
+    notes: agy discovers agent.md files (~/.gemini/config/agents, .agents/agents) but exposes no non-interactive `--agent` selector and the schema is only partially public; subagents are managed through the interactive /agents and /tasks panels only. Not linked in v1.
+    properties: null
+    repo_path: null
+    user_path: null
+  commands:
+    also_reads_from: []
+    format: null
+    level: None
+    notes: Antigravity has no dedicated slash-command directory; registered Agent Skills automatically become TUI slash commands, and there is no argument-placeholder syntax. Commands are skill-derived (rewrite required); not linked as a separate resource.
+    properties: null
+    repo_path: null
+    user_path: null
+  provider: antigravity
+  scripts:
+    also_reads_from: []
+    format: null
+    level: None
+    notes: No dedicated scripts resource directory.
+    properties: null
+    repo_path: null
+    user_path: null
+  skill_frontmatter:
+    allowed_tools: false
+    compatibility: false
+    description: true
+    disable_model_invocation: false
+    license: false
+    metadata: false
+    name: true
+    user_invocable: false
+  skills:
+    also_reads_from: []
+    format: Markdown
+    level: Full
+    notes: Agent Skills standard (<root>/skills/<name>/SKILL.md), first-class in agy 1.1.0 (built-ins shipped under ~/.gemini/antigravity-cli/builtin/skills). Only name + description are documented frontmatter keys; progressive disclosure injects name+description until activated.
+    properties:
+      optional: []
+      required:
+      - name
+      - description
+      source_doc: claudine/docs/research/skills/antigravity.md
+    repo_path: .agents/skills
+    user_path: ~/.gemini/config/skills
+memory_files:
+- raw: AGENTS.md
+  segments: []
+- raw: GEMINI.md
+  segments: []
+- raw: CLAUDE.md
+  segments: []
+output_formats:
+# agy's non-interactive default is plain text (the final assistant response on
+# stdout). `--output-format json` (a hidden-but-accepted flag, verified in the
+# 1.1.0 binary via the `--json-schema can only be used when --output-format is
+# 'json'` string) prints ONE buffered JSON envelope after the run — the Json
+# format, NOT a line-delimited stream. The prompt is the value of `--print`,
+# never stdin (io_contract.stdin: ignored), so stdin_supported is false.
+- cli_flag: null
+  companion_flags: []
+  format: text
+  native_name: text
+  selector:
+    kind: default
+  stdin_supported: false
+- cli_flag: --output-format
+  companion_flags: []
+  format: json
+  native_name: json
+  selector:
+    flag: --output-format
+    kind: flag_value
+  stdin_supported: false
+# `--print` (aliases `-p`, `--prompt`) is the non-interactive entrypoint: it
+# takes the prompt as its flag value and prints the response. The prompt is
+# delivered adjacent to `--print` by the wrapper's prompt_delivery override
+# (AppendArgs, so `--print <prompt>` lands last and Go's flag parser reads the
+# value correctly); no required entrypoint flag is injected here.
+entrypoints:
+- mode: non_interactive
+  required_flags: []
+  subcommand: null
+system_prompt:
+  # agy 1.1.0 exposes NO native system-prompt flag (--append-system-prompt /
+  # --replace-system-prompt / --system-prompt are all rejected; GEMINI_SYSTEM_MD
+  # has no verified effect). Appending is only possible by writing workspace
+  # rule files (AGENTS.md / .agents/rules/*.md), which is not a flag-based
+  # delivery Claudine can drive today. So every mode is Unsupported and the
+  # default apply_system_prompt stub (which reports "unsupported") is correct —
+  # no wrapper override. Workspace-rule-file delivery is a tracked follow-up.
+  append:
+    interactive: unsupported
+    non_interactive: unsupported
+  memory_files:
+  - raw: AGENTS.md
+    segments: []
+  - raw: GEMINI.md
+    segments: []
+  - raw: CLAUDE.md
+    segments: []
+  replace:
+    interactive: unsupported
+    non_interactive: unsupported
+# agy's YOLO equivalent is the direct flag `--dangerously-skip-permissions`
+# (auto-approves all tool permission requests); honored in --print mode.
+yolo:
+  direct_flag:
+    native_flag: --dangerously-skip-permissions
+# No documented reasoning/extended-thinking flag: reasoning is embedded in the
+# model name ("... (Thinking)"), not a CLI level selector.
+reasoning: not_documented
+known_gaps:
+- area: hooks
+  note: agy's hook subsystem is confirmed to LOAD and parse ~/.gemini/config/hooks.json during a --print run (verified against 1.1.0), and the five hook events are wired (real configurator + adapter). NOT YET confirmed is whether a hook handler's command EXECUTES in one-shot --print mode (probing destabilized the local agy backend before a clean firing could be captured). Verify with a single clean PreInvocation/Stop command hook on a stable agy; if it does not fire, print mode skips hooks like `claude --bare` and these should revert to not_supported.
+  tracker: claudine/docs/research/hooks/antigravity.md
+- area: other
+  note: System-prompt append is only possible via workspace rule files (AGENTS.md / .agents/rules); agy has no system-prompt CLI flag, so Claudine reports it unsupported for now.
+  tracker: claudine/docs/research/system-prompt/antigravity.md
+- area: mcp
+  note: agy reads shared MCP config files but exposes no non-interactive add/list/remove command and no safe runtime-injection surface (changing HOME would break keyring auth); MCP is not wired.
+  tracker: claudine/docs/research/mcp/antigravity.md
+acp:
+  client_supported: false
+  events_via_acp: []
+prompt_arg_conventions:
+  entrypoint: null
+  prompt_flags:
+  - --print
+  - -p
+  - --prompt
+cli_sensitive_axes:
+  # agy CLI flags that can override a runtime permission-policy axis:
+  # --add-dir (workspace access domain), --sandbox (command execution
+  # sandboxing), --mode plan|accept-edits (mode switch). No flag targets the
+  # other axes.
+  access_domain: true
+  execute_command: true
+  modify_provider_config: false
+  read_path: false
+  spawn_subagent: false
+  switch_mode: true
+  traverse_path: false
+  use_mcp_server: false
+  use_mcp_tool: false
+  write_path: false
+repo_home_root_files: []
+billing_models:
+# Antigravity bills through Google: AI Premium subscription tiers plus metered
+# prompt credits (monthly window; five-hour refresh for paid, weekly limits for
+# free). See usage/antigravity.md.
+- subscription
+- prepaid_credits
+# agy authenticates through the OS keyring + Google Sign-In OAuth; there is NO
+# headless API-key mode and no auth env var is honored (GEMINI_API_KEY is
+# ignored; ANTIGRAVITY_API_KEY/_TOKEN are community-reported and unverified). A
+# wrapped run reuses the cached keyring/OAuth session, so no auth key bypasses
+# the sanitizer. (HOME preservation — required for keyring access — is handled
+# by the wrapper env plan, not this allowlist.)
+cap_policies: []
+allowed_env_keys: []
+display_policy:
+  tool_result_summary: show
+  info_event_suppression: []
+  collapse_task_progress: false
+  suppress_subscription_rate_limit: false
+  silent_extension_kinds: []
+  stdout_noise_prefixes: []
+  stderr_noise_prefixes: []
+suppress_structured_stderr_on_success: false
+supports_interactive_inline_closure: false
+model_required_in_non_tty: false
+# Antigravity is Google's own gateway (Cloud Code backend): the user does not
+# bring their own provider keys — Google bills and serves every model (Gemini,
+# Claude, GPT-OSS) through one authenticated backend. That is a vendor platform,
+# not a BYO-key aggregator.
+platform_kind: vendor_platform
+unmapped_native_events: []
+# Ordered error-classification vocabulary (Phase A seed, transcribed verbatim
+# from lib/src/stream/providers/antigravity.rs::ERROR_KEYWORDS). agy is a
+# message-only classifier (no structured error kind), so `kind_buckets` is
+# omitted. Sequence order IS the cascade order; the auth bucket is checked
+# first and its `401`/`403`/`sign in` needles were empirically hardened for
+# agy's keyring/OAuth failure modes.

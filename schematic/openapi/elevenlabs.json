@@ -307,15 +307,6 @@
             "type": "string"
           },
           "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "voice_id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
         }
       ]
     },
@@ -1046,15 +1037,6 @@
             "type": "string"
           },
           "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "history_item_id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
         }
       ]
     },
@@ -1515,15 +1497,6 @@
             "type": "string"
           },
           "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "service_account_user_id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
         }
       ]
     },
@@ -1595,24 +1568,6 @@
         }
       },
       "parameters": [
-        {
-          "in": "path",
-          "name": "service_account_user_id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "api_key_id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
         {
           "in": "path",
           "name": "service_account_user_id",
@@ -1769,15 +1724,6 @@
         }
       },
       "parameters": [
-        {
-          "in": "path",
-          "name": "webhook_id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
         {
           "in": "path",
           "name": "webhook_id",

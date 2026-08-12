@@ -6,7 +6,49 @@
 
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
+use schematic_define::openapi::import::naming::sanitize_rust_field_ident;
 use schematic_define::{EndpointParams, QueryParamType};
+
+/// Renders a schema type name as Rust type tokens.
+///
+/// Names arriving from an imported spec are not always bare identifiers: a
+/// schema with no `$ref` maps to the path `serde_json::Value`, and generic
+/// spellings such as `Vec<Model>` also occur. Both are valid input to
+/// [`syn::parse_str`] but panic `format_ident!`, so every site that turns a
+/// `Schema::type_name` into tokens must go through here.
+pub fn type_name_to_tokens(type_name: &str) -> TokenStream {
+    match syn::parse_str::<syn::Type>(type_name) {
+        Ok(ty) => quote! { #ty },
+        // Unparseable names are still emitted as an identifier so the generated
+        // file fails to compile at the offending type rather than aborting the
+        // whole run with a `quote` panic.
+        Err(_) => {
+            let ident = format_ident!("{}", sanitize_rust_field_ident(type_name));
+            quote! { #ident }
+        }
+    }
+}
+
+/// Returns the Rust struct-field identifier for a parameter's wire name.
+///
+/// Wire names taken from a spec (`{user-id}`, `$top`, `user.name`, `2fa`) are
+/// not always valid Rust identifiers; routing them through
+/// [`sanitize_rust_field_ident`] guarantees a usable field name and keeps the
+/// path-building, field-declaration, and constructor sites in agreement.
+pub fn param_field_name(wire_name: &str) -> String {
+    sanitize_rust_field_ident(wire_name)
+}
+
+/// Emits `#[serde(rename = "<wire>")]` when the sanitized field name differs
+/// from the parameter's wire name, so the on-the-wire spelling is preserved.
+pub fn param_serde_rename(wire_name: &str) -> TokenStream {
+    let field = param_field_name(wire_name);
+    if field == wire_name {
+        quote! {}
+    } else {
+        quote! { #[serde(rename = #wire_name)] }
+    }
+}
 
 /// Converts a PascalCase or camelCase string to snake_case.
 pub fn to_snake_case(s: &str) -> String {
@@ -85,11 +127,24 @@ pub fn generate_path_format(
         let path_literal = path;
         quote! { let #mut_tok path = #path_literal.to_string(); }
     } else {
-        // Build format string and arguments
+        // Build format string and arguments. The format string keeps each
+        // placeholder's position by wire name; the interpolated value is the
+        // sanitized field, percent-encoded so a value containing `/ ? # %`
+        // cannot break out of its path segment or forge the request.
+        //
+        // A param written `{+name}` in the source path opts out of encoding
+        // (RFC 6570 reserved expansion): its value is emitted raw, so a
+        // slash-bearing repository id or file path keeps its separators.
         let format_str = build_format_string(path, path_params);
         let format_args = path_params.iter().map(|param| {
-            let field_name = format_ident!("{}", param);
-            quote! { self.#field_name }
+            let field_name = format_ident!("{}", param_field_name(param));
+            if path.contains(&format!("{{+{}}}", param)) {
+                // No `&`: `format!` takes its arguments by reference already, and
+                // a redundant one trips `clippy::needless_borrows_for_generic_args`.
+                quote! { self.#field_name }
+            } else {
+                quote! { urlencoding::encode(&self.#field_name.to_string()) }
+            }
         });
 
         quote! { let #mut_tok path = format!(#format_str, #(#format_args),*); }
@@ -101,7 +156,7 @@ pub fn generate_path_format(
     } else {
         // Generate collection statements for each param
         let query_param_collectors = query_params.iter().map(|qp| {
-            let field_name = format_ident!("{}", to_snake_case(&qp.name));
+            let field_name = format_ident!("{}", param_field_name(&qp.name));
             let param_name = &qp.name;
 
             match &qp.param_type {
@@ -131,7 +186,7 @@ pub fn generate_path_format(
             if !query_pairs.is_empty() {
                 let query_string: String = query_pairs
                     .iter()
-                    .map(|(k, v)| format!("{}={}", k, urlencoding::encode(v)))
+                    .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
                     .collect::<Vec<_>>()
                     .join("&");
                 if path.contains('?') {
@@ -149,12 +204,12 @@ pub fn generate_path_format(
     }
 }
 
-/// Builds a format string by replacing {param} with {}.
+/// Builds a format string by replacing `{param}` and `{+param}` with `{}`.
 pub fn build_format_string(path: &str, path_params: &[&str]) -> String {
     let mut result = path.to_string();
     for param in path_params {
-        let placeholder = format!("{{{}}}", param);
-        result = result.replace(&placeholder, "{}");
+        result = result.replace(&format!("{{+{}}}", param), "{}");
+        result = result.replace(&format!("{{{}}}", param), "{}");
     }
     result
 }

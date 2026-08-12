@@ -10,7 +10,7 @@ It is intentionally separate from `ProtectService`. After the 2026-04-06 Protect
 
 ## Built-in Backends
 
-8 providers: Claude, Codex, Gemini, OpenCode, Goose, Kimi, Qwen, Roo. Each backend has capability metadata (`engine.capabilities(provider)`) covering fidelity, query types, and mutation support.
+7 providers: Claude, Codex, Gemini, OpenCode, Goose, Kimi, Qwen. Each backend has capability metadata (`engine.capabilities(provider)`) covering fidelity, query types, and mutation support.
 
 ## Core Concepts
 

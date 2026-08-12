@@ -71,5 +71,5 @@ darkmatter_lib/
 
 ## Resources
 
-- [darkmatter/lib](../../../darkmatter/lib/) - Library source
-- [darkmatter/cli](../../../darkmatter/cli/) - CLI source
+- darkmatter/lib - Library source
+- darkmatter/cli - CLI source

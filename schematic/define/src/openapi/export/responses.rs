@@ -3,6 +3,24 @@ use openapiv3::{MediaType, ReferenceOr, Response, Responses, StatusCode};
 
 use crate::response::ApiResponse;
 
+/// Builds the schema entry for a named body or response type.
+///
+/// A path-shaped name (`serde_json::Value`) names a foreign Rust type that has
+/// no component entry, so it is emitted as an unconstrained inline schema. A
+/// `$ref` to it would dangle and fail export's reference-closure check.
+pub(super) fn schema_reference(type_name: &str) -> ReferenceOr<openapiv3::Schema> {
+    if type_name.contains("::") {
+        return ReferenceOr::Item(openapiv3::Schema {
+            schema_data: Default::default(),
+            schema_kind: openapiv3::SchemaKind::Any(openapiv3::AnySchema::default()),
+        });
+    }
+
+    ReferenceOr::Reference {
+        reference: format!("#/components/schemas/{type_name}"),
+    }
+}
+
 /// Maps response type to OpenAPI Responses.
 pub(super) fn map_responses(response: &ApiResponse) -> Responses {
     let mut responses = IndexMap::new();
@@ -11,9 +29,7 @@ pub(super) fn map_responses(response: &ApiResponse) -> Responses {
         ApiResponse::Json(schema_def) => (
             "200",
             "application/json",
-            Some(ReferenceOr::Reference {
-                reference: format!("#/components/schemas/{}", schema_def.type_name),
-            }),
+            Some(schema_reference(&schema_def.type_name)),
         ),
         ApiResponse::Text => (
             "200",

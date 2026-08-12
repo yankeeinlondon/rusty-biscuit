@@ -1,10 +1,28 @@
 ---
-hash: ef46db3751d8e999-98a03d15d3a9a515
-last_updated: 2026-06-14
+hash: ef46db3751d8e999-7ba4e8bda2fc74df
+last_updated: 2026-07-22
 ---
 # Claudine CLI Reference
 
 Complete command documentation with examples and options.
+
+## Contents
+
+- [Global options](#global-options)
+- [`claudine init`](#claudine-init)
+- [`claudine hooks`](#claudine-hooks)
+- [`claudine actions`](#claudine-actions)
+- [Wrapped provider commands](#wrapped-provider-commands)
+- [Composition commands](#composition-commands)
+- [MCP commands](#claudine-mcp)
+- [Resource linking](#claudine-skills--claudine-commands--claudine-agents)
+- [Logs](#claudine-logs)
+- [Providers](#claudine-providers)
+- [Dashboard](#claudine-dashboard)
+- [Completions](#claudine-completions-shell)
+
+This compact index routes by command family; use heading search for a specific
+subcommand or flag.
 
 ## Global Options
 
@@ -68,10 +86,11 @@ claudine hooks [OPTIONS] [PROVIDER]
 
 | Option | Description |
 |--------|-------------|
-| *(none)* | Table of providers with install status and subscribed hooks |
+| *(none)* | Status report: install state, registration drift per provider, legend, protect status, `claudine sync --fix` hint when drift exists |
 | `-v` | Adds action count indicators per event |
-| `<provider>` | Detailed event/action view for one provider (fuzzy matching) |
-| `--support` | Event support matrix across all providers (✅ hook / ⛔️ non-hook / ❌ none) |
+| `<provider>` | Detailed event/action view for one provider (fuzzy matching), including per-event capture method and its unmapped native events |
+| `--support` | Event support glyph matrix across all providers (✅ hook / 🔶 indirect / 🅐 acp / – none) |
+| `--capture-method` | Hidden alias of `--support` (its per-level detail moved to the provider detail view) |
 | `--mapping` | Native event name mappings per provider |
 | `--describe` | Event descriptions, payload schemas, and return schemas |
 | `--variables` | All 28 template variables with current detected values |
@@ -90,13 +109,15 @@ Gemini      ✓          -
 OpenCode    ✗          -
 ```
 
+Event names in the Subscribed Hooks column are color coded, and the legend below the table documents the coding: yellow = missing (not yet registered), red = stale (registered but no longer configured), red strikethrough = unsupported (won't fire). When any drift exists the report closes with a hint to run `claudine sync --fix`.
+
 **Provider detail view:**
 
 ```bash
 claudine hooks claude
 ```
 
-Shows detailed event/action configuration for a specific provider.
+Shows detailed event/action configuration for a specific provider. The Capture column carries the per-event capture method — `hook`, `stream-parse (protocol)`, `wire-proxy (mode)`, `wrapper`, or `acp`. Providers with native hook phases Claudine's 16-event model cannot represent (e.g. Gemini `BeforeToolSelection`, OpenCode `tool.definition`) get a closing "Not mappable — configure natively" section with remediation guidance.
 
 **Support matrix:**
 
@@ -104,10 +125,13 @@ Shows detailed event/action configuration for a specific provider.
 claudine hooks --support
 ```
 
-Shows which events each provider supports:
-- ✓ = Hook support (config file registration)
-- ○ = NonHook support (wrapper/proxy required)
-- - = Not supported
+Shows which events each provider supports as a glyph matrix. One glyph vocabulary drives both cells and legend:
+- ✅ = hook (config-file registration)
+- 🔶 = indirect (delivered via wrapper, stream parsing, or wire proxy)
+- 🅐 = acp (captured via the Agent Client Protocol)
+- – = not supported (no capture path)
+
+When the terminal is too narrow for all provider columns, the matrix degrades into stacked tables of fewer providers (it never refuses to render). `--support` and `--mapping` both close with the "Not mappable — configure natively" list of provider-native events with no canonical mapping.
 
 ---
 
@@ -170,6 +194,8 @@ claudine config
 - A **Test Connection** workflow (press `T` during webhook input) sends a test message without saving the route.
 - Desktop notifications are intentionally absent — they are zero-config and triggered via lifecycle `notify` frontmatter only.
 
+See [Messaging](messaging.md) for the full messaging subsystem — route types, the `redact_webhook_urls` invariants, and per-provider delivery.
+
 ---
 
 ## `claudine providers`
@@ -179,6 +205,17 @@ Show a compact provider capability matrix with provider name as an OSC8 link to 
 ```bash
 claudine providers
 ```
+
+**`claudine providers generate [slug]`** shells out to the `claudine-gen` binary (the CLI never links the generator). Default: forwards to `claudine-gen generate` with inherited stdio — per-file diff + `[y/N/q]` confirmation on a TTY, report-only otherwise; declined drift prints the field-keyed override snippet and exits non-zero.
+
+| Option | Description |
+|--------|-------------|
+| `--dry-run` | Report-only regardless of TTY (forwarded) |
+| `--yes` | Write every drifted file without prompting (forwarded) |
+| `--mapping` | Render the field → source → coercion mapping registry as a table |
+| `--mapping --json` | Raw mapping JSON pass-through |
+
+**`claudine providers agent-errors check <slug> [--findings <path>]`** runs the deterministic `agent-errors` research gate through the same generator-binary boundary. The command writes an explicit `clean`, `findings`, or `gate_error` outcome report and is safe to reference from a lifecycle shell action; the shell policy continues to blacklist direct `cargo` invocations.
 
 ---
 
@@ -256,7 +293,7 @@ echo '{"hook_event_name": "PreToolUse", "tool_name": "Bash"}' | claudine handle 
 
 ## Composition Commands
 
-Markdown frontmatter-based composition pipelines for delivering prompts to provider sessions. All three commands reuse the wrapper pipeline (env setup, harness detection, structured streaming, handler-driven recovery).
+Markdown frontmatter-based composition pipelines for delivering prompts to provider sessions. All three commands reuse the wrapper pipeline (env setup, harness detection, structured streaming, lifecycle-stack recovery).
 
 ### `claudine compose <file-ref> [key=value ...]`
 
@@ -276,24 +313,43 @@ claudine inline-compose @notes/update.md draft=false
 
 ### `claudine sequence <file-ref> [key=value ...]`
 
-Run a serial sequence of composition steps declared in a single document. Shared shell approval cache across steps.
+Run an ordered list of steps. Each step composes and executes one unit of work; later steps see what earlier ones produced. Accepts a Markdown document or a YAML file (`kind: sequence`) invoked directly.
 
 ```bash
 claudine sequence @research.md topic="async traits"
+claudine sequence @pipeline.yaml dir=features/my-feature
 ```
+
+**Execution is two-phase.** *Static preflight* walks the entire task graph before anything runs: dynamic sources resolve exactly once (the step list is a snapshot), every referenced group/task/prompt document loads transitively, schemas aggregate their missing properties into one interactive pass, and every shell command — including those in branches that never run — is approved byte-for-byte under an early-binding-only lookup. A preflight failure aborts regardless of `fail_fast`. *Just-in-time composition* then composes each step **at its turn**, re-reading the live source from disk, so an earlier step's inline-compose write-back or `set` mutation is visible to later steps.
+
+**One executable per task.** A step declares at most one of `prompt` (a file reference), `shell`, `side_effect`, `group`, or `task`; a step with none composes the source document's body. Steps accumulate their final stdout into the reserved `outputs` array — `{{ last(outputs) }}` is the previous task's output, and it behaves identically in standalone `compose`/`inline-compose`.
+
+**Groups** bundle tasks under a name, inline or via a `kind: group` / `kind: group-catalog` file, and run `serial` (default) or `parallel` with an optional `max_parallel` cap. Parallel members take one state snapshot, merge mutations in declaration order, and render with attributed color bars. Group `loop` is rejected pending ratified commit semantics.
+
+> **`prompt` means two things.** At the document root it is *prose* that flips the sequence to inline-compose; on a step or task it is a *file reference* to a prompt document. They never co-occur at the same level.
+
+Full user contract: `claudine/docs/topics/flow-control/sequences.md`.
+
+#### `--fail-fast <BOOL>`
+
+Overrides the document's `fail_fast`. Precedence: CLI → document → default `true`. The effective value reaches child processes as `CLAUDINE_FAIL_FAST`. Exit `0` when every executed step succeeded (or a dynamic source resolved to 0 steps), `1` on any step failure, `130` on Ctrl+C.
 
 ### `--dry-run`
 
-Runs the full composition pipeline **up to but not including provider launch**, then emits the composed result instead of sending it to a provider. Available on all three commands; suitable for CI rehearsal because it exercises the identical path minus the spawn.
+Runs composition through provider/model resolution, then emits the composed result before launch wiring begins. Available on all three commands and suitable for CI rehearsal.
 
-- Schema validation, shell-command execution (real side effects), and harness pre-checks all run normally.
+- Schema validation, shell-command execution (real side effects), and the shell-audit pre-flight all run normally.
+- Selected-executable availability validation and path resolution do not run;
+  the selected provider need not be installed or present on `PATH`. Claudine
+  may still inventory installed providers when automatic selection or the
+  rendered agent-resolution breakdown requires it.
 - The provider is never launched; `inline-compose --dry-run` therefore **does not mutate** the source file.
 - **stdout** = composed body; **stderr** = highlighted YAML frontmatter + a metadata table (Document as a blue OSC8 link, Description, Agent, Model, YOLO, Session mode/source, and Area when inside a monorepo). So `compose --dry-run doc.md > body.md` captures only the body.
 - `--quiet` / `--silent` have **no effect** under `--dry-run`.
 - **Non-TTY shell gate:** an unapproved shell command in a non-TTY environment exits non-zero with `Cannot dry-run: shell command 'X' requires interactive approval. Run with --yolo to auto-approve, or pre-approve the command in your configuration.` In a TTY the normal interactive approval prompt fires. Bypass with `--yolo`.
-- **`sequence --dry-run`** concatenates all step bodies to stdout in order, prints each step's metadata to stderr separated by a `=== Document N of M ===` divider (before every document after the first), and fails fast on the first composition error.
+- **`sequence --dry-run`** performs the full static preflight, then just-in-time-composes every step against the *initial* state (empty `outputs`, no runtime mutations), concatenating step bodies to stdout in order with each step's metadata on stderr. No provider launches and no inline-compose write-back occurs. Shell work is **not** suppressed: `$( … )` expansions and `shell:` tasks execute for real, so a dry run of a sequence containing `shell: just commit` will commit.
 
-See [Composition — Dry Run](../../../claudine/docs/topics/composition.md#dry-run) for the full reference.
+See [Composition — Dry Run](composition.md#dry-run) for the full reference.
 
 ### Session interactivity
 
@@ -308,7 +364,7 @@ Composition commands resolve session interactivity from (highest to lowest prece
 
 ### `--perf`
 
-Opt-in flag (composition commands and the provider wrappers) that prints a **reconciling performance tree** to **stderr** after the run. The `Performance` headline is true wall-clock and equals the sum of its top-level `Structural` buckets (`pre-dispatch`, `prep phase`, `environment setup`, `agent execution`) plus a synthetic `unattributed` remainder — the headline can never contradict the body. Nested `Breakdown` rows itemize cost (Darkmatter composition stages, agent sub-timings) without double-counting; a percent column shows each row's share of wall-clock, a single `▇ HOT` marker flags the dominant leaf (≥20% of wall-clock), and `×N` annotates stages that ran more than once. Dry runs render `agent execution` as an `—` leaf. The report is stderr-only (never pollutes piped stdout) and is emitted even under `--silent`/`--quiet`. `sequence` aggregates one report across all steps. See [Composition — Performance Reporting](../../../claudine/docs/topics/composition.md#performance-reporting) for the full reference.
+Opt-in flag (composition commands and the provider wrappers) that prints a **reconciling performance tree** to **stderr** after the run. The `Performance` headline is true wall-clock and equals the sum of its top-level `Structural` buckets (`pre-dispatch`, `prep phase`, `environment setup`, `agent execution`) plus a synthetic `unattributed` remainder — the headline can never contradict the body. Nested `Breakdown` rows itemize cost (Darkmatter composition stages, agent sub-timings) without double-counting; a percent column shows each row's share of wall-clock, a single `▇ HOT` marker flags the dominant leaf (≥20% of wall-clock), and `×N` annotates stages that ran more than once. Dry runs render `agent execution` as an `—` leaf. The report is stderr-only (never pollutes piped stdout) and is emitted even under `--silent`/`--quiet`. `sequence` aggregates one report across all steps. See [Composition — Performance Reporting](composition.md#performance-reporting) for the full reference.
 
 **Positional Arguments:**
 - Exactly one file reference (supports `@` magic paths)
@@ -321,6 +377,7 @@ Opt-in flag (composition commands and the provider wrappers) that prints a **rec
 - `-m, --model <MODEL>`
 - `-s, --system-prompt <PROMPT|FILE>`
 - `-t, --timeout <DURATION>`
+- `--stall-timeout <DURATION>` (OpenCode-only stalled-generation backstop; `0s` disables; env `CLAUDINE_OPENCODE_STALL_TIMEOUT`, frontmatter `stall_timeout`, built-in `10m`)
 - `--dry-run`, `-q, --quiet`, `--silent`, `--perf`
 
 ---
@@ -345,7 +402,26 @@ Shared filters: `--provider`, `--repo`, `--package-area`, `--package`. Read comm
 | `errors` | Error log |
 | `repos` | Per-repo summary |
 | `trends` | Usage trends over time |
+| `drift` | Model-catalog drift signals and family-latest alias resolutions |
 | `sync` | Force re-sync of JSONL logs into SQLite |
+
+---
+
+## `claudine dashboard`
+
+The mesh NOW view — a one-shot, read-only render over the rendezvous daemon's live registers (rendezvous dashboard feature, D1). The historical complement is `claudine logs`; this command answers "what is running right now, where, and does anything need me?"
+
+```bash
+claudine dashboard [--local]
+```
+
+- **Mesh-wide by default** — renders every host the local daemon holds a register replica for. `--local` restricts to this host only.
+- **Data path** — folds five daemon read RPCs into one view: `ListActiveSessions` (live sessions), `ListHostCapabilities` (hostname/OS/arch/CPU/RAM/GPU), `ListHostRepos` (checked-out repo count), `ListPeers` (per-peer `last_synced_unix_ms`, the freshness clock), and `Status` (the local node id, to mark the always-fresh local host).
+- **Staleness (D4)** — every remote host row shows its last-sync age. Past **60 seconds** of sync silence a host is rendered *stale* and its sessions as *unknown* rather than as last-known status; a host never synced renders *never synced*. The clock is the daemon's `last_synced_unix_ms` (stamped only on a successful direct-sync round — not mDNS chatter), kept advancing by the daemon's periodic re-sync worker.
+- **Needs human intervention (D5, triggers 1 & 2)** — session status is a **typed per-producer model with a daemon-side precedence reducer** (session-state foundation, 2026-07-13), not a bare last-writer-wins string. Each producer owns one `status_slots` entry; the daemon folds them by intervention strength (`waiting_on_user` > `idle` > `active`, ties by revision) and projects three fields the dashboard reads: the backward-compatible flat `status`, plus `status_basis` (why) and `status_producer` (who). Trigger 1 is **hook-primary**: the permission signal is reported from the normalized `claudine handle` hook boundary so it covers interactive PTY sessions (which run no stream sink), with the wrapper stream sink demoted to a stamped fallback. The `Needs?` column is **tiered and honest**: (a) a fresh `waiting_on_user` renders a strong "⚠ input" badge (carrying its basis/producer provenance and reported age); (b) a fresh `idle` (Trigger 2, below) renders a weaker dim "◦ idle" badge; (c) a `permission_signal:"supported"` provider with nothing outstanding renders "no intervention needed"; (d) a `permission_signal:"unsupported"` provider (no permission-signal capability, recorded at STARTED from the `claudine hooks --support` matrix) renders "permission signal unavailable" — so absence of a signal reads as "can't tell", never mislabeled as fine. Untrusted (stale) hosts suppress all of these to "—".
+- **Interactive-idle signal (D5, trigger 2, IMPLEMENTED 2026-07-13)** — a wrapped **interactive** session that has been idle since its last assistant turn completed is the agent waiting on the user. It is a **hook-driven producer** (not the stream sink, which the interactive PTY path never builds): the wrapper injects `CLAUDINE_INTERACTIVE=1` into the child env, and `claudine handle` reports `idle` on a turn-complete event (Claude's `Stop` → `AgenticEvent::TurnComplete`) and clears back to `active` on the next user prompt (`AgenticEvent::BeforePrompt`). Non-interactive turn-completes report nothing (the agent auto-proceeding is not a human wait). This weaker `idle` writes its own `IdleHook` reducer slot (basis `interactive_turn_complete`), so it can **never** clobber an unresolved stronger `waiting_on_user`. The badge shows the idle duration ("◦ idle 45s") for **local** sessions only — a remote session's `updated_at` is stamped by the remote daemon, so its age is meaningless under clock skew and renders "◦ idle" without a duration. The heading appends an idle count when non-zero.
+- **v1 scope** — wrapped sessions only; unwrapped sessions appear once the process monitor lands. An absent daemon degrades to a friendly note (exit 0), never an error.
+- **Dual-target** — rendered through `DashboardReport` (`TerminalRenderable` + `BrowserRenderable`, the `MetricsReport` precedent); the component lives CLI-local (`cli/src/commands/dashboard/`) so the `claudine` library stays free of any `rendezvous-*` dependency.
 
 ---
 
@@ -389,12 +465,13 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 
 | Flag | Description |
 |------|-------------|
-| `-y, --yolo` | Translate to provider-specific auto-approval mode (warn-only for OpenCode) |
+| `-y, --yolo` | Translate to provider-specific auto-approval mode (OpenCode: non-interactive only — pushes `--dangerously-skip-permissions` **and** merges a session-wide `permission` block into `OPENCODE_CONFIG_CONTENT` so subagents are also auto-approved; warn-only/ignored in OpenCode interactive sessions) |
 | `-i, --interactive` | Force interactive mode even when a prompt string is provided |
 | `-m, --model <MODEL>` | Override the model used by the provider |
 | `--asp <FILE>` | Append a system prompt from a file (alias: `--append-system-prompt`) |
 | `--rsp <FILE>` | Replace the provider's system prompt with contents from a file (alias: `--replace-system-prompt`) |
 | `-t, --timeout <DURATION>` | Wall-clock timeout like 30s, 5m, 2h (non-interactive only) |
+| `--stall-timeout <DURATION>` | OpenCode-only stalled-generation backstop (live-but-dead retry-churn guard); built-in `10m`, `0s` disables. Inert config on non-OpenCode providers. See [Timeouts](timeouts.md#opencode-stalled-generation-backstop) |
 | `-o, --output <FORMAT>` | Set output format (json, text, stream) |
 | `--include <ENV_NAME>` | Keep a sensitive env var name that would otherwise be filtered |
 | `--mcp` | Compose a Claudine-managed MCP session from the effective defaults |
@@ -404,7 +481,7 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 | `-p, --prompt-file <FILE>` | Source initial prompt from a Markdown file (composed with Darkmatter) |
 | `--frontmatter-prompt <FILE>` | Inline composition: use frontmatter prompt as input |
 | `--compose <FILE>` | Chained composition: compose full document and use as prompt |
-| `--dry-run` | Show what would be executed without launching the child |
+| `--dry-run` | Show what would be executed without requiring or launching the child executable |
 | `-q, --quiet` | Show only the header line; suppress env details |
 | `--silent` | Suppress all Claudine preflight output |
 | `--perf` | Print a reconciling performance tree to stderr after the run (see [`--perf`](#--perf)) |
@@ -412,6 +489,10 @@ Claudine can wrap provider CLIs with preflight checks, argument translation, env
 
 ### Wrapper Behavior
 
+- **Dry-run executable independence**: provider wrappers render the planned
+  command using the profile's executable name without resolving it on `PATH`;
+  the provider need not be installed. Live runs still validate the executable
+  before launch.
 - **Interactivity default**: providing a prompt string implies non-interactive mode. Use `-i`/`--interactive` to override back to interactive when providing a startup prompt.
 - **Execution line**: displays `Claudine ▸ {provider} {badges} {prompt}` — only the user's prompt text is shown (provider-specific switches are not leaked). Truncated to one terminal line.
 - **Structured streaming**: non-interactive runs use provider-native structured output (stream-json, JSONL, NDJSON) as the internal control plane. Claudine parses the stream live, reconstructs clean assistant text for stdout, and emits metadata summaries to stderr.
@@ -447,6 +528,14 @@ claudine completions zsh > ~/.zfunc/_claudine
 # Fish
 claudine completions fish > ~/.config/fish/completions/claudine.fish
 ```
+
+**Related runtime behavior.** The `completions` command only installs the
+static shell script. Runtime file selection also happens through the
+ENTER-path autocomplete: when a composition command runs interactively
+and a required file value is missing (omitted positional argument or a
+`file`/`file[]` schema property), Claudine opens a `ChooseOne` or
+`ChooseMany` chooser. See [Shell Completions](completions/shell-completions.md)
+for details.
 
 ---
 
@@ -636,6 +725,7 @@ Rich formatting uses biscuit-terminal components (Table, Prose with `{{bold}}` /
 | Variable | Description |
 |----------|-------------|
 | `RUST_LOG` | Diagnostic tracing level (also set via the `--debug <LEVEL>` flag) |
+| `CLAUDINE_OPENCODE_STALL_TIMEOUT` | OpenCode stalled-generation backstop default (duration string; `0s` disables). Overridden by `--stall-timeout` / frontmatter `stall_timeout`; built-in `10m` |
 | `HOME` | Used for path resolution |
 | `PATH` | Must include `claudine` binary |
 | `AGENT` | Injected by wrapper: provider name |

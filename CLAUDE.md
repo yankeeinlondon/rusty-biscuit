@@ -1,51 +1,36 @@
 # Rusty Biscuit Monorepo
 
-## Workspace Gotchas
-
-- 48 workspace members. Source of truth is `cargo metadata --no-deps --format-version 1` — not directory names.
-- `schematic/schema` lives in the repo but is **excluded from the workspace**. Use `--manifest-path schematic/schema/Cargo.toml` to work on it.
-
 ## Language 
 
 - always prefer **US English (en-US)** over other English variants such as UK English (en-GB) when creating symbol names or writing documentation
 
 ## Package Area Conventions
 
-- Most areas follow a `{area}/lib` + `{area}/cli` split. Notable exceptions:
-    - `biscuit-visualized`, `tabby` — single crate
-    - `homelab` — lib/cli/server plus per-device integration crates
-    - `schematic` — `define` / `definitions` / `gen` / `oauth` / `schema`
-    - `unchained-ai` — includes the `model_id` proc-macro crate
-- `biscuit-speaks` CLI binary is named `so-you-say` (lives under `biscuit-speaks/cli`).
-- `biscuit-tui` follows the lib/cli split; CLI binary is named `question` (lives under `biscuit-tui/cli`).
+- you can run `sniff repo package-areas` for a list of all the _package areas_ in this monorepo
+    - most of the package areas consist of a library and CLI pairing though there is some variance to that pattern
+- you can run `sniff repo packages` to get the full list of packages in this monorepo
 
-## Root `just` Coverage
+## Just Runner
 
-Root `justfile` exposes `just test|lint|build|install|doctest`, iterating a **curated** area list — not every workspace member.
+- we use the `just` runner extensively throughout this monorepo. 
+- you will find a justfile at the root of this monorepo and a justfile in each of the _package areas_
+- shared recipes for just can be found in the @just/ directory
 
-- shared recipes are all located in the `/just` folder
-- each package area has it's own `justfile` but the shared recipes are leveraged as much as possible to keep as much uniformity as possible
+## Git Identity and Signing
 
-## Formatting
+- all commits must use the author `Ken Snyder <ken@ken.net>` and must be
+  OpenPGP-signed
+- the current host is expected to have the correct signing keys available; a
+  signing failure is an environment or configuration problem and must not be
+  bypassed with `--no-gpg-sign`
+- commit messages must not include agent attribution, co-authorship, or
+  co-signing trailers such as `Co-authored-by`, `Generated-by`, or similar
+  agent-identifying metadata
+- repository-local Git configuration should set `user.name`, `user.email`,
+  `user.signingkey`, and `commit.gpgsign`; verify these values before committing
+- verify every new commit with `git verify-commit HEAD` before reporting success
 
-`main` is the formatting authority.
-
-- Never run `cargo fmt` / `rustfmt` write-mode unless explicitly asked. Match surrounding style by hand when editing.
-- Reason: `rust-toolchain.toml` pins `channel = "stable"`, not a specific rustfmt version. Ad-hoc fmt reformats to whatever rustfmt floats in locally, which drifts from `main` and poisons branch↔`main` merges — a repo-wide reformat touches nearly every line, so git silently mis-merges reformatted-but-old code with `main`'s real changes.
-- `cargo fmt --check` (read-only) is fine for diagnosis.
-- To resolve a merge poisoned by a stray reformat: reset every file whose only branch-side change was a `style`/reformat commit back to `main` (`git checkout MERGE_HEAD -- <file>`), keeping only genuine semantic work.
-
-## Rustdoc Convention
-
-- No `# H1` inside `///` blocks — rustdoc already titles the item.
-- `## H2` sections: `Examples`, `Returns`, `Errors`, `Panics`, `Safety`, `Notes`.
-- Order: summary → `Examples` → `Returns` → `Errors` → `Panics` → `Safety` → `Notes`.
-
-## Comment Quality
-
-Structural rules above are silent on *content*. Prefer comments that carry information the code does not. See [`docs/comment-quality.md`](docs/comment-quality.md) for worked before/after examples.
-
-Anti-patterns — remove on sight:
+## Code Comment Quality
 
 1. **HOW-narration** — prose that restates the implementation step-by-step.
 2. **Tautological examples** — assertions guaranteed by the function signature.
@@ -80,12 +65,6 @@ Update alongside code changes:
 - `.claude/skills/` when architecture or workflows change
 - This file when workspace layout, commands, or repo-wide conventions change
 
-## Authoritative Docs
-
-- run `sniff repo` for the up to date list of package areas and packages
-- Local skill catalog under `.claude/skills/` is the authoritative skill list.
-- `.claude/skills/rust-testing/SKILL.md` — testing tier taxonomy, canonical `just` recipes, and `require_level!` usage.
-
 ## Rules
 
 - **Rule 1** — Think Before Coding.
@@ -97,7 +76,13 @@ Update alongside code changes:
 - **Rule 4** — Goal-Driven Execution.
     Define success criteria. Loop until verified. Don't tell Claude what steps to follow, tell it what success looks like and let it iterate.
 
-## Hashing
+## Features and Fixes
 
-- any hashing requirements should prefer using the crypto, non-crypto, and password hashing that **biscuit-hash** provides
-- in the case of hashing Markdown documents, the **Darkmatter** hasher should be used (as it uses a Markdown aware approach)
+- each package area will have a `features` and `fixes` directory which contains specs
+    - **features** tend to be larger in scope and can introduce new features
+    - **fixes** are primarily focused on fixing existing functionality
+- we have two lifecycle directories `_unscheduled` and `_completed` which can be found as subdirectories of features/fixes
+    - features/fixes which have been identified but not scheduled (aka, lower urgency) will be found in `_unscheduled` with non-dated filename
+    - features/fixes as direct subdirectories are "active" features/fixes and should always follow the format `YYYY-MM-DD-{name}`
+        - the files in a feature/fix can vary but almost always will be the `spec.md` file
+    - when a feature/fix is completed it is moved to `_completed`

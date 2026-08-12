@@ -45,6 +45,29 @@ from.
 - **No new resolution roots.** Abbreviation uses the same roots resolution
   already uses; it does not introduce new search semantics.
 
+## Dependency: portable path rendering
+
+This spec decides *which anchor* a path is expressed against. It does **not**
+address how the resulting path is rendered as text — separator normalization
+and Windows verbatim (`\\?\`) prefix reduction. That is owned by
+[`2026-07-31-portable-strings`](../2026-07-31-portable-strings/spec.md), which
+adds `biscuit_file::to_portable_string`.
+
+The two compose, and the ordering matters:
+
+- `abbreviate` **must** render its spelling through `to_portable_string`.
+  Without it, this spec consolidates seven divergent abbreviation copies into
+  biscuit-file and still emits OS-native separators — at which point every
+  consumer re-adds its own `.replace('\\', "/")`, regenerating the exact
+  duplication this spec exists to eliminate, one layer up.
+- The [round-trip property](#round-trip-property) needs a Windows case: the
+  portable spelling differs from the native one there, so `relative.resolve()`
+  must accept the portable form.
+
+Landing `portable-strings` first is the cheaper order — it is additive,
+consumer-free, and has no open decisions. This spec then consumes it rather
+than duplicating it.
+
 ## Public API
 
 ```rust
@@ -310,6 +333,9 @@ Land `abbreviate`, `resolve_tuple{,_from}`, `with_abbreviation`,
   matched variable for `${VAR}` forms, `None` otherwise.
 - `resolve_tuple` absolute member always equals `resolve()`; relative is the
   absolute spelling when no anchor applies.
+- `#[cfg(windows)]`: every emitted spelling uses `/` separators and carries no
+  `\\?\` prefix (see [Dependency: portable path rendering](#dependency-portable-path-rendering)),
+  and round-trips back to the same absolute path.
 
 ## Open decisions
 

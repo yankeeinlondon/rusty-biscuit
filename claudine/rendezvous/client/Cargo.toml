@@ -3,7 +3,7 @@ name = "rendezvous-client"
 version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
-description = "Test client for the rendezvous daemon. Connects over Unix Domain Sockets and exercises the gRPC control plane."
+description = "Test client for the rendezvous daemon. Connects over the platform's local IPC transport (Unix Domain Socket on Unix, named pipe on Windows) and exercises the gRPC control plane."
 
 [[bin]]
 name = "rendezvous-test-client"
@@ -28,4 +28,5 @@ thiserror = "2.0"
 
 [dev-dependencies]
 rendezvous-daemon = { path = "../daemon" }
+rendezvous-core = { path = "../core", features = ["test-support"] }
 tempfile = "3"

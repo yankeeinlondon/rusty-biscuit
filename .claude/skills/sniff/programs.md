@@ -1,6 +1,18 @@
 # Program Detection
 
-Parallel detection across 8 categories with macOS app bundle and Windows fallback support. A single shared `ExecutableIndex` scans `PATH` and platform-specific fallback directories once, then all categories perform O(1) HashMap lookups against it in parallel via `rayon::join` pairs.
+## Contents
+
+- Categories
+- Usage
+- macOS App Bundle Fallback
+- Windows Fallback Chain
+- CLI Subcommands
+- Extension route
+
+Use heading search to jump to the listed subsystem.
+
+
+Parallel detection across 10 categories with macOS app bundle and Windows fallback support. A single shared `ExecutableIndex` scans `PATH` and platform-specific fallback directories once, then all categories perform O(1) HashMap lookups against it in parallel via `rayon::join` pairs.
 
 ## Categories
 
@@ -14,6 +26,8 @@ Parallel detection across 8 categories with macOS app bundle and Windows fallbac
 | Terminal Apps | `terminal_apps` | `TerminalApp` | alacritty, wezterm, kitty, iTerm2 |
 | Headless Audio | `headless_audio` | `HeadlessAudio` | afplay, pacat, aplay |
 | AI CLI | `ai_clients` | `AiCli` | claude, aider, goose |
+| Notification Helpers | `notification_helpers` | `NotificationHelper` | notify-send, terminal-notifier, dunstify |
+| Test Runners | `test_runners` | `TestRunner` | cargo test, vitest, pytest, go test |
 
 ## Usage
 
@@ -36,13 +50,16 @@ for editor in &programs.editors {
 PATH lookup with `/Applications` fallback:
 
 ```rust
-use sniff::programs::find_program_with_source;
+use sniff::programs::{ExecutableSource, find_program_with_source};
 
-let (path, source) = find_program_with_source("code");
-match source {
-    ExecutableSource::Path => { /* Found in PATH */ }
-    ExecutableSource::MacOsBundle(bundle) => { /* Found in /Applications */ }
-    ExecutableSource::NotFound => { /* Not installed */ }
+if let Some((path, source)) = find_program_with_source("code") {
+    match source {
+        ExecutableSource::Path => { /* Found in PATH */ }
+        ExecutableSource::MacOsAppBundle => { /* Found in an app bundle */ }
+        ExecutableSource::WindowsAppPaths
+        | ExecutableSource::WindowsInstallRoot
+        | ExecutableSource::ProjectLocal => { /* Other platform/project source */ }
+    }
 }
 ```
 
@@ -88,13 +105,17 @@ sniff software test-runners             # Host test-runner availability
 sniff software --json                   # JSON with full metadata
 ```
 
-**Install subcommand (per category or all):**
+**Install subcommand (eight installable categories or aggregate):**
 ```bash
 sniff software editors install          # Interactive picker
 sniff software editors install nvim     # Install specific program
-sniff software install                  # Pick from all categories
+sniff software install                  # Pick from all installable categories
 ```
 
-## Adding a Program Category
+Notification helpers and test runners are report-only categories; they do not expose `install` or `install-plan` actions.
 
-See [extending.md](./extending.md) for step-by-step instructions.
+## Extension route
+
+Use [extending.md](./extending.md) to add or change a program category,
+detector, fallback, or installation implementation. This topic owns the current
+catalog and user-facing CLI surface; `extending.md` owns contributor steps.

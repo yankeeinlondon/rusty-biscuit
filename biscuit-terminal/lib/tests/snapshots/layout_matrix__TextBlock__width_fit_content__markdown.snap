@@ -1,0 +1,5 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: md
+---
+TextBlock applies uniform block styling to a single piece of content.

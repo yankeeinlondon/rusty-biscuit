@@ -6,6 +6,9 @@
 //! back to portable forms in the Finalization stage.
 
 use crate::markdown::Markdown;
+use crate::markdown::compose::util::{
+    document_resolution_context, find_git_root_from, package_area_for_reference,
+};
 use crate::markdown::compose::{ComposeOptions, ComposeReport, ComposeSource};
 use crate::markdown::reference::{
     ReferenceKind, ReferenceTarget,
@@ -15,12 +18,24 @@ use crate::markdown::reference::{
     },
     local::{extract_markdown_images, extract_markdown_links},
 };
-use crate::markdown::types::MarkdownResult;
+use crate::markdown::types::{MarkdownError, MarkdownResult};
+use biscuit_file::try_portable_string;
 use std::path::Path;
 use tracing::trace;
 
 /// Resolves all local link targets (Markdown hyperlinks/images and
 /// supported HTML embeds) to absolute paths.
+///
+/// ## Errors
+///
+/// [`MarkdownError::Transform`] when a resolved destination has no faithful
+/// portable spelling (a Windows UNC, device, or unreducible verbatim path).
+/// This stage runs before transclusion precisely to make child-relative links
+/// absolute, so leaving the authored target in place would make it relative to
+/// the root document afterwards and silently retarget the link — the reason
+/// this is an error rather than the warn-and-preserve that
+/// [`normalize_links`](super::link_normalization::normalize_links) applies
+/// after transclusion.
 pub fn link_resolve(
     markdown: &mut Markdown,
     options: &ComposeOptions,
@@ -94,7 +109,12 @@ pub fn link_resolve(
 
         // 2.5 Resolve to absolute path
         if let Some(abs_path) = resolve_absolute(&raw_target, base_dir, options) {
-            let abs_path_str = abs_path.to_string_lossy().to_string();
+            let Some(abs_path_str) = try_portable_string(&abs_path) else {
+                return Err(MarkdownError::Transform(format!(
+                    "link target '{raw_target}' resolves to '{}', which has no faithful portable Markdown destination. CommonMark consumes backslash escapes inside a link destination, so the native Windows spelling would not survive a parse, and leaving the authored target would retarget it once this document is transcluded.",
+                    abs_path.display()
+                )));
+            };
 
             // 2.6 Replace original link text with absolute path
             // We need to find the raw target string within the span.
@@ -129,41 +149,60 @@ fn resolve_absolute(
     }
 
     trace!("resolve_absolute called with raw: '{}'", raw);
-    if let Ok(mut file_ref) = biscuit_file::FileReference::new(raw) {
-        // Add magic paths from options
-        for (path, position) in &options.magic_paths {
-            file_ref = file_ref.add_magic_path(path, *position);
-        }
+    // A value that does not parse as a `FileReference` is not a resolvable
+    // local path; leave the link untouched rather than fabricating a path.
+    let file_ref = biscuit_file::FileReference::new(raw).ok()?;
 
-        // Resolve to an absolute path.  Use resolve_from when we have a
-        // base directory (document location) so that relative / magic
-        // references are resolved relative to the document, not the process
-        // CWD.  We intentionally do NOT use resolve_relative here – link
-        // resolve's job is to produce absolute paths, not make them
-        // relative again.
-        let resolved = if let Some(dir) = base_dir {
-            file_ref.resolve_from(dir).ok().flatten()
-        } else {
-            file_ref.resolve().ok().flatten()
+    // Resolve through the shared document-backed context so relative and `@`
+    // references anchor on the document directory (implicit paths
+    // repository-first then source), never the ambient process CWD. Magic roots
+    // live on the context, not on the reference. We intentionally do NOT use
+    // resolve_relative here — link resolve's job is to produce absolute paths,
+    // not make them relative again.
+    let resolved = if let Some(dir) = base_dir {
+        let resolution_ctx = match options.file_resolution_context.as_ref() {
+            Some(snapshot) => snapshot.for_base(dir),
+            None => {
+                let repo_root = find_git_root_from(dir);
+                let package_area =
+                    package_area_for_reference(&file_ref, dir, repo_root.as_deref());
+                document_resolution_context(
+                    dir,
+                    None,
+                    &options.magic_paths,
+                    repo_root.as_deref(),
+                    package_area.as_deref(),
+                )
+            }
         };
-
-        if let Some(resolved) = resolved {
-            let result = std::fs::canonicalize(&resolved).ok().or(Some(resolved));
-            trace!("resolve_absolute FileReference success: {:?}", result);
-            return result;
+        // An existing target resolves to its matched path; a clean miss (a link
+        // to a not-yet-created file) is absolutized to the FIRST shared
+        // candidate — repository-first for an implicit bare path — via the same
+        // `FileReference` grammar execution uses, never a source-first
+        // `dir.join(raw)` that would bypass shared classification. A hard
+        // resolver failure (invalid context, missing anchor) leaves the link
+        // untouched.
+        match file_ref.resolve_in_context(&resolution_ctx) {
+            Ok(Some(path)) => Some(path),
+            Ok(None) => file_ref
+                .candidate_plan(&resolution_ctx)
+                .ok()
+                .and_then(|plan| plan.into_iter().next())
+                .map(|candidate| candidate.path().to_path_buf()),
+            Err(_) => None,
         }
-    }
+    } else {
+        // Bare-API path with no document base: only an existing target can be
+        // absolutized; a miss has no candidate anchor without a base.
+        file_ref.resolve().ok().flatten()
+    };
 
-    // Fallback to simple join if FileReference fails or returns nothing
-    if let Some(dir) = base_dir {
-        let joined = dir.join(raw);
-        let result = std::fs::canonicalize(&joined).ok().or(Some(joined));
-        trace!("resolve_absolute Fallback success: {:?}", result);
-        return result;
-    }
-
-    trace!("resolve_absolute failed");
-    None
+    let resolved = resolved?;
+    // `canonicalize` can fail on a resolved-but-since-removed (or not-yet-
+    // created) path; the resolved absolute path is a correct fallback then.
+    let result = std::fs::canonicalize(&resolved).ok().or(Some(resolved));
+    trace!("resolve_absolute success: {:?}", result);
+    result
 }
 
 #[cfg(test)]
@@ -187,13 +226,89 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_path = fs::canonicalize(&file_b)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_path =
+            biscuit_file::to_portable_string(&fs::canonicalize(&file_b).unwrap());
         assert!(md.content().contains(&format!("({})", resolved_path)));
         assert!(md.content().contains(&format!("({})", resolved_path)));
         assert_eq!(report.link_resolves_applied, 2);
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn link_resolution_reuses_snapshot_home_for_nested_source() {
+        let request = tempdir().unwrap();
+        let nested = request.path().join("nested");
+        let home = request.path().join("home");
+        fs::create_dir_all(&nested).unwrap();
+        fs::create_dir_all(&home).unwrap();
+        let target = home.join("captured.md");
+        fs::write(&target, "captured").unwrap();
+        let ambient = tempdir().unwrap();
+        let prior_home = std::env::var_os("HOME");
+
+        let snapshot = biscuit_file::FileResolutionContext::new(request.path())
+            .with_home_dir(&home);
+        let options = ComposeOptions::new()
+            .with_source_file(nested.join("child.md"))
+            .with_file_resolution_context(snapshot);
+        let mut markdown = Markdown::new("[captured](~/captured.md)");
+        let mut report = ComposeReport::new();
+        // SAFETY: this test is serialized while mutating process-global state.
+        unsafe { std::env::set_var("HOME", ambient.path()) };
+        let result = link_resolve(&mut markdown, &options, &mut report);
+        match prior_home {
+            Some(value) => unsafe { std::env::set_var("HOME", value) },
+            None => unsafe { std::env::remove_var("HOME") },
+        }
+
+        result.unwrap();
+        let expected = biscuit_file::to_portable_string(&std::fs::canonicalize(target).unwrap());
+        assert!(
+            markdown.content().contains(&expected),
+            "{}",
+            markdown.content(),
+        );
+        assert_eq!(report.link_resolves_applied, 1);
+    }
+
+    #[test]
+    fn package_link_resolves_from_package_area_not_repository() {
+        let dir = tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        gix::init(&root).unwrap();
+        fs::write(
+            root.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"darkmatter/lib\"]\nresolver = \"2\"\n",
+        )
+        .unwrap();
+        let package_area = root.join("darkmatter");
+        let member = package_area.join("lib");
+        fs::create_dir_all(member.join("src")).unwrap();
+        fs::create_dir_all(member.join("docs")).unwrap();
+        fs::write(
+            member.join("Cargo.toml"),
+            "[package]\nname = \"fixture-darkmatter\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        fs::write(member.join("src/lib.rs"), "").unwrap();
+        fs::write(root.join("shared.md"), "repository decoy").unwrap();
+        let package_target = package_area.join("shared.md");
+        fs::write(&package_target, "package").unwrap();
+        let source = member.join("docs/guide.md");
+        let mut md = Markdown::new("[package](!shared.md)");
+        let options = ComposeOptions::new().with_source_file(source);
+        let mut report = ComposeReport::new();
+
+        link_resolve(&mut md, &options, &mut report).unwrap();
+
+        let expected =
+            biscuit_file::to_portable_string(&std::fs::canonicalize(package_target).unwrap());
+        assert!(
+            md.content().contains(&expected),
+            "{}",
+            md.content(),
+        );
+        assert_eq!(report.link_resolves_applied, 1);
     }
 
     #[test]
@@ -211,10 +326,8 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_path = fs::canonicalize(&file_b)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_path =
+            biscuit_file::to_portable_string(&fs::canonicalize(&file_b).unwrap());
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
@@ -235,10 +348,8 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_path = fs::canonicalize(&file_b)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_path =
+            biscuit_file::to_portable_string(&fs::canonicalize(&file_b).unwrap());
         assert!(md.content().contains(&format!("\"{}\"", resolved_path)));
         assert_eq!(report.link_resolves_applied, 3);
     }
@@ -262,18 +373,12 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_css = fs::canonicalize(&target_css)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let resolved_font = fs::canonicalize(&target_font)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let resolved_script = fs::canonicalize(&target_script)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_css =
+            biscuit_file::to_portable_string(&fs::canonicalize(&target_css).unwrap());
+        let resolved_font =
+            biscuit_file::to_portable_string(&fs::canonicalize(&target_font).unwrap());
+        let resolved_script =
+            biscuit_file::to_portable_string(&fs::canonicalize(&target_script).unwrap());
 
         assert!(
             md.content().contains(&format!("\"{}\"", resolved_css)),
@@ -317,22 +422,14 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_parens = fs::canonicalize(&target_parens)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let resolved_quotes = fs::canonicalize(&target_quotes)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let resolved_mixed = fs::canonicalize(&target_mixed)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let resolved_multi = fs::canonicalize(&target_multi)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_parens =
+            biscuit_file::to_portable_string(&fs::canonicalize(&target_parens).unwrap());
+        let resolved_quotes =
+            biscuit_file::to_portable_string(&fs::canonicalize(&target_quotes).unwrap());
+        let resolved_mixed =
+            biscuit_file::to_portable_string(&fs::canonicalize(&target_mixed).unwrap());
+        let resolved_multi =
+            biscuit_file::to_portable_string(&fs::canonicalize(&target_multi).unwrap());
 
         assert!(
             md.content().contains(&format!("(<{}>)", resolved_parens)),
@@ -379,13 +476,55 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        // The target b.md doesn't exist, but it should still be resolved to an absolute path via simple join
+        // `./b.md` is an EXPLICIT-relative reference: even missing, it is pinned
+        // to the source directory (its sole shared candidate), so the absolute
+        // shape is `<source_dir>/./b.md`. This flows through `FileReference`'s
+        // candidate plan, not a private `dir.join(raw)` fallback.
         let joined = dir.path().join("./b.md");
-        let resolved_path = joined.to_string_lossy().to_string();
+        let resolved_path = biscuit_file::to_portable_string(&joined);
 
         assert!(
             md.content().contains(&format!("({})", resolved_path)),
             "Non-existent failed. Content: {}",
+            md.content()
+        );
+        assert_eq!(report.link_resolves_applied, 1);
+    }
+
+    /// A missing IMPLICIT bare reference is absolutized repository-first — the
+    /// same anchoring an existing implicit reference resolves with — rather than
+    /// source-joined. This is the D2/D3 precedence: `link_resolve` no longer
+    /// falls back to `source_dir.join(raw)` after a miss.
+    #[test]
+    fn test_link_resolve_non_existent_implicit_is_repository_first() {
+        let dir = tempdir().unwrap();
+        // Plant a `.git` marker so the tempdir is a repository root distinct
+        // from the nested document directory.
+        std::fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let nested = dir.path().join("prompts");
+        std::fs::create_dir_all(&nested).unwrap();
+        let source = nested.join("a.md");
+        std::fs::write(&source, "source").unwrap();
+
+        // `missing.md` exists nowhere; as an implicit bare reference its shape
+        // anchors on the repository root, not the source directory.
+        let content = "[link](missing.md)";
+        let mut md = Markdown::new(content);
+        let options = ComposeOptions::new().with_source_file(&source);
+        let mut report = ComposeReport::new();
+
+        link_resolve(&mut md, &options, &mut report).unwrap();
+
+        let repo_first = biscuit_file::to_portable_string(&dir.path().join("missing.md"));
+        let source_first = biscuit_file::to_portable_string(&nested.join("missing.md"));
+        assert!(
+            md.content().contains(&format!("({repo_first})")),
+            "expected repository-first shape {repo_first}. Content: {}",
+            md.content()
+        );
+        assert!(
+            !md.content().contains(&format!("({source_first})")),
+            "must not source-join a missing implicit reference. Content: {}",
             md.content()
         );
         assert_eq!(report.link_resolves_applied, 1);
@@ -406,10 +545,8 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_path = fs::canonicalize(&logo)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_path =
+            biscuit_file::to_portable_string(&fs::canonicalize(&logo).unwrap());
 
         // src should be resolved to absolute path
         assert!(
@@ -441,10 +578,8 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_path = fs::canonicalize(&target)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_path =
+            biscuit_file::to_portable_string(&fs::canonicalize(&target).unwrap());
 
         assert!(
             md.content().contains(&format!("\"{}\"", resolved_path)),
@@ -469,10 +604,8 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_path = fs::canonicalize(&movie)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_path =
+            biscuit_file::to_portable_string(&fs::canonicalize(&movie).unwrap());
 
         assert!(
             md.content().contains(&format!("\"{}\"", resolved_path)),
@@ -500,18 +633,12 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let resolved_b = fs::canonicalize(&file_b)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let resolved_movie = fs::canonicalize(&file_movie)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-        let resolved_css = fs::canonicalize(&file_css)
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
+        let resolved_b =
+            biscuit_file::to_portable_string(&fs::canonicalize(&file_b).unwrap());
+        let resolved_movie =
+            biscuit_file::to_portable_string(&fs::canonicalize(&file_movie).unwrap());
+        let resolved_css =
+            biscuit_file::to_portable_string(&fs::canonicalize(&file_css).unwrap());
 
         assert!(
             md.content().contains(&format!("\"{}\"", resolved_b)),
@@ -529,6 +656,42 @@ mod tests {
             md.content()
         );
         assert_eq!(report.link_resolves_applied, 4);
+    }
+
+    /// A child-relative link whose document lives under a path with no faithful
+    /// portable spelling must abort resolution, not survive it.
+    ///
+    /// The authored `./sibling.md` is only correct while the document stays put.
+    /// This stage exists to absolutize it before transclusion moves the content
+    /// under a root document, after which the same text names
+    /// `<root>/sibling.md`. Returning `Ok` with the target untouched is
+    /// therefore the failure this pins: the assertion on the unchanged content
+    /// is what distinguishes an error from a silent retarget.
+    ///
+    /// The base directory is verbatim-with-a-literal-`.` rather than a UNC
+    /// share so nothing here waits on SMB name resolution.
+    #[cfg(windows)]
+    #[test]
+    fn declined_resolved_destination_errors_before_transclusion() {
+        let content = "[sibling](./sibling.md)";
+        let mut md = Markdown::new(content);
+        let options =
+            ComposeOptions::new().with_source_file(Path::new(r"\\?\C:\repo\.\docs\parent.md"));
+        let mut report = ComposeReport::new();
+
+        let err = link_resolve(&mut md, &options, &mut report).unwrap_err();
+
+        assert!(
+            matches!(
+                &err,
+                MarkdownError::Transform(message)
+                    if message.contains("./sibling.md")
+                        && message.contains(r"\\?\C:\repo\.\docs")
+            ),
+            "expected a Transform error naming the authored target and the declined resolution, got: {err:?}"
+        );
+        assert_eq!(md.content(), content);
+        assert_eq!(report.link_resolves_applied, 0);
     }
 
     #[test]

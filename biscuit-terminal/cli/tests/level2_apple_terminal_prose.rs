@@ -40,7 +40,7 @@ use biscuit_test_harness::shared::SharedHarness;
 use serial_test::serial;
 use std::process::{Command, Stdio};
 use std::time::Duration;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// Extra settle time after spawning a Terminal.app shell to absorb the
 /// AppleScript dispatch latency before sending commands. Apple Terminal's
@@ -69,11 +69,7 @@ static SHARED_APPLE: SharedHarness<AppleTerminalHarness> = SharedHarness::new();
 #[test]
 #[serial(level2_terminal)]
 fn level2_apple_terminal_link_fallback_visible() {
-    require_level!(
-        Level::L2,
-        AppleTerminalHarness::available(),
-        "Terminal.app",
-    );
+    require_level!(Level::L2, AppleTerminalHarness::available(), Backend::AppleTerminal);
 
     let mut guard = SHARED_APPLE.get_or_init(|| {
         AppleTerminalHarness::shared_or_else(|| {
@@ -159,11 +155,7 @@ fn level2_apple_terminal_link_fallback_visible() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_apple_terminal_styled_link_fallback_escapes_bracket() {
-    require_level!(
-        Level::L2,
-        AppleTerminalHarness::available(),
-        "Terminal.app",
-    );
+    require_level!(Level::L2, AppleTerminalHarness::available(), Backend::AppleTerminal);
 
     let mut guard = SHARED_APPLE.get_or_init(|| {
         AppleTerminalHarness::shared_or_else(|| {
@@ -242,11 +234,7 @@ fn level2_apple_terminal_styled_link_fallback_escapes_bracket() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_apple_terminal_double_underline_plain_text_visible() {
-    require_level!(
-        Level::L2,
-        AppleTerminalHarness::available(),
-        "Terminal.app",
-    );
+    require_level!(Level::L2, AppleTerminalHarness::available(), Backend::AppleTerminal);
 
     let mut guard = SHARED_APPLE.get_or_init(|| {
         AppleTerminalHarness::shared_or_else(|| {
@@ -333,11 +321,7 @@ fn level2_apple_terminal_harness_lifecycle() {
     // AC-6: clean skip path. No osascript invocations, no window
     // ever opened. Test exits OK without touching the host
     // application state.
-    require_level!(
-        Level::L2,
-        AppleTerminalHarness::available(),
-        "Terminal.app",
-    );
+    require_level!(Level::L2, AppleTerminalHarness::available(), Backend::AppleTerminal);
 
     // Skip under a shared broker window. This is the only Apple-Terminal
     // test that spawns its *own* window (to exercise Drop cleanup), and

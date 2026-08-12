@@ -72,6 +72,7 @@ Use subcommands to filter output to specific sections.
 
 ```bash
 sniff os          # OS information (name, kernel, locale, timezone)
+sniff runtime     # Native, WSL 1, or WSL 2 runtime
 sniff hardware    # Hardware information (CPU, GPU, memory, storage)
 sniff network     # Network information (interfaces, local IPs, WAN IP)
 sniff filesystem  # Filesystem information (git, languages, monorepo)
@@ -226,13 +227,30 @@ sniff software test-runners               # Test runners with availability detai
 
 **Program Installation:**
 
-Each program category supports an `install` subcommand:
+Eight of the ten detectable program categories support `install` and `install-plan`. Notification helpers and test runners are report-only and expose neither action.
 
 ```bash
 sniff software editors install          # Interactive picker
 sniff software editors install nvim     # Install a specific program
-sniff software install                  # Pick from all categories
+sniff software install                  # Pick from all installable categories
 ```
+
+Each install attempt runs under a deadline. If the package manager is still
+running when the deadline expires, sniff kills it and reports a **timeout**
+rather than an ordinary install failure. The timeout warning is rendered after
+the failure status and before any retry prompt, so you see it before deciding
+whether to try another installation method.
+
+A timed-out install may leave a **partial install** behind. On Unix, killing
+the installer's process tree is best-effort: everything in the installer's
+process group is terminated, but a descendant that forks and calls `setsid()`
+between sniff's samples escapes that group and can keep running — and keep
+modifying your system — after sniff has reported the timeout. Third-party
+package managers and remote shell installers do sometimes fork and detach, so
+treat a reported timeout as "state unknown" and re-check with
+`sniff software <category>` before retrying. On Windows the installer is
+confined to a kill-on-close Job Object, so termination is enforced by the
+kernel and nothing escapes.
 
 **Software Output:**
 
@@ -586,7 +604,7 @@ The library provides modular detection across six domains:
 
 **Programs Module:**
 
-Detects installed programs across 9 categories with parallel execution:
+Detects installed programs across 10 categories with parallel execution:
 
 - **Editors**: vim, VS Code, Cursor, IntelliJ, Sublime, etc.
 - **Utilities**: ripgrep, fzf, bat, jq, fd, delta, etc.
@@ -596,6 +614,7 @@ Detects installed programs across 9 categories with parallel execution:
 - **Terminal Apps**: alacritty, wezterm, kitty, iTerm2, etc.
 - **Headless Audio**: afplay, pacat, aplay, etc.
 - **AI CLI Tools**: claude, aider, goose, etc.
+- **Notification Helpers**: notify-send, terminal-notifier, dunstify, etc.
 - **Test Runners**: cargo test, vitest, pytest, go test, etc.
 
 Features:
@@ -835,7 +854,7 @@ sniff/
 │   │   │   ├── file_types/   # Broad file type classification
 │   │   │   └── ...           # languages, docs, formatting, blast_radius, just
 │   │   ├── package/          # Package manager abstraction (110+)
-│   │   ├── programs/         # Program detection and install (9 categories)
+│   │   ├── programs/         # Program detection (10 categories; 8 installable)
 │   │   ├── remote/           # Remote repo inspection (GitHub, GitLab, Gitea, Bitbucket)
 │   │   └── services/         # Init system and service detection
 │   └── Cargo.toml
@@ -941,6 +960,14 @@ COMPLETE=fish sniff | source
 ```
 
 Completions include subcommand names, flag values, package names, and program names.
+
+## Platform Support
+
+`sniff` supports **macOS**, **Linux**, and **Windows**. **WSL** is treated as the
+Linux compile and runtime path — under WSL, sniff uses the same `/proc`-backed
+detectors as native Linux and never crosses into native Windows behavior. See the
+[library README](../lib/README.md#platform-support) for the per-detector support
+matrix.
 
 ## Limitations
 

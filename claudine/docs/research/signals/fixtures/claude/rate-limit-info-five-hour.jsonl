@@ -1,0 +1,1 @@
+{"type": "rate_limit_event", "rate_limit_info": {"status": "allowed_warning", "resetsAt": 1712000000, "rateLimitType": "five_hour", "overageStatus": "allowed"}}

@@ -1,0 +1,19 @@
+Command: git merge-tree --write-tree --name-only 72a5843af470ba75c1ae6f6e1ccf16ba10a427eb 43c23c6535cf6e52a35dbb06ea6f4ccce0c88e97
+Exit status: 1 (expected conflict-reporting evidence)
+Stdout:
+5fd084fba02c3371cb87544b153d7956adc8380c
+.claudine/memory/commits.md
+CLAUDE.md
+prompts/_implement/implement-suggestions.md
+
+Auto-merging .claudine/memory/commits.md
+CONFLICT (content): Merge conflict in .claudine/memory/commits.md
+Auto-merging CLAUDE.md
+CONFLICT (content): Merge conflict in CLAUDE.md
+Auto-merging claudine/cli/src/commands/wrap/composition/pipeline.rs
+Auto-merging claudine/cli/src/commands/wrap/wrapper_stages.rs
+Auto-merging claudine/docs/topics/composition.md
+Auto-merging claudine/docs/topics/system-prompt.md
+Auto-merging prompts/_implement/implement-suggestions.md
+CONFLICT (content): Merge conflict in prompts/_implement/implement-suggestions.md
+Stderr:

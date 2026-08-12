@@ -46,6 +46,7 @@ pub mod output;
 pub mod reference;
 pub mod render_tree;
 pub mod schemas;
+pub mod span;
 pub mod toc;
 mod types;
 pub mod yaml_block;
@@ -55,7 +56,9 @@ pub use delta::{
     FrontmatterChange, MarkdownDelta, MovedSection, SectionId, SectionPath,
 };
 pub use code_block::{CodeBlock, CodeBlockError};
-pub use frontmatter::{Frontmatter, MergeStrategy};
+pub use frontmatter::{
+    Frontmatter, FrontmatterExtraction, MergeStrategy, extract_frontmatter_block,
+};
 pub use hash::{
     ComputedHash, DetailedValue, FmHashPair, MdHashKind, MdHashOptions, ParseMdHashKindError,
     SectionTuple,
@@ -67,13 +70,18 @@ pub use normalize::{
 };
 pub use reference::file_tree::{FileTree, FileTreeError};
 pub use reference::{
-    ReferenceError, ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
-    ReferenceSet, TransclusionRef,
+    DependencyMismatchKind, ReferenceError, ReferenceGraph, ReferenceGraphMismatchError,
+    ReferenceGraphMismatchKind, ReferenceGraphOptions, ReferenceKind, ReferenceRecord,
+    ReferenceSet, TransclusionRef, extract_document_references,
 };
 #[allow(deprecated)]
 pub use render_tree::TerminalCodeRenderer;
-pub use toc::{CodeBlockInfo, InternalLinkInfo, MarkdownToc, MarkdownTocNode};
-pub use types::{FrontmatterMap, MarkdownError, MarkdownResult};
+pub use span::{SourceSpan, Spanned, line_col_of_offset, line_of_offset};
+pub use toc::{
+    CodeBlockInfo, HeadingRecord, InternalLinkInfo, MarkdownToc, MarkdownTocNode,
+    extract_headings, generate_heading_slug,
+};
+pub use types::{FrontmatterMap, MarkdownError, MarkdownResult, SourceRef};
 #[allow(deprecated)]
 pub use yaml_block::{YamlBlock, YamlBlockError};
 
@@ -194,6 +202,67 @@ impl Markdown {
                 std::path::PathBuf::from("unknown"),
                 content,
             ),
+        }
+    }
+
+    /// Build a [`SourceContext`] that includes the full file content
+    /// (frontmatter + body) with the frontmatter byte range set.
+    ///
+    /// This is the coordinate space shell-expansion errors report into:
+    /// `excerpt_prose` uses file-relative lines and `frontmatter_prose`
+    /// renders the composed frontmatter block.
+    pub fn full_source_context_for_errors(&self) -> biscuit_terminal::errors::SourceContext {
+        use std::sync::Arc;
+        let (content, frontmatter) = self.reconstruct_source();
+        let content = Arc::from(content.as_str());
+        match &self.source {
+            Some(ComposeSource::File(path)) => {
+                let absolute = path.canonicalize().unwrap_or_else(|_| path.clone());
+                biscuit_terminal::errors::SourceContext::with_frontmatter(
+                    absolute,
+                    path.clone(),
+                    content,
+                    frontmatter,
+                )
+            }
+            _ => biscuit_terminal::errors::SourceContext::with_frontmatter(
+                std::path::PathBuf::from("unknown"),
+                std::path::PathBuf::from("unknown"),
+                content,
+                frontmatter,
+            ),
+        }
+    }
+
+    /// Number of source lines occupied by the frontmatter block, including
+    /// both `---` delimiters.
+    ///
+    /// Returns `0` when the document has no parsed frontmatter (e.g.
+    /// programmatically constructed documents without a raw source snapshot).
+    pub fn frontmatter_line_count(&self) -> usize {
+        match self.frontmatter.raw_source() {
+            Some("") => 2,
+            Some(raw) => 2 + raw.lines().count(),
+            None => 0,
+        }
+    }
+
+    /// Reconstruct the full source text (frontmatter + body) and the byte
+    /// range of the frontmatter block, when it can be recovered from the
+    /// parsed snapshot.
+    fn reconstruct_source(&self) -> (String, Option<std::ops::Range<usize>>) {
+        match self.frontmatter.raw_source() {
+            Some(raw) => {
+                let prefix = if raw.is_empty() {
+                    "---\n---\n".to_string()
+                } else {
+                    format!("---\n{raw}\n---\n")
+                };
+                let full = format!("{prefix}{}", self.content);
+                let end = prefix.len();
+                (full, Some(0..end))
+            }
+            None => (self.content.clone(), None),
         }
     }
 
@@ -372,9 +441,9 @@ impl Markdown {
 
     /// Cleans up markdown content by normalizing formatting.
     ///
-    /// This method performs two main operations:
-    /// 1. Injects blank lines between block elements (headers, paragraphs, code blocks, etc.)
-    /// 2. Aligns table columns for visual consistency
+    /// This method collapses incidental single newlines inside prose, injects
+    /// blank lines between block elements, and aligns table columns for visual
+    /// consistency.
     ///
     /// The cleanup operation mutates the content in place and returns a mutable
     /// reference to self for method chaining.
@@ -391,6 +460,18 @@ impl Markdown {
     /// ```
     pub fn cleanup(&mut self) -> &mut Self {
         self.content = cleanup::cleanup_content(&self.content);
+        self
+    }
+
+    /// Collapses incidental single newlines inside prose.
+    pub fn strip_incidental_newlines(&mut self) -> &mut Self {
+        self.content = cleanup::strip_incidental_newlines(&self.content);
+        self
+    }
+
+    /// Cleans up markdown content and wraps prose to a fixed display width.
+    pub fn cleanup_with_fixed_width(&mut self, width: usize) -> &mut Self {
+        self.content = cleanup::cleanup_to_fixed_width(&self.content, width);
         self
     }
 
@@ -618,10 +699,9 @@ impl Markdown {
     /// through the wired [`TerminalCodeRenderer`] hook. This is the only HTML
     /// render path; the legacy event-stream serializer has been deleted.
     ///
-    /// When `options.hr_defaults` is unset, a document's deprecated top-level
-    /// `hr:` frontmatter still seeds bare-rule defaults — restoring the bespoke
-    /// serializer's direct-API fallback so `as_html(HtmlOptions::default())`
-    /// honors it without routing through a [`DarkmatterPage`](crate::layout::DarkmatterPage).
+    /// Bare-rule defaults come from [`HtmlOptions::hr_defaults`]. Document
+    /// frontmatter is honored only when callers parse `style.hr.*` and project
+    /// it into those options or a [`DarkmatterPage`](crate::layout::DarkmatterPage).
     ///
     /// ## Examples
     ///
@@ -649,9 +729,9 @@ impl Markdown {
     /// styled headings, and formatted block elements including inline images
     /// (via Kitty/iTerm2 protocols through biscuit-terminal).
     ///
-    /// When `options.hr_defaults` is unset, a document's deprecated top-level
-    /// `hr:` frontmatter still seeds bare-rule defaults — the direct-API
-    /// counterpart to the [`as_html`](Self::as_html) fallback.
+    /// Bare-rule defaults come from [`TerminalOptions::hr_defaults`](output::TerminalOptions::hr_defaults).
+    /// Document frontmatter is honored only when callers parse `style.hr.*` and
+    /// project it into those options or a [`DarkmatterPage`](crate::layout::DarkmatterPage).
     ///
     /// ## Examples
     ///
@@ -1049,10 +1129,12 @@ title: Test
     }
 
     /// A structured link directive must lower to real HTML attributes through
-    /// the tree-backed `as_html` (review-2 finding 2): `class`, `target`,
-    /// `data-prompt`, and `data-*` must survive, and the raw directive must not
-    /// leak as a `title="…"` attribute. No frontmatter hyperlink style is
-    /// configured, proving the lowering is unconditional.
+    /// the tree-backed `as_html` (review-2 finding 2): `class`, `target`, and
+    /// `data-*` must survive, and the raw directive must not leak as a
+    /// `title="…"` attribute. No frontmatter hyperlink style is configured,
+    /// proving the lowering is unconditional. Since Phase 4 the `prompt`
+    /// directive is consumed into the accessible popover structure rather than
+    /// emitted as a `data-prompt` transport attribute.
     #[test]
     fn as_html_preserves_structured_link_metadata() {
         let md: Markdown = r#"[Read docs](https://example.com "class='btn' target='_blank' prompt='Read docs' data-id='42'")"#.into();
@@ -1063,11 +1145,17 @@ title: Test
         assert!(html.contains(r#"href="https://example.com""#), "html={html}");
         assert!(html.contains(r#"class="btn""#), "class lost; html={html}");
         assert!(html.contains(r#"target="_blank""#), "target lost; html={html}");
-        assert!(
-            html.contains(r#"data-prompt="Read docs""#),
-            "prompt lost; html={html}"
-        );
         assert!(html.contains(r#"data-id="42""#), "data-* lost; html={html}");
+        // The prompt is consumed into the popover markup, not re-emitted as the
+        // internal `data-prompt` transport.
+        assert!(
+            !html.contains("data-prompt="),
+            "internal prompt transport leaked; html={html}"
+        );
+        assert!(
+            html.contains(r#"popover="hint""#) && html.contains("Read docs"),
+            "prompt lost from popover markup; html={html}"
+        );
         assert!(
             !html.contains("title="),
             "raw structured directive leaked as title; html={html}"
@@ -1211,6 +1299,41 @@ title: Test
 
         assert!(md.content().contains("\n    - Child"));
         assert!(md.content().contains("\n        - Grandchild"));
+    }
+
+    #[test]
+    fn test_cleanup_with_fixed_width_method() {
+        let content = "This paragraph is long enough to wrap at a narrow display width.";
+        let mut md: Markdown = content.into();
+
+        md.cleanup_with_fixed_width(24);
+
+        assert_eq!(
+            md.content(),
+            "This paragraph is long\nenough to wrap at a\nnarrow display width."
+        );
+    }
+
+    /// Wrapped top-level prose followed by a wrapped list once produced two
+    /// overlapping strip edits for the list's soft break and panicked in both
+    /// debug and release. See `cleanup::reflow`'s mixed prose/list regressions.
+    #[test]
+    fn test_cleanup_with_fixed_width_method_mixes_prose_and_wrapped_list() {
+        let content = concat!(
+            "Wrapped prose\ncontinues here with more words.\n\n",
+            "- first item that is long\n  and wrapped\n",
+        );
+        let mut md: Markdown = content.into();
+
+        md.cleanup_with_fixed_width(30);
+
+        assert_eq!(
+            md.content(),
+            concat!(
+                "Wrapped prose continues here\nwith more words.\n\n",
+                "- first item that is long and\n  wrapped\n",
+            )
+        );
     }
 
     #[test]
@@ -1623,5 +1746,79 @@ title: Test
             "HTML should contain 'dimmed text', got: {}",
             html
         );
+    }
+
+    // =========================================================================
+    // Frontmatter fence mismatch cross-package validation (Phase 3)
+    // =========================================================================
+
+    /// Acceptance criterion #4: a correctly `---`-fenced document round-trips
+    /// end-to-end through [`Markdown::try_from_content`] with frontmatter parsed
+    /// and the body starting after the closing delimiter.
+    #[test]
+    fn try_from_content_three_dash_fence_round_trips() {
+        let content = "---\ntitle: Test\n---\n# Hello\n";
+        let md = Markdown::try_from_content(content).expect("valid --- fence must parse");
+
+        let title: Option<String> = md.fm_get("title").unwrap();
+        assert_eq!(title, Some("Test".to_string()));
+        assert!(md.content().starts_with("# Hello"));
+        // The delimiter and YAML must not leak into the body.
+        assert!(!md.content().contains("---"));
+        assert!(!md.content().contains("title:"));
+    }
+
+    /// Acceptance criterion #6: a `----`-fenced YAML map loaded via
+    /// [`Markdown::try_from_content`] surfaces the typed mismatch error.
+    #[test]
+    fn try_from_content_four_dash_fence_returns_typed_error() {
+        let content = "----\nname: cross-platform\ndescription: near-miss\n----\n# Body\n";
+        let err = Markdown::try_from_content(content).expect_err("---- fence must fail");
+
+        match err {
+            MarkdownError::FrontmatterFenceMismatch { found, line, .. } => {
+                assert_eq!(found, "----");
+                assert_eq!(line, 1);
+            }
+            other => panic!("expected FrontmatterFenceMismatch, got {other:?}"),
+        }
+    }
+
+    /// Acceptance criterion #6: a `----`-fenced YAML map loaded from disk via
+    /// [`Markdown::try_from`] also surfaces the typed mismatch error, preserving
+    /// the source path in the error context.
+    #[test]
+    fn try_from_path_four_dash_fence_returns_typed_error() {
+        let mut file = NamedTempFile::new().unwrap();
+        writeln!(file, "----").unwrap();
+        writeln!(file, "name: cross-platform").unwrap();
+        writeln!(file, "description: near-miss").unwrap();
+        writeln!(file, "----").unwrap();
+        writeln!(file, "# Body").unwrap();
+
+        let err = Markdown::try_from(file.path()).expect_err("---- fence must fail");
+        match err {
+            MarkdownError::FrontmatterFenceMismatch { found, line, .. } => {
+                assert_eq!(found, "----");
+                assert_eq!(line, 1);
+            }
+            other => panic!("expected FrontmatterFenceMismatch, got {other:?}"),
+        }
+    }
+
+    /// The infallible [`From<String>`] conversion intentionally swallows
+    /// frontmatter errors and returns a document whose entire source is treated
+    /// as body text. Claudine's prompt-loading path uses [`Markdown::try_from`],
+    /// not this conversion, so a malformed fence is still rejected there. This
+    /// test documents the asymmetry so it is not mistaken for a bug.
+    #[test]
+    fn from_string_swallows_frontmatter_fence_mismatch_by_design() {
+        let content = "----\nname: cross-platform\n----\n# Body\n".to_string();
+        let md: Markdown = content.into();
+
+        // The conversion succeeds with empty frontmatter; the raw text becomes body.
+        assert!(md.frontmatter().is_empty());
+        assert!(md.content().contains("name: cross-platform"));
+        assert!(md.content().contains("----"));
     }
 }

@@ -1,58 +1,33 @@
 //! Frontmatter-to-plan parser for harness configuration.
 //!
-//! Accepts `pre_checks` and `post_checks` in both list form (canonical) and
-//! map form (shorthand), parses handler declarations, and builds a typed
-//! [`HarnessPlan`].
+//! Accepts timeout-related keys and builds a typed [`HarnessPlan`].
 
 use std::path::Path;
 
 use serde_json::Value;
 use tracing::debug;
 
-use self::frontmatter::extract_frontmatter_text;
-use self::handlers::parse_handlers;
-use self::span::find_rule_spans;
-use self::validations::parse_checks;
 use crate::harness::error::HarnessError;
-use crate::harness::model::{
-    HarnessPlan, ValidationEvent, ValidationKind, ValidationPhase, ValidationRule, ValidationRuleId,
-};
-use crate::harness::resolve::HarnessResolutionContext;
+use crate::harness::model::HarnessPlan;
 use crate::harness::timeout::{format_duration, parse_timeout};
-
-mod frontmatter;
-mod handlers;
-mod overlays;
-mod shapes;
-mod span;
-mod validations;
 
 /// Harness-relevant frontmatter keys.
 const HARNESS_KEYS: &[&str] = &[
-    "pre_checks",
-    "post_checks",
     "timeout",
     "step_timeout",
     "timeout_warn",
     "step_timeout_warn",
-    "handle",
 ];
 
 /// Check whether composed frontmatter contains any harness-relevant keys.
 ///
-/// Returns `true` if any of `pre_checks`, `post_checks`, `timeout`,
-/// `step_timeout`, `timeout_warn`, `step_timeout_warn`, `handle`, or any
-/// `handle_*` key is present.
+/// Returns `true` if any of `timeout`, `step_timeout`, `timeout_warn`, or
+/// `step_timeout_warn` is present.
 pub fn has_harness_properties(frontmatter: &Value) -> bool {
     let Some(obj) = frontmatter.as_object() else {
         return false;
     };
-    for key in obj.keys() {
-        if HARNESS_KEYS.contains(&key.as_str()) || key.starts_with("handle_") {
-            return true;
-        }
-    }
-    false
+    obj.keys().any(|key| HARNESS_KEYS.contains(&key.as_str()))
 }
 
 /// Parse composed frontmatter into a [`HarnessPlan`].
@@ -60,12 +35,10 @@ pub fn has_harness_properties(frontmatter: &Value) -> bool {
 /// ## Errors
 ///
 /// Returns [`HarnessError`] for any structural or semantic issue found at parse
-/// time, including unknown validation names, post-only validations in
-/// `pre_checks`, invalid timeout strings, and missing handler fields.
+/// time, including invalid timeout strings.
 pub fn parse_harness_plan(
     frontmatter: &Value,
     source_path: &Path,
-    ctx: &HarnessResolutionContext<'_>,
 ) -> Result<HarnessPlan, HarnessError> {
     let obj = frontmatter
         .as_object()
@@ -74,54 +47,6 @@ pub fn parse_harness_plan(
             property: "(root)".to_string(),
             detail: "frontmatter must be an object".to_string(),
         })?;
-
-    let mut next_id: u32 = 0;
-    let mut alloc_id = || {
-        let id = ValidationRuleId(next_id);
-        next_id += 1;
-        id
-    };
-
-    // Best-effort source-span recovery. Read the markdown from disk and
-    // extract the YAML frontmatter slice; on any IO or framing failure
-    // fall back to an empty `SpanIndex` so `line_range` stays `None` and
-    // `yaml_snippet` falls back to reconstructed YAML.
-    let raw_source = std::fs::read_to_string(source_path).ok();
-    let frontmatter_slice: Option<(&str, usize)> =
-        raw_source.as_deref().and_then(extract_frontmatter_text);
-    let span_index = frontmatter_slice
-        .map(|(text, base_line)| find_rule_spans(text, base_line))
-        .unwrap_or_default();
-
-    // Parse pre_checks
-    let pre_checks = if let Some(v) = obj.get("pre_checks") {
-        parse_checks(
-            v,
-            true,
-            source_path,
-            ctx,
-            &span_index,
-            frontmatter_slice,
-            &mut alloc_id,
-        )?
-    } else {
-        Vec::new()
-    };
-
-    // Parse post_checks
-    let post_checks = if let Some(v) = obj.get("post_checks") {
-        parse_checks(
-            v,
-            false,
-            source_path,
-            ctx,
-            &span_index,
-            frontmatter_slice,
-            &mut alloc_id,
-        )?
-    } else {
-        Vec::new()
-    };
 
     // Parse timeout
     let timeout = if let Some(v) = obj.get("timeout") {
@@ -235,80 +160,19 @@ pub fn parse_harness_plan(
         });
     }
 
-    // Parse handlers
-    let (handlers, programmatic_handler) = parse_handlers(obj, source_path, ctx)?;
-
     let plan = HarnessPlan {
         source_path: source_path.to_path_buf(),
         timeout,
         step_timeout,
         timeout_warn,
         step_timeout_warn,
-        pre_checks,
-        post_checks,
-        handlers,
-        programmatic_handler,
     };
     debug!(
         source = %source_path.display(),
-        pre_checks = plan.pre_checks.len(),
-        post_checks = plan.post_checks.len(),
         timeout_secs = plan.timeout.map(|d| d.as_secs()),
         "parsed harness plan",
     );
     Ok(plan)
-}
-
-/// Create a system-owned `has_write_permission` pre-check rule for the
-/// source document itself.
-///
-/// Inline composition requires write access to the source file. When a
-/// harness is active, this rule participates in the normal pre-check
-/// pipeline so that handler recovery paths (redirect, deviate, etc.)
-/// can respond to permission failures instead of hard-failing before
-/// the handler system exists.
-pub fn inline_writability_pre_check(source_path: &Path) -> ValidationRule {
-    ValidationRule {
-        id: ValidationRuleId(u32::MAX),
-        event: ValidationEvent::HasWritePermission,
-        phase: ValidationPhase::PreOnly,
-        kind: ValidationKind::HasWritePermission {
-            file: source_path.to_path_buf(),
-        },
-        message_template: None,
-        subject_key: Some(source_path.display().to_string()),
-        source: None,
-    }
-}
-
-/// Whether the effective plan is for inline composition (which needs the
-/// system-owned writability pre-check) or direct composition.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EffectivePlanMode {
-    /// Direct composition: no file mutation, no writability pre-check.
-    Direct,
-    /// Inline composition: prepend the system-owned writability pre-check.
-    Inline,
-}
-
-/// Finalize a parsed harness plan into the effective plan used by the
-/// execution loop.
-///
-/// For inline composition, this prepends a system-owned writability
-/// pre-check so handler recovery paths can respond to permission failures.
-/// For direct composition, the plan is returned unchanged.
-///
-/// Preserves author rule order: the system rule is inserted at the front,
-/// and any authored `pre_checks` keep their relative order after it.
-pub fn finalize_effective_plan(
-    mut plan: HarnessPlan,
-    mode: EffectivePlanMode,
-    source_path: &Path,
-) -> HarnessPlan {
-    if matches!(mode, EffectivePlanMode::Inline) {
-        plan.pre_checks.insert(0, inline_writability_pre_check(source_path));
-    }
-    plan
 }
 
 #[cfg(test)]
@@ -330,10 +194,6 @@ mod tests {
             step_timeout: None,
             timeout_warn: None,
             step_timeout_warn: None,
-            pre_checks: Vec::new(),
-            post_checks: Vec::new(),
-            handlers: Default::default(),
-            programmatic_handler: None,
         }
     }
 
@@ -341,66 +201,69 @@ mod tests {
     fn direct_bare_plan_unchanged() {
         let source = test_source_path();
         let plan = bare_plan(&source);
-        let effective = finalize_effective_plan(plan, EffectivePlanMode::Direct, &source);
 
-        assert_eq!(effective.timeout, None);
-        assert_eq!(effective.step_timeout, None);
-        assert_eq!(effective.timeout_warn, None);
-        assert_eq!(effective.step_timeout_warn, None);
-        assert!(effective.pre_checks.is_empty());
-        assert!(effective.post_checks.is_empty());
-        assert!(effective.programmatic_handler.is_none());
+        assert_eq!(plan.timeout, None);
+        assert_eq!(plan.step_timeout, None);
+        assert_eq!(plan.timeout_warn, None);
+        assert_eq!(plan.step_timeout_warn, None);
     }
 
     #[test]
-    fn inline_bare_plan_adds_writability_pre_check() {
+    fn stall_timeout_is_not_a_frontmatter_property() {
         let source = test_source_path();
-        let plan = bare_plan(&source);
-        let effective = finalize_effective_plan(plan, EffectivePlanMode::Inline, &source);
+        let frontmatter_value = json!({ "stall_timeout": "1s" });
 
-        assert_eq!(effective.pre_checks.len(), 1);
-        let rule = &effective.pre_checks[0];
-        assert_eq!(rule.id.0, u32::MAX);
-        assert!(matches!(rule.event, ValidationEvent::HasWritePermission));
-        assert!(matches!(
-            &rule.kind,
-            ValidationKind::HasWritePermission { file } if file == &source
-        ));
-        assert!(rule.source.is_none());
-        assert!(effective.post_checks.is_empty());
+        assert!(!has_harness_properties(&frontmatter_value));
+        let plan = parse_harness_plan(&frontmatter_value, &source).unwrap();
+        assert_eq!(plan.timeout, None);
+        assert_eq!(plan.step_timeout, None);
     }
 
     #[test]
-    fn inline_parsed_plan_preserves_author_order() {
-        let tmp = tempfile::tempdir().unwrap();
-        let source = tmp.path().join("prompt.md");
-        let frontmatter = "---\npre_checks:\n  - file_exists: a.txt\n  - file_exists: b.txt\n---\n";
-        std::fs::write(&source, frontmatter).unwrap();
-
-        let ctx = HarnessResolutionContext {
-            source_path: &source,
-            repo_root: Some(tmp.path()),
-        };
+    fn parses_timeouts() {
+        let source = test_source_path();
         let frontmatter_value = json!({
-            "pre_checks": [
-                { "file_exists": "a.txt" },
-                { "file_exists": "b.txt" },
-            ]
+            "timeout": "5m",
+            "step_timeout": "30s",
+            "timeout_warn": "1m",
+            "step_timeout_warn": "10s",
         });
 
-        let plan = parse_harness_plan(&frontmatter_value, &source, &ctx).unwrap();
-        assert_eq!(plan.pre_checks.len(), 2);
-        assert_eq!(plan.pre_checks[0].id.0, 0);
-        assert_eq!(plan.pre_checks[1].id.0, 1);
+        let plan = parse_harness_plan(&frontmatter_value, &source)
+            .expect("timeouts should parse");
+        assert_eq!(plan.timeout, Some(std::time::Duration::from_secs(300)));
+        assert_eq!(plan.step_timeout, Some(std::time::Duration::from_secs(30)));
+        assert_eq!(plan.timeout_warn, Some(std::time::Duration::from_secs(60)));
+        assert_eq!(plan.step_timeout_warn, Some(std::time::Duration::from_secs(10)));
+    }
 
-        let effective = finalize_effective_plan(plan, EffectivePlanMode::Inline, &source);
-        assert_eq!(effective.pre_checks.len(), 3);
-        assert_eq!(effective.pre_checks[0].id.0, u32::MAX);
-        assert!(matches!(
-            effective.pre_checks[0].kind,
-            ValidationKind::HasWritePermission { .. }
-        ));
-        assert_eq!(effective.pre_checks[1].id.0, 0);
-        assert_eq!(effective.pre_checks[2].id.0, 1);
+    #[test]
+    fn rejects_step_timeout_greater_than_timeout() {
+        let source = test_source_path();
+        let frontmatter_value = json!({
+            "timeout": "30s",
+            "step_timeout": "1m",
+        });
+
+        let err = parse_harness_plan(&frontmatter_value, &source).unwrap_err();
+        assert!(
+            matches!(err, HarnessError::InvalidTimeout { .. }),
+            "expected InvalidTimeout, got {err:?}"
+        );
+    }
+
+    #[test]
+    fn rejects_warn_equal_to_hard_timeout() {
+        let source = test_source_path();
+        let frontmatter_value = json!({
+            "timeout": "30s",
+            "timeout_warn": "30s",
+        });
+
+        let err = parse_harness_plan(&frontmatter_value, &source).unwrap_err();
+        assert!(
+            matches!(err, HarnessError::InvalidTimeout { .. }),
+            "expected InvalidTimeout, got {err:?}"
+        );
     }
 }

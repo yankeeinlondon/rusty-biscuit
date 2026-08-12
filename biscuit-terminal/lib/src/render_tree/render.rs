@@ -139,6 +139,9 @@ pub fn render_terminal_node(
     Ok(Rendered {
         output,
         diagnostics: writer.diagnostics,
+        // Terminal output never receives browser feature assets, so the
+        // feature side channel stays empty here.
+        features: Vec::new(),
     })
 }
 
@@ -896,6 +899,29 @@ impl Writer<'_> {
         result
     }
 
+    /// Renders a single `node` through the full [`Self::render`] path with the
+    /// context narrowed to `width`.
+    ///
+    /// Mirrors [`Self::render_kind_in_width`] but keeps the layout/paint wrapper
+    /// (`render`, not `render_kind`). Used when a block child is about to be
+    /// indented (e.g. a nested list inside a list item): the child must wrap to
+    /// the width left *after* that indent, or its lines overrun the terminal by
+    /// the indent amount and the terminal hard-wraps the overflow.
+    fn render_in_width(&mut self, node: &RenderNode, width: u32) -> Result<String, RenderError> {
+        let mut narrowed = self.opts.clone();
+        narrowed.context.available_width = width;
+        narrowed.context.width = width;
+        narrowed.context.terminal.fixed_width = Some(width);
+        let mut sub = Writer {
+            opts: &narrowed,
+            diagnostics: Vec::new(),
+            inherited: self.inherited.clone(),
+        };
+        let result = sub.render(node);
+        self.diagnostics.append(&mut sub.diagnostics);
+        result
+    }
+
     /// Renders an unstyled block quote with a caller-supplied left-border
     /// `prefix` (the darkmatter `▐   ` bar) instead of the shared
     /// [`BlockQuote`] component's `│ ` border.
@@ -1062,8 +1088,8 @@ impl Writer<'_> {
                         let open = style::text_appearance_sgr(&child_effective, term);
                         // Reset, then restore the ancestor appearance so the
                         // run after the span keeps the inherited color/emphasis.
-                        // An empty `open` (e.g. a no-color terminal) closes to
-                        // nothing rather than a stray reset.
+                        // An empty `open` closes to nothing rather than a
+                        // stray reset.
                         let close = style::appearance_close(&open, effective, term);
                         Ok(format!("{open}{styled}{close}"))
                     }
@@ -1558,26 +1584,63 @@ impl Writer<'_> {
 
         let mut out = String::new();
         let mut prefix_used = false;
-        for (idx, child) in item_children.iter().enumerate() {
-            if idx > 0 {
+        let mut first_group = true;
+        let mut idx = 0;
+        while idx < item_children.len() {
+            if !first_group {
                 out.push('\n');
             }
-            if !prefix_used && is_inline_block(child) {
-                // Inline/paragraph child: carries the prefix, with the
-                // prefix width as hanging indent for continuation lines.
+            let child = &item_children[idx];
+            if is_inline_block(child) {
+                // A tight list item carries its content as a flat run of
+                // inline siblings (`[Text, InlineCode, Text, …]`) with no
+                // wrapping `Paragraph`. Coalesce a maximal run of consecutive
+                // bare-inline children into one inline render so the whole run
+                // flows and wraps as a single paragraph; a `Paragraph` child is
+                // already coalesced and is rendered on its own. Without this,
+                // every inline sibling after the first would fall through to the
+                // block branch below and render on its own unwrapped line.
                 let markup = match &child.kind {
                     NodeKind::Paragraph { children } => {
+                        idx += 1;
                         self.render_inline(children, &Style::default())?
                     }
-                    _ => self.render_inline(std::slice::from_ref(child), &Style::default())?,
+                    _ => {
+                        let start = idx;
+                        while idx < item_children.len()
+                            && is_inline_kind(&item_children[idx].kind)
+                        {
+                            idx += 1;
+                        }
+                        self.render_inline(&item_children[start..idx], &Style::default())?
+                    }
                 };
-                out.push_str(&self.render_list_text(&full_prefix, &markup, hanging_indent));
-                prefix_used = true;
+                if prefix_used {
+                    // A trailing inline run after a block child: indent it like
+                    // body text instead of re-applying the bullet prefix.
+                    out.push_str(&indent_block(&markup, indent_children));
+                } else {
+                    // First inline run: carries the prefix, with the prefix
+                    // width as hanging indent for continuation lines.
+                    out.push_str(&self.render_list_text(&full_prefix, &markup, hanging_indent));
+                    prefix_used = true;
+                }
             } else {
-                // Block child: indent by `indent_children`, no prefix.
-                let body = self.render(child)?;
+                // Block child: indent by `indent_children`, no prefix. Render
+                // it at the width left *after* that indent so a nested list (or
+                // other block) wraps within bounds instead of overrunning the
+                // terminal by `indent_children` cells.
+                let inner_width = self
+                    .opts
+                    .context
+                    .available_width
+                    .saturating_sub(indent_children)
+                    .max(1);
+                let body = self.render_in_width(child, inner_width)?;
                 out.push_str(&indent_block(&body, indent_children));
+                idx += 1;
             }
+            first_group = false;
         }
 
         // An item with no children still occupies a prefixed line.
@@ -1901,9 +1964,19 @@ impl Writer<'_> {
             .attrs
             .table_terminal_hints_ref()
             .unwrap_or(&default_terminal_hints);
-        let table = Table::new()
+        let mut table = Table::new()
             .with_columns(columns.clone())
             .with_data(data.clone());
+        table.expand_tabs_in_place(self.opts.context.terminal.tab_width);
+
+        // Carry only the content-box `width` from the node's layout onto the
+        // planning input. Margins stay default here: the tree has already
+        // reduced `available_width` by the block's margins, so re-applying them
+        // would double-count. `width` (e.g. `width: 100%`) drives whether the
+        // planner fills to the available width or hugs its content.
+        if let Some(layout) = table_node.attrs.layout_ref() {
+            table.layout_mut().width = layout.width.clone();
+        }
 
         // ── Pass 1: width planning ─────────────────────────────────────────
         let available = self.opts.context.available_width.max(1);
@@ -1942,8 +2015,8 @@ impl Writer<'_> {
             .filter(|sgr| !sgr.is_empty());
 
         Ok(emit_table(
-            &columns,
-            &data,
+            table.columns(),
+            table.data(),
             &plan,
             stripe_bg.as_deref(),
             stripe_fg.as_deref(),
@@ -2847,7 +2920,7 @@ mod render_tree_tests {
         ] {
             let mut opts = opts(RenderStrictness::Warn);
             opts.context.color_depth = crate::discovery::detection::ColorDepth::TrueColor;
-            opts.context.color_mode = mode.clone();
+            opts.context.color_mode = mode;
             opts.context.code_theme = Some("one-half".to_string());
             opts.context.line_numbers = true;
             opts.code_renderer = Some(Rc::new(CaptureRenderer {
@@ -3384,6 +3457,7 @@ mod render_tree_tests {
     fn no_osc_opts(width: u32) -> TerminalRenderOptions {
         let term = Terminal::builder()
             .width(width)
+            .color_depth(ColorDepth::TrueColor)
             .osc_link_support(false)
             .build();
         TerminalRenderOptions::new(&term, RenderStrictness::Warn)
@@ -3596,6 +3670,86 @@ mod render_tree_tests {
         let center = render_pad(RAlignment::Center);
         assert!(right > center, "right pad {right} should exceed center {center}");
         assert!(center > 0, "center pad should be positive");
+    }
+
+    #[test]
+    fn render_tree_tight_list_item_coalesces_inline_run_and_wraps() {
+        // A tight list item carries its content as a flat run of inline
+        // siblings (`[Text, InlineCode, Text]`) with no wrapping `Paragraph`.
+        // The whole run must flow and wrap as one paragraph — not split with
+        // the code span (and the text after it) each on its own line, and not
+        // overflow the width. Regression for the prompt-reporting wrap bug.
+        let item = RenderNode::list_item(
+            None,
+            vec![
+                RenderNode::text("the spec may include a "),
+                RenderNode::inline_code("sub-spec"),
+                RenderNode::text(
+                    " frontmatter property indicating that this spec is part of a larger series",
+                ),
+            ],
+        );
+        let node = RenderNode::list(false, None, vec![item]);
+        let out = render_terminal_node(&node, &no_osc_opts(40)).expect("render");
+        let stripped = strip_escape_codes(&out.output);
+
+        // No line exceeds the width.
+        for line in stripped.lines() {
+            assert!(line.chars().count() <= 40, "overflow line {line:?}");
+        }
+        // The first line carries the bullet and the text that precedes the
+        // code span flows onto it (not broken before `sub-spec`).
+        let first = stripped.lines().next().unwrap();
+        assert!(
+            first.starts_with("- the spec may include a sub-spec"),
+            "inline run did not coalesce: {first:?}"
+        );
+        // The trailing text wraps onto continuation lines rather than a single
+        // unwrapped overflow row — more than the two lines a broken render would
+        // collapse to, and the closing word survives.
+        assert!(stripped.contains("series"), "trailing text lost: {stripped:?}");
+        assert!(stripped.lines().count() >= 3, "did not wrap: {stripped:?}");
+    }
+
+    #[test]
+    fn render_tree_nested_list_item_wraps_within_width() {
+        // A nested list item is indented by the parent's `indent_children` after
+        // it renders. Its content must wrap to the width left *after* that
+        // indent, or every line overruns the terminal by the indent amount and
+        // the terminal hard-wraps the overflow (the lone-`;` blemish). Regression
+        // for the implement-plan prompt nested frontmatter-property list.
+        let inner = RenderNode::list(
+            false,
+            None,
+            vec![RenderNode::list_item(
+                None,
+                vec![RenderNode::text(
+                    "set the source files frontmatter property to every file touched during this phase; put an empty list if none",
+                )],
+            )],
+        );
+        let outer_item = RenderNode::list_item(
+            None,
+            vec![
+                RenderNode::text("You must set the following Frontmatter properties:"),
+                inner,
+            ],
+        );
+        let node = RenderNode::list(false, None, vec![outer_item]);
+        let out = render_terminal_node(&node, &no_osc_opts(60)).expect("render");
+        let stripped = strip_escape_codes(&out.output);
+        for line in stripped.lines() {
+            assert!(
+                line.chars().count() <= 60,
+                "nested item overran width: {line:?}"
+            );
+        }
+        // The nested bullet is indented under the parent (not at column 0).
+        let nested = stripped
+            .lines()
+            .find(|l| l.contains("set the source files"))
+            .expect("nested line");
+        assert!(nested.starts_with("  "), "nested bullet not indented: {nested:?}");
     }
 
     #[test]
@@ -4142,6 +4296,36 @@ mod render_tree_tests {
         .expect("render")
         .output;
         assert_eq!(lead_spaces_of_line_with(&out, "hi"), 30);
+    }
+
+    /// A `width: 50%` table fills half the available width — the table's column
+    /// fill must use the box the block-layout step already sized (40 of 80), not
+    /// re-resolve the 50% against that narrowed box (which would yield 25%, a
+    /// double-applied percentage).
+    #[test]
+    fn render_tree_table_fixed_percent_does_not_double_apply() {
+        use crate::components::renderable::TerminalRenderable;
+        use renderable::layout::{Length, TargetValue, Width};
+
+        let term = Terminal::new_optimistic(80);
+        let mut table = Table::new()
+            .with_columns(vec![TableColumn::new("A"), TableColumn::new("B")])
+            .with_data(vec![vec!["x".into(), "y".into()]]);
+        table.layout_mut().width =
+            Width::Fixed(TargetValue::universal(Length::Percent(50.0)));
+
+        let out = table.render(&term);
+        let border = out
+            .lines()
+            .map(visible_width)
+            .max()
+            .expect("table emits at least one line");
+        // The box is 40 (50% of 80); the table fills it. Double-application
+        // would collapse it to ~20. Allow a small tolerance for border glyphs.
+        assert!(
+            (38..=40).contains(&border),
+            "width:50% table must fill ~40 cells, got {border}; output:\n{out}"
+        );
     }
 
     #[test]

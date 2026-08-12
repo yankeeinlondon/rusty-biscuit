@@ -1,0 +1,87 @@
+# SimplifiedSchema for the non-interactive-sessions research topic.
+#
+# Captures how each provider runs headlessly and emits structured output for
+# Claudine's wrapper, stream parser, reporting, and lifecycle machinery.
+$schema:
+    # Date the research file was first created.
+    created: date
+
+    # Date the provider non-interactive behavior was last verified.
+    last_updated: date(required)
+
+    # Agent/model that produced the research.
+    agent: string(required)
+    model: string(required)
+
+    # Primary official documentation URL for non-interactive/headless execution.
+    docs: url
+
+    # Non-interactive invocation forms, such as `-p`, `exec`, `run`, or `--print`.
+    invocation: "{ command: string(required), stdin_support: boolean, prompt_arg: string, notes: string }[]"
+
+    # Structured output formats available in non-interactive mode.
+    output_formats: "{ name: string(required), cli_value: string(required), stream: boolean, format: enum(json,jsonl,ndjson,sse,jsonrpc_lines,text,other; required), description: string, side_effects: string }[]"
+
+    # Formal or informal schema sources for the structured stream/output.
+    schema_sources: "{ url: string, schema_type: enum(json_schema,openapi,typescript,rust,protobuf,examples,none,other; required), formal: boolean(required), notes: string }[]"
+
+    # CLI flags that affect headless execution or structured output.
+    cli_params: "{ flag: string(required), value: string, description: string(required), example: string }[]"
+
+    # Configuration files that influence non-interactive output behavior.
+    config_files: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,system,managed,other; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other), effect: string, notes: string }[]"
+
+    # Environment variables that specifically affect non-interactive execution,
+    # structured output, auth source, buffering, color, logging, or tool approvals.
+    env_vars: "{ name: string(required), effect: string(required), notes: string }[]"
+
+    # Process and stdio contract Claudine must preserve when wrapping the provider.
+    io_contract: "{ stdout: enum(structured_only,mixed_text_and_structured,text_only,none,unknown; required), stderr: enum(diagnostics_only,structured_events,mixed,unused,unknown), stdin: enum(prompt,stream_protocol,ignored,interactive_only,unknown), framing: enum(single_json,jsonl,ndjson,sse,jsonrpc_lines,text,other,unknown), noise_handling: string, notes: string }"
+
+    # Stream envelope and parsing contract for structured output.
+    stream_contract: "{ discriminator: string, event_ordering: string, correlation_fields: string[], terminal_event: string, partial_message_events: boolean, unknown_event_policy: string, notes: string }"
+
+    # Metadata emitted at session start, per turn, and session completion.
+    session_metadata: "{ session_id: string, cwd: string, model: string, provider: string, auth: string, version: string, mcp_servers: string, permission_mode: string, notes: string }"
+
+    # Event families visible in structured output.
+    stream_events: "{ event: string(required), category: enum(session,assistant,reasoning,tool_call,tool_result,file_change,plan,usage,error,permission,subagent,other; required), fields: string[], notes: string }[]"
+
+    # Built-in tools and how their calls/results appear in headless streams.
+    tools: "{ name: string(required), call_visible: boolean, result_visible: boolean, metadata: string[], notes: string }[]"
+
+    # Completion status and process-exit behavior.
+    completion: "{ success_event: string, failure_event: string, exit_code_reliable: boolean, result_fields: string[], cost_fields: string[], usage_fields: string[], notes: string }"
+
+    # Permission, approval, and human-input behavior in non-interactive mode.
+    blocking_behavior: "{ permissions: enum(auto_deny,auto_approve,fail,hang,prompt_tool,configurable,unknown), questions: enum(auto_deny,empty_answer,fail,hang,configurable,unknown), tool_approvals: enum(auto_deny,auto_approve,fail,hang,prompt_tool,configurable,unknown), notes: string }"
+
+    # Subagent visibility and control in non-interactive mode.
+    subagents: "{ supported: boolean, start_visible: boolean, stop_visible: boolean, nested_events_visible: boolean, prompt_injection_supported: boolean, metadata_fields: string[], notes: string }"
+
+    # Known states Claudine wants to detect from non-interactive output.
+    use_cases: "{ name: enum(plan_cap_approaching,plan_capped,no_funds,auth,permission_read_denied,permission_write_denied,tokens_consumed,model_used,model_fallback,human_in_loop,session_resumable,subagent_prompt_injection,other; required), detectable: boolean(required), event_types: string[], fields: string[], hook_parity: string, notes: string }[]"
+
+    # Non-interactive failure and blocking behavior.
+    headless_constraints: "{ constraint: string(required), mitigation: string, notes: string }[]"
+
+    # Provider quirks and parser footguns.
+    quirks: string[]
+
+    # Claims that could not be verified or need fixture evidence.
+    gaps: string[]
+
+    # Preferred Claudine wrapper/parser strategy for this provider.
+    claudine_strategy: "{ preferred_invocation: string, required_flags: string[], conflicting_flags: string[], parser_notes: string, wrapper_notes: string }"
+
+    # Coarse primary output format used by Claudine.
+    data_format: enum(json,jsonl,ndjson,sse,jsonrpc_lines,text,other)
+
+    # Update-mode changelog entries. Fresh first-run documents should use [].
+    changes: string[]
+
+    # Whether discovered behavior requires Claudine code/generated metadata changes.
+    requires_claudine_update: boolean(required)
+
+    # Short explanation for `requires_claudine_update`.
+    reason: string

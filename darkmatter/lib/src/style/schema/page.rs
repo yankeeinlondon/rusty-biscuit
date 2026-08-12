@@ -124,4 +124,15 @@ mod tests {
         let p: PageStyle = serde_json::from_str(r#"{"background": "subtle"}"#).unwrap();
         assert_eq!(p.background, Some(PageBackground::Subtle));
     }
+
+    /// Validation guard (spec item 8): an unsupported `background` variant is
+    /// rejected at deserialize time, never silently dropped.
+    #[test]
+    fn rejects_unknown_background() {
+        let err = serde_json::from_str::<PageStyle>(r#"{"background": "glossy"}"#).unwrap_err();
+        assert!(
+            err.to_string().contains("unknown variant") || err.to_string().contains("glossy"),
+            "unexpected error: {err}"
+        );
+    }
 }

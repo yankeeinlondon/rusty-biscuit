@@ -94,6 +94,39 @@ two-column layouts render from `ComponentHints::Columns` on a `BlockQuote`
 two-pass pre-scan / emit renderer that reuses the table module's width-planning
 utilities (but not `Table::render()`).
 
+### List-item inline coalescing (wrap invariant)
+
+A list item's children shape differs by CommonMark list *kind*: a **loose**
+item wraps its content in a `Paragraph` (`[Paragraph([Text, InlineCode, …])]`),
+but a **tight** item carries a **flat run of inline siblings**
+(`[Text, InlineCode, Text, …]`) with no `Paragraph`. `render_list_item` must
+**coalesce a maximal run of consecutive inline-kind children into one inline
+render** before wrapping — wrapping is **per-list-item**, not per-inline-node.
+If only the first inline child is sent through the prefix/hanging-indent wrap
+path, every following sibling (the code span, the trailing text) falls through
+to the block branch and renders on its own **unwrapped** line — the span lands
+alone and the trailing text overflows the width. Regression test:
+`render_tree_tight_list_item_coalesces_inline_run_and_wraps`. Note this is
+purely a render-tree concern: darkmatter's `Markdown::as_terminal` (and thus
+every Markdown surface, e.g. claudine's prompt reporting) folds through here, so
+a "tight bullet with `code`/**bold**/link wraps wrong" bug is fixed in this
+renderer, not upstream.
+
+### Nested-list width narrowing (overflow invariant)
+
+A nested list is a **block child** of a list item: it renders first, then the
+parent `indent_block`s the whole thing by `indent_children`. So the nested
+content must be rendered at the width left **after** that indent —
+`render_list_item` narrows via `render_in_width(child, available_width −
+indent_children)`. If a nested block instead wraps against the full terminal
+width (the bug was `render_list_text` reading `term.width()` with no
+depth-narrowing), every line runs `indent_children` cells over the terminal
+width once indented, and the **terminal hard-wraps the overflow** — e.g. a lone
+trailing `;` or bracket dropped onto its own visual line. The renderer's own
+output looks ~1–2 cells too wide per line; the visible artifact is the terminal
+folding it. Sweep widths and assert no rendered line exceeds the width. Regression
+test: `render_tree_nested_list_item_wraps_within_width`.
+
 ## Layout
 
 The terminal tree renderer applies a block node's `renderable::layout::Layout`

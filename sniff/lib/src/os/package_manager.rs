@@ -363,27 +363,17 @@ pub fn get_path_dirs() -> Vec<PathBuf> {
 
 fn compute_path_dirs() -> Vec<PathBuf> {
     let started = Instant::now();
-    let path_var = match std::env::var("PATH") {
-        Ok(p) => p,
-        Err(_) => {
-            performance::record_logged_stage(
-                "os.path_dirs",
-                started.elapsed(),
-                tracing::Level::DEBUG,
-            );
-            return Vec::new();
-        }
+    // `var_os` + `split_paths` is portable (handles `:` on Unix and `;` on
+    // Windows) and, unlike `var`, does not discard the entire PATH when a
+    // single entry is non-Unicode — such entries become `PathBuf`s that simply
+    // fail the `is_dir` filter rather than rejecting every directory up front.
+    let Some(path_var) = std::env::var_os("PATH") else {
+        performance::record_logged_stage("os.path_dirs", started.elapsed(), tracing::Level::DEBUG);
+        return Vec::new();
     };
 
-    #[cfg(target_os = "windows")]
-    let separator = ';';
-    #[cfg(not(target_os = "windows"))]
-    let separator = ':';
-
-    let dirs: Vec<PathBuf> = path_var
-        .split(separator)
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from)
+    let dirs: Vec<PathBuf> = std::env::split_paths(&path_var)
+        .filter(|p| !p.as_os_str().is_empty())
         .filter(|p| p.is_dir())
         .collect();
     performance::increment_counter("os.path.directories_available", dirs.len() as u64);
@@ -1674,7 +1664,7 @@ mod tests {
 
         #[test]
         fn test_get_path_dirs_parses_valid_dirs() {
-            let _lock = ENV_MUTEX.lock().unwrap();
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let temp = TempDir::new().expect("should create temp dir");
             let dir1 = temp.path().join("bin1");
             let dir2 = temp.path().join("bin2");
@@ -1682,13 +1672,11 @@ mod tests {
             fs::create_dir(&dir1).expect("should create dir1");
             fs::create_dir(&dir2).expect("should create dir2");
 
-            #[cfg(not(target_os = "windows"))]
-            let path_value = format!("{}:{}", dir1.display(), dir2.display());
-            #[cfg(target_os = "windows")]
-            let path_value = format!("{};{}", dir1.display(), dir2.display());
+            let path_value = std::env::join_paths([dir1.as_os_str(), dir2.as_os_str()])
+                .expect("join PATH dirs");
 
             let mut env = ScopedEnv::new();
-            env.set("PATH", &path_value);
+            env.set_os("PATH", &path_value);
 
             let dirs = get_path_dirs();
             assert!(dirs.contains(&dir1));
@@ -1697,20 +1685,18 @@ mod tests {
 
         #[test]
         fn test_get_path_dirs_filters_nonexistent() {
-            let _lock = ENV_MUTEX.lock().unwrap();
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let temp = TempDir::new().expect("should create temp dir");
             let existing = temp.path().join("exists");
             let nonexistent = temp.path().join("does_not_exist");
 
             fs::create_dir(&existing).expect("should create dir");
 
-            #[cfg(not(target_os = "windows"))]
-            let path_value = format!("{}:{}", existing.display(), nonexistent.display());
-            #[cfg(target_os = "windows")]
-            let path_value = format!("{};{}", existing.display(), nonexistent.display());
+            let path_value = std::env::join_paths([existing.as_os_str(), nonexistent.as_os_str()])
+                .expect("join PATH dirs");
 
             let mut env = ScopedEnv::new();
-            env.set("PATH", &path_value);
+            env.set_os("PATH", &path_value);
 
             let dirs = get_path_dirs();
             assert!(dirs.contains(&existing));
@@ -1719,23 +1705,88 @@ mod tests {
 
         #[test]
         fn test_get_path_dirs_handles_empty_entries() {
-            let _lock = ENV_MUTEX.lock().unwrap();
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let temp = TempDir::new().expect("should create temp dir");
             let dir = temp.path().join("bin");
             fs::create_dir(&dir).expect("should create dir");
 
-            #[cfg(not(target_os = "windows"))]
-            let path_value = format!("::{}::", dir.display());
-            #[cfg(target_os = "windows")]
-            let path_value = format!(";;{};;", dir.display());
+            // Surround the real dir with empty entries (leading/trailing
+            // separators). `join_paths` serializes them with the platform
+            // separator so the test stays cross-platform.
+            let empty = std::ffi::OsStr::new("");
+            let path_value =
+                std::env::join_paths([empty, empty, dir.as_os_str(), empty, empty])
+                    .expect("join PATH with empty entries");
 
             let mut env = ScopedEnv::new();
-            env.set("PATH", &path_value);
+            env.set_os("PATH", &path_value);
 
             let dirs = get_path_dirs();
             assert!(dirs.contains(&dir));
             // Empty entries should be filtered out
             assert!(!dirs.iter().any(|p| p.as_os_str().is_empty()));
+        }
+
+        /// On Windows, PATH entries are separated by `;`. Prove that a
+        /// semicolon-separated PATH parses into distinct directories instead of
+        /// collapsing into one malformed entry. Only Windows hosts can express
+        /// this because `split_paths` keys off the platform separator.
+        #[test]
+        #[cfg(target_os = "windows")]
+        fn test_get_path_dirs_splits_semicolon_separated_entries() {
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+            let temp = TempDir::new().expect("should create temp dir");
+            let dir1 = temp.path().join("bin1");
+            let dir2 = temp.path().join("bin2");
+            fs::create_dir(&dir1).expect("should create dir1");
+            fs::create_dir(&dir2).expect("should create dir2");
+
+            let path_value = format!("{};{}", dir1.display(), dir2.display());
+
+            let mut env = ScopedEnv::new();
+            env.set("PATH", &path_value);
+
+            let dirs = get_path_dirs();
+            assert!(
+                dirs.contains(&dir1),
+                "first semicolon-separated dir should be parsed"
+            );
+            assert!(
+                dirs.contains(&dir2),
+                "second semicolon-separated dir should be parsed"
+            );
+        }
+
+        /// A non-Unicode PATH entry must not nuke detection of valid
+        /// directories. The previous `std::env::var("PATH")` implementation
+        /// returned an error (and an empty dir list) for any non-UTF-8 PATH;
+        /// `var_os` + `split_paths` retains the valid entries and simply drops
+        /// the non-Unicode one when it fails the `is_dir` filter.
+        #[test]
+        #[cfg(unix)]
+        fn test_get_path_dirs_retains_valid_dirs_with_non_unicode_entry() {
+            use std::ffi::OsString;
+            use std::os::unix::ffi::{OsStrExt, OsStringExt};
+
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+            let temp = TempDir::new().expect("should create temp dir");
+            let valid = temp.path().join("valid_bin");
+            fs::create_dir(&valid).expect("should create valid dir");
+
+            // PATH = "<valid_dir>:<invalid-UTF-8>"
+            let mut bytes = valid.as_os_str().as_bytes().to_vec();
+            bytes.push(b':');
+            bytes.extend_from_slice(&[0xFF, 0xFE]);
+            let path_value = OsString::from_vec(bytes);
+
+            let mut env = ScopedEnv::new();
+            env.set_os("PATH", &path_value);
+
+            let dirs = get_path_dirs();
+            assert!(
+                dirs.contains(&valid),
+                "valid dir should be retained despite a non-Unicode PATH entry"
+            );
         }
 
         #[test]
@@ -1792,7 +1843,7 @@ mod tests {
 
         #[test]
         fn test_command_exists_in_path_searches_in_order() {
-            use std::os::unix::fs::PermissionsExt;
+            use crate::test_helpers::make_executable_fixture;
 
             let temp = TempDir::new().expect("should create temp dir");
             let dir1 = temp.path().join("dir1");
@@ -1800,21 +1851,13 @@ mod tests {
             fs::create_dir(&dir1).expect("should create dir1");
             fs::create_dir(&dir2).expect("should create dir2");
 
-            // Create executable in both directories
-            let exe1 = dir1.join("mycmd");
-            let exe2 = dir2.join("mycmd");
-            fs::write(&exe1, "first").expect("should write exe1");
-            fs::write(&exe2, "second").expect("should write exe2");
+            // Create a runnable fixture in both directories. The helper handles
+            // the Unix mode-bit vs Windows `.cmd`-suffix difference and returns
+            // the path the resolver will actually find.
+            let exe1 = make_executable_fixture(&dir1.join("mycmd"));
+            let _exe2 = make_executable_fixture(&dir2.join("mycmd"));
 
-            #[cfg(not(target_os = "windows"))]
-            {
-                fs::set_permissions(&exe1, fs::Permissions::from_mode(0o755))
-                    .expect("should set permissions");
-                fs::set_permissions(&exe2, fs::Permissions::from_mode(0o755))
-                    .expect("should set permissions");
-            }
-
-            // dir1 comes first, so exe1 should be found
+            // dir1 comes first, so the dir1 fixture should be found.
             let path_dirs = vec![dir1.clone(), dir2.clone()];
             let result = command_exists_in_path("mycmd", &path_dirs);
 

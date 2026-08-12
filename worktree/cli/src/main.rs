@@ -64,9 +64,10 @@ wt() {{
     (( exit_code != 0 )) && return $exit_code
     if [[ "$output" == cd:* ]]; then
         builtin cd -- "${{output#cd:}}"
-    else
-        [[ -n "$output" ]] && echo "$output"
+    elif [[ -n "$output" ]]; then
+        echo "$output"
     fi
+    return 0
 }}
 source <(COMPLETE=bash command wt)"#
         ),
@@ -80,9 +81,10 @@ wt() {{
     (( exit_code != 0 )) && return $exit_code
     if [[ "$output" == cd:* ]]; then
         builtin cd -- "${{output#cd:}}"
-    else
-        [[ -n "$output" ]] && print -- "$output"
+    elif [[ -n "$output" ]]; then
+        print -- "$output"
     fi
+    return 0
 }}
 source <(COMPLETE=zsh command wt)"#
         ),
@@ -97,9 +99,10 @@ function wt
     end
     if string match -q 'cd:*' -- $output
         builtin cd (string replace 'cd:' '' -- $output)
-    else
-        test -n "$output" && echo $output
+    else if test -n "$output"
+        echo $output
     end
+    return 0
 end
 COMPLETE=fish command wt | source"#
         ),

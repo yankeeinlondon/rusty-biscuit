@@ -273,10 +273,10 @@ pub(crate) fn text_appearance_sgr(style: &Style, term: &Terminal) -> String {
 /// Closes an inline appearance run, restoring the ancestor `parent` appearance.
 ///
 /// `open` is the run produced by [`text_appearance_sgr`] for the styled node.
-/// When it is empty — no text appearance, or a [`ColorDepth::None`] terminal
-/// that suppresses every escape — the run opened nothing, so the close is also
-/// empty: no stray [`SGR_RESET`] is emitted. Otherwise the run is reset and the
-/// `parent` appearance re-applied so text after the node keeps the inherited
+/// When it is empty — no text appearance, or every requested text appearance is
+/// unsupported — the run opened nothing, so the close is also empty: no stray
+/// [`SGR_RESET`] is emitted. Otherwise the run is reset and the `parent`
+/// appearance re-applied so text after the node keeps the inherited
 /// color/emphasis.
 pub(crate) fn appearance_close(open: &str, parent: &Style, term: &Terminal) -> String {
     if open.is_empty() {
@@ -289,16 +289,15 @@ pub(crate) fn appearance_close(open: &str, parent: &Style, term: &Terminal) -> S
 ///
 /// The non-underline layers come from [`TextEmphasis::sgr_ops`]; the underline
 /// variant is degraded against the terminal's reported support. A
-/// [`ColorDepth::None`] terminal emits no style SGR at all — emphasis is a
-/// style escape and is suppressed alongside color so the no-color profile
-/// yields completely escape-free output.
+/// [`ColorDepth::None`] terminal still suppresses non-underline emphasis, but
+/// underline support is a separate capability and can remain available when
+/// color is unavailable.
 fn emphasis_sgr(style: &Style, term: &Terminal) -> String {
-    if matches!(term.color_depth, ColorDepth::None) {
-        return String::new();
-    }
     let mut sgr = String::new();
-    for (_, code) in style.emphasis.sgr_ops() {
-        sgr.push_str(code);
+    if !matches!(term.color_depth, ColorDepth::None) {
+        for (_, code) in style.emphasis.sgr_ops() {
+            sgr.push_str(code);
+        }
     }
     if let Some(underline) = style.emphasis.underline
         && let Some(code) = underline_sgr(underline, term)
@@ -767,6 +766,23 @@ mod tests {
         let out = apply_style("x", &style, &term);
         assert!(out.contains(UnderlineStyle::Straight.sgr_open()));
         assert!(!out.contains("\x1b[4:2m"));
+    }
+
+    #[test]
+    fn underline_degrades_when_color_depth_is_none() {
+        let mut term = truecolor_term();
+        term.color_depth = ColorDepth::None;
+        term.underline_support.double = false;
+        term.underline_support.straight = true;
+        let style = Style {
+            emphasis: TextEmphasis {
+                underline: Some(UnderlineStyle::Double),
+                ..Default::default()
+            },
+            ..Style::default()
+        };
+        let out = apply_style("x", &style, &term);
+        assert_eq!(out, "\x1b[4mx\x1b[0m");
     }
 
     #[test]

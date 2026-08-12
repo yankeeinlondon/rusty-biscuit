@@ -65,7 +65,23 @@ trace/*
 
 ~$*.docx
 **/debug/*
-**/Cargo.lock
+
+# `Cargo.lock` is COMMITTED, not ignored.
+#
+# The advice to ignore it applies to published libraries, and even there Cargo's
+# own guidance now recommends committing: a lock is simply ignored when the
+# package is consumed as a dependency, so there is no downside. This repo ships
+# 22 binaries, which is the unambiguous commit case.
+#
+# Concretely, ignoring it meant CI re-resolved every dependency on every run.
+# `libgit2-sys 0.18.7` shipped a PCRE1 -> PCRE2 swap with unprefixed symbols and
+# broke the Windows builds of `sniff`, `darkmatter`, and `tree-hugger` on an
+# upstream release day, with no local change and nothing in the repo recording
+# which version had been in play. A past CI run could not be reproduced.
+#
+# One lock per workspace root or excluded package. A lock inside a workspace
+# MEMBER is a stray artifact Cargo never consults — `research/{lib,cli}` each had
+# one, four months stale, from before they joined the workspace.
 
 # Insta pending snapshots (transient — should never be committed)
 **/*.snap.new
@@ -80,3 +96,12 @@ trace/*
 **/test-*timing.jsonl
 .claudine/tmp/
 **/tmp-stream*
+# do not add gitnexus cache
+.gitnexus/*
+
+/.claude/settings.local.json
+.codex/config.toml
+
+# Python bytecode from scripts/ci test runs
+__pycache__/
+*.pyc

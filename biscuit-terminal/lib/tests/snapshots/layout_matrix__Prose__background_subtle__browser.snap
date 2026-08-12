@@ -1,0 +1,5 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: html
+---
+<div style="background-color:rgb(30, 30, 34)"><p>The shared render-tree fold resolves the full Layout and Style surface for a plain block node.</p></div>

@@ -195,6 +195,53 @@ impl<V: Clone + PartialEq> ChooseOneState<V> {
         }
     }
 
+    /// Returns the option at the current highlight (the "active" row),
+    /// if any.
+    ///
+    /// Mirrors [`hover`](Self::hover) and applies no filtering of its
+    /// own: it returns the option **as-is**, including a `disabled`
+    /// one if the highlight rests on it (navigation already governs
+    /// where the highlight may land). `None` means there is no active
+    /// row — e.g. an empty option list.
+    ///
+    /// Distinct from [`selected_value`](Self::selected_value): the
+    /// active row is the highlighted one, not the submitted
+    /// selection. This is the read entry point for the master/detail
+    /// pattern — a detail pane can derive its content from the active
+    /// option each frame.
+    pub fn active_option(&self) -> Option<&ChoiceOption<V>> {
+        self.hover().and_then(|i| self.options().get(i))
+    }
+
+    /// Returns the value of the option at the current highlight, if
+    /// any.
+    ///
+    /// Sugar over [`active_option`](Self::active_option); inherits its
+    /// disabled-passthrough and `None`-means-no-active-row semantics.
+    pub fn active_value(&self) -> Option<&V> {
+        self.active_option().map(|o| &o.value)
+    }
+
+    /// Looks up a description for the active option in a caller-
+    /// supplied `id -> description` map.
+    ///
+    /// Sugar over [`active_option`](Self::active_option): performs the
+    /// `active_option().id -> map` lookup. The map is caller-owned —
+    /// this does **not** add a description field to [`ChoiceOption`],
+    /// which stays unchanged. `None` means either there is no active
+    /// row, or the active option's `id` has no entry in `map`.
+    ///
+    /// The returned reference borrows from `map`, not `self`, so it
+    /// can outlive a transient borrow of the state (e.g. across
+    /// independent re-renders in a master/detail layout).
+    pub fn active_description<'a>(
+        &self,
+        map: &'a HashMap<String, String>,
+    ) -> Option<&'a str> {
+        self.active_option()
+            .and_then(|o| map.get(&o.id).map(String::as_str))
+    }
+
     /// Returns the index of the currently selected option, if any.
     pub fn selected_index(&self) -> Option<usize> {
         self.selected
@@ -573,25 +620,27 @@ impl<V: Clone + PartialEq> HandleEvent for ChooseOne<V> {
             return EventOutcome::Consumed;
         }
 
-        // Ctrl/Alt hotkeys select and submit (Phase 5).
-        match event.modifiers {
-            KeyModifiers::CONTROL => {
-                if let KeyCode::Char(c) = event.code
-                    && let Some(&idx) = state.ctrl_hotkeys.get(&c.to_ascii_lowercase())
-                {
-                    select_at(state, idx);
-                    return EventOutcome::Submitted;
-                }
+        // Ctrl/Alt hotkeys select and submit. Modifier matching uses
+        // `.contains(...)` so a benign extra bit (e.g. SHIFT on an
+        // uppercase chord) does not suppress an otherwise valid hotkey.
+        // WHY CONTROL|ALT falls through: on some layouts AltGr-style
+        // chords report CONTROL|ALT and must not be hijacked as a
+        // hotkey, so when both are present neither map matches.
+        let modifiers = event.modifiers;
+        if modifiers.contains(KeyModifiers::CONTROL) && !modifiers.contains(KeyModifiers::ALT) {
+            if let KeyCode::Char(c) = event.code
+                && let Some(&idx) = state.ctrl_hotkeys.get(&c.to_ascii_lowercase())
+            {
+                select_at(state, idx);
+                return EventOutcome::Submitted;
             }
-            KeyModifiers::ALT => {
-                if let KeyCode::Char(c) = event.code
-                    && let Some(&idx) = state.alt_hotkeys.get(&c.to_ascii_lowercase())
-                {
-                    select_at(state, idx);
-                    return EventOutcome::Submitted;
-                }
-            }
-            _ => {}
+        } else if modifiers.contains(KeyModifiers::ALT)
+            && !modifiers.contains(KeyModifiers::CONTROL)
+            && let KeyCode::Char(c) = event.code
+            && let Some(&idx) = state.alt_hotkeys.get(&c.to_ascii_lowercase())
+        {
+            select_at(state, idx);
+            return EventOutcome::Submitted;
         }
 
         // Home/End/vim-style jumps, hotkey or filter-open, only when

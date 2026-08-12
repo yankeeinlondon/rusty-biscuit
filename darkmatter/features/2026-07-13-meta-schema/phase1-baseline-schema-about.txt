@@ -1,0 +1,242 @@
+Phase 1 pre-change baseline
+Captured: 2026-07-18
+Command: ./target/debug/md schema about
+ANSI styling removed; all text and spacing below are otherwise preserved.
+
+ SimplifiedSchema Language Reference
+
+ A SimplifiedSchema describes the frontmatter a Markdown file expects. Put it
+ under $schema to name required fields, allowed types, defaults, and simple
+ constraints. Darkmatter uses that schema when you run md schema validate and
+ during compose, so invalid frontmatter fails early and common string values
+ can be coerced before the page is rendered.
+
+ Use this as a quick authoring reference: what shapes are allowed, which type
+ keywords exist, which constraints can be attached, and what Darkmatter does
+ with values during compose.
+
+ Schema Shapes
+
+ A $schema value can use any of these forms. Choose the simplest shape that
+ describes the frontmatter you expect.
+
+ - Single object. Use this for the common case: property names mapped to type
+   expressions.
+   - Example: title: string(required)
+ - Root-level union. Use this when a document may follow one of several
+   schema alternatives.
+   - Example: - title: string\n- ./schemas/post.yaml
+ - Property-level union. Use this when one property may have one of several
+   allowed types.
+   - Example: data: [string, "{ foo: string }"]
+ - Inline object literal. Use this to validate a nested object without
+   creating a separate schema file.
+   - Example: { foo: string(required), bar: number }
+ - Nested mapping object. Use a YAML mapping as a property value to declare a
+   nested object shape. Equivalent to the inline object literal for the
+   cases both forms can express; the mapping form additionally permits
+   sequence union arms without quoting.
+   - Example: addr:\n  street: string\n  zip: number
+
+ Type System
+
+ ┌────────────┬───────────────────────────────────┬──────────────────────────┐
+ │ Type       │ Meaning                           │ Constraints              │
+ ├────────────┼───────────────────────────────────┼──────────────────────────┤
+ │ string     │ Text.                             │ min, max, not-empty,     │
+ │            │                                   │ pattern, suggest,        │
+ │            │                                   │ default, required        │
+ │ date       │ ISO-8601 date (YYYY-MM-DD).       │ default, required        │
+ │ datetime   │ ISO-8601 datetime; the timezone   │ default, required        │
+ │            │ offset is optional.               │                          │
+ │ time       │ Time of day with optional         │ default, required        │
+ │            │ timezone.                         │                          │
+ │ number     │ A numeric value.                  │ min, max, integer,       │
+ │            │                                   │ suggest, default,        │
+ │            │                                   │ required                 │
+ │ numberlike │ A number, or a string that can    │ default, required        │
+ │            │ be coerced to a number during     │                          │
+ │            │ compose.                          │                          │
+ │ boolean    │ A true or false value.            │ default, required        │
+ │ boolish    │ A boolean, or a true / false      │ default, required        │
+ │            │ string that can be coerced        │                          │
+ │            │ during compose.                   │                          │
+ │ object     │ Any object shape. Use an inline   │ default, required        │
+ │            │ object literal when you want to   │                          │
+ │            │ validate nested fields.           │                          │
+ │ file       │ A path-like file reference. Lazy  │ eager, match, default,   │
+ │            │ by default (syntax-only); add     │ required                 │
+ │            │ eager to require the file to      │                          │
+ │            │ exist. Use match(...) to suggest  │                          │
+ │            │ accepted paths.                   │                          │
+ │ enum       │ Value must be one of the          │ <members>, default,      │
+ │            │ constraint-supplied members.      │ required                 │
+ │ url        │ Absolute URL.                     │ scheme, default,         │
+ │            │                                   │ required                 │
+ │ email      │ RFC 5322 addr-spec.               │ default, required        │
+ │ literal    │ The value must equal exactly one  │ <value>, default,        │
+ │            │ scalar of any scalar type. Bare   │ required                 │
+ │            │ true/false types as boolean, a    │                          │
+ │            │ bare numberlike token as number,  │                          │
+ │            │ and quoted or any other bare      │                          │
+ │            │ token as string. Replaces the     │                          │
+ │            │ single-member enum and makes      │                          │
+ │            │ discriminated unions first-       │                          │
+ │            │ class. Coerces a document value   │                          │
+ │            │ to the literal's scalar type      │                          │
+ │            │ ("2" against literal(2) → 2);     │                          │
+ │            │ string literals never coerce.     │                          │
+ │ expression │ A string that must parse under    │ default, required,       │
+ │            │ the Darkmatter expression         │ generated                │
+ │            │ grammar. Parse-only and never     │                          │
+ │            │ evaluated — the third content-    │                          │
+ │            │ format string type alongside      │                          │
+ │            │ yaml and json. Native             │                          │
+ │            │ boolean/number values coerce to   │                          │
+ │            │ their string forms (true →        │                          │
+ │            │ "true"); mappings and sequences   │                          │
+ │            │ are type mismatches.              │                          │
+ │ any        │ Anything. Useful when you only    │ required                 │
+ │            │ care that a property exists.      │                          │
+ └────────────┴───────────────────────────────────┴──────────────────────────┘
+
+ Any of the above types can be made into an array by adding [] to the end of
+ the type:
+
+                                                                         yaml 
+                                                                              
+  $schema:                                                                    
+      # a string type                                                         
+      foo: string                                                             
+      # can be made into a string array                                       
+      bar: string[]                                                           
+                                                                              
+
+ All types listed here, including those with the [] array modifier, can add
+ constraints to the type by putting parentheses after the type. Multiple
+ constraints are always delimited by the ; character. As an example:
+
+                                                                         yaml 
+                                                                              
+  $schema:                                                                    
+    foo: string(required)                                                     
+    bar: "number(required; min(0); max(10))"                                  
+    baz: "string[](min(1))"                                                   
+                                                                              
+
+ In this example, constraints are added to a string, a number, and an array
+ of strings. The next section lists the available constraints.
+
+ ▐   Note: the values in schemas must be valid YAML strings. In some cases
+ ▐   you won't need to put single or double quotes around them, but you can
+ ▐   always quote the string and then you don't need to think about it.
+
+ Constraint Vocabulary
+
+ Constraints go inside (...) after a type, separated by commas or semicolons.
+ They narrow what a value may contain or provide metadata such as defaults.
+
+ ┌──────────────────────────┬──────────────────┬─────────────────────────────┐
+ │ Write                    │ Applies To       │ Meaning                     │
+ ├──────────────────────────┼──────────────────┼─────────────────────────────┤
+ │ required                 │ all types        │ The property must be        │
+ │                          │                  │ present.                    │
+ │ default(value)           │ all types        │ Provides the value to use   │
+ │                          │                  │ when the property is        │
+ │                          │                  │ absent.                     │
+ │ generated                │ all types        │ The value is supplied by    │
+ │                          │                  │ the host runtime (e.g.      │
+ │                          │                  │ Darkmatter context          │
+ │                          │                  │ capture), not authored in   │
+ │                          │                  │ static frontmatter.         │
+ │                          │                  │ Orthogonal to required,     │
+ │                          │                  │ which controls              │
+ │                          │                  │ type/nullability.           │
+ │ min(number)              │ string, number,  │ Sets a lower bound.         │
+ │                          │ array            │ - string: minimum length    │
+ │                          │                  │ - number: minimum value     │
+ │                          │                  │ - array: minimum item count │
+ │ max(number)              │ string, number,  │ Sets an upper bound.        │
+ │                          │ array            │ - string: maximum length    │
+ │                          │                  │ - number: maximum value     │
+ │                          │                  │ - array: maximum item count │
+ │ integer                  │ number           │ Restrict to integer values. │
+ │ not-empty                │ string           │ Disallow empty /            │
+ │                          │                  │ whitespace-only strings.    │
+ │ pattern(regex)           │ string           │ ECMA-262 regex the value    │
+ │                          │                  │ must match.                 │
+ │ enum(member, ...)        │ enum             │ Lists the allowed values.   │
+ │                          │                  │ At least one member is      │
+ │                          │                  │ required.                   │
+ │ literal(value)           │ literal          │ The single scalar value     │
+ │                          │                  │ the property must equal.    │
+ │                          │                  │ Typed like YAML: bare       │
+ │                          │                  │ true/false → boolean, bare  │
+ │                          │                  │ numberlike → number,        │
+ │                          │                  │ quoted or any other bare    │
+ │                          │                  │ token → string. Exactly     │
+ │                          │                  │ one value; use enum(...)    │
+ │                          │                  │ for a set.                  │
+ │ eager                    │ file             │ Require the referenced      │
+ │                          │                  │ file to exist at            │
+ │                          │                  │ validation time. Without    │
+ │                          │                  │ it, file is lazy (syntax-   │
+ │                          │                  │ only).                      │
+ │ match(glob, ...)         │ file             │ Glob patterns that shape    │
+ │                          │                  │ file path suggestions       │
+ │                          │                  │ (completion). Patterns      │
+ │                          │                  │ starting with ! exclude.    │
+ │                          │                  │ Suggestion metadata only —  │
+ │                          │                  │ not validated.              │
+ │ scheme(http, https, ...) │ url              │ Allowed URL schemes         │
+ │                          │                  │ (lowercased).               │
+ │ suggest(value, ...)      │ string, number   │ Advisory completion         │
+ │                          │                  │ candidates for DMLS. Non-   │
+ │                          │                  │ validating: a document      │
+ │                          │                  │ value is valid when it      │
+ │                          │                  │ satisfies the underlying    │
+ │                          │                  │ type and constraints,       │
+ │                          │                  │ whether or not it appears   │
+ │                          │                  │ in the list. At most one    │
+ │                          │                  │ suggest(...) per complete   │
+ │                          │                  │ property definition         │
+ │                          │                  │ (including across property- │
+ │                          │                  │ union atoms). Array forms   │
+ │                          │                  │ (string[], number[])        │
+ │                          │                  │ describe individual         │
+ │                          │                  │ elements, not whole arrays. │
+ │ unique                   │ array            │ Array items must be         │
+ │                          │                  │ distinct.                   │
+ └──────────────────────────┴──────────────────┴─────────────────────────────┘
+
+ Trigger Schemas
+
+ Trigger schemas activate an object-schema payload for matching documents.
+ Their match language is pure and side-effect-free.
+ - Envelope. kind: trigger-schema — Claims a discovered YAML file as a
+   trigger envelope; $schema is its merge-compatible object-schema payload.
+ - Property condition. property: type-expr — A bare expression is an optional
+   guard; required makes it a presence gate. Present values must satisfy
+   the type and match-safe constraints.
+ - $path. $path: glob | \[glob, ...\] — Matches the case-sensitive, boundary-
+   relative path with / separators. Basename globs match in any directory
+   and ! patterns exclude.
+ - all. all: \[condition, ...\] — Matches when every child condition matches.
+ - any. any: \[condition, ...\] — Matches when at least one child condition
+   matches.
+ - none. none: \[condition, ...\] — Matches when no child condition matches.
+ - min-match. min-match: { count: N, of: \[condition, ...\] } — Matches when
+   at least N of the child conditions match.
+ - Outer OR arms. match: \[arm, ...\] — A mapping is one arm; a sequence of
+   arm mappings is OR'd. Mixing property and structural keys in one mapping
+   is invalid.
+ - Vacuous-arm lint. each arm requires a positive gate — Every satisfiable
+   arm must require presence through required or $path, outside none; an
+   arm that could match every document is rejected.
+ Match-safe constraints only: required, <members>, pattern, min, max,
+ integer, not-empty, unique, min-keys, max-keys. Constraints such as default,
+ generated, suggest, eager, match, and scheme are rejected because trigger
+ evaluation cannot transform values or consult external state.
+
+ ℹ use --verbose to see additional details
+

@@ -11,6 +11,7 @@ serde_json = "1.0"
 unicode-width = "0.2"
 
 [dev-dependencies]
+serial_test = "3"
 tempfile = "3"
 
 # Opt-out of benchmarking: this crate has no algorithmic hot paths.
@@ -24,3 +25,12 @@ reason = "Test/dev infrastructure crate; no measurable hot paths."
 [[bin]]
 name = "biscuit-harness-broker"
 path = "src/bin/broker.rs"
+
+# CI exclusion: 92 L1 tests that currently run in no CI job. Promotion is
+# blocked on the canonical just recipe set (check-canonical).
+[package.metadata.ci]
+gates = false
+exclusion-class = "promotion-pending"
+owner = "@yankeeinlondon"
+reason = "92 L1 tests that currently run in NO CI job. Promotion is blocked on the canonical just recipe set (check-canonical) for biscuit-test-harness/; transitive exercise by consumer packages is not the same as running these tests."
+expiry = "2026-10-31"

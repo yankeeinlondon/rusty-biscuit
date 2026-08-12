@@ -14,9 +14,9 @@ use unchained_ai::models::model_pricing::ModelPricing;
 /// The input `value` is the full JSON object for a single model from
 /// OpenRouter's `/v1/models` response `data` array.
 ///
-/// Fields that OpenRouter doesn't provide (`family`, `capabilities`) are
-/// left as defaults (`None` / empty vec) so they can be filled by Parsera
-/// data during the merge phase.
+/// Fields that OpenRouter doesn't provide (`family`, `capabilities`,
+/// `release_date`) are left as defaults so an external catalog can fill them
+/// during the merge phase.
 pub fn parse_openrouter_model(value: &serde_json::Value) -> ProviderModelMetadata {
     let display_name = str_field(value, "name");
     let description = str_field(value, "description");
@@ -58,6 +58,7 @@ pub fn parse_openrouter_model(value: &serde_json::Value) -> ProviderModelMetadat
         default_parameters,
         knowledge_cutoff,
         created,
+        release_date: None,
     }
 }
 

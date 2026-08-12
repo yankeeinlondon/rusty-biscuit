@@ -17,6 +17,7 @@ cargo install --path biscuit-terminal/cli
 | Command | Description |
 |---------|-------------|
 | `bt` | Terminal inspection (default) |
+| `bt about [APP]` | Report on a specific terminal app |
 | `bt image` | Render inline images |
 | `bt prose` | Render styled prose text |
 | `bt quote` | Block quote with left border |
@@ -64,6 +65,29 @@ Output sections:
 - **Connection**: Local, SSH, Mosh
 - **Locale**: Raw, BCP47 tag, encoding
 - **Config**: Path to terminal config file
+
+## About a Specific Terminal App
+
+```bash
+bt about                # Report on the currently detected terminal
+bt about kitty          # Report on Kitty
+bt about iterm          # Prefix/contains match to iTerm2
+bt about VSCode         # Alias match to VS Code
+bt about kitty --json   # JSON output
+bt about kitty --plain  # Plain text, no ANSI escapes
+```
+
+Output sections:
+- **Identity**: App name, internal variant, whether it is the current terminal
+- **Install Status**: Discovered executable/bundle path via `sniff`, or not installed/unknown
+- **OS Target**: Config-resolution target (Linux, MacOS, Windows, Wsl1, Wsl2)
+- **Resolved Config**: In-use config-file path and provenance
+- **Config Candidates**: Default candidate paths for the current OS target
+- **Config Overrides**: Config-relocating environment variables and their current values
+- **Settings**: Extracted raw config values where statically parseable
+- **Environment Facts**: Live env values (only when the queried app is the current terminal)
+
+Invalid app names exit with code 2 and list the supported apps.
 
 ## Image Rendering
 

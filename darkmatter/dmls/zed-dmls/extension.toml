@@ -1,0 +1,11 @@
+id = "dmls"
+name = "DMLS"
+description = "Darkmatter Language Server for Markdown"
+version = "0.0.1"
+schema_version = 1
+authors = ["Ken Snyder"]
+repository = "https://github.com/ken/zed-dmls"
+
+[language_servers.dmls]
+name = "Darkmatter Language Server"
+languages = ["Markdown"]

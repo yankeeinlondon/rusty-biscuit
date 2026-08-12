@@ -32,6 +32,11 @@ pub fn render_page_blocks<L: EvaluationLookup>(
 
         let condition = match &region.options.when_expr {
             Some(expr) => {
+                for warning in
+                    conditions::collect_condition_context_warnings(expr, state, "condition")
+                {
+                    report.add_warning(warning.at_line(region.start_line));
+                }
                 conditions::evaluate_condition(expr, state, region.start_line, ctx.clone())?
             }
             None => true, // No when → treated as enabled
@@ -85,6 +90,11 @@ fn render_body<L: EvaluationLookup>(
 
         let condition = match &child.options.when_expr {
             Some(expr) => {
+                for warning in
+                    conditions::collect_condition_context_warnings(expr, state, "condition")
+                {
+                    report.add_warning(warning.at_line(child.start_line));
+                }
                 conditions::evaluate_condition(expr, state, child.start_line, ctx.clone())?
             }
             None => true,

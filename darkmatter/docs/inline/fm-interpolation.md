@@ -129,8 +129,9 @@ property literally named `doc` is reached as `doc.doc`. See
 The [read-side functions](../topics/darkmatter-expressions.md#read-side-functions)
 (`file_exists`, `frontmatter`, `markdown_title`, `markdown_body_empty`,
 `validate_schema`, `absolute`, `relative`) resolve in frontmatter interpolation
-just as they do in body interpolation — both passes carry a document-relative
-resolution context. The motivating pattern relies on this:
+just as they do in body interpolation — both passes carry a resolution context
+anchored on the source document's directory and its repository root (implicit
+paths resolve repository-root first, then the document directory). The motivating pattern relies on this:
 
 ```yaml
 possible_spec: "{{dir}}/spec.md"
@@ -168,7 +169,10 @@ The `ctx.*` namespace provides 70+ runtime variables organized into demand-drive
 | Hardware | `memory_total`, `memory_used`, `memory_avail`, `cpu_cores`, `cpu_arch` |
 | Gpu | `gpu` |
 
-Each group also provides `_list` variants (markdown bullet list) alongside CSV variants where applicable (e.g., `dirty_files` vs `dirty_files_list`). DateTime variables have `_utc` counterparts.
+List-valued variables (e.g. `packages`, `dirty_files`) are captured as real
+arrays; render them with the list-formatting functions (`as_csv`,
+`as_unordered_list`, `as_ordered_list`, …) or rely on the default line-separated
+rendering of a bare `{{ ctx.foo }}`. DateTime variables have `_utc` counterparts.
 
 ## Supported Value Shapes
 
@@ -248,6 +252,28 @@ That means:
 
 When `fail_fast` is enabled, parse or evaluation failures stop the compose run.
 When `fail_fast` is disabled, the original string is preserved and a warning is recorded.
+
+### Whole-Value Exception (Strict)
+
+There is one exception to the lenient `fail_fast`-off behavior above. When a
+frontmatter value's trimmed content is **exactly one** `{{ ... }}` span (only
+whitespace before and after it), the value is treated as executable state, not
+text, and is held to a strict parse-and-evaluate contract:
+
+- The expression is parsed and evaluated directly, and the typed
+  `serde_json::Value` result is preserved (so `{{ false }}` stays the boolean
+  `false`, a numeric expression stays a number, and an array/object result keeps
+  its type).
+- A parse failure or an evaluation failure is **fatal regardless of
+  `fail_fast`**, so malformed expansion syntax (e.g. a mismatched paren) can
+  never leak downstream as a raw `{{ … }}` string.
+- Undefined variables stay lenient: a whole-value `{{ missing }}` resolves to
+  `null`, not an error.
+
+This is scoped to whole-value spans only. Mixed text (`"a {{ x }}"`), strings
+holding more than one expression, and body interpolation fall through to the
+lenient string path described above — they are **not** newly fatal when
+`fail_fast` is off.
 
 ## Important Limitation
 

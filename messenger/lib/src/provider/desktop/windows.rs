@@ -270,12 +270,11 @@ fn detect_windows_helpers(app_id: &str) -> Vec<Arc<dyn HelperBackend>> {
         helpers.push(Arc::new(SnoreToastHelper::new(path, app_id.to_string())));
     }
 
-    if info.is_installed(sniff::programs::NotificationHelper::BurntToast) {
-        if let Some(pwsh) = sniff::programs::find_program::find_program("pwsh")
+    if info.is_installed(sniff::programs::NotificationHelper::BurntToast)
+        && let Some(pwsh) = sniff::programs::find_program::find_program("pwsh")
             .or_else(|| sniff::programs::find_program::find_program("powershell"))
-        {
-            helpers.push(Arc::new(BurntToastHelper::new(pwsh, app_id.to_string())));
-        }
+    {
+        helpers.push(Arc::new(BurntToastHelper::new(pwsh, app_id.to_string())));
     }
 
     helpers

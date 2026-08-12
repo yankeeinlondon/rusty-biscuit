@@ -16,7 +16,7 @@ use claudine::events::{
 };
 use claudine::linking::preference_prompt_count;
 use claudine::provider::Provider;
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Result, WrapErr};
 use inquire::{Confirm, MultiSelect, Select, Text};
 
 /// Prompt user for ranked provider preferences, reusing prior answers as defaults.
@@ -219,7 +219,7 @@ fn prompt_log_target(default: Option<&LogTarget>) -> Result<LogTarget> {
                 Some(LogTarget::File {
                     path: Some(path),
                     rotate_daily: false,
-                }) => path.display().to_string(),
+                }) => biscuit_file::to_portable_string(path),
                 _ => "~/.claudine/events.jsonl".to_string(),
             };
             let path = Text::new("Enter file path:")
@@ -237,8 +237,7 @@ fn prompt_log_target(default: Option<&LogTarget>) -> Result<LogTarget> {
                 prompt = prompt.with_default(url);
             }
             let url_str = prompt.prompt()?;
-            let url = url::Url::parse(&url_str)
-                .map_err(|e| color_eyre::eyre::eyre!("Invalid URL: {}", e))?;
+            let url = url::Url::parse(&url_str).wrap_err("Invalid URL")?;
             LogTarget::Server {
                 url: url.to_string(),
                 timeout_ms: 10_000,

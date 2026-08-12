@@ -68,7 +68,7 @@ pub use cli_claims::{
 };
 pub use color::{lower_to_css, lower_to_sgr, wrap_with_color, StyleColor};
 pub use error::StyleParseError;
-pub use parse::{from_frontmatter, from_json_value, into_strict};
+pub use parse::{build_yaml_position_map, from_frontmatter, from_json_value, into_strict};
 pub use schema::StyleFrontmatter;
 pub use warning::{StyleSpan, StyleWarning, StyleWarningKind};
 

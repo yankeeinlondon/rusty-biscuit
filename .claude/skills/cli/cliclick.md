@@ -87,16 +87,18 @@ A practical Rust setup usually looks like this:
 
 This should not replace normal Rust tests. Keep parser/state/reducer/widget tests deterministic, then add a small number of host-terminal tests for behavior that only the real terminal can prove.
 
-## Reference implementation: rusty-biscuit `cli/tests/common/real_terminal/`
+## Reference implementation: rusty-biscuit `biscuit-test-harness`
 
-The `biscuit-tui` package contains a battle-tested macOS Level-3 harness that solves most of the problems below. Treat it as the reference implementation — copy the patterns rather than reinventing them.
+The shared `biscuit-test-harness` crate contains a battle-tested macOS Level-3 harness that solves most of the problems below. Treat it as the reference implementation — copy the patterns rather than reinventing them. Live Level-3 consumers (e.g. `claudine/cli/tests/level3_*.rs`) attach to it.
 
 Key patterns it implements:
 
-- `TerminalHarness` trait + `WezTermHarness` that spawns into a unique window, AXRaises by title, returns click coords.
+- `TerminalHarness` trait + `WezTermHarness` that spawns into a unique window (`SpawnVisibility::Foreground` for L3), AXRaises by title, returns click coords.
 - `cliclick.rs` helpers: `click_then_press`, `click_then_ctrl_chord`, `system_events_key_down/up`, `run_verbose` for diagnostic output.
-- A justfile `test-level-3` recipe that detects a WezTerm parent (`$TERM_PROGRAM == "WezTerm"`) and relaunches inside iTerm2 / Terminal.app via osascript so parent-vs-child app activation doesn't fight for OS focus.
-- `level3_wezterm_arrow_down_moves_active_marker` — a "plain key delivers" diagnostic test that localises focus issues vs chord/modifier-specific issues. Always include one of these in any Level-3 suite.
+- The shared `_test_l3` recipe (`just/devops.just`) sets `RUN_LEVEL3=1` so the `require_level!(Level::L3, …)` gate trips; a WezTerm parent should relaunch inside iTerm2 / Terminal.app so parent-vs-child app activation doesn't fight for OS focus.
+- A "plain key delivers" diagnostic test (single arrow-down, assert the active marker moves) that localises focus issues vs chord/modifier-specific issues. Always include one of these in any Level-3 suite.
+
+Note: prefer Level-3 cliclick **only** to verify a terminal's physical-key encoder. If you only need to prove your binary decodes a known byte sequence, inject those bytes headlessly at Level 2 (e.g. tmux `send-keys`) instead — it is reliable and never steals focus. `biscuit-tui` deliberately retired its L3 cliclick tests in favour of that approach.
 
 ## Gotchas
 

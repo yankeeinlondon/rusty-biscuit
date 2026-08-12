@@ -29,17 +29,18 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 
-use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::terminal::Terminal;
 use claudine::events::{AgenticEvent, EnvironmentContext, EventMeta as DispatchEventMeta};
-use claudine::provider::{Provider, provider_info};
+use claudine::provider::{EventClass, Provider};
+use claudine::render::{EventRenderer, ThinkingStream};
+use claudine::runaway::ContentDetector;
+use claudine::stream::logs::EarlyTermination;
 use claudine::stream::progress::{self, LiveMetrics};
-use claudine::stream::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
+use claudine::stream::semantic::SemanticEvent;
 use claudine::stream::stderr::Verbosity;
-use claudine::stream::thinking::render_thinking_block;
-use claudine::stream::tool_display::{ToolCallDisplay, ToolStatus};
 use serde_json::Value;
 
 // Re-exports from the parent wrap module so submodules can reach them easily.
@@ -49,20 +50,43 @@ pub(crate) use super::stream_io::StreamOutput;
 pub(crate) use super::subagent_watchdog::WatchdogState;
 
 // Submodules
-mod errors;
+mod event_sink;
 mod heartbeat;
 mod sections;
 mod spacing;
 mod thinking;
-mod tool_calls;
 
-// Re-exports from submodules to preserve the API surface for tests and callers.
+// Re-exports of the moved render helpers, kept at this path so the existing
+// per-helper unit tests (which reach them via `super::`) compile unchanged.
+// The implementations now live in the shared `claudine::render::EventRenderer`.
 #[allow(unused_imports)]
-pub(crate) use errors::error_kind_presentation;
-#[allow(unused_imports)]
-pub(crate) use tool_calls::{
-    pending_matches_tool_call, strip_progress_verb, tool_result_body, tool_result_output_text,
+pub(crate) use claudine::render::{
+    error_kind_presentation, pending_matches_tool_call, strip_progress_verb,
 };
+// Re-exported for the test suites' `use super::*`; the production render path
+// now handles error kinds inside `EventRenderer`.
+#[allow(unused_imports)]
+pub(crate) use claudine::stream::semantic::SemanticErrorKind;
+
+/// Section that a rendered [`claudine::render::RenderUnit`] is emitted into,
+/// keyed by its [`EventClass`]. Every status class routes to
+/// [`Section::ToolUseAndEvents`]; `Thinking` and `FinalMessage` are reserved
+/// for the streaming paths that stay sink-side (part 2) and are not produced
+/// by [`EventRenderer::render`] this round.
+pub(crate) fn section_for(class: EventClass) -> Section {
+    match class {
+        EventClass::Thinking => Section::Thinking,
+        EventClass::FinalMessage => Section::FinalStdout,
+        EventClass::ToolUse
+        | EventClass::McpCall
+        | EventClass::HookEvent
+        | EventClass::StepProgress
+        | EventClass::FileChange
+        | EventClass::PlanUpdate
+        | EventClass::SubagentActivity
+        | EventClass::Error => Section::ToolUseAndEvents,
+    }
+}
 
 /// Borrow-friendly terminal used for status rendering. Mirrors the helper in
 /// `wrap/mod.rs` so both sinks render against the same capabilities.
@@ -79,9 +103,9 @@ pub(crate) type SemanticDispatchFn =
 pub(crate) type StderrEmitFn = Box<dyn Fn(&str) + Send + Sync + 'static>;
 
 /// Function type for forwarding assistant text to an external
-/// [`super::exec::StreamTextRenderer`]-style renderer on stdout. This keeps
-/// the sink decoupled from the rendering machinery that lives inside
-/// `exec.rs` while still letting `OutputText` events flow through the
+/// `AssistantStream`-style renderer on stdout (the lib streaming component
+/// the exec layer drives). This keeps the sink decoupled from the rendering
+/// machinery while still letting `OutputText` events flow through the
 /// standard semantic pipeline.
 pub(crate) type OutputTextFn = Box<dyn FnMut(&str) + Send + 'static>;
 
@@ -99,19 +123,15 @@ pub(crate) type OutputTextFn = Box<dyn FnMut(&str) + Send + 'static>;
 pub(crate) type SemanticEventLoggerFn =
     Box<dyn Fn(&SemanticEvent, &DispatchEventMeta) + Send + Sync + 'static>;
 
-const TOOL_RESULT_BODY_MAX_LINES: usize = 10;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ToolResultBody {
-    pub(crate) text: String,
-    pub(crate) truncated: bool,
-}
-
 pub(crate) struct LiveSemanticSink {
     provider: Provider,
     env: EnvironmentContext,
     cwd: PathBuf,
-    home: Option<PathBuf>,
+    /// STDERR status renderer. Owns the render policy, the file-link cwd/home
+    /// context, the `SessionStart` auth source, and the `task_progress` dedup
+    /// buffer. The sink drives it per event and routes each returned
+    /// [`claudine::render::RenderUnit`] through [`Self::emit_section_line`].
+    renderer: EventRenderer,
     /// Immediate child PID captured after a successful provider spawn.
     ///
     /// `None` until the wrapper spawns the provider; the parser-builder
@@ -120,10 +140,8 @@ pub(crate) struct LiveSemanticSink {
     /// `env` and needs no separate slot here.
     agent_pid: Option<u32>,
     verbosity: Verbosity,
-    pending_task_progress: Option<String>,
     session_id: Option<String>,
     model: Option<String>,
-    claude_api_key_source: Option<String>,
     start_emitted: bool,
     summary_details: Arc<Mutex<StructuredSummaryDetails>>,
     context_extra: HashMap<String, Value>,
@@ -138,6 +156,29 @@ pub(crate) struct LiveSemanticSink {
     /// of the per-event render path avoids unnecessary work for long
     /// structured sessions.
     terminal: Terminal,
+    /// Buffers `Reasoning` deltas and flushes coalesced thinking blocks. A
+    /// [`claudine::render::StreamRenderable`]: token-level Claude fragments and
+    /// a single accumulated Kimi thought both render as one clean `▌ ` block by
+    /// construction. Drained at the top of `on_semantic_event` before any
+    /// non-`Reasoning` event and again in `Drop`. Owns its own `Terminal`
+    /// clone; the (test-only) `terminal` mutation does not re-target it.
+    ///
+    /// No idle-flush ticker (deliberate — unlike the exec-layer
+    /// [`AssistantStream`], which has [`super::super::exec::spawn_flush_if_idle_ticker`]).
+    /// The next-event boundary drain covers every real thinking→output/tool
+    /// transition and `Drop` covers stream end / timeout termination, so
+    /// buffered thinking is never lost. What a ticker would add is *mid-stall*
+    /// surfacing of the held buffer, and that buffer is bounded to ~one
+    /// in-progress sentence (this stream flushes per line and early-flushes past
+    /// 200 bytes on a sentence terminator) — versus the whole paragraph
+    /// `AssistantStream` can hold, which is what justifies *its* ticker. Wiring
+    /// one here would mean moving this field behind `Arc<Mutex<_>>`, threading
+    /// the handle out of sink construction (`policy.rs`) down to the ticker, and
+    /// adding a second concurrent stderr writer racing `emit_section_line`
+    /// against the no-double-blank-line contract — disproportionate for a
+    /// sub-sentence cosmetic. Revisit only if long silent mid-thought stalls
+    /// holding large partials become a real complaint.
+    thinking_stream: ThinkingStream,
     /// Section-spacing state machine shared with [`super::section::SectionStream`]
     /// and any post-stream trailer emitter obtained via [`Self::section_stream`].
     /// Encapsulates the dedup and section-transition logic so every writer
@@ -171,6 +212,38 @@ pub(crate) struct LiveSemanticSink {
     /// request termination. The same `Arc<Mutex<_>>` is shared with
     /// `exec.rs` via [`Self::watchdog_state`].
     watchdog_state: Arc<Mutex<WatchdogState>>,
+    /// Runaway-output content detector (Phase 6). `None` when guards are
+    /// fully opted out, in which case `on_semantic_event` does no
+    /// detection work. Fed from `OutputText`/`Reasoning` text only (never
+    /// tool payloads — A2) and reset per turn on `TurnComplete`.
+    content_detector: Option<ContentDetector>,
+    /// Validated guard config kept so the in-scope exit-expression set can
+    /// be re-filtered when a provider reports its actual model via
+    /// `SessionStart`. `None` when no re-scope source was wired (e.g. unit
+    /// tests that arm a detector directly). See
+    /// [`Self::set_guard_rescope_source`].
+    guard_inputs: Option<Arc<super::runaway_guard::ResolvedGuardInputs>>,
+    /// Model the currently-compiled exit-expression set was filtered for
+    /// (the launch-time hint, possibly empty). A `SessionStart` model that
+    /// differs from this triggers a re-scope; an identical one is a no-op.
+    detector_scope_model: Option<String>,
+    /// Trip sender wired to the unified early-termination channel the
+    /// exec wait loop polls. Set by `build_structured_plumbing` so the
+    /// detector and (for OpenCode) the stderr bridge share one channel.
+    trip_sender: Option<Sender<EarlyTermination>>,
+    /// Set once a content trip has fired. Guards against a double-send (a
+    /// trip is terminal) and suppresses further output rendering so the
+    /// tail of a runaway is not echoed to the terminal (spec Part 1).
+    content_tripped: bool,
+    /// Best-effort mid-session status reporter to the rendezvous
+    /// dashboard's `sessions-active` register (trigger 1). Inert unless
+    /// a session was bracketed against a live daemon.
+    status_reporter: super::session_report::StatusReporter,
+    /// Whether the last observed transition left the session waiting on
+    /// the user (a `PermissionRequest` not yet followed by progress).
+    /// Debounces the `waiting_on_user` → `active` status reports so only
+    /// real edges hit the daemon.
+    awaiting_user: bool,
 }
 
 impl LiveSemanticSink {
@@ -183,17 +256,16 @@ impl LiveSemanticSink {
         dispatch: SemanticDispatchFn,
         emit_stderr: StderrEmitFn,
     ) -> Self {
+        let terminal = wrap_terminal();
         Self {
             provider,
             env,
             cwd: cwd.to_path_buf(),
-            home: dirs::home_dir(),
+            renderer: EventRenderer::new(provider, cwd.to_path_buf(), dirs::home_dir()),
             agent_pid: None,
             verbosity,
-            pending_task_progress: None,
             session_id: None,
             model: None,
-            claude_api_key_source: None,
             start_emitted: false,
             summary_details,
             context_extra: HashMap::new(),
@@ -202,13 +274,30 @@ impl LiveSemanticSink {
             emit_output_text: None,
             emit_event_log: None,
             live_metrics: progress::new_live_metrics(),
-            stream_output: StreamOutput::new(),
-            terminal: wrap_terminal(),
+            stream_output: StreamOutput::shared(),
+            thinking_stream: ThinkingStream::new(terminal.clone()),
+            terminal,
             section_tracker: Arc::new(Mutex::new(SectionTracker::new())),
             at_blank_row: false,
             stdout_trailing_newlines: 0,
             watchdog_state: Arc::new(Mutex::new(WatchdogState::default())),
+            content_detector: None,
+            guard_inputs: None,
+            detector_scope_model: None,
+            trip_sender: None,
+            content_tripped: false,
+            status_reporter: super::session_report::StatusReporter::inert(),
+            awaiting_user: false,
         }
+    }
+
+    /// Wire the dashboard status reporter (trigger 1). Defaults to inert.
+    pub(crate) fn with_status_reporter(
+        mut self,
+        reporter: super::session_report::StatusReporter,
+    ) -> Self {
+        self.status_reporter = reporter;
+        self
     }
 
     /// Convenience constructor for the wrapped-provider call sites
@@ -216,12 +305,18 @@ impl LiveSemanticSink {
     /// dispatch closure, an emit_stderr closure backed by
     /// [`StreamOutput::emit_stderr_line`], and a best-effort JSONL logger
     /// pointing at [`claudine::stream::reporting::write_summary_event`].
+    ///
+    /// `task_gutter` is a sequence task's rendered bar. When present every
+    /// status and reasoning line this sink emits carries it, because the sink's
+    /// coordinator — and therefore the section stream, the watchdog tickers, and
+    /// the timing monitor that are handed it — is the decorated handle.
     pub(crate) fn with_default_wiring(
         provider: Provider,
         env: EnvironmentContext,
         cwd: &Path,
         verbosity: Verbosity,
         summary_details: Arc<Mutex<StructuredSummaryDetails>>,
+        task_gutter: Option<String>,
     ) -> Self {
         let handle = tokio::runtime::Handle::try_current().ok();
         let runtime_context = match claudine::dispatch::DispatchRuntimeContext::load_for_env(&env) {
@@ -231,7 +326,10 @@ impl LiveSemanticSink {
                 claudine::dispatch::DispatchRuntimeContext::default()
             }
         };
-        let stream_output = StreamOutput::new();
+        let stream_output = match task_gutter {
+            Some(gutter) => StreamOutput::shared().decorated(gutter),
+            None => StreamOutput::shared(),
+        };
 
         let dispatch: SemanticDispatchFn = {
             let runtime_context = runtime_context;
@@ -264,17 +362,16 @@ impl LiveSemanticSink {
                 }
             });
 
+        let terminal = wrap_terminal();
         Self {
             provider,
             env,
             cwd: cwd.to_path_buf(),
-            home: dirs::home_dir(),
+            renderer: EventRenderer::new(provider, cwd.to_path_buf(), dirs::home_dir()),
             agent_pid: None,
             verbosity,
-            pending_task_progress: None,
             session_id: None,
             model: None,
-            claude_api_key_source: None,
             start_emitted: false,
             summary_details,
             context_extra: HashMap::new(),
@@ -284,11 +381,19 @@ impl LiveSemanticSink {
             emit_event_log: Some(event_logger),
             live_metrics: progress::new_live_metrics(),
             stream_output,
-            terminal: wrap_terminal(),
+            thinking_stream: ThinkingStream::new(terminal.clone()),
+            terminal,
             section_tracker: Arc::new(Mutex::new(SectionTracker::new())),
             at_blank_row: false,
             stdout_trailing_newlines: 0,
             watchdog_state: Arc::new(Mutex::new(WatchdogState::default())),
+            content_detector: None,
+            guard_inputs: None,
+            detector_scope_model: None,
+            trip_sender: None,
+            content_tripped: false,
+            status_reporter: super::session_report::StatusReporter::inert(),
+            awaiting_user: false,
         }
     }
 
@@ -313,7 +418,7 @@ impl LiveSemanticSink {
 
     /// Wire a stdout-rendering callback that receives every
     /// [`SemanticEvent::OutputText`]. Typically this forwards into an
-    /// `exec.rs`-owned `StreamTextRenderer` so the markdown-boundary logic
+    /// exec-driven `AssistantStream` so the markdown-boundary logic
     /// stays in one place.
     pub(crate) fn with_output_text_sink(mut self, emit: OutputTextFn) -> Self {
         self.emit_output_text = Some(emit);
@@ -325,7 +430,7 @@ impl LiveSemanticSink {
     /// Used by the structured wrapper path when the sink has been wrapped in
     /// a [`claudine::stream::semantic::SharedSemanticSink`] ahead of thread
     /// spawning — the parser builder closure locks the inner sink and calls
-    /// this setter so the exec-layer `StreamTextRenderer` stays in the stdout
+    /// this setter so the exec-layer `AssistantStream` stays in the stdout
     /// thread while the sink itself is shared with the stderr log bridge.
     pub(crate) fn set_output_text_sink(&mut self, emit: OutputTextFn) {
         self.emit_output_text = Some(emit);
@@ -357,208 +462,190 @@ impl LiveSemanticSink {
         self.watchdog_state.clone()
     }
 
+    /// Arm the runaway-output content detector (Phase 6). Called by the
+    /// streaming wiring point before the sink is handed to
+    /// `build_structured_plumbing`. A `None` argument leaves the sink with
+    /// no detector (zero per-event overhead).
+    pub(crate) fn set_content_detector(&mut self, detector: Option<ContentDetector>) {
+        self.content_detector = detector;
+    }
+
+    /// Whether a content detector is armed. `build_structured_plumbing`
+    /// uses this to decide whether to create + wire the trip channel.
+    pub(crate) fn has_content_detector(&self) -> bool {
+        self.content_detector.is_some()
+    }
+
+    /// Wire the source needed to re-scope the exit-expression set when a
+    /// provider reports its actual model.
+    ///
+    /// `inputs` is the validated, model-independent guard config (the
+    /// expensive half of resolution, already run once before streaming);
+    /// `launch_model` is the launch-time model hint the currently-armed
+    /// detector was filtered for (CLI `--model` / `MODEL` env / frontmatter
+    /// `model`, possibly absent → `None`).
+    ///
+    /// When the active detector was filtered with no launch-time model hint
+    /// (`""`), an agent/model-scoped exit expression cannot match yet. If
+    /// the provider later reports a model via `SessionStart` that brings
+    /// such an expression into scope, [`Self::rescope_for_model`] re-filters
+    /// and recompiles the in-scope set and swaps it into the live detector
+    /// without losing volume / repetition state.
+    pub(crate) fn set_guard_rescope_source(
+        &mut self,
+        inputs: Arc<super::runaway_guard::ResolvedGuardInputs>,
+        launch_model: Option<&str>,
+    ) {
+        self.guard_inputs = Some(inputs);
+        self.detector_scope_model = Some(launch_model.unwrap_or("").to_string());
+    }
+
+    /// Whether the run wants a content-detector trip channel wired.
+    ///
+    /// True when a detector is already armed, OR when a re-scope source
+    /// carries an exit expression that could come into scope for this
+    /// provider under a model the provider has not yet reported. The latter
+    /// case matters because the launch-time compile can legitimately produce
+    /// **no** detector — every other guard off and the only exit expression
+    /// out of scope for the launch-time model — yet a `SessionStart` model
+    /// can still bring that expression into scope. `build_structured_plumbing`
+    /// uses this (not [`Self::has_content_detector`]) to decide whether to
+    /// own the trip channel so a re-scope-armed detector has somewhere to
+    /// send.
+    pub(crate) fn wants_content_channel(&self) -> bool {
+        self.content_detector.is_some()
+            || self
+                .guard_inputs
+                .as_ref()
+                .is_some_and(|inputs| inputs.has_provider_scoped_entries())
+    }
+
+    /// Re-scope the content detector's exit-expression set for a
+    /// provider-reported model, when it differs from the model the current
+    /// set was filtered for.
+    ///
+    /// A no-op when no re-scope source is wired or the reported model matches
+    /// the model already in force (so a `SessionStart` echoing the
+    /// launch-time model never rebuilds the set or drops state). When a
+    /// detector is already armed, only its compiled pattern set is swapped,
+    /// preserving the volume / repetition state. When the launch-time compile
+    /// produced no detector (every other guard off and the only exit
+    /// expression out of scope), a fresh detector is built and the existing
+    /// trip sender is re-attached so the newly in-scope expression can fire.
+    ///
+    /// The recompile stays fail-closed: re-filtering an already-validated
+    /// entry set should never produce a compile error, but if it somehow
+    /// does, the error is logged and the previous set is left in force rather
+    /// than silently disabling all exit expressions.
+    fn rescope_for_model(&mut self, reported_model: Option<&str>) {
+        let Some(inputs) = self.guard_inputs.clone() else {
+            return;
+        };
+        let reported = reported_model.unwrap_or("");
+        if self.detector_scope_model.as_deref() == Some(reported) {
+            return;
+        }
+
+        if self.content_detector.is_some() {
+            // Hot path: a detector already exists, so swap only the compiled
+            // pattern set and keep its accumulated state.
+            match inputs.compile_patterns_for_model(reported_model) {
+                Ok(compiled) => {
+                    if let Some(detector) = self.content_detector.as_mut() {
+                        detector.set_exit_expressions(compiled);
+                    }
+                    self.detector_scope_model = Some(reported.to_string());
+                }
+                Err(error) => Self::warn_rescope_failed(inputs.provider(), reported, &error),
+            }
+            return;
+        }
+
+        // No detector yet (launch-time set was empty and other guards off).
+        // Rebuild a full detector for the reported model; it is `None` again
+        // only if the reported model also brings nothing into scope.
+        match inputs.compile_for_model(reported_model) {
+            Ok(resolved) => {
+                // The trip sender lives on the sink (already wired by
+                // `build_structured_plumbing` because `wants_content_channel`
+                // reported `true`), so installing the detector is enough for
+                // it to fire.
+                self.content_detector = resolved.detector;
+                self.detector_scope_model = Some(reported.to_string());
+            }
+            Err(error) => Self::warn_rescope_failed(inputs.provider(), reported, &error),
+        }
+    }
+
+    fn warn_rescope_failed(provider: Provider, reported_model: &str, error: &claudine::error::ClaudineError) {
+        tracing::warn!(
+            %provider,
+            reported_model,
+            "failed to re-scope exit expressions for reported model: {error}; \
+             keeping the previous set"
+        );
+    }
+
+    /// Wire the detector's trip sender to the unified early-termination
+    /// channel the exec wait loop polls. Set by `build_structured_plumbing`
+    /// (which owns the channel) after the detector is armed.
+    pub(crate) fn set_trip_sender(&mut self, sender: Sender<EarlyTermination>) {
+        self.trip_sender = Some(sender);
+    }
+
+    /// Feed assistant text to the content detector, firing a trip on the
+    /// first guard breach. No-op when no detector is armed or a trip has
+    /// already fired. Returns `true` when this call fired the trip so the
+    /// caller can suppress rendering of the tripping chunk.
+    fn feed_content_detector(&mut self, text: &str) -> bool {
+        if self.content_tripped {
+            return false;
+        }
+        let Some(detector) = self.content_detector.as_mut() else {
+            return false;
+        };
+        if let Some(trip) = detector.feed(text) {
+            self.fire_content_trip(trip);
+            return true;
+        }
+        false
+    }
+
+    /// Reset the detector's per-turn volume counters (`TurnComplete`).
+    fn reset_content_detector_turn(&mut self) {
+        if let Some(detector) = self.content_detector.as_mut() {
+            detector.reset_turn();
+        }
+    }
+
+    /// Send a content trip on the unified termination channel exactly once.
+    ///
+    /// A trip is terminal: the `content_tripped` flag guards against a
+    /// double-send and also suppresses further output rendering. The send
+    /// is best-effort — if the receiver has already hung up (the wait loop
+    /// killed the child), dropping the signal is fine.
+    fn fire_content_trip(&mut self, trip: claudine::runaway::Trip) {
+        if self.content_tripped {
+            return;
+        }
+        self.content_tripped = true;
+        if let Some(sender) = self.trip_sender.as_ref() {
+            let early = super::exec::termination::trip_to_early_termination(trip);
+            let _ = sender.send(early);
+        }
+    }
+
+    /// Whether a content trip has fired (rendering is then suppressed).
+    fn content_tripped(&self) -> bool {
+        self.content_tripped
+    }
+
     fn should_render(&self) -> bool {
         self.verbosity != Verbosity::Silent
     }
 
     fn emit_line(&self, line: &str) {
         (self.emit_stderr)(line);
-    }
-
-    fn render_event(&mut self, event: &SemanticEvent) {
-        if !self.should_render() {
-            return;
-        }
-        // Every event variant handled in this match renders into the
-        // ToolUseAndEvents section. SessionAndModel is handled separately
-        // via `emit_agent_session_id`; Thinking is handled via the
-        // `Reasoning` branch of [`SemanticEventSink::on_semantic_event`];
-        // FinalStdout is entered via `enter_final_stdout` in the
-        // `OutputText` branch of that same method; TrailerMetadata is
-        // emitted post-stream through [`Self::section_stream`] by callers
-        // in `wrap/mod.rs` and `wrap/composition.rs`.
-        let section = Section::ToolUseAndEvents;
-
-        // Redundancy suppression: Claude's `task_progress` events arrive
-        // immediately before the matching tool call ("Reading <path>" →
-        // `→ Read(<path>)`). Hold the most recent progress message in a
-        // one-slot buffer and consult it on the next event so the pair
-        // collapses to the canonical tool line.
-        if is_claude_task_progress(self.provider, event) {
-            if let SemanticEvent::Info { message, .. } = event {
-                self.pending_task_progress = Some(message.clone());
-            }
-            return;
-        }
-        self.resolve_pending_task_progress(section, event);
-        match event {
-            SemanticEvent::ToolCall { .. } => {
-                if let Some(display) = ToolCallDisplay::from_call(event) {
-                    let desc = self.render_tool_display(display);
-                    self.render_status_prose(section, StatusState::ToolUse, desc);
-                }
-            }
-            SemanticEvent::ToolResult { .. } => {
-                if let Some(display) = ToolCallDisplay::from_result(event) {
-                    if display.is_file_tool() && display.status == Some(ToolStatus::Error) {
-                        self.render_file_tool_error(section, &display);
-                    } else {
-                        let body = tool_calls::tool_result_body(event);
-                        let mut header_display = display.clone();
-                        if self.provider == Provider::Codex
-                            && body.is_some()
-                            && header_display.status == Some(ToolStatus::Success)
-                            && !header_display.is_file_tool()
-                        {
-                            header_display.summary = None;
-                        }
-                        let desc = self.render_tool_display(header_display);
-                        self.render_status_prose(section, StatusState::ToolUse, desc);
-                        if self.provider == Provider::Codex
-                            && self.verbosity == Verbosity::Normal
-                            && let Some(body) = body
-                        {
-                            self.render_tool_result_body(section, &body);
-                        }
-                    }
-                }
-            }
-            SemanticEvent::SubagentStart { name, .. } => {
-                self.render_status(
-                    section,
-                    StatusState::Subagent,
-                    Self::subagent_description('\u{2192}', name),
-                );
-            }
-            SemanticEvent::SubagentStop { name, .. } => {
-                self.render_status(
-                    section,
-                    StatusState::Subagent,
-                    Self::subagent_description('\u{2190}', name),
-                );
-            }
-            SemanticEvent::FileChange {
-                path, change_kind, ..
-            } => {
-                // Suppress rendering when the event carries neither a path
-                // nor a classification. Codex can emit provisional
-                // `file_change` items with empty bodies that would otherwise
-                // appear as a bare "change" line with no context.
-                let path = path.as_deref().unwrap_or("");
-                let kind = change_kind.as_deref();
-                if path.is_empty() && kind.is_none() {
-                    return;
-                }
-                let kind_label = kind.unwrap_or("change");
-                let line = if path.is_empty() {
-                    kind_label.to_string()
-                } else {
-                    format!("{kind_label} {path}")
-                };
-                self.render_status(section, StatusState::Info, line);
-            }
-            SemanticEvent::PlanUpdate { message, .. } => {
-                if let Some(msg) = message {
-                    self.render_status(section, StatusState::Info, msg.clone());
-                }
-            }
-            SemanticEvent::Info { message, extra } => {
-                // Suppress OpenCode's `step_start` / `step_finish` phase
-                // markers from the rendered stderr surface. They carry no
-                // user-visible meaning (internal phase boundaries between
-                // tool batches) and produce visual noise around tool lines.
-                // The events still flow through dispatch, JSONL logging, and
-                // the LiveMetrics heartbeat — only the human-visible Status
-                // line is suppressed. Suppression is gated on
-                // `extra["step_phase"]` so unrelated Info events from
-                // OpenCode (or any other provider) are unaffected.
-                //
-                // Invisible-event invariant: suppressed events MUST return
-                // before any call to `emit_section_line` so the
-                // `SectionTracker` state is not updated. This prevents the
-                // tracker from detecting a phantom section change that would
-                // inject a redundant separator before the next visible
-                // event.
-                if self.provider == Provider::OpenCode && extra.get("step_phase").is_some() {
-                    return;
-                }
-                self.render_status(section, StatusState::Info, message.clone());
-            }
-            SemanticEvent::Warning { message, extra } => {
-                // Suppress noisy malformed-line warnings on stderr — these
-                // are common when providers mix non-JSON output into the
-                // stream (Gemini hook logs, stack traces, etc.) and the
-                // semantic parser surfaces them as Warning events per the
-                // Phase 2 policy. Still dispatched and logged.
-                //
-                // Also suppress the legacy generic Claude rate-limit Warning
-                // when the session metadata shows a subscription auth source.
-                // Explicit metadata text such as "approaching limit" must
-                // still render so users can see the next reset window.
-                if message.starts_with("Malformed JSON on line ")
-                    || is_suppressed_claude_rate_limit(
-                        self.provider,
-                        message,
-                        extra,
-                        self.claude_api_key_source.as_deref(),
-                    )
-                {
-                    return;
-                }
-                // Codex stderr bridge emits Warnings enriched with a
-                // `tracing_target` extra. Those want a two-line rendering
-                // (Status header + orange BlockQuote) so operators can read
-                // the diagnostic without the raw `TIMESTAMP LEVEL ...`
-                // formatting leaking through.
-                if let Some(target) = extra.get("tracing_target").and_then(Value::as_str) {
-                    self.render_tracing_diagnostic(section, target, message);
-                } else {
-                    self.render_status(section, StatusState::Warning, message.clone());
-                }
-            }
-            SemanticEvent::Error { message, kind, .. } => {
-                self.render_error_block(section, *kind, message);
-            }
-            SemanticEvent::ProviderExtension {
-                provider,
-                kind,
-                payload,
-            } => {
-                if is_silent_extension_kind(*provider, kind) {
-                    // Suppress stderr rendering; the event still flows
-                    // through dispatch and the JSONL log.
-                    return;
-                }
-                self.render_status(
-                    section,
-                    StatusState::Info,
-                    Self::provider_extension_description(*provider, kind, payload),
-                );
-            }
-            // OutputText / Reasoning / SessionStart / TurnStart / TurnComplete /
-            // PermissionRequest do not render through Status — Output/Reasoning
-            // flow through their own renderers in the Phase 3.3 wiring step;
-            // the others are envelope-only.
-            SemanticEvent::SessionStart { .. }
-            | SemanticEvent::TurnStart { .. }
-            | SemanticEvent::TurnComplete { .. }
-            | SemanticEvent::OutputText { .. }
-            | SemanticEvent::Reasoning { .. }
-            | SemanticEvent::PermissionRequest { .. } => {}
-        }
-    }
-
-    fn subagent_description(arrow: char, name: &Option<String>) -> String {
-        let name_part = name.as_deref().unwrap_or("(subagent)");
-        format!("{arrow} {name_part}")
-    }
-
-    fn provider_extension_description(provider: Provider, kind: &str, payload: &Value) -> String {
-        let summary = summarize_provider_payload(payload);
-        match summary {
-            Some(s) => format!("{}/{kind} \u{00b7} {s}", provider_short(provider)),
-            None => format!("{}/{kind}", provider_short(provider)),
-        }
     }
 
     fn update_session_state(&mut self, session_id: &Option<String>, model: &Option<String>) {
@@ -648,3223 +735,32 @@ impl LiveSemanticSink {
 
 impl Drop for LiveSemanticSink {
     fn drop(&mut self) {
+        // Drain any buffered reasoning first so a lone trailing thought (a
+        // `Reasoning` event with no following non-`Reasoning` event to trigger
+        // the boundary flush) still renders at stream end.
+        self.flush_pending_thinking();
         // Any `task_progress` Info still buffered at stream end was never
         // matched against a follow-up tool call. Flush it so the
         // narration is not lost when the sink is dropped mid-turn.
-        if self.pending_task_progress.is_some() {
-            self.flush_pending_task_progress();
+        let units = self.renderer.flush(&self.terminal);
+        for unit in units {
+            self.emit_section_line(section_for(unit.class), &unit.text);
         }
     }
-}
-
-impl SemanticEventSink for LiveSemanticSink {
-    fn on_semantic_event(&mut self, event: SemanticEvent) {
-        // 1. LiveMetrics observation for the heartbeat.
-        if let Ok(mut state) = self.live_metrics.lock() {
-            state.observe_event(&event, std::time::Instant::now());
-        }
-
-        // 2. Update cached session id / model from envelope events.
-        if let SemanticEvent::SessionStart {
-            session_id,
-            model,
-            extra,
-        } = &event
-        {
-            self.update_session_state(session_id, model);
-            self.claude_api_key_source = extra
-                .get("api_key_source")
-                .and_then(Value::as_str)
-                .map(String::from);
-        }
-
-        // 3. Update structured summary's tool-name rollup and the
-        //    final-response accumulator. The accumulator captures only the
-        //    output text emitted after the last tool call: a `ToolCall`
-        //    resets it (dropping any narration that preceded the tool), and
-        //    `OutputText` appends to it. `inline-compose` writes this final
-        //    turn — never the full accumulated narration — into the body.
-        match &event {
-            SemanticEvent::ToolCall { name, .. } => {
-                if let Ok(mut details) = self.summary_details.lock() {
-                    if let Some(n) = name {
-                        details.record_tool_name(n);
-                    }
-                    details.reset_final_response();
-                }
-            }
-            SemanticEvent::OutputText { text, .. } => {
-                if let Ok(mut details) = self.summary_details.lock() {
-                    details.push_final_response(text);
-                }
-            }
-            _ => {}
-        }
-
-        // 4. Update shared watchdog state for subagent tracking.
-        //    Start/stop manage the active set; any event with a recognized
-        //    subagent id resets `last_progress_at` for that id.
-        {
-            let now = std::time::Instant::now();
-            if let Ok(mut state) = self.watchdog_state.lock() {
-                match &event {
-                    SemanticEvent::SubagentStart { id, name, .. } => {
-                        state.subagent_started(id.clone().unwrap_or_default(), name.clone(), now);
-                    }
-                    SemanticEvent::SubagentStop {
-                        id,
-                        name,
-                        status,
-                        extra,
-                        ..
-                    } => {
-                        if let Some(id) = id {
-                            let description = extra
-                                .get("description")
-                                .and_then(|v| v.as_str())
-                                .map(String::from)
-                                .or_else(|| {
-                                    extra
-                                        .get("subagent_type")
-                                        .and_then(|v| v.as_str())
-                                        .map(String::from)
-                                });
-                            state.subagent_stopped(
-                                id,
-                                name.clone(),
-                                description,
-                                status.clone(),
-                                now,
-                            );
-                        }
-                    }
-                    _ => {
-                        for subagent_id in extract_subagent_ids_from_event(&event) {
-                            state.observe_subagent_progress(&subagent_id, now);
-                        }
-                    }
-                }
-            }
-        }
-
-        // 5. Forward text/reasoning to their dedicated renderers before the
-        //    status-line rendering so stdout writes happen in stream order.
-        match &event {
-            SemanticEvent::OutputText { text, .. } if self.emit_output_text.is_some() => {
-                // Route the transition into the FinalStdout section
-                // through the shared section tracker so the separator
-                // blank (between stderr events and final stdout) is
-                // emitted exactly once. The raw text bytes continue to
-                // flow directly to the caller's renderer.
-                //
-                // The separator is suppressed in two cases:
-                // 1. The combined output is already at a visual blank row
-                //    (previous stdout ended with \n\n, or the last stderr
-                //    line was blank). Injecting would create consecutive
-                //    blank lines.
-                // 2. The text itself starts with \n. The text provides its
-                //    own visual break, making the separator redundant.
-                let needs_separator = {
-                    let mut tracker = self
-                        .section_tracker
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner());
-                    tracker
-                        .classify(Section::FinalStdout, "x")
-                        .is_some_and(|(s, _)| s)
-                };
-                let text_starts_with_newline = text.starts_with('\n');
-                if needs_separator && !self.at_visual_blank() && !text_starts_with_newline {
-                    (self.emit_stderr)("");
-                    self.at_blank_row = true;
-                }
-                if let Some(emit) = self.emit_output_text.as_mut() {
-                    emit(text);
-                }
-                self.update_stdout_trailing_newlines(text);
-            }
-            SemanticEvent::Reasoning { text, .. } => {
-                let block = render_thinking_block(text, &self.terminal);
-                if !block.is_empty() {
-                    // Split the multi-line block render into lines so the
-                    // dedup works per-line; section transitions only
-                    // insert blanks between sections, not between lines of
-                    // a single block.
-                    for line in block.lines() {
-                        self.emit_section_line(Section::Thinking, line);
-                    }
-                }
-            }
-            _ => {}
-        }
-
-        // 6. Render status line to STDERR.
-        self.render_event(&event);
-
-        // 7. Dispatch to agentic hooks when applicable, and log the
-        //    resulting `DispatchEventMeta` to JSONL when a logger is wired.
-        //    The logger always sees every event (even Output/Reasoning which
-        //    have no agentic mapping); we build a Notification-shaped meta
-        //    for those so the JSONL row still carries the full serialized
-        //    semantic event under `extra["semantic_event"]`.
-        let agentic = Self::to_agentic(&event);
-        let log_agentic = agentic.unwrap_or(AgenticEvent::Notification);
-        let meta = self.dispatch_meta(&event, log_agentic);
-        if let Some(emit_log) = self.emit_event_log.as_ref() {
-            emit_log(&event, &meta);
-        }
-        if let Some(agentic) = agentic {
-            (self.dispatch)(agentic, meta);
-        }
-    }
-}
-
-/// Extract any recognized subagent identifiers from a semantic event.
-///
-/// Returns all ids found so the caller can update `last_progress_at`
-/// for every matching active entry.  The list is usually empty or a
-/// single element, but OpenCode `task_progress` payloads may carry a
-/// `task_id` alongside the primary event id.
-fn extract_subagent_ids_from_event(
-    event: &SemanticEvent,
-) -> Vec<super::subagent_watchdog::SubagentId> {
-    use super::subagent_watchdog::SubagentId;
-
-    let mut ids = Vec::new();
-
-    match event {
-        SemanticEvent::SubagentStart { id, .. } | SemanticEvent::SubagentStop { id, .. } => {
-            if let Some(id) = id {
-                ids.push(id.clone());
-            }
-        }
-        SemanticEvent::Info { extra, .. } => {
-            // OpenCode task_progress style: extra["task_id"] or extra["id"]
-            if let Some(task_id) = extra.get("task_id").and_then(Value::as_str) {
-                ids.push(SubagentId::from(task_id));
-            } else if let Some(id) = extra.get("id").and_then(Value::as_str) {
-                ids.push(SubagentId::from(id));
-            }
-        }
-        SemanticEvent::ProviderExtension { payload, .. } => {
-            // Some provider extensions carry a task/subagent id in the payload.
-            if let Some(task_id) = payload.get("task_id").and_then(Value::as_str) {
-                ids.push(SubagentId::from(task_id));
-            } else if let Some(id) = payload.get("id").and_then(Value::as_str) {
-                ids.push(SubagentId::from(id));
-            }
-        }
-        _ => {}
-    }
-
-    ids
-}
-
-/// Return `true` when `event` is a Claude `task_progress` Info line —
-/// the narration Claude emits just before the matching tool call. Only
-/// `Provider::Claude` emits this shape today; the gate is explicit so
-/// unrelated Info events do not get delayed one tick.
-fn is_claude_task_progress(provider: Provider, event: &SemanticEvent) -> bool {
-    if provider != Provider::Claude {
-        return false;
-    }
-    let SemanticEvent::Info { extra, .. } = event else {
-        return false;
-    };
-    extra
-        .get("type")
-        .and_then(Value::as_str)
-        .is_some_and(|kind| kind == "task_progress")
-}
-
-/// Produce a terse one-line human summary of a [`SemanticEvent::ProviderExtension`]
-/// payload.
-///
-/// Returns `None` when no summary can be derived from known nested shapes —
-/// callers must render `provider/kind` WITHOUT a trailing ` · <payload>` in
-/// that case rather than falling back to raw JSON. This is a deliberate UX
-/// trade-off: a bare `provider/kind` is less informative but still readable,
-/// whereas a truncated raw JSON blob is actively harmful noise on stderr.
-fn summarize_provider_payload(payload: &Value) -> Option<String> {
-    // Known single-string text locations, in descending specificity. Each
-    // entry is a path of object keys from the root of the payload.
-    let known_paths: &[&[&str]] = &[
-        &["message"],
-        &["status"],
-        &["name"],
-        &["path"],
-        &["text"],
-        &["content"],
-        &["error", "message"],
-        &["error_message"],
-        &["title"],
-        &["description"],
-    ];
-
-    payload.as_object()?;
-
-    for path in known_paths {
-        let mut cursor: &Value = payload;
-        let mut ok = true;
-        for segment in path.iter() {
-            match cursor.get(*segment) {
-                Some(next) => cursor = next,
-                None => {
-                    ok = false;
-                    break;
-                }
-            }
-        }
-        if ok && let Some(s) = cursor.as_str().filter(|s| !s.is_empty()) {
-            return Some(s.to_string());
-        }
-    }
-
-    // Nested content arrays: message.content[*].text, item.content.parts[*].text, etc.
-    let nested_array_paths: &[&[&str]] = &[
-        &["message", "content"],
-        &["item", "content", "parts"],
-        &["content", "parts"],
-        &["parts"],
-    ];
-    for nested_path in nested_array_paths {
-        let mut cursor: &Value = payload;
-        let mut ok = true;
-        for seg in nested_path.iter() {
-            match cursor.get(*seg) {
-                Some(next) => cursor = next,
-                None => {
-                    ok = false;
-                    break;
-                }
-            }
-        }
-        if !ok {
-            continue;
-        }
-        if let Some(array) = cursor.as_array() {
-            for elem in array {
-                if let Some(text) = elem
-                    .get("text")
-                    .and_then(Value::as_str)
-                    .filter(|s| !s.is_empty())
-                {
-                    return Some(text.to_string());
-                }
-                if let Some(text) = elem
-                    .get("content")
-                    .and_then(Value::as_str)
-                    .filter(|s| !s.is_empty())
-                {
-                    return Some(text.to_string());
-                }
-            }
-        }
-    }
-
-    // Last resort: the first non-empty top-level string value. This recovers
-    // summary text for shapes we haven't explicitly enumerated while still
-    // avoiding a raw-JSON dump.
-    if let Some(obj) = payload.as_object() {
-        for (_, v) in obj.iter() {
-            if let Some(s) = v.as_str().filter(|s| !s.is_empty()) {
-                return Some(s.to_string());
-            }
-        }
-    }
-
-    None
-}
-
-fn provider_short(p: Provider) -> &'static str {
-    provider_info(p).short_name
-}
-
-/// Kinds that are known to be high-volume or entirely redundant on stderr.
-/// Listed explicitly rather than relying on summary heuristics so the
-/// suppression is visible, reviewable, and reversible. Events in this set
-/// still flow through dispatch and the JSONL log; only the stderr status
-/// line is suppressed.
-const SILENT_PROVIDER_EXTENSION_KINDS: &[(Provider, &str)] = &[
-    // Claude: partial assistant token deltas — redundant with OutputText.
-    (Provider::Claude, "stream_event"),
-    // Claude: hook lifecycle events. Claude parser (Task 2a.2) emits
-    // these as ProviderExtension with kind `system/<subtype>` after
-    // buffering them to trail SessionStart.
-    (Provider::Claude, "system/hook_started"),
-    (Provider::Claude, "system/hook_response"),
-    (Provider::Claude, "system/hook_progress"),
-    // Codex: unknown/unmodeled item lifecycle markers. When the inner
-    // `item.type` is something Claudine does not classify (new Codex
-    // builds, experimental item types), the parser falls back to a
-    // ProviderExtension. Leaking `codex/item.started · {...}` onto stderr
-    // is noise — the underlying detail is what callers care about, and
-    // the raw event is still in the JSONL log.
-    (Provider::Codex, "item.started"),
-    (Provider::Codex, "item.completed"),
-    // Kimi: high-volume wire envelope kinds that the Kimi semantic parser
-    // already maps to first-class semantic events. If a future Kimi
-    // protocol revision changes the payload shape so typed
-    // deserialization fails, the parser falls back to a
-    // `ProviderExtension` with a `event:<inner_type>` raw_kind. These
-    // entries keep the stderr surface quiet on drift; the raw envelopes
-    // still flow through dispatch and the JSONL log.
-    //
-    // ContentPart (assistant text/think deltas) and ToolCallPart
-    // (streamed tool argument fragments) can fire many times per turn,
-    // so suppressing fallback rendering here matches the "high-volume
-    // wire fallback kinds" contract from Phase 5 of the fix-kimi plan.
-    (Provider::KimiCode, "event:ContentPart"),
-    (Provider::KimiCode, "event:ToolCallPart"),
-    // StatusUpdate fires on every step boundary and carries token /
-    // context-percent telemetry. The parser emits a Warning only when
-    // the context-pressure threshold is crossed; routine StatusUpdate
-    // payload-shape drift should not surface as a fallback line.
-    (Provider::KimiCode, "event:StatusUpdate"),
-    // Legacy stream-json payload names that Kimi is unlikely to emit on
-    // the wire transport but are kept here as defensive entries so an
-    // accidental cross-mode payload (or replay of a legacy fixture) does
-    // not flood stderr.
-    (Provider::KimiCode, "event:MessageStart"),
-    (Provider::KimiCode, "event:MessageDelta"),
-    (Provider::KimiCode, "event:MessageEnd"),
-    (Provider::KimiCode, "event:Thinking"),
-];
-
-fn is_silent_extension_kind(provider: Provider, kind: &str) -> bool {
-    SILENT_PROVIDER_EXTENSION_KINDS
-        .iter()
-        .any(|(p, k)| *p == provider && *k == kind)
-}
-
-/// Suppress only the legacy generic Claude `rate limit` Warning on stderr
-/// when the session metadata shows subscription auth. Explicit Claude
-/// metadata text must still render because it can include cap-window timing.
-fn is_suppressed_claude_rate_limit(
-    provider: Provider,
-    message: &str,
-    extra: &Value,
-    api_key_source: Option<&str>,
-) -> bool {
-    if provider != Provider::Claude {
-        return false;
-    }
-    let raw_kind = extra.get("raw_kind").and_then(Value::as_str).unwrap_or("");
-    if raw_kind != "rate_limit_event" || message.trim() != "rate limit" {
-        return false;
-    }
-    if let Some(api_key_source) = api_key_source {
-        return api_key_source != "ANTHROPIC_API_KEY";
-    }
-    std::env::var("ANTHROPIC_API_KEY")
-        .map(|v| v.trim().is_empty())
-        .unwrap_or(true)
-}
-
-/// Escape user-controlled text so it can be safely interpolated into
-/// biscuit-terminal prose markup without being parsed as tags / tokens.
-///
-/// Biscuit-terminal's `Prose` parser recognises backslash escapes for `<`,
-/// `>`, `{`, and `\`; escaping those four characters is sufficient to
-/// prevent arbitrary user strings (commands, paths, URLs, raw JSON) from
-/// being interpreted as markup.
-fn escape_prose(input: &str) -> String {
-    let mut out = String::with_capacity(input.len());
-    for ch in input.chars() {
-        match ch {
-            '\\' | '<' | '>' | '{' => {
-                out.push('\\');
-                out.push(ch);
-            }
-            other => out.push(other),
-        }
-    }
-    out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use biscuit_terminal::discovery::detection::ColorDepth;
-    use serde_json::json;
-    use std::sync::Mutex as StdMutex;
-
-    fn make_sink(
-        captured_lines: Arc<StdMutex<Vec<String>>>,
-        captured_dispatch: Arc<StdMutex<Vec<(AgenticEvent, String)>>>,
-    ) -> LiveSemanticSink {
-        make_sink_for_provider(
-            Provider::Claude,
-            Verbosity::Normal,
-            captured_lines,
-            captured_dispatch,
-        )
-    }
-
-    fn make_sink_for_provider(
-        provider: Provider,
-        verbosity: Verbosity,
-        captured_lines: Arc<StdMutex<Vec<String>>>,
-        captured_dispatch: Arc<StdMutex<Vec<(AgenticEvent, String)>>>,
-    ) -> LiveSemanticSink {
-        let dispatch = {
-            let captured = captured_dispatch.clone();
-            Box::new(move |event: AgenticEvent, meta: DispatchEventMeta| {
-                captured
-                    .lock()
-                    .unwrap()
-                    .push((event, meta.tool_name.unwrap_or_default()));
-            })
-        };
-        let emit = {
-            let lines = captured_lines.clone();
-            Box::new(move |line: &str| {
-                lines.lock().unwrap().push(line.to_string());
-            })
-        };
-        let mut sink = LiveSemanticSink::new(
-            provider,
-            EnvironmentContext::default(),
-            Path::new("/tmp"),
-            verbosity,
-            Arc::new(Mutex::new(StructuredSummaryDetails::default())),
-            dispatch,
-            emit,
-        );
-        sink.terminal = Terminal::builder()
-            .is_tty(true)
-            .color_depth(ColorDepth::TrueColor)
-            .osc_link_support(true)
-            .build();
-        sink
-    }
-
-    #[test]
-    fn tool_call_renders_arrow_right_prefix() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("bash".into()),
-            id: Some("t1".into()),
-            input: Some(json!({"command": "ls"})),
-            extra: json!({}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(rendered.contains('\u{2192}'), "expected → in {rendered:?}");
-        assert!(rendered.contains("Bash"));
-        assert!(rendered.contains("ls"));
-    }
-
-    #[test]
-    fn tool_call_renders_with_parentheses_format() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("Bash".into()),
-            id: Some("t1".into()),
-            input: Some(json!({"command": "ls -la"})),
-            extra: json!({}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("Bash(") && rendered.contains(")"),
-            "tool call must render as Name(summary) with parentheses: {rendered:?}"
-        );
-        assert!(
-            !rendered.contains(" \u{00b7} "),
-            "tool call must no longer use the `·` separator: {rendered:?}"
-        );
-        // Shell name gets prepended to the command inside the parens.
-        assert!(
-            rendered.contains("bash ls -la"),
-            "summary inside parens must include prepended shell name: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn tool_result_renders_arrow_left_prefix_with_error_status() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("bash".into()),
-            id: Some("t1".into()),
-            status: Some("failure".into()),
-            exit_code: None,
-            output: None,
-            extra: json!({}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(rendered.contains('\u{2190}'));
-        assert!(rendered.contains("Bash"));
-        // Status wins over summary/exit code; "failure" maps to ToolStatus::Error
-        // which renders as "error" in the dim slot.
-        assert!(
-            rendered.contains("error"),
-            "expected error status word: {rendered:?}"
-        );
-        assert!(
-            !rendered.contains("<red>"),
-            "prose markup must be interpreted, not leaked as literal text: {rendered:?}"
-        );
-        assert!(
-            !rendered.contains("<b>"),
-            "prose markup must be interpreted, not leaked as literal text: {rendered:?}"
-        );
-        assert!(
-            rendered.contains("\u{1b}[31m"),
-            "error-path rendering must emit red ANSI escape: {rendered:?}"
-        );
-        assert!(
-            !rendered.contains("exit 1"),
-            "exit_code must not render when status is present; status wins: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn tool_call_with_markup_looking_summary_is_not_interpreted() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("Bash".into()),
-            id: None,
-            input: Some(json!({"command": "echo '<b>hi</b>'"})),
-            extra: json!({}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        // User input containing markup must appear verbatim — Status::new
-        // does NOT interpret prose markup on the summary path.
-        assert!(
-            rendered.contains("<b>hi</b>"),
-            "user input with prose tokens must render literally: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn tool_result_success_status_co_renders_with_input_summary() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("bash".into()),
-            id: Some("t1".into()),
-            status: Some("completed".into()),
-            exit_code: None,
-            output: None,
-            extra: json!({ "input": { "command": "ls -la" } }),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(rendered.contains('\u{2190}'), "expected ← arrow");
-        assert!(rendered.contains("Bash"), "expected humanized tool name");
-        // Per the 2026-04-18 contract, a successful incoming tool result
-        // renders `status + summary` together when a summary derived from
-        // the cached input is available — so the user can see what command
-        // succeeded, not just that something succeeded.
-        assert!(
-            rendered.contains("successful"),
-            "expected mapped status word 'successful': {rendered:?}"
-        );
-        assert!(
-            rendered.contains("bash ls -la"),
-            "expected shell summary `bash ls -la` to co-render with status: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn subagent_start_and_stop_use_arrows() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::SubagentStart {
-            name: Some("researcher".into()),
-            id: Some("sa1".into()),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::SubagentStop {
-            name: Some("researcher".into()),
-            id: Some("sa1".into()),
-            status: Some("success".into()),
-            extra: json!({}),
-        });
-        let collected = lines.lock().unwrap().clone();
-        assert!(collected[0].contains('\u{2192}') && collected[0].contains("researcher"));
-        assert!(collected[1].contains('\u{2190}') && collected[1].contains("researcher"));
-    }
-
-    #[test]
-    fn provider_extension_formatter_uses_summary_extraction_order() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::Codex,
-            kind: "item.updated".into(),
-            payload: json!({"message": "still working"}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(rendered.contains("codex/item.updated"));
-        assert!(rendered.contains("still working"));
-    }
-
-    #[test]
-    fn warning_renders_and_dispatches_as_notification() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::Warning {
-            message: "rate limited".into(),
-            extra: json!({}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(rendered.contains("rate limited"));
-        let dispatches = dispatched.lock().unwrap().clone();
-        assert_eq!(dispatches[0].0, AgenticEvent::Notification);
-    }
-
-    #[test]
-    fn terminal_error_dispatches_turn_error() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::Error {
-            message: "billing".into(),
-            terminal: true,
-            kind: SemanticErrorKind::ApiRemote,
-            extra: json!({}),
-        });
-        let dispatches = dispatched.lock().unwrap().clone();
-        assert_eq!(dispatches[0].0, AgenticEvent::TurnError);
-    }
-
-    #[test]
-    fn error_event_renders_blockquote_with_red_border() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::Error {
-            message: "Quota exceeded".into(),
-            terminal: true,
-            kind: SemanticErrorKind::ApiRemote,
-            extra: json!({}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("API Error"),
-            "expected API Error label, got: {rendered:?}"
-        );
-        assert!(
-            rendered.contains("Quota exceeded"),
-            "expected message text, got: {rendered:?}"
-        );
-        assert!(
-            rendered.contains('\u{2503}'),
-            "expected centered block-quote border (┃), got: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn interrupted_error_renders_blockquote_with_interrupted_label() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::Error {
-            message: "User cancelled".into(),
-            terminal: true,
-            kind: SemanticErrorKind::Interrupted,
-            extra: json!({}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("Interrupted"),
-            "expected Interrupted label, got: {rendered:?}"
-        );
-        assert!(rendered.contains('\u{2503}'));
-    }
-
-    #[test]
-    fn configuration_error_renders_blockquote_with_configuration_label() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::Error {
-            message: "Bad API key".into(),
-            terminal: true,
-            kind: SemanticErrorKind::Configuration,
-            extra: json!({}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("Configuration Error"),
-            "expected Configuration Error label, got: {rendered:?}"
-        );
-        assert!(rendered.contains('\u{2503}'));
-    }
-
-    #[test]
-    fn error_kind_presentation_returns_expected_labels() {
-        assert_eq!(
-            error_kind_presentation(SemanticErrorKind::Configuration).0,
-            "Configuration Error"
-        );
-        assert_eq!(
-            error_kind_presentation(SemanticErrorKind::AgentNative).0,
-            "Agent Error"
-        );
-        assert_eq!(
-            error_kind_presentation(SemanticErrorKind::ApiRemote).0,
-            "API Error"
-        );
-        assert_eq!(
-            error_kind_presentation(SemanticErrorKind::Interrupted).0,
-            "Interrupted"
-        );
-        assert_eq!(
-            error_kind_presentation(SemanticErrorKind::Unknown).0,
-            "Error"
-        );
-    }
-
-    #[test]
-    fn silent_verbosity_suppresses_stderr_but_not_dispatch() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.verbosity = Verbosity::Silent;
-        sink.on_semantic_event(SemanticEvent::Warning {
-            message: "rate limited".into(),
-            extra: json!({}),
-        });
-        assert!(lines.lock().unwrap().is_empty());
-        assert!(!dispatched.lock().unwrap().is_empty());
-    }
-
-    #[test]
-    fn session_start_updates_cached_state_and_emits_session_header() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::SessionStart {
-            session_id: Some("s1".into()),
-            model: Some("claude".into()),
-            extra: json!({"api_key_source": "none"}),
-        });
-        assert_eq!(sink.session_id.as_deref(), Some("s1"));
-        assert_eq!(sink.model.as_deref(), Some("claude"));
-        assert_eq!(sink.claude_api_key_source.as_deref(), Some("none"));
-        // Task 3.2 routes the session header through the section-aware
-        // emit path so the `emit_stderr` closure captures it. The header
-        // line must appear; a trailing blank is allowed but not required.
-        let collected = lines.lock().unwrap().clone();
-        assert!(
-            collected.iter().any(|l| l.contains("s1")),
-            "session id must appear in stderr capture: {collected:?}"
-        );
-        let dispatches = dispatched.lock().unwrap().clone();
-        assert_eq!(dispatches[0].0, AgenticEvent::SessionStart);
-    }
-
-    #[test]
-    fn full_run_has_no_two_consecutive_blank_lines() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        // Synthetic sequence representing every section transition.
-        sink.on_semantic_event(SemanticEvent::SessionStart {
-            session_id: Some("s1".into()),
-            model: Some("claude-opus-4-6".into()),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::Reasoning {
-            text: "thinking…".into(),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("Bash".into()),
-            id: None,
-            input: Some(json!({"command": "ls"})),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("Bash".into()),
-            id: None,
-            status: Some("success".into()),
-            exit_code: Some(0),
-            output: None,
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "answer".into(),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::TurnComplete {
-            provider_status: Some("ok".into()),
-            token_usage: None,
-            cost_usd: None,
-            duration_ms: Some(100),
-            extra: json!({}),
-        });
-        let collected = lines.lock().unwrap().clone();
-        let mut prev_blank = false;
-        for line in &collected {
-            let is_blank = line.trim().is_empty();
-            if is_blank && prev_blank {
-                panic!("two consecutive blank lines in {collected:?}");
-            }
-            prev_blank = is_blank;
-        }
-    }
-
-    /// Combined section golden test: feed every section transition through
-    /// the sink and verify no two consecutive blank lines exist in the
-    /// combined stderr output.
-    #[test]
-    fn combined_sections_have_no_consecutive_blanks() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-
-        // SessionStart -> SessionAndModel section
-        sink.on_semantic_event(SemanticEvent::SessionStart {
-            session_id: Some("s-combined".into()),
-            model: Some("test-model".into()),
-            extra: json!({}),
-        });
-        // Reasoning -> Thinking section
-        sink.on_semantic_event(SemanticEvent::Reasoning {
-            text: "pondering deeply".into(),
-            extra: json!({}),
-        });
-        // ToolCall -> ToolUseAndEvents section
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("Bash".into()),
-            id: Some("t1".into()),
-            input: Some(json!({"command": "echo hello"})),
-            extra: json!({}),
-        });
-        // ToolResult -> stays in ToolUseAndEvents
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("Bash".into()),
-            id: Some("t1".into()),
-            status: Some("success".into()),
-            exit_code: Some(0),
-            output: None,
-            extra: json!({}),
-        });
-        // OutputText -> does not emit to stderr (goes to stdout callback)
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "the answer".into(),
-            extra: json!({}),
-        });
-        // TurnComplete -> envelope-only, no section emission
-        sink.on_semantic_event(SemanticEvent::TurnComplete {
-            provider_status: Some("ok".into()),
-            token_usage: None,
-            cost_usd: None,
-            duration_ms: Some(500),
-            extra: json!({}),
-        });
-
-        let collected = lines.lock().unwrap().clone();
-        // Basic sanity: the sink must have emitted something.
-        assert!(!collected.is_empty(), "sink must emit lines: {collected:?}");
-
-        // Core invariant: no two consecutive blank lines.
-        let mut prev_blank = false;
-        for line in &collected {
-            let is_blank = line.trim().is_empty();
-            if is_blank && prev_blank {
-                panic!("two consecutive blank lines in combined section output:\n{collected:#?}");
-            }
-            prev_blank = is_blank;
-        }
-    }
-
-    #[test]
-    fn tool_call_records_tool_name_in_summary_details() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
-        let sink_details = details.clone();
-        let dispatch = {
-            let captured = dispatched.clone();
-            Box::new(move |event: AgenticEvent, meta: DispatchEventMeta| {
-                captured
-                    .lock()
-                    .unwrap()
-                    .push((event, meta.tool_name.unwrap_or_default()));
-            })
-        };
-        let emit = {
-            let lines = lines.clone();
-            Box::new(move |line: &str| lines.lock().unwrap().push(line.to_string()))
-        };
-        let mut sink = LiveSemanticSink::new(
-            Provider::Claude,
-            EnvironmentContext::default(),
-            Path::new("/tmp"),
-            Verbosity::Normal,
-            sink_details,
-            dispatch,
-            emit,
-        );
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("bash".into()),
-            id: None,
-            input: None,
-            extra: json!({}),
-        });
-        let names = details.lock().unwrap().tool_names.clone();
-        assert_eq!(names, vec!["bash".to_string()]);
-    }
-
-    #[test]
-    fn final_response_keeps_only_text_after_last_tool_call() {
-        // The final-response accumulator must drop interstitial narration
-        // emitted between tool calls and retain only the output text that
-        // follows the LAST tool call — the agent's closing answer that
-        // `inline-compose` writes into the document body.
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
-        let sink_details = details.clone();
-        let dispatch = Box::new(|_event: AgenticEvent, _meta: DispatchEventMeta| {});
-        let emit = {
-            let lines = lines.clone();
-            Box::new(move |line: &str| lines.lock().unwrap().push(line.to_string()))
-        };
-        let mut sink = LiveSemanticSink::new(
-            Provider::Claude,
-            EnvironmentContext::default(),
-            Path::new("/tmp"),
-            Verbosity::Normal,
-            sink_details,
-            dispatch,
-            emit,
-        );
-
-        let tool_call = |name: &str| SemanticEvent::ToolCall {
-            name: Some(name.to_string()),
-            id: None,
-            input: None,
-            extra: json!({}),
-        };
-        let output = |text: &str| SemanticEvent::OutputText {
-            text: text.to_string(),
-            extra: json!({}),
-        };
-
-        sink.on_semantic_event(output("Let me read the research documents. "));
-        sink.on_semantic_event(tool_call("read_file"));
-        sink.on_semantic_event(output("Now let me write the draft. "));
-        sink.on_semantic_event(tool_call("write_file"));
-        sink.on_semantic_event(output("# Final Body\n"));
-        sink.on_semantic_event(output("This is the closing answer."));
-
-        let final_response = details.lock().unwrap().final_response.clone();
-        assert_eq!(
-            final_response, "# Final Body\nThis is the closing answer.",
-            "only the output text after the last tool call should remain"
-        );
-    }
-
-    #[test]
-    fn output_text_flows_through_external_renderer() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let rendered_text = Arc::new(StdMutex::new(String::new()));
-
-        let output_cb = {
-            let buf = rendered_text.clone();
-            Box::new(move |text: &str| {
-                buf.lock().unwrap().push_str(text);
-            })
-        };
-
-        let mut sink = make_sink(lines.clone(), dispatched).with_output_text_sink(output_cb);
-
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "hello ".into(),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::Reasoning {
-            text: "pondering".into(),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "world".into(),
-            extra: json!({}),
-        });
-
-        assert_eq!(*rendered_text.lock().unwrap(), "hello world");
-        // Reasoning is now rendered directly by LiveSemanticSink via
-        // render_thinking_block into the stderr lines (not through an
-        // external callback).
-        let captured = lines.lock().unwrap().join("\n");
-        assert!(
-            captured.contains("pondering"),
-            "reasoning text must appear in stderr: {captured:?}"
-        );
-    }
-
-    #[test]
-    fn first_output_text_inserts_section_separator_between_tool_and_final_stdout() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let rendered_text = Arc::new(StdMutex::new(String::new()));
-
-        let output_cb = {
-            let buf = rendered_text.clone();
-            Box::new(move |text: &str| {
-                buf.lock().unwrap().push_str(text);
-            })
-        };
-
-        let mut sink = make_sink(lines.clone(), dispatched).with_output_text_sink(output_cb);
-
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("bash".into()),
-            id: None,
-            status: Some("success".into()),
-            exit_code: None,
-            output: None,
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "chunk-a ".into(),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "chunk-b".into(),
-            extra: json!({}),
-        });
-
-        let captured = lines.lock().unwrap();
-        // Exactly one blank separator between the tool render (stderr)
-        // and the stdout-bound assistant text.
-        let blanks = captured.iter().filter(|l| l.is_empty()).count();
-        assert_eq!(
-            blanks, 1,
-            "expected exactly one section-separator blank: {captured:?}"
-        );
-        // The last stderr line is that separator (the OutputText payload
-        // does not go through `emit_stderr`).
-        assert!(captured.last().is_some_and(|l| l.is_empty()));
-        // And both OutputText chunks still reach the external renderer.
-        assert_eq!(*rendered_text.lock().unwrap(), "chunk-a chunk-b");
-    }
-
-    #[test]
-    fn blank_line_terminated_output_text_suppresses_next_section_separator() {
-        // Regression: OpenCode (and any provider that emits assistant text
-        // terminated with `\n\n`) previously produced two visually blank
-        // rows between a stdout paragraph and the next stderr tool line —
-        // one from the text's own trailing blank, another from the section
-        // transition separator. When the stdout already ends on a blank
-        // line the separator is redundant and must be suppressed.
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let rendered_text = Arc::new(StdMutex::new(String::new()));
-
-        let output_cb = {
-            let buf = rendered_text.clone();
-            Box::new(move |text: &str| {
-                buf.lock().unwrap().push_str(text);
-            })
-        };
-
-        let mut sink = make_sink(lines.clone(), dispatched).with_output_text_sink(output_cb);
-
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("bash".into()),
-            id: None,
-            status: Some("success".into()),
-            exit_code: Some(0),
-            output: None,
-            extra: json!({}),
-        });
-        // Assistant prose ending with `\n\n` — the stdout stream now ends
-        // on a blank line.
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "I'll start by reading the file.\n\n".into(),
-            extra: json!({}),
-        });
-        // Next tool result triggers a FinalStdout → ToolUseAndEvents
-        // transition. The classifier wants a separator but the stdout
-        // already shows a blank line, so the sink must skip it.
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("bash".into()),
-            id: None,
-            status: Some("success".into()),
-            exit_code: Some(0),
-            output: None,
-            extra: json!({}),
-        });
-
-        let captured = lines.lock().unwrap().clone();
-        let blanks = captured.iter().filter(|l| l.is_empty()).count();
-        assert_eq!(
-            blanks, 1,
-            "exactly one separator blank (the one before the stdout text); \
-             the transition back to stderr must reuse the stdout trailing blank: {captured:?}"
-        );
-    }
-
-    #[test]
-    fn trailing_newline_accumulates_across_chunks() {
-        // Provider streams that split `\n\n` into separate events must
-        // still accumulate to the "ends on a blank line" state, so the
-        // next section transition suppresses the redundant separator.
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let rendered_text = Arc::new(StdMutex::new(String::new()));
-
-        let output_cb = {
-            let buf = rendered_text.clone();
-            Box::new(move |text: &str| {
-                buf.lock().unwrap().push_str(text);
-            })
-        };
-
-        let mut sink = make_sink(lines.clone(), dispatched).with_output_text_sink(output_cb);
-
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("bash".into()),
-            id: None,
-            status: Some("success".into()),
-            exit_code: Some(0),
-            output: None,
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "paragraph.\n".into(),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "\n".into(),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("bash".into()),
-            id: None,
-            status: Some("success".into()),
-            exit_code: Some(0),
-            output: None,
-            extra: json!({}),
-        });
-
-        let captured = lines.lock().unwrap().clone();
-        let blanks = captured.iter().filter(|l| l.is_empty()).count();
-        assert_eq!(
-            blanks, 1,
-            "chunked `\\n` + `\\n` must accumulate to a blank-line trailing \
-             state and suppress the next section separator: {captured:?}"
-        );
-    }
-
-    #[test]
-    fn single_trailing_newline_does_not_suppress_separator() {
-        // A single `\n` ends the line but does not produce a blank line,
-        // so the section separator is still required to visually separate
-        // stdout prose from the next stderr event.
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let rendered_text = Arc::new(StdMutex::new(String::new()));
-
-        let output_cb = {
-            let buf = rendered_text.clone();
-            Box::new(move |text: &str| {
-                buf.lock().unwrap().push_str(text);
-            })
-        };
-
-        let mut sink = make_sink(lines.clone(), dispatched).with_output_text_sink(output_cb);
-
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("bash".into()),
-            id: None,
-            status: Some("success".into()),
-            exit_code: Some(0),
-            output: None,
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "single trailing newline.\n".into(),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("bash".into()),
-            id: None,
-            status: Some("success".into()),
-            exit_code: Some(0),
-            output: None,
-            extra: json!({}),
-        });
-
-        let captured = lines.lock().unwrap().clone();
-        let blanks = captured.iter().filter(|l| l.is_empty()).count();
-        assert_eq!(
-            blanks, 2,
-            "one separator into FinalStdout and one back into ToolUseAndEvents: {captured:?}"
-        );
-    }
-
-    #[test]
-    fn output_text_starting_with_newline_suppresses_separator() {
-        // When the OutputText itself starts with a \n, the text provides
-        // its own visual blank line. The section-transition separator must
-        // be suppressed to avoid double-blanking.
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let rendered_text = Arc::new(StdMutex::new(String::new()));
-
-        let output_cb = {
-            let buf = rendered_text.clone();
-            Box::new(move |text: &str| {
-                buf.lock().unwrap().push_str(text);
-            })
-        };
-
-        let mut sink = make_sink(lines.clone(), dispatched).with_output_text_sink(output_cb);
-
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("bash".into()),
-            id: None,
-            status: Some("success".into()),
-            exit_code: Some(0),
-            output: None,
-            extra: json!({}),
-        });
-        // Text starting with \n provides its own visual break.
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "\nanswer".into(),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("bash".into()),
-            id: None,
-            status: Some("success".into()),
-            exit_code: Some(0),
-            output: None,
-            extra: json!({}),
-        });
-
-        let captured = lines.lock().unwrap().clone();
-        // The separator INTO FinalStdout is suppressed (text starts with \n).
-        // The separator BACK into ToolUseAndEvents should be emitted (stdout
-        // trailing newlines = 0, "answer" has no trailing \n).
-        let blanks = captured.iter().filter(|l| l.is_empty()).count();
-        assert_eq!(
-            blanks, 1,
-            "separator into stdout suppressed (text starts with \\n),              separator back to stderr emitted: {captured:?}"
-        );
-    }
-
-    #[test]
-    fn output_text_pure_newlines_suppress_both_separators() {
-        // When OutputText is purely "\n\n" (no visible content), both
-        // separators (into and out of FinalStdout) must be suppressed to
-        // prevent triple-blanking.
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let rendered_text = Arc::new(StdMutex::new(String::new()));
-
-        let output_cb = {
-            let buf = rendered_text.clone();
-            Box::new(move |text: &str| {
-                buf.lock().unwrap().push_str(text);
-            })
-        };
-
-        let mut sink = make_sink(lines.clone(), dispatched).with_output_text_sink(output_cb);
-
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("bash".into()),
-            id: None,
-            status: Some("success".into()),
-            exit_code: Some(0),
-            output: None,
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "\n\n".into(),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("bash".into()),
-            id: None,
-            status: Some("success".into()),
-            exit_code: Some(0),
-            output: None,
-            extra: json!({}),
-        });
-
-        let captured = lines.lock().unwrap().clone();
-        // The separator INTO FinalStdout is suppressed (text starts with \n).
-        // The separator BACK into ToolUseAndEvents is suppressed (stdout
-        // trailing newlines = 2, so at_visual_blank() = true).
-        let blanks = captured.iter().filter(|l| l.is_empty()).count();
-        assert_eq!(
-            blanks, 0,
-            "both separators suppressed: into stdout (text starts with \\n),              back to stderr (stdout trailing newlines >= 2): {captured:?}"
-        );
-
-        // Verify no consecutive blanks in the combined output.
-        let mut prev_blank = false;
-        for line in &captured {
-            let is_blank = line.trim().is_empty();
-            assert!(
-                !(is_blank && prev_blank),
-                "no consecutive blank lines: {captured:?}"
-            );
-            prev_blank = is_blank;
-        }
-    }
-
-    #[test]
-    fn stdout_trailing_resets_after_intervening_stderr_line() {
-        // Between two OutputText events that are separated by stderr
-        // content, the second transition back to stdout still needs a
-        // full separator — the stderr scroll between the two stdout
-        // writes visually breaks the "stdout ended on blank" signal.
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let rendered_text = Arc::new(StdMutex::new(String::new()));
-
-        let output_cb = {
-            let buf = rendered_text.clone();
-            Box::new(move |text: &str| {
-                buf.lock().unwrap().push_str(text);
-            })
-        };
-
-        let mut sink = make_sink(lines.clone(), dispatched).with_output_text_sink(output_cb);
-
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "first block.\n\n".into(),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("bash".into()),
-            id: None,
-            status: Some("success".into()),
-            exit_code: Some(0),
-            output: None,
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "second block.".into(),
-            extra: json!({}),
-        });
-
-        let captured = lines.lock().unwrap().clone();
-        let blanks = captured.iter().filter(|l| l.is_empty()).count();
-        assert_eq!(
-            blanks, 1,
-            "first transition uses stdout trailing blank (skipped), second \
-             transition back into FinalStdout must still emit the separator: \
-             {captured:?}"
-        );
-    }
-
-    #[test]
-    fn emit_trailer_line_inserts_single_separator_after_final_stdout() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-
-        let output_cb = Box::new(move |_text: &str| {
-            // The renderer would normally write to stdout; we do not need
-            // to capture it for this assertion. The section tracker is
-            // what matters.
-        });
-
-        let mut sink = make_sink(lines.clone(), dispatched).with_output_text_sink(output_cb);
-
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("bash".into()),
-            id: None,
-            status: Some("success".into()),
-            exit_code: None,
-            output: None,
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "result".into(),
-            extra: json!({}),
-        });
-
-        sink.emit_trailer_line("✓ 5s");
-        sink.emit_trailer_line("  secondary");
-
-        let captured = lines.lock().unwrap().clone();
-        // Captured stderr lines should be, in order:
-        //   <tool line>, "" (tool→final separator), "" (final→trailer
-        //   separator), "✓ 5s", "  secondary"
-        // The two separators are tagged to different sections so the
-        // dedup does NOT collapse them; every section transition emits a
-        // separator.
-        assert!(!captured.is_empty());
-        let blanks_then: Vec<_> = captured
-            .iter()
-            .enumerate()
-            .filter(|(_, l)| l.is_empty())
-            .map(|(idx, _)| idx)
-            .collect();
-        assert_eq!(
-            blanks_then.len(),
-            2,
-            "one separator into FinalStdout and one into TrailerMetadata: {captured:?}"
-        );
-        assert!(
-            captured.iter().any(|l| l.contains("✓ 5s")),
-            "trailer line must be present: {captured:?}"
-        );
-    }
-
-    #[test]
-    fn output_text_without_callback_is_dropped_not_rendered_as_status() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "hello".into(),
-            extra: json!({}),
-        });
-        // No status line should be emitted for OutputText, and no hook dispatch.
-        assert!(lines.lock().unwrap().is_empty());
-        assert!(dispatched.lock().unwrap().is_empty());
-    }
-
-    #[test]
-    fn event_logger_records_every_event_with_full_payload() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let logged: Arc<StdMutex<Vec<(String, DispatchEventMeta)>>> =
-            Arc::new(StdMutex::new(Vec::new()));
-
-        let logger = {
-            let captured = logged.clone();
-            Box::new(move |event: &SemanticEvent, meta: &DispatchEventMeta| {
-                captured
-                    .lock()
-                    .unwrap()
-                    .push((event.kind_str().into(), meta.clone()));
-            })
-        };
-
-        let mut sink = make_sink(lines, dispatched).with_event_logger(logger);
-
-        // OutputText has no agentic mapping but should still be logged.
-        sink.on_semantic_event(SemanticEvent::OutputText {
-            text: "hello".into(),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("bash".into()),
-            id: Some("t1".into()),
-            input: Some(json!({"command": "ls"})),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::Codex,
-            kind: "item.updated".into(),
-            payload: json!({"message": "still working"}),
-        });
-
-        let collected = logged.lock().unwrap().clone();
-        let kinds: Vec<&str> = collected.iter().map(|(k, _)| k.as_str()).collect();
-        assert_eq!(
-            kinds,
-            vec!["output_text", "tool_call", "provider_extension"]
-        );
-
-        // Every row must carry the full serialized semantic event under
-        // extra["semantic_event"] so JSONL readers can replay fidelity.
-        for (kind, meta) in &collected {
-            let sem = meta
-                .extra
-                .get("semantic_event")
-                .expect("semantic_event payload missing");
-            assert_eq!(sem["type"], *kind);
-            assert_eq!(
-                meta.extra.get("synthetic_kind"),
-                Some(&Value::String("stream_semantic_event".into()))
-            );
-        }
-    }
-
-    /// Review-1 Finding 1 — live dispatched/logged records must carry
-    /// `agent_pid` once the wrapper has stamped the spawned child PID.
-    ///
-    /// The same `DispatchEventMeta` is handed to both the JSONL logger and
-    /// the hook dispatcher (step 7 of `on_semantic_event`), so asserting the
-    /// logged copy proves the dispatched hook/action context too. Before
-    /// `set_agent_pid`, records stay `None`; after, they carry the PID.
-    #[test]
-    fn live_records_carry_agent_pid_after_set() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let logged: Arc<StdMutex<Vec<DispatchEventMeta>>> = Arc::new(StdMutex::new(Vec::new()));
-
-        let logger = {
-            let captured = logged.clone();
-            Box::new(move |_event: &SemanticEvent, meta: &DispatchEventMeta| {
-                captured.lock().unwrap().push(meta.clone());
-            })
-        };
-
-        let mut sink = make_sink(lines, dispatched).with_event_logger(logger);
-
-        // Before spawn the wrapper has no child PID to report.
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("bash".into()),
-            id: Some("t1".into()),
-            input: None,
-            extra: json!({}),
-        });
-
-        sink.set_agent_pid(Some(98_765));
-
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("bash".into()),
-            id: Some("t2".into()),
-            input: None,
-            extra: json!({}),
-        });
-
-        let collected = logged.lock().unwrap().clone();
-        assert_eq!(collected.len(), 2);
-        assert_eq!(
-            collected[0].agent_pid, None,
-            "records before set_agent_pid must omit agent_pid"
-        );
-        assert_eq!(
-            collected[1].agent_pid,
-            Some(98_765),
-            "records after set_agent_pid must carry the spawned child PID"
-        );
-    }
-
-    #[test]
-    fn live_metrics_updated_from_events() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines, dispatched);
-        let metrics = sink.live_metrics();
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("bash".into()),
-            id: Some("t1".into()),
-            input: None,
-            extra: json!({}),
-        });
-        let state = metrics.lock().unwrap();
-        assert_eq!(state.in_flight.len(), 1);
-    }
-
-    #[test]
-    fn provider_extension_with_only_nested_text_renders_summary_not_raw_json() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-
-        // Payload has no top-level message/status/name/path, but nested text.
-        sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::Codex,
-            kind: "future.unknown".into(),
-            payload: json!({
-                "item": {
-                    "content": { "parts": [ { "text": "meaningful text here" } ] }
-                }
-            }),
-        });
-
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("meaningful text here"),
-            "expected nested text preview in stderr: {rendered}"
-        );
-        assert!(
-            !rendered.contains(r#"{"item":"#),
-            "raw JSON must not appear in stderr: {rendered}"
-        );
-    }
-
-    #[test]
-    fn provider_extension_unresolvable_drops_payload_tail_entirely() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-
-        sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::Codex,
-            kind: "opaque.event".into(),
-            payload: json!({
-                "some_numeric_field": 42,
-                "another": [1, 2, 3]
-            }),
-        });
-
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("codex/opaque.event"),
-            "provider/kind label must still appear: {rendered}"
-        );
-        assert!(
-            !rendered.contains(r#"{"some_numeric_field":"#) && !rendered.contains("42"),
-            "raw payload must not appear when no human-readable summary is available: {rendered}"
-        );
-        assert!(
-            !rendered.contains(" \u{00b7} {"),
-            "must not render the summary separator followed by raw JSON: {rendered}"
-        );
-    }
-
-    #[test]
-    fn provider_extension_respects_silent_kind_allowlist() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-
-        // Kinds in the silent allowlist must produce NO stderr line at all
-        // (they still get dispatched and logged, just not rendered).
-        sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::Claude,
-            kind: "stream_event".into(),
-            payload: json!({ "delta": "chunk" }),
-        });
-
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            !rendered.contains("claude/stream_event"),
-            "silent-kind allowlist must suppress the status line entirely: {rendered}"
-        );
-    }
-
-    #[test]
-    fn provider_extension_kimi_high_volume_kinds_are_silent() {
-        // Phase 5 of the fix-kimi plan adds defensive Kimi entries to the
-        // silent-extension allowlist so high-volume wire fallback kinds
-        // (ContentPart, ToolCallPart, StatusUpdate, and legacy
-        // stream-json names) don't flood stderr if a future Kimi
-        // protocol revision changes payload shapes and the typed
-        // deserialization falls back to ProviderExtension.
-        for kind in [
-            "event:ContentPart",
-            "event:ToolCallPart",
-            "event:StatusUpdate",
-            "event:MessageStart",
-            "event:MessageDelta",
-            "event:MessageEnd",
-            "event:Thinking",
-        ] {
-            let lines = Arc::new(StdMutex::new(Vec::new()));
-            let dispatched = Arc::new(StdMutex::new(Vec::new()));
-            let mut sink = make_sink_for_provider(
-                Provider::KimiCode,
-                Verbosity::Normal,
-                lines.clone(),
-                dispatched.clone(),
-            );
-            sink.on_semantic_event(SemanticEvent::ProviderExtension {
-                provider: Provider::KimiCode,
-                kind: kind.into(),
-                payload: json!({"delta": "x"}),
-            });
-            let rendered = lines.lock().unwrap().join("\n");
-            assert!(
-                !rendered.contains(&format!("kimi/{kind}")),
-                "kimi {kind} must be suppressed: {rendered}"
-            );
-        }
-    }
-
-    #[test]
-    fn provider_extension_kimi_unknown_kinds_still_surface() {
-        // Inverse of the silent-allowlist: unknown Kimi event types must
-        // still render as ProviderExtension status lines so operators
-        // can see protocol drift and add explicit handling.
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink_for_provider(
-            Provider::KimiCode,
-            Verbosity::Normal,
-            lines.clone(),
-            dispatched.clone(),
-        );
-        sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::KimiCode,
-            kind: "event:FutureKimiEvent".into(),
-            payload: json!({"x": 1}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("kimi/event:FutureKimiEvent"),
-            "unknown Kimi event types must surface as ProviderExtension: {rendered}"
-        );
-    }
-
-    #[test]
-    fn provider_extension_claude_system_hook_kinds_are_silent() {
-        // Task 2a.2 parser emits hook events with kinds `system/hook_started`,
-        // `system/hook_response`, `system/hook_progress`. The sink allowlist
-        // must suppress all three so subscription users don't see hook noise.
-        for kind in [
-            "system/hook_started",
-            "system/hook_response",
-            "system/hook_progress",
-        ] {
-            let lines = Arc::new(StdMutex::new(Vec::new()));
-            let dispatched = Arc::new(StdMutex::new(Vec::new()));
-            let mut sink = make_sink(lines.clone(), dispatched.clone());
-            sink.on_semantic_event(SemanticEvent::ProviderExtension {
-                provider: Provider::Claude,
-                kind: kind.into(),
-                payload: json!({"hook_name": "SessionStart:startup"}),
-            });
-            let rendered = lines.lock().unwrap().join("\n");
-            assert!(
-                !rendered.contains(&format!("claude/{kind}")),
-                "kind {kind:?} must be suppressed: {rendered}"
-            );
-        }
-    }
-
-    #[test]
-    fn opencode_firecrawl_tool_use_does_not_render_via_info_glyph() {
-        // Task 2c.4 regression: the ⚙ firecrawl line was OpenCode's own
-        // TUI output (suppressed via noise-prefix list in profile.rs);
-        // the sink's own rendering of a firecrawl ToolResult must use
-        // the ← arrow via ToolCallDisplay, NOT the ⚙ Info glyph.
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let dispatch = {
-            let captured = dispatched.clone();
-            Box::new(move |event: AgenticEvent, meta: DispatchEventMeta| {
-                captured
-                    .lock()
-                    .unwrap()
-                    .push((event, meta.tool_name.unwrap_or_default()));
-            })
-        };
-        let emit = {
-            let lines = lines.clone();
-            Box::new(move |line: &str| {
-                lines.lock().unwrap().push(line.to_string());
-            })
-        };
-        let mut sink = LiveSemanticSink::new(
-            Provider::OpenCode,
-            EnvironmentContext::default(),
-            Path::new("/tmp"),
-            Verbosity::Normal,
-            Arc::new(Mutex::new(StructuredSummaryDetails::default())),
-            dispatch,
-            emit,
-        );
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("firecrawl_firecrawl_search".into()),
-            id: None,
-            status: Some("success".into()),
-            exit_code: None,
-            output: None,
-            extra: json!({"input": {"query": "NFL draft 2026 date"}}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            !rendered.contains('\u{2699}'),
-            "must not use the ⚙ Info glyph for tool events: {rendered:?}"
-        );
-        assert!(
-            rendered.contains("Firecrawl Search"),
-            "humanized tool name must appear: {rendered:?}"
-        );
-        assert!(
-            rendered.contains('\u{2190}'),
-            "incoming ← arrow must render: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn tool_call_renders_canonical_format_with_humanized_name_and_query_summary() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("firecrawl_firecrawl_search".into()),
-            id: None,
-            input: Some(json!({"query": "NFL draft 2026 date"})),
-            extra: json!({}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("Firecrawl Search"),
-            "expected humanized name in {rendered:?}"
-        );
-        assert!(
-            rendered.contains("NFL draft 2026 date"),
-            "expected query summary in {rendered:?}"
-        );
-        assert!(rendered.contains('\u{2192}'), "expected → arrow");
-    }
-
-    #[test]
-    fn tool_result_renders_status_word_when_status_present() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("firecrawl_firecrawl_search".into()),
-            id: None,
-            status: Some("success".into()),
-            exit_code: None,
-            output: None,
-            extra: json!({}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(rendered.contains("Firecrawl Search"));
-        assert!(rendered.contains("successful"));
-        assert!(rendered.contains('\u{2190}'));
-    }
-
-    #[test]
-    fn no_captured_fixture_ever_renders_raw_json_on_stderr() {
-        use std::path::Path as StdPath;
-
-        let fixtures_dir = StdPath::new(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("lib")
-            .join("tests")
-            .join("fixtures")
-            .join("providers");
-
-        assert!(
-            fixtures_dir.exists(),
-            "fixtures dir must exist: {fixtures_dir:?}"
-        );
-
-        for provider_slug in &["claude", "codex", "gemini", "opencode"] {
-            let fixture = fixtures_dir.join(format!("{provider_slug}.ndjson"));
-            if !fixture.exists() {
-                continue; // optional fixtures
-            }
-            let provider = match *provider_slug {
-                "claude" => Provider::Claude,
-                "codex" => Provider::Codex,
-                "gemini" => Provider::Gemini,
-                "opencode" => Provider::OpenCode,
-                _ => unreachable!(),
-            };
-            let fixture_lines: Vec<String> = std::fs::read_to_string(&fixture)
-                .expect("read fixture")
-                .lines()
-                .map(String::from)
-                .collect();
-
-            let lines_ref: Vec<&str> = fixture_lines.iter().map(String::as_str).collect();
-            let stderr_lines = golden_stderr::replay_to_stderr(provider, &lines_ref, None);
-
-            for line in &stderr_lines {
-                // Tool result lines (`← Name(...)`) and tool call lines
-                // (`→ Name(...)`) legitimately carry tool slot content
-                // derived from input or output text, which may include
-                // arbitrary characters — for example, a successful
-                // `run_shell_command` whose output is grep results that
-                // happen to embed JSON strings. Per the 2026-04-18
-                // contract, those summaries co-render with the status,
-                // so the raw-JSON guard does not apply to lines wrapped
-                // in a tool arrow.
-                if line.contains('\u{2190}') || line.contains('\u{2192}') {
-                    continue;
-                }
-                // Heuristic: a line is "raw JSON" if it contains both `{`
-                // and a JSON-shaped key-value opener like `"\:`.
-                let has_json_obj_opener = line.contains('{') && line.contains("\":");
-                assert!(
-                    !has_json_obj_opener,
-                    "provider={provider_slug}: stderr line contains raw JSON: {line:?}"
-                );
-            }
-        }
-    }
-
-    /// Strip biscuit-terminal Layout soft-wrap continuations so assertions
-    /// can check the pre-wrap content regardless of the terminal-aware
-    /// column budget applied by `Status` + `Layout`.
-    ///
-    /// Handles both the 2-space hanging indent used by generic status lines
-    /// (`ProviderExtension`, `Info`, `Warning`) and the 4-space hanging
-    /// indent used by tool-call status lines (`→ Name(...)` / `← Name(...)`)
-    /// which bump the indent to align continuation text under the tool
-    /// name rather than under the state-icon glyph.
-    fn strip_layout_wraps(rendered: &str) -> String {
-        rendered
-            .replace("-\n    ", "")
-            .replace("\n    ", "")
-            .replace("-\n  ", "")
-            .replace("\n  ", "")
-    }
-
-    #[test]
-    fn long_summary_is_not_truncated_to_60_or_80_chars() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        let long = "a".repeat(200);
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("Bash".into()),
-            id: None,
-            input: Some(json!({"command": long.clone()})),
-            extra: json!({}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        let unwrapped = strip_layout_wraps(&rendered);
-        assert!(
-            unwrapped.contains(&long),
-            "long command must not be truncated; got {rendered:?}"
-        );
-        assert!(!rendered.contains('\u{2026}'), "no ellipsis expected");
-    }
-
-    #[test]
-    fn long_provider_extension_payload_is_not_capped_at_80() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        let long = "x".repeat(300);
-        sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::Codex,
-            kind: "custom.kind".into(),
-            payload: json!({"message": long.clone()}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        let unwrapped = strip_layout_wraps(&rendered);
-        assert!(
-            unwrapped.contains(&long),
-            "long provider-extension message must not be truncated; got {rendered:?}"
-        );
-        assert!(!rendered.contains('\u{2026}'), "no ellipsis expected");
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn claude_generic_rate_limit_warning_suppressed_for_subscription_metadata() {
-        let _guard = TestEnvGuard::set("ANTHROPIC_API_KEY", "sk-test");
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::SessionStart {
-            session_id: Some("s1".into()),
-            model: Some("claude".into()),
-            extra: json!({"api_key_source": "none"}),
-        });
-        lines.lock().unwrap().clear();
-        sink.on_semantic_event(SemanticEvent::Warning {
-            message: "rate limit".into(),
-            extra: json!({"raw_kind": "rate_limit_event"}),
-        });
-        assert!(
-            lines.lock().unwrap().is_empty(),
-            "generic rate-limit Warning must not render for subscription auth"
-        );
-        assert!(
-            !dispatched.lock().unwrap().is_empty(),
-            "underlying dispatch must still fire so JSONL log retains the event"
-        );
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn claude_generic_rate_limit_warning_suppression_preserves_jsonl_log() {
-        // Definition of Done: "underlying event still in JSONL for
-        // subscription users". Explicit assertion that the event-log
-        // closure fires even when the stderr render is suppressed.
-        let _guard = TestEnvGuard::set("ANTHROPIC_API_KEY", "sk-test");
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let logged: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
-        let logger = {
-            let captured = logged.clone();
-            Box::new(move |event: &SemanticEvent, _meta: &DispatchEventMeta| {
-                captured.lock().unwrap().push(event.kind_str().into());
-            })
-        };
-        let mut sink = make_sink(lines.clone(), dispatched.clone()).with_event_logger(logger);
-        sink.on_semantic_event(SemanticEvent::SessionStart {
-            session_id: Some("s1".into()),
-            model: Some("claude".into()),
-            extra: json!({"api_key_source": "none"}),
-        });
-        lines.lock().unwrap().clear();
-        logged.lock().unwrap().clear();
-        sink.on_semantic_event(SemanticEvent::Warning {
-            message: "rate limit".into(),
-            extra: json!({"raw_kind": "rate_limit_event"}),
-        });
-        assert!(
-            lines.lock().unwrap().is_empty(),
-            "stderr must be suppressed"
-        );
-        let kinds = logged.lock().unwrap().clone();
-        assert_eq!(
-            kinds,
-            vec!["warning".to_string()],
-            "JSONL log must still receive the Warning event"
-        );
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn claude_generic_rate_limit_warning_renders_for_api_key_metadata() {
-        let _guard = TestEnvGuard::remove("ANTHROPIC_API_KEY");
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::SessionStart {
-            session_id: Some("s1".into()),
-            model: Some("claude".into()),
-            extra: json!({"api_key_source": "ANTHROPIC_API_KEY"}),
-        });
-        lines.lock().unwrap().clear();
-        sink.on_semantic_event(SemanticEvent::Warning {
-            message: "rate limit".into(),
-            extra: json!({"raw_kind": "rate_limit_event"}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("rate limit"),
-            "generic rate-limit Warning must render for API-key auth: {rendered:?}"
-        );
-    }
-
-    #[test]
-    #[serial_test::serial]
-    fn claude_explicit_rate_limit_message_renders_for_subscription_metadata() {
-        let _guard = TestEnvGuard::remove("ANTHROPIC_API_KEY");
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::SessionStart {
-            session_id: Some("s1".into()),
-            model: Some("claude".into()),
-            extra: json!({"api_key_source": "none"}),
-        });
-        lines.lock().unwrap().clear();
-        sink.on_semantic_event(SemanticEvent::Warning {
-            message: "Claude rate limit warning: your 5-hour session window is approaching the cap. Window resets on 2024-04-01 at 19:33".into(),
-            extra: json!({
-                "raw_kind": "rate_limit_event",
-                "rate_limit_status": "approaching_limit",
-                "reset_at": "2024-04-01T19:33:20+00:00"
-            }),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("Window resets on"),
-            "explicit Claude rate-limit metadata must render for subscriptions: {rendered:?}"
-        );
-        assert!(
-            rendered.contains("approaching the cap"),
-            "explicit Claude rate-limit metadata must include user-friendly wording: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn reasoning_emits_block_quote_to_stderr_in_thinking_section() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::Reasoning {
-            text: "considering the options".into(),
-            extra: json!({}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("considering the options"),
-            "reasoning text must appear in stderr: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn tracing_warning_renders_header_and_block_quote_body() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::Warning {
-            message: "forked agents inherit the parent agent type".into(),
-            extra: json!({
-                "provider": "codex",
-                "tracing_target": "codex_core::tools::router",
-                "tracing_level": "error",
-            }),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("WARN"),
-            "tracing warning must render the WARN label regardless of the incoming level: {rendered:?}"
-        );
-        assert!(
-            rendered.contains("codex_core::tools::router"),
-            "tracing target must appear in the header: {rendered:?}"
-        );
-        assert!(
-            rendered.contains("forked agents inherit the parent agent type"),
-            "tracing body must appear in the BlockQuote: {rendered:?}"
-        );
-        // Warning BlockQuote must use the centered ┃ (U+2503) glyph so the
-        // bar aligns under the centered ⚠ Warning icon. The left-aligned
-        // ▌ (U+258C) used by thinking blocks must NOT appear here.
-        assert!(
-            rendered.contains("\u{2503}"),
-            "tracing BlockQuote must use the centered ┃ border: {rendered:?}"
-        );
-        assert!(
-            !rendered.contains("\u{258c}"),
-            "tracing BlockQuote must not use the left-aligned ▌ border: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn reasoning_then_tool_call_transitions_with_single_blank() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::Reasoning {
-            text: "planning".into(),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("Bash".into()),
-            id: None,
-            input: Some(json!({"command": "ls"})),
-            extra: json!({}),
-        });
-        let collected = lines.lock().unwrap().clone();
-        let mut prev_blank = false;
-        for line in &collected {
-            let is_blank = line.trim().is_empty();
-            assert!(
-                !(is_blank && prev_blank),
-                "two consecutive blank lines in reasoning→tool transition: {collected:?}"
-            );
-            prev_blank = is_blank;
-        }
-    }
-
-    /// RAII wrapper that restores the prior env var value on drop. Tests
-    /// using this guard must be annotated `#[serial_test::serial]` because
-    /// env vars are process-wide.
-    struct TestEnvGuard {
-        key: &'static str,
-        prior: Option<String>,
-    }
-    impl TestEnvGuard {
-        fn remove(key: &'static str) -> Self {
-            let prior = std::env::var(key).ok();
-            // SAFETY: tests are serialized via serial_test; no other thread
-            // races on env vars while the guard exists.
-            unsafe {
-                std::env::remove_var(key);
-            }
-            Self { key, prior }
-        }
-        fn set(key: &'static str, value: &str) -> Self {
-            let prior = std::env::var(key).ok();
-            unsafe {
-                std::env::set_var(key, value);
-            }
-            Self { key, prior }
-        }
-    }
-    impl Drop for TestEnvGuard {
-        fn drop(&mut self) {
-            unsafe {
-                match &self.prior {
-                    Some(v) => std::env::set_var(self.key, v),
-                    None => std::env::remove_var(self.key),
-                }
-            }
-        }
-    }
-
-    /// Build a sink rooted at `cwd` with a captured stderr line buffer.
-    /// Used by the link-rendering tests so fixtures can feed absolute
-    /// paths that resolve against a non-`/tmp` root.
-    fn make_sink_with_cwd(
-        captured_lines: Arc<StdMutex<Vec<String>>>,
-        cwd: &Path,
-    ) -> LiveSemanticSink {
-        let dispatch = Box::new(|_: AgenticEvent, _: DispatchEventMeta| {});
-        let emit = {
-            let lines = captured_lines.clone();
-            Box::new(move |line: &str| {
-                lines.lock().unwrap().push(line.to_string());
-            })
-        };
-        let mut sink = LiveSemanticSink::new(
-            Provider::Claude,
-            EnvironmentContext::default(),
-            cwd,
-            Verbosity::Normal,
-            Arc::new(Mutex::new(StructuredSummaryDetails::default())),
-            dispatch,
-            emit,
-        );
-        sink.terminal = Terminal::builder()
-            .is_tty(true)
-            .color_depth(ColorDepth::TrueColor)
-            .osc_link_support(true)
-            .build();
-        sink
-    }
-
-    #[test]
-    fn read_tool_call_renders_path_as_cwd_relative_blue_link() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let cwd = Path::new("/repo");
-        let mut sink = make_sink_with_cwd(lines.clone(), cwd);
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("Read".into()),
-            id: Some("t1".into()),
-            input: Some(json!({"file_path": "/repo/src/main.rs"})),
-            extra: json!({}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("Read("),
-            "expected Read(...) form: {rendered:?}"
-        );
-        assert!(
-            rendered.contains("src/main.rs"),
-            "expected cwd-relative visible path: {rendered:?}"
-        );
-        // Link is rendered in blue (ANSI 34). Terminals without OSC8
-        // support drop the hyperlink wrapper but keep the blue colour,
-        // which is what biscuit-terminal emits in the test harness.
-        assert!(
-            rendered.contains("\u{1b}[34m"),
-            "file-tool path must render with blue styling: {rendered:?}"
-        );
-        // The visible label (the part inside `[...]` for markdown-link
-        // fallback, or the OSC8 link text for terminals with hyperlink
-        // support) must be the cwd-relative path. The link target may
-        // legitimately carry the absolute `file://` URL — that is metadata,
-        // not visible text — so we only forbid the absolute path from
-        // appearing as the bracket label.
-        assert!(
-            !rendered.contains("[/repo/src/main.rs]"),
-            "absolute path must not appear as visible label: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn read_tool_success_result_includes_path_link_in_slot() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let cwd = Path::new("/repo");
-        let mut sink = make_sink_with_cwd(lines.clone(), cwd);
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("Read".into()),
-            id: Some("t1".into()),
-            status: Some("success".into()),
-            exit_code: None,
-            output: Some(json!({"file_path": "/repo/src/main.rs"})),
-            extra: json!({"input": {"file_path": "/repo/src/main.rs"}}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("successful"),
-            "success result must retain 'successful' label: {rendered:?}"
-        );
-        assert!(
-            rendered.contains("src/main.rs"),
-            "success result must surface the file path: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn read_tool_error_renders_warning_header_and_blockquote() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let cwd = Path::new("/repo");
-        let mut sink = make_sink_with_cwd(lines.clone(), cwd);
-        let error_body = "File content (30485 tokens) exceeds maximum allowed tokens (25000). \
-            Use offset and limit parameters to read specific portions of the file.";
-        sink.on_semantic_event(SemanticEvent::ToolResult {
-            name: Some("Read".into()),
-            id: Some("t1".into()),
-            status: Some("error".into()),
-            exit_code: None,
-            output: Some(Value::String(error_body.to_string())),
-            extra: json!({"input": {"file_path": "/repo/src/args.rs"}, "error": error_body}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("Read("),
-            "header should read like a Read() call: {rendered:?}"
-        );
-        assert!(
-            rendered.contains("error"),
-            "header should carry 'error' label: {rendered:?}"
-        );
-        // The header is styled red-bold for the 'error' label.
-        assert!(
-            rendered.contains("\u{1b}[31m"),
-            "'error' label must render red: {rendered:?}"
-        );
-        assert!(
-            rendered.contains("src/args.rs"),
-            "header should carry the relative path: {rendered:?}"
-        );
-        // BlockQuote body uses the centered ┃ (U+2503) glyph to align
-        // under the warning status icon.
-        assert!(
-            rendered.contains("\u{2503}"),
-            "body should render inside a centered BlockQuote: {rendered:?}"
-        );
-        assert!(
-            rendered.contains("exceeds maximum allowed tokens"),
-            "error body text must appear verbatim: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn task_progress_suppressed_when_followed_by_matching_read_call() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let cwd = Path::new("/repo");
-        let mut sink = make_sink_with_cwd(lines.clone(), cwd);
-        sink.on_semantic_event(SemanticEvent::Info {
-            message: "Reading src/args.rs".into(),
-            extra: json!({"type": "task_progress", "message": "Reading src/args.rs"}),
-        });
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("Read".into()),
-            id: Some("t1".into()),
-            input: Some(json!({"file_path": "/repo/src/args.rs"})),
-            extra: json!({}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            !rendered.contains("Reading src/args.rs"),
-            "redundant task_progress narration must be suppressed: {rendered:?}"
-        );
-        assert!(
-            rendered.contains("Read("),
-            "the follow-up Read tool call must still render: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn task_progress_flushed_when_followed_by_unrelated_tool_call() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let cwd = Path::new("/repo");
-        let mut sink = make_sink_with_cwd(lines.clone(), cwd);
-        sink.on_semantic_event(SemanticEvent::Info {
-            message: "Running git status".into(),
-            extra: json!({"type": "task_progress", "message": "Running git status"}),
-        });
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("Read".into()),
-            id: Some("t1".into()),
-            input: Some(json!({"file_path": "/repo/Cargo.toml"})),
-            extra: json!({}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("Running git status"),
-            "unrelated task_progress must be flushed before the tool call: {rendered:?}"
-        );
-        assert!(
-            rendered.contains("Cargo.toml"),
-            "tool call must still render: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn task_progress_flushed_on_drop_if_no_matching_tool_follows() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let cwd = Path::new("/repo");
-        {
-            let mut sink = make_sink_with_cwd(lines.clone(), cwd);
-            sink.on_semantic_event(SemanticEvent::Info {
-                message: "Reading src/main.rs".into(),
-                extra: json!({"type": "task_progress", "message": "Reading src/main.rs"}),
-            });
-        }
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("Reading src/main.rs"),
-            "pending task_progress must be flushed on sink drop: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn task_progress_for_non_claude_provider_renders_immediately() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatch = Box::new(|_: AgenticEvent, _: DispatchEventMeta| {});
-        let emit = {
-            let lines = lines.clone();
-            Box::new(move |line: &str| {
-                lines.lock().unwrap().push(line.to_string());
-            })
-        };
-        let mut sink = LiveSemanticSink::new(
-            Provider::Codex,
-            EnvironmentContext::default(),
-            Path::new("/repo"),
-            Verbosity::Normal,
-            Arc::new(Mutex::new(StructuredSummaryDetails::default())),
-            dispatch,
-            emit,
-        );
-        sink.on_semantic_event(SemanticEvent::Info {
-            message: "Reading src/args.rs".into(),
-            extra: json!({"type": "task_progress"}),
-        });
-        sink.on_semantic_event(SemanticEvent::ToolCall {
-            name: Some("read_file".into()),
-            id: Some("t1".into()),
-            input: Some(json!({"file_path": "/repo/src/args.rs"})),
-            extra: json!({}),
-        });
-        let rendered = lines.lock().unwrap().join("\n");
-        assert!(
-            rendered.contains("Reading src/args.rs"),
-            "non-Claude task_progress must render unchanged: {rendered:?}"
-        );
-    }
-
-    #[test]
-    fn pending_matches_tool_call_requires_minimum_shared_overlap() {
-        // Short progress + short summary must NOT auto-match.
-        let event = SemanticEvent::ToolCall {
-            name: Some("Read".into()),
-            id: None,
-            input: Some(json!({"file_path": "/a"})),
-            extra: json!({}),
-        };
-        assert!(!super::pending_matches_tool_call("Reading b", &event));
-    }
-
-    #[test]
-    fn strip_progress_verb_removes_known_prefixes() {
-        assert_eq!(
-            super::strip_progress_verb("Reading src/main.rs"),
-            "src/main.rs"
-        );
-        assert_eq!(
-            super::strip_progress_verb("Running git status"),
-            "git status"
-        );
-        assert_eq!(super::strip_progress_verb("Writing foo"), "foo");
-        // Unknown verbs pass through untouched.
-        assert_eq!(
-            super::strip_progress_verb("Pondering life"),
-            "Pondering life"
-        );
-    }
-
-    mod golden_stderr {
-        use super::*;
-        use claudine::stream::{ParserConfig, create_semantic_parser};
-
-        pub(super) fn replay_to_stderr(
-            provider: Provider,
-            fixture: &[&str],
-            model: Option<String>,
-        ) -> Vec<String> {
-            replay_to_combined(provider, fixture, model)
-                .into_iter()
-                .filter_map(|(is_stdout, line)| (!is_stdout).then_some(line))
-                .collect()
-        }
-
-        /// Replay fixture lines through the parser + [`LiveSemanticSink`]
-        /// and capture every emission — both stderr status lines and
-        /// stdout `OutputText` bytes — in the order they were written. The
-        /// boolean is `true` when the emission was destined for stdout.
-        ///
-        /// This is the authoritative view of the sink's rendered output
-        /// because the spec's spacing invariant is defined against the
-        /// combined stream: "there are no two consecutive blank lines"
-        /// across the whole rendered surface, not just stderr.
-        pub(super) fn replay_to_combined(
-            provider: Provider,
-            fixture: &[&str],
-            model: Option<String>,
-        ) -> Vec<(bool, String)> {
-            let captured: Arc<StdMutex<Vec<(bool, String)>>> = Arc::new(StdMutex::new(Vec::new()));
-            let dispatched: Arc<StdMutex<Vec<(AgenticEvent, String)>>> =
-                Arc::new(StdMutex::new(Vec::new()));
-
-            let dispatch = {
-                let cap = dispatched.clone();
-                Box::new(move |ev: AgenticEvent, _meta: DispatchEventMeta| {
-                    cap.lock().unwrap().push((ev, String::new()));
-                })
-                    as Box<dyn Fn(AgenticEvent, DispatchEventMeta) + Send + Sync + 'static>
-            };
-            let emit_stderr = {
-                let cap = captured.clone();
-                Box::new(move |line: &str| {
-                    cap.lock().unwrap().push((false, line.to_string()));
-                }) as Box<dyn Fn(&str) + Send + Sync + 'static>
-            };
-            let output_cb: OutputTextFn = {
-                let cap = captured.clone();
-                Box::new(move |text: &str| {
-                    // Emit every embedded line separately so the combined
-                    // view sees each stdout line as its own entry. Using
-                    // `str::lines` drops the spurious trailing empty that
-                    // `split('\n')` produces for newline-terminated text —
-                    // that trailing empty is a chunk artifact, not a real
-                    // blank line in the rendered output. Internal blank
-                    // lines (`"a\n\nb"`) are preserved so the combined
-                    // blank-line assertion can still catch real content
-                    // problems that straddle the stdout surface.
-                    for line in text.lines() {
-                        cap.lock().unwrap().push((true, line.to_string()));
-                    }
-                })
-            };
-
-            let mut sink = LiveSemanticSink::new(
-                provider,
-                EnvironmentContext::default(),
-                Path::new("/tmp"),
-                Verbosity::Normal,
-                Arc::new(Mutex::new(StructuredSummaryDetails::default())),
-                dispatch,
-                emit_stderr,
-            )
-            .with_output_text_sink(output_cb);
-
-            struct Rec {
-                events: Arc<StdMutex<Vec<SemanticEvent>>>,
-            }
-            impl SemanticEventSink for Rec {
-                fn on_semantic_event(&mut self, event: SemanticEvent) {
-                    self.events.lock().unwrap().push(event);
-                }
-            }
-
-            let inner = Arc::new(StdMutex::new(Vec::new()));
-            let parser_sink = Rec {
-                events: inner.clone(),
-            };
-            let config = ParserConfig { model };
-            let mut parser = create_semantic_parser(provider, parser_sink, config);
-            for line in fixture {
-                parser.feed_line(line).unwrap();
-            }
-            drop(parser);
-
-            let events = inner.lock().unwrap().clone();
-            for event in events {
-                sink.on_semantic_event(event);
-            }
-
-            captured.lock().unwrap().clone()
-        }
-
-        #[test]
-        #[serial_test::serial]
-        fn claude_stderr_snapshot() {
-            // Set ANTHROPIC_API_KEY so the rate-limit Warning renders on
-            // stderr; the Subscription-mode suppression is covered by
-            // `claude_rate_limit_warning_suppressed_when_anthropic_api_key_unset`.
-            let _guard = super::TestEnvGuard::set("ANTHROPIC_API_KEY", "sk-test");
-            let lines = replay_to_stderr(
-                Provider::Claude,
-                &[
-                    r#"{"type":"init","session_id":"s1","model":"claude-sonnet-4"}"#,
-                    r#"{"type":"tool_use","id":"t1","name":"bash","input":{"cmd":"ls -la"}}"#,
-                    r#"{"type":"tool_result","tool_use_id":"t1","content":"file.txt"}"#,
-                    r#"{"type":"task_started","task_id":"sa1","name":"researcher"}"#,
-                    r#"{"type":"task_progress","message":"working"}"#,
-                    r#"{"type":"task_completed","task_id":"sa1","name":"researcher","status":"success"}"#,
-                    r#"{"type":"rate_limit_event","is_throttled":true,"retry_after_ms":5000,"message":"Rate limited"}"#,
-                    r#"{"type":"some_future_event","x":1}"#,
-                ],
-                None,
-            );
-            assert!(!lines.is_empty());
-            let joined = lines.join("\n");
-            assert!(joined.contains('\u{2192}'), "expected → arrow: {joined:?}");
-            assert!(joined.contains('\u{2190}'), "expected ← arrow: {joined:?}");
-            assert!(joined.contains("Bash"));
-            assert!(joined.contains("researcher"));
-            assert!(joined.contains("Rate limited"));
-            assert!(joined.contains("claude/some_future_event"));
-        }
-
-        #[test]
-        fn claude_tool_preface_stays_in_thinking_not_stdout() {
-            let combined = replay_to_combined(
-                Provider::Claude,
-                &[
-                    r#"{"type":"system","subtype":"init","session_id":"s1","model":"claude-sonnet-4"}"#,
-                    r#"{"type":"assistant","message":{"content":[{"type":"text","text":"Let me investigate the spacing issue first."},{"type":"tool_use","id":"tu_1","name":"Read","input":{"file_path":"/tmp/section.rs"}}]}}"#,
-                ],
-                None,
-            );
-
-            assert!(
-                combined.iter().all(|(is_stdout, _)| !*is_stdout),
-                "Claude tool-preface narration must not open FinalStdout mid-turn: {combined:#?}"
-            );
-
-            let rendered: Vec<String> = combined.iter().map(|(_, line)| line.clone()).collect();
-            let joined = rendered.join("\n");
-            assert!(
-                joined.contains("Let me investigate the spacing issue first."),
-                "tool-preface narration must still render: {joined:?}"
-            );
-            assert!(
-                joined.contains('\u{258c}'),
-                "tool-preface narration must render through the thinking BlockQuote: {joined:?}"
-            );
-            assert!(
-                joined.contains("Read"),
-                "follow-up tool call must still render after the thinking block: {joined:?}"
-            );
-
-            let mut prev_blank = false;
-            for line in &rendered {
-                let is_blank = line.trim().is_empty();
-                assert!(
-                    !(is_blank && prev_blank),
-                    "tool-preface replay must not introduce doubled blanks: {rendered:?}"
-                );
-                prev_blank = is_blank;
-            }
-        }
-
-        #[test]
-        fn codex_stderr_snapshot() {
-            let lines = replay_to_stderr(
-                Provider::Codex,
-                &[
-                    r#"{"type":"thread.started","thread_id":"th-1"}"#,
-                    r#"{"type":"item.started","item":{"id":"cmd1","type":"command_exec","tool_name":"bash","input":{"command":"ls"}}}"#,
-                    r#"{"type":"item.completed","item":{"id":"cmd1","type":"command_exec","status":"success","exit_code":0,"output":"file.txt"}}"#,
-                    r#"{"type":"item.completed","item":{"id":"f1","type":"file_change","path":"src/lib.rs","change_kind":"modified"}}"#,
-                    r#"{"type":"item.completed","item":{"id":"p1","type":"plan_update","message":"Step 2"}}"#,
-                    r#"{"type":"error","error_type":"rate_limit","error_message":"Too many requests"}"#,
-                    r#"{"type":"future.unknown","payload":{"k":1}}"#,
-                ],
-                Some("codex-mini".into()),
-            );
-            assert!(!lines.is_empty());
-            let joined = lines.join("\n");
-            assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
-            assert!(joined.contains('\u{2190}'), "expected ←: {joined:?}");
-            assert!(joined.contains("Bash"));
-            assert!(joined.contains("modified src/lib.rs"));
-            assert!(joined.contains("Step 2"));
-            assert!(joined.contains("Too many requests"));
-            assert!(joined.contains("codex/future.unknown"));
-        }
-
-        #[test]
-        fn gemini_stderr_snapshot() {
-            let lines = replay_to_stderr(
-                Provider::Gemini,
-                &[
-                    r#"{"type":"init","session_id":"g1","model":"gemini-2.5-pro"}"#,
-                    r#"{"type":"tool_use","tool_id":"t1","tool_name":"search","parameters":{"q":"rust"}}"#,
-                    r#"{"type":"tool_result","tool_id":"t1","status":"success","output":{"hits":3}}"#,
-                    r#"{"type":"error","severity":"warning","message":"Loop detected"}"#,
-                    r#"{"type":"some_unknown","data":"x"}"#,
-                ],
-                None,
-            );
-            assert!(!lines.is_empty());
-            let joined = lines.join("\n");
-            assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
-            assert!(joined.contains('\u{2190}'), "expected ←: {joined:?}");
-            assert!(joined.contains("Search"));
-            assert!(joined.contains("Loop detected"));
-            assert!(joined.contains("gemini/some_unknown"));
-        }
-
-        #[test]
-        fn kimi_stderr_snapshot() {
-            let lines = replay_to_stderr(
-                Provider::KimiCode,
-                &[
-                    r#"{"jsonrpc":"2.0","id":"init-1","result":{"protocol_version":"1.9","server":{"name":"Kimi Code CLI","version":"1.38.0"},"slash_commands":[],"hooks":[],"capabilities":{"supports_question":true}}}"#,
-                    r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ToolCall","payload":{"id":"k1","function":{"name":"Shell","arguments":"{\"command\":\"ls\"}"}}}}"#,
-                    r#"{"jsonrpc":"2.0","method":"event","params":{"type":"ToolResult","payload":{"tool_call_id":"k1","return_value":{"is_error":false,"output":"ok"}}}}"#,
-                    r#"{"jsonrpc":"2.0","id":"prompt-2","error":{"code":-32005,"message":"slow down","data":null}}"#,
-                    r#"{"jsonrpc":"2.0","method":"event","params":{"type":"BrandNewEvent","payload":{}}}"#,
-                ],
-                None,
-            );
-            assert!(!lines.is_empty());
-            let joined = lines.join("\n");
-            assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
-            assert!(joined.contains('\u{2190}'), "expected ←: {joined:?}");
-            assert!(joined.contains("Shell"));
-            assert!(joined.contains("slow down"));
-            assert!(joined.contains("kimi/event:BrandNewEvent"));
-        }
-
-        #[test]
-        fn opencode_stderr_snapshot() {
-            let lines = replay_to_stderr(
-                Provider::OpenCode,
-                &[
-                    r#"{"type":"step_start","sessionID":"ses_1"}"#,
-                    r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"cmd":"ls"}}}"#,
-                    r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"ok"}}"#,
-                    r#"{"type":"error","error_message":"API timeout"}"#,
-                    r#"{"type":"some_future_event","x":1}"#,
-                ],
-                Some("gpt-4o".into()),
-            );
-            assert!(!lines.is_empty());
-            let joined = lines.join("\n");
-            assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
-            assert!(joined.contains('\u{2190}'), "expected ←: {joined:?}");
-            assert!(joined.contains("Bash"));
-            assert!(joined.contains("API timeout"));
-            assert!(joined.contains("opencode/some_future_event"));
-        }
-
-        #[test]
-        fn opencode_tool_use_completion_shows_incoming_arrow_only() {
-            let lines = replay_to_stderr(
-                Provider::OpenCode,
-                &[
-                    r#"{"type":"step_start","sessionID":"ses_1"}"#,
-                    r#"{"type":"tool_use","part":{"id":"t1","tool":"bash",
-                     "state":{"status":"completed","input":{"command":"ls -la"},"output":"file.txt"}}}"#,
-                ],
-                Some("gpt-4o".into()),
-            );
-            let joined = lines.join("\n");
-            assert!(
-                joined.contains('\u{2190}'),
-                "incoming ← arrow must still render: {joined:?}"
-            );
-            assert!(
-                !joined.contains('\u{2192}'),
-                "outgoing → arrow must NOT render (no synthesized ToolCall): {joined:?}"
-            );
-            assert!(
-                joined.contains("Bash"),
-                "humanized tool name must appear: {joined:?}"
-            );
-        }
-
-        /// 2026-04-18 contract: OpenCode `step_start` / `step_finish`
-        /// phase markers MUST NOT render to stderr. They were previously
-        /// surfaced as `Info` Status lines that produced visual noise
-        /// around the actual tool events. The events are still emitted
-        /// for JSONL/dispatch but suppressed at the sink boundary.
-        #[test]
-        fn opencode_step_phase_info_events_suppressed_from_stderr() {
-            let lines = replay_to_stderr(
-                Provider::OpenCode,
-                &[
-                    r#"{"type":"step_start","sessionID":"ses_1"}"#,
-                    r#"{"type":"tool_start","part":{"id":"t1","tool_name":"read","input":{"file_path":"a.md"}}}"#,
-                    r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"hi"}}"#,
-                    r#"{"type":"step_finish","sessionID":"ses_1"}"#,
-                ],
-                Some("gpt-4o".into()),
-            );
-            let joined = lines.join("\n");
-            assert!(
-                !joined.contains("step_start"),
-                "step_start must not render to stderr: {joined:?}"
-            );
-            assert!(
-                !joined.contains("step_finish"),
-                "step_finish must not render to stderr: {joined:?}"
-            );
-            assert!(
-                joined.contains("Read"),
-                "real tool events must still render: {joined:?}"
-            );
-        }
-
-        /// 2026-04-18 contract: a successful OpenCode `Bash` (or other
-        /// shell-shaped) tool result MUST carry the cached input summary
-        /// alongside the `successful` status. `Bash(successful)` with no
-        /// slot was the regression this guards against.
-        #[test]
-        fn opencode_bash_success_carries_summary_alongside_status() {
-            let lines = replay_to_stderr(
-                Provider::OpenCode,
-                &[
-                    r#"{"type":"step_start","sessionID":"ses_1"}"#,
-                    r#"{"type":"tool_start","part":{"id":"t1","tool_name":"bash","input":{"command":"ls -la"}}}"#,
-                    r#"{"type":"tool_end","part":{"tool_use_id":"t1","status":"success","content":"file.txt"}}"#,
-                ],
-                Some("gpt-4o".into()),
-            );
-            let joined = lines.join("\n");
-            assert!(
-                joined.contains('\u{2190}'),
-                "incoming ← arrow must render: {joined:?}"
-            );
-            assert!(
-                joined.contains("Bash"),
-                "humanized tool name must appear: {joined:?}"
-            );
-            assert!(
-                joined.contains("successful"),
-                "status word must still render: {joined:?}"
-            );
-            assert!(
-                joined.contains("bash ls -la"),
-                "shell summary must co-render with status: {joined:?}"
-            );
-        }
-
-        #[test]
-        fn qwen_stderr_snapshot() {
-            let lines = replay_to_stderr(
-                Provider::QwenCode,
-                &[
-                    r#"{"type":"init","session_id":"q1","model":"qwen-coder"}"#,
-                    r#"{"type":"tool_call","id":"q1","name":"bash","input":{"command":"git status"}}"#,
-                    r#"{"type":"tool_response","tool_use_id":"q1","status":"success","content":"clean"}"#,
-                    r#"{"type":"error","error":{"type":"rate_limit","message":"slow down"}}"#,
-                    r#"{"type":"something.new"}"#,
-                ],
-                None,
-            );
-            assert!(!lines.is_empty());
-            let joined = lines.join("\n");
-            assert!(joined.contains('\u{2192}'), "expected →: {joined:?}");
-            assert!(joined.contains('\u{2190}'), "expected ←: {joined:?}");
-            assert!(joined.contains("Bash"));
-            assert!(joined.contains("slow down"));
-            assert!(joined.contains("qwen/something.new"));
-        }
-
-        #[test]
-        #[serial_test::serial]
-        fn captured_fixtures_have_no_two_consecutive_blank_lines_per_provider() {
-            // Some replays (notably Claude rate-limit events) consult
-            // ANTHROPIC_API_KEY; set it so any warnings render normally and
-            // serialize with other env-touching tests.
-            let _guard = super::TestEnvGuard::set("ANTHROPIC_API_KEY", "sk-test");
-
-            let fixtures: &[(Provider, &str, Option<&str>)] = &[
-                (Provider::Claude, "claude.ndjson", None),
-                (Provider::Codex, "codex.ndjson", Some("codex-mini")),
-                (Provider::Gemini, "gemini.ndjson", None),
-                (Provider::OpenCode, "opencode.ndjson", Some("gpt-4o")),
-            ];
-            for (provider, fname, model) in fixtures {
-                let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                    .join("..")
-                    .join("lib")
-                    .join("tests/fixtures/providers")
-                    .join(fname);
-                if !path.exists() {
-                    eprintln!("skip: fixture not found at {path:?}");
-                    continue;
-                }
-                let raw = std::fs::read_to_string(&path).expect("read fixture");
-                let fixture_lines: Vec<&str> = raw.lines().collect();
-                // Assert against the COMBINED stdout+stderr emission
-                // stream — per spec, the spacing invariant is defined
-                // over all rendered output in emission order, not just
-                // stderr. A stderr-only assertion would miss consecutive
-                // blanks that straddle the FinalStdout section boundary.
-                let combined =
-                    replay_to_combined(*provider, &fixture_lines, model.map(String::from));
-                let mut prev_blank = false;
-                for (is_stdout, line) in &combined {
-                    let is_blank = line.trim().is_empty();
-                    assert!(
-                        !(is_blank && prev_blank),
-                        "provider={provider:?} ({fname}): two consecutive blank lines in combined rendered output (is_stdout={is_stdout}):\n{combined:#?}"
-                    );
-                    prev_blank = is_blank;
-                }
-            }
-        }
-
-        /// Phase 4 acceptance gate for the 2026-04-18 OpenCode reporting
-        /// improvements (`features/2026-04-18-opencode-reporting-improvements`).
-        ///
-        /// Replays the captured `opencode.ndjson` fixture and asserts the
-        /// four user-visible requirements from `spec.md` simultaneously:
-        ///
-        /// 1. No `step_start` / `step_finish` lines render to stderr.
-        /// 2. No two consecutive blank lines in the combined emission.
-        /// 3. Successful `Bash` results carry a useful summary slot
-        ///    (e.g. `bash git log ...`) and not just `successful` alone.
-        /// 4. Successful `Read` / file-tool results carry a path slot.
-        ///
-        /// The fixture contains 23 step pairs and 41 `tool_use` events,
-        /// so this is a meaningful end-to-end replay of the spec's
-        /// reference session shape.
-        #[test]
-        #[serial_test::serial]
-        fn opencode_acceptance_replay_satisfies_phase4_contract() {
-            let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("..")
-                .join("lib")
-                .join("tests/fixtures/providers/opencode.ndjson");
-            let raw = std::fs::read_to_string(&path).expect("read opencode fixture");
-            let fixture_lines: Vec<&str> = raw.lines().collect();
-
-            let combined =
-                replay_to_combined(Provider::OpenCode, &fixture_lines, Some("gpt-4o".into()));
-
-            let stderr_only: Vec<String> = combined
-                .iter()
-                .filter_map(
-                    |(is_stdout, line)| {
-                        if *is_stdout { None } else { Some(line.clone()) }
-                    },
-                )
-                .collect();
-            let stderr_joined = stderr_only.join("\n");
-
-            // (1) step markers must be suppressed from stderr.
-            assert!(
-                !stderr_joined.contains("step_start"),
-                "spec §1: step_start must not render to stderr:\n{stderr_joined}"
-            );
-            assert!(
-                !stderr_joined.contains("step_finish"),
-                "spec §1: step_finish must not render to stderr:\n{stderr_joined}"
-            );
-
-            // (2) no two consecutive blank lines anywhere in the
-            //     combined emission stream.
-            let mut prev_blank = false;
-            for (is_stdout, line) in &combined {
-                let is_blank = line.trim().is_empty();
-                assert!(
-                    !(is_blank && prev_blank),
-                    "spec §2: two consecutive blank lines in combined output (is_stdout={is_stdout}):\n{combined:#?}"
-                );
-                prev_blank = is_blank;
-            }
-
-            // (3) at least one ← Bash(...) line in the fixture must carry
-            //     a non-empty summary slot — i.e. the slot text is more
-            //     than just `successful`.
-            let bash_incoming_lines: Vec<&String> = stderr_only
-                .iter()
-                .filter(|l| l.contains('\u{2190}') && l.contains("Bash"))
-                .collect();
-            assert!(
-                !bash_incoming_lines.is_empty(),
-                "spec §3: fixture should produce at least one ← Bash line:\n{stderr_joined}"
-            );
-            let bash_with_summary = bash_incoming_lines.iter().any(|l| l.contains("bash "));
-            assert!(
-                bash_with_summary,
-                "spec §3: at least one ← Bash result must carry a `bash <command>` summary slot. Got:\n{}",
-                bash_incoming_lines
-                    .iter()
-                    .map(|s| s.as_str())
-                    .collect::<Vec<_>>()
-                    .join("\n")
-            );
-
-            // (4) successful incoming Read / file-tool lines must carry
-            //     a path slot — verified by the presence of an OSC8
-            //     hyperlink escape (`\x1b]8;;`) on at least one
-            //     incoming Read line. The fixture only includes Glob
-            //     and Bash tool_use events, so file-tool coverage is
-            //     handled by the unit tests in this file (e.g.
-            //     `tool_result_success_status_co_renders_with_input_summary`)
-            //     and `opencode_bash_success_carries_summary_alongside_status`
-            //     above. Skipping a fixture-level assertion here keeps
-            //     this test honest: we do not assert a Read line if the
-            //     fixture does not contain one.
-        }
-
-        /// Regression test for the duplicate-reasoning fix.
-        ///
-        /// Before the fix, reasoning was rendered twice on the structured-
-        /// stream path:
-        /// 1. `LiveSemanticSink` rendered it as a BlockQuote via
-        ///    `render_thinking_block`.
-        /// 2. `StreamThinkingRenderer` in `exec.rs` ALSO rendered it via
-        ///    the `reasoning_cb` callback (emitting a dim "Thinking..."
-        ///    header plus dimmed lines).
-        ///
-        /// After the fix, `LiveSemanticSink` owns reasoning rendering
-        /// end-to-end. The `reasoning_cb` is a no-op. This test verifies:
-        /// - Reasoning text appears in stderr exactly once.
-        /// - The old "Thinking..." header from `StreamThinkingRenderer`
-        ///   does NOT appear.
-        #[test]
-        fn reasoning_appears_exactly_once_in_stderr() {
-            let lines: Arc<StdMutex<Vec<String>>> = Arc::new(StdMutex::new(Vec::new()));
-            let dispatched: Arc<StdMutex<Vec<(AgenticEvent, String)>>> =
-                Arc::new(StdMutex::new(Vec::new()));
-
-            let dispatch = {
-                let cap = dispatched.clone();
-                Box::new(move |ev: AgenticEvent, _meta: DispatchEventMeta| {
-                    cap.lock().unwrap().push((ev, String::new()));
-                })
-                    as Box<dyn Fn(AgenticEvent, DispatchEventMeta) + Send + Sync + 'static>
-            };
-            let emit = {
-                let cap = lines.clone();
-                Box::new(move |line: &str| {
-                    cap.lock().unwrap().push(line.to_string());
-                }) as Box<dyn Fn(&str) + Send + Sync + 'static>
-            };
-
-            let mut sink = LiveSemanticSink::new(
-                Provider::Claude,
-                EnvironmentContext::default(),
-                Path::new("/tmp"),
-                Verbosity::Normal,
-                Arc::new(Mutex::new(StructuredSummaryDetails::default())),
-                dispatch,
-                emit,
-            );
-
-            // Feed a reasoning event directly (simulating what the parser
-            // would emit after parsing a thinking content block).
-            sink.on_semantic_event(SemanticEvent::Reasoning {
-                text: "Let me analyze this step by step.".into(),
-                extra: json!({}),
-            });
-
-            let captured = lines.lock().unwrap().join("\n");
-
-            // Reasoning text must appear in stderr.
-            assert!(
-                captured.contains("analyze this step by step"),
-                "reasoning text must appear in stderr: {captured:?}"
-            );
-
-            // The old StreamThinkingRenderer "Thinking..." header must NOT
-            // appear — that was the duplicate-rendering artifact.
-            assert!(
-                !captured.contains("Thinking..."),
-                "old StreamThinkingRenderer header must not appear: {captured:?}"
-            );
-
-            // Count occurrences of the reasoning text to verify it appears
-            // exactly once (not duplicated).
-            let count = captured.matches("analyze this step by step").count();
-            assert_eq!(
-                count, 1,
-                "reasoning text must appear exactly once, found {count} times: {captured:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn subagent_start_inserts_active_entry_via_on_semantic_event() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::SubagentStart {
-            name: Some("researcher".into()),
-            id: Some("sa1".into()),
-            extra: json!({}),
-        });
-        let state = sink.watchdog_state.lock().unwrap();
-        let active = state.active_subagents(std::time::Instant::now());
-        assert_eq!(active.len(), 1);
-        assert_eq!(active[0].id, "sa1");
-        assert_eq!(active[0].name.as_deref(), Some("researcher"));
-    }
-
-    #[test]
-    fn subagent_stop_removes_active_entry_via_on_semantic_event() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::SubagentStart {
-            name: Some("researcher".into()),
-            id: Some("sa1".into()),
-            extra: json!({}),
-        });
-        sink.on_semantic_event(SemanticEvent::SubagentStop {
-            name: Some("researcher".into()),
-            id: Some("sa1".into()),
-            status: Some("success".into()),
-            extra: json!({}),
-        });
-        let state = sink.watchdog_state.lock().unwrap();
-        let active = state.active_subagents(std::time::Instant::now());
-        assert!(active.is_empty());
-    }
-
-    #[test]
-    fn opencode_progress_payload_resets_last_progress_at() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::SubagentStart {
-            name: Some("researcher".into()),
-            id: Some("sa1".into()),
-            extra: json!({}),
-        });
-        // Small delay to ensure progress timestamp moves forward
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        sink.on_semantic_event(SemanticEvent::Info {
-            message: "working".into(),
-            extra: json!({"task_id": "sa1"}),
-        });
-        let state = sink.watchdog_state.lock().unwrap();
-        let active = state.active_subagents(std::time::Instant::now());
-        assert_eq!(active.len(), 1);
-        // elapsed_since_progress should be very small (< 1s) because the
-        // Info event with task_id reset last_progress_at just now.
-        assert!(
-            active[0].elapsed_since_progress < std::time::Duration::from_secs(1),
-            "progress should have been reset by the Info event: {:?}",
-            active[0].elapsed_since_progress
-        );
-    }
-
-    #[test]
-    fn unknown_subagent_id_in_progress_is_silently_ignored() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        // No subagent started yet — progress for unknown id must not panic
-        sink.on_semantic_event(SemanticEvent::Info {
-            message: "working".into(),
-            extra: json!({"task_id": "unknown"}),
-        });
-        let state = sink.watchdog_state.lock().unwrap();
-        let active = state.active_subagents(std::time::Instant::now());
-        assert!(active.is_empty());
-    }
-
-    #[test]
-    fn provider_extension_with_task_id_updates_progress() {
-        let lines = Arc::new(StdMutex::new(Vec::new()));
-        let dispatched = Arc::new(StdMutex::new(Vec::new()));
-        let mut sink = make_sink(lines.clone(), dispatched.clone());
-        sink.on_semantic_event(SemanticEvent::SubagentStart {
-            name: Some("worker".into()),
-            id: Some("ext1".into()),
-            extra: json!({}),
-        });
-        std::thread::sleep(std::time::Duration::from_millis(10));
-        sink.on_semantic_event(SemanticEvent::ProviderExtension {
-            provider: Provider::OpenCode,
-            kind: "task_progress".into(),
-            payload: json!({"task_id": "ext1", "percent": 50}),
-        });
-        let state = sink.watchdog_state.lock().unwrap();
-        let active = state.active_subagents(std::time::Instant::now());
-        assert_eq!(active.len(), 1);
-        assert!(
-            active[0].elapsed_since_progress < std::time::Duration::from_secs(1),
-            "progress should have been reset by the ProviderExtension event: {:?}",
-            active[0].elapsed_since_progress
-        );
-    }
+    // The `SemanticEventSink` trait is no longer imported by the production
+    // module (the impl moved to `event_sink`), so bring it back into scope
+    // here for the `on_semantic_event` driver calls in the child suites.
+    use claudine::stream::semantic::SemanticEventSink;
+
+    mod content_guard;
+    mod dispatch_and_recording;
+    mod golden_stderr;
+    mod provider_extension_and_opencode;
+    mod render_basics;
+    mod sections_and_output;
 }

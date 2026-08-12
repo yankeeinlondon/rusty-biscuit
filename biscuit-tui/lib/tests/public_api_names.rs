@@ -7,8 +7,8 @@ use biscuit_tui::{
     BooleanSwitch, BooleanSwitchState, CellState, CellValue, ChoiceInput, ChoiceOption, ChooseMany,
     ChooseManyState, ChooseOne, ChooseOneState, ComponentTheme, EventOutcome, HandleEvent,
     InputTable, InputTableColumn, InputTableState, KeyBindings, Label, LabelPosition, Row, RowCell,
-    SelectionMode, StandaloneState, TextAreaInput, TextAreaInputState, TextInput, TextInputState,
-    ValidationState,
+    SelectionMode, SplitDirection, SplitPane, SplitRatio, StandaloneState, TextAreaInput,
+    TextAreaInputState, TextInput, TextInputState, ValidationState,
 };
 
 #[test]
@@ -42,6 +42,11 @@ fn canonical_public_names_compile() {
     let _input = ChoiceInput::<String>::new("test", "Prompt");
     let _option: ChoiceOption<String> = ChoiceOption::new("id", "label", "value");
     let _mode = SelectionMode::Single;
+
+    // SplitPane layout primitive (core container/layout, not an input)
+    let _sp = SplitPane::new();
+    let _dir = SplitDirection::Auto;
+    let _ratio = SplitRatio::percent(50);
 
     // Table types
     let _col = InputTableColumn::StaticText {

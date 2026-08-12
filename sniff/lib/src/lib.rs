@@ -12,9 +12,12 @@ pub mod network;
 pub mod os;
 pub mod package;
 pub mod performance;
+pub(crate) mod process;
 pub mod programs;
 #[cfg(feature = "remote")]
 pub mod remote;
+#[cfg(feature = "network")]
+mod credentials;
 pub mod request;
 pub mod services;
 
@@ -22,7 +25,7 @@ pub mod services;
 mod test_helpers;
 
 pub use error::{Result, SniffError};
-pub use filesystem::FilesystemInfo;
+pub use filesystem::{FilesystemInfo, FilesystemObservation, GitRepositoryIdentity};
 pub use hardware::HardwareInfo;
 pub use network::NetworkInfo;
 pub use performance::PerformanceReport;
@@ -54,6 +57,18 @@ pub struct SniffResult {
     pub filesystem: Option<FilesystemInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub performance: Option<PerformanceReport>,
+}
+
+/// Planned detection output paired with its reusable filesystem observation.
+///
+/// The returned observation is the same shared owner supplied by the caller,
+/// so later Git queries reuse its discovered repository handle.
+#[derive(Debug)]
+pub struct ObservedSniffResult {
+    /// Detection output.
+    pub result: SniffResult,
+    /// Reusable filesystem observation.
+    pub filesystem_observation: FilesystemObservation,
 }
 
 /// Configuration for the detect operation.
@@ -256,6 +271,13 @@ pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
 ///
 /// let result = detect_with_plan(plan).unwrap();
 /// ```
+///
+/// ## Notes
+///
+/// Performance-enabled plans reuse a collector already installed on the
+/// calling thread. This lets a composed request include work performed before
+/// or after detection in one report while preserving the standalone result
+/// snapshot.
 #[instrument(skip(plan), fields(
     os = plan.os.is_some(),
     hw = plan.hardware.is_some(),
@@ -264,14 +286,50 @@ pub fn detect_with_config(config: SniffConfig) -> Result<SniffResult> {
     perf = plan.include_performance,
 ))]
 pub fn detect_with_plan(plan: DetectionPlan) -> Result<SniffResult> {
+    detect_with_plan_inner(plan, None)
+}
+
+/// Detect according to a plan using a pre-observed Git filesystem context.
+///
+/// When filesystem detection is requested, the plan's base directory must
+/// match [`FilesystemObservation::observed_root`]. A plan without an explicit
+/// base uses that observed root and therefore does not read the ambient current
+/// directory. No additional Git discovery occurs.
+pub fn detect_with_plan_and_filesystem_observation(
+    plan: DetectionPlan,
+    filesystem_observation: FilesystemObservation,
+) -> Result<ObservedSniffResult> {
+    let result = detect_with_plan_inner(plan, Some(&filesystem_observation))?;
+    Ok(ObservedSniffResult {
+        result,
+        filesystem_observation,
+    })
+}
+
+fn detect_with_plan_inner(
+    plan: DetectionPlan,
+    filesystem_observation: Option<&FilesystemObservation>,
+) -> Result<SniffResult> {
     let started = Instant::now();
-    let base = plan
-        .base_dir
-        .clone()
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    let collector = plan
-        .include_performance
-        .then(performance::PerformanceCollector::new_shared);
+    let base = match (&plan.base_dir, filesystem_observation, plan.filesystem.is_some()) {
+        (Some(base), Some(observation), true) if base != observation.observed_root() => {
+            return Err(SniffError::SystemInfo {
+                domain: "filesystem",
+                message: format!(
+                    "filesystem observation for '{}' cannot seed plan rooted at '{}'",
+                    observation.observed_root().display(),
+                    base.display()
+                ),
+            });
+        }
+        (Some(base), _, _) => base.clone(),
+        (None, Some(observation), true) => observation.observed_root().to_path_buf(),
+        (None, _, _) => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
+    };
+    let collector = plan.include_performance.then(|| {
+        performance::current_collector()
+            .unwrap_or_else(performance::PerformanceCollector::new_shared)
+    });
 
     let mut result = performance::with_current_collector(collector.clone(), || {
         // Run all four domains concurrently using scoped threads.
@@ -330,11 +388,19 @@ pub fn detect_with_plan(plan: DetectionPlan) -> Result<SniffResult> {
 
             let fs_collector = collector.clone();
             let fs_handle = plan.filesystem.as_ref().map(|req| {
+                let filesystem_observation = filesystem_observation.cloned();
                 s.spawn(move || {
                     performance::with_current_collector(fs_collector, || {
                         let _span = tracing::info_span!("detect_filesystem").entered();
                         let started = Instant::now();
-                        let result = filesystem::detect_filesystem_with_request(&base, req);
+                        let result = match filesystem_observation.as_ref() {
+                            Some(observation) => filesystem::detect_filesystem_with_observation(
+                                &base,
+                                req,
+                                observation,
+                            ),
+                            None => filesystem::detect_filesystem_with_request(&base, req),
+                        };
                         performance::record_logged_stage(
                             "detect.filesystem",
                             started.elapsed(),
@@ -376,8 +442,13 @@ mod tests {
     use super::*;
 
     #[test]
+    #[serial_test::serial]
     fn test_detect_returns_result() {
+        let original_dir = std::env::current_dir().unwrap();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        std::env::set_current_dir(temp_dir.path()).unwrap();
         let result = detect();
+        std::env::set_current_dir(original_dir).unwrap();
         assert!(result.is_ok());
     }
 
@@ -426,14 +497,57 @@ mod tests {
 
     #[test]
     fn test_detect_with_base_dir() {
+        let temp_dir = tempfile::TempDir::new().unwrap();
         // Filesystem only: skip os/hardware/network, which this test does not assert.
         let plan = DetectionPlan::new()
-            .base_dir(PathBuf::from("."))
+            .base_dir(temp_dir.path().to_path_buf())
             .without_os()
             .without_hardware()
             .without_network();
         let result = detect_with_plan(plan).unwrap();
         assert!(result.filesystem.is_some());
+    }
+
+    #[test]
+    fn test_detect_with_plan_reuses_filesystem_observation() {
+        let dir = tempfile::tempdir().unwrap();
+        git2::Repository::init(dir.path()).unwrap();
+        let observation = FilesystemObservation::discover(dir.path());
+        let plan = DetectionPlan::new()
+            .without_os()
+            .without_hardware()
+            .without_network()
+            .filesystem(
+                FilesystemRequest::new()
+                    .git(GitRequest::identity())
+                    .without_repo()
+                    .without_docs()
+                    .without_formatting()
+                    .without_file_inventory(),
+            )
+            .performance(true);
+
+        let observed = detect_with_plan_and_filesystem_observation(plan, observation).unwrap();
+        let filesystem = observed.result.filesystem.unwrap();
+        let performance = observed.result.performance.unwrap();
+
+        assert!(filesystem.git.is_some());
+        assert!(
+            observed
+                .filesystem_observation
+                .repository_identity()
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            performance
+                .counters
+                .get(performance::counters::GIT_DISCOVERIES)
+                .copied()
+                .unwrap_or(0),
+            0
+        );
+        assert!(performance.stages.contains_key("detect.filesystem"));
     }
 
     // Regression test: OS should be skipped when skip_os is set
@@ -449,7 +563,8 @@ mod tests {
     // Regression test: OS should be present by default
     #[test]
     fn test_os_present_by_default() {
-        let config = SniffConfig::new();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let config = SniffConfig::new().base_dir(temp_dir.path().to_path_buf());
         let result = detect_with_config(config).unwrap();
         assert!(result.os.is_some(), "OS should be Some by default");
     }
@@ -457,7 +572,12 @@ mod tests {
     // Regression test: Combining skip_os with other sections should work correctly
     #[test]
     fn test_skip_os_with_filesystem_only() {
-        let config = SniffConfig::new().skip_os().skip_hardware().skip_network();
+        let temp_dir = tempfile::TempDir::new().unwrap();
+        let config = SniffConfig::new()
+            .base_dir(temp_dir.path().to_path_buf())
+            .skip_os()
+            .skip_hardware()
+            .skip_network();
         let result = detect_with_config(config).unwrap();
         assert!(result.os.is_none(), "OS should be None when skipped");
         assert!(

@@ -1,0 +1,3 @@
+ERROR 2026-04-15T21:28:30 +315ms service=config command=/Users/user/.config/opencode/commands/catalog.md err=ENOENT: no such file or directory, open '/Users/user/.config/opencode/commands/catalog.md' failed to load command
+ERROR 2026-04-15T21:28:30 +0ms service=config skill=/Users/user/.config/opencode/skills/bad-skill.md err=ENOENT: no such file or directory, open '/Users/user/.config/opencode/skills/bad-skill.md' failed to load skill
+ERROR 2026-04-15T21:28:30 +0ms service=config agent=/Users/user/.config/opencode/agent/bad-agent.md err=ENOENT: no such file or directory failed to load agent

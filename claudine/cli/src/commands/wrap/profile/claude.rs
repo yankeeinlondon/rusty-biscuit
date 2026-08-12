@@ -3,9 +3,7 @@ use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::Result;
 use std::path::Path;
 
-use super::{
-    PromptDelivery, WrapperProfile, prompt_delivery_stdin_or_append, push_stream_json_flags,
-};
+use super::{PromptDelivery, WrapperProfile, prompt_delivery_stdin_or_append};
 
 pub(crate) struct ClaudeWrapper;
 
@@ -74,12 +72,5 @@ impl WrapperProfile for ClaudeWrapper {
             session_id.to_string(),
             "--print".to_string(),
         ])
-    }
-
-    fn apply_structured_stream(&self, args: &mut Vec<String>) {
-        // Claude needs --print --verbose alongside stream-json for reliable
-        // structured output. The typed catalog does not model "extra flags
-        // required for structured streaming", so this override is kept.
-        push_stream_json_flags(args, &["--print", "--verbose"]);
     }
 }

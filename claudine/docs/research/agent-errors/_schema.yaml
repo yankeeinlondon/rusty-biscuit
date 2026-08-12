@@ -1,0 +1,89 @@
+# SimplifiedSchema for the `agent-errors` research topic.
+#
+# Referenced by each provider research document via `$schema: ./_schema.yaml`.
+# The root `$schema:` key is REQUIRED — it is how darkmatter's resolver
+# classifies this file as a SimplifiedSchema rather than raw JSON Schema.
+#
+# This topic captures per-provider **error-classification vocabulary**: the
+# ordered keyword/code buckets that drive Claudine's shared
+# `SemanticErrorKind` cascade
+# (`lib/src/stream/providers/common.rs::classify_error_by_keywords`). It is the
+# RENDERING/summary vocabulary layer, deliberately distinct from the `signals/`
+# topic, which owns wire-level `SignalKind` *detection* (see the fleet prompt's
+# Scope section and spec D9 for the boundary).
+#
+# **Order is the behavior contract.** Bucket *sequence order* IS the cascade
+# order: the classifier walks a provider's buckets in order and the first
+# substring hit wins. Repeated `kind` across buckets is legal and meaningful
+# (the "late ApiRemote" second pass). Keep buckets in the order the provider's
+# precedence requires.
+#
+# **Nested inline objects.** SimplifiedSchema supports nested inline-object
+# literals (to `MAX_INLINE_OBJECT_DEPTH = 32`, grammar Decision #11), so each
+# bucket nests its needle/code list and each needle/code carries its own
+# provenance inline. This mirrors the Phase-A facts shape one-for-one, with the
+# per-needle evidence added.
+#
+# **Provenance lives only here.** Graduation (Phase C) projects `needles[].text`
+# and `codes[].code` into the runtime `ErrorKeywords` tables and DROPS the
+# `evidence`/`source` fields — the generated code carries no provenance. The
+# research documents retain their citations.
+#
+# **Conditional `source` constraint the grammar cannot express.** For every
+# non-`seed` needle/code, `source` is REQUIRED and must be a stable citation
+# (an official-docs URL, a commit-pinned source permalink with record identity,
+# or an issue URL with provider version/date); search-result URLs and
+# unversioned repository homepages are not evidence. `empirical` additionally
+# requires an `empirical` object with a scrubbed `./_fixtures/...` file
+# reference plus capture notes. The sidecar declares `source` and `empirical`
+# optional (a `seed` needle may omit them); the conditional requirement is
+# enforced by the deterministic gate
+# (`claudine-gen agent-errors check`, gen/src/agent_errors_check.rs).
+$schema:
+    # Date the research document was first created. Optional so update-mode
+    # legacy documents may predate the schema contract.
+    created: date
+
+    # Date the provider's error vocabulary was last verified or refreshed.
+    last_updated: date(required)
+
+    # Agent/model that produced the research.
+    agent: string(required)
+    model: string(required)
+
+    # Best official documentation URL for the provider's error surfaces.
+    docs: url
+
+    # Ordered buckets checked against the STRUCTURED error-kind discriminator.
+    # Sequence order is the cascade order. Absent for message-only classifiers
+    # (Pi, Antigravity). `kind` is the snake_case `SemanticErrorKind` name.
+    # Each needle carries its own provenance; `text` must be lowercase (the
+    # matcher lowercases input) and free of leading/trailing whitespace.
+    kind_buckets: "{ kind: enum(configuration,agent_native,api_remote,interrupted,unknown; required), needles: { text: string(required), evidence: enum(documented,source_code,issue_tracker,empirical,seed; required), source: string, empirical: { fixture: string(required), capture_notes: string(required) } }[] }[]"
+
+    # Ordered buckets checked against the FREE-FORM error message. Required
+    # (non-empty) for every provider with a structured stream parser.
+    msg_buckets: "{ kind: enum(configuration,agent_native,api_remote,interrupted,unknown; required), needles: { text: string(required), evidence: enum(documented,source_code,issue_tracker,empirical,seed; required), source: string, empirical: { fixture: string(required), capture_notes: string(required) } }[] }[]"
+
+    # Ordered buckets of NUMERIC wire codes (Kimi JSON-RPC; spec D5). Code
+    # matching is the first exact step of the cascade. Absent for every
+    # provider but Kimi. `name` links a code to its `protocol/<slug>.rs`
+    # constant.
+    code_buckets: "{ kind: enum(configuration,agent_native,api_remote,interrupted,unknown; required), codes: { code: number(required), name: string, evidence: enum(documented,source_code,issue_tracker,empirical,seed; required), source: string, empirical: { fixture: string(required), capture_notes: string(required) } }[] }[]"
+
+    # Error surfaces the researcher could not confirm either way. The
+    # capacity/overload motivating class MUST appear either as a bucket needle
+    # or as a gap here — never silently dropped.
+    gaps: "{ area: string(required), notes: string(required) }[]"
+
+    # Update-mode changelog entries. Fresh first-run documents use [].
+    changes: string[]
+
+    # Whether the discovered vocabulary would require a Claudine behavior
+    # change once graduated (Phase C). Research alone never changes runtime
+    # behavior — every delta is adjudicated in Phase C — so this flags the
+    # delta report, it does not authorize a change.
+    requires_claudine_update: boolean(required)
+
+    # Required when `requires_claudine_update` is true; optional otherwise.
+    reason: string

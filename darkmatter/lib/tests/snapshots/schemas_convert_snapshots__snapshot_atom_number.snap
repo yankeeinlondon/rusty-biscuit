@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 75
 expression: "convert_atom(\"number\")"
 ---
 {
@@ -7,7 +8,14 @@ expression: "convert_atom(\"number\")"
   "additionalProperties": true,
   "properties": {
     "field": {
-      "type": "number"
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "number"
+        }
+      ]
     }
   },
   "type": "object"

@@ -1,7 +1,6 @@
 use std::fs;
 use std::time::{Duration, Instant};
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use serial_test::serial;
 
 mod common;
@@ -28,7 +27,7 @@ fn handle_turn_complete_fast_path_completes_under_3s() {
     .to_string();
 
     let start = Instant::now();
-    let assertion = cargo_bin_cmd!("claudine")
+    let assertion = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&cwd)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -62,7 +61,7 @@ fn handle_exits_on_deadline() {
     fs::create_dir_all(&home_dir).unwrap();
     fs::create_dir_all(&cwd).unwrap();
 
-    let bin = env!("CARGO_BIN_EXE_claudine");
+    let bin = common::claudine_bin();
     let mut child = Command::new(bin)
         .current_dir(&cwd)
         .env("HOME", &home_dir)

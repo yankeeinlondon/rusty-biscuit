@@ -30,9 +30,11 @@ fn component_overrides_global_alignment_claims_every_bucket() {
             tables_alignment: true,
             images_alignment: true,
             block_quotes_alignment: true,
+            code_blocks_alignment: true,
             tables_fill: false,
             images_fill: false,
             block_quotes_fill: false,
+            code_blocks_fill: false,
         }
     );
 }
@@ -50,9 +52,11 @@ fn component_overrides_global_fill_claims_every_bucket() {
             tables_fill: true,
             images_fill: true,
             block_quotes_fill: true,
+            code_blocks_fill: true,
             tables_alignment: false,
             images_alignment: false,
             block_quotes_alignment: false,
+            code_blocks_alignment: false,
         }
     );
 }

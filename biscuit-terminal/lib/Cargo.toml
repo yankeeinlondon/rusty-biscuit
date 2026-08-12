@@ -27,6 +27,10 @@ image = ["dep:resvg", "dep:biscuit-visualized", "biscuit-visualized/image"]
 [dependencies]
 base64 = "0.22"
 biscuit-visualized = { path = "../../biscuit-visualized/src", features = ["clap"], optional = true }
+# Structured config parsing for app-metadata value extraction. Normalizes
+# TOML/YAML/JSON5 to `serde_json::Value`; the underlying parsers stay indirect.
+# `default-features = false` keeps the heavy PDF/gix tree out.
+biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["toml", "yaml", "json5"] }
 ignore = "0.4"
 image = "0.25"
 renderable = { path = "../../renderable" }
@@ -37,9 +41,13 @@ termini = "1.0"
 thiserror = "2.0"
 tracing = "0.1"
 unicode-width = "0.2"
+url = "2.5"
 regex = "1.11"
 paste = "1.0"
 globset = "0.4"
+# Apple property-list (XML + binary) extraction for iTerm2 / Apple Terminal
+# config value reading; the only structured parser added directly (§6/§10).
+plist = "1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 unic-langid = "0.9.6"
 
@@ -78,6 +86,12 @@ tracing-test = "0.2"
 # cells (`tests/prose_cells_parity.rs`). They skip cleanly when no
 # Chrome/Chromium is found.
 biscuit-browser-harness = { path = "../../biscuit-browser-harness" }
+# Real-terminal (Level-2) harness for the OSC 10 cache proof
+# (`tests/level2_terminal_osc_wezterm.rs`). Shared harness — biscuit-terminal
+# adds no PTY abstraction of its own.
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
+# `require_level!` gating for the Level-2 tier.
+test-toolkit = { path = "../../tools/test-toolkit" }
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread"] }
 
 [[bench]]
@@ -87,3 +101,12 @@ harness = false
 [[bench]]
 name = "render_tree"
 harness = false
+
+# CI policy: L1 runs with the `image` feature; biscuit-terminal owns L2
+# (real-terminal) and browser (headless) tier tests. The library's own L2
+# tests drive WezTerm only (tmux/kitty/apple-terminal are the CLI's); a
+# backend declared here that no lib test executes fails backend-proof.
+[package.metadata.ci.tests]
+tiers = ["L1", "L2", "browser"]
+l2-backends = ["wezterm"]
+features = ["image"]

@@ -30,7 +30,7 @@ The reporting is broken down into the following sections:
    - the _canonical_ base providers will be defined in the user and repo configuration files and are set when the user runs `claudine init` (via an interactive Q and A).
        - obviously if the current working directory is **not** a git repo then we only report on the user scoped canonical provider
    - to provide symbolic links _to_ commands we need to isolate which provider will _provide_ the command sources ... the "canonical provider" is the designated provider of commands.
-   - **Only Markdown-based providers** are eligible as canonical for commands. Gemini (TOML), Goose (MCP), and KimiCode (built-in only) are excluded because cross-format conversion is not yet supported. Eligible providers: Claude, Codex, OpenCode, Qwen, Roo Code.
+   - **Only Markdown-based providers** are eligible as canonical for commands. Gemini (TOML), Goose (MCP), and KimiCode (built-in only) are excluded because cross-format conversion is not yet supported. Eligible providers: Claude, Codex, OpenCode, Qwen.
    - based on this context here are two examples of what **line 5** of the Header Intro section might look like:
        - example 1 (user & repo): `<blue><b>Canonical Providers:</b></blue> user: <b>{user-provider}</b>, repo: <b>{repo-provider}</b>`
        - example 2 (user only): `<blue><b>Canonical Providers:</b></blue> user: <b>{user-provider}</b>`
@@ -102,7 +102,7 @@ The reporting is broken down into the following sections:
    |--------------------|----------------|-----------------|---------------------------------------------|
    | `name`             | (from filename) | All            | If `name` is missing, insert it from the filename. Not a cross-provider alias but a completeness fix. |
    | `description`      | `description`  | All             | Universal property — no aliasing needed      |
-   | `argument-hint`    | `argument-hint`| Claude, Codex, Roo Code | Same name across all providers that support it — passes through symlinks naturally |
+   | `argument-hint`    | `argument-hint`| Claude, Codex   | Same name across all providers that support it — passes through symlinks naturally |
 
    **Drift detection — `VariantLinkedProperty` exception:**
 
@@ -110,7 +110,7 @@ The reporting is broken down into the following sections:
 
    **Property passthrough:**
 
-   Many properties — `argument-hint`, `user-invocable`, `disable-model-invocation`, `allowed-tools`, `template`, `subtask`, `agent`, `context`, `mode`, etc. — are only recognized by some CLIs. Under the same simplifying assumption (extra properties cause no downside to CLIs that don't use them), these values can live in the canonical command file and pass through symlinks harmlessly. CLIs that understand a given property will use it; those that don't will ignore it. For the full analysis of which properties are safe to pass through and which block sharing, see [Non-Portable Assets](non-portable-assets.md).
+   Many properties — `argument-hint`, `user-invocable`, `disable-model-invocation`, `allowed-tools`, `template`, `subtask`, `agent`, `context`, etc. — are only recognized by some CLIs. Under the same simplifying assumption (extra properties cause no downside to CLIs that don't use them), these values can live in the canonical command file and pass through symlinks harmlessly. CLIs that understand a given property will use it; those that don't will ignore it. For the full analysis of which properties are safe to pass through and which block sharing, see [Non-Portable Assets](non-portable-assets.md).
 
    When the `--verbose` flag is used, the Footer Messages section includes per-property notes showing which CLIs actually consume each property present in the listed commands (see section 7).
 
@@ -179,9 +179,8 @@ The reporting is broken down into the following sections:
    - **property passthrough notes** (verbose only)
        - only shown when the `-v` / `--verbose` flag is used AND at least one command in the listing has properties that are only consumed by a subset of CLIs
        - each such property that appears across the listed commands gets its own line indicating which CLIs consume it, e.g.:
-           - `<b><yellow>argument-hint</yellow></b><dim> used by Claude, Codex, and Roo Code; other CLI Agents will ignore</dim>`
+           - `<b><yellow>argument-hint</yellow></b><dim> used by Claude and Codex; other CLI Agents will ignore</dim>`
            - `<b><yellow>template</yellow></b><dim> used by OpenCode; other CLI Agents will ignore</dim>`
-           - `<b><yellow>mode</yellow></b><dim> used by Roo Code; other CLI Agents will ignore</dim>`
            - `<b><yellow>subtask</yellow></b><dim> used by OpenCode; other CLI Agents will ignore</dim>`
        - only the properties that actually appear in the currently listed commands are shown
 
@@ -202,11 +201,10 @@ The following table summarizes how each provider handles commands, derived from 
 | KimiCode  | Limited       | Built-in | N/A                    | N/A                           | N/A            | N/A                                                                                                  |
 | OpenCode  | Full          | Markdown | `.opencode/commands`   | `.config/opencode/commands`   | (none)         | description, template, agent, model, subtask                                                         |
 | Qwen      | Full          | Markdown | `.qwen/commands`       | `.qwen/commands`              | (none)         | description                                                                                          |
-| Roo Code  | Full          | Markdown | `.roo/commands`        | `.roo/commands`               | (none)         | description, argument-hint, mode                                                                     |
 
 ### Linking Implications
 
-- **Full + Markdown** providers (Claude, OpenCode, Qwen, Roo Code): Commands can be symlinked directly from the canonical provider. Frontmatter properties not recognized by the target provider are silently ignored.
+- **Full + Markdown** providers (Claude, OpenCode, Qwen): Commands can be symlinked directly from the canonical provider. Frontmatter properties not recognized by the target provider are silently ignored.
 - **CustomFormat + Markdown** (Codex): User-scoped symlinks work since the format is Markdown, but Codex uses a `prompts/` directory instead of `commands/` and does not currently document repo-scoped prompt discovery.
 - **CustomFormat + TOML** (Gemini): Cannot be symlinked from a Markdown-based canonical provider. Requires format conversion or manual creation. Counted as `format_incompatible` in the fix summary.
 - **CustomFormat + MCP** (Goose): Commands are MCP-based, not file-based. Cannot participate in file-based linking. Counted as `format_incompatible` and noted in the provider exception header.

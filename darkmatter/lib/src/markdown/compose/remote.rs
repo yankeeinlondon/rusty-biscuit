@@ -7,6 +7,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+use biscuit_file::{FileReference, FileReferenceKind};
 use thiserror::Error;
 
 use crate::markdown::compose::ComposeSource;
@@ -17,7 +18,7 @@ use crate::markdown::compose::transclusion::BlockDirective;
 /// evaluator will actually **fetch over the network** when it is an HTTP(S) URL.
 ///
 /// This is deliberately narrower than the context-requiring read-side set
-/// (`expression::functions::FS_FUNCTIONS`, seven functions): `absolute` and
+/// (the context-aware expression registrations): `absolute` and
 /// `relative` also require a resolution context but only ever rewrite a path
 /// string — they never touch the network — so registering them as remote
 /// egress would make the pre-fetch discovery scanner contact a host for a URL
@@ -235,9 +236,8 @@ impl RemoteUrlCatalog {
 
 /// Scans parsed block directives for URL targets.
 ///
-/// Looks for directives whose `raw_target` starts with `http://` or
-/// `https://` and maps them to the appropriate [`RemoteUrlConsumer`] based
-/// on directive kind.
+/// Uses [`FileReference`] classification to find URL targets and maps them to
+/// the appropriate [`RemoteUrlConsumer`] based on directive kind.
 pub fn discover_remote_urls_from_directives(
     directives: &[BlockDirective],
     source: &ComposeSource,
@@ -249,8 +249,11 @@ pub fn discover_remote_urls_from_directives(
 
     directives
         .iter()
-        .filter(|d| is_http_url(&d.raw_target))
         .filter_map(|d| {
+            let file_ref = FileReference::new(&d.raw_target).ok()?;
+            if file_ref.class().kind != FileReferenceKind::Url {
+                return None;
+            }
             validate_url_for_remote_read(&d.raw_target).ok().map(|url| {
                 let consumer = match d.kind {
                     crate::markdown::compose::transclusion::DirectiveKind::File
@@ -288,18 +291,35 @@ pub fn discover_remote_urls_from_expressions(
     content: &str,
     source: &ComposeSource,
 ) -> Vec<DiscoveredRemoteUrl> {
+    // A remote-read URL argument is a string literal that validates as an
+    // `http(s)` URL, so it necessarily contains the substring "http". When the
+    // document has none, no expression can register a URL — skip the full
+    // expression scan/parse the interpolation stage repeats anyway (F33).
+    // Byte-identical: the scan would produce the same empty result.
+    if !content.contains("http") {
+        return Vec::new();
+    }
+
+    let locations = ExpressionFinder::new(content).find_all();
+    if locations.is_empty() {
+        return Vec::new();
+    }
+
     let source_file = match source {
         ComposeSource::File(p) => Some(p.clone()),
         _ => None,
     };
 
+    // Built once for the whole document rather than rescanning `content[..start]`
+    // per expression, which was quadratic in document size (F33).
+    let newline_offsets = newline_offset_table(content);
     let mut results = Vec::new();
 
-    for loc in ExpressionFinder::new(content).find_all() {
+    for loc in locations {
         let Ok(expr) = parse(&loc.expression) else {
             continue;
         };
-        let line = byte_offset_to_line(content, loc.start);
+        let line = line_at_offset(&newline_offsets, loc.start);
         collect_expression_urls(&expr, &source_file, line, &mut results);
     }
 
@@ -377,10 +397,6 @@ pub fn check_remote_read_allowed(
     }
 }
 
-fn is_http_url(s: &str) -> bool {
-    s.starts_with("http://") || s.starts_with("https://")
-}
-
 /// Recursively walks a parsed expression, registering a remote URL for every
 /// exact-identifier [`REMOTE_READ_FUNCTIONS`] call whose first argument is a
 /// string-literal `http(s)` URL. Recurses into all sub-expressions so calls
@@ -430,16 +446,35 @@ fn expr_children(expr: &Expr) -> Vec<&Expr> {
         } => vec![condition.as_ref(), then_branch.as_ref(), else_branch.as_ref()],
         Expr::Comparison { left, right, .. } => vec![left.as_ref(), right.as_ref()],
         Expr::FunctionCall { args, .. } => args.iter().collect(),
+        Expr::ArrayLiteral(items) => items.iter().collect(),
+        Expr::ObjectLiteral(entries) => entries.iter().map(|(_, value)| value).collect(),
     }
 }
 
-/// Converts a byte offset into a 1-based line number.
-fn byte_offset_to_line(content: &str, offset: usize) -> usize {
-    content[..offset.min(content.len())]
+/// Byte offsets of every `\n` in `content`, in ascending order.
+fn newline_offset_table(content: &str) -> Vec<usize> {
+    content
         .bytes()
-        .filter(|&b| b == b'\n')
-        .count()
-        + 1
+        .enumerate()
+        .filter_map(|(i, byte)| (byte == b'\n').then_some(i))
+        .collect()
+}
+
+/// Returns the 1-based line containing `offset`, using the precomputed
+/// [`newline_offset_table`].
+///
+/// Byte-identical to counting the `\n` in `content[..offset]` and adding one,
+/// including for an `offset` past the end of `content` (every newline precedes
+/// it, so it lands on the final line — matching the clamping scan this
+/// replaced). CRLF needs no special case: only `\n` is counted, so `\r\n` is
+/// one break on every platform.
+///
+/// Note this is deliberately *not* the TOC module's same-named lookup, which
+/// adds a trailing-newline adjustment to match `str::lines` counting semantics.
+/// Remote discovery reports the line an expression's `{{` sits on, so a `{{` at
+/// a line's first byte belongs to that line, not the previous one.
+fn line_at_offset(newline_offsets: &[usize], offset: usize) -> usize {
+    newline_offsets.partition_point(|&pos| pos < offset) + 1
 }
 
 #[cfg(test)]
@@ -500,6 +535,22 @@ mod tests {
     }
 
     #[test]
+    fn discovers_file_and_code_targets_with_case_insensitive_http_schemes() {
+        let directives = vec![
+            make_directive(DirectiveKind::File, "hTtP://example.com/doc.md", 5),
+            make_directive(DirectiveKind::Code, "HTTPS://example.com/snippet.rs", 10),
+        ];
+
+        let results = discover_remote_urls_from_directives(&directives, &file_source());
+
+        assert_eq!(results.len(), 2);
+        assert_eq!(results[0].url.as_str(), "http://example.com/doc.md");
+        assert_eq!(results[0].consumer, RemoteUrlConsumer::TransclusionFile);
+        assert_eq!(results[1].url.as_str(), "https://example.com/snippet.rs");
+        assert_eq!(results[1].consumer, RemoteUrlConsumer::TransclusionCode);
+    }
+
+    #[test]
     fn discover_from_url_directive() {
         let directives = vec![
             make_directive(DirectiveKind::Url, "https://example.com/doc.md", 3),
@@ -543,6 +594,15 @@ mod tests {
     }
 
     #[test]
+    fn discover_from_expression_literal_children() {
+        let content =
+            "{{ length({ source: [frontmatter(\"https://example.com/api.md\")] }) }}";
+        let results = discover_remote_urls_from_expressions(content, &file_source());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].url.as_str(), "https://example.com/api.md");
+    }
+
+    #[test]
     fn discover_from_expression_file_exists() {
         let content = "Check: {{ file_exists(\"https://example.com/remote.md\") }}";
         let results = discover_remote_urls_from_expressions(content, &unknown_source());
@@ -582,6 +642,15 @@ mod tests {
         let results = discover_remote_urls_from_expressions(content, &file_source());
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].url.as_str(), "https://example.com/api.md");
+    }
+
+    #[test]
+    fn no_fetch_for_url_inside_interpolation_literal() {
+        // `{{{ ... }}}` content is inert: a URL inside a literal must not be
+        // discovered as remote egress.
+        let content = "See {{{ frontmatter(\"https://example.com/doc.md\") }}} for details.";
+        let results = discover_remote_urls_from_expressions(content, &file_source());
+        assert!(results.is_empty(), "URL inside interpolation literal must not be discovered");
     }
 
     #[test]
@@ -639,6 +708,191 @@ Intro
         let content = "{{ not_frontmatter(\"https://example.com/doc.md\") }}";
         let results = discover_remote_urls_from_expressions(content, &file_source());
         assert!(results.is_empty());
+    }
+
+    // --- F33: line positions from the newline-offset table --------------------
+    //
+    // The offset table replaced a per-expression `content[..start]` prefix
+    // rescan. These pin the reported lines the scan produced, so a regression
+    // in the table/binary-search path fails here rather than silently
+    // mislabeling a remote-fetch diagnostic.
+
+    /// The formula the offset-table path must reproduce exactly: count the
+    /// `\n` before `offset` and add one.
+    fn naive_line(content: &str, offset: usize) -> usize {
+        content[..offset.min(content.len())]
+            .bytes()
+            .filter(|&b| b == b'\n')
+            .count()
+            + 1
+    }
+
+    fn url_fn(n: usize) -> String {
+        format!("{{{{ frontmatter(\"https://example.com/{n}.md\") }}}}")
+    }
+
+    #[test]
+    fn expression_lines_with_lf_newlines() {
+        let content = format!("intro\n{}\nmiddle prose\n\n{}\n", url_fn(1), url_fn(2));
+        let results = discover_remote_urls_from_expressions(&content, &file_source());
+        assert_eq!(
+            results.iter().map(|r| r.line).collect::<Vec<_>>(),
+            vec![2, 5]
+        );
+    }
+
+    #[test]
+    fn expression_lines_with_crlf_newlines() {
+        // Only `\n` delimits a line, so a `\r\n` document reports the same
+        // lines its LF twin does.
+        let content = format!(
+            "intro\r\n{}\r\nmiddle prose\r\n\r\n{}\r\n",
+            url_fn(1),
+            url_fn(2)
+        );
+        let results = discover_remote_urls_from_expressions(&content, &file_source());
+        assert_eq!(
+            results.iter().map(|r| r.line).collect::<Vec<_>>(),
+            vec![2, 5]
+        );
+    }
+
+    #[test]
+    fn expression_line_after_multibyte_unicode() {
+        // A wide multi-byte prefix (630 bytes / 210 chars) puts the expression's
+        // byte offset far beyond the *character* offset of every newline that
+        // follows it. A table keyed on char indices would therefore count the
+        // trailing lines as preceding the expression and over-report the line;
+        // only a byte-offset table reports line 2.
+        let wide = "日本語テキスト".repeat(30);
+        let content = format!("{wide}\n{}\ntail one\ntail two\ntail three\n", url_fn(1));
+        let results = discover_remote_urls_from_expressions(&content, &file_source());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].line, 2);
+    }
+
+    #[test]
+    fn expression_line_between_multibyte_lines() {
+        // Multi-byte text on both sides, expression mid-document: byte offsets
+        // and character offsets diverge before *and* after it.
+        let content = format!(
+            "café ☕\n🎉 naïve 🎉\n{}\n日本語\n{}\n",
+            url_fn(1),
+            url_fn(2)
+        );
+        let results = discover_remote_urls_from_expressions(&content, &file_source());
+        assert_eq!(
+            results.iter().map(|r| r.line).collect::<Vec<_>>(),
+            vec![3, 5]
+        );
+    }
+
+    #[test]
+    fn expression_at_start_of_file_is_line_one() {
+        // Offset 0: no newline precedes it, and the `partition_point` must not
+        // underflow off the front of the table.
+        let content = format!("{}\ntrailing prose\n", url_fn(1));
+        let results = discover_remote_urls_from_expressions(&content, &file_source());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].line, 1);
+    }
+
+    #[test]
+    fn expression_at_end_of_file_with_and_without_trailing_newline() {
+        // The final line is reported the same whether or not the document ends
+        // in a newline — the terminator follows the expression either way.
+        let without = format!("a\nb\n{}", url_fn(1));
+        let with = format!("a\nb\n{}\n", url_fn(1));
+
+        for content in [without, with] {
+            let results = discover_remote_urls_from_expressions(&content, &file_source());
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].line, 3, "content: {content:?}");
+        }
+    }
+
+    #[test]
+    fn multiple_expressions_on_one_line_share_a_line_number() {
+        // Distinct byte offsets between the same pair of newlines must all map
+        // to that one line.
+        let content = format!("intro\n{} and {} and {}\n", url_fn(1), url_fn(2), url_fn(3));
+        let results = discover_remote_urls_from_expressions(&content, &file_source());
+        assert_eq!(results.len(), 3);
+        assert!(results.iter().all(|r| r.line == 2), "{results:#?}");
+        // Each URL is still distinct — the shared line does not collapse them.
+        assert_eq!(
+            results.iter().map(|r| r.url.as_str()).collect::<Vec<_>>(),
+            vec![
+                "https://example.com/1.md",
+                "https://example.com/2.md",
+                "https://example.com/3.md",
+            ]
+        );
+    }
+
+    #[test]
+    fn consecutive_blank_lines_do_not_skew_line_numbers() {
+        // Adjacent newlines put several table entries at consecutive offsets;
+        // the binary search must still count every one of them.
+        let content = format!("intro\n\n\n\n{}\n", url_fn(1));
+        let results = discover_remote_urls_from_expressions(&content, &file_source());
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].line, 5);
+    }
+
+    #[test]
+    fn line_at_offset_matches_naive_at_every_offset() {
+        // Exhaustive equivalence over a mixed LF/CRLF/Unicode document: the
+        // table must agree with the replaced prefix scan at every char
+        // boundary, plus offsets past the end (which the old scan clamped).
+        let content = "first\r\nsecond café\n\n\n日本語 line\nlast no newline";
+        let table = newline_offset_table(content);
+
+        for offset in 0..=content.len() {
+            if !content.is_char_boundary(offset) {
+                continue;
+            }
+            assert_eq!(
+                line_at_offset(&table, offset),
+                naive_line(content, offset),
+                "offset {offset}"
+            );
+        }
+
+        for past_end in [content.len() + 1, content.len() + 100] {
+            assert_eq!(
+                line_at_offset(&table, past_end),
+                naive_line(content, past_end),
+                "past-end offset {past_end}"
+            );
+        }
+    }
+
+    #[test]
+    fn empty_newline_table_reports_line_one() {
+        // A single-line document has no table entries at all.
+        let content = "no newlines here";
+        let table = newline_offset_table(content);
+        assert!(table.is_empty());
+        assert_eq!(line_at_offset(&table, 0), 1);
+        assert_eq!(line_at_offset(&table, content.len()), 1);
+    }
+
+    #[test]
+    fn no_http_guard_short_circuits_before_expression_scan() {
+        // The cheap guard is retained: a document with expressions but no
+        // `http` substring can never register a URL.
+        let content = "{{ frontmatter(\"./local.md\") }}\n{{ file_exists(\"./b.md\") }}";
+        assert!(!content.contains("http"));
+        assert!(discover_remote_urls_from_expressions(content, &file_source()).is_empty());
+    }
+
+    #[test]
+    fn http_prose_without_any_expression_discovers_nothing() {
+        // Passes the `http` guard but has no `{{ }}` at all — the early return
+        // before the table build must not change the result.
+        let content = "See https://example.com/doc.md for details.\nNo expressions here.\n";
+        assert!(discover_remote_urls_from_expressions(content, &file_source()).is_empty());
     }
 
     #[test]

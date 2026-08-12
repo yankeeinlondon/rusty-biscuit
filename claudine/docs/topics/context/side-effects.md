@@ -45,6 +45,17 @@ let engine = EffectEngine::builder()
   carries a `hash:` frontmatter field, the engine recomputes the hash so the
   document stays self-consistent.
 
+## Runtime-accessible descriptions
+
+Every effect descriptor implements the shared `Described` trait from
+`darkmatter::catalog`. This powers exact lookup, fuzzy suggestion, and
+plain-text error enrichment for consumers that need to talk about capabilities
+programmatically.
+
+The `--side-effects` report renders an optional **Example** column (hidden below
+70 columns to preserve the minimum supported width). Examples are taken from
+`EFFECT_DESCRIPTORS` and formatted with the same rules as the expression report.
+
 ## The capabilities
 
 The verbs live in `effects/verbs.rs` and are catalogued in
@@ -67,16 +78,27 @@ Each capability has a **safety classification** (`EffectSafety`):
 
 `render_side_effects_report` (`claudine/cli/src/commands/context.rs`) renders
 directly from `effect_descriptors()` (`EFFECT_DESCRIPTORS`). It groups by
-`category` and emits a three-column table — **Capability**, **Description**,
-**Safety** — with the safety cell colored by classification. Ahead of the table
-it prints a constraint checklist that restates the engine's guarantees
-(documentation-only, orchestrator-driven, mutation-root confinement, deny-all
-network, auto-rehash, and that *catalog membership is not authorization*).
+`category` and emits a table — **Capability**, **Description**, **Example**
+(above 70 columns), **Safety** — with the safety cell colored by
+classification. Ahead of the table it prints a constraint checklist that
+restates the engine's guarantees (documentation-only, orchestrator-driven,
+mutation-root confinement, deny-all network, auto-rehash, and that *catalog
+membership is not authorization*).
 
 Because effects are **typed methods with no string dispatcher**, the descriptor
 catalog *is* the authoritative capability surface — there is no runtime name
 table to enumerate (unlike the expression engine). A method without a descriptor
 is simply not a catalogued capability.
+
+## Intentionally uncatalogued methods
+
+Public `EffectEngine` methods that are deliberately excluded from the capability
+surface are listed in `INTENTIONALLY_UNCATALOGUED` in
+`darkmatter/lib/src/effects/catalog.rs`. The list is currently empty: every
+public mutating method is either catalogued or explicitly reviewed and
+documented as excluded. Adding a method to this list requires the same code-
+review scrutiny as adding a descriptor, because it is a claim that the method
+should remain outside the documented capability surface.
 
 ## Documentation-only guarantee
 
@@ -95,11 +117,19 @@ enable the feature, so the atomics never touch the hot path.
 1. **Implement it.** Add a method to `EffectEngine` (in `verbs.rs`) honoring the
    mutation-root / allowlist / auto-rehash guards.
 2. **Catalog it.** Add an `EffectDescriptor` to `EFFECT_DESCRIPTORS` with its
-   `signature`, `description`, `safety`, `category`, and `order`.
+   `signature`, `description`, `safety`, `category`, `order`, and a verified
+   `example`.
 3. **Pin it under test.** Add an `EffectVerb` entry to the `cfg(test)`
    `EFFECT_VERBS` table pairing the descriptor signature with a real call to the
-   new method.
+   new method. `verb_signature_set_equals_descriptor_signature_set` also asserts
+   every descriptor carries an example.
 4. The `--side-effects` report needs **no change** — it reads the catalog.
+
+If the method is intentionally *not* a catalogued capability, add its name to
+`INTENTIONALLY_UNCATALOGUED` in `effects/catalog.rs` with a written rationale in
+the code-review discussion. The allow-list exists because Rust cannot enumerate
+a type's public method surface at compile time; it converts the silent orphan-
+method gap into a reviewed decision.
 
 ## Drift control for side effects
 

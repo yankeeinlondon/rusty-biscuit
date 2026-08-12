@@ -39,8 +39,14 @@ Treat the first whitespace-delimited token in `$ARGUMENTS` as the API module nam
 Before writing code, read these existing definitions to understand the house patterns. Choose the reference closest to your target API's complexity:
 
 **Simple API (few endpoints, bearer auth):**
-- `schematic/definitions/src/openai/mod.rs` — 3 endpoints, bearer token
-- `schematic/definitions/src/openai/types.rs` — minimal types with JsonSchema
+- `schematic/definitions/src/anthropic/mod.rs` — 4 endpoints, API-key header, required constant header
+- `schematic/definitions/src/lmstudio/mod.rs` — 6 endpoints, bearer token
+
+**Generated from a published spec (do not hand-edit):**
+- `schematic/definitions/src/openai/` — 265 endpoints, 1394 types, produced by
+  `schematic-gen import` from `schematic/specs/openai/openapi.yaml`. If the API
+  you are adding publishes an OpenAPI document, prefer importing it over hand-authoring:
+  see `just -f schematic/justfile import-openai` for the invocation shape.
 
 **Medium API (10-20 endpoints, path params, pagination):**
 - `schematic/definitions/src/github/mod.rs` — 16 endpoints, rich query params, pagination

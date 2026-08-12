@@ -31,10 +31,17 @@ biscuit-hash = { path = "../../biscuit-hash/lib" }
 
 [dev-dependencies]
 reqwest = "0.13"
-serial_test = "3.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "process", "io-util", "fs"] }
 
 # Opt-out of benchmarking: this crate has no algorithmic hot paths.
 [package.metadata.benchmarks]
 required = false
 reason = "TTS provider dispatch dominated by external synthesis backends; no measurable in-process hot paths."
+
+# CI policy: L1 runs with the `playa` feature (the area recipe's contract), and
+# the suite shells out to the `espeak-ng` binary on Linux runners.
+[package.metadata.ci.tests]
+features = ["playa"]
+
+[package.metadata.ci.native]
+ubuntu-latest = ["espeak-ng"]

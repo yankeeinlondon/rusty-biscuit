@@ -1,6 +1,6 @@
 # Supported Platforms
 
-Claudine supports 8 agentic CLI platforms. Each platform has varying levels of support for skills, slash commands, sub-agents, and hook events. Run `claudine providers` to see the live capability matrix:
+Claudine supports 7 agentic CLI platforms. Each platform has varying levels of support for skills, slash commands, sub-agents, and hook events. Run `claudine providers` to see the live capability matrix:
 
 ```
 ┌───────────┬───────┬───────┬───────┬───────┐
@@ -13,7 +13,6 @@ Claudine supports 8 agentic CLI platforms. Each platform has varying levels of s
 │ Kimi Code │  ✅   │  ❌   │  ✅   │    0  │
 │ OpenCode  │  ✅   │  ✅   │  ✅   │   13  │
 │ Qwen Code │  ✅   │  ✅   │  ✅   │    0  │
-│ Roo Code  │  ✅   │  ✅   │  ✅   │    0  │
 └───────────┴───────┴───────┴───────┴───────┘
 ```
 

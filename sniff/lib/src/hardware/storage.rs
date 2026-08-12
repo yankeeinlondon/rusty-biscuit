@@ -125,8 +125,12 @@ fn detect_storage_impl() -> Vec<StorageInfo> {
             for name in &device_names {
                 args.push(name.as_str());
             }
-            if let Ok(output) = std::process::Command::new("diskutil").args(&args).output() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Ok(output) = crate::process::run_with_timeout(
+                "diskutil",
+                &args,
+                crate::process::timeouts::DISKUTIL,
+            ) {
+                let stdout = output.stdout_lossy();
                 let mut current_device: Option<&str> = None;
                 for line in stdout.lines() {
                     let trimmed = line.trim();
@@ -180,17 +184,20 @@ fn detect_storage_kind_macos(device: &str) -> StorageKind {
     if dev_name.is_empty() {
         return StorageKind::Unknown;
     }
-    let output = match std::process::Command::new("diskutil")
-        .args(["info", dev_name])
-        .output()
-    {
+    let output = match crate::process::run_with_timeout(
+        "diskutil",
+        &["info", dev_name],
+        crate::process::timeouts::DISKUTIL,
+    ) {
         Ok(o) => o,
         Err(_) => return StorageKind::Unknown,
     };
     parse_diskutil_info_output(&output.stdout)
 }
 
-#[cfg(target_os = "macos")]
+// Available under test on every platform so the pure-parser coverage below
+// compiles on Linux and Windows; only macOS uses it at runtime.
+#[cfg(any(target_os = "macos", test))]
 #[allow(dead_code)]
 fn parse_diskutil_info_output(stdout: &[u8]) -> StorageKind {
     let stdout = String::from_utf8_lossy(stdout);
@@ -209,6 +216,10 @@ fn parse_diskutil_info_output(stdout: &[u8]) -> StorageKind {
 
 #[cfg(test)]
 mod tests {
+    // These exercise the macOS `diskutil info` text parser only. They run on
+    // every platform purely to keep the parser coverage portable — they assert
+    // nothing about Linux (`/sys/block/.../rotational`) or Windows storage
+    // detection, which use entirely separate code paths.
     use super::*;
 
     #[test]

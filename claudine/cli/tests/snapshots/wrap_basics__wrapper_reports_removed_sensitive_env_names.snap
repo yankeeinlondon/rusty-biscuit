@@ -1,0 +1,29 @@
+---
+source: claudine/cli/tests/wrap_basics.rs
+expression: redacted
+---
+
+Claudine ▸ Codex  Interactive 
+
+ℹ Starting pre-flight checks
+Environment Variables:
+• INTERNAL_TOKEN
+• OPENAI_API_KEY
+• AGENT=codex
+• AGENT_PARAMS=["--include","OPENAI_API_KEY","--","--version"]
+• CLAUDINE_INTERACTIVE=1
+• CLAUDINE_PID=<redacted>
+• CLAUDINE_SESSION_ID=<redacted>
+• INTERACTIVE=true
+• PWD=<workspace>/cwd
+• YOLO=false
+- Info: potentially dangerous ENV variables were removed; if you need one of
+   these to be included use the --include <ENV> CLI switch
+
+■ System Prompt (appended)
+┃ The system prompt was appended to; the content was composed from ./system-prom
+┃ pt.md. The composed system prompt is roughly 9 tokens.
+┃ 
+┃ You are a test fixture system prompt.
+
+✓ Pre-flight checks have passed

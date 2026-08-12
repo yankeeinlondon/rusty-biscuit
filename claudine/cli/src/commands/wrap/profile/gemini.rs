@@ -5,7 +5,7 @@ use std::path::Path;
 
 use super::{
     PromptDelivery, WrapperProfile, has_any_flag, has_flag, option_value,
-    prompt_delivery_append_flags, push_stream_json_flags,
+    prompt_delivery_append_flags,
 };
 use std::io::Write;
 
@@ -58,10 +58,6 @@ impl WrapperProfile for GeminiWrapper {
         Ok(())
     }
 
-    fn allowed_env_keys(&self) -> &'static [&'static str] {
-        &["GEMINI_API_KEY", "GOOGLE_API_KEY"]
-    }
-
     fn prepare_captured_output(&self, args: &mut Vec<String>) {
         // Use stream-json so we can reliably separate the assistant
         // response from hook logs, skill conflict notices, and other
@@ -87,24 +83,6 @@ impl WrapperProfile for GeminiWrapper {
             }
         }
         result
-    }
-
-    fn stdout_noise_prefixes(&self) -> &'static [&'static str] {
-        &[
-            "Created execution plan for ",
-            "Expanding hook command: ",
-            "Hook execution for ",
-            "Skill conflict detected: ",
-            "[LocalAgentExecutor]",
-        ]
-    }
-
-    fn stderr_noise_prefixes(&self) -> &'static [&'static str] {
-        &["Skill conflict detected: ", "[LocalAgentExecutor]"]
-    }
-
-    fn suppress_structured_stderr_on_success(&self) -> bool {
-        true
     }
 
     fn apply_non_interactive_flags(&self, args: &mut [String]) -> Result<()> {
@@ -146,11 +124,14 @@ impl WrapperProfile for GeminiWrapper {
         ))
     }
 
-    fn apply_structured_stream(&self, args: &mut Vec<String>) {
-        // Gemini uses the catalog-default --output-format stream-json via
-        // push_stream_json_flags, with no extra flags. This override is kept
-        // because structured-stream setup is not modeled in the output-format
-        // catalog (it is a transport concern, not an output format concern).
-        push_stream_json_flags(args, &[]);
+    fn build_resume_args(&self, session_id: &str) -> Result<Vec<String>> {
+        // Full session IDs are Gemini's first-class resume selector;
+        // `--resume latest` / numeric indexes are human conveniences and
+        // unsafe for automation (session-resumption research, 2026-07-03).
+        Ok(vec![
+            "gemini".to_string(),
+            "--resume".to_string(),
+            session_id.to_string(),
+        ])
     }
 }

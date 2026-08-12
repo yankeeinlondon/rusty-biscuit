@@ -1,0 +1,31 @@
+# Human-owned overrides for the opencode provider. Each entry WINS over the
+# field's declared source during generation (whole-key replacement) and MUST
+# carry a `reason:`. Keys are catalog field names; an override for a field
+# with no mapping-registry entry is a generation error.
+model_catalog_source:
+    value:
+        shell_command:
+            program: opencode
+            args: ["models"]
+    reason: >-
+        agent-models research reports dynamic_listing.available: true
+        (`opencode models [--refresh]`), but the research boolean cannot
+        express a shell-command mechanism (program/args). Pin the
+        ShellCommand object until the agent-models schema grows a typed
+        catalog-source key (pending schema addition).
+model_env_vars:
+    value: ["OPENCODE_MODEL"]
+    reason: >-
+        agent-models research's only env_var record is
+        OPENCODE_CONFIG_CONTENT (whole-config injection, not model
+        selection), so the coercion yields an unusable list. The wrapper
+        MODEL selection chain uses OPENCODE_MODEL (CLI switch >
+        OPENCODE_MODEL > config default). Pin until the wrapper env
+        contract is redesigned (Phase D).
+model_cli_flag:
+    value: "--model"
+    reason: >-
+        agent-models records the model flag as the compound site
+        "--model / -m", which the bare-token rule skips loudly, leaving
+        None even though the flag clearly exists. Pin the long-form
+        `--model`. Ruled at Phase D wave 1 (2026-07-04).

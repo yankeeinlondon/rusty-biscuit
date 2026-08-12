@@ -1,0 +1,38 @@
+{
+  "name": "dmls",
+  "displayName": "DMLS",
+  "description": "Darkmatter Language Server for Markdown",
+  "version": "0.0.1",
+  "publisher": "darkmatter",
+  "engines": {
+    "vscode": "^1.75.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onLanguage:markdown"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "configuration": {
+      "title": "DMLS",
+      "properties": {
+        "dmls.server.path": {
+          "type": "string",
+          "default": "dmls",
+          "description": "Path to the dmls binary. Defaults to `dmls` on PATH; set an absolute path if VS Code cannot find it."
+        },
+        "dmls.server.args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "default": [],
+          "description": "Extra arguments passed to the dmls binary."
+        }
+      }
+    }
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  }
+}

@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-05-07T02:07:04.911884+00:00
+//! Generated: 2026-07-06T22:44:36.054955+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: OpenRouter
 //!
@@ -26,14 +26,8 @@ pub enum ProviderModelOpenRouter {
     Aion__Labs___Aion__2_0,
     /// Model: `aion-labs/aion-rp-llama-3.1-8b`
     Aion__Labs___Aion__Rp__Llama__3_1__8b,
-    /// Model: `alfredpros/codellama-7b-instruct-solidity`
-    Alfredpros___Codellama__7b__Instruct__Solidity,
-    /// Model: `alibaba/tongyi-deepresearch-30b-a3b`
-    Alibaba___Tongyi__Deepresearch__30b__A3b,
     /// Model: `allenai/olmo-3-32b-think`
     Allenai___Olmo__3__32b__Think,
-    /// Model: `alpindale/goliath-120b`
-    Alpindale___Goliath__120b,
     /// Model: `amazon/nova-2-lite-v1`
     Amazon___Nova__2__Lite__V1,
     /// Model: `amazon/nova-lite-v1`
@@ -48,12 +42,8 @@ pub enum ProviderModelOpenRouter {
     Anthracite__Org___Magnum__V4__72b,
     /// Model: `anthropic/claude-3-haiku`
     Anthropic___Claude__3__Haiku,
-    /// Model: `anthropic/claude-3.5-haiku`
-    Anthropic___Claude__3_5__Haiku,
-    /// Model: `anthropic/claude-3.7-sonnet`
-    Anthropic___Claude__3_7__Sonnet,
-    /// Model: `anthropic/claude-3.7-sonnet:thinking`
-    Anthropic___Claude__3_7__Sonnet__Thinking,
+    /// Model: `anthropic/claude-fable-5`
+    Anthropic___Claude__Fable__5,
     /// Model: `anthropic/claude-haiku-4.5`
     Anthropic___Claude__Haiku__4_5,
     /// Model: `anthropic/claude-opus-4`
@@ -64,44 +54,32 @@ pub enum ProviderModelOpenRouter {
     Anthropic___Claude__Opus__4_5,
     /// Model: `anthropic/claude-opus-4.6`
     Anthropic___Claude__Opus__4_6,
-    /// Model: `anthropic/claude-opus-4.6-fast`
-    Anthropic___Claude__Opus__4_6__Fast,
     /// Model: `anthropic/claude-opus-4.7`
     Anthropic___Claude__Opus__4_7,
+    /// Model: `anthropic/claude-opus-4.7-fast`
+    Anthropic___Claude__Opus__4_7__Fast,
+    /// Model: `anthropic/claude-opus-4.8`
+    Anthropic___Claude__Opus__4_8,
+    /// Model: `anthropic/claude-opus-4.8-fast`
+    Anthropic___Claude__Opus__4_8__Fast,
     /// Model: `anthropic/claude-sonnet-4`
     Anthropic___Claude__Sonnet__4,
     /// Model: `anthropic/claude-sonnet-4.5`
     Anthropic___Claude__Sonnet__4_5,
     /// Model: `anthropic/claude-sonnet-4.6`
     Anthropic___Claude__Sonnet__4_6,
+    /// Model: `anthropic/claude-sonnet-5`
+    Anthropic___Claude__Sonnet__5,
     /// Model: `arcee-ai/coder-large`
     Arcee__Ai___Coder__Large,
-    /// Model: `arcee-ai/maestro-reasoning`
-    Arcee__Ai___Maestro__Reasoning,
-    /// Model: `arcee-ai/spotlight`
-    Arcee__Ai___Spotlight,
-    /// Model: `arcee-ai/trinity-large-preview`
-    Arcee__Ai___Trinity__Large__Preview,
     /// Model: `arcee-ai/trinity-large-thinking`
     Arcee__Ai___Trinity__Large__Thinking,
     /// Model: `arcee-ai/trinity-mini`
     Arcee__Ai___Trinity__Mini,
     /// Model: `arcee-ai/virtuoso-large`
     Arcee__Ai___Virtuoso__Large,
-    /// Model: `baidu/cobuddy:free`
-    Baidu___Cobuddy__Free,
-    /// Model: `baidu/ernie-4.5-21b-a3b`
-    Baidu___Ernie__4_5__21b__A3b,
-    /// Model: `baidu/ernie-4.5-21b-a3b-thinking`
-    Baidu___Ernie__4_5__21b__A3b__Thinking,
-    /// Model: `baidu/ernie-4.5-300b-a47b`
-    Baidu___Ernie__4_5__300b__A47b,
-    /// Model: `baidu/ernie-4.5-vl-28b-a3b`
-    Baidu___Ernie__4_5__Vl__28b__A3b,
     /// Model: `baidu/ernie-4.5-vl-424b-a47b`
     Baidu___Ernie__4_5__Vl__424b__A47b,
-    /// Model: `baidu/qianfan-ocr-fast:free`
-    Baidu___Qianfan__Ocr__Fast__Free,
     /// Model: `bytedance-seed/seed-1.6`
     Bytedance__Seed___Seed__1_6,
     /// Model: `bytedance-seed/seed-1.6-flash`
@@ -122,6 +100,8 @@ pub enum ProviderModelOpenRouter {
     Cohere___Command__R__Plus__08__2024,
     /// Model: `cohere/command-r7b-12-2024`
     Cohere___Command__R7b__12__2024,
+    /// Model: `cohere/north-mini-code:free`
+    Cohere___North__Mini__Code__Free,
     /// Model: `deepcogito/cogito-v2.1-671b`
     Deepcogito___Cogito__V2_1__671b,
     /// Model: `deepseek/deepseek-chat`
@@ -136,26 +116,16 @@ pub enum ProviderModelOpenRouter {
     Deepseek___Deepseek__R1__0528,
     /// Model: `deepseek/deepseek-r1-distill-llama-70b`
     Deepseek___Deepseek__R1__Distill__Llama__70b,
-    /// Model: `deepseek/deepseek-r1-distill-qwen-32b`
-    Deepseek___Deepseek__R1__Distill__Qwen__32b,
     /// Model: `deepseek/deepseek-v3.1-terminus`
     Deepseek___Deepseek__V3_1__Terminus,
     /// Model: `deepseek/deepseek-v3.2`
     Deepseek___Deepseek__V3_2,
     /// Model: `deepseek/deepseek-v3.2-exp`
     Deepseek___Deepseek__V3_2__Exp,
-    /// Model: `deepseek/deepseek-v3.2-speciale`
-    Deepseek___Deepseek__V3_2__Speciale,
     /// Model: `deepseek/deepseek-v4-flash`
     Deepseek___Deepseek__V4__Flash,
     /// Model: `deepseek/deepseek-v4-pro`
     Deepseek___Deepseek__V4__Pro,
-    /// Model: `essentialai/rnj-1-instruct`
-    Essentialai___Rnj__1__Instruct,
-    /// Model: `google/gemini-2.0-flash-001`
-    Google___Gemini__2_0__Flash__001,
-    /// Model: `google/gemini-2.0-flash-lite-001`
-    Google___Gemini__2_0__Flash__Lite__001,
     /// Model: `google/gemini-2.5-flash`
     Google___Gemini__2_5__Flash,
     /// Model: `google/gemini-2.5-flash-image`
@@ -172,16 +142,26 @@ pub enum ProviderModelOpenRouter {
     Google___Gemini__2_5__Pro__Preview__05__06,
     /// Model: `google/gemini-3-flash-preview`
     Google___Gemini__3__Flash__Preview,
+    /// Model: `google/gemini-3-pro-image`
+    Google___Gemini__3__Pro__Image,
     /// Model: `google/gemini-3-pro-image-preview`
     Google___Gemini__3__Pro__Image__Preview,
+    /// Model: `google/gemini-3.1-flash-image`
+    Google___Gemini__3_1__Flash__Image,
     /// Model: `google/gemini-3.1-flash-image-preview`
     Google___Gemini__3_1__Flash__Image__Preview,
+    /// Model: `google/gemini-3.1-flash-lite`
+    Google___Gemini__3_1__Flash__Lite,
+    /// Model: `google/gemini-3.1-flash-lite-image`
+    Google___Gemini__3_1__Flash__Lite__Image,
     /// Model: `google/gemini-3.1-flash-lite-preview`
     Google___Gemini__3_1__Flash__Lite__Preview,
     /// Model: `google/gemini-3.1-pro-preview`
     Google___Gemini__3_1__Pro__Preview,
     /// Model: `google/gemini-3.1-pro-preview-customtools`
     Google___Gemini__3_1__Pro__Preview__Customtools,
+    /// Model: `google/gemini-3.5-flash`
+    Google___Gemini__3_5__Flash,
     /// Model: `google/gemma-2-27b-it`
     Google___Gemma__2__27b__It,
     /// Model: `google/gemma-3-12b-it`
@@ -212,10 +192,12 @@ pub enum ProviderModelOpenRouter {
     Ibm__Granite___Granite__4_1__8b,
     /// Model: `inception/mercury-2`
     Inception___Mercury__2,
-    /// Model: `inclusionai/ling-2.6-1t:free`
-    Inclusionai___Ling__2_6__1t__Free,
+    /// Model: `inclusionai/ling-2.6-1t`
+    Inclusionai___Ling__2_6__1t,
     /// Model: `inclusionai/ling-2.6-flash`
     Inclusionai___Ling__2_6__Flash,
+    /// Model: `inclusionai/ring-2.6-1t`
+    Inclusionai___Ring__2_6__1t,
     /// Model: `inflection/inflection-3-pi`
     Inflection___Inflection__3__Pi,
     /// Model: `inflection/inflection-3-productivity`
@@ -230,8 +212,6 @@ pub enum ProviderModelOpenRouter {
     Liquid___Lfm__2_5__1_2b__Thinking__Free,
     /// Model: `mancer/weaver`
     Mancer___Weaver,
-    /// Model: `meta-llama/llama-3-70b-instruct`
-    Meta__Llama___Llama__3__70b__Instruct,
     /// Model: `meta-llama/llama-3-8b-instruct`
     Meta__Llama___Llama__3__8b__Instruct,
     /// Model: `meta-llama/llama-3.1-70b-instruct`
@@ -254,14 +234,10 @@ pub enum ProviderModelOpenRouter {
     Meta__Llama___Llama__4__Maverick,
     /// Model: `meta-llama/llama-4-scout`
     Meta__Llama___Llama__4__Scout,
-    /// Model: `meta-llama/llama-guard-3-8b`
-    Meta__Llama___Llama__Guard__3__8b,
     /// Model: `meta-llama/llama-guard-4-12b`
     Meta__Llama___Llama__Guard__4__12b,
     /// Model: `microsoft/phi-4`
     Microsoft___Phi__4,
-    /// Model: `microsoft/phi-4-mini-instruct`
-    Microsoft___Phi__4__Mini__Instruct,
     /// Model: `microsoft/wizardlm-2-8x22b`
     Microsoft___Wizardlm__2__8x22b,
     /// Model: `minimax/minimax-01`
@@ -276,32 +252,24 @@ pub enum ProviderModelOpenRouter {
     Minimax___Minimax__M2_1,
     /// Model: `minimax/minimax-m2.5`
     Minimax___Minimax__M2_5,
-    /// Model: `minimax/minimax-m2.5:free`
-    Minimax___Minimax__M2_5__Free,
     /// Model: `minimax/minimax-m2.7`
     Minimax___Minimax__M2_7,
+    /// Model: `minimax/minimax-m3`
+    Minimax___Minimax__M3,
     /// Model: `mistralai/codestral-2508`
     Mistralai___Codestral__2508,
     /// Model: `mistralai/devstral-2512`
     Mistralai___Devstral__2512,
-    /// Model: `mistralai/devstral-medium`
-    Mistralai___Devstral__Medium,
-    /// Model: `mistralai/devstral-small`
-    Mistralai___Devstral__Small,
     /// Model: `mistralai/ministral-14b-2512`
     Mistralai___Ministral__14b__2512,
     /// Model: `mistralai/ministral-3b-2512`
     Mistralai___Ministral__3b__2512,
     /// Model: `mistralai/ministral-8b-2512`
     Mistralai___Ministral__8b__2512,
-    /// Model: `mistralai/mistral-7b-instruct-v0.1`
-    Mistralai___Mistral__7b__Instruct__V0_1,
     /// Model: `mistralai/mistral-large`
     Mistralai___Mistral__Large,
     /// Model: `mistralai/mistral-large-2407`
     Mistralai___Mistral__Large__2407,
-    /// Model: `mistralai/mistral-large-2411`
-    Mistralai___Mistral__Large__2411,
     /// Model: `mistralai/mistral-large-2512`
     Mistralai___Mistral__Large__2512,
     /// Model: `mistralai/mistral-medium-3`
@@ -324,10 +292,6 @@ pub enum ProviderModelOpenRouter {
     Mistralai___Mistral__Small__3_2__24b__Instruct,
     /// Model: `mistralai/mixtral-8x22b-instruct`
     Mistralai___Mixtral__8x22b__Instruct,
-    /// Model: `mistralai/mixtral-8x7b-instruct`
-    Mistralai___Mixtral__8x7b__Instruct,
-    /// Model: `mistralai/pixtral-large-2411`
-    Mistralai___Pixtral__Large__2411,
     /// Model: `mistralai/voxtral-small-24b-2507`
     Mistralai___Voxtral__Small__24b__2507,
     /// Model: `moonshotai/kimi-k2`
@@ -340,14 +304,16 @@ pub enum ProviderModelOpenRouter {
     Moonshotai___Kimi__K2_5,
     /// Model: `moonshotai/kimi-k2.6`
     Moonshotai___Kimi__K2_6,
+    /// Model: `moonshotai/kimi-k2.7-code`
+    Moonshotai___Kimi__K2_7__Code,
     /// Model: `morph/morph-v3-fast`
     Morph___Morph__V3__Fast,
     /// Model: `morph/morph-v3-large`
     Morph___Morph__V3__Large,
-    /// Model: `nex-agi/deepseek-v3.1-nex-n1`
-    Nex__Agi___Deepseek__V3_1__Nex__N1,
-    /// Model: `nousresearch/hermes-2-pro-llama-3-8b`
-    Nousresearch___Hermes__2__Pro__Llama__3__8b,
+    /// Model: `nex-agi/nex-n2-mini`
+    Nex__Agi___Nex__N2__Mini,
+    /// Model: `nex-agi/nex-n2-pro`
+    Nex__Agi___Nex__N2__Pro,
     /// Model: `nousresearch/hermes-3-llama-3.1-405b`
     Nousresearch___Hermes__3__Llama__3_1__405b,
     /// Model: `nousresearch/hermes-3-llama-3.1-405b:free`
@@ -358,8 +324,6 @@ pub enum ProviderModelOpenRouter {
     Nousresearch___Hermes__4__405b,
     /// Model: `nousresearch/hermes-4-70b`
     Nousresearch___Hermes__4__70b,
-    /// Model: `nvidia/llama-3.1-nemotron-70b-instruct`
-    Nvidia___Llama__3_1__Nemotron__70b__Instruct,
     /// Model: `nvidia/llama-3.3-nemotron-super-49b-v1.5`
     Nvidia___Llama__3_3__Nemotron__Super__49b__V1_5,
     /// Model: `nvidia/nemotron-3-nano-30b-a3b`
@@ -372,10 +336,14 @@ pub enum ProviderModelOpenRouter {
     Nvidia___Nemotron__3__Super__120b__A12b,
     /// Model: `nvidia/nemotron-3-super-120b-a12b:free`
     Nvidia___Nemotron__3__Super__120b__A12b__Free,
+    /// Model: `nvidia/nemotron-3-ultra-550b-a55b`
+    Nvidia___Nemotron__3__Ultra__550b__A55b,
+    /// Model: `nvidia/nemotron-3-ultra-550b-a55b:free`
+    Nvidia___Nemotron__3__Ultra__550b__A55b__Free,
+    /// Model: `nvidia/nemotron-3.5-content-safety:free`
+    Nvidia___Nemotron__3_5__Content__Safety__Free,
     /// Model: `nvidia/nemotron-nano-12b-v2-vl:free`
     Nvidia___Nemotron__Nano__12b__V2__Vl__Free,
-    /// Model: `nvidia/nemotron-nano-9b-v2`
-    Nvidia___Nemotron__Nano__9b__V2,
     /// Model: `nvidia/nemotron-nano-9b-v2:free`
     Nvidia___Nemotron__Nano__9b__V2__Free,
     /// Model: `openai/gpt-3.5-turbo`
@@ -388,10 +356,6 @@ pub enum ProviderModelOpenRouter {
     Openai___Gpt__3_5__Turbo__Instruct,
     /// Model: `openai/gpt-4`
     Openai___Gpt__4,
-    /// Model: `openai/gpt-4-0314`
-    Openai___Gpt__4__0314,
-    /// Model: `openai/gpt-4-1106-preview`
-    Openai___Gpt__4__1106__Preview,
     /// Model: `openai/gpt-4-turbo`
     Openai___Gpt__4__Turbo,
     /// Model: `openai/gpt-4-turbo-preview`
@@ -410,8 +374,6 @@ pub enum ProviderModelOpenRouter {
     Openai___Gpt__4o__2024__08__06,
     /// Model: `openai/gpt-4o-2024-11-20`
     Openai___Gpt__4o__2024__11__20,
-    /// Model: `openai/gpt-4o-audio-preview`
-    Openai___Gpt__4o__Audio__Preview,
     /// Model: `openai/gpt-4o-mini`
     Openai___Gpt__4o__Mini,
     /// Model: `openai/gpt-4o-mini-2024-07-18`
@@ -514,10 +476,12 @@ pub enum ProviderModelOpenRouter {
     Openrouter___Bodybuilder,
     /// Model: `openrouter/free`
     Openrouter___Free,
-    /// Model: `openrouter/owl-alpha`
-    Openrouter___Owl__Alpha,
+    /// Model: `openrouter/fusion`
+    Openrouter___Fusion,
     /// Model: `openrouter/pareto-code`
     Openrouter___Pareto__Code,
+    /// Model: `perceptron/perceptron-mk1`
+    Perceptron___Perceptron__Mk1,
     /// Model: `perplexity/sonar`
     Perplexity___Sonar,
     /// Model: `perplexity/sonar-deep-research`
@@ -528,32 +492,30 @@ pub enum ProviderModelOpenRouter {
     Perplexity___Sonar__Pro__Search,
     /// Model: `perplexity/sonar-reasoning-pro`
     Perplexity___Sonar__Reasoning__Pro,
+    /// Model: `poolside/laguna-m.1`
+    Poolside___Laguna__M_1,
     /// Model: `poolside/laguna-m.1:free`
     Poolside___Laguna__M_1__Free,
+    /// Model: `poolside/laguna-xs-2.1`
+    Poolside___Laguna__Xs__2_1,
+    /// Model: `poolside/laguna-xs-2.1:free`
+    Poolside___Laguna__Xs__2_1__Free,
+    /// Model: `poolside/laguna-xs.2`
+    Poolside___Laguna__Xs_2,
     /// Model: `poolside/laguna-xs.2:free`
     Poolside___Laguna__Xs_2__Free,
-    /// Model: `prime-intellect/intellect-3`
-    Prime__Intellect___Intellect__3,
     /// Model: `qwen/qwen-2.5-72b-instruct`
     Qwen___Qwen__2_5__72b__Instruct,
     /// Model: `qwen/qwen-2.5-7b-instruct`
     Qwen___Qwen__2_5__7b__Instruct,
     /// Model: `qwen/qwen-2.5-coder-32b-instruct`
     Qwen___Qwen__2_5__Coder__32b__Instruct,
-    /// Model: `qwen/qwen-max`
-    Qwen___Qwen__Max,
     /// Model: `qwen/qwen-plus`
     Qwen___Qwen__Plus,
     /// Model: `qwen/qwen-plus-2025-07-28`
     Qwen___Qwen__Plus__2025__07__28,
     /// Model: `qwen/qwen-plus-2025-07-28:thinking`
     Qwen___Qwen__Plus__2025__07__28__Thinking,
-    /// Model: `qwen/qwen-turbo`
-    Qwen___Qwen__Turbo,
-    /// Model: `qwen/qwen-vl-max`
-    Qwen___Qwen__Vl__Max,
-    /// Model: `qwen/qwen-vl-plus`
-    Qwen___Qwen__Vl__Plus,
     /// Model: `qwen/qwen2.5-vl-72b-instruct`
     Qwen___Qwen2_5__Vl__72b__Instruct,
     /// Model: `qwen/qwen3-14b`
@@ -636,6 +598,10 @@ pub enum ProviderModelOpenRouter {
     Qwen___Qwen3_6__Max__Preview,
     /// Model: `qwen/qwen3.6-plus`
     Qwen___Qwen3_6__Plus,
+    /// Model: `qwen/qwen3.7-max`
+    Qwen___Qwen3_7__Max,
+    /// Model: `qwen/qwen3.7-plus`
+    Qwen___Qwen3_7__Plus,
     /// Model: `rekaai/reka-edge`
     Rekaai___Reka__Edge,
     /// Model: `rekaai/reka-flash-3`
@@ -644,8 +610,8 @@ pub enum ProviderModelOpenRouter {
     Relace___Relace__Apply__3,
     /// Model: `relace/relace-search`
     Relace___Relace__Search,
-    /// Model: `sao10k/l3-euryale-70b`
-    Sao10k___L3__Euryale__70b,
+    /// Model: `sakana/fugu-ultra`
+    Sakana___Fugu__Ultra,
     /// Model: `sao10k/l3-lunaris-8b`
     Sao10k___L3__Lunaris__8b,
     /// Model: `sao10k/l3.1-70b-hanami-x1`
@@ -656,12 +622,18 @@ pub enum ProviderModelOpenRouter {
     Sao10k___L3_3__Euryale__70b,
     /// Model: `stepfun/step-3.5-flash`
     Stepfun___Step__3_5__Flash,
+    /// Model: `stepfun/step-3.7-flash`
+    Stepfun___Step__3_7__Flash,
     /// Model: `switchpoint/router`
     Switchpoint___Router,
     /// Model: `tencent/hunyuan-a13b-instruct`
     Tencent___Hunyuan__A13b__Instruct,
-    /// Model: `tencent/hy3-preview:free`
-    Tencent___Hy3__Preview__Free,
+    /// Model: `tencent/hy3`
+    Tencent___Hy3,
+    /// Model: `tencent/hy3-preview`
+    Tencent___Hy3__Preview,
+    /// Model: `tencent/hy3:free`
+    Tencent___Hy3__Free,
     /// Model: `thedrummer/cydonia-24b-v4.1`
     Thedrummer___Cydonia__24b__V4_1,
     /// Model: `thedrummer/rocinante-12b`
@@ -670,54 +642,28 @@ pub enum ProviderModelOpenRouter {
     Thedrummer___Skyfall__36b__V2,
     /// Model: `thedrummer/unslopnemo-12b`
     Thedrummer___Unslopnemo__12b,
-    /// Model: `tngtech/deepseek-r1t2-chimera`
-    Tngtech___Deepseek__R1t2__Chimera,
     /// Model: `undi95/remm-slerp-l2-13b`
     Undi95___Remm__Slerp__L2__13b,
     /// Model: `upstage/solar-pro-3`
     Upstage___Solar__Pro__3,
     /// Model: `writer/palmyra-x5`
     Writer___Palmyra__X5,
-    /// Model: `x-ai/grok-3`
-    X__Ai___Grok__3,
-    /// Model: `x-ai/grok-3-beta`
-    X__Ai___Grok__3__Beta,
-    /// Model: `x-ai/grok-3-mini`
-    X__Ai___Grok__3__Mini,
-    /// Model: `x-ai/grok-3-mini-beta`
-    X__Ai___Grok__3__Mini__Beta,
-    /// Model: `x-ai/grok-4`
-    X__Ai___Grok__4,
-    /// Model: `x-ai/grok-4-fast`
-    X__Ai___Grok__4__Fast,
-    /// Model: `x-ai/grok-4.1-fast`
-    X__Ai___Grok__4_1__Fast,
     /// Model: `x-ai/grok-4.20`
     X__Ai___Grok__4_20,
     /// Model: `x-ai/grok-4.20-multi-agent`
     X__Ai___Grok__4_20__Multi__Agent,
     /// Model: `x-ai/grok-4.3`
     X__Ai___Grok__4_3,
-    /// Model: `x-ai/grok-code-fast-1`
-    X__Ai___Grok__Code__Fast__1,
-    /// Model: `xiaomi/mimo-v2-flash`
-    Xiaomi___Mimo__V2__Flash,
-    /// Model: `xiaomi/mimo-v2-omni`
-    Xiaomi___Mimo__V2__Omni,
-    /// Model: `xiaomi/mimo-v2-pro`
-    Xiaomi___Mimo__V2__Pro,
+    /// Model: `x-ai/grok-build-0.1`
+    X__Ai___Grok__Build__0_1,
     /// Model: `xiaomi/mimo-v2.5`
     Xiaomi___Mimo__V2_5,
     /// Model: `xiaomi/mimo-v2.5-pro`
     Xiaomi___Mimo__V2_5__Pro,
-    /// Model: `z-ai/glm-4-32b`
-    Z__Ai___Glm__4__32b,
     /// Model: `z-ai/glm-4.5`
     Z__Ai___Glm__4_5,
     /// Model: `z-ai/glm-4.5-air`
     Z__Ai___Glm__4_5__Air,
-    /// Model: `z-ai/glm-4.5-air:free`
-    Z__Ai___Glm__4_5__Air__Free,
     /// Model: `z-ai/glm-4.5v`
     Z__Ai___Glm__4_5v,
     /// Model: `z-ai/glm-4.6`
@@ -734,8 +680,12 @@ pub enum ProviderModelOpenRouter {
     Z__Ai___Glm__5__Turbo,
     /// Model: `z-ai/glm-5.1`
     Z__Ai___Glm__5_1,
+    /// Model: `z-ai/glm-5.2`
+    Z__Ai___Glm__5_2,
     /// Model: `z-ai/glm-5v-turbo`
     Z__Ai___Glm__5v__Turbo,
+    /// Model: `~anthropic/claude-fable-latest`
+    __Anthropic___Claude__Fable__Latest,
     /// Model: `~anthropic/claude-haiku-latest`
     __Anthropic___Claude__Haiku__Latest,
     /// Model: `~anthropic/claude-opus-latest`

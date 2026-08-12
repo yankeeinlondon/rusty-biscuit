@@ -3,6 +3,7 @@ use std::marker::PhantomData;
 
 use crate::{
     browser::{ComponentStylesheet, feature::PageFeature},
+    html::attribute::{ClassDefinition, DomId},
     html::tag::{BlockTag, HtmlAttribute, HtmlBlockTag, HtmlVoidTag, VoidTag, link::LinkTag},
     microdata::MicrodataKey,
 };
@@ -87,6 +88,68 @@ pub enum ComposableNode {
     /// Boxed because `BrowserFragment` itself stores a `ComposableNode`;
     /// the indirection breaks the otherwise-infinite type recursion.
     Component(Box<BrowserFragment<Ready>>),
+    /// A prompted-link popover whose document-unique `id` is deferred to render
+    /// time (see [`PopoverNode`]).
+    Popover(Box<PopoverNode>),
+}
+
+/// A prompted-link popover carried through the fragment IR with its
+/// document-unique `id` **unallocated** until final render.
+///
+/// The render-tree browser writer emits this typed node instead of a fully
+/// baked `<span>` wrapper, so two independently rendered prompted links can be
+/// composed into one page (via [`HtmlPage::from_fragments`]) without colliding
+/// on their ids — the collision the eager, per-writer allocator produced
+/// (spec criterion 7). [`HtmlPage::render`] threads a single
+/// [`PopoverIdAllocator`] across every fragment so each occurrence of a base
+/// slug becomes `dm-popover-<base>`, `dm-popover-<base>-1`, … in document
+/// order, and the anchor's `interestfor` / `aria-describedby` always name that
+/// same occurrence's prompt.
+///
+/// [`HtmlPage::from_fragments`]: crate::html::HtmlPage::from_fragments
+/// [`HtmlPage::render`]: crate::html::HtmlPage::render
+pub(crate) struct PopoverNode {
+    /// Readable slug derived from the link target (e.g. `https-example-com`);
+    /// the allocator turns it into the document-unique id at render.
+    pub(crate) id_base: String,
+    /// Anchor attributes **excluding** the id-dependent `interestfor` /
+    /// `aria-describedby`, which are appended once the id is allocated.
+    pub(crate) anchor_attrs: Vec<HtmlAttribute>,
+    /// The anchor's rendered child nodes (the link's display content).
+    pub(crate) anchor_children: Vec<ComposableNode>,
+    /// The prompt text. Escaped on emit. The prompt span's remaining
+    /// attributes (`class`, `popover`, `role`) are constant and are rebuilt at
+    /// render alongside the allocated `id`.
+    pub(crate) prompt_text: String,
+}
+
+/// Allocates document-unique, readable, deterministic ids for prompted-link
+/// popovers.
+///
+/// The first occurrence of a base slug uses it verbatim (`dm-popover-<base>`)
+/// and each later occurrence appends an `-N` suffix, so repeated identical
+/// prompted links never collide. A single allocator threaded across every
+/// fragment of a page ([`HtmlPage::render`](crate::html::HtmlPage::render)) —
+/// or across one streamed document walk — yields document-unique ids; the
+/// streaming and fragment browser paths share this one type so their id
+/// sequences stay byte-identical.
+#[derive(Default)]
+pub(crate) struct PopoverIdAllocator {
+    counts: HashMap<String, usize>,
+}
+
+impl PopoverIdAllocator {
+    /// Allocates the next id for a popover whose slug is `base`.
+    pub(crate) fn allocate(&mut self, base: &str) -> String {
+        let count = self.counts.entry(base.to_string()).or_insert(0);
+        let id = if *count == 0 {
+            format!("dm-popover-{base}")
+        } else {
+            format!("dm-popover-{base}-{count}")
+        };
+        *count += 1;
+        id
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -170,6 +233,17 @@ impl BrowserFragment<Shape> {
     /// which is escaped on emit.
     pub fn define_as_raw_html(self, html: impl Into<String>) -> BrowserFragment<RefineText> {
         self.into_state(Some(ComposableNode::RawHtml(html.into())))
+    }
+
+    /// Commit the fragment to a prompted-link popover shape ([`PopoverNode`]).
+    ///
+    /// The popover's document-unique `id` is allocated at render, not here, so
+    /// composed fragments never collide. Transitions to [`RefineText`] so the
+    /// cross-cutting builders still apply — the caller declares
+    /// [`PageFeature::Popover`](crate::browser::feature::PageFeature::Popover)
+    /// with `add_feature` before `finalize`.
+    pub(crate) fn define_as_popover(self, popover: PopoverNode) -> BrowserFragment<RefineText> {
+        self.into_state(Some(ComposableNode::Popover(Box::new(popover))))
     }
 }
 
@@ -281,9 +355,21 @@ impl BrowserFragment<Ready> {
     /// `TextFragment` content is HTML-escaped; `RawHtml` content is
     /// emitted verbatim (caller-owned). Nested `Component` fragments
     /// recurse.
+    ///
+    /// A standalone `render` scopes popover-id allocation to this fragment
+    /// alone; to keep ids document-unique across several composed fragments,
+    /// [`HtmlPage::render`](crate::html::HtmlPage::render) threads one allocator
+    /// across them all via [`render_with`](BrowserFragment::render_with).
     pub fn render(&self) -> String {
+        self.render_with(&mut PopoverIdAllocator::default())
+    }
+
+    /// Renders the fragment, drawing popover ids from a caller-owned
+    /// [`PopoverIdAllocator`] so a page can keep ids unique across every
+    /// fragment it composes.
+    pub(crate) fn render_with(&self, popover_ids: &mut PopoverIdAllocator) -> String {
         match &self.node {
-            Some(node) => render_node(node),
+            Some(node) => render_node(node, popover_ids),
             None => String::new(),
         }
     }
@@ -299,12 +385,13 @@ impl BrowserFragment<Ready> {
     }
 }
 
-/// Recursively renders a single composable node to HTML.
-fn render_node(node: &ComposableNode) -> String {
+/// Recursively renders a single composable node to HTML, drawing prompted-link
+/// popover ids from `popover_ids` so they stay unique across the render.
+fn render_node(node: &ComposableNode, popover_ids: &mut PopoverIdAllocator) -> String {
     match node {
         ComposableNode::TextFragment(text) => crate::browser::utils::escape_text(text).into_owned(),
         ComposableNode::RawHtml(html) => html.clone(),
-        ComposableNode::Component(fragment) => fragment.render(),
+        ComposableNode::Component(fragment) => fragment.render_with(popover_ids),
         ComposableNode::VoidTag(void) => {
             format!(
                 "<{}{}>",
@@ -314,13 +401,66 @@ fn render_node(node: &ComposableNode) -> String {
         }
         ComposableNode::BlockTag(block) => {
             let name = block.tag.name();
-            let children: String = block.content.children.iter().map(render_node).collect();
+            let children: String = block
+                .content
+                .children
+                .iter()
+                .map(|child| render_node(child, popover_ids))
+                .collect();
             format!(
                 "<{name}{}>{children}</{name}>",
                 render_attributes(&block.attributes, Some(&block.base_class))
             )
         }
+        ComposableNode::Popover(popover) => render_popover(popover, popover_ids),
     }
+}
+
+/// Renders a prompted-link popover, allocating its document-unique id from
+/// `popover_ids` and injecting it into the anchor's `interestfor` /
+/// `aria-describedby` and the prompt span's `id`.
+///
+/// The emitted bytes match the streaming full-document writer's prompted-link
+/// markup so the fragment and streaming browser paths stay byte-identical.
+fn render_popover(popover: &PopoverNode, popover_ids: &mut PopoverIdAllocator) -> String {
+    let id = popover_ids.allocate(&popover.id_base);
+
+    // `HtmlAttribute` is not `Clone`, so the id-dependent association attributes
+    // are rendered from their own short-lived list and appended to the base
+    // anchor attributes. Both sub-lists emit their class first (there is none
+    // here) then their entries in order, so the concatenation is byte-identical
+    // to rendering one combined list (the streaming path's single list).
+    let base_attrs = render_attributes(&popover.anchor_attrs, None);
+    let id_attrs = render_attributes(
+        &[
+            HtmlAttribute::Other("interestfor".into(), id.clone()),
+            HtmlAttribute::Other("aria-describedby".into(), id.clone()),
+        ],
+        None,
+    );
+    let anchor_children: String = popover
+        .anchor_children
+        .iter()
+        .map(|child| render_node(child, popover_ids))
+        .collect();
+    let anchor = format!("<a{base_attrs}{id_attrs}>{anchor_children}</a>");
+
+    // `write_attributes` always emits the merged class first, so the vector
+    // order below yields `class, id, popover, role` — matching the streaming
+    // writer's prompt element exactly.
+    let prompt_attrs = [
+        HtmlAttribute::Class(ClassDefinition::new("dm-popover-prompt")),
+        HtmlAttribute::Id(DomId::new(id)),
+        HtmlAttribute::Other("popover".into(), "hint".to_string()),
+        HtmlAttribute::Other("role".into(), "note".to_string()),
+    ];
+    let prompt = format!(
+        "<span{}>{}</span>",
+        render_attributes(&prompt_attrs, None),
+        crate::browser::utils::escape_text(&popover.prompt_text)
+    );
+
+    format!(r#"<span class="dm-popover-wrapper">{anchor}{prompt}</span>"#)
 }
 
 /// Recursively validates a composable node.
@@ -330,6 +470,7 @@ fn validate_node(node: &ComposableNode) -> bool {
         ComposableNode::VoidTag(_) => true,
         ComposableNode::Component(fragment) => fragment.validate_render_content(),
         ComposableNode::BlockTag(block) => block.content.children.iter().all(validate_node),
+        ComposableNode::Popover(popover) => popover.anchor_children.iter().all(validate_node),
     }
 }
 
@@ -470,6 +611,38 @@ impl BrowserFragment<Ready> {
         &self.features
     }
 
+    /// Rolls up this fragment's declared features and those of every nested
+    /// component fragment, in first-seen order with duplicates removed.
+    ///
+    /// [`features`](BrowserFragment::features) returns only this fragment's own
+    /// top-level requests; a fragment composed of nested components (e.g. the
+    /// browser writer's document body) carries its feature requests on those
+    /// nested [`Component`](ComposableNode::Component) fragments. This is the
+    /// single-fragment analogue of [`HtmlPage::features`], so
+    /// [`render_browser_node`] can return the same first-seen rollup a whole
+    /// page would.
+    ///
+    /// [`HtmlPage::features`]: crate::html::HtmlPage::features
+    /// [`render_browser_node`]: crate::tree::render::render_browser_node
+    pub fn collect_features(&self) -> Vec<PageFeature> {
+        let mut out: Vec<PageFeature> = Vec::new();
+        self.push_features(&mut out);
+        out
+    }
+
+    /// Appends this fragment's own features, then recurses into nested
+    /// component fragments — first-seen order, duplicates skipped.
+    fn push_features(&self, out: &mut Vec<PageFeature>) {
+        for &feature in &self.features {
+            if !out.contains(&feature) {
+                out.push(feature);
+            }
+        }
+        if let Some(node) = &self.node {
+            push_node_features(node, out);
+        }
+    }
+
     /// The microdata key/value pairs this fragment contributes.
     pub fn metadata(&self) -> &HashMap<MicrodataKey, String> {
         &self.metadata
@@ -478,6 +651,26 @@ impl BrowserFragment<Ready> {
     /// The `<link>` dependencies this fragment declares.
     pub fn dependency_links(&self) -> &[LinkTag] {
         &self.dependency_links
+    }
+}
+
+/// Walks a composable node tree, descending into `BlockTag` children and
+/// recursing into every `Component` fragment to roll up its features — the
+/// feature analogue of [`HtmlPage`](crate::html::HtmlPage)'s fragment walk.
+fn push_node_features(node: &ComposableNode, out: &mut Vec<PageFeature>) {
+    match node {
+        ComposableNode::Component(child) => child.push_features(out),
+        ComposableNode::BlockTag(block) => {
+            for child in &block.content.children {
+                push_node_features(child, out);
+            }
+        }
+        ComposableNode::Popover(popover) => {
+            for child in &popover.anchor_children {
+                push_node_features(child, out);
+            }
+        }
+        _ => {}
     }
 }
 

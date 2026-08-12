@@ -10,6 +10,7 @@ use crate::log;
 use crate::provider_values::provider_value_parser;
 
 mod common;
+mod drift;
 mod errors;
 mod month;
 mod repos;
@@ -20,6 +21,7 @@ mod tools;
 mod trends;
 mod week;
 
+use drift::render_drift_report;
 use errors::render_errors_report;
 use repos::render_repos_report;
 use sessions::{render_session_detail, render_sessions_report};
@@ -101,6 +103,8 @@ pub enum LogsCommand {
     Tools,
     /// Error report for the selected date or range.
     Errors,
+    /// Model-catalog drift signals and alias resolutions for the selected date or range.
+    Drift,
     /// Repository activity for the selected date or range.
     Repos,
     /// Trend report for the selected date or range.
@@ -182,6 +186,12 @@ pub async fn run(args: LogsArgs) -> Result<()> {
             best_effort_sync(&mut store, SyncRequest::Range(range));
             let report = store.errors(range, &filters, args.top)?;
             output_json_or(args.json, &report, || render_errors_report(&report))?;
+        }
+        LogsCommand::Drift => {
+            let range = range_from_args(&args, Local::now().date_naive())?;
+            best_effort_sync(&mut store, SyncRequest::Range(range));
+            let report = store.drift(range, &filters, args.top)?;
+            output_json_or(args.json, &report, || render_drift_report(&report))?;
         }
         LogsCommand::Repos => {
             let range = range_from_args(&args, Local::now().date_naive())?;
@@ -349,6 +359,12 @@ mod tests {
             }
             other => panic!("expected week errors, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parses_drift_subcommand() {
+        let cli = TestLogsCli::parse_from(["claudine", "drift"]);
+        assert!(matches!(cli.logs.command, Some(LogsCommand::Drift)));
     }
 
     #[test]

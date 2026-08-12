@@ -1,0 +1,75 @@
+Finding 35.7 — link/image URL + title cloning in the policy appliers
+====================================================================
+
+Run id:    run-20260716T160000
+Host:      macOS (Darwin 25.5.0), aarch64. SHARED, HEAVILY LOADED host
+           (load average ~29-30). Baseline and candidate are sampled
+           INTERLEAVED in one process so the ratio survives host drift.
+Profile:   release (`cargo nextest run -p darkmatter --lib --release`)
+Harness:   TEMPORARY in-crate module `f35_7_profile` in
+           darkmatter/lib/src/markdown/render_tree/build_context.rs.
+           Deleted after this capture; its equivalence gate was promoted to the
+           permanent differential test `build_context::finding_35_7`.
+           `apply_link_policy` is private and exposing it for a Criterion bench
+           would be the public API addition the standing contract bars.
+Warm-up:   3 iterations per case. Samples: 50 (10 for the full render).
+Statistic: median.
+
+Fixture:   1000 synthetic link nodes shaped like `toc_large`'s TOC entries
+           (`./docs/chapter-N/section-N.md#heading-N`), plus the committed
+           `toc_large.md` (1000 links) for the end-to-end proportion.
+
+Declared threshold (before capture)
+-----------------------------------
+Target operation: `apply_link_policy` / `apply_image_policy` over a document's
+link and image nodes.
+Minimum repeatable win: >= 5% on the empty-policy target (the common shape: most
+documents carry no `style.hyperlinks.*` policy).
+Maximum permitted control regression: 0% on any populated-policy shape.
+
+Equivalence gate
+----------------
+The harness asserted `Debug`-equality of the candidate-applied and
+baseline-applied node for every measured case before timing it.
+
+Results — apply_link_policy over 1000 link nodes
+------------------------------------------------
+  case                            baseline    candidate    change
+  empty policy, no title            72.6 us      58.2 us    -19.9 %
+  empty policy, with title         291.8 us     256.5 us    -12.1 %
+  hyperlink policy, no title        97.0 us      89.3 us     -7.9 %
+  hyperlink policy, with title     974.0 us     937.6 us     -3.7 %
+
+  full as_terminal(toc_large, 1000 links) (median): 3237.0 us
+
+Interpretation
+--------------
+The appliers cloned BOTH the URL and the title out of every link/image node
+before deciding anything — including on the empty-policy path, where the clones
+were the only work performed. They now borrow out of `node.kind` and resolve each
+decision into an owned value before the node is mutated, so the borrow ends
+before mutation without any clone. Application order (colors -> text-layout hints
+-> directive) is unchanged; `parse_link_directive` / `parse_image_directive` are
+pure, so computing them earlier is equivalent.
+
+Every case improved and none regressed, so the declared 0% control-regression
+budget holds. The win is largest exactly where it matters most: the empty-policy,
+no-title shape (-19.9%) is the common case for ordinary documents, and it is the
+shape where the clones were previously ALL of the work.
+
+Honest end-to-end scope: 14.4 us saved on 1000 links is ~0.44% of a 3237 us
+`as_terminal(toc_large)` render. This sub-item is retained on its target-operation
+win, not on a render-level win, and it is retained because it is a STRICT
+improvement — every measured shape got faster, the code carries no added
+complexity (two clones removed, no new state, no new branch), and there is no
+downside case. This is the opposite of 35.3, which was rejected because it was a
+net pessimization that also added an accessor and a storage conversion.
+
+Disposition: ACCEPTED (implementation win at the target operation).
+
+Cross-platform classification: OS-IDENTICAL, confirmed from the actual diff.
+The change is pure borrow-vs-clone restructuring inside two in-memory node
+appliers: no `cfg`, no filesystem, no URL runtime, no terminal or browser I/O.
+`is_local_link` / `is_local_image` are unchanged and still receive the same
+string content. Windows compile + the macOS behavioral run + ordinary Linux CI
+are sufficient per the Verification Matrix.

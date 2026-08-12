@@ -18,7 +18,7 @@ use claudine::provider::{ProviderInfo, ReasoningSupport};
 
 /// A resolved reasoning control: the provider's flag/key and the chosen value.
 ///
-/// Recorded on the [`SessionPlan`](crate::SessionPlan) and emitted onto argv
+/// Recorded on the [`SessionPlan`](crate::session::SessionPlan) and emitted onto argv
 /// where the provider has a verified non-interactive config-override (Codex).
 /// For a provider whose non-interactive reasoning wiring is not verifiable, the
 /// preference is recorded but not emitted, since an unrecognized flag could

@@ -11,7 +11,6 @@
 //! Uses a small on-disk fixture seeded via `tempfile::tempdir()` to keep the
 //! tests hermetic.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 fn build_fixture() -> tempfile::TempDir {
@@ -25,7 +24,8 @@ fn build_fixture() -> tempfile::TempDir {
 
 #[test]
 fn dir_help_lists_target_switches() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt")
+        .unwrap()
         .args(["dir", "--help"])
         .assert()
         .success()
@@ -37,7 +37,8 @@ fn dir_help_lists_target_switches() {
 #[test]
 fn dir_md_emits_nested_markdown_list_without_box_drawing() {
     let temp = build_fixture();
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt")
+        .unwrap()
         .args(["dir", "--md", "--skip-root"])
         .arg(temp.path())
         .assert()
@@ -51,7 +52,8 @@ fn dir_md_emits_nested_markdown_list_without_box_drawing() {
 #[test]
 fn dir_md_plus_emits_classed_icon_spans() {
     let temp = build_fixture();
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt")
+        .unwrap()
         .args(["dir", "--md-plus", "--skip-root"])
         .arg(temp.path())
         .assert()
@@ -62,7 +64,8 @@ fn dir_md_plus_emits_classed_icon_spans() {
 #[test]
 fn dir_html_emits_nested_ul_li_with_fs_classes() {
     let temp = build_fixture();
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt")
+        .unwrap()
         .args(["dir", "--html", "--skip-root"])
         .arg(temp.path())
         .assert()
@@ -75,7 +78,8 @@ fn dir_html_emits_nested_ul_li_with_fs_classes() {
 
 #[test]
 fn dir_md_and_html_are_mutually_exclusive() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt")
+        .unwrap()
         .args(["dir", "--md", "--html"])
         .assert()
         .failure();
@@ -83,7 +87,8 @@ fn dir_md_and_html_are_mutually_exclusive() {
 
 #[test]
 fn dir_md_and_md_plus_are_mutually_exclusive() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt")
+        .unwrap()
         .args(["dir", "--md", "--md-plus"])
         .assert()
         .failure();
@@ -91,7 +96,8 @@ fn dir_md_and_md_plus_are_mutually_exclusive() {
 
 #[test]
 fn dir_example_terminal_default_still_works() {
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt")
+        .unwrap()
         .env("NO_COLOR", "1")
         .args(["dir", "--example"])
         .assert()
@@ -107,7 +113,8 @@ fn dir_example_terminal_default_still_works() {
 fn dir_example_with_md_still_prints_example_command() {
     // `--example --md` should run the example fixture and print the
     // example command line at the end, even when routing through Markdown.
-    cargo_bin_cmd!("bt")
+    assert_cmd::Command::cargo_bin("bt")
+        .unwrap()
         .args(["dir", "--example", "--md"])
         .assert()
         .success()
@@ -122,7 +129,8 @@ fn dir_terminal_default_renders_box_drawing() {
     // still appear when stdout is captured. `NO_COLOR` keeps the bytes
     // predictable.
     let temp = build_fixture();
-    let output = cargo_bin_cmd!("bt")
+    let output = assert_cmd::Command::cargo_bin("bt")
+        .unwrap()
         .env("NO_COLOR", "1")
         .args(["dir", "--skip-root"])
         .arg(temp.path())

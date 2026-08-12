@@ -1,0 +1,1 @@
+{"type":"extension_ui_request","id":"request_01","method":"confirm","title":"Confirm action","message":"Allow this extension action?","timeout":30000}

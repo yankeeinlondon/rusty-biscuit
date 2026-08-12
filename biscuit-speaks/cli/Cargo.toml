@@ -19,6 +19,13 @@ sniff = { path = "../../sniff/lib" }
 strum = "0.28"
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 
+[dev-dependencies]
+# `bin_exe!`: resolves the `so-you-say` path at run time so the integration
+# tests survive execution from a relocated nextest archive (the wsl2 leg).
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
+tempfile = "3"
+
+
 # Opt-out of benchmarking: this is a thin CLI wrapper; benchmarks belong
 # on the underlying library crate.
 [package.metadata.benchmarks]

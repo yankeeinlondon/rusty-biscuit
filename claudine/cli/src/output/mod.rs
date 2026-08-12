@@ -5,7 +5,7 @@ pub(crate) mod error_walker;
 pub(crate) mod switches;
 
 pub(crate) use api_errors::try_format_api_error;
-pub(crate) use assistant::{render_assistant_markdown, render_assistant_markdown_with_options};
+pub(crate) use assistant::emit_final_message;
 pub(crate) use switches::{style_cli_switches, truncate_args};
 
 use biscuit_terminal::components::list::UnorderedList;
@@ -22,7 +22,7 @@ use std::path::Path;
 
 use crate::commands::wrap::McpRuntimeInfo;
 use crate::commands::wrap::env::EnvPlan;
-use crate::commands::wrap::profile::WrapperProfile;
+use crate::commands::wrap::profile::{WrapperProfile, profile_for_provider};
 use crate::log;
 
 /// Context for compose/inline-compose mode display in the header.
@@ -45,6 +45,17 @@ fn trim_trailing_blank_rendered_lines(rendered: &str) -> String {
         }
     }
     lines.join("\n")
+}
+
+fn render_operation_badge(operation: &str, term: &Terminal) -> String {
+    let open = "<bg-green-900><green-100><bold>";
+    let close = "</bold></green-100></bg-green-900>";
+
+    // Each segment owns the background because closing nested emphasis resets it.
+    Prose::new(format!(
+        "{open} Op({close}{open}<dim><i>{operation}</i></dim>{close}{open}) {close}"
+    ))
+    .render(term)
 }
 
 /// Print the one-line header: `Claudine ▸ Provider [badges] prompt`
@@ -102,12 +113,7 @@ pub(crate) fn log_wrapper_header(
     }
 
     if let Some(op) = operation {
-        header_parts.push(
-            Prose::new(format!(
-                "<bg-green-900><green-100><bold> Op(<dim><i>{op}</i></dim>) </bold></green-100></bg-green-900>"
-            ))
-            .render(term),
-        );
+        header_parts.push(render_operation_badge(op, term));
     }
 
     if let Some(package_name) = package_name_display(env_plan) {
@@ -142,7 +148,16 @@ pub(crate) fn log_wrapper_header(
         header_parts.push(Prose::new(format!("<dim>{prose_safe}</dim>")).render(term));
     }
 
-    log::message(&format!("\n{}\n", header_parts.join(" ")));
+    let rendered = header_parts.join(" ");
+    let rendered = if matches!(
+        term.color_depth,
+        biscuit_terminal::discovery::detection::ColorDepth::None
+    ) {
+        strip_ansi_codes(&rendered)
+    } else {
+        rendered
+    };
+    log::message(&format!("\n{rendered}\n"));
 }
 
 /// Render the composed prompt as a BlockQuote after environment details.
@@ -159,15 +174,15 @@ pub(crate) fn log_compose_prompt(
     _quiet: bool,
     term: &Terminal,
 ) {
-    use claudine::prompt_reporting::{AgentPromptReport, resolve_agent_prompt_report_mode};
+    use claudine::render::{AgentPrompt, resolve_agent_prompt_report_mode};
 
     if silent {
         return;
     }
 
     let mode = resolve_agent_prompt_report_mode(silent, verbose, prompt.lines().count());
-    if let Some(output) = AgentPromptReport::new(prompt, mode).render(term) {
-        log::message(&output);
+    if let Some(report) = AgentPrompt::from_mode(prompt, mode) {
+        log::message(&report.render(term));
     }
 }
 
@@ -190,8 +205,8 @@ pub(crate) fn log_system_prompt_with_scope(
     scope: Option<&Path>,
     term: &Terminal,
 ) {
-    use claudine::prompt_reporting::{
-        ReportMode, SystemPromptReport, parse_frontmatter_verbosity,
+    use claudine::render::{
+        ReportMode, SystemPrompt, parse_frontmatter_verbosity,
         resolve_system_prompt_report_mode,
     };
     use claudine::system_prompt::check_and_record;
@@ -239,8 +254,8 @@ pub(crate) fn log_system_prompt_with_scope(
         unchanged,
     );
 
-    if let Some(output) = SystemPromptReport::new(effective_sp, mode, scope).render(term) {
-        log::message(&output);
+    if let Some(report) = SystemPrompt::from_mode(effective_sp, mode, scope) {
+        log::message(&report.render(term));
     }
 }
 
@@ -318,13 +333,13 @@ pub(crate) fn log_dry_run(
     log::message(
         &Prose::new(format!(
             "<bold>Working directory:</bold> <dim>{}</dim>",
-            child_cwd.display()
+            biscuit_file::to_portable_string(child_cwd)
         ))
         .render(term),
     );
 
     // Full command line
-    let cmd_parts: Vec<String> = std::iter::once(binary_path.display().to_string())
+    let cmd_parts: Vec<String> = std::iter::once(biscuit_file::to_portable_string(binary_path))
         .chain(child_args.iter().map(|a| shell_escape(a)))
         .collect();
     log::message(
@@ -404,7 +419,7 @@ pub(crate) fn repo_flag_info_message(
     let shadow_msg = if let Some(path) = shadow_home {
         format!(
             " A shadow HOME has been created at <blue>{}</blue> to preserve authentication.",
-            path.display()
+            biscuit_file::to_portable_string(path)
         )
     } else {
         String::new()
@@ -412,7 +427,7 @@ pub(crate) fn repo_flag_info_message(
 
     Prose::new(format!(
         "- <blue><bold>Info:</bold></blue> the {} was used; this constrains skills, commands, and subagent definitions to those in the repo.{}",
-        &*claudine::badges::REPO_FLAG,
+        *claudine::badges::REPO_FLAG,
         shadow_msg
     ))
     .with_word_wrap(WordWrap::WrapProse(Some(8), Some(3)))
@@ -515,7 +530,7 @@ fn log_mcp_runtime(term: &Terminal, mcp_runtime: &McpRuntimeInfo) {
             mcp_runtime
                 .temp_files
                 .iter()
-                .map(|path| path.display().to_string())
+                .map(|path| biscuit_file::to_portable_string(path))
                 .collect::<Vec<_>>()
                 .join(", ")
         ))));
@@ -592,6 +607,14 @@ static USER_INTERRUPTED: std::sync::atomic::AtomicBool = std::sync::atomic::Atom
 /// Also raises the lib-side flag in [`claudine::interrupt`] so blocking
 /// post-execute work (lifecycle messenger sends, TTS playback, sound
 /// effects) short-circuits on the first Ctrl+C instead of after several.
+///
+/// # Signal-handler safety
+///
+/// This function is called from the `SIGINT` handler installed by
+/// `commands::wrap::interrupt`. It must remain async-signal-safe: it
+/// performs only atomic stores and calls [`claudine::interrupt::mark_interrupted`],
+/// which is also a pure atomic store. No `OnceLock`, `Mutex`, allocation,
+/// or non-reentrant libc calls are introduced on the store path.
 pub(crate) fn mark_user_interrupted() {
     USER_INTERRUPTED.store(true, std::sync::atomic::Ordering::SeqCst);
     claudine::interrupt::mark_interrupted();
@@ -600,6 +623,46 @@ pub(crate) fn mark_user_interrupted() {
 /// Returns `true` once a Ctrl+C has been observed in this process.
 pub(crate) fn user_interrupt_observed() -> bool {
     USER_INTERRUPTED.load(std::sync::atomic::Ordering::SeqCst)
+}
+
+/// Nesting depth of the active child-process wait loops.
+///
+/// A child wait loop (`wait_with_signal_*` in `wrap::exec`) installs its own
+/// `SIGINT` handler that drives the child-targeted `SIGINT → SIGTERM →
+/// SIGKILL` escalation ladder. While that ladder is in charge, the
+/// compose-scoped Ctrl+C guard must **not** abruptly `_exit` the wrapper out
+/// from under it. Outside that window — prep, between loop iterations, and
+/// post-execute lifecycle side effects (TTS, sound) — there is no ladder, so a
+/// repeated press must be able to force-exit a wedged synchronous call.
+///
+/// A counter (not a bool) keeps the flag correct if wait loops ever nest.
+static WAIT_LOOP_DEPTH: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Returns `true` while at least one child-process wait loop is blocking with
+/// its own `SIGINT` handler installed. Read from the compose guard's signal
+/// handler — a single atomic load, async-signal-safe.
+pub(crate) fn wait_loop_active() -> bool {
+    WAIT_LOOP_DEPTH.load(std::sync::atomic::Ordering::SeqCst) > 0
+}
+
+/// RAII guard that marks a child wait loop active for its lifetime.
+///
+/// Construct it at the top of each `wait_with_signal_*` function; the
+/// decrement on `Drop` fires on every exit path (including `?` early returns),
+/// so the flag can never get stuck "active" after the wait returns.
+pub(crate) struct WaitLoopActiveGuard;
+
+impl WaitLoopActiveGuard {
+    pub(crate) fn new() -> Self {
+        WAIT_LOOP_DEPTH.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Self
+    }
+}
+
+impl Drop for WaitLoopActiveGuard {
+    fn drop(&mut self) {
+        WAIT_LOOP_DEPTH.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
 }
 
 /// Reset the user-interrupt flag. Used only by tests that need a clean
@@ -619,7 +682,7 @@ pub(crate) fn clear_user_interrupt_for_tests() {
 pub(crate) fn format_launch_directory(directory: &Path) -> String {
     Prose::new(format!(
         "- <dim>starting agent in</dim> <blue>{}</blue>",
-        directory.display()
+        biscuit_file::to_portable_string(directory)
     ))
     .with_word_wrap(WordWrap::WrapProse(None, Some(2)))
     .render(&crate::log::terminal())
@@ -658,9 +721,89 @@ pub(crate) fn capitalize_provider(provider: Provider) -> String {
     }
 }
 
+/// Render the one-line execution header for a composition run.
+///
+/// Shared by the up-front emit in `compose` / `inline-compose` (which
+/// resolves the agent eagerly so the line appears immediately) and the
+/// in-pipeline emit for callers that did not pre-render it.
+///
+/// Returns `false` without emitting when `provider` has no wrapper
+/// profile, so the caller leaves the header to the executor rather than
+/// silently dropping it.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn emit_execution_header(
+    provider: Provider,
+    yolo: bool,
+    session_interactive: bool,
+    detail_requested: bool,
+    repo: bool,
+    is_inline: bool,
+    sequence: bool,
+    operation: Option<&str>,
+    file_ref: &str,
+    package_context: Option<claudine::composition::PackageContext>,
+    term: &Terminal,
+) -> bool {
+    let Some(profile) = profile_for_provider(provider) else {
+        return false;
+    };
+    let compose_display = if is_inline {
+        ComposeDisplay::InlineCompose
+    } else {
+        ComposeDisplay::Compose
+    };
+    let header_env_plan = EnvPlan {
+        package_context,
+        ..Default::default()
+    };
+    log_wrapper_header(
+        profile,
+        yolo,
+        !session_interactive,
+        session_interactive,
+        detail_requested,
+        repo,
+        Some(&compose_display),
+        sequence,
+        operation,
+        None, // no inline prompt text for compose
+        Some(file_ref),
+        &header_env_plan,
+        term,
+    );
+    true
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wait_loop_active_guard_tracks_nesting_depth() {
+        // Outside any wait loop the compose Ctrl+C guard is free to force-exit.
+        assert!(!wait_loop_active(), "must start inactive");
+
+        {
+            let _outer = WaitLoopActiveGuard::new();
+            assert!(wait_loop_active(), "active while a guard is held");
+
+            {
+                let _inner = WaitLoopActiveGuard::new();
+                assert!(wait_loop_active(), "still active while nested");
+            }
+            // Inner drop must not clear the flag while the outer guard lives —
+            // a bool flag would; the depth counter must not.
+            assert!(
+                wait_loop_active(),
+                "must remain active until the outermost guard drops"
+            );
+        }
+
+        assert!(
+            !wait_loop_active(),
+            "must be inactive again once all guards drop"
+        );
+    }
 
     #[test]
     fn format_launch_directory_mentions_directory() {
@@ -675,6 +818,26 @@ mod tests {
         assert_eq!(
             trim_trailing_blank_rendered_lines(rendered),
             "first\nsecond"
+        );
+    }
+
+    #[test]
+    fn operation_badge_reapplies_background_before_closing_parenthesis() {
+        let rendered = render_operation_badge("commit", &Terminal::new_optimistic(80));
+        let closing_parenthesis = rendered
+            .find(')')
+            .expect("operation badge should contain a closing parenthesis");
+        let before_closing_parenthesis = &rendered[..closing_parenthesis];
+        let last_background = before_closing_parenthesis
+            .rfind("\x1b[48;2;")
+            .expect("operation badge should render a true-color background");
+        let last_reset = before_closing_parenthesis
+            .rfind("\x1b[0m")
+            .expect("nested operation styling should emit a reset");
+
+        assert!(
+            last_background > last_reset,
+            "badge background must be active for the closing parenthesis: {rendered:?}"
         );
     }
 

@@ -1,6 +1,7 @@
 ---
 name: renderable
 description: Expert knowledge for the renderable library, which provides traits and utilities for multi-target rendering (Terminal, Markdown, Browser) from a shared render-tree IR in the rusty-biscuit monorepo. Use when working in the renderable package area, implementing multi-target rendering for a type, adding or targeting a render target (Terminal/Markdown/Browser), working with the render tree (TreeRenderable, RenderNode, Document), or adding the renderable dependency.
+hash: c0aac8e9eca375bd-d33aeebcc9cd75ea
 ---
 # `renderable` Library
 
@@ -83,12 +84,12 @@ Terminal from the single tree it produces.
 Darkmatter's document-level `style:` frontmatter is implemented in
 `darkmatter::style`, but it intentionally uses renderable primitives:
 `Length`, `Alignment`, and color-backed values. Active wiring covers
-sub-specs 1 through 7 from
-`renderable/features/2026-05-23-style-property/`: schema/parser, page layout,
-table/image/block-quote layout, `ul`/`ol`/`li` layout, page/component
-`color` / `bg-color`, `style.hr.*`, and the bespoke knobs
-`page.stylesheet`, `page.meta`, `page.code.theme`, hyperlink style, and
-local hyperlink/image style.
+sub-specs 1 through 8, and sub-spec 9 (the
+[Style Everywhere](../../../renderable/features/2026-06-30-style-everywhere/matrix.md)
+surface) expands every `PageComponent` bucket with `margin`, `padding`,
+`border`, `emphasis`, `word-wrap`, and explicit `width` mode keywords (`auto`,
+`fit-content`, lengths). See the darkmatter `style:` reference for the full
+per-component property list.
 
 This pipeline is separate from `renderable::style::Style`. Frontmatter applies
 policy to `DarkmatterPage`; `Style` is the render-tree appearance attribute

@@ -1,10 +1,11 @@
+#![cfg(unix)]
+
 //! Integration tests for `claudine sequence --perf`.
 //!
 //! Validates that sequence performance reporting aggregates step-level
 //! metrics into a single end-of-run report, including CLI overhead
 //! propagation and partial-metrics handling on fail-fast.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 mod common;
@@ -42,10 +43,16 @@ exit 0
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    // Run from the isolated workspace (as
+    // `sequence_perf_propagates_startup_timings` does): with the ambient
+    // monorepo as cwd, each step's repository discovery pays a full git
+    // worktree-metadata refresh that can exceed nextest's termination
+    // ceiling under full-suite contention.
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args(["sequence", "--goose", "--perf", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -94,25 +101,28 @@ exit 0
         "Sequence finished should appear before Performance block"
     );
 
-    // Per-step composition is metered during environment setup (Phase 1c), not
-    // the per-step execution window, so it renders under a `step preparation`
-    // node beneath `environment setup` — not nested under each `steps → step N`
-    // execution node, where a slow compose could exceed its parent (review-2 /
-    // G-2). Each step name therefore appears twice: once under `step
-    // preparation` (its compose detail) and once under `steps` (its execution).
+    // Just-in-time orchestration composes each step *at its turn*, inside the
+    // window `steps → step N` measures, so composition nests under its own step
+    // rather than under a separate `environment setup → step preparation`
+    // bucket. The G-2 hazard that split guarded against — a compose rendered
+    // larger than its parent — cannot arise once compose is inside the parent.
     assert!(
-        plain.contains("step preparation"),
-        "stderr should contain the step preparation bucket under environment setup; got: {plain}"
+        !plain.contains("step preparation"),
+        "composition is no longer metered outside the step window; got: {plain}"
+    );
+    assert!(
+        plain.contains("composition"),
+        "each step should carry its own composition detail; got: {plain}"
     );
     assert_eq!(
         plain.matches("step 1: alpha").count(),
-        2,
-        "step 1 should appear under both `step preparation` and `steps`; stderr: {plain}"
+        1,
+        "each step appears once, under `steps`; stderr: {plain}"
     );
     assert_eq!(
         plain.matches("step 2: beta").count(),
-        2,
-        "step 2 should appear under both `step preparation` and `steps`; stderr: {plain}"
+        1,
+        "each step appears once, under `steps`; stderr: {plain}"
     );
 }
 
@@ -159,11 +169,12 @@ exit 0
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
         .env("CLAUDINE_COUNT_FILE", &count_path)
+        .current_dir(workspace.path())
         .args([
             "sequence",
             "--goose",
@@ -221,10 +232,12 @@ exit 0
 "#,
     );
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args(["sequence", "--goose", "--perf", md_file.to_str().unwrap()])
         .assert()
         .success();

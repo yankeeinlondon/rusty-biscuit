@@ -36,7 +36,7 @@ Paths in flags are normalized by replacing the current working directory with `.
 
 ### What kache does not cache by default
 
-Binary crates (`bin`), dynamic libraries (`dylib`, `cdylib`), and proc-macros are skipped. These depend on the linker and are more expensive to restore. Enable `cache_executables = true` or `KACHE_CACHE_EXECUTABLES=1` to opt in. Incremental compilation is automatically disabled (`CARGO_INCREMENTAL=0`) when kache is active.
+User-facing binaries and test harnesses are skipped by default. Dynamic libraries and proc-macros remain cached. Enable `cache_executables = true` or `KACHE_CACHE_EXECUTABLES=1` to opt in to executable caching. Incremental compilation is automatically disabled when kache is active.
 
 ### Requirements
 
@@ -54,7 +54,6 @@ Binary crates (`bin`), dynamic libraries (`dylib`, `cdylib`), and proc-macros ar
 ## When Not to Use
 
 - **Single-crate projects with fast compile times.** The overhead of cache key computation (including the `dep-info` pre-pass) may exceed the compilation itself.
-- **Windows.** Not supported — compilation fails explicitly.
 - **Projects relying heavily on incremental compilation.** kache disables incremental by design; its artifact-level caching replaces it, but if you depend on incremental's fine-grained re-use for edit-compile cycles, kache's crate-level granularity may feel slower during active development.
 - **Builds with heavy `env!()` usage.** Environment variables baked into the binary become part of the cache key, causing unnecessary misses if values change across runs.
 - **When `sccache` or `cargo-cache` already meets your needs** and you have no reason to switch.
@@ -65,7 +64,7 @@ Binary crates (`bin`), dynamic libraries (`dylib`, `cdylib`), and proc-macros ar
 |--------------------------------|---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | macOS (Intel + Apple Silicon)  | Supported     | Pre-built binaries. Store excluded from Time Machine and Spotlight. Incremental disabled to avoid APFS corruption in worktrees. launchd service available. |
 | Linux (x86_64 + aarch64, musl) | Supported     | Statically linked musl binaries. systemd user service available.                                                                                           |
-| Windows                        | Not supported | Compilation explicitly fails.                                                                                                                              |
+| Windows (x64 + ARM64)          | Supported     | Native MSVC binaries are available; GitHub Actions support both architectures.                                                                              |
 
 Cache directory locations follow platform conventions: `~/Library/Caches/kache` on macOS, `~/.cache/kache` on Linux.
 
@@ -78,7 +77,7 @@ Cache directory locations follow platform conventions: `~/Library/Caches/kache` 
 mise use -g github:kunobi-ninja/kache@latest
 
 # or pin a specific version
-mise use -g github:kunobi-ninja/kache@0.3.1
+mise use -g github:kunobi-ninja/kache@0.8.0
 ```
 
 To pin per-project so every contributor gets the same version, add to `mise.toml`:
@@ -205,7 +204,11 @@ Adding an S3-compatible remote (AWS S3, Cloudflare R2, Ceph, MinIO) shares artif
 
 The remote is additive: local caching always works, and the daemon degrades gracefully if S3 is unreachable. The typical CI pattern is `kache sync --pull` before the build and `kache sync --push` after (with `if: always()` to preserve partial results).
 
-For GitHub Actions specifically, the `kunobi-ninja/kache-action@v1` action uses GitHub's built-in cache as the backend — no S3 bucket required.
+For GitHub Actions specifically, the `kunobi-ninja/kache-action@v1` action uses GitHub's built-in cache as the backend — no S3 bucket required. Note that `kache-action@v1` runs on **Linux and macOS only**: it rejects Windows runners with `Unsupported platform: win32-x64`, even though the standalone kache binary supports Windows. A Windows CI leg must therefore build without kache.
+
+### In this repo (rusty-biscuit)
+
+kache is the compiler cache for **every** build here, on every OS: the tracked `.cargo/config.toml` sets `rustc-wrapper = "kache"` repo-wide, so plain `cargo build` and all `just` recipes go through kache. There is a single version authority, `.github/kache-version` (currently `0.12.0` — 0.7.x was silently write-only, never use it), consumed by both the root `justfile` (`KACHE_VERSION`) and the verifying `.github/actions/enable-kache` composite action. `just init` seeds a default `local_max_size = "100GiB"` store cap on unconfigured hosts (Windows config lives at `%APPDATA%\kache\config.toml`, elsewhere `~/.config/kache/config.toml`). Target hygiene is `just sweep` (`scripts/sweep.sh`: uninstalled toolchains → untouched 14d → 120 GB backstop cap); decisions and sizing evidence are in `docs/kache-strategy.md`. In CI, every leg either installs kache or neutralizes the wrapper: the `enable-kache` composite installs on Linux/macOS (`kache-action@v1`, GitHub-cache-backed) and clears `RUSTC_WRAPPER` on Windows (`kache-action@v1` rejects win32-x64); all other workflows set `RUSTC_WRAPPER: ""`. Windows store persistence (manual install + `actions/cache`, or an S3 remote) is a documented future ambition in `docs/kache-strategy.md`.
 
 ### Credential resolution
 

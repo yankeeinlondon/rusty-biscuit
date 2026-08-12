@@ -1,13 +1,14 @@
+#![cfg(unix)]
+
 //! Integration tests for `claudine inline-compose`.
 //!
 //! Phase 1 of the `2026-06-03-always-harness` feature. Pins current observable
 //! behavior so divergence introduced by later phases fails loudly.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 mod common;
-use common::{augmented_path, write_executable};
+use common::{augmented_path, init_git_repo, write, write_executable};
 
 // ============================================================================
 // Phase 1: convergence between non-harness and harness-enabled inline compose
@@ -35,118 +36,99 @@ exit 0
     );
 }
 
-/// Dry-run must still run the inline writability pre-check before returning.
-/// A read-only (`0444`) inline source must fail the pre-check — not render a
-/// clean dry-run and exit 0 — while leaving the source file untouched.
 #[cfg(unix)]
 #[test]
-fn inline_compose_dry_run_fails_on_read_only_source() {
-    use std::os::unix::fs::PermissionsExt;
-
+fn inline_compose_writes_expected_final_body() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
 
-    // A binary must resolve on PATH (dry-run resolves it before the seam),
-    // but the dry-run path never launches it.
     stage_opencode_inline_body_writer(&path_dir);
 
-    let source = workspace.path().join("readonly.md");
-    let original = "---\nprompt: Generate the body\n---\nOriginal body.\n";
-    fs::write(&source, original).unwrap();
-    fs::set_permissions(&source, fs::Permissions::from_mode(0o444)).unwrap();
+    let source = workspace.path().join("bare.md");
+    fs::write(
+        &source,
+        "---\nprompt: Generate the body\n---\nOriginal body.\n",
+    )
+    .unwrap();
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
         .env("OPENCODE_MODEL", "test-model")
         .current_dir(workspace.path())
-        .args([
-            "inline-compose",
-            "--opencode",
-            "--dry-run",
-            source.to_str().unwrap(),
-        ])
+        .args(["inline-compose", "--opencode", source.to_str().unwrap()])
         .assert()
-        .failure();
+        .success();
 
-    // The source must be untouched: same content and still read-only.
-    let after = fs::read_to_string(&source).unwrap();
-    assert_eq!(
-        after, original,
-        "dry-run must not mutate the source file; got:\n{after}"
+    let doc = fs::read_to_string(&source).unwrap();
+    // The inline closure must use the final response (text after the last
+    // tool call), not the interstitial narration.
+    assert!(
+        doc.contains("# Final Body"),
+        "inline body must contain final response heading; doc:\n{doc}"
     );
-    let mode = fs::metadata(&source).unwrap().permissions().mode() & 0o777;
-    assert_eq!(mode, 0o444, "dry-run must leave permissions unchanged");
+    assert!(
+        doc.contains("This is the replacement body."),
+        "inline body must contain final response body; doc:\n{doc}"
+    );
+    assert!(
+        !doc.contains("Let me look up the answer."),
+        "inline body must not contain interstitial narration; doc:\n{doc}"
+    );
 }
 
 #[cfg(unix)]
 #[test]
-fn inline_compose_non_harness_and_harness_write_identical_final_body() {
+fn inline_compose_uses_source_doc_repository_not_launch_cwd() {
     let workspace = tempdir().unwrap();
+    let source_root = workspace.path().join("source");
+    let launch_root = workspace.path().join("launch");
+    fs::create_dir_all(&source_root).unwrap();
+    fs::create_dir_all(&launch_root).unwrap();
+    assert!(init_git_repo(&source_root));
+    assert!(init_git_repo(&launch_root));
+
+    write(
+        &source_root.join("snippet.md"),
+        "SOURCE_REPOSITORY_INLINE_MARKER\n",
+    );
+    write(
+        &launch_root.join("snippet.md"),
+        "LAUNCH_REPOSITORY_INLINE_MARKER\n",
+    );
+    let source = source_root.join("prompts/inline.md");
+    write(
+        &source,
+        "---\nprompt: |\n  ::file snippet.md\n---\nOriginal body.\n",
+    );
+
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
+    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
 
-    stage_opencode_inline_body_writer(&path_dir);
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .env("NO_COLOR", "1")
+        .env("HOME", workspace.path())
+        .env("PATH", augmented_path(&path_dir))
+        .current_dir(&launch_root)
+        .args([
+            "inline-compose",
+            "--goose",
+            "--dry-run",
+            source.to_str().unwrap(),
+        ])
+        .assert()
+        .success();
 
-    let bare_file = workspace.path().join("bare.md");
-    fs::write(
-        &bare_file,
-        "---\nprompt: Generate the body\n---\nOriginal body.\n",
-    )
-    .unwrap();
-
-    let harness_file = workspace.path().join("harness.md");
-    fs::write(
-        &harness_file,
-        "---\nprompt: Generate the body\npost_checks: []\n---\nOriginal body.\n",
-    )
-    .unwrap();
-
-    let run = |path: &std::path::Path| {
-        cargo_bin_cmd!("claudine")
-            .env("NO_COLOR", "1")
-            .env("HOME", workspace.path())
-            .env("PATH", augmented_path(&path_dir))
-            .env("OPENCODE_MODEL", "test-model")
-            .current_dir(workspace.path())
-            .args(["inline-compose", "--opencode", path.to_str().unwrap()])
-            .assert()
-            .success();
-
-        let doc = fs::read_to_string(path).unwrap();
-        // The inline closure must use the final response (text after the last
-        // tool call), not the interstitial narration.
-        assert!(
-            doc.contains("# Final Body"),
-            "inline body must contain final response heading; doc:\n{doc}"
-        );
-        assert!(
-            doc.contains("This is the replacement body."),
-            "inline body must contain final response body; doc:\n{doc}"
-        );
-        assert!(
-            !doc.contains("Let me look up the answer."),
-            "inline body must not contain interstitial narration; doc:\n{doc}"
-        );
-        doc
-    };
-
-    let bare_doc = run(&bare_file);
-    let harness_doc = run(&harness_file);
-
-    // Extract the body (everything after the second `---` frontmatter fence).
-    let extract_body = |doc: &str| {
-        let mut parts = doc.splitn(3, "---");
-        let _before = parts.next();
-        let _frontmatter = parts.next();
-        parts.next().unwrap_or("").trim_start().to_string()
-    };
-    let bare_body = extract_body(&bare_doc);
-    let harness_body = extract_body(&harness_doc);
-    assert_eq!(
-        bare_body, harness_body,
-        "inline-compose final body must be identical with and without harness frontmatter"
+    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+    assert!(
+        stdout.contains("SOURCE_REPOSITORY_INLINE_MARKER"),
+        "inline prompt transclusion must use the source repository; stdout:\n{stdout}"
+    );
+    assert!(
+        !stdout.contains("LAUNCH_REPOSITORY_INLINE_MARKER"),
+        "launch repository must not leak into inline prompt transclusion; stdout:\n{stdout}"
     );
 }

@@ -1,0 +1,19 @@
+Revision: e348486c810969abe87a6b7209979034f5454b07
+Detached worktree: /tmp/claudine-mega-proxy.InQb45/tree
+Working directory: .
+Command: just test biscuit-test-harness
+Timeout policy: SIGINT at 60s; SIGKILL 5s later
+Exit status: 1
+Classification: failed
+Elapsed seconds: 0.00000175
+
+[[STDOUT]]
+
+Running Level-1 tests for 1 workspace packages...
+------------------------------------------------
+
+Testing biscuit-test-harness...
+[[STDERR]]
+/var/folders/l9/xdcp3xnn6s78_5l9w2_mnvtw0000gn/T/just-OIEHCo/_test_workspace: line 313: package_args[@]: unbound variable
+error: recipe `_test_workspace` failed with exit code 1
+error: recipe `test` failed on line 46 with exit code 1

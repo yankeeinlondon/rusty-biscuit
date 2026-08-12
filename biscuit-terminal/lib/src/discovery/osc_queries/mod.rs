@@ -70,6 +70,7 @@ pub use support::{osc10_support, osc11_support, osc12_support};
 pub use types::{DEFAULT_TIMEOUT, OscQueryError, RgbValue};
 
 static BG_COLOR_CACHE: OnceLock<Option<RgbValue>> = OnceLock::new();
+static TEXT_COLOR_CACHE: OnceLock<Option<RgbValue>> = OnceLock::new();
 
 /// Query background color via OSC 11 heuristics.
 ///
@@ -95,8 +96,13 @@ pub fn bg_color() -> Option<RgbValue> {
 }
 
 /// Query foreground/text color via OSC 10 heuristics.
+///
+/// Like [`bg_color`], the result is cached per-process: the OSC 10 query
+/// opens `/dev/tty`, toggles raw mode, and polls with a timeout, so repeated
+/// `Terminal` constructions would otherwise each pay a full tty round-trip.
+/// The explicit [`text_color_with_timeout`] path stays uncached.
 pub fn text_color() -> Option<RgbValue> {
-    query::query_osc_color(10)
+    *TEXT_COLOR_CACHE.get_or_init(|| query::query_osc_color(10))
 }
 
 /// Query cursor color via OSC 12 heuristics.
@@ -119,4 +125,24 @@ pub fn text_color_with_timeout(timeout: Duration) -> Option<RgbValue> {
 /// Query cursor color with a custom timeout.
 pub fn cursor_color_with_timeout(timeout: Duration) -> Option<RgbValue> {
     query::query_osc_color_with_timeout(12, timeout)
+}
+
+#[cfg(test)]
+mod cache_tests {
+    use super::{bg_color, text_color};
+
+    /// The OSC 10 foreground query is cached per process (mirroring OSC 11),
+    /// so repeated `Terminal` constructions do not re-round-trip the tty.
+    /// The value must be stable across calls.
+    #[test]
+    fn text_color_is_stable_across_calls() {
+        let first = text_color();
+        let second = text_color();
+        assert_eq!(first, second, "cached text_color must be stable");
+    }
+
+    #[test]
+    fn bg_color_is_stable_across_calls() {
+        assert_eq!(bg_color(), bg_color(), "cached bg_color must be stable");
+    }
 }

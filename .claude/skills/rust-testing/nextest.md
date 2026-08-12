@@ -182,6 +182,41 @@ cargo nextest archive --archive-file tests.tar.zst
 cargo nextest run --archive-file tests.tar.zst
 ```
 
+The `wsl2-ubuntu` leg of every area's CI runs this way (`.github/workflows/_wsl-ci.yml`):
+the archive is built on `ubuntu-latest` and only executed inside the guest.
+
+### Never bake a binary path with `env!`
+
+A test that spawns a sibling binary must read its path from the environment at
+**run time**. `env!("CARGO_BIN_EXE_<name>")` resolves at compile time to a path
+inside the *build* host's target directory; nextest extracts an archive into a
+temp directory, so that path does not exist and every such test dies with
+`Os { code: 2, kind: NotFound }` — green locally, red on `wsl2-ubuntu` only.
+
+Use `biscuit_test_harness::bin_exe!`, which prefers nextest's run-time
+republication of the path and falls back to the compile-time value:
+
+```rust
+use biscuit_test_harness::bin_exe;
+
+let output = Command::new(bin_exe!("so-you-say")).arg("--help").output()?;
+```
+
+It returns a `PathBuf`; suites that interpolate the path into a shell command
+line wrap it once in a `OnceLock<String>` helper (see
+`claudine/cli/tests/common/mod.rs`'s `claudine_bin`).
+
+`--workspace-remap` does not help here: it relocates *source* paths, not the
+build's target directory.
+
+### Examples are built but not archived
+
+An archive carries test binaries and non-test **bin** targets. A test that
+spawns an *example* (biscuit-terminal's `discovery_probe`) finds nothing in the
+guest unless the example is named in `archive.include` in `.config/nextest.toml`
+— which is per-path, has no glob support, and needs one entry per target-dir
+layout (`debug/…` locally, `<triple>/debug/…` when CI builds with `--target`).
+
 ## Output Formats
 
 ```bash

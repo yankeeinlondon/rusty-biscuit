@@ -1,0 +1,293 @@
+# Topic-less catalog facts for the gemini provider.
+#
+# Field-source matrix (design/catalog-generation.md): this file owns values
+# whose research topic has not landed yet. Keys are catalog field names.
+# Seeded once from the hand-written provider constants (the one-time
+# `scrape-facts` bootstrap, retired after seeding).
+# When a field's research topic lands, the mapping registry re-points the
+# field and generation ERRORS while this file still carries the key
+# (delete-on-graduate).
+stream_protocol: stream-json
+event_mapping:
+  mappings:
+  - event: session_start
+    parse_aliases:
+    - SessionStart
+    registration_target: true
+    support_level:
+      hook:
+        native_name: SessionStart
+  - event: session_end
+    parse_aliases:
+    - SessionEnd
+    registration_target: true
+    support_level:
+      hook:
+        native_name: SessionEnd
+  - event: before_prompt
+    parse_aliases:
+    - BeforeAgent
+    registration_target: true
+    support_level:
+      hook:
+        native_name: BeforeAgent
+  - event: before_tool
+    parse_aliases:
+    - BeforeTool
+    registration_target: true
+    support_level:
+      hook:
+        native_name: BeforeTool
+  - event: after_tool
+    parse_aliases:
+    - AfterTool
+    registration_target: true
+    support_level:
+      hook:
+        native_name: AfterTool
+  - event: tool_error
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: permission_request
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: human_in_the_loop
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: turn_complete
+    parse_aliases:
+    - AfterAgent
+    registration_target: true
+    support_level:
+      hook:
+        native_name: AfterAgent
+  - event: turn_error
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: subagent_start
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: subagent_stop
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: before_model
+    parse_aliases:
+    - BeforeModel
+    - BeforeToolSelection
+    registration_target: true
+    support_level:
+      hook:
+        native_name: BeforeModel
+  - event: after_model
+    parse_aliases:
+    - AfterModel
+    registration_target: true
+    support_level:
+      hook:
+        native_name: AfterModel
+  - event: before_compact
+    parse_aliases:
+    - PreCompress
+    registration_target: true
+    support_level:
+      hook:
+        native_name: PreCompress
+  - event: notification
+    parse_aliases:
+    - Notification
+    registration_target: true
+    support_level:
+      hook:
+        native_name: Notification
+resource_support:
+  agents:
+    also_reads_from: []
+    format: Markdown
+    level: CustomFormat
+    notes: Sub-agent markdown definitions are experimental
+    properties:
+      optional:
+      - kind
+      - tools
+      - model
+      - temperature
+      - max_turns
+      - timeout_mins
+      required:
+      - name
+      - description
+      source_doc: claudine/docs/cross-referencing/gemini-cli.md
+    repo_path: .gemini/agents
+    user_path: .gemini/agents
+  commands:
+    also_reads_from: []
+    format: Toml
+    level: CustomFormat
+    notes: Uses TOML format with {{args}} placeholder
+    properties:
+      optional:
+      - description
+      required:
+      - prompt
+      source_doc: claudine/docs/cross-referencing/gemini-cli.md
+    repo_path: .gemini/commands
+    user_path: .gemini/commands
+  provider: gemini
+  scripts:
+    also_reads_from: []
+    format: null
+    level: None
+    notes: Scripts stored within skill directories
+    properties: null
+    repo_path: null
+    user_path: null
+  skill_frontmatter:
+    allowed_tools: false
+    compatibility: false
+    description: true
+    disable_model_invocation: false
+    license: false
+    metadata: false
+    name: true
+    user_invocable: false
+  skills:
+    also_reads_from: []
+    format: Markdown
+    level: Full
+    notes: Also supports .gemini/modules/ as context modules
+    properties:
+      optional: []
+      required:
+      - name
+      - description
+      source_doc: claudine/docs/cross-referencing/gemini-cli.md
+    repo_path: .gemini/skills
+    user_path: .gemini/skills
+memory_files:
+- raw: ~/.gemini/GEMINI.md
+  segments: []
+- raw: .gemini/GEMINI.md
+  segments: []
+- raw: GEMINI.md
+  segments: []
+output_formats:
+- cli_flag: --output-format
+  companion_flags: []
+  format: text
+  native_name: text
+  selector:
+    flag: --output-format
+    kind: flag_value
+  stdin_supported: true
+- cli_flag: --output-format
+  companion_flags: []
+  format: json
+  native_name: json
+  selector:
+    flag: --output-format
+    kind: flag_value
+  stdin_supported: true
+- cli_flag: --output-format
+  companion_flags: []
+  format: stream
+  native_name: stream-json
+  selector:
+    flag: --output-format
+    kind: flag_value
+  stdin_supported: true
+entrypoints:
+- mode: non_interactive
+  required_flags: []
+  subcommand: null
+system_prompt:
+  append:
+    interactive:
+      env_var_file:
+        env_var: GEMINI_SYSTEM_MD
+    non_interactive:
+      env_var_file:
+        env_var: GEMINI_SYSTEM_MD
+  memory_files:
+  - raw: ~/.gemini/GEMINI.md
+    segments: []
+  - raw: .gemini/GEMINI.md
+    segments: []
+  - raw: GEMINI.md
+    segments: []
+  replace:
+    interactive:
+      env_var_file:
+        env_var: GEMINI_SYSTEM_MD
+    non_interactive:
+      env_var_file:
+        env_var: GEMINI_SYSTEM_MD
+yolo:
+  direct_flag:
+    native_flag: --approval-mode=yolo
+reasoning:
+  numeric_budget:
+    default: null
+    flag: thinkingBudget
+    max: 32768
+    min: 0
+known_gaps: []
+acp:
+  client_supported: false
+  events_via_acp: []
+prompt_arg_conventions:
+  entrypoint: null
+  prompt_flags:
+  - -p
+  - --prompt
+cli_sensitive_axes:
+  access_domain: false
+  execute_command: true
+  modify_provider_config: true
+  read_path: false
+  spawn_subagent: false
+  switch_mode: false
+  traverse_path: false
+  use_mcp_server: false
+  use_mcp_tool: false
+  write_path: false
+repo_home_root_files: []
+billing_models:
+- subscription
+- per_token
+cap_policies: []
+allowed_env_keys:
+- GEMINI_API_KEY
+- GOOGLE_API_KEY
+display_policy:
+  tool_result_summary: show
+  info_event_suppression: []
+  collapse_task_progress: false
+  suppress_subscription_rate_limit: false
+  silent_extension_kinds: []
+  stdout_noise_prefixes:
+  - "Created execution plan for "
+  - "Expanding hook command: "
+  - "Hook execution for "
+  - "Skill conflict detected: "
+  - "[LocalAgentExecutor]"
+  stderr_noise_prefixes:
+  - "Skill conflict detected: "
+  - "[LocalAgentExecutor]"
+suppress_structured_stderr_on_success: true
+supports_interactive_inline_closure: false
+model_required_in_non_tty: false
+platform_kind: vendor_platform
+unmapped_native_events:
+- native_event: BeforeToolSelection
+  description: Filters which tools the model may choose before any concrete tool call exists; returns toolConfig {mode, allowedFunctionNames}.
+  remediation: Register a command hook for BeforeToolSelection directly in Gemini settings (hooksConfig); Claudine cannot dispatch this phase.
+# Ordered error-classification vocabulary (Phase A seed, transcribed verbatim
+# from lib/src/stream/providers/gemini.rs::ERROR_KEYWORDS). Sequence order IS
+# the cascade order; Gemini checks Configuration before ApiRemote in the kind
+# branch, and runs a "late ApiRemote" second pass after Interrupted.

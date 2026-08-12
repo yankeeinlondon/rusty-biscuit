@@ -1,0 +1,297 @@
+# Topic-less catalog facts for the kimi provider.
+#
+# Field-source matrix (design/catalog-generation.md): this file owns values
+# whose research topic has not landed yet. Keys are catalog field names.
+# Seeded once from the hand-written provider constants (the one-time
+# `scrape-facts` bootstrap, retired after seeding).
+# When a field's research topic lands, the mapping registry re-points the
+# field and generation ERRORS while this file still carries the key
+# (delete-on-graduate).
+stream_protocol: wire-json-rpc
+event_mapping:
+  mappings:
+  - event: session_start
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: session_end
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: before_prompt
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wire_proxy:
+        mode: json_rpc
+        native_name: TurnBegin
+  - event: before_tool
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wire_proxy:
+        mode: json_rpc
+        native_name: ToolCall
+  - event: after_tool
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wire_proxy:
+        mode: json_rpc
+        native_name: ToolResult
+  - event: tool_error
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wire_proxy:
+        mode: json_rpc
+        native_name: ToolResult
+  - event: permission_request
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      acp:
+        event: approval_request
+        native_name: ApprovalRequest
+  - event: human_in_the_loop
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      acp:
+        event: approval_request
+        native_name: ApprovalRequest
+  - event: turn_complete
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wire_proxy:
+        mode: json_rpc
+        native_name: TurnEnd
+  - event: turn_error
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wire_proxy:
+        mode: json_rpc
+        native_name: prompt.status
+  - event: subagent_start
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wire_proxy:
+        mode: json_rpc
+        native_name: SubagentEvent
+  - event: subagent_stop
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wire_proxy:
+        mode: json_rpc
+        native_name: SubagentEvent
+  - event: before_model
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: after_model
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wire_proxy:
+        mode: json_rpc
+        native_name: ContentPart
+  - event: before_compact
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wire_proxy:
+        mode: json_rpc
+        native_name: CompactionBegin
+  - event: notification
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wire_proxy:
+        mode: json_rpc
+        native_name: StatusUpdate
+resource_support:
+  agents:
+    also_reads_from: []
+    format: Yaml
+    level: CustomFormat
+    notes: YAML agent files loaded via --agent-file flag
+    properties:
+      optional:
+      - extend
+      - system_prompt_args
+      - exclude_tools
+      - subagents
+      required:
+      - name
+      - system_prompt_path
+      - tools
+      source_doc: claudine/docs/cross-referencing/kimi-code.md
+    repo_path: .kimi/agents
+    user_path: .kimi/agents
+  commands:
+    also_reads_from: []
+    format: BuiltinOnly
+    level: Limited
+    notes: Built-in slash commands only
+    properties: null
+    repo_path: null
+    user_path: null
+  provider: kimi_code
+  scripts:
+    also_reads_from: []
+    format: null
+    level: None
+    notes: Scripts stored within skill directories
+    properties: null
+    repo_path: null
+    user_path: null
+  skill_frontmatter:
+    allowed_tools: false
+    compatibility: true
+    description: true
+    disable_model_invocation: false
+    license: true
+    metadata: true
+    name: true
+    user_invocable: false
+  skills:
+    also_reads_from:
+    - .claude/skills
+    - .agents/skills
+    - .codex/skills
+    format: Markdown
+    level: Full
+    notes: null
+    properties:
+      optional:
+      - name
+      - description
+      - license
+      - compatibility
+      - metadata
+      - type
+      required: []
+      source_doc: claudine/docs/cross-referencing/kimi-code.md
+    repo_path: .kimi/skills
+    user_path: .config/agents/skills
+memory_files:
+- raw: AGENTS.md
+  segments: []
+output_formats:
+- cli_flag: null
+  companion_flags: []
+  format: text
+  native_name: text
+  selector:
+    kind: default
+  stdin_supported: true
+- cli_flag: --wire
+  companion_flags: []
+  format: stream
+  native_name: stream-json
+  selector:
+    flag: --wire
+    kind: transport_flag
+  stdin_supported: true
+entrypoints:
+- mode: non_interactive
+  required_flags:
+  - --wire
+  subcommand: null
+system_prompt:
+  append:
+    interactive:
+      custom: kimi_agent_file
+    non_interactive:
+      custom: kimi_agent_file
+  memory_files:
+  - raw: AGENTS.md
+    segments: []
+  replace:
+    interactive:
+      custom: kimi_agent_file
+    non_interactive:
+      custom: kimi_agent_file
+yolo:
+  direct_flag:
+    native_flag: --yolo
+reasoning:
+  binary_toggle:
+    flag: --thinking
+    off: --no-thinking
+    on: --thinking
+known_gaps: []
+acp:
+  client_supported: true
+  events_via_acp:
+  - approval_request
+prompt_arg_conventions:
+  entrypoint: null
+  prompt_flags:
+  - --prompt
+cli_sensitive_axes:
+  access_domain: false
+  execute_command: false
+  modify_provider_config: false
+  read_path: false
+  spawn_subagent: false
+  switch_mode: false
+  traverse_path: false
+  use_mcp_server: false
+  use_mcp_tool: false
+  write_path: false
+repo_home_root_files: []
+billing_models:
+- subscription
+- per_token
+cap_policies: []
+allowed_env_keys:
+- KIMI_API_KEY
+display_policy:
+  tool_result_summary: show
+  info_event_suppression: []
+  collapse_task_progress: false
+  suppress_subscription_rate_limit: false
+  # High-volume wire envelope kinds that the Kimi semantic parser already
+  # maps to first-class semantic events. If a future Kimi protocol revision
+  # changes the payload shape so typed deserialization fails, the parser
+  # falls back to a ProviderExtension with an `event:<inner_type>`
+  # raw_kind; these entries keep the stderr surface quiet on drift (the
+  # raw envelopes still flow through dispatch and the JSONL log).
+  #
+  # ContentPart (assistant text/think deltas) and ToolCallPart (streamed
+  # tool argument fragments) can fire many times per turn, matching the
+  # "high-volume wire fallback kinds" contract from Phase 5 of the
+  # fix-kimi plan. StatusUpdate fires on every step boundary and carries
+  # token / context-percent telemetry (the parser emits a Warning only
+  # when the context-pressure threshold is crossed). The Message* /
+  # Thinking entries are legacy stream-json payload names kept as
+  # defensive entries so an accidental cross-mode payload (or replay of a
+  # legacy fixture) does not flood stderr.
+  silent_extension_kinds:
+  - event:ContentPart
+  - event:ToolCallPart
+  - event:StatusUpdate
+  - event:MessageStart
+  - event:MessageDelta
+  - event:MessageEnd
+  - event:Thinking
+  stdout_noise_prefixes: []
+  stderr_noise_prefixes: []
+suppress_structured_stderr_on_success: false
+supports_interactive_inline_closure: false
+model_required_in_non_tty: false
+platform_kind: vendor_platform
+unmapped_native_events: []
+# Ordered error-classification vocabulary (Phase A seed, transcribed verbatim
+# from lib/src/stream/providers/kimi.rs). Kimi classifies on JSON-RPC numeric
+# codes first (exact match, checked before the message branch), then on the
+# free-form message. `kind_buckets` is omitted (Kimi has no structured error
+# kind). `code_buckets` carries the complete explicit numeric mapping from
+# classify_jsonrpc_error; the numeric values mirror the wire-protocol
+# constants in lib/src/stream/protocol/kimi.rs (KimiJsonRpcError). Unknown
+# codes fall through to the message branch.

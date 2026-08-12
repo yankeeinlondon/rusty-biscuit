@@ -96,6 +96,16 @@
 mod detect;
 mod error;
 mod format;
+mod list_format;
+mod path_text;
+mod span;
+
+// `span_serde` is re-exported alongside the type it adapts: `Range` has no
+// serde implementation, so a consumer serializing a `SourceSpan` cannot supply
+// one itself. Without this the module was unreachable, which a dependent
+// crate's `-D warnings` lint surfaced as dead code — invisible to this crate's
+// own lint, whose `--all-targets` build includes the tests that exercise it.
+pub use span::{SourceSpan, span_serde};
 
 #[cfg(feature = "toml")]
 pub mod toml_impl;
@@ -121,12 +131,27 @@ pub use detect::{FileType, detect_file_type, detect_file_type_from_bytes};
 // Re-export data format enum
 pub use format::DataFormat;
 
+// Re-export list-shape classification and conversion
+pub use list_format::{ListFormat, classify_list};
+
+// Re-export the path→text rendering boundary
+pub use path_text::{to_portable_string, try_portable_string};
+
 // Re-export format-specific types
 #[cfg(feature = "toml")]
 pub use self::toml_impl::{Toml, TomlError, TomlSource};
 
 #[cfg(feature = "yaml")]
-pub use self::yaml::{Yaml, YamlError, YamlSource};
+pub use self::yaml::{
+    EditAudit, EditRejection, EditSetOutcome, RejectedEdit, Yaml, YamlAnalysis, YamlCertainty,
+    YamlDiagnostic, YamlDiagnosticCode, YamlError, YamlLocation, YamlParseFailure,
+    YamlParseOutcome, YamlPathSegment, YamlRepair, YamlSource, YamlValueLocation, analyze_yaml,
+    apply_edit_set, locate_yaml_key, locate_yaml_value,
+};
+
+#[cfg(feature = "yaml")]
+#[doc(hidden)]
+pub use self::yaml::{analyze_parse_count, reset_analyze_parse_count};
 
 #[cfg(feature = "json5")]
 pub use self::json5::{Json5, Json5Error, Json5Source};
@@ -136,7 +161,10 @@ pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};
 
 #[cfg(feature = "file-reference")]
 pub use self::file_reference::{
-    CompletionEntryForm, FileReference, FileReferenceError, PartialCompletion, PathPosition,
+    CompletionEntryForm, DetailedOutcome, DetailedResolution, FileReference, FileReferenceClass,
+    FileReferenceError, FileReferenceKind, FileResolutionContext, PartialCompletion, PathPosition,
+    ProbeDisposition, ProbedCandidate, ResolutionCandidate, ResolutionFailure, RootProvenance,
+    find_git_root, find_package_area, home_dir,
 };
 
 #[cfg(feature = "url")]

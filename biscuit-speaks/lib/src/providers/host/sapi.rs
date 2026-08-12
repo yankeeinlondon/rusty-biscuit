@@ -329,11 +329,11 @@ mod tests {
         assert!(SapiProvider::parse_voice_line("   ").is_none());
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[tokio::test]
     async fn test_list_voices_empty_on_non_windows() {
         let provider = SapiProvider::new();
         let voices = provider.list_voices().await.unwrap();
-        #[cfg(not(target_os = "windows"))]
         assert!(voices.is_empty());
     }
 }

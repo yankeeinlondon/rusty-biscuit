@@ -288,9 +288,10 @@ pub(super) fn handle_repo_dependencies(
     use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::terminal::Terminal;
     use sniff::filesystem::repo::{
-        AggregateScope, collect_external_dependencies, detect_repo_structure_or_root_package,
+        AggregateScope, collect_external_dependencies, detect_repo_with_request_or_root_package,
         resolve_scope,
     };
+    use sniff::request::{RepoDetailRequest, RepoRequest};
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
     let explicit = base_dir.unwrap_or(&cwd);
@@ -299,7 +300,8 @@ pub(super) fn handle_repo_dependencies(
     } else {
         sniff::filesystem::repo_root(explicit)?.unwrap_or_else(|| explicit.to_path_buf())
     };
-    let Some(info) = detect_repo_structure_or_root_package(&root)? else {
+    let request = RepoRequest::focused(RepoDetailRequest::dependencies());
+    let Some(info) = detect_repo_with_request_or_root_package(&root, &request)? else {
         return Err("Not inside a recognized repository".into());
     };
     let dir_for_scope = if base_dir.is_some() { explicit } else { &cwd };
@@ -356,8 +358,9 @@ pub(super) fn handle_repo_package_manager(
     use biscuit_terminal::terminal::Terminal;
     use sniff::filesystem::repo::{
         AggregateResult, AggregateScope, aggregate_package_values,
-        detect_repo_structure_or_root_package, resolve_scope,
+        detect_repo_with_request_or_root_package, resolve_scope,
     };
+    use sniff::request::{RepoDetailRequest, RepoRequest};
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
     let explicit = base_dir.unwrap_or(&cwd);
@@ -367,7 +370,8 @@ pub(super) fn handle_repo_package_manager(
         sniff::filesystem::repo_root(explicit)?.unwrap_or_else(|| explicit.to_path_buf())
     };
 
-    let info = detect_repo_structure_or_root_package(&root)?;
+    let request = RepoRequest::focused(RepoDetailRequest::package_managers());
+    let info = detect_repo_with_request_or_root_package(&root, &request)?;
     let dir_for_scope = if base_dir.is_some() { explicit } else { &cwd };
 
     let (result, scope_kind): (AggregateResult<String>, &'static str) = match &info {
@@ -522,9 +526,10 @@ pub(super) fn handle_repo_test_runner(
     use biscuit_terminal::components::renderable::TerminalRenderable;
     use biscuit_terminal::terminal::Terminal;
     use sniff::filesystem::repo::{
-        TestRunnerAttribution, aggregate_test_runners, detect_repo_structure,
+        TestRunnerAttribution, aggregate_test_runners, detect_repo_with_request,
         detect_test_runners_for_dir, resolve_scope,
     };
+    use sniff::request::{RepoDetailRequest, RepoRequest};
 
     let cwd = std::env::current_dir().unwrap_or_else(|_| ".".into());
     let explicit = base_dir.unwrap_or(&cwd);
@@ -534,7 +539,8 @@ pub(super) fn handle_repo_test_runner(
         sniff::filesystem::repo_root(explicit)?.unwrap_or_else(|| explicit.to_path_buf())
     };
 
-    let info = detect_repo_structure(&root)?;
+    let request = RepoRequest::focused(RepoDetailRequest::test_runners());
+    let info = detect_repo_with_request(&root, &request)?;
 
     // Resolve the scope relative to the CWD so the command answers
     // "what does THIS directory declare?" rather than always the repo root.

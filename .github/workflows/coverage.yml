@@ -1,16 +1,26 @@
 name: coverage
 
-# Generates per-package LCOV coverage reports and a workspace-aggregated
-# report. Uploads artifacts for review. Report-only — no PR gating.
+# Generates one full-workspace LCOV report on the nightly schedule or by
+# explicit request. Pull requests use the affected-package coverage job in
+# `ci.yml` (artifact `lcov-affected`); pushes to main do not repeat coverage
+# already generated for a PR.
+#
+# Deliberately distinct from required validation (D14): its own workflow name,
+# its own schedule slot, its own artifact name, and its own summary, so a
+# coverage failure can never be read as an L1 regression. Scheduled at 05:00 UTC
+# to keep every scheduled workflow in its own slot — bench-nightly 00:00,
+# fuzz-nightly 02:00, sniff-performance 04:00, coverage 05:00,
+# maintenance-audit Mondays 07:00.
 
 on:
-  pull_request:
-    branches: [main]
-  push:
-    branches: [main]
+  schedule:
+    - cron: "0 5 * * *"
   workflow_dispatch: {}
 
 env:
+  # The repository tracks no rustc wrapper; cleared explicitly so a stray
+  # environment value cannot silently intercept this workflow's builds.
+  RUSTC_WRAPPER: ""
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
@@ -19,17 +29,32 @@ concurrency:
 
 jobs:
   coverage:
-    name: Coverage report
+    name: coverage / workspace / ubuntu
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      # Instrumenting the whole workspace compiles every area, so every area's
+      # declared system libraries must be present first (D9).
+      - name: Install native prerequisites
+        run: just _ensure-native-libs
+
+      - name: Set up the pinned toolchain with coverage components
+        run: |
+          rustup show
+          rustup component add llvm-tools-preview
+
+      # Backstop for the vendored protoc in rendezvous-core's build.rs:
+      # a system protoc if the vendored binary is ever unavailable.
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
         with:
-          components: llvm-tools-preview
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
@@ -37,35 +62,10 @@ jobs:
           workspaces: ". -> target"
           shared-key: coverage
 
-      - name: Install just
-        uses: extractions/setup-just@v2
-
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@cargo-llvm-cov
 
-      - name: Install cargo-nextest
-        uses: taiki-e/install-action@nextest
-
-      - name: Generate per-package coverage
-        run: just coverage
-
-      - name: Collect per-package LCOV reports
-        run: |
-          mkdir -p coverage-reports
-          # Per-package recipes drop `lcov-<pkg>.info` next to each package
-          # area; gather them for upload.
-          find . -type f -name 'lcov-*.info' \
-            -not -path './coverage-reports/*' \
-            -not -path './target/*' \
-            -print -exec cp {} coverage-reports/ \;
-
-      - name: Upload per-package LCOV artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: lcov-per-package
-          path: coverage-reports/
-
-      - name: Generate workspace coverage
+      - name: Generate one workspace coverage report
         run: cargo llvm-cov --workspace --lcov --output-path lcov-workspace.info
 
       - name: Upload workspace LCOV artifact
@@ -73,3 +73,16 @@ jobs:
         with:
           name: lcov-workspace
           path: lcov-workspace.info
+
+      - name: Summarize
+        if: ${{ !cancelled() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Scheduled coverage"
+            echo ""
+            echo "Full-workspace LCOV, artifact \`lcov-workspace\`."
+            echo "Not a required check — pull-request coverage is the"
+            echo "\`lcov-affected\` artifact from the \`ci\` workflow."
+          } >>"$GITHUB_STEP_SUMMARY"

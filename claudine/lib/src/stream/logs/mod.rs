@@ -9,7 +9,9 @@
 pub mod codex;
 pub mod opencode;
 
-pub use opencode::{EarlyTermination, StderrIngestOutcome, StuckSubagentInfo};
+pub use opencode::{
+    EarlyTermination, StalledGenerationContext, StderrIngestOutcome, StuckSubagentInfo,
+};
 
 use std::sync::mpsc::Receiver;
 

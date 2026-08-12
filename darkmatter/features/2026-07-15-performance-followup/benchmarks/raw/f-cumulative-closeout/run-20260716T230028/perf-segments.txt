@@ -1,0 +1,32 @@
+=== BASE 51c1f16e1 --perf ===
+[38;2;253;199;0m▌ [39mCommand Setup (elapsed 5.3ms)            Compose Pipeline (elapsed 788µs)    
+[38;2;253;199;0m▌ [39m  load input:           92µs             frontmatter interpolation:16µs (2   
+[38;2;253;199;0m▌ [39m  resolve input:        48µs             calls)                              
+[38;2;253;199;0m▌ [39m  capture context:      130µs            schema validation:      141µs       
+[38;2;253;199;0m▌ [39m  validate references:  3.4ms            frontmatter shell expansion:10µs (2 
+[38;2;253;199;0m▌ [39m  build options:        3.8ms            calls)                              
+[38;2;253;199;0m▌ [39m  compose pipeline:     1.2ms            effective state build:  2µs         
+[38;2;253;199;0m▌ [39m                                         text replacement:       0µs         
+[38;2;253;199;0m▌ [39m                                         page blocks:            11µs        
+[38;2;253;199;0m▌ [39m                                         interpolation:          5µs         
+[38;2;253;199;0m▌ [39m                                         shell expansion:        10µs        
+[38;2;253;199;0m▌ [39m                                         shell blocks:           12µs        
+[38;2;253;199;0m▌ [39m                                         link resolve:           101µs       
+[38;2;253;199;0m▌ [39m                                         transclusion parse:     25µs        
+[38;2;253;199;0m▌ [39m                                         transclusion prepare:   3µs         
+=== CAND 74e0fdc90 --perf ===
+[38;2;253;199;0m▌ [39mCommand Setup (elapsed 8.5ms)            Compose Pipeline (elapsed 1.0ms)    
+[38;2;253;199;0m▌ [39m  load input:           77µs             frontmatter interpolation:14µs (2   
+[38;2;253;199;0m▌ [39m  resolve input:        50µs             calls)                              
+[38;2;253;199;0m▌ [39m  capture context:      134µs            schema validation:      145µs       
+[38;2;253;199;0m▌ [39m  validate references:  6.4ms            frontmatter shell expansion:10µs (2 
+[38;2;253;199;0m▌ [39m  build options:        6.8ms            calls)                              
+[38;2;253;199;0m▌ [39m  compose pipeline:     1.4ms            effective state build:  2µs         
+[38;2;253;199;0m▌ [39m                                         text replacement:       0µs         
+[38;2;253;199;0m▌ [39m                                         page blocks:            10µs        
+[38;2;253;199;0m▌ [39m                                         interpolation:          4µs         
+[38;2;253;199;0m▌ [39m                                         shell expansion:        12µs        
+[38;2;253;199;0m▌ [39m                                         shell blocks:           11µs        
+[38;2;253;199;0m▌ [39m                                         link resolve:           107µs       
+[38;2;253;199;0m▌ [39m                                         transclusion parse:     21µs        
+[38;2;253;199;0m▌ [39m                                         transclusion prepare:   4µs         

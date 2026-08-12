@@ -1,0 +1,16 @@
+{
+  "directory": "/workspace/project",
+  "payload": {
+    "id": "evt_scrubbed_model",
+    "type": "session.next.model.switched",
+    "properties": {
+      "timestamp": "2026-07-05T12:00:00.000Z",
+      "sessionID": "ses_scrubbed",
+      "model": {
+        "id": "anthropic/claude-sonnet-4.5",
+        "providerID": "kilo",
+        "variant": "default"
+      }
+    }
+  }
+}

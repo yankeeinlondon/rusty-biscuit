@@ -1,0 +1,7 @@
+$schema:
+    kind: enum(example; required)
+    invocation:
+        - string(required)
+        - { frontmatter: yaml }
+    returns: any
+    description: string

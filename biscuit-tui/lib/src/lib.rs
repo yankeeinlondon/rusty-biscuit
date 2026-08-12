@@ -7,7 +7,8 @@
 //! Public surface is organised into three modules:
 //!
 //! - [`core`] — cross-cutting primitives ([`EventOutcome`], [`Label`],
-//!   [`ComponentTheme`], [`KeyBindings`], [`run_standalone`], ...)
+//!   [`ComponentTheme`], [`KeyBindings`], [`run_standalone`],
+//!   [`FrameChrome`], [`SplitPane`], ...)
 //! - [`components`] — per-component widgets + state structs.
 //! - [`helpers`] — free functions for constructing component configs
 //!   from CSV, Markdown lists, and dictionaries.
@@ -20,4 +21,10 @@ pub mod core;
 pub mod helpers;
 pub mod prelude;
 
+#[cfg(feature = "renderables")]
+pub mod renderable;
+
 pub use prelude::*;
+
+#[cfg(feature = "renderables")]
+pub use renderable::TuiRenderable;

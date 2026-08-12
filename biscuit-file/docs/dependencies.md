@@ -8,6 +8,23 @@
   `file-reference` and used only for repository-root discovery in
   `find_git_root`. It replaces the former `git2`/libgit2 dependency so the
   crate (and its consumers, e.g. `sniff`) carries no C-linked git backend.
+- `dirs` is gated behind `file-reference` and supplies the cross-platform
+  home directory for `home_dir` / `~` (home-pinned) references. It replaces a
+  bare `$HOME` read, which is not a complete contract on native Windows.
+- `dunce` is unconditional and reduces a Windows `\\?\` verbatim path to its
+  legacy spelling — but only when the legacy spelling is equivalent — at the
+  crate's two boundaries:
+  - `simplify_root` (behind `file-reference`), the resolver's root boundary.
+    Anchors reach the resolver in both spellings (`std::fs::canonicalize` yields
+    verbatim; `gix` and `dirs` yield legacy), and Win32 applies no path
+    normalization under the verbatim prefix, so a reference's own `/` separators
+    would never resolve.
+  - `to_portable_string` / `try_portable_string`, the path→text boundary, which
+    is unfeatured and so cannot depend on an optional crate. `dunce`'s refusal
+    to reduce is authoritative there: a declined path keeps its native spelling
+    rather than becoming URL-shaped text.
+
+  It is a no-op on every other target and has no transitive dependencies.
 - `reqwest`, `bytes`, and `tokio` are gated behind the off-by-default `fetch`
   feature. They provide the shared policy-enforcing HTTP primitive used by
   Darkmatter compose and side-effect network paths.

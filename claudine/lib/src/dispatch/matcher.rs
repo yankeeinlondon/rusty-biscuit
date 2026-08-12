@@ -45,8 +45,9 @@ impl RuntimeMatcher {
     ///
     /// The string is parsed as a Darkmatter condition first; on parse
     /// failure it is compiled as a regex. If neither succeeds, returns
-    /// `None` and emits a warning so the binding falls back to
-    /// unconditional matching rather than being silently dropped.
+    /// `None` silently. At config-load time callers should use
+    /// [`compile_many`] so invalid matchers are reported in one
+    /// aggregated warning rather than one log line per binding.
     ///
     /// ## Notes
     ///
@@ -76,28 +77,57 @@ impl RuntimeMatcher {
         // treated as a regex below so legacy `tool_name`-style matchers
         // keep their original semantics.
 
-        match Regex::new(trimmed) {
-            Ok(regex) => Some(Self::Regex(regex)),
-            Err(error) => {
-                warn!(
-                    matcher = %trimmed,
-                    %error,
-                    "Matcher is neither a valid Darkmatter condition nor a valid regex; binding will fire unconditionally"
-                );
-                None
-            }
-        }
+        Regex::new(trimmed).ok().map(Self::Regex)
     }
+}
+
+/// Compile matchers for multiple event bindings at load time.
+///
+/// Invalid matchers compile to `None` so the binding fires
+/// unconditionally. A single aggregated warning names every binding
+/// whose matcher failed, replacing the previous per-binding warnings.
+pub fn compile_many(bindings: &[(AgenticEvent, &str)]) -> Vec<(AgenticEvent, Option<RuntimeMatcher>)> {
+    let mut results = Vec::with_capacity(bindings.len());
+    let mut failed = Vec::new();
+
+    for (event, source) in bindings {
+        let trimmed = source.trim();
+        let compiled = RuntimeMatcher::compile(source);
+        if compiled.is_none() && !trimmed.is_empty() {
+            failed.push(format!("{} ({})", event, trimmed));
+        }
+        results.push((*event, compiled));
+    }
+
+    if !failed.is_empty() {
+        warn!(
+            bindings = %failed.join(", "),
+            "Matchers are neither valid Darkmatter conditions nor valid regexes; listed bindings will fire unconditionally"
+        );
+    }
+
+    results
 }
 
 /// Whether the parsed expression uses condition-grade features (operators,
 /// comparisons, fallbacks, helper functions, literals). A bare variable
 /// reference such as `Bash` deliberately does not qualify so that simple
 /// regex-style matchers continue to compile as regexes.
+///
+/// Container literals recurse rather than qualifying outright, for the same
+/// reason: `[Bb]` is a regex character class that also parses as an array
+/// literal of bare variables, so it must keep falling through to the regex
+/// branch. `[tool_name == 'Bash']` does qualify, because an element uses a
+/// condition-grade feature. Object keys are authored text, never expressions,
+/// so only the values are inspected.
 fn expression_uses_known_features(expr: &Expr) -> bool {
     match expr {
         Expr::Variable(_) => false,
         Expr::Paren(inner) => expression_uses_known_features(inner),
+        Expr::ArrayLiteral(elements) => elements.iter().any(expression_uses_known_features),
+        Expr::ObjectLiteral(entries) => {
+            entries.iter().any(|(_, value)| expression_uses_known_features(value))
+        }
         Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => true,
         Expr::UnaryNot(_)
         | Expr::UnaryMinus(_)
@@ -176,235 +206,4 @@ pub fn matches_with_pattern(pattern: Option<&str>, meta: &EventMeta) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::events::*;
-    use crate::provider::Provider;
-    use chrono::Utc;
-    use std::collections::HashMap;
-    use std::path::PathBuf;
-
-    fn tool_meta(event: AgenticEvent, tool_name: Option<&str>) -> EventMeta {
-        EventMeta {
-            provider: Provider::Claude,
-            event,
-            timestamp: Utc::now(),
-            session_id: None,
-            cwd: None,
-            tool_name: tool_name.map(String::from),
-            tool_input: None,
-            tool_response: None,
-            error: None,
-            prompt: None,
-            agent_type: None,
-            notification_type: None,
-            notification_message: None,
-            agent_pid: None,
-            extra: HashMap::new(),
-            env: EnvironmentContext::default(),
-        }
-    }
-
-    fn notification_meta(ntype: Option<&str>) -> EventMeta {
-        EventMeta {
-            provider: Provider::Claude,
-            event: AgenticEvent::Notification,
-            timestamp: Utc::now(),
-            session_id: None,
-            cwd: None,
-            tool_name: None,
-            tool_input: None,
-            tool_response: None,
-            error: None,
-            prompt: None,
-            agent_type: None,
-            notification_type: ntype.map(String::from),
-            notification_message: None,
-            agent_pid: None,
-            extra: HashMap::new(),
-            env: EnvironmentContext::default(),
-        }
-    }
-
-    fn tool_meta_with_branch(
-        event: AgenticEvent,
-        tool_name: Option<&str>,
-        branch: Option<&str>,
-        is_dirty: bool,
-    ) -> EventMeta {
-        let mut meta = tool_meta(event, tool_name);
-        meta.env.git = Some(GitContext {
-            repo_root: PathBuf::from("/tmp/repo"),
-            branch: branch.map(String::from),
-            is_dirty,
-            staged_count: 0,
-            unstaged_count: 0,
-            untracked_count: 0,
-            head_sha: None,
-            head_message: None,
-            user_name: None,
-            user_email: None,
-            remote_name: None,
-            remote_url: None,
-            hosting_provider: None,
-            repo_name: None,
-            repo_org: None,
-        });
-        meta
-    }
-
-    #[test]
-    fn no_matcher_returns_true() {
-        let meta = tool_meta(AgenticEvent::BeforeTool, Some("Bash"));
-        assert!(matches_with_pattern(None, &meta));
-    }
-
-    #[test]
-    fn regex_matches_tool_name() {
-        let meta_bash = tool_meta(AgenticEvent::BeforeTool, Some("Bash"));
-        let meta_edit = tool_meta(AgenticEvent::AfterTool, Some("Edit"));
-        let meta_read = tool_meta(AgenticEvent::BeforeTool, Some("Read"));
-
-        assert!(matches_with_pattern(Some("Bash|Edit"), &meta_bash));
-        assert!(matches_with_pattern(Some("Bash|Edit"), &meta_edit));
-        assert!(!matches_with_pattern(Some("Bash|Edit"), &meta_read));
-    }
-
-    #[test]
-    fn regex_matches_tool_error() {
-        let meta = tool_meta(AgenticEvent::ToolError, Some("Bash"));
-        assert!(matches_with_pattern(Some("Bash"), &meta));
-    }
-
-    #[test]
-    fn regex_matches_notification_type() {
-        let meta_match = notification_meta(Some("permission_prompt"));
-        let meta_nomatch = notification_meta(Some("info"));
-
-        assert!(matches_with_pattern(
-            Some("permission_prompt|ToolPermission"),
-            &meta_match
-        ));
-        assert!(!matches_with_pattern(
-            Some("permission_prompt|ToolPermission"),
-            &meta_nomatch
-        ));
-    }
-
-    #[test]
-    fn tool_event_with_no_tool_name_returns_false() {
-        let meta = tool_meta(AgenticEvent::BeforeTool, None);
-        assert!(!matches_with_pattern(Some("Bash"), &meta));
-    }
-
-    #[test]
-    fn notification_with_no_type_returns_false() {
-        let meta = notification_meta(None);
-        assert!(!matches_with_pattern(Some("info"), &meta));
-    }
-
-    #[test]
-    fn invalid_matcher_returns_false() {
-        let meta = tool_meta(AgenticEvent::BeforeTool, Some("Bash"));
-        // A pattern that is neither a valid expression nor a valid regex
-        // compiles to None, which causes matches_with_pattern to return
-        // false (binding skipped).
-        assert!(!matches_with_pattern(Some("[invalid(regex"), &meta));
-    }
-
-    #[test]
-    fn non_tool_event_with_regex_matcher_returns_true() {
-        let meta = tool_meta(AgenticEvent::SessionStart, None);
-        assert!(matches_with_pattern(Some("anything"), &meta));
-    }
-
-    #[test]
-    fn matches_with_pattern_function() {
-        let meta = tool_meta(AgenticEvent::BeforeTool, Some("Bash"));
-        assert!(matches_with_pattern(Some("Bash"), &meta));
-        assert!(!matches_with_pattern(Some("Read"), &meta));
-        assert!(matches_with_pattern(None, &meta));
-    }
-
-    // -----------------------------------------------------------------
-    // Expression-mode matcher tests
-    // -----------------------------------------------------------------
-
-    #[test]
-    fn expression_matches_tool_and_branch() {
-        let meta =
-            tool_meta_with_branch(AgenticEvent::BeforeTool, Some("Bash"), Some("main"), false);
-
-        assert!(matches_with_pattern(
-            Some("tool_name == 'Bash' && git.branch == 'main'"),
-            &meta,
-        ));
-    }
-
-    #[test]
-    fn expression_provider_and_not_dirty() {
-        let meta =
-            tool_meta_with_branch(AgenticEvent::BeforeTool, Some("Bash"), Some("main"), false);
-
-        assert!(matches_with_pattern(
-            Some("provider == 'claude' && !git.is_dirty"),
-            &meta,
-        ));
-    }
-
-    #[test]
-    fn expression_fails_when_branch_does_not_match() {
-        let meta = tool_meta_with_branch(
-            AgenticEvent::BeforeTool,
-            Some("Bash"),
-            Some("feature/foo"),
-            false,
-        );
-
-        assert!(!matches_with_pattern(
-            Some("tool_name == 'Bash' && git.branch == 'main'"),
-            &meta,
-        ));
-    }
-
-    #[test]
-    fn expression_returns_false_for_missing_field() {
-        // tool_name is missing but the expression references it.
-        let meta = tool_meta(AgenticEvent::SessionStart, None);
-
-        assert!(!matches_with_pattern(Some("tool_name == 'Bash'"), &meta,));
-    }
-
-    #[test]
-    fn expression_compiles_with_helper_function() {
-        let mut meta = tool_meta(AgenticEvent::BeforeTool, Some("Bash"));
-        meta.tool_input = Some(serde_json::json!({"command": "echo hi"}));
-
-        let matcher =
-            RuntimeMatcher::compile("tool_name == 'Bash' && length(tool_input.command) > 0")
-                .expect("compile should succeed");
-        assert!(matches!(matcher, RuntimeMatcher::Expression { .. }));
-        assert!(matches(Some(&matcher), &meta));
-    }
-
-    #[test]
-    fn compile_prefers_regex_for_bare_word() {
-        // `Bash` parses as a bare variable; we prefer regex semantics so
-        // legacy `tool_name`-style matchers keep working.
-        let matcher =
-            RuntimeMatcher::compile("Bash|Edit").expect("compile should succeed for regex");
-        assert!(matches!(matcher, RuntimeMatcher::Regex(_)));
-    }
-
-    #[test]
-    fn compile_returns_none_for_invalid_input() {
-        // Neither valid expression nor valid regex.
-        assert!(RuntimeMatcher::compile("[invalid(regex").is_none());
-    }
-
-    #[test]
-    fn compile_returns_none_for_empty_string() {
-        assert!(RuntimeMatcher::compile("").is_none());
-        assert!(RuntimeMatcher::compile("   ").is_none());
-    }
-}
+mod tests;

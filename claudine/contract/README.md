@@ -51,8 +51,9 @@ therefore runs constrained:
   `--strict-mcp-config`), which forbids every tool outright. Codex has no
   deny-all equivalent — its execution-rules can only forbid named command
   prefixes escaping the sandbox — so its tightest pre-turn lever is
-  `--sandbox read-only`, blocking every write and network call. A read-only
-  command attempt is still possible under that sandbox, but it runs against the
+  `--sandbox read-only`, blocking writes. Network denial is treated as a
+  defense-in-depth assumption rather than a guarantee. A read-only command
+  attempt is still possible under that sandbox, but it runs against the
   isolated empty working directory and shadow home (nothing sensitive is
   reachable), it surfaces as a tool item in the JSONL stream, and it is rejected
   post-hoc (see *Tool-use rejection* below) — so no tool takes effect or has its
@@ -93,13 +94,12 @@ tool-free for untrusted input. Everything else is reported as
 | Provider | Binary | Non-interactive entrypoint | Tool/MCP control | v1 status |
 |----------|--------|----------------------------|------------------|-----------|
 | Claude Code | `claude` | `--print --output-format stream-json --verbose` | deny-all `settings.json` (`permissions.deny: ["*"]`) in shadow home + `--strict-mcp-config --mcp-config '{"mcpServers":{}}'`; guard via `--append-system-prompt`; shadow HOME + isolated CWD + env allowlist | **Enabled** |
-| Codex | `codex` | `codex exec --json` | `--sandbox read-only` (blocks writes/network; `exec` never prompts) + post-hoc tool-call rejection; guard via `-c developer_instructions=…`; shadow HOME + isolated CWD + env allowlist | **Enabled** |
+| Codex | `codex` | `codex exec --json` | `--sandbox read-only` (blocks writes; network denial is defense-in-depth) + post-hoc tool-call rejection; guard via `-c developer_instructions=…`; shadow HOME + isolated CWD + env allowlist | **Enabled** |
 | Gemini CLI | `gemini` | `-p` / stream-json | — | Rejected — not yet verified tool-free for untrusted input in v1 |
 | Goose | `goose` | run / stream-json | — | Rejected — not yet verified tool-free for untrusted input in v1 |
 | Kimi Code | `kimi` | stream-json | — | Rejected — not yet verified tool-free for untrusted input in v1 |
 | OpenCode | `opencode` | run / stream-json | — | Rejected — not yet verified tool-free for untrusted input in v1 |
 | Qwen Code | `qwen` | stream-json | — | Rejected — not yet verified tool-free for untrusted input in v1 |
-| Roo Code | `roo` | stream-json | — | Rejected — not yet verified tool-free for untrusted input in v1 |
 
 The matrix is also available programmatically via
 [`claudine_contract::support_matrix`]. Widening the enabled set is a
@@ -126,8 +126,8 @@ untrusted input.
   prose), and validated with the bundled `jsonschema` engine. Invalid JSON, a
   schema violation, or prose where structure was requested is `InvalidResponse`.
 - **Cancellation.** Dropping the `infer` future kills the spawned child
-  (`kill_on_drop`). The adapter owns no timeout; the consumer wraps `infer`
-  with `tokio::time::timeout`.
+  (`kill_on_drop`). The adapter deliberately owns no internal timeout; the
+  consumer wraps `infer` with `tokio::time::timeout`.
 
 ## Error mapping
 

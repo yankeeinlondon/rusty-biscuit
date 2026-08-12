@@ -1,6 +1,8 @@
 set dotenv-load
 set positional-arguments
-set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+# `env CYG_SYS_BASHRC=1` guards against Cygwin's /etc/bash.bashrc tripping `-u`;
+# see the root justfile for the full explanation.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
 
 import "../just/lifecycle.just"
 import "../just/plan.just"
@@ -33,17 +35,70 @@ build *args="":
     @just _build biscuit-clipboard-service "Biscuit Clipboard Service" {{args}}
     @just _build biscuit-clipboard-cli "Biscuit Clipboard CLI" {{args}}
 
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity_all "biscuit-clipboard biscuit-clipboard-service biscuit-clipboard-cli"
+
 # test library, service, and CLI
 test *args="":
-    @just _test biscuit-clipboard {{args}}
-    @just _test biscuit-clipboard-service {{args}}
-    @just _test biscuit-clipboard-cli {{args}}
+    @just _test_all "biscuit-clipboard biscuit-clipboard-service biscuit-clipboard-cli" {{args}}
+
+# not applicable: biscuit-clipboard has no real-terminal (Level-2) tests
+test-l2:
+    @echo "test-l2: not applicable for biscuit-clipboard"
+
+# not applicable: biscuit-clipboard has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for biscuit-clipboard"
+
+# not applicable: biscuit-clipboard emits no HTML
+test-browser:
+    @echo "test-browser: not applicable for biscuit-clipboard"
+
+# not applicable: biscuit-clipboard has no `real_`-prefixed tier today. The
+# system-clipboard-backed tests are ordinary L1 tests that skip when no
+# clipboard backend is reachable.
+test-real:
+    @echo "test-real: not applicable for biscuit-clipboard"
 
 # Lint library, service, and CLI
 lint:
     @just _lint biscuit-clipboard
     @just _lint biscuit-clipboard-service
     @just _lint biscuit-clipboard-cli
+
+# not applicable: biscuit-clipboard has no criterion benches
+bench:
+    @echo "bench: not applicable for biscuit-clipboard"
+
+# Per-package LCOV coverage for the library, service, and CLI.
+coverage *args="":
+    @just _coverage biscuit-clipboard {{args}}
+    @just _coverage biscuit-clipboard-service {{args}}
+    @just _coverage biscuit-clipboard-cli {{args}}
+
+# Doctests for the library, service, and CLI.
+doctest *args="":
+    @just _doctest biscuit-clipboard {{args}}
+    @just _doctest biscuit-clipboard-service {{args}}
+    @just _doctest biscuit-clipboard-cli {{args}}
+
+# not applicable: biscuit-clipboard has no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for biscuit-clipboard"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
 
 # Lint (and fix) library, service, and CLI
 lint-fix:

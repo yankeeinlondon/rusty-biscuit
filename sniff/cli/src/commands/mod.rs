@@ -95,6 +95,20 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
+    if matches!(cli.command.as_ref(), Some(Commands::Runtime)) {
+        let runtime = sniff::os::detect_runtime_environment();
+        if cli.json {
+            output::print_json_value(
+                serde_json::to_value(runtime)?,
+                perf.build_report().as_ref(),
+            );
+        } else {
+            output::emit_text(&output::render_runtime_environment(runtime), cli.plain);
+            perf.emit_stdout(None);
+        }
+        return Ok(());
+    }
+
     let output_filter = cli
         .command
         .as_ref()
@@ -1164,11 +1178,15 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         )
     );
 
+    let bare_repo_aggregate =
+        matches!(&repo_action, Some(crate::args::RepoAction::Default)) && cli.json;
+
     // Build git request based on deep/commit_count flags
     let git_request = select_git_request(
         refresh_remotes_enabled,
         lightweight_repo_action,
         changes_only_repo_action,
+        bare_repo_aggregate,
         history_count,
     );
 
@@ -1212,6 +1230,16 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .without_filesystem()
             .hardware(HardwareRequest::summary().include_audio(true)),
         OutputFilter::Repo => match &repo_action {
+            Some(crate::args::RepoAction::Default) if cli.json => DetectionPlan::new()
+                .without_os()
+                .without_hardware()
+                .without_network()
+                .filesystem(
+                    FilesystemRequest::new()
+                        .git(git_request.clone())
+                        .repo(RepoRequest::focused(RepoDetailRequest::all()))
+                        .without_file_inventory(),
+                ),
             Some(crate::args::RepoAction::Language { breakdown: true }) => DetectionPlan::new()
                 .without_os()
                 .without_hardware()
@@ -1240,9 +1268,9 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             }) => {
                 // `git-status` renders only the git section (Status, Worktrees,
                 // Meta). Repo language scanning, docs, formatting, and the file
-                // inventory are never displayed, yet `RepoRequest::full()` alone
-                // costs 10-50x a structure scan — the dominant fixed cost that
-                // kept the command above the 500ms target. Drop all of it.
+                // inventory are never displayed, so none of it is requested —
+                // this was the dominant fixed cost keeping the command above
+                // the 500ms target.
                 //
                 // Repo *structure* is still required to resolve a
                 // `--package`/`--package-area` scope to a path; in that case
@@ -1319,7 +1347,21 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
     .performance(cli.perf);
 
-    let mut result = detect_with_plan(plan)?;
+    let mut detected_aggregate = None;
+    let mut result = if bare_repo_aggregate {
+        let dir = base_dir
+            .as_deref()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        let observation = perf.collect(|| sniff::filesystem::repo::detect_repo_aggregate(dir))?;
+        let (filesystem, aggregate) = observation.into_parts();
+        detected_aggregate = Some(aggregate);
+        SniffResult {
+            filesystem: Some(filesystem),
+            ..SniffResult::default()
+        }
+    } else {
+        perf.collect(|| detect_with_plan(plan))?
+    };
 
     // Handle package scoping for git actions. Both `--package` and
     // `--package-area` are honored; when both are passed, the resolved package
@@ -1344,10 +1386,13 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
             .as_deref()
             .unwrap_or_else(|| std::path::Path::new("."));
         {
-            let scoped_commits =
-                sniff::filesystem::commits_for_path_at(dir, path_prefix, history_count)?;
+            let scoped_history = sniff::filesystem::commits_for_path_at(
+                dir,
+                path_prefix,
+                sniff::filesystem::PathHistoryOptions::new(history_count),
+            )?;
             if let Some(ref mut git) = filesystem.git {
-                git.recent = scoped_commits;
+                git.recent = scoped_history.commits;
 
                 // Filter file_changes to the package path
                 git.file_changes
@@ -1651,18 +1696,22 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
         result = enrich_result_dependencies(result).await;
     }
 
-    // Bare `sniff repo --json` assembles the scope-complete aggregate of its
-    // participating children. It must run after the full detection pass so
-    // the aggregate can draw from the shared `SniffResult`.
-    if matches!(repo_action, Some(crate::args::RepoAction::Default)) && cli.json {
-        let dir = base_dir
-            .as_deref()
-            .unwrap_or_else(|| std::path::Path::new("."));
-        let identity = sniff::filesystem::repo::detect_repo_identity(dir)?;
-        let aggregate =
-            output::repo_json::build_aggregate_value(&result, base_dir.as_deref(), &identity)?;
-        output::print_json_value(aggregate, result.performance.as_ref());
-        perf.emit_for_json(result.performance.as_ref());
+    // Bare `sniff repo --json` renders the scope-complete observation returned
+    // by the dedicated library boundary. The ordinary `SniffResult` carries no
+    // CLI-only evidence, and this builder remains a pure projection.
+    if bare_repo_aggregate {
+        let value = perf.collect(|| {
+            let timer = sniff::performance::StageTimer::start("cli.repo.aggregate_projection");
+            let aggregate = detected_aggregate
+                .as_ref()
+                .expect("bare aggregate detection returns its projection");
+            let value = output::repo_json::build_aggregate_value(&result, aggregate);
+            timer.finish();
+            Ok::<_, sniff::SniffError>(value)
+        })?;
+        let report = perf.build_report();
+        output::print_json_value(value, report.as_ref());
+        perf.emit_for_json(report.as_ref());
         return Ok(());
     }
 
@@ -2104,10 +2153,23 @@ fn select_git_request(
     refresh_remotes: bool,
     lightweight: bool,
     changes_only: bool,
+    aggregate_json: bool,
     history_count: usize,
 ) -> GitRequest {
     if refresh_remotes {
         GitRequest::deep().commit_count(history_count)
+    } else if aggregate_json {
+        // Aggregate-only branches, worktrees, identity fallback, and file-aware
+        // history are observed inside the original Git detection. Its single
+        // handle and ref snapshot supply the exact projection shapes without a
+        // post-detection rediscovery or another status walk.
+        GitRequest::full()
+            .commit_count(history_count)
+            .metadata(
+                GitMetadataRequest::none()
+                    .remotes(true)
+                    .config(true),
+            )
     } else if lightweight {
         GitRequest::summary()
     } else if changes_only {
@@ -2141,7 +2203,7 @@ mod tests {
         // Mapping staged/unstaged/dirty files to packages must never enable
         // `include_worktrees` — that is the per-worktree status/merge fan-out
         // that made `staged-packages` take seconds on a many-worktree checkout.
-        let req = select_git_request(false, false, true, 10);
+        let req = select_git_request(false, false, true, false, 10);
         assert!(
             !req.include_worktrees,
             "change-only actions must not enumerate worktrees"
@@ -2159,8 +2221,206 @@ mod tests {
     #[test]
     fn full_repo_action_keeps_worktrees() {
         // The default repo summary still renders the worktree table.
-        let req = select_git_request(false, false, false, 10);
+        let req = select_git_request(false, false, false, false, 10);
         assert!(req.include_worktrees);
+    }
+
+    #[test]
+    fn aggregate_json_requests_status_and_config_without_worktree_status() {
+        let req = select_git_request(false, false, false, true, 10);
+
+        assert!(req.include_file_changes);
+        assert!(req.wants_config());
+        assert!(!req.wants_commits());
+        assert!(!req.wants_branches());
+        assert!(!req.wants_worktrees());
+        let metadata = serde_json::to_value(req.metadata.unwrap()).unwrap();
+        assert!(
+            metadata.get("aggregate").is_none(),
+            "aggregate evidence must not become a serializable request flag"
+        );
+    }
+
+    #[test]
+    fn aggregate_command_path_discovers_and_walks_status_once() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+        std::fs::write(
+            dir.path().join("Cargo.toml"),
+            "[package]\nname = \"aggregate-fixture\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("tracked.rs"), "fn original() {}\n").unwrap();
+        let mut index = repo.index().unwrap();
+        index.add_path(std::path::Path::new("Cargo.toml")).unwrap();
+        index.add_path(std::path::Path::new("tracked.rs")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+                .unwrap();
+        }
+        std::fs::write(dir.path().join("tracked.rs"), "fn changed() {}\n").unwrap();
+
+        let collector = sniff::performance::PerformanceCollector::new_shared();
+        let aggregate = sniff::performance::with_current_collector(
+            Some(collector.clone()),
+            || sniff::filesystem::repo::detect_repo_aggregate(dir.path()),
+        )
+        .expect("aggregate command path succeeds");
+        let counters = collector.snapshot(std::time::Duration::ZERO).counters;
+
+        assert_eq!(
+            counters
+                .get(sniff::performance::counters::GIT_DISCOVERIES)
+                .copied()
+                .unwrap_or(0),
+            1,
+            "the complete command path shares one repository discovery: {counters:?}"
+        );
+        assert_eq!(
+            counters
+                .get(sniff::performance::counters::GIT_STATUS_WALKS)
+                .copied()
+                .unwrap_or(0),
+            1,
+            "the complete command path shares one status walk: {counters:?}"
+        );
+        assert_eq!(
+            counters
+                .get(sniff::performance::counters::GIT_REF_WALKS)
+                .copied()
+                .unwrap_or(0),
+            1,
+            "aggregate branches reuse the detection ref snapshot: {counters:?}"
+        );
+        assert_eq!(
+            counters
+                .get(sniff::performance::counters::GIT_WORKTREE_OPENS)
+                .copied()
+                .unwrap_or(0),
+            0,
+            "aggregate worktree projection must not independently open checkouts: {counters:?}"
+        );
+        let (_, aggregate) = aggregate.into_parts();
+        assert_eq!(aggregate.identity.name, "aggregate-fixture");
+        assert!(!aggregate.branches.is_empty());
+        assert_eq!(aggregate.worktrees.len(), 1);
+    }
+
+    /// The aggregate renders no Markdown inventory and no `.editorconfig`
+    /// result, so observing either is work outside its output contract. Docs
+    /// are a repository-wide walk consumer, so leaving them enabled also
+    /// reinstates the shared descendant walk this boundary exists to avoid.
+    #[test]
+    fn aggregate_command_path_observes_no_markdown_or_formatting() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let root = dir.path();
+        let repo = git2::Repository::init(root).unwrap();
+        let signature = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        std::fs::write(
+            root.join("Cargo.toml"),
+            "[package]\nname = \"docs-fixture\"\nversion = \"1.0.0\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.join(".editorconfig"),
+            "root = true\n\n[*]\nindent_style = space\nindent_size = 4\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        for name in ["README.md", "docs/guide.md", "docs/reference.md"] {
+            std::fs::write(root.join(name), "# Title\n\nBody.\n").unwrap();
+        }
+        std::fs::write(root.join("tracked.rs"), "fn original() {}\n").unwrap();
+
+        let mut index = repo.index().unwrap();
+        index
+            .add_all(["*"].iter(), git2::IndexAddOption::DEFAULT, None)
+            .unwrap();
+        index.add_path(std::path::Path::new(".editorconfig")).unwrap();
+        index.write().unwrap();
+        let tree_id = index.write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            repo.commit(Some("HEAD"), &signature, &signature, "initial", &tree, &[])
+                .unwrap();
+        }
+        std::fs::write(root.join("tracked.rs"), "fn changed() {}\n").unwrap();
+
+        let collector = sniff::performance::PerformanceCollector::new_shared();
+        let observation = sniff::performance::with_current_collector(
+            Some(collector.clone()),
+            || sniff::filesystem::repo::detect_repo_aggregate(root),
+        )
+        .expect("aggregate command path succeeds");
+        let counters = collector.snapshot(std::time::Duration::ZERO).counters;
+        let count = |name: &str| counters.get(name).copied().unwrap_or(0);
+
+        assert_eq!(
+            count(sniff::performance::counters::FS_DOCS_PARSED),
+            0,
+            "the aggregate renders no filesystem Markdown inventory, so it must \
+             parse no documents: {counters:?}"
+        );
+        assert_eq!(
+            count(sniff::performance::counters::FS_WALK_ENTRIES),
+            0,
+            "with docs and inventory both off the aggregate has no repository-wide \
+             walk consumer and must start no shared walk: {counters:?}"
+        );
+
+        // The Git bounds the aggregate already contracts for must survive.
+        assert_eq!(
+            count(sniff::performance::counters::GIT_DISCOVERIES),
+            1,
+            "the complete command path shares one repository discovery: {counters:?}"
+        );
+        assert_eq!(
+            count(sniff::performance::counters::GIT_STATUS_WALKS),
+            1,
+            "the complete command path shares one status walk: {counters:?}"
+        );
+        assert_eq!(
+            count(sniff::performance::counters::GIT_REF_WALKS),
+            1,
+            "aggregate branches reuse the detection ref snapshot: {counters:?}"
+        );
+
+        let (filesystem, aggregate) = observation.into_parts();
+        assert!(
+            filesystem.docs.is_none(),
+            "unrendered Markdown inventory must stay unobserved"
+        );
+        assert!(
+            filesystem.formatting.is_none(),
+            "unrendered formatting result must stay unobserved"
+        );
+
+        let result = sniff::SniffResult {
+            filesystem: Some(filesystem),
+            ..Default::default()
+        };
+        let value = output::repo_json::build_aggregate_value(&result, &aggregate);
+        let obj = value.as_object().expect("aggregate must be an object");
+        for absent in ["docs", "markdown", "formatting", "editorconfig"] {
+            assert!(
+                !obj.contains_key(absent),
+                "aggregate output must not contain `{absent}`: {:?}",
+                obj.keys().collect::<Vec<_>>()
+            );
+        }
+        // `documentation_changes` is Git-derived (a filter over the one commit
+        // set), so it survives docs being off — this is the fact that makes the
+        // Markdown walk unnecessary rather than merely unrendered.
+        assert!(
+            obj.contains_key("documentation_changes"),
+            "Git-derived documentation_changes must still render: {:?}",
+            obj.keys().collect::<Vec<_>>()
+        );
     }
 
     #[test]

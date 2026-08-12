@@ -61,11 +61,40 @@ let initial_rows = vec![
         RowCell::new("enabled", CellValue::Boolean(true)),
     ]),
 ];
+// For static/known-good data; panics on invalid shape.
 let state = InputTableState::new(columns, initial_rows);
 
 // Access values after interaction
 let values: &[Row] = state.value();
 ```
+
+### Fallible Construction with `try_new`
+
+When rows originate from user, config, or other untrusted input, use
+`InputTableState::try_new` instead of `new`. It validates the row shape,
+column ids (duplicate, unknown, missing), and per-cell `CellValue` type
+compatibility, returning a typed [`InputTableError`] instead of
+panicking. `new` is now a thin `expect`-ing wrapper over `try_new`, so
+its signature and panic-on-misuse contract are unchanged for existing
+callers.
+
+```rust
+use biscuit_tui::prelude::*;
+use biscuit_tui::components::input_table::{CellValue, InputTableState, Row, RowCell};
+
+let columns = vec![/* ... */];
+let initial_rows = vec![/* ... */];
+
+match InputTableState::try_new(columns, initial_rows) {
+    Ok(state) => { /* run prompt */ }
+    Err(e) => eprintln!("invalid table: {e}"),
+}
+```
+
+The `InputTableError` variants are: `RowShapeMismatch`, `DuplicateColumnId`,
+`UnknownColumnId`, `MissingColumnId`, and `CellTypeMismatch` — each
+carrying the row index (and column id / cell-kind context where relevant)
+so diagnostics can point at the offending input.
 
 ### `RowCell` and `CellValue`
 
@@ -120,6 +149,31 @@ question input-table \
 - `--rows <JSON>`: (Optional) A JSON array of arrays, where each inner array provides initial values for a row, matching the column order.
 
 The CLI outputs a JSON array of row objects upon successful submission.
+
+### Permissive Row-Value Contracts
+
+The `--rows` JSON boundary accepts a small, documented set of
+compatibility coercions so hand-written or shell-generated JSON does not
+have to be perfectly typed. Anything outside these contracts is an
+`InvalidInput` error with row/column context rather than a silent
+truncation or default:
+
+| Column type | Accepted JSON shapes | Rejected |
+| :--- | :--- | :--- |
+| **boolean-switch** | `bool`; a JSON number (non-zero is `true`); or one of the strings `true`, `on`, `yes`, `1`, `false`, `off`, `no`, `0` (case-insensitive) | any other string or type |
+| **text-area-input** | a JSON array of strings; or a single JSON string split on `\n` | any other type |
+| **choose-many** | a JSON array of strings; or a single JSON string split on `,` (whitespace trimmed, empties dropped) | any other type |
+| **static-text** / **text-input** / **choose-one** | a JSON string (JSON `null` is treated as the empty string) | any other type |
+
+These coercions are intentional compatibility behavior, not silent
+acceptance of malformed data — an out-of-contract value produces a
+non-zero exit with a field/column-tagged diagnostic. Column-configuration
+fields (`initial`, `required`, `scrollbar`, `min_selections`,
+`max_selections`, `max_length`, `preferred_width`, `preferred_height`)
+follow the stricter rule: absence defaults the field, but a
+present-but-wrong-type value (e.g. `"required": "yes"`) is an
+`InvalidInput` error, and numeric fields that would overflow their target
+integer (`u16`/`usize`) are rejected rather than truncated.
 
 ### Global Flags
 - `--output <raw|json|null>`: Serialisation format for the submitted values (`json` is the default for `input-table`).

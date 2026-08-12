@@ -13,6 +13,22 @@ use super::parse::parse_osc_color_response;
 use super::parse::{ansi_index_to_rgb, parse_colorfgbg};
 use super::types::{DEFAULT_TIMEOUT, OscQueryError, RgbValue};
 
+/// Tracing target marking one *actual* tty round-trip attempt for an OSC code.
+///
+/// Round-trip attempts are the quantity the per-process colour caches exist to
+/// suppress, and they cannot be counted from outside the process when the
+/// terminal is a real emulator: WezTerm/Kitty consume the query and answer on
+/// the wire, so there is no PTY master to tally request bytes on. Emitting the
+/// attempt as its own tracing event lets an in-repo observer — currently
+/// `examples/discovery_probe.rs`, which feeds the Level-2 cache proof in
+/// `tests/level2_terminal_osc_wezterm.rs` — count attempts with a local layer
+/// instead of the library exporting a counter as public API.
+///
+/// The event carries a `code` field; a dedicated target keeps it distinguishable
+/// from the outcome/fallback events this module also logs at `debug`.
+#[cfg(unix)]
+pub(super) const OSC_QUERY_ATTEMPT_TARGET: &str = "biscuit_terminal::osc_query_attempt";
+
 /// Human-readable name for an OSC color query code.
 fn osc_color_name(code: u8) -> &'static str {
     match code {
@@ -67,6 +83,13 @@ pub(super) fn query_osc_color_with_timeout(code: u8, timeout: Duration) -> Optio
         );
 
         if supports_osc && detect_multiplexer().is_none() {
+            tracing::debug!(
+                target: OSC_QUERY_ATTEMPT_TARGET,
+                code,
+                "OSC{} actual query attempted",
+                code
+            );
+
             match query_osc_actual(code, timeout) {
                 Ok(color) => {
                     tracing::debug!(
@@ -162,6 +185,7 @@ fn get_terminal_default_color(app: &TerminalApp, code: u8) -> Option<RgbValue> {
         | TerminalApp::GnomeTerminal
         | TerminalApp::Konsole
         | TerminalApp::VsCode
+        | TerminalApp::WindowsTerminal
         | TerminalApp::Wast => match code {
             10 | 12 => Some(RgbValue::new(229, 229, 229)),
             11 => Some(RgbValue::new(30, 30, 30)),

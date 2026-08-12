@@ -1,3 +1,0 @@
-[workspace]
-resolver = "2"
-members = ["schema", "gen", "define", "definitions", "oauth"]

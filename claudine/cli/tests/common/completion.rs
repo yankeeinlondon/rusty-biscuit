@@ -18,8 +18,6 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use assert_cmd::cargo::cargo_bin_cmd;
-
 /// Seed a minimal Cargo workspace with a single `pkg` member.
 ///
 /// `sniff::detect_repo_structure` recognizes the tempdir as a monorepo
@@ -116,7 +114,7 @@ pub(crate) fn run_complete(cwd: &Path, argv_tail: &[&str]) -> Vec<String> {
 /// the user-global scope is rendered home-relative.
 pub(crate) fn run_complete_with_home(cwd: &Path, home: &Path, argv_tail: &[&str]) -> Vec<String> {
     let current = argv_tail.len();
-    let reference = cargo_bin_cmd!("claudine");
+    let reference = assert_cmd::Command::cargo_bin("claudine").unwrap();
     let program = reference.get_program().to_os_string();
     let mut cmd = Command::new(program);
     cmd.current_dir(cwd)

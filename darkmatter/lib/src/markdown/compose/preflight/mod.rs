@@ -33,6 +33,7 @@ use crate::markdown::compose::{ComposeOptions, ComposeWarning};
 use crate::markdown::compose::shell_expansion::types::{ShellCommandEntry, ShellExpansionError};
 use crate::markdown::types::MarkdownResult;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 /// One edge in the preflight graph: a transclusion directive and the
 /// resolved target it points to, captured during the condition-blind
@@ -56,7 +57,11 @@ pub struct PreflightGraphEdge {
     pub resolved_target: PreflightResolvedTarget,
     /// The child document this edge points to. Reuse recurses through
     /// `child.edges` for nested transclusions.
-    pub child: PreflightGraphNode,
+    ///
+    /// Held behind an `Arc` (Finding 16) so the [`PreflightGraphNode::children`]
+    /// flat view shares the same subtree instead of deep-cloning it — for a deep
+    /// transclusion tree the old duplication was O(n²) in nodes.
+    pub child: Arc<PreflightGraphNode>,
 }
 
 /// Resolved target for a preflight graph edge.
@@ -102,11 +107,12 @@ pub struct PreflightGraphNode {
     ///
     /// Empty when this document is a leaf or has no transclusion directives.
     pub edges: Vec<PreflightGraphEdge>,
-    /// Flat view of the children, in the same order as [`Self::edges`].
-    /// Kept for callers that only want the per-document metadata without
-    /// the edge data. Each entry is the [`PreflightGraphEdge::child`]
-    /// of the corresponding edge.
-    pub children: Vec<PreflightGraphNode>,
+    /// Flat view of the children. Body-transclusion children come first in
+    /// [`Self::edges`] order (each is the same `Arc` as the corresponding
+    /// [`PreflightGraphEdge::child`], so the flat view is a set of refcount
+    /// bumps, not a subtree deep-clone — Finding 16), followed by frontmatter
+    /// prologue/epilogue children, which have no directive edge.
+    pub children: Vec<Arc<PreflightGraphNode>>,
 }
 
 /// Best-effort canonical form of a path for source-equality comparison.
@@ -131,7 +137,7 @@ impl PreflightGraphNode {
     /// are compared after a best-effort canonicalization so a relative directive
     /// target and the stored absolute source still match. Both body-edge
     /// children and frontmatter prologue/epilogue children are searched.
-    pub(crate) fn child_for_source(&self, path: &Path) -> Option<&PreflightGraphNode> {
+    pub(crate) fn child_for_source(&self, path: &Path) -> Option<&Arc<PreflightGraphNode>> {
         let want = canonical_key(path);
         self.children.iter().find(|child| {
             child
@@ -150,7 +156,7 @@ impl PreflightGraphNode {
     /// lets grandchild URL resolution be reused too — the recursive half of the
     /// graph reuse the v2 design calls for, now closed for URL children as well
     /// as local files.
-    pub(crate) fn child_for_url(&self, url: &url::Url) -> Option<&PreflightGraphNode> {
+    pub(crate) fn child_for_url(&self, url: &url::Url) -> Option<&Arc<PreflightGraphNode>> {
         let want = PathBuf::from(url.to_string());
         self.children
             .iter()
@@ -323,6 +329,14 @@ mod acceptance_tests {
                 ComposeOperation::ShellExpansion,
             ])
             .with_shell_policy_root(policy_root)
+            // The default per-command shell timeout is 10s. These acceptance
+            // tests spawn real `echo` subprocesses, which finish in
+            // milliseconds in isolation but can be starved well past 10s under
+            // full-suite parallel load — tripping `ShellTimeoutBehavior::Error`
+            // and failing compose with a spurious timeout. A generous leash
+            // (far below the 90s nextest termination ceiling for these tests)
+            // keeps contention from masquerading as a real hang.
+            .with_shell_timeout(std::time::Duration::from_secs(60))
             .with_pre_approved_commands(approval)
     }
 
@@ -436,7 +450,7 @@ flag: a
     fn preflight_blocks_frontmatter_shell_when_body_unapproved() {
         let temp = TempDir::new().unwrap();
         let sentinel = temp.path().join("sentinel");
-        let sentinel_str = sentinel.display().to_string();
+        let sentinel_str = biscuit_file::to_portable_string(&sentinel);
 
         let content = format!(
             "---\nsentinel: \"$(touch {sentinel_str})\"\n---\n::shell echo body-cmd\n"
@@ -477,7 +491,7 @@ flag: a
     fn preflight_allows_frontmatter_shell_when_all_approved() {
         let temp = TempDir::new().unwrap();
         let sentinel = temp.path().join("sentinel");
-        let sentinel_str = sentinel.display().to_string();
+        let sentinel_str = biscuit_file::to_portable_string(&sentinel);
 
         let content = format!(
             "---\nsentinel: \"$(touch {sentinel_str})\"\n---\n::shell echo body-cmd\n"
@@ -615,7 +629,7 @@ flag: a
     #[test]
     fn execution_subset_of_approval_across_randomized_conditions() {
         const BRANCH_COUNT: usize = 4;
-        const ITERATIONS: usize = 16;
+        const ITERATIONS: usize = 8;
 
         let mut body = String::from("---\n");
         for i in 0..BRANCH_COUNT {

@@ -1,0 +1,364 @@
+# Topic-less catalog facts for the claude provider.
+#
+# Field-source matrix (design/catalog-generation.md): this file owns values
+# whose research topic has not landed yet. Keys are catalog field names.
+# Seeded once from the hand-written provider constants (the one-time
+# `scrape-facts` bootstrap, retired after seeding).
+# When a field's research topic lands, the mapping registry re-points the
+# field and generation ERRORS while this file still carries the key
+# (delete-on-graduate).
+stream_protocol: stream-json
+event_mapping:
+  mappings:
+  - event: session_start
+    parse_aliases:
+    - SessionStart
+    registration_target: true
+    support_level:
+      hook:
+        native_name: SessionStart
+  - event: session_end
+    parse_aliases:
+    - SessionEnd
+    registration_target: true
+    support_level:
+      hook:
+        native_name: SessionEnd
+  - event: before_prompt
+    parse_aliases:
+    - UserPromptSubmit
+    registration_target: true
+    support_level:
+      hook:
+        native_name: UserPromptSubmit
+  - event: before_tool
+    parse_aliases:
+    - PreToolUse
+    registration_target: true
+    support_level:
+      hook:
+        native_name: PreToolUse
+  - event: after_tool
+    parse_aliases:
+    - PostToolUse
+    registration_target: true
+    support_level:
+      hook:
+        native_name: PostToolUse
+  - event: tool_error
+    parse_aliases:
+    - PostToolUseFailure
+    registration_target: true
+    support_level:
+      hook:
+        native_name: PostToolUseFailure
+  - event: permission_request
+    parse_aliases:
+    - PermissionRequest
+    registration_target: true
+    support_level:
+      hook:
+        native_name: PermissionRequest
+  - event: human_in_the_loop
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      hook:
+        native_name: PreToolUse
+  - event: turn_complete
+    parse_aliases:
+    - Stop
+    - TeammateIdle
+    - TaskCompleted
+    registration_target: true
+    support_level:
+      hook:
+        native_name: Stop
+  - event: turn_error
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: subagent_start
+    parse_aliases:
+    - SubagentStart
+    registration_target: true
+    support_level:
+      hook:
+        native_name: SubagentStart
+  - event: subagent_stop
+    parse_aliases:
+    - SubagentStop
+    registration_target: true
+    support_level:
+      hook:
+        native_name: SubagentStop
+  - event: before_model
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: after_model
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: before_compact
+    parse_aliases:
+    - PreCompact
+    registration_target: true
+    support_level:
+      hook:
+        native_name: PreCompact
+  - event: notification
+    parse_aliases:
+    - Notification
+    registration_target: true
+    support_level:
+      hook:
+        native_name: Notification
+resource_support:
+  agents:
+    also_reads_from: []
+    format: Markdown
+    level: Full
+    notes: null
+    properties:
+      optional:
+      - tools
+      - disallowedTools
+      - model
+      - permissionMode
+      - maxTurns
+      - skills
+      - mcpServers
+      - hooks
+      - memory
+      required:
+      - name
+      - description
+      source_doc: claudine/docs/cross-referencing/claude-code.md
+    repo_path: .claude/agents
+    user_path: .claude/agents
+  commands:
+    also_reads_from: []
+    format: Markdown
+    level: Full
+    notes: null
+    properties:
+      optional:
+      - name
+      - description
+      - argument-hint
+      - disable-model-invocation
+      - user-invocable
+      - allowed-tools
+      - model
+      - context
+      - agent
+      - hooks
+      required: []
+      source_doc: claudine/docs/cross-referencing/claude-code.md
+    repo_path: .claude/commands
+    user_path: .claude/commands
+  provider: claude
+  scripts:
+    also_reads_from: []
+    format: null
+    level: None
+    notes: Scripts are stored within skill directories
+    properties: null
+    repo_path: null
+    user_path: null
+  skill_frontmatter:
+    allowed_tools: false
+    compatibility: false
+    description: true
+    disable_model_invocation: true
+    license: true
+    metadata: true
+    name: true
+    user_invocable: true
+  skills:
+    also_reads_from: []
+    format: Markdown
+    level: Full
+    notes: null
+    properties:
+      optional:
+      - name
+      - description
+      - argument-hint
+      - disable-model-invocation
+      - user-invocable
+      - allowed-tools
+      - model
+      - context
+      - agent
+      - hooks
+      required: []
+      source_doc: claudine/docs/cross-referencing/claude-code.md
+    repo_path: .claude/skills
+    user_path: .claude/skills
+memory_files:
+- raw: ~/.claude/CLAUDE.md
+  segments: []
+- raw: CLAUDE.md
+  segments: []
+- raw: .claude/CLAUDE.md
+  segments: []
+- raw: .claude/CLAUDE.local.md
+  segments: []
+output_formats:
+- cli_flag: --output-format
+  companion_flags: []
+  format: text
+  native_name: text
+  selector:
+    flag: --output-format
+    kind: flag_value
+  stdin_supported: true
+- cli_flag: --output-format
+  companion_flags: []
+  format: json
+  native_name: json
+  selector:
+    flag: --output-format
+    kind: flag_value
+  stdin_supported: true
+- cli_flag: --output-format
+  companion_flags:
+  - --print
+  - --verbose
+  format: stream
+  native_name: stream-json
+  selector:
+    flag: --output-format
+    kind: flag_value
+  stdin_supported: true
+entrypoints:
+- mode: non_interactive
+  required_flags:
+  - --print
+  subcommand: null
+- mode: non_interactive
+  required_flags:
+  - -c
+  - --print
+  subcommand: null
+- mode: non_interactive
+  required_flags:
+  - -r
+  - --print
+  subcommand: null
+system_prompt:
+  append:
+    interactive:
+      inline_flag:
+        flag: --append-system-prompt
+    non_interactive:
+      inline_flag:
+        flag: --append-system-prompt
+  memory_files:
+  - raw: ~/.claude/CLAUDE.md
+    segments: []
+  - raw: CLAUDE.md
+    segments: []
+  - raw: .claude/CLAUDE.md
+    segments: []
+  - raw: .claude/CLAUDE.local.md
+    segments: []
+  replace:
+    interactive:
+      inline_flag:
+        flag: --system-prompt
+    non_interactive:
+      inline_flag:
+        flag: --system-prompt
+yolo:
+  direct_flag:
+    native_flag: --dangerously-skip-permissions
+reasoning:
+  named_levels:
+    flag: thinking_effort
+    levels:
+    - low
+    - medium
+    - high
+known_gaps:
+- area: other
+  note: Populate claudine/docs/cross-referencing/claude-code.md
+  tracker: claudine/docs/cross-referencing/claude-code.md
+acp:
+  client_supported: false
+  events_via_acp: []
+prompt_arg_conventions:
+  entrypoint: null
+  prompt_flags: []
+cli_sensitive_axes:
+  access_domain: true
+  execute_command: true
+  modify_provider_config: true
+  read_path: true
+  spawn_subagent: true
+  switch_mode: true
+  traverse_path: true
+  use_mcp_server: true
+  use_mcp_tool: true
+  write_path: true
+repo_home_root_files:
+- .claude.json
+billing_models:
+- subscription
+- per_token
+# Layer A cap-policy catalog (more-struture Cluster 0): the Claude Max cap
+# windows. `all` = account-wide; timeframe_secs is the window before reset
+# (5h = 18000, 7d = 604800). See docs/research/signals/claude.md for the
+# runtime detection records that decompose rateLimitType into these axes.
+cap_policies:
+- model: all
+  timeframe_secs: 18000
+- model: all
+  timeframe_secs: 604800
+- model: opus
+  timeframe_secs: 604800
+- model: sonnet
+  timeframe_secs: 604800
+allowed_env_keys: []
+display_policy:
+  tool_result_summary: show
+  info_event_suppression: []
+  # Claude's `task_progress` Info lines arrive immediately before the
+  # matching tool call ("Reading <path>" → `→ Read(<path>)`); the sink
+  # holds them one tick and collapses the pair to the canonical tool line.
+  collapse_task_progress: true
+  # Suppress only the legacy generic `rate limit` Warning when session
+  # metadata shows subscription auth. Explicit Claude metadata text must
+  # still render because it can include cap-window timing.
+  suppress_subscription_rate_limit: true
+  # Kinds known to be high-volume or entirely redundant on stderr. Listed
+  # explicitly so the suppression is visible, reviewable, and reversible;
+  # suppressed events still flow through dispatch and the JSONL log.
+  silent_extension_kinds:
+  # Partial assistant token deltas — redundant with OutputText.
+  - stream_event
+  # Hook lifecycle events: the Claude parser (Task 2a.2) emits these as
+  # ProviderExtension with kind `system/<subtype>` after buffering them to
+  # trail SessionStart.
+  - system/hook_started
+  - system/hook_response
+  - system/hook_progress
+  # Per-turn thinking-token telemetry. Newer Claude Code builds emit
+  # `{"type":"system","subtype":"thinking_tokens",...}` several times per
+  # assistant turn; Claudine has no typed model for it, so the parser falls
+  # back to a `system/thinking_tokens` ProviderExtension. The running count
+  # is redundant with the thinking deltas already streamed as Reasoning.
+  - system/thinking_tokens
+  stdout_noise_prefixes: []
+  stderr_noise_prefixes: []
+suppress_structured_stderr_on_success: false
+supports_interactive_inline_closure: false
+model_required_in_non_tty: false
+platform_kind: vendor_platform
+unmapped_native_events: []
+# Ordered error-classification vocabulary (Phase A seed, transcribed verbatim
+# from lib/src/stream/providers/claude.rs::ERROR_KEYWORDS). Sequence order IS
+# the cascade order (first substring hit wins). Owned by the dedicated
+# vocabulary loader, not the general mapping registry.

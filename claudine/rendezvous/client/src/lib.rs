@@ -1,49 +1,17 @@
-//! Library surface for the rendezvous test client.
+//! Connecting a gRPC client to the rendezvous daemon's local control plane.
 //!
-//! The test client's primary role is to exercise the daemon's gRPC IPC
-//! interface from integration tests and from CI smoke checks. Lifting the
-//! `connect_uds` helper into a library makes both the binary and future
-//! tests share a single, vetted code path for opening a `Channel` over a
-//! Unix Domain Socket.
+//! [`connect`] takes a [`LocalEndpoint`], which already knows whether it is a
+//! Unix-domain socket or a Windows named pipe. Callers pass one and get a
+//! client back; selecting the transport, opening it, waiting out a busy pipe,
+//! and classifying the failure all happen behind that one entry point, so a
+//! production call site never needs a `cfg(unix)`/`cfg(windows)` branch.
+//!
+//! ## Errors
+//!
+//! [`ConnectError`] keeps the cases a caller acts on apart: nothing listening,
+//! not permitted, saturated, an endpoint this target cannot speak, and other
+//! transport failures. Each preserves the originating OS error as its source.
 
-use std::io;
-use std::path::{Path, PathBuf};
+mod connector;
 
-use hyper_util::rt::TokioIo;
-use rendezvous_core::RendezvousClient;
-use tokio::net::UnixStream;
-use tonic::transport::{Channel, Endpoint, Uri};
-use tower::service_fn;
-
-/// Errors returned while connecting the gRPC client to a daemon UDS.
-#[derive(Debug, thiserror::Error)]
-pub enum ConnectError {
-    /// The placeholder URI used by tonic to drive the connector could not
-    /// be parsed. This is unexpected and indicates a programmer error.
-    #[error("invalid placeholder URI: {0}")]
-    Uri(#[from] tonic::transport::Error),
-}
-
-/// Build a connected [`RendezvousClient`] backed by a `UnixStream`
-/// pointed at `socket_path`.
-///
-/// The endpoint URI is a placeholder; tonic only uses the scheme to drive
-/// HTTP/2 framing — the supplied connector reroutes the actual byte stream
-/// over the Unix socket.
-pub async fn connect_uds(
-    socket_path: impl Into<PathBuf>,
-) -> Result<RendezvousClient<Channel>, ConnectError> {
-    let path = socket_path.into();
-    let channel = Endpoint::try_from("http://[::]:0")?
-        .connect_with_connector(service_fn(move |_: Uri| {
-            let path = path.clone();
-            async move { connect_unix(&path).await }
-        }))
-        .await?;
-    Ok(RendezvousClient::new(channel))
-}
-
-async fn connect_unix(path: &Path) -> Result<TokioIo<UnixStream>, io::Error> {
-    let stream = UnixStream::connect(path).await?;
-    Ok(TokioIo::new(stream))
-}
+pub use connector::{ConnectError, connect};

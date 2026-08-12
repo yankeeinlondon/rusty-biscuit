@@ -129,7 +129,7 @@ impl<'a> McpExporter<'a> {
         info.mcp
             .write_native_config(&export_servers, &config_path, &managed_names)?;
 
-        let source = config_path.to_string_lossy().to_string();
+        let source = biscuit_file::to_portable_string(&config_path);
         for removed in managed_entries
             .iter()
             .filter(|entry| !desired_names.contains(&entry.native_name))
@@ -180,7 +180,7 @@ fn build_export_servers<'a>(
 // ---------------------------------------------------------------------------
 
 /// Helper for behavior trait implementations: read MCP server names from a
-/// config file with a top-level `mcpServers` JSON object (Claude, Gemini, Roo).
+/// config file with a top-level `mcpServers` JSON object (Claude, Gemini).
 pub(crate) fn read_existing_json_mcp_servers(config_path: &Path) -> Result<Vec<String>> {
     if !config_path.exists() {
         return Ok(Vec::new());
@@ -287,7 +287,7 @@ pub(crate) fn write_claude_mcp(
     }
 
     let output = serde_json::to_string_pretty(&doc)?;
-    atomic_write(config_path, output.as_bytes())
+    Ok(atomic_write(config_path, output.as_bytes())?)
 }
 
 /// Write MCP servers to Codex config (TOML).
@@ -390,7 +390,7 @@ pub(crate) fn write_codex_mcp(
         mcp_table[&server.native_name] = toml_edit::Item::Table(table);
     }
 
-    atomic_write(config_path, doc.to_string().as_bytes())
+    Ok(atomic_write(config_path, doc.to_string().as_bytes())?)
 }
 
 /// Write MCP servers to Gemini config (JSON).
@@ -448,7 +448,7 @@ pub(crate) fn write_gemini_mcp(
     }
 
     let output = serde_json::to_string_pretty(&doc)?;
-    atomic_write(config_path, output.as_bytes())
+    Ok(atomic_write(config_path, output.as_bytes())?)
 }
 
 /// Write MCP servers to OpenCode config (JSON).
@@ -512,64 +512,7 @@ pub(crate) fn write_opencode_mcp(
     }
 
     let output = serde_json::to_string_pretty(&doc)?;
-    atomic_write(config_path, output.as_bytes())
-}
-
-/// Write MCP servers to Roo Code config (JSON).
-pub(crate) fn write_roo_mcp(
-    servers: &[ExportServer<'_>],
-    config_path: &Path,
-    managed_names: &[String],
-) -> Result<()> {
-    let mut doc = if config_path.exists() {
-        let content = fs::read_to_string(config_path)?;
-        serde_json::from_str::<Value>(&content)?
-    } else {
-        json!({})
-    };
-
-    let mcp_servers = doc
-        .as_object_mut()
-        .unwrap()
-        .entry("mcpServers")
-        .or_insert_with(|| json!({}));
-    let obj = mcp_servers.as_object_mut().unwrap();
-
-    for name in managed_names {
-        obj.remove(name);
-    }
-
-    for server in servers {
-        let server_def = server.server;
-        let mut entry = Map::new();
-        if let Some(ref cmd) = server_def.command {
-            entry.insert("command".into(), json!(cmd));
-        }
-        if !server_def.args.is_empty() {
-            entry.insert("args".into(), json!(server_def.args));
-        }
-        if !server_def.env.is_empty() {
-            entry.insert("env".into(), json!(server_def.env));
-        }
-        if let Some(ref url) = server_def.url {
-            entry.insert("url".into(), json!(url));
-        }
-        match server_def.transport {
-            McpTransport::Sse => {
-                entry.insert("transportType".into(), json!("sse"));
-            }
-            McpTransport::Http => {
-                entry.insert("transportType".into(), json!("streamableHttp"));
-            }
-            McpTransport::Stdio => {
-                entry.insert("transportType".into(), json!("stdio"));
-            }
-        }
-        obj.insert(server.native_name.clone(), Value::Object(entry));
-    }
-
-    let output = serde_json::to_string_pretty(&doc)?;
-    atomic_write(config_path, output.as_bytes())
+    Ok(atomic_write(config_path, output.as_bytes())?)
 }
 
 fn provider_override_value<'a>(
@@ -773,18 +716,6 @@ mod tests {
 
         let content: Value = serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
         assert_eq!(content["mcp"]["test"]["type"], "local");
-    }
-
-    #[test]
-    fn write_roo_uses_transport_type() {
-        let tmp = TempDir::new().unwrap();
-        let config = tmp.path().join("mcp.json");
-        let servers = vec![make_stdio_server("test")];
-
-        write_roo_mcp(&export_servers(&servers), &config, &[]).unwrap();
-
-        let content: Value = serde_json::from_str(&fs::read_to_string(&config).unwrap()).unwrap();
-        assert_eq!(content["mcpServers"]["test"]["transportType"], "stdio");
     }
 
     #[test]

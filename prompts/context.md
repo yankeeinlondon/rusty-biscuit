@@ -31,9 +31,9 @@
 
 - this repo is a monorepo, with the following package areas:
 
-    {{ctx.package_areas_list}}
+    {{ as_unordered_list(ctx.package_areas) }}
 
-- the programming language(s) found in this monorepo are: {{ctx.programming_languages_in_repo}}
+- the programming language(s) found in this monorepo are: {{ as_csv(ctx.programming_languages_in_repo) }}
 
 ::end-block
 

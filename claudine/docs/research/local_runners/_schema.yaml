@@ -1,0 +1,149 @@
+# SimplifiedSchema for the local-runners research topic — local model runners
+# (Ollama, LM Studio, oMLX, Llama.cpp, vLLM) as model SERVERS: what a machine
+# catalog should know to detect one, talk to it, and wire it into an agentic CLI.
+#
+# Two consumers: (a) the model_config topic's ground truth about per-runner
+# support in each agentic CLI, and (b) a future `sniff` detection surface —
+# hence the detection-friendly forms (exact binary names per OS, exact URL
+# paths, expected response markers).
+#
+# Referenced by each runner research document via `$schema: ./_schema.yaml`.
+# The root `$schema:` key is REQUIRED — it is how darkmatter's resolver
+# classifies this file as a SimplifiedSchema rather than raw JSON Schema
+# (a bare property mapping would validate vacuously).
+#
+# Nested shapes are written as quoted inline-object literals for uniformity;
+# YAML-native nested mappings are also accepted by the SimplifiedSchema parser
+# (they lower to the same inline objects).
+$schema:
+    created: date
+    last_updated: date(required)
+    agent: string(required)
+    model: string(required)
+
+    summary: string(required)
+    homepage: url(required)
+    docs_url: url(required)
+    repo_url: url
+    api_reference_url: url
+    # full = everything open; partial = e.g. LM Studio (closed app, open CLI/SDKs)
+    open_source: enum(full,partial,closed; required)
+
+    # Does the runner publish a machine-readable schema for its API/config?
+    # An auto-generated OpenAPI document (e.g. FastAPI's /openapi.json)
+    # qualifies as `formal`, with that path as schema_url.
+    has_official_schema: enum(formal,informal,none; required)
+    schema_url: url
+
+    default_port: number(required)
+    # e.g. "127.0.0.1" — note vLLM binds all interfaces by default
+    default_bind: string(required)
+    auth: enum(none,optional_api_key,required_api_key; required)
+    # nuance the enum cannot carry (e.g. enforced by default but skippable
+    # for localhost via a settings toggle)
+    auth_notes: string
+
+    # One record per OS. `support: native` means a released installable
+    # artifact exists for that OS (wheel, binary, installer); experimental
+    # build-from-source or a plugin/fork project (e.g. vLLM-Metal) is
+    # `separate_project`, not `native`. `binary` is the exact name to check
+    # for on that OS (detection-friendly); `alt_binaries` carries historical
+    # or secondary names (e.g. llama.cpp's pre-2024 `server`, Windows tray
+    # executables).
+    platforms: "{ os: enum(macos,linux,windows; required), support: enum(native,wsl,separate_project,unsupported; required), binary: string, alt_binaries: string[], install: string[], process_model: enum(daemon,foreground,both), service: string, notes: string }[]"
+
+    # One record per API standard — record `supported: no` explicitly rather
+    # than omitting, so absence of support is a stated fact. `base_url` is the
+    # exact client-side value (OpenAI-style includes /v1; Anthropic-style
+    # excludes it because SDKs append /v1/messages). `since_version` matters:
+    # Anthropic-compat is new everywhere (2025-2026 additions) — it must be
+    # an exact release tag verified against releases/blog, or the literal
+    # string "unknown"; hedges like "v0.13.3 or later" are not values.
+    api_standards: "{ standard: enum(openai_compatible,anthropic_compatible,native; required), supported: enum(yes,no,partial; required), base_url: string, key_paths: string[], auth: string, since_version: string, deviations: string[], docs_url: string }[]"
+
+    # Non-inference endpoints a client or detector calls. `gated_by` records a
+    # flag that must be present for the endpoint to exist (e.g. `--metrics`);
+    # `auth_gated: true` means the endpoint refuses unauthenticated requests
+    # when the server has auth enabled — detection probes need the ungated set.
+    metadata_endpoints: "{ purpose: enum(health,version,model_list,loaded_models,model_info,metrics,load_model,unload_model,admin_ui,other; required), method: enum(get,post; required), path: string(required), gated_by: string, auth_gated: boolean, response_hint: string, notes: string }[]"
+
+    # Ordered detection probes for `sniff`: how to establish the runner is
+    # installed and/or running. `target` is method-specific (binary name,
+    # process name, port number, "GET /path", config-file path, .app bundle
+    # path); `expect` is the marker that confirms identity (needed where
+    # ports collide — vLLM and oMLX both default to 8000).
+    detection: "{ os: enum(macos,linux,windows,all; required), method: enum(binary,process,port,http,config_file,app_bundle,service; required), target: string(required), expect: string, confidence: enum(source_code,observed,documented,inferred; required), notes: string }[]"
+
+    # Ranked port-identity probes — the canonical, machine-consumable answer
+    # to "which runner is listening on this port?" Run probes in `rank` order
+    # (1 = try first) until one matches. `request` is the probe (e.g.
+    # "GET /api/version"; "ANY /" means any request, used for header
+    # fingerprinting). `match_in` selects where to look: `body` (substring in
+    # the response body), `json_field` (a named JSON key present/equal),
+    # `header` (a named response header), or `status` (status line only —
+    # almost never sufficient alone). `field` names the JSON key or header
+    # (empty for `body`/`status`); `marker` is the expected value or
+    # substring. `uniqueness` grades the probe: `unique` = this runner only,
+    # `strong` = near-definitive in combination with the port, `weak` =
+    # corroborating evidence only. `zero_model_ok` means the probe works on a
+    # server with no models loaded (detectors must not require a loaded
+    # model); `auth_gated` means the probe is refused when server auth is
+    # enabled (prefer ungated probes for identification).
+    identity_probes: "{ rank: number(required), request: string(required), match_in: enum(body,json_field,header,status; required), field: string, marker: string(required), uniqueness: enum(unique,strong,weak; required), zero_model_ok: boolean, auth_gated: boolean, confidence: enum(source_code,observed,documented,inferred; required), notes: string }[]"
+
+    # How to determine the INSTALLED version without starting the server (the
+    # running-server version is an identity_probes concern). One record per
+    # probe per OS where the answer differs. `method`: `cli` (version flag),
+    # `bundle` (app-bundle/package metadata), `package` (package manager
+    # query), `http` (running server only — include just to cross-reference).
+    # `command` is the exact invocation; `pattern` is a regex whose first
+    # capture group extracts the version from the output. Record what the
+    # output actually is — some CLIs print a commit hash or build tag instead
+    # of a semver (e.g. `lms --version` prints `CLI commit: <hash>`, not the
+    # LM Studio app version; llama-server prints `version: <build> (<sha>)`).
+    version_probe: "{ os: enum(macos,linux,windows,all; required), method: enum(cli,bundle,package,http; required), command: string(required), pattern: string, confidence: enum(source_code,observed,documented,inferred; required), notes: string }[]"
+
+    config_mechanism: enum(config_file,env_vars,cli_flags,gui,mixed; required)
+    config_files: "{ os: enum(macos,linux,windows; required), path: string(required), format: enum(json,jsonc,yaml,toml,ini,text,other; required), role: string, notes: string }[]"
+    env_vars: "{ name: string(required), effect: string(required) }[]"
+
+    # How model ids are written for this runner (e.g. `name[:tag]` for Ollama,
+    # `publisher/model` for LM Studio, directory name for oMLX, whatever
+    # `--served-model-name` says for vLLM) — feeds the identity grammar.
+    # Enumerate ALL accepted id forms, including registry-URL forms such as
+    # Ollama's `hf.co/{user}/{repo}[:quant]`.
+    model_id_grammar: string(required)
+    # Served/runtime formats only — a format the runner merely converts at
+    # import time (e.g. Ollama's safetensors→GGUF) belongs in
+    # model_acquisition notes, not here.
+    model_formats: string[](required)
+    model_acquisition: "{ method: enum(registry,huggingface,manual,in_app; required), example: string, notes: string }[]"
+    model_store_paths: "{ os: enum(macos,linux,windows; required), path: string(required), notes: string }[]"
+
+    hardware_acceleration: string[](required)
+    concurrency: "{ multi_model: boolean, parallel_requests: boolean, notes: string }"
+    streaming_sse: boolean(required)
+    tool_calling: enum(yes,no,conditional; required)
+    tool_calling_notes: string
+    embeddings: boolean(required)
+    rerank: boolean
+    web_ui_url: string
+
+    # Runner-native agentic-CLI integration hooks — commands that wire the
+    # runner into a coding agent (e.g. `omlx launch codex`,
+    # `ollama launch claude`).
+    integration_hooks: "{ command: string(required), effect: string(required), notes: string }[]"
+
+    # Misleading knobs and surprising behaviors a consumer must know, one
+    # string each (e.g. "VLLM_PORT is NOT the API port — it configures
+    # internal distributed comms"; "LM Studio's home dir is relocatable via
+    # the ~/.lmstudio-home-pointer file"). Empty array when none found.
+    traps: string[]
+
+    # A complete, plausible OpenCode provider block for this runner
+    # (`provider.<id>.npm` + `options.baseURL` + `models`), as a JSON string.
+    opencode_example: string(required)
+
+    changes: string[]
+    requires_claudine_update: boolean(required)
+    reason: string

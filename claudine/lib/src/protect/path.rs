@@ -1,9 +1,8 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-/// Check if `path` is exactly `prefix` or starts with `prefix/`.
-fn is_prefix_match(path: &str, prefix: &str) -> bool {
-    path == prefix || (path.starts_with(prefix) && path.as_bytes().get(prefix.len()) == Some(&b'/'))
-}
+use crate::path_semantics::{is_absolute_spelling, is_exact_or_descendant, normalize, segments};
+#[cfg(windows)]
+use crate::path_semantics::is_windows_absolute_spelling;
 
 /// Prefixes for absolute sensitive paths.
 ///
@@ -12,21 +11,43 @@ fn is_prefix_match(path: &str, prefix: &str) -> bool {
 /// /System/Library is the actual macOS system directory; /System/Volumes/Data
 /// is the firmlink root for user data and should not be blocked.
 const SENSITIVE_PREFIXES: &[&str] = &[
-    "/etc",
-    "/var",
-    "/usr",
+    "/bin",
     "/boot",
     "/dev",
+    "/etc",
+    "/opt",
+    "/private/etc",
+    "/private/var",
     "/proc",
+    "/root",
+    "/sbin",
     "/sys",
     "/System/Library",
     "/System/Applications",
-    "/private/etc",
-    "/private/var",
+    "/Library/LaunchDaemons",
+    "/usr",
+    "/var",
 ];
 
 /// Home-relative sensitive prefixes (checked after ~ expansion).
-const SENSITIVE_HOME_PREFIXES: &[&str] = &[".ssh", ".gnupg"];
+const SENSITIVE_HOME_PREFIXES: &[&str] = &[
+    ".aws",
+    ".claude",
+    ".codex",
+    ".config/gh",
+    ".docker/config.json",
+    ".gemini",
+    ".git-credentials",
+    ".gnupg",
+    ".goose",
+    ".kube",
+    ".netrc",
+    ".npmrc",
+    ".opencode",
+    ".qwen",
+    ".roo",
+    ".ssh",
+];
 
 /// Checks whether a file path targets a sensitive system location.
 #[derive(Debug, Clone)]
@@ -41,22 +62,33 @@ impl SensitivePathChecker {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn with_home_dir(home_dir: PathBuf) -> Self {
+        Self {
+            home_dir: Some(home_dir),
+        }
+    }
+
     /// Returns true if the path is under a sensitive prefix.
     pub fn is_sensitive(&self, path: &str) -> bool {
         let normalized = normalize_path(path);
+        let normalized = canonicalize_native_spelling(&normalized);
         let path_str = normalized.to_string_lossy();
+        let path_str = normalize(&path_str);
 
         for prefix in SENSITIVE_PREFIXES {
-            if is_prefix_match(&path_str, prefix) {
+            if is_exact_or_descendant(&path_str, prefix) {
                 return true;
             }
         }
 
         if let Some(home) = &self.home_dir {
-            let home_str = home.to_string_lossy();
             for prefix in SENSITIVE_HOME_PREFIXES {
-                let full_prefix = format!("{home_str}/{prefix}");
-                if is_prefix_match(&path_str, &full_prefix) {
+                let full_prefix = home.join(prefix);
+                let full_prefix = full_prefix.to_string_lossy();
+                let full_prefix = normalize(&full_prefix);
+                let full_prefix = canonical_comparison(&full_prefix);
+                if is_exact_or_descendant(&path_str, &full_prefix) {
                     return true;
                 }
             }
@@ -170,21 +202,70 @@ pub fn all_targets_allowed(targets: &[String], allow_paths: &[String]) -> bool {
         .all(|target| is_path_allowed(target, allow_paths))
 }
 
-fn is_path_allowed(target: &str, allow_paths: &[String]) -> bool {
+/// Check whether `target` is allowed by any entry in `allow_paths`.
+///
+/// Relative allow entries are matched as an anchored component-sequence prefix
+/// of the target, so `node_modules` allows `node_modules/foo` but not
+/// `/etc/build/passwd`. Absolute allow entries use boundary-aware prefix
+/// semantics so `/var/tmp` does not allow `/var/tmpevil`.
+pub fn is_path_allowed(target: &str, allow_paths: &[String]) -> bool {
+    let target = normalize(target);
     let target = target.trim_start_matches("./");
+    let target_is_absolute = is_absolute_spelling(target);
+
     for allowed in allow_paths {
-        if allowed.starts_with('/') {
-            if target.starts_with(allowed.as_str()) {
+        let allowed = normalize(allowed);
+        let allowed = allowed.trim_start_matches("./");
+        if is_absolute_spelling(allowed) {
+            if !target_is_absolute {
+                continue;
+            }
+            let allowed = canonical_comparison(allowed);
+            let target = canonical_comparison(target);
+            if is_exact_or_descendant(&target, &allowed) {
                 return true;
             }
         } else {
-            let parts: Vec<&str> = target.split('/').collect();
-            if parts.contains(&allowed.as_str()) {
+            let allowed_components: Vec<&str> = segments(allowed).collect();
+            if allowed_components.is_empty() {
+                continue;
+            }
+            let target_components: Vec<&str> = segments(target).collect();
+            if target_components.starts_with(&allowed_components) {
                 return true;
             }
         }
     }
     false
+}
+
+fn canonical_comparison(path: &str) -> String {
+    if is_native_absolute_spelling(path) {
+        let canonical = canonicalize_existing_ancestor(&normalize_path(path));
+        normalize(&canonical.to_string_lossy()).into_owned()
+    } else {
+        path.to_owned()
+    }
+}
+
+pub(crate) fn canonicalize_native_spelling(path: &Path) -> PathBuf {
+    let spelling = path.to_string_lossy();
+    if is_native_absolute_spelling(&spelling) {
+        canonicalize_existing_ancestor(path)
+    } else {
+        path.to_path_buf()
+    }
+}
+
+#[cfg(windows)]
+fn is_native_absolute_spelling(path: &str) -> bool {
+    let path = normalize(path);
+    is_windows_absolute_spelling(&path)
+}
+
+#[cfg(not(windows))]
+fn is_native_absolute_spelling(path: &str) -> bool {
+    Path::new(path).is_absolute()
 }
 
 #[cfg(test)]
@@ -218,6 +299,19 @@ mod tests {
         assert!(checker.is_sensitive(ssh_config.to_str().unwrap()));
         let gnupg = home.join(".gnupg/pubring.kbx");
         assert!(checker.is_sensitive(gnupg.to_str().unwrap()));
+    }
+
+    #[test]
+    fn windows_home_credential_paths_are_sensitive_on_every_host() {
+        let checker = SensitivePathChecker::with_home_dir(PathBuf::from(r"C:\Users\user"));
+        for path in [
+            r"C:\Users\user\.ssh\config",
+            r"C:\Users\user\.aws\credentials",
+            r"C:\Users\user\.gnupg\pubring.kbx",
+            r"C:\Users\user\.claude\settings.json",
+        ] {
+            assert!(checker.is_sensitive(path), "{path} should be sensitive");
+        }
     }
 
     #[test]
@@ -266,13 +360,50 @@ mod tests {
     }
 
     #[test]
-    fn nested_allowed_path_matches() {
+    fn nested_allowed_path_matches_top_level_only() {
         let allow = vec!["node_modules".to_string()];
         assert!(all_targets_allowed(&["./node_modules".to_string()], &allow));
-        assert!(all_targets_allowed(
-            &["packages/foo/node_modules".to_string()],
-            &allow
-        ));
+        assert!(
+            !all_targets_allowed(
+                &["packages/foo/node_modules".to_string()],
+                &allow
+            ),
+            "relative allow entries must match as an anchored prefix"
+        );
+    }
+
+    #[test]
+    fn relative_allow_does_not_match_absolute_target() {
+        let allow = vec!["build".to_string()];
+        assert!(
+            !is_path_allowed("/etc/build/passwd", &allow),
+            "relative 'build' must not allow /etc/build/passwd"
+        );
+    }
+
+    #[test]
+    fn absolute_allow_respects_boundary() {
+        let allow = vec!["/var/tmp".to_string()];
+        assert!(is_path_allowed("/var/tmp/file.txt", &allow));
+        assert!(
+            !is_path_allowed("/var/tmpevil", &allow),
+            "absolute allow must use boundary-aware prefix matching"
+        );
+    }
+
+    #[test]
+    fn windows_absolute_allow_is_portable_and_boundary_aware() {
+        let allow = vec![r"C:\proj".to_string()];
+        assert!(is_path_allowed(r"C:\proj\src\main.rs", &allow));
+        assert!(is_path_allowed("C:/proj/src/main.rs", &allow));
+        assert!(!is_path_allowed(r"C:\proj2\src\main.rs", &allow));
+    }
+
+    #[test]
+    fn windows_drive_relative_allow_is_not_absolute() {
+        let allow = vec![r"C:proj".to_string()];
+        assert!(!is_absolute_spelling(&normalize(&allow[0])));
+        assert!(!is_path_allowed(r"C:\proj\file.txt", &allow));
     }
 
     #[test]
@@ -325,6 +456,11 @@ mod tests {
         );
     }
 
+    // Unix-only for the *fixture*, not the behavior: creating a symlink on
+    // Windows needs SeCreateSymbolicLinkPrivilege (developer mode or elevation),
+    // which a test host cannot assume. `canonicalize_existing_ancestor` itself is
+    // cross-platform and covered on every host by the sibling tests.
+    #[cfg(unix)]
     #[test]
     fn canonicalize_existing_ancestor_resolves_symlink_parent() {
         let tmp = tempfile::tempdir().unwrap();
@@ -347,5 +483,36 @@ mod tests {
         let result =
             canonicalize_existing_ancestor(std::path::Path::new("/nonexistent/deeply/nested/path"));
         assert!(result.to_string_lossy().contains("nonexistent"));
+    }
+
+    #[test]
+    fn home_credential_paths_are_sensitive() {
+        let checker = SensitivePathChecker::new();
+        let home = dirs::home_dir().unwrap();
+        assert!(checker.is_sensitive(&format!("{}/.aws/credentials", home.display())));
+        assert!(checker.is_sensitive(&format!("{}/.kube/config", home.display())));
+        assert!(checker.is_sensitive(&format!("{}/.docker/config.json", home.display())));
+        assert!(checker.is_sensitive(&format!("{}/.netrc", home.display())));
+        assert!(checker.is_sensitive(&format!("{}/.npmrc", home.display())));
+        assert!(checker.is_sensitive(&format!("{}/.git-credentials", home.display())));
+        assert!(checker.is_sensitive(&format!("{}/.config/gh/hosts.yml", home.display())));
+        assert!(checker.is_sensitive(&format!("{}/.claude/config.json", home.display())));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unix_absolute_sensitive_paths_are_detected() {
+        let checker = SensitivePathChecker::new();
+        assert!(checker.is_sensitive("/bin/bash"));
+        assert!(checker.is_sensitive("/sbin/init"));
+        assert!(checker.is_sensitive("/root/.bashrc"));
+        assert!(checker.is_sensitive("/opt/someapp/config"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_launch_daemon_path_is_sensitive() {
+        let checker = SensitivePathChecker::new();
+        assert!(checker.is_sensitive("/Library/LaunchDaemons/com.example.plist"));
     }
 }

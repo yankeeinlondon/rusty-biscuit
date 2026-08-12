@@ -5,6 +5,7 @@ use super::super::OpenApiError;
 use super::super::extensions::SchematicOpExtension;
 use super::super::options::ExportOptions;
 use super::components::SchemaRegistryLike;
+use super::parameters::map_parameters;
 use super::request_body::map_request_body;
 use super::responses::map_responses;
 use crate::types::{Endpoint, RestMethod};
@@ -21,9 +22,10 @@ pub(super) fn map_paths<R: SchemaRegistryLike>(
         let operation = map_operation(endpoint, registry, options)?;
         let path_params = extract_path_params(&endpoint.path);
 
-        let path_item = paths
-            .entry(endpoint.path.clone())
-            .or_insert_with(PathItem::default);
+        // A reserved-expansion marker (`{+name}`) is a runtime encoding hint;
+        // the exported OpenAPI path key must render as valid `{name}`.
+        let path_key = strip_reserved_markers(&endpoint.path);
+        let path_item = paths.entry(path_key).or_insert_with(PathItem::default);
 
         match endpoint.method {
             RestMethod::Get => path_item.get = Some(operation),
@@ -35,8 +37,23 @@ pub(super) fn map_paths<R: SchemaRegistryLike>(
             RestMethod::Options => path_item.options = Some(operation),
         }
 
+        // Endpoints sharing a path each contribute the same path parameters, but
+        // OpenAPI forbids duplicates in a parameter list, so add each name once.
         for param in path_params {
-            path_item.parameters.push(ReferenceOr::Item(param));
+            let openapiv3::Parameter::Path { parameter_data, .. } = &param else {
+                continue;
+            };
+            let already_declared = path_item.parameters.iter().any(|existing| {
+                matches!(
+                    existing,
+                    ReferenceOr::Item(openapiv3::Parameter::Path { parameter_data: declared, .. })
+                        if declared.name == parameter_data.name
+                )
+            });
+
+            if !already_declared {
+                path_item.parameters.push(ReferenceOr::Item(param));
+            }
         }
     }
 
@@ -79,15 +96,33 @@ pub(super) fn map_operation<R: SchemaRegistryLike>(
         description: Some(endpoint.description.clone()),
         request_body,
         responses,
-        parameters: vec![],
+        parameters: map_parameters(endpoint.params.as_ref()),
         extensions,
         ..Default::default()
     })
 }
 
+/// Rewrites RFC 6570 reserved-expansion markers (`{+name}`) to plain `{name}`.
+///
+/// The `+` is a runtime encoding hint; exported OpenAPI paths and parameter
+/// names must never carry it.
+fn strip_reserved_markers(path: &str) -> String {
+    let mut result = String::with_capacity(path.len());
+    let mut chars = path.chars().peekable();
+    while let Some(c) = chars.next() {
+        result.push(c);
+        if c == '{' && chars.peek() == Some(&'+') {
+            chars.next();
+        }
+    }
+    result
+}
+
 /// Extracts path parameters from a path template.
 ///
-/// Parses `{param}` segments from the path and returns OpenAPI parameter definitions.
+/// Parses `{param}` (and reserved-expansion `{+param}`) segments from the path
+/// and returns OpenAPI parameter definitions. A leading `+` is stripped so the
+/// exported parameter name is always the bare spelling.
 pub fn extract_path_params(path: &str) -> Vec<openapiv3::Parameter> {
     let mut params = Vec::new();
 
@@ -102,6 +137,11 @@ pub fn extract_path_params(path: &str) -> Vec<openapiv3::Parameter> {
                 }
                 param_name.push(chars.next().unwrap());
             }
+
+            let param_name = param_name
+                .strip_prefix('+')
+                .map(str::to_string)
+                .unwrap_or(param_name);
 
             if !param_name.is_empty() {
                 params.push(openapiv3::Parameter::Path {
@@ -171,6 +211,27 @@ mod tests {
 
         assert!(names.contains(&"user_id".to_string()));
         assert!(names.contains(&"post_id".to_string()));
+    }
+
+    #[test]
+    fn extract_path_params_strips_reserved_marker() {
+        let params = extract_path_params("/models/{+repo_id}");
+        assert_eq!(params.len(), 1);
+
+        if let openapiv3::Parameter::Path { parameter_data, .. } = &params[0] {
+            assert_eq!(parameter_data.name, "repo_id");
+        } else {
+            panic!("expected a path parameter");
+        }
+    }
+
+    #[test]
+    fn strip_reserved_markers_rewrites_plus_form() {
+        assert_eq!(
+            strip_reserved_markers("/repos/{owner}/{repo}/contents/{+path}"),
+            "/repos/{owner}/{repo}/contents/{path}"
+        );
+        assert_eq!(strip_reserved_markers("/models/{model}"), "/models/{model}");
     }
 
     #[test]

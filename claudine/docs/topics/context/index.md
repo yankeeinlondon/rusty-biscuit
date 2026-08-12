@@ -11,6 +11,12 @@ document can *read*, *compute*, and (under an orchestrator) *change*.
 | **Expression engine** | A small read-only language for interpolation `{{ … }}` and conditions `when="…"` | `claudine context --expressions` |
 | **Side effects** | A catalog of *mutating* operations (frontmatter, files, HTTP) driven by an orchestrator | `claudine context --side-effects` |
 
+Each descriptor catalog also implements the shared `Described` trait from
+`darkmatter::catalog`, so every item is runtime-accessible: exact lookup via
+`describe`, fuzzy nearest-match via `suggest`, and plain-text enrichment via
+`describe_for_error`. These powers drive the CLI reports *and* the enriched
+error surfaces described in the subsystem docs.
+
 Read each in detail:
 
 - **[Context Variables](context-variables.md)** — what they are, how they are
@@ -34,7 +40,7 @@ catalog is a plain `const` slice of structs — constructing or reading it does
 Darkmatter (library)                         Claudine CLI (claudine context)
 ────────────────────                         ───────────────────────────────
 context::CONTEXT_VARIABLE_DESCRIPTORS  ─────▶ default report  (Property/Type/Description)
-expression::EXPRESSION_FUNCTION_DESCRIPTORS ─▶ --expressions   (Function/Description)
+expression_function_descriptors() ──────────▶ --expressions   (Function/Description)
 effects::EFFECT_DESCRIPTORS            ─────▶ --side-effects   (Capability/Description/Safety)
 ```
 
@@ -48,9 +54,9 @@ own parallel list. That single decision is what keeps the reports honest:
    in-crate parity test that fails if the catalog and the real runtime surface
    disagree (see [Drift Control](drift.md)).
 
-What this design does *not* yet guarantee — the descriptions and type labels in
-a descriptor are free text and are still maintained by hand — is the subject of
-the [Drift Control](drift.md) doc.
+What this design does *not* yet guarantee — purely descriptive prose that is
+not anchored by a verified example — is the subject of the
+[Drift Control](drift.md) doc.
 
 ## The CLI command at a glance
 

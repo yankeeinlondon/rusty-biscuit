@@ -1,0 +1,2088 @@
+use super::*;
+use crate::markdown::compose::directives_api::{BlockKind, scan_darkmatter_blocks};
+use biscuit_terminal::utils::UnicodeWidthStr;
+use pulldown_cmark::TagEnd;
+
+fn structural_fingerprint(content: &str) -> Vec<String> {
+    let mut fingerprint = Vec::new();
+    let mut list_depth = 0usize;
+    let mut item_depth = 0usize;
+    let mut blockquote_depth = 0usize;
+    let mut explicit_paragraph_depth = 0usize;
+    let mut implicit_paragraph = false;
+
+    macro_rules! close_implicit_paragraph {
+        () => {
+            if implicit_paragraph {
+                fingerprint.push(format!("end-paragraph:{list_depth}:{blockquote_depth}"));
+                implicit_paragraph = false;
+            }
+        };
+    }
+
+    macro_rules! open_implicit_paragraph {
+        () => {
+            if item_depth > 0 && explicit_paragraph_depth == 0 && !implicit_paragraph {
+                fingerprint.push(format!("start-paragraph:{list_depth}:{blockquote_depth}"));
+                implicit_paragraph = true;
+            }
+        };
+    }
+
+    for event in Parser::new_ext(content, cleanup_parser_options()) {
+        match event {
+            Event::Start(Tag::List(start)) => {
+                close_implicit_paragraph!();
+                list_depth += 1;
+                let kind = if start.is_some() { "ordered" } else { "unordered" };
+                // `TagEnd::List` carries only the ordered flag, so the starting ordinal is pinned
+                // here or nowhere.
+                let ordinal = start.map_or_else(|| "none".to_string(), |start| start.to_string());
+                fingerprint.push(format!("start-list:{kind}:{ordinal}:{list_depth}"));
+            }
+            Event::End(TagEnd::List(ordered)) => {
+                close_implicit_paragraph!();
+                let kind = if ordered { "ordered" } else { "unordered" };
+                fingerprint.push(format!("end-list:{kind}:{list_depth}"));
+                list_depth = list_depth.saturating_sub(1);
+            }
+            Event::Start(Tag::Item) => {
+                item_depth += 1;
+                fingerprint.push(format!("start-item:{list_depth}"));
+            }
+            Event::End(TagEnd::Item) => {
+                close_implicit_paragraph!();
+                fingerprint.push(format!("end-item:{list_depth}"));
+                item_depth = item_depth.saturating_sub(1);
+            }
+            Event::Start(Tag::Paragraph) => {
+                close_implicit_paragraph!();
+                fingerprint.push(format!("start-paragraph:{list_depth}:{blockquote_depth}"));
+                explicit_paragraph_depth += 1;
+            }
+            Event::End(TagEnd::Paragraph) => {
+                fingerprint.push(format!("end-paragraph:{list_depth}:{blockquote_depth}"));
+                explicit_paragraph_depth = explicit_paragraph_depth.saturating_sub(1);
+            }
+            Event::Start(Tag::BlockQuote(_)) => {
+                close_implicit_paragraph!();
+                blockquote_depth += 1;
+                fingerprint.push(format!("start-blockquote:{blockquote_depth}"));
+            }
+            Event::End(TagEnd::BlockQuote(_)) => {
+                close_implicit_paragraph!();
+                fingerprint.push(format!("end-blockquote:{blockquote_depth}"));
+                blockquote_depth = blockquote_depth.saturating_sub(1);
+            }
+            Event::Start(Tag::CodeBlock(kind)) => {
+                close_implicit_paragraph!();
+                fingerprint.push(format!("start-code:{kind:?}:{list_depth}"));
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                fingerprint.push(format!("end-code:{list_depth}"));
+            }
+            Event::Start(Tag::Table(_)) => {
+                close_implicit_paragraph!();
+                fingerprint.push(format!("start-table:{list_depth}"));
+            }
+            Event::End(TagEnd::Table) => fingerprint.push(format!("end-table:{list_depth}")),
+            Event::Start(Tag::HtmlBlock) => {
+                close_implicit_paragraph!();
+                fingerprint.push(format!("start-html:{list_depth}"));
+            }
+            Event::End(TagEnd::HtmlBlock) => fingerprint.push(format!("end-html:{list_depth}")),
+            Event::TaskListMarker(checked) => {
+                open_implicit_paragraph!();
+                fingerprint.push(format!("task:{checked}:{list_depth}"));
+            }
+            Event::Text(_)
+            | Event::Code(_)
+            | Event::InlineHtml(_)
+            | Event::InlineMath(_)
+            | Event::DisplayMath(_)
+            | Event::FootnoteReference(_) => open_implicit_paragraph!(),
+            Event::Start(
+                Tag::Emphasis
+                | Tag::Strong
+                | Tag::Strikethrough
+                | Tag::Link { .. }
+                | Tag::Image { .. },
+            ) => open_implicit_paragraph!(),
+            _ => {}
+        }
+    }
+    fingerprint
+}
+
+fn assert_structure_preserved(source: &str, output: &str) {
+    assert_eq!(
+        structural_fingerprint(output),
+        structural_fingerprint(source),
+        "cleanup changed semantic block structure\nsource:\n{source}\noutput:\n{output}"
+    );
+}
+
+fn assert_shell_block_payloads_preserved(source: &str, output: &str) {
+    let source_blocks = scan_darkmatter_blocks(source).unwrap();
+    let output_blocks = scan_darkmatter_blocks(output).unwrap();
+    let source_payloads: Vec<_> = source_blocks
+        .iter()
+        .filter(|block| block.kind == BlockKind::Shell)
+        .map(|block| &source[block.body_span.clone()])
+        .collect();
+    let output_payloads: Vec<_> = output_blocks
+        .iter()
+        .filter(|block| block.kind == BlockKind::Shell)
+        .map(|block| &output[block.body_span.clone()])
+        .collect();
+
+    assert_eq!(output_payloads, source_payloads);
+}
+
+/// Reparses `content` and asserts that `label` is still a link-reference
+/// definition pointing at `destination`, and that some inline link in the
+/// document resolves through it.
+fn assert_reference_resolves(content: &str, label: &str, destination: &str, title: &str) {
+    let parser = Parser::new_ext(content, cleanup_parser_options());
+    let definition = parser
+        .reference_definitions()
+        .get(label)
+        .unwrap_or_else(|| panic!("`{label}` is no longer a reference definition:\n{content}"));
+    assert_eq!(definition.dest.as_ref(), destination);
+    assert_eq!(definition.title.as_deref(), Some(title));
+
+    let resolved = Parser::new_ext(content, cleanup_parser_options()).any(|event| match event {
+        Event::Start(Tag::Link { dest_url, .. }) => dest_url.as_ref() == destination,
+        _ => false,
+    });
+    assert!(resolved, "the reference link no longer resolves:\n{content}");
+}
+
+fn assert_lines_within_width(content: &str, width: usize) {
+    for line in content.lines() {
+        assert!(
+            UnicodeWidthStr::width(line) <= width,
+            "line exceeded width {width}: {line:?}\n{content}"
+        );
+    }
+}
+
+    // ==================== Incidental Newline Tests ====================
+
+    #[test]
+    fn strip_incidental_newlines_drops_after_trailing_whitespace() {
+        let content = "Wrapped line \ncontinues here";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "Wrapped line continues here");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_replaces_with_space_without_trailing_whitespace() {
+        let content = "Wrapped line\ncontinues here";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "Wrapped line continues here");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_blank_lines() {
+        let content = "First paragraph\n\nSecond paragraph\n\n\nThird paragraph";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_fenced_code_verbatim() {
+        let content = "Before\n```rust\nlet value = 1;\nlet other = 2;\n```\nAfter";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(
+            stripped,
+            "Before\n```rust\nlet value = 1;\nlet other = 2;\n```\nAfter"
+        );
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_indented_code_verbatim() {
+        let content = "Before\n\n    let value = 1;\n    let other = 2;\n\nAfter";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_newline_inside_inline_code_span() {
+        let content = "Before `code\nspan` after";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_html_block_verbatim() {
+        let content = "<div>\n<span>One</span>\n<span>Two</span>\n</div>\n\nAfter";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_blockquote_prefix() {
+        let content = "> Wrapped quote\n> continues here\n\nAfter";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "> Wrapped quote continues here\n\nAfter");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_table_rows() {
+        let content = "| A | B |\n|---|---|\n| 1 | 2 |\n\nAfter";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_list_marker() {
+        let content = "- Wrapped item\ncontinues here\n- Second item";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "- Wrapped item continues here\n- Second item");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_collapses_explicit_list_continuation_without_layout_spaces() {
+        let content = "- Ratified design: `claudine/features/2026-07-12-rendezvous-dashboard/spec.md`\n    (see the \"Decisions\" section, especially the implementation stamps).";
+        let stripped = strip_incidental_newlines(content);
+
+        assert_eq!(
+            stripped,
+            "- Ratified design: `claudine/features/2026-07-12-rendezvous-dashboard/spec.md` (see the \"Decisions\" section, especially the implementation stamps)."
+        );
+        assert_eq!(strip_incidental_newlines(&stripped), stripped);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_collapses_unordered_indent_variants() {
+        let cases = [
+            ("- Alpha\n  beta", "- Alpha beta"),
+            ("* Alpha\n    beta", "* Alpha beta"),
+            ("+ Alpha\n        beta", "+ Alpha beta"),
+        ];
+
+        for (content, expected) in cases {
+            assert_eq!(strip_incidental_newlines(content), expected, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn strip_incidental_newlines_collapses_ordered_marker_variants() {
+        let cases = [
+            ("1. Alpha\n   beta", "1. Alpha beta"),
+            ("1. Alpha\n    beta", "1. Alpha beta"),
+            ("10. Alpha\n    beta", "10. Alpha beta"),
+            ("10) Alpha\n    beta", "10) Alpha beta"),
+        ];
+
+        for (content, expected) in cases {
+            let stripped = strip_incidental_newlines(content);
+            assert_eq!(stripped, expected, "{content:?}");
+            assert_structure_preserved(content, &stripped);
+        }
+    }
+
+    #[test]
+    fn strip_incidental_newlines_collapses_task_item_continuations() {
+        let cases = [
+            ("- [ ] Alpha\n      beta", "- [ ] Alpha beta"),
+            ("- [x] Alpha\n      beta", "- [x] Alpha beta"),
+        ];
+
+        for (content, expected) in cases {
+            let stripped = strip_incidental_newlines(content);
+            assert_eq!(stripped, expected, "{content:?}");
+            assert_structure_preserved(content, &stripped);
+        }
+    }
+
+    #[test]
+    fn strip_incidental_newlines_collapses_nested_items_independently() {
+        let content = "- Parent alpha\n    parent beta\n    - Child alpha\n      child beta\n- Sibling";
+        let stripped = strip_incidental_newlines(content);
+
+        assert_eq!(
+            stripped,
+            "- Parent alpha parent beta\n    - Child alpha child beta\n- Sibling"
+        );
+    }
+
+    #[test]
+    fn strip_incidental_newlines_removes_composite_blockquote_prefixes() {
+        let content = "> - Alpha\n>   beta\n\n> > 10. Gamma\n> >     delta";
+        let stripped = strip_incidental_newlines(content);
+
+        assert_eq!(stripped, "> - Alpha beta\n\n> > 10. Gamma delta");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_second_paragraph_container() {
+        let content = "- First paragraph.\n\n    Second alpha\n    second beta";
+        let stripped = strip_incidental_newlines(content);
+
+        assert_eq!(
+            stripped,
+            "- First paragraph.\n\n    Second alpha second beta"
+        );
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_list_hard_breaks() {
+        let cases = [
+            "- First line ends here.  \n  Second line remains.",
+            "- First line ends here.\\\n  Second line remains.",
+        ];
+
+        for content in cases {
+            assert_eq!(strip_incidental_newlines(content), content, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_list_child_blocks() {
+        let cases = [
+            "- Before\n\n    ```text\n    fenced one\n    fenced two\n    ```",
+            "- Before\n\n    ```text\n    unclosed fenced one\n    unclosed fenced two",
+            "- Before\n\n        indented one\n        indented two",
+            "- Before\n\n    | A | B |\n    |---|---|\n    | 1 | 2 |",
+            "- Before\n\n    <div>\n    html one\n    html two\n    </div>",
+            "- Before\n\n    ::shell-block\n    echo one\n    echo two\n    ::end-block",
+            "- Before\n\n    ::shell-block\n    echo unclosed one\n    echo unclosed two",
+        ];
+
+        for content in cases {
+            assert_eq!(strip_incidental_newlines(content), content, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn cleanup_preserves_list_semantic_structure_while_collapsing_soft_breaks() {
+        let fixtures = [
+            (
+                "- Parent alpha\n    parent beta\n    - Child alpha\n      child beta\n- Sibling",
+                "- Parent alpha parent beta\n    - Child alpha child beta\n\n- Sibling\n",
+            ),
+            (
+                "- First paragraph.\n\n    Second alpha\n    second beta",
+                "- First paragraph.\n    \n    Second alpha second beta\n",
+            ),
+            ("> - Alpha\n>   beta", "> - Alpha beta\n"),
+            (
+                "- Before\n\n    ```text\n    fenced one\n    fenced two\n    ```",
+                "- Before\n    \n  ```text\n  fenced one\n  fenced two\n  ```\n",
+            ),
+        ];
+
+        for (source, expected) in fixtures {
+            let output = cleanup_content(source);
+            assert_eq!(output, expected, "{source:?}");
+            assert_structure_preserved(source, &output);
+        }
+    }
+
+    #[test]
+    fn cleanup_list_modes_share_soft_break_policy_without_changing_spacing_policy() {
+        let source = "- Alpha\n    beta\n- Gamma\n    delta";
+
+        assert_eq!(cleanup_content(source), "- Alpha beta\n- Gamma delta\n");
+        assert_eq!(cleanup_content_compact(source), "- Alpha beta\n- Gamma delta\n");
+        assert_eq!(cleanup_content_loose(source), "- Alpha beta\n\n- Gamma delta\n");
+        assert_eq!(
+            cleanup_content_with_indent_preserving_incidental(source, DEFAULT_INDENT),
+            "- Alpha\n    beta\n\n- Gamma\n    delta\n"
+        );
+    }
+
+    #[test]
+    fn cleanup_preserve_mode_is_idempotent_for_authored_list_soft_breaks() {
+        let source = concat!(
+            "- Alpha beta gamma\n",
+            "    delta epsilon.\n",
+            "- [x] Checked item\n",
+            "      authored continuation.\n"
+        );
+        let expected = concat!(
+            "- Alpha beta gamma\n",
+            "    delta epsilon.\n",
+            "\n",
+            "- [x] Checked item\n",
+            "      authored continuation.\n"
+        );
+
+        let first = cleanup_content_with_indent_preserving_incidental(source, DEFAULT_INDENT);
+        assert_eq!(first, expected);
+        assert_structure_preserved(source, &first);
+
+        let second =
+            cleanup_content_with_indent_preserving_incidental(&first, DEFAULT_INDENT);
+        assert_eq!(second, first);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_normalizes_list_line_endings_identically() {
+        let lf = "- Alpha\n    beta\n\nAfter";
+        let expected = "- Alpha beta\n\nAfter";
+
+        assert_eq!(strip_incidental_newlines(lf), expected);
+        assert_eq!(strip_incidental_newlines(&lf.replace('\n', "\r\n")), expected);
+        assert_eq!(strip_incidental_newlines(&lf.replace('\n', "\r")), expected);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_keeps_unicode_separator_parity_inside_lists() {
+        let cases = [
+            ("\u{6F22}", "\u{5B57}", "\u{6F22}\u{5B57}"),
+            ("\u{0E20}\u{0E32}", "\u{0E44}\u{0E17}", "\u{0E20}\u{0E32}\u{0E44}\u{0E17}"),
+            ("\u{D55C}", "\u{AE00}", "\u{D55C} \u{AE00}"),
+            ("\u{1F600}", "\u{1F601}", "\u{1F600} \u{1F601}"),
+            ("\u{6F22}\u{3002}", "\u{5B57}", "\u{6F22}\u{3002}\u{5B57}"),
+            ("foo\u{200B}", "bar", "foo\u{200B}bar"),
+        ];
+
+        for (previous, next, expected) in cases {
+            let outside = format!("{previous}\n{next}");
+            let inside = format!("- {previous}\n  {next}");
+            assert_eq!(strip_incidental_newlines(&outside), expected);
+            assert_eq!(
+                strip_incidental_newlines(&inside),
+                format!("- {expected}")
+            );
+        }
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_transclusion_directives() {
+        let content = "::file ./README.md\n::code ./src/main.rs\n::shell echo hi\n::disclosure Details\n::details\nWrapped\ntext\n::end-disclosure\n";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(
+            stripped,
+            "::file ./README.md\n::code ./src/main.rs\n::shell echo hi\n::disclosure Details\n::details\nWrapped text\n::end-disclosure\n"
+        );
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_shell_block_bodies() {
+        let content = "::shell-block\necho a\necho b\n::end-block\n\nAfter";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_blockquoted_shell_block_bodies() {
+        let content = "> ::shell-block\n> echo a\n> echo b\n> ::end-block\n\nAfter";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_treats_crlf_and_lf_as_newlines() {
+        let content = "One\r\ntwo\nthree\r\n\nFour";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "One two three\n\nFour");
+    }
+
+    // ---- Structural safety: hard line breaks and setext headings ----
+
+    #[test]
+    fn strip_incidental_newlines_preserves_two_space_hard_break() {
+        let content = "Roses are red  \nviolets are blue";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_trailing_backslash_hard_break() {
+        let content = "Roses are red\\\nviolets are blue";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_collapses_single_trailing_space_not_hard_break() {
+        // A single trailing space is incidental, not a hard break: the newline drops.
+        let content = "Roses are red \nviolets are blue";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "Roses are red violets are blue");
+    }
+
+    #[test]
+    fn cleanup_preserves_word_separator_at_single_space_soft_break() {
+        let content = "Gather useful \ninformation here.";
+
+        assert_eq!(cleanup_content(content), "Gather useful information here.\n");
+    }
+
+    #[test]
+    fn cleanup_does_not_materialize_source_space_at_spaceless_script_boundary() {
+        let content = "\u{6F22} \n\u{5B57}";
+
+        assert_eq!(cleanup_content(content), "\u{6F22}\u{5B57}\n");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_setext_h1_underline() {
+        let content = "Heading\n===\nbody continues";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_setext_h2_underline() {
+        let content = "Heading\n---\nbody continues";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, content);
+    }
+
+    // ---- Join separator by Unicode Script ----
+
+    #[test]
+    fn strip_incidental_newlines_joins_han_without_separator() {
+        let content = "\u{6F22}\n\u{5B57}";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "\u{6F22}\u{5B57}");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_joins_thai_without_separator() {
+        let content = "\u{0E20}\u{0E32}\u{0E29}\u{0E32}\n\u{0E44}\u{0E17}\u{0E22}";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "\u{0E20}\u{0E32}\u{0E29}\u{0E32}\u{0E44}\u{0E17}\u{0E22}");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_keeps_space_between_hangul() {
+        // Hangul is space-delimited (excluded from the spaceless set).
+        let content = "\u{D55C}\n\u{AE00}";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "\u{D55C} \u{AE00}");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_joins_han_to_latin_without_separator() {
+        // Script transition: neutral reconstruction, never a pangu space.
+        let content = "\u{6F22}\ntext";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "\u{6F22}text");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_keeps_space_between_emoji() {
+        // Emoji are not letters, so they are not mis-joined as CJK.
+        let content = "\u{1F600}\n\u{1F601}";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "\u{1F600} \u{1F601}");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_joins_after_cjk_punctuation() {
+        // A line ending in `。` joined with a following ideograph: no separator.
+        let content = "\u{6F22}\u{3002}\n\u{5B57}";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "\u{6F22}\u{3002}\u{5B57}");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_no_separator_around_zwsp() {
+        let trailing = "foo\u{200B}\nbar";
+        assert_eq!(strip_incidental_newlines(trailing), "foo\u{200B}bar");
+
+        let leading = "foo\n\u{200B}bar";
+        assert_eq!(strip_incidental_newlines(leading), "foo\u{200B}bar");
+    }
+
+    // ==================== Fixed-Width Reflow Tests ====================
+
+    #[test]
+    fn reflow_to_width_wraps_ascii_paragraphs_at_common_widths() {
+        let content = "This paragraph has enough words to wrap cleanly at several common editor widths without needing to split any individual word.";
+
+        for width in [20, 40, 80, 100] {
+            let reflowed = cleanup_to_fixed_width(content, width);
+            assert!(
+                reflowed
+                    .lines()
+                    .all(|line| UnicodeWidthStr::width(line) <= width),
+                "line exceeded width {width}:\n{reflowed}"
+            );
+        }
+    }
+
+    #[test]
+    fn reflow_to_width_uses_unicode_display_columns() {
+        let content = "café naïve résumé words";
+        let reflowed = cleanup_to_fixed_width(content, 12);
+
+        assert_eq!(reflowed, "café naïve\nrésumé words");
+        assert!(reflowed.lines().all(|line| UnicodeWidthStr::width(line) <= 12));
+    }
+
+    #[test]
+    fn reflow_to_width_keeps_long_words_on_one_line() {
+        let content = "supercalifragilisticexpialidocious";
+        let reflowed = cleanup_to_fixed_width(content, 10);
+
+        assert_eq!(reflowed, content);
+    }
+
+    #[test]
+    fn reflow_to_width_keeps_han_run_atomic_and_overflows() {
+        // A contiguous Han run is a single whitespace-free token. v1 treats it
+        // like a long URL: never split between ideographs, allowed to overflow.
+        let content = "\u{6F22}".repeat(10);
+        let width = 8;
+        assert!(UnicodeWidthStr::width(content.as_str()) > width);
+
+        let reflowed = cleanup_to_fixed_width(&content, width);
+
+        assert_eq!(reflowed, content);
+        assert!(!reflowed.contains('\n'));
+    }
+
+    #[test]
+    fn reflow_to_width_keeps_thai_run_atomic_and_overflows() {
+        // Thai is spaceless but non-Han; the atomic-overflow contract holds for
+        // the whole curated spaceless set, not just CJK ideographs.
+        let content = "\u{0E2A}\u{0E27}\u{0E31}\u{0E2A}\u{0E14}\u{0E35}\u{0E0A}\u{0E32}\u{0E27}\u{0E42}\u{0E25}\u{0E01}";
+        let width = 6;
+        assert!(UnicodeWidthStr::width(content) > width);
+
+        let reflowed = cleanup_to_fixed_width(content, width);
+
+        assert_eq!(reflowed, content);
+        assert!(!reflowed.contains('\n'));
+    }
+
+    #[test]
+    fn reflow_to_width_handles_empty_document() {
+        assert_eq!(cleanup_to_fixed_width("", 80), "");
+    }
+
+    #[test]
+    fn reflow_to_width_preserves_code_only_document() {
+        let content = "```rust\nlet value = \"a very long line that stays untouched\";\n```\n";
+        let reflowed = cleanup_to_fixed_width(content, 19);
+
+        assert_eq!(reflowed, content);
+    }
+
+    #[test]
+    fn reflow_to_width_preserves_mixed_list_marker_alignment() {
+        let content = "- short marker has enough text to wrap around the target width\n1. ordered marker has enough text to wrap around the target width\n- [ ] task marker has enough text to wrap around the target width";
+        let reflowed = cleanup_to_fixed_width(content, 28);
+
+        assert_eq!(
+            reflowed,
+            "- short marker has enough\n  text to wrap around the\n  target width\n1. ordered marker has enough\n   text to wrap around the\n   target width\n- [ ] task marker has enough\n      text to wrap around\n      the target width"
+        );
+    }
+
+    #[test]
+    fn reflow_to_width_unwraps_complete_list_paragraph_before_wrapping() {
+        let content = "- Alpha beta gamma delta\n    epsilon zeta eta theta.";
+        let reflowed = cleanup_to_fixed_width(content, 24);
+
+        assert_eq!(
+            reflowed,
+            "- Alpha beta gamma delta\n  epsilon zeta eta\n  theta."
+        );
+        assert_lines_within_width(&reflowed, 24);
+    }
+
+    #[test]
+    fn reflow_to_width_derives_ordered_prefix_width_per_item() {
+        let content = "9. Alpha beta gamma delta epsilon.\n10. Alpha beta gamma delta epsilon.";
+        let reflowed = cleanup_to_fixed_width(content, 19);
+
+        assert_eq!(
+            reflowed,
+            "9. Alpha beta gamma\n   delta epsilon.\n10. Alpha beta\n    gamma delta\n    epsilon."
+        );
+        assert_lines_within_width(&reflowed, 19);
+        assert_structure_preserved(content, &reflowed);
+    }
+
+    #[test]
+    fn reflow_to_width_treats_nine_digit_ordinal_as_an_ordered_marker() {
+        let content = "123456789. Alpha beta gamma delta epsilon.";
+        assert!(
+            structural_fingerprint(content)
+                .iter()
+                .any(|entry| entry.starts_with("start-list:ordered")),
+            "pulldown-cmark must parse a nine-digit ordinal as an ordered list"
+        );
+
+        let reflowed = cleanup_to_fixed_width(content, 24);
+
+        assert_eq!(
+            reflowed,
+            "123456789. Alpha beta\n           gamma delta\n           epsilon."
+        );
+        assert_lines_within_width(&reflowed, 24);
+    }
+
+    #[test]
+    fn reflow_to_width_treats_ten_digit_ordinal_as_prose() {
+        let content = "1234567890. Alpha beta gamma delta epsilon zeta.";
+        assert!(
+            structural_fingerprint(content)
+                .iter()
+                .all(|entry| !entry.starts_with("start-list")),
+            "pulldown-cmark must parse a ten-digit ordinal as a paragraph"
+        );
+
+        let reflowed = cleanup_to_fixed_width(content, 24);
+
+        // No hanging indent: the digit run is prose, so continuation lines start at column zero.
+        assert_eq!(
+            reflowed,
+            "1234567890. Alpha beta\ngamma delta epsilon\nzeta."
+        );
+        assert_lines_within_width(&reflowed, 24);
+    }
+
+    #[test]
+    fn strip_incidental_newlines_collapses_ten_digit_run_after_prose() {
+        // pulldown-cmark parses both lines as one paragraph, so the line scanner must not treat
+        // the ten-digit run as an item boundary and preserve the break.
+        let content = "Some prose\n1234567890. more prose";
+        assert!(
+            structural_fingerprint(content)
+                .iter()
+                .all(|entry| !entry.starts_with("start-list")),
+            "pulldown-cmark must parse a ten-digit run after prose as one paragraph"
+        );
+
+        assert_eq!(
+            strip_incidental_newlines(content),
+            "Some prose 1234567890. more prose"
+        );
+    }
+
+    #[test]
+    fn strip_incidental_newlines_preserves_nine_digit_run_after_prose() {
+        // Pins current line-scanner output, which is NOT parser-backed: CommonMark only lets an
+        // ordered list interrupt a paragraph when it starts at 1, so pulldown-cmark reads this as
+        // one paragraph while the scanner still sees an item boundary. That divergence predates
+        // the nine-digit cap and is deliberately left alone here.
+        let content = "Some prose\n123456789. more prose";
+        assert!(
+            structural_fingerprint(content)
+                .iter()
+                .all(|entry| !entry.starts_with("start-list")),
+            "an ordered list may only interrupt a paragraph when it starts at 1"
+        );
+
+        assert_eq!(strip_incidental_newlines(content), content);
+    }
+
+    #[test]
+    fn cleanup_spacing_modes_share_the_commonmark_ordered_marker_boundary() {
+        struct SpacingFixture {
+            name: &'static str,
+            cleanup: fn(&str) -> String,
+            nine_expected: &'static str,
+            list_expected: &'static str,
+        }
+
+        let modes = [
+            SpacingFixture {
+                name: "normal",
+                cleanup: cleanup_content,
+                nine_expected: "123456789. nine-digit item\n- unordered item\n1. ordered item\n",
+                list_expected: "- unordered item\n1. ordered item\n",
+            },
+            SpacingFixture {
+                name: "compact",
+                cleanup: cleanup_content_compact,
+                nine_expected: "123456789. nine-digit item\n- unordered item\n1. ordered item\n",
+                list_expected: "- unordered item\n1. ordered item\n",
+            },
+            SpacingFixture {
+                name: "loose",
+                cleanup: cleanup_content_loose,
+                nine_expected: "123456789. nine-digit item\n\n- unordered item\n\n1. ordered item\n",
+                list_expected: "- unordered item\n\n1. ordered item\n",
+            },
+        ];
+
+        for delimiter in ['.', ')'] {
+            let nine_source = format!(
+                "123456789{delimiter} nine-digit item\n\n- unordered item\n\n1) ordered item\n"
+            );
+            let ten_source = format!(
+                "1234567890{delimiter} ten-digit prose\n\n- unordered item\n\n1) ordered item\n"
+            );
+
+            for fixture in &modes {
+                let nine_cleaned = (fixture.cleanup)(&nine_source);
+                assert_eq!(
+                    nine_cleaned, fixture.nine_expected,
+                    "{}, delimiter {delimiter}", fixture.name
+                );
+                assert_eq!(
+                    (fixture.cleanup)(&nine_cleaned),
+                    nine_cleaned,
+                    "{}, delimiter {delimiter}", fixture.name
+                );
+                assert_structure_preserved(&nine_source, &nine_cleaned);
+
+                let ten_expected = format!(
+                    "1234567890{delimiter} ten-digit prose\n\n{}",
+                    fixture.list_expected
+                );
+                let ten_cleaned = (fixture.cleanup)(&ten_source);
+                assert_eq!(
+                    ten_cleaned, ten_expected,
+                    "{}, delimiter {delimiter}", fixture.name
+                );
+                assert_eq!(
+                    (fixture.cleanup)(&ten_cleaned),
+                    ten_cleaned,
+                    "{}, delimiter {delimiter}", fixture.name
+                );
+                assert_structure_preserved(&ten_source, &ten_cleaned);
+
+                assert_eq!(
+                    (fixture.cleanup)(&nine_source.replace('\n', "\r\n")),
+                    nine_cleaned,
+                    "CRLF parity for {}, delimiter {delimiter}", fixture.name
+                );
+                assert_eq!(
+                    (fixture.cleanup)(&ten_source.replace('\n', "\r\n")),
+                    ten_cleaned,
+                    "CRLF parity for {}, delimiter {delimiter}", fixture.name
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn reflow_to_width_aligns_checked_and_unchecked_task_items() {
+        let content = "- [ ] Alpha beta gamma delta epsilon.\n- [x] Alpha beta gamma delta epsilon.";
+        let reflowed = cleanup_to_fixed_width(content, 24);
+
+        assert_eq!(
+            reflowed,
+            "- [ ] Alpha beta gamma\n      delta epsilon.\n- [x] Alpha beta gamma\n      delta epsilon."
+        );
+        assert_lines_within_width(&reflowed, 24);
+        assert_structure_preserved(content, &reflowed);
+    }
+
+    #[test]
+    fn reflow_to_width_uses_configured_nested_list_indentation() {
+        let cases = [
+            (
+                2,
+                "- Parent\n    - Alpha beta gamma delta epsilon.",
+                "- Parent\n  - Alpha beta gamma\n    delta epsilon.\n",
+            ),
+            (
+                4,
+                "- Parent\n  - Child\n    - Alpha beta gamma delta epsilon.",
+                "- Parent\n    - Child\n        - Alpha beta\n          gamma delta\n          epsilon.\n",
+            ),
+        ];
+
+        for (indent, content, expected) in cases {
+            let normalized = cleanup_content_with_indent(content, indent);
+            let reflowed = reflow_to_width(&normalized, 22);
+
+            assert_eq!(reflowed, expected, "indent {indent}, normalized {normalized:?}");
+            assert_lines_within_width(&reflowed, 22);
+        }
+    }
+
+    #[test]
+    fn configured_indent_8_preserves_structure_through_fixed_width_and_second_pass() {
+        let source = concat!(
+            "- Parent first paragraph alpha beta gamma delta.\n",
+            "\n",
+            "  Second paragraph alpha beta gamma delta epsilon.\n",
+            "\n",
+            "  - Child item alpha beta gamma delta epsilon.\n",
+            "\n",
+            "> - Quote parent alpha beta gamma delta.\n",
+            ">   - Quote child alpha beta gamma delta epsilon.\n",
+            "\n",
+            "> - [ ] Task parent alpha beta gamma delta.\n",
+            ">   - [x] Task child alpha beta gamma delta epsilon.\n"
+        );
+        let cleaned = cleanup_content_with_indent(source, 8);
+
+        assert_eq!(
+            cleaned,
+            concat!(
+                "-    Parent first paragraph alpha beta gamma delta.\n",
+                "        \n",
+                "     Second paragraph alpha beta gamma delta epsilon.\n",
+                "\n",
+                "        - Child item alpha beta gamma delta epsilon.\n",
+                "\n",
+                "> -    Quote parent alpha beta gamma delta.\n",
+                ">         - Quote child alpha beta gamma delta epsilon.\n",
+                "\n",
+                "> -    [ ] Task parent alpha beta gamma delta.\n",
+                ">         - [x] Task child alpha beta gamma delta epsilon.\n"
+            )
+        );
+        assert_structure_preserved(source, &cleaned);
+        assert_eq!(cleanup_content_with_indent(&cleaned, 8), cleaned);
+
+        let fixed = reflow_to_width(&cleaned, 30);
+        assert_eq!(
+            fixed,
+            concat!(
+                "-    Parent first paragraph\n",
+                "     alpha beta gamma delta.\n",
+                "        \n",
+                "     Second paragraph alpha\n",
+                "     beta gamma delta epsilon.\n",
+                "\n",
+                "        - Child item alpha\n",
+                "          beta gamma delta\n",
+                "          epsilon.\n",
+                "\n",
+                "> -    Quote parent alpha beta\n",
+                ">      gamma delta.\n",
+                ">         - Quote child alpha\n",
+                ">           beta gamma delta\n",
+                ">           epsilon.\n",
+                "\n",
+                "> -    [ ] Task parent alpha\n",
+                ">          beta gamma delta.\n",
+                ">         - [x] Task child\n",
+                ">               alpha beta\n",
+                ">               gamma delta\n",
+                ">               epsilon.\n"
+            )
+        );
+        assert_structure_preserved(source, &fixed);
+        assert_lines_within_width(&fixed, 30);
+
+        let second = reflow_to_width(&cleanup_content_with_indent(&fixed, 8), 30);
+        assert_eq!(second, fixed);
+        assert_structure_preserved(source, &second);
+    }
+
+    #[test]
+    fn configured_indent_8_uses_exact_columns_for_narrow_marker_families() {
+        let cases = [
+            (
+                "- Parent\n  - Child\n",
+                "-    Parent\n        - Child\n",
+            ),
+            (
+                "1. Parent\n   1. Child\n",
+                "1.    Parent\n        1. Child\n",
+            ),
+            (
+                "99. Parent\n    - Child\n",
+                "99.    Parent\n        - Child\n",
+            ),
+            (
+                "999. Parent\n     - Child\n",
+                "999.    Parent\n        - Child\n",
+            ),
+            (
+                "- [ ] Parent\n  - [x] Child\n",
+                "-    [ ] Parent\n        - [x] Child\n",
+            ),
+            (
+                "- Parent\n  - Child\n    - Grandchild\n",
+                "-    Parent\n        -    Child\n                - Grandchild\n",
+            ),
+            (
+                "> - Parent\n>   - Child\n",
+                "> -    Parent\n>         - Child\n",
+            ),
+        ];
+
+        for (source, expected) in cases {
+            let cleaned = cleanup_content_with_indent(source, 8);
+            assert_eq!(cleaned, expected, "source: {source:?}");
+            assert_structure_preserved(source, &cleaned);
+            assert_eq!(cleanup_content_with_indent(&cleaned, 8), cleaned);
+
+            let fixed = reflow_to_width(&cleaned, 80);
+            assert_eq!(fixed, cleaned);
+            assert_structure_preserved(source, &fixed);
+            assert_eq!(
+                reflow_to_width(&cleanup_content_with_indent(&fixed, 8), 80),
+                fixed
+            );
+        }
+    }
+
+    #[test]
+    fn reflow_to_width_composes_blockquote_list_prefix_families() {
+        let cases = [
+            (
+                "> - Alpha beta gamma delta epsilon.",
+                "> - Alpha beta gamma\n>   delta epsilon.",
+            ),
+            (
+                "> 10. Alpha beta gamma delta epsilon.",
+                "> 10. Alpha beta gamma\n>     delta epsilon.",
+            ),
+            (
+                "> - [x] Alpha beta gamma delta epsilon.",
+                "> - [x] Alpha beta gamma\n>       delta epsilon.",
+            ),
+            (
+                "> > - Alpha beta gamma delta epsilon.",
+                "> > - Alpha beta gamma\n> >   delta epsilon.",
+            ),
+        ];
+
+        for (content, expected) in cases {
+            let reflowed = cleanup_to_fixed_width(content, 24);
+            assert_eq!(reflowed, expected, "{content:?}");
+            assert_lines_within_width(&reflowed, 24);
+        }
+    }
+
+    #[test]
+    fn reflow_to_width_keeps_first_and_subsequent_item_paragraphs_independent() {
+        let content = "- First alpha beta gamma delta.\n\n    Second alpha beta gamma delta epsilon.";
+        let reflowed = reflow_to_width(content, 24);
+
+        assert_eq!(
+            reflowed,
+            "- First alpha beta gamma\n  delta.\n\n    Second alpha beta\n    gamma delta epsilon."
+        );
+        assert_lines_within_width(&reflowed, 24);
+    }
+
+    #[test]
+    fn cleanup_preserves_nested_child_after_additional_item_paragraph() {
+        let source = concat!(
+            "- Parent first paragraph.\n",
+            "\n",
+            "  Second paragraph.\n",
+            "\n",
+            "  - Child item.\n"
+        );
+        let expected_default = concat!(
+            "- Parent first paragraph.\n",
+            "    \n",
+            "  Second paragraph.\n",
+            "\n",
+            "    - Child item.\n"
+        );
+        let expected_configured = concat!(
+            "- Parent first paragraph.\n",
+            "  \n",
+            "  Second paragraph.\n",
+            "\n",
+            "  - Child item.\n"
+        );
+        let expected_fixed = concat!(
+            "- Parent first\n",
+            "  paragraph.\n",
+            "    \n",
+            "  Second paragraph.\n",
+            "\n",
+            "    - Child item.\n"
+        );
+
+        let default = cleanup_content(source);
+        assert_eq!(default, expected_default);
+        assert_structure_preserved(source, &default);
+
+        let configured = cleanup_content_with_indent(source, 2);
+        assert_eq!(configured, expected_configured);
+        assert_structure_preserved(source, &configured);
+
+        let fixed = reflow_to_width(&default, 24);
+        assert_eq!(fixed, expected_fixed);
+        assert_lines_within_width(&fixed, 24);
+        assert_structure_preserved(source, &fixed);
+
+        assert_eq!(cleanup_content(&default), default);
+        assert_eq!(cleanup_content_with_indent(&configured, 2), configured);
+        let fixed_second = reflow_to_width(&cleanup_content(&fixed), 24);
+        assert_eq!(fixed_second, fixed);
+        assert_structure_preserved(source, &fixed_second);
+    }
+
+    #[test]
+    fn cleanup_preserves_additional_paragraphs_inside_blockquoted_items() {
+        #[derive(Clone, Copy)]
+        enum Spacing {
+            Normal,
+            Compact,
+            Loose,
+        }
+
+        let fixtures = [
+            (
+                Spacing::Normal,
+                4,
+                concat!(
+                    "> - Parent first paragraph.\n",
+                    ">\n",
+                    ">   Second paragraph alpha beta gamma delta.\n",
+                    ">\n",
+                    ">   - Child item alpha beta.\n"
+                ),
+                concat!(
+                    "> - Parent first paragraph.\n",
+                    "> \n",
+                    ">   Second paragraph alpha beta gamma delta.\n",
+                    "> \n",
+                    ">     - Child item alpha beta.\n"
+                ),
+                concat!(
+                    "> - Parent first\n",
+                    ">   paragraph.\n",
+                    "> \n",
+                    ">   Second paragraph\n",
+                    ">   alpha beta gamma\n",
+                    ">   delta.\n",
+                    "> \n",
+                    ">     - Child item alpha\n",
+                    ">       beta.\n"
+                ),
+            ),
+            (
+                Spacing::Compact,
+                2,
+                concat!(
+                    "> > 1. Parent first paragraph.\n",
+                    "> >\n",
+                    "> >    Second paragraph alpha beta gamma delta.\n",
+                    "> >\n",
+                    "> >    - Child item alpha beta.\n"
+                ),
+                concat!(
+                    "> > 1. Parent first paragraph.\n",
+                    "> > \n",
+                    "> >    Second paragraph alpha beta gamma delta.\n",
+                    "> > \n",
+                    "> >    - Child item alpha beta.\n"
+                ),
+                concat!(
+                    "> > 1. Parent first\n",
+                    "> >    paragraph.\n",
+                    "> > \n",
+                    "> >    Second paragraph\n",
+                    "> >    alpha beta gamma\n",
+                    "> >    delta.\n",
+                    "> > \n",
+                    "> >    - Child item\n",
+                    "> >      alpha beta.\n"
+                ),
+            ),
+            (
+                Spacing::Loose,
+                4,
+                concat!(
+                    "> - [ ] Parent first paragraph.\n",
+                    ">\n",
+                    ">   Second café 🙂 alpha beta gamma delta.\n",
+                    ">\n",
+                    ">   1. Child item alpha beta.\n"
+                ),
+                concat!(
+                    "> - [ ] Parent first paragraph.\n",
+                    "> \n",
+                    ">   Second café 🙂 alpha beta gamma delta.\n",
+                    "> \n",
+                    ">     1. Child item alpha beta.\n"
+                ),
+                concat!(
+                    "> - [ ] Parent first\n",
+                    ">       paragraph.\n",
+                    "> \n",
+                    ">   Second café 🙂 alpha\n",
+                    ">   beta gamma delta.\n",
+                    "> \n",
+                    ">     1. Child item\n",
+                    ">        alpha beta.\n"
+                ),
+            ),
+            (
+                Spacing::Normal,
+                4,
+                concat!(
+                    "> - Parent.\n",
+                    ">   1. Child first paragraph alpha beta.\n",
+                    ">\n",
+                    ">      Child second paragraph alpha beta gamma delta.\n"
+                ),
+                concat!(
+                    "> - Parent.\n",
+                    ">     1. Child first paragraph alpha beta.\n",
+                    "> \n",
+                    ">        Child second paragraph alpha beta gamma delta.\n"
+                ),
+                concat!(
+                    "> - Parent.\n",
+                    ">     1. Child first\n",
+                    ">        paragraph alpha\n",
+                    ">        beta.\n",
+                    "> \n",
+                    ">        Child second\n",
+                    ">        paragraph alpha\n",
+                    ">        beta gamma\n",
+                    ">        delta.\n"
+                ),
+            ),
+        ];
+
+        for (spacing, indent, source, expected, expected_fixed) in fixtures {
+            let clean = |content| match spacing {
+                Spacing::Normal => cleanup_content_with_indent(content, indent),
+                Spacing::Compact => cleanup_content_with_indent_compact(content, indent),
+                Spacing::Loose => cleanup_content_with_indent_loose(content, indent),
+            };
+
+            let cleaned = clean(source);
+            assert_eq!(cleaned, expected);
+            assert_structure_preserved(source, &cleaned);
+            assert_eq!(clean(&cleaned), cleaned);
+
+            let fixed = reflow_to_width(&cleaned, 24);
+            assert_eq!(fixed, expected_fixed);
+            assert_lines_within_width(&fixed, 24);
+            assert_structure_preserved(source, &fixed);
+
+            let second = reflow_to_width(&clean(&fixed), 24);
+            assert_eq!(second, fixed);
+            assert_structure_preserved(source, &second);
+        }
+    }
+
+    #[test]
+    fn cleanup_preserves_nested_lists_inside_blockquotes() {
+        let fixtures = [
+            (
+                concat!(
+                    "> - Parent alpha beta gamma delta epsilon.\n",
+                    ">   - Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> - Parent alpha beta gamma delta epsilon.\n",
+                    ">     - Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> - Parent alpha beta gamma delta epsilon.\n",
+                    ">   - Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> - Parent alpha beta\n",
+                    ">   gamma delta epsilon.\n",
+                    ">     - Child alpha beta\n",
+                    ">       gamma delta\n",
+                    ">       epsilon.\n"
+                ),
+            ),
+            (
+                concat!(
+                    "> 1. Parent alpha beta gamma delta epsilon.\n",
+                    ">    1. Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> 1. Parent alpha beta gamma delta epsilon.\n",
+                    ">     1. Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> 1. Parent alpha beta gamma delta epsilon.\n",
+                    ">    1. Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> 1. Parent alpha beta\n",
+                    ">    gamma delta\n",
+                    ">    epsilon.\n",
+                    ">     1. Child alpha\n",
+                    ">        beta gamma\n",
+                    ">        delta epsilon.\n"
+                ),
+            ),
+            (
+                concat!(
+                    "> - [ ] Parent alpha beta gamma delta epsilon.\n",
+                    ">   - [x] Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> - [ ] Parent alpha beta gamma delta epsilon.\n",
+                    ">     - [x] Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> - [ ] Parent alpha beta gamma delta epsilon.\n",
+                    ">   - [x] Child alpha beta gamma delta epsilon.\n"
+                ),
+                concat!(
+                    "> - [ ] Parent alpha\n",
+                    ">       beta gamma delta\n",
+                    ">       epsilon.\n",
+                    ">     - [x] Child alpha\n",
+                    ">           beta gamma\n",
+                    ">           delta\n",
+                    ">           epsilon.\n"
+                ),
+            ),
+        ];
+
+        for (source, expected_default, expected_configured, expected_fixed) in fixtures {
+            let default = cleanup_content(source);
+            assert_eq!(default, expected_default);
+            assert_structure_preserved(source, &default);
+
+            let configured = cleanup_content_with_indent(source, 2);
+            assert_eq!(configured, expected_configured);
+            assert_structure_preserved(source, &configured);
+
+            let fixed = reflow_to_width(&default, 24);
+            assert_eq!(fixed, expected_fixed);
+            assert_lines_within_width(&fixed, 24);
+            assert_structure_preserved(source, &fixed);
+
+            assert_eq!(cleanup_content(&default), default);
+            assert_eq!(cleanup_content_with_indent(&configured, 2), configured);
+            assert_eq!(reflow_to_width(&cleanup_content(&fixed), 24), fixed);
+        }
+    }
+
+    #[test]
+    fn cleanup_preserves_marker_looking_indented_code_blocks() {
+        let fixtures = [
+            (
+                concat!(
+                    "- Parent.\n",
+                    "\n",
+                    "      - literal unordered code\n",
+                    "\n",
+                    "+ Later sibling.\n"
+                ),
+                concat!(
+                    "- Parent.\n",
+                    "    \n",
+                    "      - literal unordered code\n",
+                    "\n",
+                    "+ Later sibling.\n"
+                ),
+            ),
+            (
+                concat!(
+                    "- Parent.\n",
+                    "\n",
+                    "      1. literal ordered code\n",
+                    "\n",
+                    "+ Later sibling.\n"
+                ),
+                concat!(
+                    "- Parent.\n",
+                    "    \n",
+                    "      1. literal ordered code\n",
+                    "\n",
+                    "+ Later sibling.\n"
+                ),
+            ),
+        ];
+
+        for (source, expected) in fixtures {
+            let default = cleanup_content(source);
+            assert_eq!(default, expected);
+            assert_structure_preserved(source, &default);
+            assert_eq!(cleanup_content(&default), default);
+
+            let configured = cleanup_content_with_indent(source, 4);
+            assert_eq!(configured, expected);
+            assert_structure_preserved(source, &configured);
+            assert_eq!(cleanup_content_with_indent(&configured, 4), configured);
+
+            let fixed = reflow_to_width(&default, 24);
+            assert_eq!(fixed, expected);
+            assert_structure_preserved(source, &fixed);
+            let fixed_second = reflow_to_width(&cleanup_content(&fixed), 24);
+            assert_eq!(fixed_second, fixed);
+        }
+    }
+
+    #[test]
+    fn cleanup_preserves_marker_looking_indented_code_inside_blockquotes() {
+        let fixtures = [
+            (
+                concat!(
+                    "> - Parent.\n",
+                    ">\n",
+                    ">       - literal code\n",
+                    ">\n",
+                    "> - Later sibling.\n"
+                ),
+                concat!(
+                    "> - Parent.\n",
+                    "> \n",
+                    ">       - literal code\n",
+                    "> \n",
+                    "> \n",
+                    "> - Later sibling.\n"
+                ),
+            ),
+            (
+                concat!(
+                    "> 1. Parent.\n",
+                    ">\n",
+                    ">       1. literal code\n",
+                    ">\n",
+                    "> 2. Later sibling.\n"
+                ),
+                concat!(
+                    "> 1. Parent.\n",
+                    "> \n",
+                    ">     1. literal code\n",
+                    "> 2. Later sibling.\n"
+                ),
+            ),
+            (
+                concat!(
+                    "> > - Parent.\n",
+                    "> >\n",
+                    "> >       - literal code\n",
+                    "> >\n",
+                    "> > - Later sibling.\n"
+                ),
+                concat!(
+                    "> > - Parent.\n",
+                    "> > \n",
+                    "> >       - literal code\n",
+                    "> > \n",
+                    "> > \n",
+                    "> > - Later sibling.\n"
+                ),
+            ),
+            (
+                concat!(
+                    "> > 1. Parent.\n",
+                    "> >\n",
+                    "> >       1. literal code\n",
+                    "> >\n",
+                    "> > 2. Later sibling.\n"
+                ),
+                concat!(
+                    "> > 1. Parent.\n",
+                    "> > \n",
+                    "> >     1. literal code\n",
+                    "> > 2. Later sibling.\n"
+                ),
+            ),
+        ];
+
+        for (source, expected) in fixtures {
+            let default = cleanup_content(source);
+            assert_eq!(default, expected);
+            assert_structure_preserved(source, &default);
+            assert_eq!(cleanup_content(&default), default);
+
+            let configured = cleanup_content_with_indent(source, 4);
+            assert_eq!(configured, expected);
+            assert_structure_preserved(source, &configured);
+            assert_eq!(cleanup_content_with_indent(&configured, 4), configured);
+
+            let fixed = reflow_to_width(&default, 24);
+            assert_eq!(fixed, expected);
+            assert_structure_preserved(source, &fixed);
+            assert_eq!(reflow_to_width(&cleanup_content(&fixed), 24), fixed);
+        }
+    }
+
+    #[test]
+    fn full_cleanup_restores_markers_only_for_parser_confirmed_items() {
+        let fixtures = [
+            (
+                "<div>\n* literal html\n</div>\n\n- Actual item.\n",
+                "<div>\n* literal html\n</div>\n\n- Actual item.\n",
+            ),
+            (
+                "```text\n* literal fence\n```\n\n- Actual item.\n",
+                "```text\n* literal fence\n```\n\n- Actual item.\n",
+            ),
+            (
+                "- Parent.\n\n      * literal code\n\n+ Actual item.\n",
+                "- Parent.\n    \n      * literal code\n\n+ Actual item.\n",
+            ),
+            (
+                "| Cell |\n| --- |\n| * literal table |\n\n- Actual item.\n",
+                "| Cell            |\n|-----------------|\n| * literal table |\n\n- Actual item.\n",
+            ),
+            (
+                "::shell-block\n* literal shell\n::end-block\n\n- Actual item.\n",
+                "::shell-block\n* literal shell\n::end-block\n\n- Actual item.\n",
+            ),
+        ];
+
+        for (source, expected) in fixtures {
+            let default = cleanup_content(source);
+            assert_eq!(default, expected);
+            assert_structure_preserved(source, &default);
+            assert_eq!(cleanup_content(&default), default);
+
+            let configured = cleanup_content_with_indent(source, 4);
+            assert_eq!(configured, expected);
+            assert_structure_preserved(source, &configured);
+            assert_eq!(cleanup_content_with_indent(&configured, 4), configured);
+
+            let fixed = reflow_to_width(&default, 24);
+            assert_eq!(fixed, expected);
+            assert_structure_preserved(source, &fixed);
+            assert_eq!(reflow_to_width(&cleanup_content(&fixed), 24), fixed);
+        }
+    }
+
+    #[test]
+    fn full_cleanup_preserves_opaque_shell_payload_bytes_and_structure() {
+        let fixtures = [
+            (
+                concat!(
+                    "::shell-block\n",
+                    "- first literal\n",
+                    "+ second literal\n",
+                    "* third literal\n",
+                    "1. ordered literal\n",
+                    "- [ ] task literal\n",
+                    "::end-block\n",
+                    "\n",
+                    "+ Actual item long enough to wrap at width twenty four.\n"
+                ),
+                concat!(
+                    "::shell-block\n",
+                    "- first literal\n",
+                    "+ second literal\n",
+                    "* third literal\n",
+                    "1. ordered literal\n",
+                    "- [ ] task literal\n",
+                    "::end-block\n",
+                    "\n",
+                    "+ Actual item long\n",
+                    "  enough to wrap at\n",
+                    "  width twenty four.\n"
+                ),
+            ),
+            (
+                concat!(
+                    "> ::shell-block\n",
+                    "> - first literal\n",
+                    "> + second literal\n",
+                    "> * third literal\n",
+                    "> 1. ordered literal\n",
+                    "> - [ ] task literal\n",
+                    "> ::end-block\n",
+                    "> \n",
+                    "> + Actual item long enough to wrap at width twenty four.\n"
+                ),
+                concat!(
+                    "> ::shell-block\n",
+                    "> - first literal\n",
+                    "> + second literal\n",
+                    "> * third literal\n",
+                    "> 1. ordered literal\n",
+                    "> - [ ] task literal\n",
+                    "> ::end-block\n",
+                    "> \n",
+                    "> + Actual item long\n",
+                    ">   enough to wrap at\n",
+                    ">   width twenty four.\n"
+                ),
+            ),
+            (
+                concat!(
+                    "::shell-block\n",
+                    "- first literal\n",
+                    "::block condition\n",
+                    "+ second literal\n",
+                    "::end-block\n",
+                    "- third source line\n",
+                    "  continuation remains literal\n",
+                    "::end-block\n",
+                    "\n",
+                    "+ Actual item long enough to wrap at width twenty four.\n"
+                ),
+                concat!(
+                    "::shell-block\n",
+                    "- first literal\n",
+                    "::block condition\n",
+                    "+ second literal\n",
+                    "::end-block\n",
+                    "- third source line\n",
+                    "  continuation remains literal\n",
+                    "::end-block\n",
+                    "\n",
+                    "+ Actual item long\n",
+                    "  enough to wrap at\n",
+                    "  width twenty four.\n"
+                ),
+            ),
+        ];
+
+        for (source, fixed_expected) in fixtures {
+            let default = cleanup_content(source);
+            assert_eq!(default, source);
+            assert_shell_block_payloads_preserved(source, &default);
+            assert_structure_preserved(source, &default);
+            assert_eq!(cleanup_content(&default), default);
+
+            let configured = cleanup_content_with_indent(source, 4);
+            assert_eq!(configured, source);
+            assert_shell_block_payloads_preserved(source, &configured);
+
+            let fixed = reflow_to_width(&default, 24);
+            assert_eq!(fixed, fixed_expected);
+            assert_shell_block_payloads_preserved(source, &fixed);
+            assert_structure_preserved(source, &fixed);
+            assert_eq!(reflow_to_width(&cleanup_content(&fixed), 24), fixed);
+        }
+    }
+
+    #[test]
+    fn opaque_shell_ownership_uses_shared_block_classification_and_safe_fallbacks() {
+        let lookalike = "::shell-blocker\n- Alpha beta\n  gamma delta.\n";
+        let lookalike_expected = "::shell-blocker\n\n- Alpha beta gamma delta.\n";
+        assert_eq!(cleanup_content(lookalike), lookalike_expected);
+        assert_eq!(cleanup_content(lookalike_expected), lookalike_expected);
+
+        let quoted_mismatch = concat!(
+            "::shell-block\n",
+            "- literal\n",
+            "> ::end-block\n",
+            "- still literal\n",
+            "::end-block\n",
+            "\n",
+            "- Actual wrapped\n",
+            "  prose line.\n"
+        );
+        let quoted_expected = concat!(
+            "::shell-block\n",
+            "- literal\n",
+            "> ::end-block\n",
+            "- still literal\n",
+            "::end-block\n",
+            "\n",
+            "- Actual wrapped prose line.\n"
+        );
+        let quoted_cleaned = cleanup_content(quoted_mismatch);
+        assert_eq!(quoted_cleaned, quoted_expected);
+        assert_shell_block_payloads_preserved(quoted_mismatch, &quoted_cleaned);
+        assert_eq!(cleanup_content(&quoted_cleaned), quoted_cleaned);
+
+        let malformed = [
+            concat!(
+                "::shell-block\n",
+                "- literal\n",
+                "::end-block trailing text\n",
+                "\n",
+                "- Actual wrapped\n",
+                "  prose line.\n"
+            ),
+            concat!(
+                "::shell-block\n",
+                "- unterminated literal\n",
+                "  continuation remains literal\n"
+            ),
+        ];
+        for source in malformed {
+            assert_eq!(cleanup_content(source), source);
+            assert_eq!(reflow_to_width(source, 24), source);
+            assert_eq!(cleanup_content(&cleanup_content(source)), source);
+        }
+    }
+
+    #[test]
+    fn reflow_to_width_preserves_list_hard_breaks_and_container_prefixes() {
+        let cases = [
+            (
+                "- Alpha beta gamma delta.  \n  Epsilon zeta eta theta iota.",
+                "- Alpha beta gamma\n  delta.  \n  Epsilon zeta eta\n  theta iota.",
+            ),
+            (
+                "- Alpha beta gamma delta.\\\n  Epsilon zeta eta theta iota.",
+                "- Alpha beta gamma\n  delta.\\\n  Epsilon zeta eta\n  theta iota.",
+            ),
+        ];
+
+        for (content, expected) in cases {
+            let reflowed = reflow_to_width(content, 20);
+            assert_eq!(reflowed, expected, "{content:?}");
+            assert_lines_within_width(&reflowed, 20);
+        }
+    }
+
+    #[test]
+    fn reflow_to_width_keeps_long_token_intact_after_tight_prefix() {
+        let content = "> - [ ] supercalifragilisticexpialidocious tail";
+        let reflowed = reflow_to_width(content, 12);
+
+        assert_eq!(
+            reflowed,
+            "> - [ ] supercalifragilisticexpialidocious\n>       tail"
+        );
+        assert!(UnicodeWidthStr::width(reflowed.lines().next().unwrap()) > 12);
+        assert!(UnicodeWidthStr::width(reflowed.lines().nth(1).unwrap()) <= 12);
+    }
+
+    #[test]
+    fn reflow_to_width_measures_wide_unicode_with_list_prefix() {
+        let content = "- 漢字 alpha 漢字 beta";
+        let reflowed = reflow_to_width(content, 12);
+
+        assert_eq!(reflowed, "- 漢字 alpha\n  漢字 beta");
+        assert_lines_within_width(&reflowed, 12);
+    }
+
+    #[test]
+    fn reflow_to_width_preserves_list_child_blocks_byte_for_byte() {
+        let cases = [
+            "- Before\n\n    ```text\n    fenced one stays long\n    fenced two stays long\n    ```",
+            "- Before\n\n        indented one stays long\n        indented two stays long",
+            "- Before\n\n    | A | B |\n    |---|---|\n    | a long cell | another long cell |",
+            "- Before\n\n    <div>\n    html one stays long\n    html two stays long\n    </div>",
+            "- Before\n\n    ::shell-block\n    echo one stays long\n    echo two stays long\n    ::end-block",
+            "- Before\n\n    [ref]: https://example.com/a/very/long/path \"A descriptive title\"",
+        ];
+
+        for content in cases {
+            assert_eq!(reflow_to_width(content, 12), content, "{content:?}");
+        }
+    }
+
+    #[test]
+    fn reflow_to_width_keeps_used_reference_definitions_resolvable() {
+        let content = concat!(
+            "- Before [label][ref] alpha beta gamma delta.\n",
+            "\n",
+            "[ref]: https://example.com/a/very/long/path \"A descriptive title\"\n"
+        );
+        let reflowed = reflow_to_width(content, 24);
+
+        assert_eq!(
+            reflowed,
+            concat!(
+                "- Before [label][ref]\n",
+                "  alpha beta gamma\n",
+                "  delta.\n",
+                "\n",
+                "[ref]: https://example.com/a/very/long/path \"A descriptive title\"\n"
+            )
+        );
+        assert_structure_preserved(content, &reflowed);
+        assert_reference_resolves(
+            &reflowed,
+            "ref",
+            "https://example.com/a/very/long/path",
+            "A descriptive title",
+        );
+    }
+
+    #[test]
+    fn cleanup_to_fixed_width_is_idempotent_for_nested_composite_lists() {
+        let content = "> - Parent alpha beta gamma delta epsilon.\n>     - Child alpha beta gamma delta epsilon.";
+        let once = cleanup_to_fixed_width(content, 24);
+        let twice = cleanup_to_fixed_width(&once, 24);
+
+        assert_eq!(
+            once,
+            "> - Parent alpha beta\n>   gamma delta epsilon.\n>     - Child alpha beta\n>       gamma delta\n>       epsilon."
+        );
+        assert_eq!(twice, once);
+        assert_lines_within_width(&twice, 24);
+    }
+
+    #[test]
+    fn reflow_to_width_preserves_table_rows() {
+        let content = "| A | B |\n|---|---|\n| a very long cell | another long cell |\n";
+        let reflowed = cleanup_to_fixed_width(content, 12);
+
+        assert_eq!(reflowed, content);
+    }
+
+    #[test]
+    fn reflow_to_width_keeps_blockquote_prefixes() {
+        let content = "> This quote has enough text to wrap while preserving the quote prefix";
+        let reflowed = cleanup_to_fixed_width(content, 24);
+
+        assert_eq!(
+            reflowed,
+            "> This quote has enough\n> text to wrap while\n> preserving the quote\n> prefix"
+        );
+    }
+
+    #[test]
+    fn reflow_to_width_keeps_composite_blockquote_list_prefixes() {
+        let content = "> - Alpha beta gamma delta epsilon zeta.";
+        let reflowed = cleanup_to_fixed_width(content, 24);
+
+        assert_eq!(
+            reflowed,
+            "> - Alpha beta gamma\n>   delta epsilon zeta."
+        );
+        assert_lines_within_width(&reflowed, 24);
+    }
+
+    #[test]
+    fn reflow_to_width_preserves_transclusion_directives() {
+        let content = "::file ./a/path/that/should/not/be/wrapped.md\n::code ./src/main.rs\n";
+        let reflowed = cleanup_to_fixed_width(content, 12);
+
+        assert_eq!(reflowed, content);
+    }
+
+    #[test]
+    fn reflow_to_width_preserves_shell_block_bodies() {
+        let content = "::shell-block\necho a\necho b\n::end-block\n";
+        let reflowed = cleanup_to_fixed_width(content, 8);
+
+        assert_eq!(reflowed, content);
+    }
+
+    #[test]
+    fn reflow_to_width_preserves_html_blocks() {
+        let content = "<div class=\"options\">\n<span>Very long HTML content stays untouched.</span>\n</div>\n";
+        let reflowed = cleanup_to_fixed_width(content, 12);
+
+        assert_eq!(reflowed, content);
+    }
+
+    /// Eight-space nesting reached through the parent marker's own width. This complements the
+    /// configured-eight narrow-marker fixture above: reflow consumes actual source indentation
+    /// rather than assuming two or four columns.
+    #[test]
+    fn reflow_to_width_derives_prefixes_from_actual_eight_space_nesting() {
+        fn hanging_indent(reflowed: &str) -> usize {
+            let last = reflowed.lines().last().expect("reflowed output has lines");
+            last.len() - last.trim_start().len()
+        }
+
+        let content = "123456. Parent\n        - Alpha beta gamma delta epsilon.";
+        let normalized = cleanup_content_with_indent(content, 2);
+
+        assert_eq!(
+            normalized,
+            "123456. Parent\n        - Alpha beta gamma delta epsilon.\n"
+        );
+        assert_structure_preserved(content, &normalized);
+
+        let reflowed = reflow_to_width(&normalized, 22);
+
+        assert_eq!(
+            reflowed,
+            "123456. Parent\n        - Alpha beta\n          gamma delta\n          epsilon.\n"
+        );
+        assert_lines_within_width(&reflowed, 22);
+        assert_structure_preserved(&normalized, &reflowed);
+
+        let two_space = reflow_to_width(
+            &cleanup_content_with_indent("- Parent\n  - Alpha beta gamma delta epsilon.", 2),
+            22,
+        );
+        let four_space = reflow_to_width(
+            &cleanup_content_with_indent("- Parent\n  - Alpha beta gamma delta epsilon.", 4),
+            22,
+        );
+
+        // A hard-coded continuation width would collapse these three into one value.
+        assert_eq!(
+            [
+                hanging_indent(&two_space),
+                hanging_indent(&four_space),
+                hanging_indent(&reflowed),
+            ],
+            [4, 6, 10]
+        );
+    }
+
+    #[test]
+    fn reflow_to_width_keeps_hard_break_suffix_on_an_indivisible_overflowing_line() {
+        let cases = [
+            (
+                "- [ ] supercalifragilisticexpialidocious  \n      tail here",
+                "- [ ] supercalifragilisticexpialidocious  \n      tail\n      here",
+                "  ",
+            ),
+            (
+                "- [ ] supercalifragilisticexpialidocious\\\n      tail here",
+                "- [ ] supercalifragilisticexpialidocious\\\n      tail\n      here",
+                "\\",
+            ),
+        ];
+        let prefix = "- [ ] ";
+        let width = 12;
+
+        for (content, expected, suffix) in cases {
+            let reflowed = reflow_to_width(content, width);
+
+            assert_eq!(reflowed, expected, "{content:?}");
+            assert_structure_preserved(content, &reflowed);
+
+            let mut lines = reflowed.lines();
+            let atom = lines.next().expect("reflowed output has lines");
+            let body = atom
+                .strip_prefix(prefix)
+                .and_then(|rest| rest.strip_suffix(suffix))
+                .unwrap_or_else(|| panic!("hard-break suffix was dropped: {atom:?}"));
+
+            // Prefix, one whitespace-free token, and the suffix form a single indivisible atom
+            // that has no narrower representation, so this line is allowed to overflow.
+            assert!(!body.contains(char::is_whitespace), "{body:?}");
+            assert!(
+                UnicodeWidthStr::width(prefix)
+                    + UnicodeWidthStr::width(body)
+                    + UnicodeWidthStr::width(suffix)
+                    > width,
+                "the fixture must make the overflow unavoidable: {atom:?}"
+            );
+
+            // The documented exception covers that atom and nothing else.
+            for line in lines {
+                assert!(
+                    UnicodeWidthStr::width(line) <= width,
+                    "line exceeded width {width}: {line:?}\n{reflowed}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "fixed-width cleanup requires a width greater than 0")]
+    fn cleanup_to_fixed_width_rejects_zero_width() {
+        let _ = cleanup_to_fixed_width("content", 0);
+    }
+
+    // ==================== Mixed Prose/List Collapse Regression ====================
+    //
+    // Semantic (list) and legacy (non-list) collapse decisions are produced by two
+    // different passes. When a legacy collapse lands at a *lower* byte offset than a
+    // list collapse, an earlier revision appended legacy edits into the same vector
+    // the semantic-ownership probe was binary-searching, which unsorted it, let one
+    // soft break receive two overlapping edits, and sliced the source backwards
+    // (debug: overlap assertion; release: "byte range starts at 42 but ends at 39").
+
+    #[test]
+    fn strip_incidental_newlines_collapses_prose_before_wrapped_list() {
+        let content = "Prose across\ntwo lines.\n\n- item wrapped\n  across lines\n";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(stripped, "Prose across two lines.\n\n- item wrapped across lines\n");
+    }
+
+    #[test]
+    fn strip_incidental_newlines_collapses_prose_then_multi_item_list() {
+        let content = concat!(
+            "Wrapped prose\ncontinues here.\n\n",
+            "- first item\n  wrapped body\n",
+            "- second item\n  wrapped body\n",
+        );
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(
+            stripped,
+            concat!(
+                "Wrapped prose continues here.\n\n",
+                "- first item wrapped body\n",
+                "- second item wrapped body\n",
+            )
+        );
+    }
+
+    #[test]
+    fn strip_incidental_newlines_collapses_wrapped_list_before_prose() {
+        let content = "- first item\n  wrapped body\n\nWrapped prose\ncontinues here.\n";
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(
+            stripped,
+            "- first item wrapped body\n\nWrapped prose continues here.\n"
+        );
+    }
+
+    #[test]
+    fn strip_incidental_newlines_collapses_alternating_prose_and_list_sections() {
+        let content = concat!(
+            "Alpha prose\nwraps on.\n\n",
+            "- alpha item\n  wraps on.\n\n",
+            "Beta prose\nwraps on.\n\n",
+            "- beta item\n  wraps on.\n",
+        );
+        let stripped = strip_incidental_newlines(content);
+        assert_eq!(
+            stripped,
+            concat!(
+                "Alpha prose wraps on.\n\n",
+                "- alpha item wraps on.\n\n",
+                "Beta prose wraps on.\n\n",
+                "- beta item wraps on.\n",
+            )
+        );
+    }
+
+    #[test]
+    fn cleanup_to_fixed_width_wraps_prose_before_wrapped_list() {
+        let content = concat!(
+            "Wrapped prose\ncontinues here with more words.\n\n",
+            "- first item that is long\n  and wrapped\n",
+        );
+        let reflowed = cleanup_to_fixed_width(content, 30);
+        assert_eq!(
+            reflowed,
+            concat!(
+                "Wrapped prose continues here\nwith more words.\n\n",
+                "- first item that is long and\n  wrapped\n",
+            )
+        );
+    }
+
+    /// Regression for the wide-marker defect reviewed in H1 of
+    /// `fixes/2026-07-13-fixed-width-lists/review-2.md`. Under a wide ordered
+    /// parent (`1234. `, `123456. `), the pre-stack `fix_list_indentation`
+    /// miscounted depth as `current_indent / 2` and over-indented the child
+    /// on every cleanup pass, so the cleanup was not idempotent. The
+    /// stack-based replacement keeps the child at cmark's canonical column
+    /// and stays byte-identical across cleanup passes.
+    #[test]
+    fn cleanup_content_with_indent_4_is_idempotent_for_wide_ordered_markers() {
+        let content = "1234. Parent alpha beta gamma delta epsilon zeta.\n      - Child alpha beta gamma delta epsilon.";
+        let first = cleanup_content_with_indent(content, 4);
+
+        // The structural fingerprint proves cleanup did not silently collapse
+        // the nested child into the parent's prose (the H1 failure mode).
+        assert_structure_preserved(content, &first);
+
+        let second = cleanup_content_with_indent(&first, 4);
+        assert_eq!(
+            first, second,
+            "cleanup_content_with_indent(_, 4) must be idempotent on `1234. ` markers\n\
+             first:\n{first}\nsecond:\n{second}"
+        );
+
+        // Repeat for a wider parent (`123456. `, content col 8) — also a
+        // CommonMark-valid eight-space child position.
+        let content_wide = "123456. Parent alpha beta gamma delta epsilon zeta.\n        - Child alpha beta gamma delta epsilon.";
+        let first_wide = cleanup_content_with_indent(content_wide, 4);
+        assert_structure_preserved(content_wide, &first_wide);
+
+        let second_wide = cleanup_content_with_indent(&first_wide, 4);
+        assert_eq!(
+            first_wide, second_wide,
+            "cleanup_content_with_indent(_, 4) must be idempotent on `123456. ` markers\n\
+             first:\n{first_wide}\nsecond:\n{second_wide}"
+        );
+    }
+
+    /// The H1 review found that `--indent 4` under a wide ordered parent
+    /// (`10. `) collapsed the nested child into the parent's prose on the
+    /// second cleanup pass. The stack-based `fix_list_indentation` keeps the
+    /// child recognized as a nested list across cleanup passes.
+    #[test]
+    fn cleanup_content_with_indent_4_preserves_nested_list_structure_under_wide_parent() {
+        let content = "10. Parent alpha beta gamma delta epsilon zeta.\n    - Child alpha beta gamma delta epsilon.";
+        let first = cleanup_content_with_indent(content, 4);
+
+        // Structural fingerprint must show two nested lists, not one
+        // flat-item-with-absorbed-prose.
+        assert_structure_preserved(content, &first);
+
+        // Sanity-check the child is still emitted as a nested list marker
+        // rather than absorbed into the parent's prose.
+        assert!(
+            first.contains("\n    - Child"),
+            "depth-1 child under `10. ` must stay at column 4, got:\n{first}"
+        );
+    }

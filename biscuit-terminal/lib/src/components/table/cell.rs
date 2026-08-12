@@ -1,14 +1,45 @@
+use std::borrow::Cow;
+
 use crate::components::prose::Prose;
 use crate::components::renderable::TerminalRenderable;
 use crate::utils::{block_constraint::visible_width, layout::Alignment};
 
 use super::types::Currency;
 
+/// Expands horizontal tabs using a caller-supplied interval.
+pub(super) fn expand_tabs_with_width(content: &str, tab_width: usize) -> Cow<'_, str> {
+    if !content.contains('\t') {
+        return Cow::Borrowed(content);
+    }
+
+    let tab_width = tab_width.max(1);
+
+    let mut expanded = String::with_capacity(content.len());
+    let mut segment_start = 0;
+
+    for (index, ch) in content.char_indices() {
+        if ch != '\t' {
+            continue;
+        }
+
+        expanded.push_str(&content[segment_start..index]);
+        let line_start = expanded.rfind('\n').map_or(0, |newline| newline + 1);
+        let column = visible_width(&expanded[line_start..]) as usize;
+        let spaces = tab_width - (column % tab_width);
+        expanded.push_str(&" ".repeat(spaces));
+        segment_start = index + ch.len_utf8();
+    }
+
+    expanded.push_str(&content[segment_start..]);
+    Cow::Owned(expanded)
+}
+
 /// Content for a table cell.
 ///
 /// This enum supports five cell types that each have distinct rendering behavior:
 ///
-/// - **Text**: Renders as-is, supports word wrapping and alignment
+/// - **Text**: Supports word wrapping and alignment; table rendering expands
+///   horizontal tabs using the supplied [`crate::terminal::Terminal`]
 /// - **Integer**: Formats with thousands separators (e.g., `1,234,567`)
 /// - **Float**: Formats with two decimal places (e.g., `12,345.67`)
 /// - **Currency**: Formats with currency symbol prefix and two decimal places (e.g., `$1,234.56`)
@@ -46,7 +77,7 @@ use super::types::Currency;
 /// ```
 #[derive(Debug, Clone)]
 pub enum TableCellContent {
-    /// Text (which can include escape characters)
+    /// Text, including ANSI escapes
     Text(String),
     /// Signed integer, formatted with thousands separators
     Integer(i64),
@@ -98,12 +129,12 @@ impl From<Prose> for TableCellContent {
 impl std::fmt::Display for TableCellContent {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            TableCellContent::Text(s) => write!(f, "{}", s),
+            TableCellContent::Text(s) => f.write_str(s),
             TableCellContent::Integer(n) => write!(f, "{}", format_integer(*n)),
             TableCellContent::Float(n) => write!(f, "{}", format_float(*n)),
             TableCellContent::Currency(c, amt) => write!(f, "{}", format_currency(c, *amt)),
             TableCellContent::StyledProse(prose) => {
-                write!(f, "{}", prose.render_optimistic(None))
+                f.write_str(&prose.render_optimistic(None))
             }
         }
     }

@@ -40,8 +40,9 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{
     BrowserRenderable, RenderableTerminalContent, TerminalRenderable,
 };
+use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use renderable::markdown::MarkdownRenderable;
-use renderable::tree::{NodeKind, RenderNode, TreeRenderable};
+use renderable::tree::{NodeKind, RenderNode, RenderStrictness, TreeRenderable};
 use std::rc::Rc;
 
 use parity_helpers::{strip_ansi, test_terminal};
@@ -106,6 +107,25 @@ fn normalize_for_parity(s: &str) -> String {
         end -= 1;
     }
     lines[..end].join("\n")
+}
+
+/// Renders a render-tree node to a terminal string at the given width,
+/// folding it through the canonical `render_terminal_node` path.
+fn render_tree(node: &RenderNode, width: u32) -> String {
+    let term = test_terminal(width);
+    let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+    render_terminal_node(node, &opts)
+        .expect("tree render should succeed")
+        .output
+}
+
+/// Widest visible (ANSI-stripped) line in the rendered output.
+fn widest_visible_line(rendered: &str) -> usize {
+    strip_ansi(rendered)
+        .lines()
+        .map(|line| line.trim_end().chars().count())
+        .max()
+        .unwrap_or(0)
 }
 
 #[test]
@@ -350,6 +370,148 @@ fn parity_triple_digit_prefix_wraps_with_5char_hanging_indent() {
         saw_continuation,
         "expected at least one wrapped line for the 100. item"
     );
+}
+
+// ---------------------------------------------------------------------------
+// Width-mode slack sink (style-everywhere Phase 2, Task 2.2)
+//
+// A list's `Layout.width` resolves the outer box, which narrows
+// `available_width`; the item body TEXT column then wraps to that width while
+// the marker / hanging-indent stays fixed. So the item body text column is
+// the documented slack sink (spec decision D2). Lists HUG naturally: a short
+// item stays short, a long item wraps to the available width.
+// ---------------------------------------------------------------------------
+
+/// A ~200-char sentence that must wrap at any realistic terminal width.
+const LONG_ITEM: &str = "This is a deliberately long ordered-list item whose \
+single sentence keeps going well past any reasonable terminal column so that \
+the render tree is forced to wrap the item body text onto several successive \
+lines at the available content width.";
+
+#[test]
+fn width_auto_body_wraps_to_available() {
+    let layout = biscuit_terminal::utils::layout::Layout {
+        width: biscuit_terminal::utils::layout::Width::Auto,
+        ..Default::default()
+    };
+    let list = OrderedList::new(vec![LONG_ITEM]).with_layout(layout);
+    let node = list.render_tree();
+    let rendered = render_tree(&node, 80);
+    let widest = widest_visible_line(&rendered);
+    let line_count = strip_ansi(&rendered)
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .count();
+    assert!(widest <= 80, "body must wrap within width 80: widest={widest}");
+    assert!(
+        line_count > 1,
+        "body must use the full width to wrap onto multiple lines: {rendered:?}"
+    );
+}
+
+#[test]
+fn width_fixed_percent_50_does_not_double_apply() {
+    use biscuit_terminal::utils::layout::{Length, TargetValue, Width};
+
+    let layout = biscuit_terminal::utils::layout::Layout {
+        width: Width::Fixed(TargetValue::universal(Length::Percent(50.0))),
+        ..Default::default()
+    };
+    let list = OrderedList::new(vec![LONG_ITEM]).with_layout(layout);
+    let node = list.render_tree();
+    let rendered = render_tree(&node, 80);
+    let widest = widest_visible_line(&rendered);
+    // 50% of width 80 = 40 cells for the outer box. A widest of ~20 would mean
+    // the 50% was resolved twice (box=40, then wrapped to 50% of 40 = 20) —
+    // the double-application bug this guards against.
+    assert!(
+        widest <= 40,
+        "50% of width 80 caps the body at 40 cells: widest={widest}"
+    );
+    assert!(
+        widest > 20,
+        "widest ~20 would mean the 50% was applied twice: widest={widest}"
+    );
+}
+
+#[test]
+fn width_fit_content_hugs_short_content() {
+    use biscuit_terminal::utils::layout::Width;
+
+    let layout = biscuit_terminal::utils::layout::Layout {
+        width: Width::FitContent,
+        ..Default::default()
+    };
+    let list = OrderedList::new(vec!["Ab", "Cd"]).with_layout(layout);
+    let node = list.render_tree();
+    let rendered = render_tree(&node, 80);
+    let widest = widest_visible_line(&rendered);
+    assert!(
+        widest < 80,
+        "FitContent hugs short content and does not pad to full width: widest={widest}"
+    );
+}
+
+#[test]
+fn width_fixed_full_wraps_body_to_available() {
+    // Width::Fixed(100%) is the explicit "fill the parent's available width"
+    // contract (spec C2). The list body wraps within the resolved content
+    // width; the marker / hanging indent stays fixed (D2 slack sink).
+    use biscuit_terminal::utils::layout::{Length, TargetValue, Width};
+
+    let layout = biscuit_terminal::utils::layout::Layout {
+        width: Width::Fixed(TargetValue::universal(Length::Percent(100.0))),
+        ..Default::default()
+    };
+    let list = OrderedList::new(vec![LONG_ITEM]).with_layout(layout);
+    let node = list.render_tree();
+    let rendered = render_tree(&node, 80);
+    let widest = widest_visible_line(&rendered);
+    assert!(
+        widest <= 80,
+        "Fixed(100%) wraps the body within width 80: widest={widest}"
+    );
+    let line_count = strip_ansi(&rendered)
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .count();
+    assert!(
+        line_count > 1,
+        "Fixed(100%) must use the full width so the long item wraps: {rendered:?}"
+    );
+}
+
+#[test]
+fn marker_and_hanging_indent_stay_fixed_under_width_modes() {
+    // D2 slack sink: the marker ("1. ") and the hanging indent are fixed, so
+    // they keep their geometry across width modes. Only the item body text
+    // column absorbs slack by wrapping.
+    use biscuit_terminal::utils::layout::Width;
+
+    for layout in [
+        biscuit_terminal::utils::layout::Layout::default(),
+        biscuit_terminal::utils::layout::Layout {
+            width: Width::Fixed(biscuit_terminal::utils::layout::TargetValue::universal(
+                biscuit_terminal::utils::layout::Length::Percent(50.0),
+            )),
+            ..Default::default()
+        },
+    ] {
+        let list =
+            OrderedList::new(vec!["Body line that is wide enough to wrap under narrow widths."])
+                .with_layout(layout);
+        let node = list.render_tree();
+        let rendered = render_tree(&node, 80);
+        let stripped = strip_ansi(&rendered);
+        let first = stripped
+            .lines()
+            .next()
+            .expect("at least one rendered line");
+        assert!(
+            first.starts_with("1. "),
+            "marker is fixed at \"1. \" under any width mode: {first:?}"
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -9,6 +9,11 @@ description = "Shared protobuf schema, gRPC stubs, and IPC helpers for the rende
 name = "rendezvous_core"
 path = "src/lib.rs"
 
+[features]
+# Endpoint constructors for daemon-spawning fixtures. Kept off the default
+# path so nothing in a shipped binary can reach them.
+test-support = []
+
 [dependencies]
 prost = "0.14"
 tonic = { version = "0.14", default-features = false, features = ["transport", "codegen", "server", "channel", "router"] }
@@ -20,9 +25,18 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std", "f
 rand_core = { version = "0.6", features = ["getrandom"] }
 biscuit-hash = { path = "../../../biscuit-hash/lib", default-features = false, features = ["blake3"] }
 bech32 = "0.11"
+# Stable OS-user discovery for the per-user local endpoint. Sniff never depends
+# on Rendezvous, so this edge stays acyclic.
+sniff = { path = "../../../sniff/lib", default-features = false }
 
 [dev-dependencies]
 tempfile = "3"
 
+[target.'cfg(unix)'.dev-dependencies]
+# An independent oracle for the effective UID in endpoint tests: asserting the
+# derived endpoint against `sniff` would only prove the code agrees with itself.
+libc = "0.2"
+
 [build-dependencies]
 tonic-prost-build = "0.14"
+protoc-bin-vendored = "3"

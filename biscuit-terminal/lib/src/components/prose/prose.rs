@@ -56,22 +56,23 @@ use crate::{
 /// assert!(prose.render_optimistic(None).contains("literal <angles>"));
 /// ```
 ///
-/// ## Layout
+/// ## Layout & Style Contract
 ///
-/// Configure margins, alignment, and word wrapping:
+/// `Prose` has a dual-mode contract (spec C1/C7):
 ///
-/// ```rust
-/// use biscuit_terminal::components::prose::Prose;
-/// use biscuit_terminal::components::renderable::TerminalRenderable;
-/// use biscuit_terminal::utils::layout::{Alignment, Layout, WordWrap};
+/// - **Block-container mode** (the public component API, i.e. calling
+///   `render()` / `render_tree()` directly): the root routes through the shared
+///   render-tree fold, so all applicable `Layout` box properties (`margin`,
+///   `padding`, `width`, `max_width`, `alignment`) and `Style` properties
+///   (`color`, `background`, `emphasis`, `border`) are honored via the fold
+///   (C1).
+/// - **Inline mode** (when `Prose` content is nested inside another component):
+///   the parsed inline spans carry no block box; the containing block owns the
+///   box. Inherited `color` / `emphasis` and inline `background` flow through
+///   (C7). Inline `background` paints only the inline content, not a padding
+///   box.
 ///
-/// let prose = Prose::new("Styled content")
-///     .with_layout(Layout {
-///         alignment: Alignment::Center,
-///         word_wrap: WordWrap::None,
-///         ..Layout::default()
-///     });
-/// ```
+/// `word_wrap` is honored on text leaves (Decision D4).
 #[derive(Debug, Clone)]
 pub struct Prose {
     /// the raw content as received

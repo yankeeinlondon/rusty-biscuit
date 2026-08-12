@@ -55,6 +55,9 @@ pub struct CreateResult {
     pub target_cwd: PathBuf,
     /// Branch name
     pub branch: String,
+    /// When the branch already existed and was reused as-is, the short commit it
+    /// points at. `None` when a fresh branch was forked from the current HEAD.
+    pub reused_branch_at: Option<String>,
 }
 
 /// Detect the default branch name (main or master).
@@ -503,13 +506,17 @@ pub fn create_worktree(branch: &str, base: &Path) -> Result<CreateResult, Worktr
     // Check if the branch already exists
     let branch_exists = git_command(&["rev-parse", "--verify", branch]).is_ok();
 
-    if branch_exists {
+    let reused_branch_at = if branch_exists {
         git_command(&[
             "worktree",
             "add",
             &target_path.display().to_string(),
             branch,
         ])?;
+        // Reusing the branch as-is checks it out wherever it already points — it
+        // is NOT forked from the current HEAD. Report the commit so callers can
+        // warn about silently resurrecting a stale branch.
+        git_command(&["rev-parse", "--short", branch]).ok()
     } else {
         git_command(&[
             "worktree",
@@ -518,7 +525,8 @@ pub fn create_worktree(branch: &str, base: &Path) -> Result<CreateResult, Worktr
             "-b",
             branch,
         ])?;
-    }
+        None
+    };
 
     let target_cwd = target_path.join(&info.relative_path);
 
@@ -526,6 +534,7 @@ pub fn create_worktree(branch: &str, base: &Path) -> Result<CreateResult, Worktr
         worktree_path: target_path,
         target_cwd,
         branch: branch.to_string(),
+        reused_branch_at,
     })
 }
 
@@ -878,10 +887,28 @@ branch refs/heads/fix/bug-42
     #[test]
     #[serial_test::serial]
     fn default_branch_detection() {
-        // Should work inside this monorepo
-        let result = default_branch();
-        assert!(result.is_ok());
-        assert!(["main", "master"].contains(&result.unwrap().as_str()));
+        // A remote-less repo has no `refs/remotes/origin/HEAD`, so detection
+        // falls through to probing for a local `main`/`master`.
+        let repo = temp_repo();
+        let _guard = DirGuard::enter(repo.path());
+
+        assert_eq!(default_branch().expect("local main is detectable"), "main");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn default_branch_prefers_remote_head_over_local_main() {
+        let repo = temp_repo();
+        let _guard = DirGuard::enter(repo.path());
+        run_git(repo.path(), &["branch", "trunk"]);
+        run_git(repo.path(), &["update-ref", "refs/remotes/origin/trunk", "trunk"]);
+        run_git(repo.path(), &[
+            "symbolic-ref",
+            "refs/remotes/origin/HEAD",
+            "refs/remotes/origin/trunk",
+        ]);
+
+        assert_eq!(default_branch().expect("origin/HEAD is detectable"), "trunk");
     }
 
     #[test]

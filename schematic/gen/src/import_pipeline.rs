@@ -9,6 +9,7 @@ use colored::Colorize;
 use schematic_define::openapi::import::{DiagnosticSeverity, OpenApiDiagnostic};
 use schematic_define::openapi::{OpenApiImport, OpenApiSource};
 
+use crate::definition_gen;
 use crate::errors::GeneratorError;
 use crate::model_gen;
 use crate::output::generate_and_write_standalone;
@@ -24,6 +25,13 @@ pub struct ImportOptions {
     pub module_path: Option<String>,
     /// Output directory for generated code.
     pub output: String,
+    /// Output directory for a `schematic-definitions`-shaped module.
+    ///
+    /// When set, `mod.rs` + `types.rs` are written here instead of a
+    /// standalone client, so the imported API joins the definitions catalog.
+    pub definitions_out: Option<String>,
+    /// Path prefixes whose endpoints are excluded from the import.
+    pub exclude_paths: Vec<String>,
     /// Print generated code without writing files.
     pub dry_run: bool,
     /// Fail on any warning-level diagnostic.
@@ -85,27 +93,70 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
         print_diagnostics(&import_result.diagnostics);
     }
 
-    let api = import_result.api;
+    let mut api = import_result.api;
     let models = import_result.models;
-    let diagnostics = import_result.diagnostics;
+    let mut diagnostics = import_result.diagnostics;
+
+    if !options.exclude_paths.is_empty() {
+        let before = api.endpoints.len();
+        api.endpoints.retain(|endpoint| {
+            !options
+                .exclude_paths
+                .iter()
+                .any(|prefix| endpoint.path.starts_with(prefix))
+        });
+        let excluded = before - api.endpoints.len();
+        if excluded > 0 {
+            diagnostics.push(OpenApiDiagnostic::info(
+                "paths".to_string(),
+                format!(
+                    "Excluded {excluded} endpoints matching {:?}",
+                    options.exclude_paths
+                ),
+            ));
+        }
+    }
 
     let api_name = api.name.clone();
     let endpoint_count = api.endpoints.len();
     let model_count = models.types.len();
 
-    let output_dir = Path::new(&options.output);
-
     // Validate model names
     model_gen::validate_model_names(&models)?;
 
-    // Generate model types
     let has_types = !models.types.is_empty();
-    if has_types {
-        model_gen::generate_models(&models, output_dir, options.dry_run)?;
-    }
 
-    // Generate client code using standalone mode (no schematic_definitions imports)
-    generate_and_write_standalone(&api, output_dir, options.dry_run, has_types)?;
+    match &options.definitions_out {
+        Some(definitions_out) => {
+            let definitions_dir = Path::new(definitions_out);
+            let module_name = options
+                .module_path
+                .clone()
+                .unwrap_or_else(|| api_name.to_lowercase());
+
+            if has_types {
+                model_gen::generate_models_with(&models, definitions_dir, options.dry_run, true)?;
+            }
+
+            definition_gen::generate_definition_module(
+                &api,
+                &module_name,
+                &model_type_names(&models),
+                definitions_dir,
+                options.dry_run,
+            )?;
+        }
+        None => {
+            let output_dir = Path::new(&options.output);
+
+            if has_types {
+                model_gen::generate_models(&models, output_dir, options.dry_run)?;
+            }
+
+            // Generate client code using standalone mode (no schematic_definitions imports)
+            generate_and_write_standalone(&api, output_dir, options.dry_run, has_types)?;
+        }
+    }
 
     Ok(ImportResult {
         api_name,
@@ -113,6 +164,27 @@ pub fn run_import(options: &ImportOptions) -> Result<ImportResult, GeneratorErro
         model_count,
         diagnostics,
     })
+}
+
+/// Collects the names of every model the catalog defines.
+///
+/// Aliases are included: an endpoint can name one as its body or response type,
+/// and `validate_completeness` requires every such name to be registered. A
+/// combinator alias emits a real enum or struct rather than a `type` item, so
+/// most of them are not aliases in the generated source at all.
+fn model_type_names(models: &schematic_define::models::ModelCatalog) -> Vec<String> {
+    use schematic_define::models::ModelDef;
+
+    models
+        .types
+        .iter()
+        .filter_map(|model| match model {
+            ModelDef::Struct(s) => Some(s.name.clone()),
+            ModelDef::Enum(e) => Some(e.name.clone()),
+            ModelDef::Alias(a) => Some(a.name.clone()),
+            _ => None,
+        })
+        .collect()
 }
 
 /// Prints diagnostics to stderr with colored output.
@@ -138,6 +210,8 @@ mod tests {
             api_name: Some("TestApi".to_string()),
             module_path: None,
             output: "./out".to_string(),
+            definitions_out: None,
+            exclude_paths: vec![],
             dry_run: true,
             strict: false,
             verbose: false,
@@ -213,6 +287,8 @@ components:
             api_name: Some("Petstore".to_string()),
             module_path: None,
             output: output_dir.to_string_lossy().to_string(),
+            definitions_out: None,
+            exclude_paths: vec![],
             dry_run: true,
             strict: false,
             verbose: false,
@@ -234,6 +310,8 @@ components:
             api_name: None,
             module_path: None,
             output: "/tmp/out".to_string(),
+            definitions_out: None,
+            exclude_paths: vec![],
             dry_run: true,
             strict: false,
             verbose: false,

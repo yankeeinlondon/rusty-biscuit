@@ -42,8 +42,13 @@ pub use loop_driver::{drive_event_loop, drive_event_loop_with_chrome, drive_even
 
 use inline_viewport::{finalize_inline_viewport, run_inline_dynamic_with_chrome};
 use terminal_lifecycle::{
-    StdoutTtyRedirect, TerminalGuard, drain_pending_events, prepare_terminal, restore_terminal,
+    TerminalGuard, drain_pending_events, prepare_terminal, restore_terminal,
 };
+// F2: StdoutTtyRedirect has a real impl on both Unix (`/dev/tty`) and
+// Windows (`CONOUT$`); only exotic non-Unix/non-Windows targets fall back
+// to the local no-op guard below.
+#[cfg(any(unix, windows))]
+use terminal_lifecycle::StdoutTtyRedirect;
 
 /// State types that can be driven to completion by [`run_standalone`].
 ///
@@ -391,10 +396,15 @@ fn loop_exit_to_result<V>(exit: LoopExit<V>) -> io::Result<V> {
     }
 }
 
-#[cfg(not(unix))]
+// Exotic non-Unix / non-Windows targets (e.g. wasm, redox) have no
+// equivalent of /dev/tty or CONOUT$. The redirect stays a no-op there;
+// mod.rs still bails with "no interactive terminal available" when both
+// stdio streams are captured. Unix and Windows pull in the real impl from
+// terminal_lifecycle via the `#[cfg(any(unix, windows))]` import above.
+#[cfg(all(not(unix), not(windows)))]
 struct StdoutTtyRedirect;
 
-#[cfg(not(unix))]
+#[cfg(all(not(unix), not(windows)))]
 impl StdoutTtyRedirect {
     fn activate_if_piped() -> Self {
         Self

@@ -21,6 +21,11 @@
 //! - `--silent` suppresses the prompt under TTY and emits the typed
 //!   `MissingProperties` report instead.
 //!
+//! This binary owns the direct-`compose` schema-prompt coverage and the
+//! interactive `inline-compose` collection coverage. The sequence-overlay
+//! coverage lives in `sequence_overlay_pty.rs`; shared PTY harness
+//! helpers live in `common::pty`.
+//!
 //! Gating: `#![cfg(unix)]`, `require_level!(Level::L2, pty_available(),
 //! ...)` so the test skips cleanly without a PTY and panics under
 //! `BISCUIT_TEST_LEVEL_REQUIRED=2`.
@@ -35,8 +40,8 @@
 
 #[allow(deprecated)]
 use assert_cmd::cargo::cargo_bin;
-use expectrl::session::OsSession;
 use expectrl::Session;
+use expectrl::session::OsSession;
 use std::fs;
 use std::io::Write;
 use std::process::Command;
@@ -45,133 +50,8 @@ use tempfile::tempdir;
 use test_toolkit::{Level, require_level};
 
 mod common;
+use common::pty::*;
 use common::{augmented_path, pty_available, write_executable};
-
-/// Drain bytes from the PTY for a generous window so each `try_read`
-/// call collects whatever the child has flushed so far. Returns the
-/// concatenated transcript bytes as `String::from_utf8_lossy` so stray
-/// ANSI fragments never panic.
-fn read_for(session: &mut OsSession, total_deadline: Duration) -> String {
-    let mut buf = Vec::new();
-    let mut scratch = [0u8; 4096];
-    let deadline = Instant::now() + total_deadline;
-    session.set_expect_timeout(Some(Duration::from_millis(150)));
-    while Instant::now() < deadline {
-        match session.try_read(&mut scratch) {
-            Ok(0) => break,
-            Ok(n) => buf.extend_from_slice(&scratch[..n]),
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            Err(_) => break,
-        }
-    }
-    String::from_utf8_lossy(&buf).into_owned()
-}
-
-/// Wait for a substring (after ANSI stripping) to appear in the cumulative
-/// transcript, draining the PTY incrementally. Returns the full ANSI-bearing
-/// transcript on success; panics with the accumulated transcript on
-/// timeout for easier diagnosis.
-fn wait_for_marker(session: &mut OsSession, marker: &str, deadline: Duration) -> String {
-    let stop = Instant::now() + deadline;
-    let mut transcript = String::new();
-    let mut scratch = [0u8; 4096];
-    session.set_expect_timeout(Some(Duration::from_millis(100)));
-    while Instant::now() < stop {
-        match session.try_read(&mut scratch) {
-            Ok(0) => break,
-            Ok(n) => {
-                transcript.push_str(&String::from_utf8_lossy(&scratch[..n]));
-                if common::strip_ansi(&transcript).contains(marker) {
-                    return transcript;
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
-                || e.kind() == std::io::ErrorKind::TimedOut =>
-            {
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            Err(_) => break,
-        }
-    }
-    panic!(
-        "marker {marker:?} did not appear within {deadline:?}; transcript:\n{transcript}"
-    );
-}
-
-/// Alternate-screen enter sequence crossterm emits via `EnterAlternateScreen`.
-const ALT_SCREEN_ENTER: &str = "\x1b[?1049h";
-
-/// Block until the interactive widget has switched the PTY into raw mode,
-/// then return the accumulated raw transcript.
-///
-/// The prompt's property name renders in the pre-prompt status report —
-/// which `run_standalone` prints to stderr *before* it calls
-/// `enable_raw_mode()`. Sending a keystroke as soon as that name appears
-/// races the line discipline: until raw mode disables `ICRNL`, a carriage
-/// return (`\r`, the byte that means Enter) is rewritten to a line feed
-/// (`\n`), which crossterm parses as `Ctrl+J` — not `Enter` — so the
-/// prompt never submits and the test hangs to its deadline.
-///
-/// `prepare_terminal` enables raw mode and *then* emits
-/// [`ALT_SCREEN_ENTER`], so observing that sequence in the transcript
-/// proves raw mode is already active and any `\r` we write next survives
-/// as a carriage return. Gate every keystroke on this marker.
-///
-/// `seed` is the transcript already drained by the preceding
-/// [`wait_for_marker`] call — the sequence may have arrived in the same
-/// read as the status report.
-fn wait_for_raw_mode(session: &mut OsSession, seed: String, deadline: Duration) -> String {
-    if seed.contains(ALT_SCREEN_ENTER) {
-        return seed;
-    }
-    let stop = Instant::now() + deadline;
-    let mut transcript = seed;
-    let mut scratch = [0u8; 4096];
-    session.set_expect_timeout(Some(Duration::from_millis(100)));
-    while Instant::now() < stop {
-        match session.try_read(&mut scratch) {
-            Ok(0) => break,
-            Ok(n) => {
-                transcript.push_str(&String::from_utf8_lossy(&scratch[..n]));
-                if transcript.contains(ALT_SCREEN_ENTER) {
-                    return transcript;
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock
-                || e.kind() == std::io::ErrorKind::TimedOut =>
-            {
-                std::thread::sleep(Duration::from_millis(20));
-            }
-            Err(_) => break,
-        }
-    }
-    panic!(
-        "raw-mode marker {ALT_SCREEN_ENTER:?} did not appear within {deadline:?}; \
-         transcript:\n{transcript}"
-    );
-}
-
-/// Pre-stage a minimal claudine config at `$HOME/.claudine/config.json`.
-///
-/// Under a PTY, claudine detects an interactive stdin and runs the
-/// first-run setup wizard when no user config exists. The wizard would
-/// intercept any input we send to the schema prompt and block the test
-/// indefinitely. Writing an empty JSON object satisfies the loader (every
-/// `ClaudineConfig` field has a `#[serde(default)]` derivation) and
-/// inherits the defaults — notably `prompt_for_missing = true`.
-fn stage_default_config(home_dir: &std::path::Path) {
-    let claudine_dir = home_dir.join(".claudine");
-    fs::create_dir_all(&claudine_dir).unwrap();
-    fs::write(claudine_dir.join("config.json"), "{}").unwrap();
-}
 
 /// Build a fresh PTY-spawnable `Command` for `claudine compose --goose <file>`
 /// with the workspace's `bin` dir on PATH and HOME set to the workspace so
@@ -179,7 +59,7 @@ fn stage_default_config(home_dir: &std::path::Path) {
 /// user config.
 fn compose_command(workspace_dir: &std::path::Path, bin_dir: &std::path::Path, md_file: &std::path::Path) -> Command {
     stage_default_config(workspace_dir);
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args(["compose", "--goose", md_file.to_str().unwrap()]);
     cmd.env("HOME", workspace_dir);
     cmd.env("PATH", augmented_path(bin_dir));
@@ -192,25 +72,6 @@ fn compose_command(workspace_dir: &std::path::Path, bin_dir: &std::path::Path, m
     cmd.env_remove("CI");
     cmd.current_dir(workspace_dir);
     cmd
-}
-
-/// Stage a stub `goose` binary that records that the provider was
-/// launched (so the test can prove the interactive prompt successfully
-/// satisfied the schema and execution proceeded).
-///
-/// The stub writes the marker file FIRST and then exits without reading
-/// stdin. Under PTY, the wrapper's stdin remains attached to the master
-/// side, so a `cat > /dev/null` stub would block on EOF that never
-/// arrives. Writing the marker first lets the test observe the launch
-/// even if the wrapper still has stdin open.
-fn stage_goose_stub(bin_dir: &std::path::Path, marker_file: &std::path::Path) {
-    write_executable(
-        &bin_dir.join("goose"),
-        &format!(
-            "#!/bin/sh\necho 'launched' > {marker}\nexit 0\n",
-            marker = marker_file.display()
-        ),
-    );
 }
 
 #[test]
@@ -378,20 +239,21 @@ fn level2_pty_schema_prompt_number_retries_on_invalid_input() {
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     let pre = wait_for_marker(&mut session, "count", Duration::from_secs(10));
-    wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
+    let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
 
     // First, submit a non-numeric value. The parse-and-retry loop in
-    // `collect_number` must re-prompt with an inline validation error
-    // and keep the previous buffer. (The retry's submission waits on the
-    // widget-rendered validation error below, which already implies raw
-    // mode for the second prompt iteration.)
+    // `collect_number` must reject it and re-prompt, keeping the previous
+    // buffer.
     session.write_all(b"not-a-number\r").expect("write bad value");
     session.flush().ok();
 
-    // Wait for the re-prompt to render the validation error. The error
-    // text is built from the parse_number helper as `\`<raw>\` is not a
-    // valid integer`.
-    wait_for_marker(&mut session, "not a valid integer", Duration::from_secs(5));
+    // Wait for the prompt to re-enter raw mode: a fresh `run_standalone`
+    // iteration is the deterministic proof the invalid value was rejected
+    // and `collect_number` looped. (Scraping the re-rendered validation
+    // error glyphs is unreliable here — a bare PTY has no emulator to
+    // answer the inline viewport's cursor probe with a real position, so
+    // the error/hint rows cannot be laid out deterministically.)
+    let _ = wait_for_raw_mode_reentry(&mut session, pre, Duration::from_secs(5));
 
     // Clear the previous buffer so the next submission contains only the
     // good value. Backspace (`\x7f` DEL) is what crossterm reports as
@@ -442,7 +304,7 @@ fn level2_pty_schema_silent_suppresses_prompt_under_tty() {
     // suppress it and surface the typed `MissingProperties` error
     // instead.
     stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args([
         "compose",
         "--goose",
@@ -591,7 +453,7 @@ fn level2_pty_schema_prompt_precedes_provider_launch_with_interactive_flag() {
     .unwrap();
 
     stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args(["compose", "-i", "--goose", md_file.to_str().unwrap()]);
     cmd.env("HOME", workspace.path());
     cmd.env("PATH", augmented_path(&bin_dir));
@@ -737,7 +599,7 @@ fn level2_pty_schema_prompt_appears_even_when_no_interactive_overrides_frontmatt
     .unwrap();
 
     stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args([
         "compose",
         "--no-interactive",
@@ -791,706 +653,6 @@ fn level2_pty_schema_prompt_appears_even_when_no_interactive_overrides_frontmatt
         common::strip_ansi(&transcript)
     );
 }
-
-// ============================================================================
-// `claudine sequence` Interactive Mode (review-5 High finding)
-// ============================================================================
-//
-// The sequence subcommand drives the same `biscuit-tui` prompt loop as
-// direct `compose`, but with two extra contracts:
-//
-// 1. Missing required properties are deduplicated across steps — the user
-//    is prompted once and the answer applies to every step that needs it.
-// 2. Prompting happens BEFORE any provider session is launched, so a
-//    malformed sequence never spawns the agent.
-//
-// These tests drive `claudine sequence` through a real pseudo-terminal so
-// both contracts can be observed end-to-end.
-
-/// Build a fresh PTY-spawnable `Command` for `claudine sequence --goose <file>`
-/// with the workspace's `bin` dir on PATH and HOME set to the workspace so
-/// `prompt_for_missing` reads the default (`true`) instead of any real
-/// user config.
-fn sequence_command(
-    workspace_dir: &std::path::Path,
-    bin_dir: &std::path::Path,
-    md_file: &std::path::Path,
-) -> Command {
-    stage_default_config(workspace_dir);
-    let mut cmd = Command::new(cargo_bin!("claudine"));
-    cmd.args(["sequence", "--goose", md_file.to_str().unwrap()]);
-    cmd.env("HOME", workspace_dir);
-    cmd.env("PATH", augmented_path(bin_dir));
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-    cmd.env_remove("NO_COLOR");
-    cmd.env_remove("CLAUDINE_PLAIN");
-    cmd.env_remove("CI");
-    cmd.current_dir(workspace_dir);
-    cmd
-}
-
-/// Stage a stub `goose` binary that records each invocation in a counter
-/// file. The stub writes the count atomically (last-writer-wins) and
-/// exits successfully so the wrapper continues to the next sequence step.
-fn stage_goose_counter_stub(bin_dir: &std::path::Path, count_path: &std::path::Path) {
-    write_executable(
-        &bin_dir.join("goose"),
-        &format!(
-            "#!/bin/sh\ncount=0\nif [ -f {count} ]; then\n  IFS= read -r count < {count}\nfi\ncount=$((count + 1))\nprintf '%s' \"$count\" > {count}\nexit 0\n",
-            count = count_path.display()
-        ),
-    );
-}
-
-#[test]
-#[serial_test::serial(pty)]
-fn level2_pty_sequence_prompt_dedupes_and_launches_all_steps() {
-    // Both steps require `topic` but the schema only declares it once.
-    // The interactive collector must prompt for `topic` EXACTLY ONCE
-    // (dedupe), reuse the answer for every step, and only launch the
-    // provider AFTER the prompt has been satisfied.
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
-
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
-
-    stage_goose_counter_stub(&bin_dir, &count_path);
-
-    let md_file = workspace.path().join("seq.md");
-    fs::write(
-        &md_file,
-        concat!(
-            "---\n",
-            "$schema:\n",
-            "  topic: 'string(required)'\n",
-            "sequence:\n",
-            "  - alpha\n",
-            "  - beta\n",
-            "---\n",
-            "Step {{state}} about {{topic}}.\n",
-        ),
-    )
-    .unwrap();
-
-    let cmd = sequence_command(workspace.path(), &bin_dir, &md_file);
-    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
-
-    // The label is built from the property name plus type hint. Wait for
-    // the prompt to render before sending input.
-    let pre = wait_for_marker(&mut session, "topic", Duration::from_secs(10));
-
-    // Sanity assertion: before we type, the stub must NOT have been
-    // launched. This proves the prompt runs strictly before any provider
-    // session starts.
-    assert!(
-        !count_path.exists(),
-        "provider stub was launched before the prompt was satisfied; \
-         transcript so far:\n{}",
-        common::strip_ansi(&pre)
-    );
-
-    // Submit the answer once, after raw mode is confirmed. The deduper
-    // should apply this value to every step that declared the same
-    // missing property.
-    let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
-    session.write_all(b"async\r").expect("write topic value");
-    session.flush().ok();
-
-    // Drain until BOTH steps have launched. The counter file is created
-    // by the stub on first invocation; the count must reach 2.
-    let stop = Instant::now() + Duration::from_secs(20);
-    let mut transcript = pre;
-    let mut final_count = String::new();
-    while Instant::now() < stop {
-        if let Ok(content) = fs::read_to_string(&count_path)
-            && content.trim() == "2"
-        {
-            final_count = content;
-            break;
-        }
-        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
-    }
-
-    assert!(
-        count_path.exists(),
-        "provider stub was never launched; transcript:\n{}",
-        common::strip_ansi(&transcript)
-    );
-    let count = if final_count.is_empty() {
-        fs::read_to_string(&count_path).unwrap_or_default()
-    } else {
-        final_count
-    };
-    assert_eq!(
-        count.trim(),
-        "2",
-        "expected both sequence steps to launch after the deduped prompt was \
-         satisfied; counter content: {count:?}; transcript:\n{}",
-        common::strip_ansi(&transcript)
-    );
-
-    // The prompt label should appear exactly once in the transcript even
-    // though two steps declared the same missing property. The
-    // status-report rendering also includes the property name in the
-    // per-step header, so we look for the prompt-specific label glyph
-    // `string` to count actual prompt instances. We tolerate
-    // re-rendering by the TUI (raw-mode cursor moves can re-emit the
-    // label) but the count must be small — never proportional to the
-    // step count.
-    let plain = common::strip_ansi(&transcript);
-    let prompt_label_hits = plain.matches("topic (string)").count();
-    assert!(
-        prompt_label_hits <= 4,
-        "expected the deduped prompt to render once (with TUI re-render \
-         tolerance up to 4); saw {prompt_label_hits} hits in transcript:\n{plain}"
-    );
-}
-
-#[test]
-#[serial_test::serial(pty)]
-fn level2_pty_sequence_step_overlay_satisfies_required_property() {
-    // The reserved overlay key `state` is set to each step's raw value
-    // (the step name for string-form steps). A schema that requires
-    // `state` is therefore satisfied by every step's overlay, so the
-    // interactive prompt should NOT fire for `state` — only for the
-    // genuinely-missing `topic`.
-    //
-    // This exercises the review-5 contract that the per-step status
-    // report must honor the per-step effective override map: `state`
-    // must appear as Valid for every step (because the overlay supplies
-    // it) even while the user is being prompted for the missing `topic`.
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
-
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let prompts_path = workspace.path().join("all-prompts.txt");
-
-    // Goose stub: append the `-t <prompt>` argument from each invocation
-    // to a single file so the test can inspect each step's composed
-    // prompt afterward.
-    write_executable(
-        &bin_dir.join("goose"),
-        r#"#!/bin/sh
-prev=""
-for arg in "$@"; do
-  if [ "$prev" = "-t" ]; then
-    {
-      printf -- '--- invocation ---\n'
-      printf '%s\n' "$arg"
-    } >> "$CLAUDINE_PROMPTS_FILE"
-  fi
-  prev="$arg"
-done
-exit 0
-"#,
-    );
-
-    let md_file = workspace.path().join("seq.md");
-    fs::write(
-        &md_file,
-        concat!(
-            "---\n",
-            "$schema:\n",
-            "  state: 'string(required)'\n",
-            "  topic: 'string(required)'\n",
-            "sequence:\n",
-            "  - alpha\n",
-            "  - beta\n",
-            "---\n",
-            "Step {{state}}: topic={{topic}}\n",
-        ),
-    )
-    .unwrap();
-
-    let mut cmd = sequence_command(workspace.path(), &bin_dir, &md_file);
-    cmd.env("CLAUDINE_PROMPTS_FILE", &prompts_path);
-    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
-
-    let pre = wait_for_marker(&mut session, "topic", Duration::from_secs(10));
-    let plain_pre = common::strip_ansi(&pre);
-
-    // The status report must NOT flag `state` as Missing — the overlay
-    // supplies it per step. If this assertion fires, the pre-prompt
-    // status report was built without the per-step effective override
-    // map (the review-5 medium finding).
-    let state_missing_line = plain_pre
-        .lines()
-        .find(|line| line.contains("state") && line.contains("was not defined but is required"));
-    assert!(
-        state_missing_line.is_none(),
-        "`state` must NOT appear as Missing in the pre-prompt status report \
-         when the per-step overlay supplies it; offending line: {state_missing_line:?}\n\
-         transcript:\n{plain_pre}"
-    );
-
-    // Drive the prompt to completion. The deduper should fire `topic`
-    // exactly once and reuse the answer for both steps.
-    let pre = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
-    session.write_all(b"collected\r").expect("write topic value");
-    session.flush().ok();
-
-    let stop = Instant::now() + Duration::from_secs(20);
-    let mut transcript = pre;
-    while Instant::now() < stop {
-        if prompts_path.exists()
-            && fs::read_to_string(&prompts_path)
-                .map(|s| s.matches("invocation").count() >= 2)
-                .unwrap_or(false)
-        {
-            break;
-        }
-        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
-    }
-
-    let captured = fs::read_to_string(&prompts_path).unwrap_or_default();
-    // Each step's `state` came from its own overlay so the prompts must
-    // contain the step name verbatim, and both steps must show the
-    // collected `topic`.
-    assert!(
-        captured.contains("Step alpha: topic=collected"),
-        "step 1 must compose its own overlay-supplied state (alpha) with the \
-         deduped collected topic; captured:\n{captured}\ntranscript:\n{}",
-        common::strip_ansi(&transcript)
-    );
-    assert!(
-        captured.contains("Step beta: topic=collected"),
-        "step 2 must compose its own overlay-supplied state (beta) with the \
-         deduped collected topic; captured:\n{captured}\ntranscript:\n{}",
-        common::strip_ansi(&transcript)
-    );
-}
-
-#[test]
-#[serial_test::serial(pty)]
-fn level2_pty_sequence_status_report_honors_setter_supplied_required() {
-    // The schema requires TWO properties, `topic` and `tier`. The user
-    // supplies `tier` via a CLI `--set` / shorthand setter, so the
-    // interactive prompt should only fire for `topic`. The status report
-    // shown before the prompt must reflect this — `tier` must NOT be
-    // listed as Missing.
-    //
-    // Regression target (review-5 medium): the previous implementation
-    // called `build_schema_status_report(&source, None)`, discarding both
-    // user `--set` overrides and the per-step overlay, so `tier` would
-    // appear as missing in the pre-prompt diagnostic even though every
-    // step's prepare step had already accepted the supplied value.
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
-
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-
-    stage_goose_stub(&bin_dir, &marker);
-
-    let md_file = workspace.path().join("seq.md");
-    fs::write(
-        &md_file,
-        concat!(
-            "---\n",
-            "$schema:\n",
-            "  topic: 'string(required)'\n",
-            "  tier: 'string(required)'\n",
-            "sequence:\n",
-            "  - alpha\n",
-            "  - beta\n",
-            "---\n",
-            "Step {{state}}: topic={{topic}} tier={{tier}}\n",
-        ),
-    )
-    .unwrap();
-
-    // Same as `sequence_command`, but appends a shorthand setter
-    // `tier=gold` after the file argument so only `topic` should remain
-    // missing once the overlay/setter merge has run.
-    stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin!("claudine"));
-    cmd.args([
-        "sequence",
-        "--goose",
-        md_file.to_str().unwrap(),
-        "tier=gold",
-    ]);
-    cmd.env("HOME", workspace.path());
-    cmd.env("PATH", augmented_path(&bin_dir));
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-    cmd.env_remove("NO_COLOR");
-    cmd.env_remove("CLAUDINE_PLAIN");
-    cmd.env_remove("CI");
-    cmd.current_dir(workspace.path());
-
-    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
-
-    let pre = wait_for_marker(&mut session, "topic", Duration::from_secs(10));
-    let plain_pre = common::strip_ansi(&pre);
-
-    // Targeted assertion: the per-property status line for `tier` must
-    // NOT carry the "was not defined but is required" missing-state body
-    // from `render_required_line`. If it does, the status report was
-    // built without the CLI setter overrides applied.
-    let tier_missing_line = plain_pre
-        .lines()
-        .find(|line| line.contains("tier") && line.contains("was not defined but is required"));
-    assert!(
-        tier_missing_line.is_none(),
-        "setter-supplied `tier` must NOT appear as Missing in the pre-prompt \
-         status report; offending line: {tier_missing_line:?}\nfull transcript:\n{plain_pre}"
-    );
-
-    // Drive the prompt to completion so the test exits cleanly.
-    wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
-    session.write_all(b"async\r").expect("write topic value");
-    session.flush().ok();
-    let stop = Instant::now() + Duration::from_secs(15);
-    while Instant::now() < stop {
-        if marker.exists() {
-            break;
-        }
-        let _ = read_for(&mut session, Duration::from_millis(200));
-    }
-}
-
-// ============================================================================
-// `claudine sequence` agent-resolution pre-prompt (review-4 High finding)
-// ============================================================================
-//
-// A live sequence (no `--dry-run`, no explicit `--<provider>`) gates agent
-// resolution on `stderr` only — the prompting/status channel — exactly like
-// direct compose. On a terminal, a prompting state must emit the same styled
-// pre-prompt message direct compose shows *before* the review screen renders:
-//
-//   - a scalar invalid `agent`        -> the imperative `Invalid Agent:` line,
-//   - an all-uninstallable `agent` list -> the zero-installed-list breakdown.
-//
-// These drive `claudine sequence` (no provider flag) through a real PTY so the
-// message is observed before the review UI. A third test redirects stdout to a
-// file to prove the gate keys off `stderr`, not `stdout`: under the old
-// `stdin && stdout` gate, `sequence doc.md > out.md` wrongly aborted; under the
-// stderr gate it prompts.
-
-/// Build a `claudine sequence <file>` command with NO explicit provider flag,
-/// so the live agent-resolution gate runs. `PATH` is restricted to `bin_dir`
-/// alone (not [`augmented_path`]) so only the staged stub providers count as
-/// installed and the classified agent state is deterministic on any host.
-fn sequence_command_no_provider(
-    workspace_dir: &std::path::Path,
-    bin_dir: &std::path::Path,
-    md_file: &std::path::Path,
-) -> Command {
-    stage_default_config(workspace_dir);
-    let mut cmd = Command::new(cargo_bin!("claudine"));
-    cmd.args(["sequence", md_file.to_str().unwrap()]);
-    cmd.env("HOME", workspace_dir);
-    cmd.env("PATH", bin_dir);
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-    cmd.env_remove("NO_COLOR");
-    cmd.env_remove("CLAUDINE_PLAIN");
-    cmd.env_remove("CI");
-    cmd.current_dir(workspace_dir);
-    cmd
-}
-
-/// Stage a stub provider `slug` that records a launch by writing `marker_file`.
-/// The agent-resolution tests assert this marker never appears, proving the
-/// pre-prompt fires strictly before any provider session starts.
-fn stage_provider_launch_stub(
-    bin_dir: &std::path::Path,
-    slug: &str,
-    marker_file: &std::path::Path,
-) {
-    write_executable(
-        &bin_dir.join(slug),
-        &format!(
-            "#!/bin/sh\necho launched > {marker}\nexit 0\n",
-            marker = marker_file.display()
-        ),
-    );
-}
-
-#[test]
-#[serial_test::serial(pty)]
-fn level2_pty_sequence_invalid_agent_shows_preprompt_before_review() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
-
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-    stage_provider_launch_stub(&bin_dir, "goose", &marker);
-
-    let md_file = workspace.path().join("seq.md");
-    fs::write(
-        &md_file,
-        concat!(
-            "---\n",
-            "agent: not-real\n",
-            "sequence:\n",
-            "  - alpha\n",
-            "  - beta\n",
-            "---\n",
-            "Step {{state}}.\n",
-        ),
-    )
-    .unwrap();
-
-    let cmd = sequence_command_no_provider(workspace.path(), &bin_dir, &md_file);
-    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
-
-    // The styled `Invalid Agent:` pre-prompt must render BEFORE the review
-    // table. Under the old code the TTY branch jumped straight into the
-    // review screen and never emitted this message.
-    let pre = wait_for_marker(&mut session, "Invalid Agent", Duration::from_secs(10));
-    let plain = common::strip_ansi(&pre);
-    assert!(
-        plain.contains("not-real"),
-        "the invalid hint must be named in the pre-prompt; transcript:\n{plain}"
-    );
-    assert!(
-        !marker.exists(),
-        "no provider may launch before the agent-resolution prompt is shown; \
-         transcript:\n{plain}"
-    );
-
-    // Cancel the review screen (Esc) so the child exits instead of blocking
-    // on the picker. Gate the keystroke on raw mode like the schema tests.
-    let _ = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
-    session.write_all(b"\x1b").expect("send Esc to cancel review");
-    session.flush().ok();
-
-    let _ = read_for(&mut session, Duration::from_secs(5));
-    assert!(
-        !marker.exists(),
-        "a cancelled review must never launch a provider"
-    );
-}
-
-#[test]
-#[serial_test::serial(pty)]
-fn level2_pty_sequence_zero_installed_list_shows_preprompt_before_review() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
-
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-    // A runnable provider must exist so the review picker has an option to
-    // choose from once the zero-installed-list breakdown is shown.
-    stage_provider_launch_stub(&bin_dir, "goose", &marker);
-
-    let md_file = workspace.path().join("seq.md");
-    // An all-invalid list resolves to zero installed providers regardless of
-    // host, mirroring the L1 `sequence_dry_run_zero_installed_list_*` fixture.
-    fs::write(
-        &md_file,
-        concat!(
-            "---\n",
-            "agent: [not-real, also-fake]\n",
-            "sequence:\n",
-            "  - alpha\n",
-            "  - beta\n",
-            "---\n",
-            "Step {{state}}.\n",
-        ),
-    )
-    .unwrap();
-
-    let cmd = sequence_command_no_provider(workspace.path(), &bin_dir, &md_file);
-    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
-
-    // `installed/valid` is the single-token signature of the zero-installed
-    // breakdown; it must render before the review table.
-    let pre = wait_for_marker(&mut session, "installed/valid", Duration::from_secs(10));
-    let plain = common::strip_ansi(&pre);
-    assert!(
-        !plain.contains("Invalid Agent"),
-        "a list state must not render the single-invalid scalar message; \
-         transcript:\n{plain}"
-    );
-    assert!(
-        !marker.exists(),
-        "no provider may launch before the agent-resolution prompt is shown; \
-         transcript:\n{plain}"
-    );
-
-    let _ = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
-    session.write_all(b"\x1b").expect("send Esc to cancel review");
-    session.flush().ok();
-
-    let _ = read_for(&mut session, Duration::from_secs(5));
-    assert!(
-        !marker.exists(),
-        "a cancelled review must never launch a provider"
-    );
-}
-
-#[test]
-#[serial_test::serial(pty)]
-fn level2_pty_sequence_stderr_tty_with_stdout_redirected_prompts() {
-    // The core gate fix: `sequence doc.md > out.md` keeps `stderr` on the
-    // terminal but redirects `stdout` to a file. The agent-resolution gate
-    // keys off `stderr` only, so the prompting state must reach the review
-    // screen (emitting the pre-prompt) rather than aborting with the no-TTY
-    // `agent resolution failed` error the old `stdin && stdout` gate produced.
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
-
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-    stage_provider_launch_stub(&bin_dir, "goose", &marker);
-    stage_default_config(workspace.path());
-
-    let md_file = workspace.path().join("seq.md");
-    fs::write(
-        &md_file,
-        concat!(
-            "---\n",
-            "agent: not-real\n",
-            "sequence:\n",
-            "  - alpha\n",
-            "---\n",
-            "Step {{state}}.\n",
-        ),
-    )
-    .unwrap();
-
-    let out_file = workspace.path().join("out.md");
-    let claudine_bin = cargo_bin!("claudine");
-
-    // Drive through `/bin/sh -c` so the shell, not expectrl, owns the `>`
-    // redirect: the child claudine inherits stderr+stdin from the PTY but
-    // stdout points at `out.md`.
-    let mut cmd = Command::new("/bin/sh");
-    cmd.arg("-c").arg(format!(
-        "'{}' sequence '{}' > '{}'",
-        claudine_bin.display(),
-        md_file.display(),
-        out_file.display(),
-    ));
-    cmd.env("HOME", workspace.path());
-    cmd.env("PATH", &bin_dir);
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-    cmd.env_remove("NO_COLOR");
-    cmd.env_remove("CLAUDINE_PLAIN");
-    cmd.env_remove("CI");
-    cmd.current_dir(workspace.path());
-
-    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
-
-    // The pre-prompt is written to stderr (the PTY) even though stdout is
-    // redirected. Observing it proves the run reached the prompt path.
-    let pre = wait_for_marker(&mut session, "Invalid Agent", Duration::from_secs(10));
-    let plain = common::strip_ansi(&pre);
-    assert!(
-        !plain.contains("agent resolution failed"),
-        "stderr-gated resolution must NOT abort when only stdout is redirected; \
-         transcript:\n{plain}"
-    );
-    assert!(
-        !marker.exists(),
-        "no provider may launch before the agent-resolution prompt is shown; \
-         transcript:\n{plain}"
-    );
-
-    let _ = wait_for_raw_mode(&mut session, pre, Duration::from_secs(10));
-    session.write_all(b"\x1b").expect("send Esc to cancel review");
-    session.flush().ok();
-
-    let _ = read_for(&mut session, Duration::from_secs(5));
-    assert!(
-        !marker.exists(),
-        "a cancelled review must never launch a provider"
-    );
-}
-
-#[test]
-#[serial_test::serial(pty)]
-fn level2_pty_sequence_auto_selectable_skips_review_and_launches() {
-    // The review-5 High finding: auto-selectable states (`Selected` /
-    // `ListOneInstalled`) must bypass the review screen on a TTY, exactly like
-    // direct compose's `resolve_live_target_with_tty` returns before the picker.
-    // A one-installed-list hint (`agent: [goose, gemini]` with only `goose`
-    // staged) classifies as `ListOneInstalled`, so the provider must launch with
-    // no alternate-screen review UI and no keyboard input.
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
-
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-    stage_provider_launch_stub(&bin_dir, "goose", &marker);
-
-    let md_file = workspace.path().join("seq.md");
-    fs::write(
-        &md_file,
-        concat!(
-            "---\n",
-            "agent: [goose, gemini]\n",
-            "sequence:\n",
-            "  - alpha\n",
-            "---\n",
-            "Auto-select body.\n",
-        ),
-    )
-    .unwrap();
-
-    let cmd = sequence_command_no_provider(workspace.path(), &bin_dir, &md_file);
-    let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
-
-    // Drain the PTY until the stub records a launch, accumulating the full raw
-    // transcript so the alternate-screen assertion below sees everything the
-    // review UI would have emitted. No keystroke is ever sent.
-    let stop = Instant::now() + Duration::from_secs(15);
-    let mut transcript = String::new();
-    while Instant::now() < stop {
-        if marker.exists() {
-            break;
-        }
-        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
-    }
-    // Drain a final window so any trailing alt-screen bytes are captured even
-    // if the marker landed before the picker would have rendered.
-    transcript.push_str(&read_for(&mut session, Duration::from_millis(300)));
-
-    assert!(
-        marker.exists(),
-        "an auto-selectable (one-installed-list) sequence must launch the \
-         provider without prompting; transcript:\n{}",
-        common::strip_ansi(&transcript)
-    );
-    assert!(
-        !transcript.contains(ALT_SCREEN_ENTER),
-        "auto-selectable states must bypass the review screen — the picker's \
-         alternate-screen enter must never appear; transcript:\n{}",
-        common::strip_ansi(&transcript)
-    );
-}
-
-// ============================================================================
-// `claudine inline-compose` interactive schema collection
-// (2026-06-14-interactive, review-1 High finding)
-// ============================================================================
-//
-// `inline-compose` has its own preparation path (`prepare_inline_with_schema`)
-// and an extra interactive-closure gate that rejects providers which cannot
-// capture the final assistant message. The schema-collection invariant —
-// missing required values are collected BEFORE any provider session starts or
-// the inline-unsupported diagnostic is reached — must therefore be verified
-// for `inline-compose` specifically, not just `compose`.
-//
-// These tests use Codex, the one provider that supports interactive inline
-// closure (`supports_interactive_inline_closure() == true`), so the run
-// proceeds to a real provider launch after collection rather than the
-// unsupported diagnostic. The stub captures Claudine's
-// `--output-last-message <file>` write-back path exactly like the non-PTY
-// `inline_compose_interactive_codex_uses_captured_last_message` test.
 
 /// Stage a Codex stub for interactive inline composition. It records its
 /// launch by writing `marker_file`, then satisfies Claudine's
@@ -1583,7 +745,7 @@ fn level2_pty_inline_compose_interactive_flag_collects_before_launch() {
     .unwrap();
 
     stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args([
         "inline-compose",
         "-i",
@@ -1632,7 +794,7 @@ fn level2_pty_inline_compose_frontmatter_interactive_collects_before_launch() {
     .unwrap();
 
     stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args(["inline-compose", "--codex", md_file.to_str().unwrap()]);
     cmd.env("HOME", workspace.path());
     cmd.env("PATH", augmented_path(&bin_dir));

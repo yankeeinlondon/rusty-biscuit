@@ -1,5 +1,23 @@
 # Unified Hooks: Events, Provider Surfaces, and Canonical Actions
 
+## Contents
+
+- Current Model: "Hooks" vs "Actions"
+- Event Mapping to Providers
+- Event Support by Provider
+- Key Types and Structures
+- Current Configuration and Runtime Types
+- Matrix Types
+- ProviderAdapter trait
+- HookAction enum
+- CLI Surfaces
+- How It Works
+- Hook Handler Deadlines
+- Support Level Implications
+
+Use heading search to jump to the listed subsystem.
+
+
 Reference for Claudine's unified event model, covering canonical event names,
 provider-native mappings, support levels, and the current dispatch pipeline.
 
@@ -57,26 +75,26 @@ before_compact     PreCompact                           PreCompress
 notification       Notification      reasoning          Notification notification
 
 
-Table 2: Kimi Code, OpenCode, Qwen Code, Roo Code
+Table 2: Kimi Code, OpenCode, Qwen Code
 
-Event              Kimi Code       OpenCode             Qwen Code  Roo Code
----------------------------------------------------------------------------
-session_start                      session.created                 TaskCreated
-session_end                        session.deleted                 TaskAborted
+Event              Kimi Code       OpenCode             Qwen Code
+-----------------------------------------------------------------
+session_start                      session.created
+session_end                        session.deleted
 before_prompt      TurnBegin       chat.message
-before_tool        ToolCall        tool.execute.before             ToolUseOutput
-after_tool         ToolResult      tool.execute.after              ToolResultOutput
-tool_error         ToolResult                                      TaskToolFailed
+before_tool        ToolCall        tool.execute.before
+after_tool         ToolResult      tool.execute.after
+tool_error         ToolResult
 permission_request ApprovalRequest permission.ask       CanUseTool
-human_in_the_loop  ApprovalRequest permission.asked                WaitingForInput
-turn_complete      TurnEnd         session.idle         result     TaskCompleted
-turn_error         prompt.status   session.error        result     Error
-subagent_start     SubagentEvent                                   TaskSpawned
-subagent_stop      SubagentEvent                                   TaskDelegationCompleted
-before_model                       chat.params                     StreamingStarted
-after_model        ContentPart     message.part.updated assistant  StreamingEnded
+human_in_the_loop  ApprovalRequest permission.asked
+turn_complete      TurnEnd         session.idle         result
+turn_error         prompt.status   session.error        result
+subagent_start     SubagentEvent
+subagent_stop      SubagentEvent
+before_model                       chat.params
+after_model        ContentPart     message.part.updated assistant
 before_compact     CompactionBegin session.compacted
-notification       StatusUpdate    tui.toast.show       system     ModeChanged
+notification       StatusUpdate    tui.toast.show       system
 
 Blank = not supported or no specific native name.
 ```
@@ -85,24 +103,24 @@ Blank = not supported or no specific native name.
 
 Support level indicates how Claudine can capture an event from a provider.
 
-| Event | Claude | Codex | Gemini | Goose | Kimi Code | OpenCode | Qwen Code | Roo Code |
-|---|---|---|---|---|---|---|---|---|
-| session_start | Hook | NonHook | Hook | -- | -- | Hook | -- | NonHook |
-| session_end | Hook | -- | Hook | -- | -- | Hook | -- | NonHook |
-| before_prompt | Hook | NonHook | Hook | -- | NonHook | Hook | -- | -- |
-| before_tool | Hook | NonHook | Hook | -- | NonHook | Hook | -- | NonHook |
-| after_tool | Hook | NonHook | Hook | -- | NonHook | Hook | -- | NonHook |
-| tool_error | Hook | NonHook | -- | -- | NonHook | -- | -- | NonHook |
-| permission_request | Hook | -- | -- | -- | NonHook | Hook | NonHook | -- |
-| human_in_the_loop | Hook | NonHook | -- | NonHook | NonHook | Hook | -- | NonHook |
-| turn_complete | Hook | Hook | Hook | NonHook | NonHook | Hook | NonHook | NonHook |
-| turn_error | -- | NonHook | -- | NonHook | NonHook | Hook | NonHook | NonHook |
-| subagent_start | Hook | -- | -- | NonHook | NonHook | -- | -- | NonHook |
-| subagent_stop | Hook | -- | -- | NonHook | NonHook | -- | -- | NonHook |
-| before_model | -- | -- | Hook | -- | -- | Hook | -- | NonHook |
-| after_model | -- | NonHook | Hook | NonHook | NonHook | Hook | NonHook | NonHook |
-| before_compact | Hook | -- | Hook | -- | NonHook | Hook | -- | -- |
-| notification | Hook | NonHook | Hook | NonHook | NonHook | Hook | NonHook | NonHook |
+| Event | Claude | Codex | Gemini | Goose | Kimi Code | OpenCode | Qwen Code |
+|---|---|---|---|---|---|---|---|
+| session_start | Hook | NonHook | Hook | -- | -- | Hook | -- |
+| session_end | Hook | -- | Hook | -- | -- | Hook | -- |
+| before_prompt | Hook | NonHook | Hook | -- | NonHook | Hook | -- |
+| before_tool | Hook | NonHook | Hook | -- | NonHook | Hook | -- |
+| after_tool | Hook | NonHook | Hook | -- | NonHook | Hook | -- |
+| tool_error | Hook | NonHook | -- | -- | NonHook | -- | -- |
+| permission_request | Hook | -- | -- | -- | NonHook | Hook | NonHook |
+| human_in_the_loop | Hook | NonHook | -- | NonHook | NonHook | Hook | -- |
+| turn_complete | Hook | Hook | Hook | NonHook | NonHook | Hook | NonHook |
+| turn_error | -- | NonHook | -- | NonHook | NonHook | Hook | NonHook |
+| subagent_start | Hook | -- | -- | NonHook | NonHook | -- | -- |
+| subagent_stop | Hook | -- | -- | NonHook | NonHook | -- | -- |
+| before_model | -- | -- | Hook | -- | -- | Hook | -- |
+| after_model | -- | NonHook | Hook | NonHook | NonHook | Hook | NonHook |
+| before_compact | Hook | -- | Hook | -- | NonHook | Hook | -- |
+| notification | Hook | NonHook | Hook | NonHook | NonHook | Hook | NonHook |
 
 **Legend:**
 
@@ -192,7 +210,7 @@ stored in `extra`.
 
 Supported agentic CLI providers. Serialized as `snake_case`.
 
-**Variants (8):**
+**Variants (7):**
 
 | Variant | Slug | Display Name |
 |---|---|---|
@@ -200,10 +218,9 @@ Supported agentic CLI providers. Serialized as `snake_case`.
 | `Codex` | `codex` | Codex |
 | `Gemini` | `gemini` | Gemini |
 | `Goose` | `goose` | Goose |
-| `KimiCode` | `kimi_code` | Kimi Code |
-| `OpenCode` | `open_code` | OpenCode |
-| `QwenCode` | `qwen_code` | Qwen Code |
-| `RooCode` | `roo_code` | Roo Code |
+| `KimiCode` | `kimi` | Kimi Code |
+| `OpenCode` | `opencode` | OpenCode |
+| `QwenCode` | `qwen` | Qwen Code |
 
 **Key methods:**
 

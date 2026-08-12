@@ -898,3 +898,143 @@ pub fn create_pnpm_forest_with_degenerate_sibling() -> (TempDir, PathBuf) {
     let path = root.to_path_buf();
     (dir, path)
 }
+
+/// Create a git-init'd bare-root repo with two nested standards under
+/// separate subtrees: a pnpm workspace at `web/` and a .NET solution at
+/// `dotnet/`.
+///
+/// The root itself has no workspace marker so only the nested walk can
+/// surface either layer. The deep `web/packages/app/package.json` ensures
+/// the second-level depth is also walked by the single-pass scan.
+pub fn create_nested_pnpm_and_dotnet_repo() -> (TempDir, PathBuf) {
+    let dir = TempDir::new().unwrap();
+    let _repo = Repository::init(dir.path()).unwrap();
+    let root = dir.path();
+
+    // Nested pnpm workspace under web/.
+    let web = root.join("web");
+    fs::create_dir_all(&web).unwrap();
+    fs::write(
+        web.join("pnpm-workspace.yaml"),
+        "packages:\n  - 'packages/*'\n",
+    )
+    .unwrap();
+    fs::write(web.join("package.json"), "{}").unwrap();
+    let web_app = web.join("packages/app");
+    fs::create_dir_all(&web_app).unwrap();
+    fs::write(web_app.join("package.json"), r#"{"name":"app"}"#).unwrap();
+    let web_lib = web.join("packages/lib");
+    fs::create_dir_all(&web_lib).unwrap();
+    fs::write(web_lib.join("package.json"), r#"{"name":"lib"}"#).unwrap();
+
+    // Nested .NET solution under dotnet/. The .sln lists a real .csproj so
+    // the dotnet detector resolves a non-degenerate package set.
+    let dotnet = root.join("dotnet");
+    fs::create_dir_all(&dotnet).unwrap();
+    fs::write(
+        dotnet.join("MyApp.sln"),
+        "Microsoft Visual Studio Solution File, Format Version 12.00\n\
+         Project(\"{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}\") = \"App\", \"src\\App\\App.csproj\", \"{1}\"\n\
+         EndProject\n",
+    )
+    .unwrap();
+    let app_proj = dotnet.join("src/App");
+    fs::create_dir_all(&app_proj).unwrap();
+    fs::write(
+        app_proj.join("App.csproj"),
+        "<Project Sdk=\"Microsoft.NET.Sdk\" />\n",
+    )
+    .unwrap();
+
+    let path = root.to_path_buf();
+    (dir, path)
+}
+
+/// Create a repo whose root has a single `package.json` and no nested
+/// directories.
+///
+/// Exercises the `parent == root` skip in `walk_for_nested_markers`: a marker
+/// directly at the repo root must not register the root itself as a nested
+/// candidate (nested discovery is non-root only).
+pub fn create_nested_marker_at_root_to_be_ignored() -> (TempDir, PathBuf) {
+    let dir = TempDir::new().unwrap();
+    fs::write(dir.path().join("package.json"), r#"{"name":"root"}"#).unwrap();
+    let path = dir.path().to_path_buf();
+    (dir, path)
+}
+
+/// Create a repo with a non-workspace package at `app/` plus a real pnpm
+/// workspace buried inside a `node_modules` subtree.
+///
+/// `node_modules` is in the prune list (`should_skip_directory_name`), so
+/// `filter_entry` keeps the walker from descending into it. The pruned subtree
+/// holds a `pnpm-workspace.yaml` that declares a real `packages/app` member: if
+/// the walker descended into `node_modules`, the candidate would dispatch to
+/// `detect_pnpm_workspace`, resolve the member, and produce a PnpmWorkspaces
+/// layer rooted under `node_modules`. Working prune yields no such candidate
+/// and no layer. The top-level `app/package.json` carries no `workspaces`
+/// field, so it dispatches but self-filters to `None`, leaving the repo with
+/// zero monorepo layers — making the prune the only thing that can introduce a
+/// layer.
+pub fn create_pruned_node_modules_with_package_json() -> (TempDir, PathBuf) {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path();
+
+    // Real (non-workspace) package at app/.
+    let app = root.join("app");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(app.join("package.json"), r#"{"name":"app"}"#).unwrap();
+
+    // Pruned subtree holding a real pnpm workspace with a resolvable member.
+    let workspace = app.join("node_modules/workspace");
+    fs::create_dir_all(&workspace).unwrap();
+    fs::write(
+        workspace.join("pnpm-workspace.yaml"),
+        "packages:\n  - 'packages/*'\n",
+    )
+    .unwrap();
+    let member = workspace.join("packages/app");
+    fs::create_dir_all(&member).unwrap();
+    fs::write(member.join("package.json"), r#"{"name":"nm-app"}"#).unwrap();
+
+    let path = root.to_path_buf();
+    (dir, path)
+}
+
+/// Create a git-init'd repo whose `nested/` subtree contains a
+/// `pnpm-workspace.yaml` that is ignored via a local `nested/.gitignore`.
+///
+/// The ignored `pnpm-workspace.yaml` declares a real `packages/app` member, so
+/// the old per-directory `Path::exists()` probe WOULD have produced a
+/// PnpmWorkspaces layer here: `exists()` bypasses the walker's `git_ignore`
+/// filter, the candidate at `nested/` dispatches to `detect_pnpm_workspace`,
+/// and the yaml resolves the member. The new single-pass `ignore` walker honors
+/// `git_ignore` and never yields the gitignored `pnpm-workspace.yaml`, so no
+/// pnpm candidate and no layer. The member's own `packages/app/package.json` is
+/// not gitignored but carries no `workspaces` field, so the npm/yarn/bun
+/// detectors self-filter to `None`. This is the intentional behavior delta:
+/// see the spec's "Intentional Behavior Change" section.
+pub fn create_gitignored_nested_marker() -> (TempDir, PathBuf) {
+    let dir = TempDir::new().unwrap();
+    let _repo = Repository::init(dir.path()).unwrap();
+    let root = dir.path();
+
+    let nested = root.join("nested");
+    fs::create_dir_all(&nested).unwrap();
+    // Local gitignore rule that drops the workspace marker in this subtree.
+    fs::write(nested.join(".gitignore"), "pnpm-workspace.yaml\n").unwrap();
+    // The marker itself, ignored by the rule above. Under the old `exists()`
+    // probe this would have produced a real PnpmWorkspaces layer.
+    fs::write(
+        nested.join("pnpm-workspace.yaml"),
+        "packages:\n  - 'packages/*'\n",
+    )
+    .unwrap();
+    // A real (non-gitignored) member so the old probe resolves a layer.
+    let app = nested.join("packages/app");
+    fs::create_dir_all(&app).unwrap();
+    fs::write(app.join("package.json"), r#"{"name":"app"}"#).unwrap();
+
+    let path = root.to_path_buf();
+    (dir, path)
+}

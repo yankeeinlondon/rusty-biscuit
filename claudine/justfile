@@ -1,9 +1,11 @@
-set dotenv-load := true
-set positional-arguments := true
+set dotenv-load
+set positional-arguments
 
 # set allow-duplicate-recipes
 
-set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+# `env CYG_SYS_BASHRC=1` guards against Cygwin's /etc/bash.bashrc tripping `-u`;
+# see the root justfile for the full explanation.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
 
 import "../just/lifecycle.just"
 import "../just/plan.just"
@@ -40,11 +42,13 @@ default:
     just --list | grep -v 'default'
     echo
 
-# Build the library, contract adapter, and CLI
+# Build the catalog types, library, contract adapter, CLI, and generator
 build *args="":
+    @just _build claudine-catalog-types "Claudine Catalog Types" {{ args }}
     @just _build claudine "Claudine Library" {{ args }}
     @just _build claudine-contract "Claudine Contract Library" {{ args }}
     @just _build claudine-cli "Claudine CLI" {{ args }}
+    @just _build claudine-gen "Claudine Catalog Generator" {{ args }}
 
 # Install the CLI
 install *args="":
@@ -57,58 +61,151 @@ install *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity claudine
-    @just _sanity claudine-contract
-    @just _sanity claudine-cli
+    @just _sanity_all "claudine-catalog-types claudine claudine-contract claudine-cli claudine-gen"
 
 # test just the CLI in Claudine
-test-cli *args="":
+test-cli *args="": _ensure-md
     @just _test claudine-cli {{ args }}
 
 # test just the Claudine Library
 test-library *args="":
     @just _test claudine {{ args }}
-    
+
 # test the rendezvous core, daemon, and test-client crates
 test-rendezvous *args:
-    @just _test rendezvous-core {{args}}
-    @just _test rendezvous-daemon {{args}}
-    @just _test rendezvous-client {{args}}
-    
-# Test the library, contract adapter, and CLI.
-test *args="":
-    @just _test claudine {{ args }}
-    @just _test claudine-contract {{ args }}
-    @just _test claudine-cli {{ args }}
+    @just _test rendezvous-core {{ args }}
+    @just _test rendezvous-daemon {{ args }}
+    @just _test rendezvous-client {{ args }}
+
+# Build darkmatter's `md` into the workspace target dir, where
+# `inline_compose_hash` looks for it before falling back to PATH.
+#
+# claudine writes a Darkmatter content hash and then verifies it round-trips by
+# shelling out to `md diff`, so `md` is a test *fixture* for this area, not an
+# optional convenience. CI builds only claudine's own crates, which is why
+# `inline_compose_writes_hash_that_passes_md_diff` failed identically on macOS,
+# Ubuntu and Windows while passing for anyone whose target dir happened to
+# carry a previous build. Wiring it into the canonical recipe fixes CI and the
+# clean-checkout developer with one change, the same way `_ensure-native-libs`
+# serves both.
+#
+# Guarded on cargo's presence, not just on `md`'s absence: the `wsl2-ubuntu` leg
+# runs this same recipe against a prebuilt nextest archive in a guest that has
+# no Cargo and no rustc, so an unconditional build would turn every WSL2 claudine
+# leg red. There it warns and leaves the one affected test to fail as it already
+# does, rather than taking the whole area down with it.
+_ensure-md:
+    @if ! command -v md >/dev/null 2>&1 && [ ! -x ../target/debug/md ]; then \
+        if command -v cargo >/dev/null 2>&1; then \
+            cargo build -q -p darkmatter-cli --bin md; \
+        else \
+            echo "warning: 'md' not found and cargo is unavailable (prebuilt-archive run);" >&2; \
+            echo "         inline_compose_writes_hash_that_passes_md_diff will fail." >&2; \
+        fi; \
+    fi
+
+# Test the catalog types, library, contract adapter, CLI, and generator.
+test *args="": _ensure-md
+    @just _test_all "claudine-catalog-types claudine claudine-contract claudine-cli claudine-gen" {{ args }}
 
 # test just the contract adapter library
 test-contract *args="":
     @just _test claudine-contract {{ args }}
 
+# Replay signal evidence fixtures through the production detection engine (requires this checkout)
+signals-check:
+    @cargo run -q -p claudine-cli -- signals check
+
+# Generator suite + signal fixture replay (the corpus ↔ generated-tables CI gate)
+test-gen *args="":
+    @just _test claudine-gen {{ args }}
+    @just signals-check
+
 # Level-2 PTY tests. Gated by `require_level!(Level::L2, pty_available(), ...)`;
 # skip cleanly when /dev/ptmx is unavailable, hard-fail when
 # BISCUIT_TEST_LEVEL_REQUIRED=2 is set.
+#
+# claudine's L2 suite is dominated by self-isolating tests (each spawns its
+# own tmux session / PTY), so it runs in `_test_l2`'s parallel self-spawn
+# mode rather than the shared-pane `-j 1` path: no broker, no shared pane,
+# every `shared_or_spawn()` falls back to an owned, Drop-cleaned pane. Cap
+# concurrency at `min(cores, 8)` so concurrent claudine+git+tmux children
+# don't saturate the host and trip nextest's slow/leak timeouts. Force the
+# old serial path with `BISCUIT_L2_THREADS=1 just test-l2`.
 test-l2 *args="":
-    @just _test_l2 claudine-cli {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cores="$(getconf _NPROCESSORS_ONLN 2>/dev/null \
+        || sysctl -n hw.ncpu 2>/dev/null \
+        || nproc 2>/dev/null \
+        || echo 4)"
+    threads=$(( cores < 8 ? cores : 8 ))
+    BISCUIT_L2_THREADS="${BISCUIT_L2_THREADS:-${threads}}" just _test_l2 claudine-cli {{ args }}
+    # claudine-gen owns the report-rendering L2 tests (declared in its
+    # manifest). They self-isolate per test but are `#[serial]`-chained, so
+    # the plain serial path — not the self-spawn mode above — is the right fit.
+    just _test_l2 claudine-gen {{ args }}
 
-# not applicable: claudine has no OS-keyboard-injection (Level-3) tests
-test-l3:
-    @echo "test-l3: not applicable for claudine"
+# Level-3 OS-keyboard-injection tests. Gated by `require_level!(Level::L3, ...)`;
+# the recipe exports RUN_LEVEL3=1, and each test also skips cleanly when its
+# backend is absent (WezTerm plus the per-OS injector: cliclick on macOS,
+# xdotool on Linux/X11, PowerShell SendKeys on Windows). Covers genuine OS
+# Ctrl+C keystroke delivery into a real WezTerm window (signal-handling.md).
+# The tmux multiplexer Ctrl+C coverage lives at L2 (`just test-l2`).
+test-l3 *args="":
+    @just _test_l3 claudine-cli {{ args }}
 
 # not applicable: claudine emits terminal/CLI output, not HTML
 test-browser:
     @echo "test-browser: not applicable for claudine"
 
-# opt-in real_ tier: contract adapter against an installed+authenticated
-# provider. Gated by CLAUDINE_CONTRACT_REAL=1 and the provider binary on PATH.
+# opt-in real_ tier: drive installed+authenticated providers end-to-end. Gated
+# by CLAUDINE_CONTRACT_REAL=1 and the provider binary on PATH; each test skips
+# cleanly when its provider/model is unavailable.
+#   - contract adapter against an enabled provider (claude/codex)
+# - the OpenCode YOLO subagent external-directory regression (compose CLI)
 test-real *args="":
-    @CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-contract --test real_provider {{ args }}
+    #!/usr/bin/env bash
+    # Run both real-tier binaries independently: one provider being unavailable
+    # in this environment must not mask the other's result. Aggregate the exit
+    # code so a genuine failure still fails the recipe.
+    set -uo pipefail
+    rc=0
+    CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-contract --test real_provider {{ args }} || rc=$?
+    CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-cli --test real_opencode_yolo_subagent {{ args }} || rc=$?
+    exit $rc
+
+# Guard against typed errors collapsing to prose anywhere in lib/src, cli/src,
+# or contract/src, and against the diagnostic registry and code catalog drifting
+# from the sources (error-propagation Phase 6, D2/D7/D8).
+#
+# A `syn` scan, not a grep: a binding is only lossy when the syntax tree proves
+# it is an error *and* proves the typed value does not survive alongside the
+# prose. This needs cargo — the predecessor grep did not, but it also could not
+# tell `eyre!("unknown server {id}")` from a real collapse.
+#
+# `just test` runs these too; the recipe exists so `just lint` fails on a
+# transport regression without waiting for the full suite.
+lint-transport:
+    @just _test claudine-cli --test error_guards
+
+# Guard new lifecycle docs onto the faceted `err.*` contract: the deprecated
+# err.kind/err.variant aliases stay inside their documentation section, and
+# `err.msg` is never a match target (rendering it is correct and unrestricted —
+# it is the effective diagnostic's notification-safe projection, not an alias).
+# Pure grep heuristic — no cargo — so it runs even when the toolchain is gated.
+lint-lifecycle-doc-facets:
+    @../scripts/check-lifecycle-doc-facets.sh
 
 # Lint the library, contract adapter, and CLI
 lint:
+    @just lint-transport
+    @just lint-lifecycle-doc-facets
+    @just _lint claudine-catalog-types
     @just _lint claudine
     @just _lint claudine-contract
     @just _lint claudine-cli
+    @just _lint claudine-gen
 
 # Criterion benches for the runtime hot paths.
 bench *args="":
@@ -120,22 +217,25 @@ coverage *args="":
     @just _coverage claudine-contract {{ args }}
     @just _coverage claudine-cli {{ args }}
 
-# Doctests for the library, contract adapter, and CLI.
+# Doctests for the catalog types, library, contract adapter, CLI, and generator.
 doctest *args="":
+    @just _doctest claudine-catalog-types {{ args }}
     @just _doctest claudine {{ args }}
     @just _doctest claudine-contract {{ args }}
     @just _doctest claudine-cli {{ args }}
+    @just _doctest claudine-gen {{ args }}
 
 # not applicable: claudine has no cargo-fuzz targets (Phase 5 scope)
 fuzz:
     @echo "fuzz: not applicable for claudine (planned Phase 5)"
 
-# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+# Canonical PR-gate runner: sanity → lint → doctest → test → signals-check → test-l2 → test-browser.
 all:
     @just sanity
     @just lint
     @just doctest
     @just test
+    @just signals-check
     @just test-l2
     @just test-browser
 
@@ -148,11 +248,71 @@ lint-fix:
 
 # Validate the source code without doing a full build
 check:
-    @cargo check -p claudine -p claudine-contract -p claudine-cli
+    @cargo check -p claudine-catalog-types -p claudine -p claudine-contract -p claudine-cli -p claudine-gen
+
+# Type-check the library and CLI *including test targets* for Windows.
+#
+# The only gate that compiles the Windows-only suites (`termination/windows.rs`
+# and `sequence_ctrl_c_windows.rs`). Without it they are unverifiable
+# dead source that merely looks like coverage. Requires the mingw-w64 toolchain
+# and the `x86_64-pc-windows-gnu` rustup target.
+#
+# Two host workarounds are load-bearing, not incidental:
+#   - `RUSTC_WRAPPER=""` — a `rustc-wrapper` in ~/.cargo/config.toml leaks into
+#     cc-rs as a compiler launcher and breaks every C build for this target.
+#   - `-Wa,-mbig-obj` — duckdb's unity build (reached via the `rendezvous-daemon`
+#     dev-dependency) emits objects past COFF's 32767-section limit, which
+#     mingw's assembler rejects until told to use the big-object format.
+check-windows:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    export RUSTC_WRAPPER=""
+    export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-target/windows-check}"
+    export CFLAGS_x86_64_pc_windows_gnu="-Wa,-mbig-obj"
+    export CXXFLAGS_x86_64_pc_windows_gnu="-Wa,-mbig-obj"
+    cargo check -p claudine -p claudine-cli --tests --target x86_64-pc-windows-gnu
 
 # Run the latest debug build of the Claudine CLI
 cli *args="":
     @cargo run -p claudine-cli {{ args }}
+
+# Incrementally source topic research with the given provider, 3 topics in parallel
+run-fleet-research agent="codex":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    # Each fleet's `initialize` gate skips any provider whose research is fresh
+    # (<14d via date_delta), so a run only sources stale/missing docs — e.g. a
+    # newly-rostered provider (Antigravity) across every live topic. `memory` is
+    # excluded on purpose (no docs yet, deferred B2 topic — including it would fan
+    # a full research run out to every provider, not just the new one).
+    cargo build -q -p claudine-cli || exit 1
+    topics=(acp agent-cli agent-logging agent-models agent-permissions hooks
+            local_runners mcp model-config non-interactive-sessions plugins
+            resume signals skills slash-commands subagents system-prompt usage)
+    failed=()
+    for ((i = 0; i < ${#topics[@]}; i += 3)); do
+        batch=("${topics[@]:i:3}")
+        echo "▶ batch: ${batch[*]} (--{{agent}})"
+        pids=()
+        for t in "${batch[@]}"; do
+            cargo run -q -p claudine-cli -- sequence "docs/research/$t/_fleet.md" -y --{{agent}} &
+            pids+=("$!:$t")
+        done
+        for entry in "${pids[@]}"; do
+            if ! wait "${entry%%:*}"; then failed+=("${entry#*:}"); fi
+        done
+    done
+    if ((${#failed[@]})); then echo "✗ fleets with failures: ${failed[*]}" >&2; exit 1; fi
+    echo "✓ all topic fleets completed"
+
+# generate model enumeration using the unchained-ai codebase
+generate-models:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd "$(sniff repo root)/unchained-ai"
+    just generate-models
+    echo
+    cd -
 
 git-conflict:
     #!/usr/bin/env bash
@@ -173,18 +333,24 @@ git-conflict:
 readme:
     _readme_files claudine
 
-# the directory structure of both CLI and Library
-structure:
-    @echo
-    @echo "{{BOLD}}{{GREEN}}Claudine CLI{{RESET}}"
-    @echo
-    @just _structure cli/src
-    @echo
-    @echo "{{BOLD}}{{GREEN}}Claudine Library{{RESET}}"
-    @echo
-    @just _structure lib/src
-    @echo
-
+# publish summary research to the claudine skill
+publish-summary-research:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    echo
+    dest="../.claude/skills/claudine/summaries"
+    mkdir -p "${dest}"
+    for src in ./docs/research/summary/*.md; do
+        name="$(basename "${src}")"
+        out="$(md compose "${src}")"
+        # a summary whose sequence has not run yet composes to an empty body
+        if [ -z "${out//[[:space:]]/}" ]; then
+            echo -e "{{ DIM }}skipped ${name} (no generated body yet){{ RESET }}"
+            continue
+        fi
+        printf '%s\n' "${out}" > "${dest}/${name}"
+        echo -e "{{ GREEN }}published{{ RESET }} ${name}"
+    done
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 

@@ -43,6 +43,14 @@ impl<'a> Cursor<'a> {
         self.pos >= self.input.len()
     }
 
+    /// Returns the cursor's current byte offset into its input slice.
+    ///
+    /// Used by the unified directive scanner to record byte spans for each
+    /// keyword, target, and option token without re-tokenizing.
+    pub fn pos(&self) -> usize {
+        self.pos
+    }
+
     pub fn current(&self) -> Option<char> {
         self.input[self.pos..].chars().next()
     }

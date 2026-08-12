@@ -16,7 +16,7 @@ use biscuit_test_harness::wezterm::WezTermHarness;
 #[cfg(feature = "image")]
 use image::GenericImageView;
 use serial_test::serial;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 
@@ -60,7 +60,7 @@ fn run_icon(harness: &mut TmuxHarness, args: &str) -> CapturedFrame {
 #[test]
 #[serial(level2_terminal)]
 fn level2_unicode_glyph_renders_in_terminal() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -89,7 +89,7 @@ fn level2_unicode_glyph_renders_in_terminal() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_nerd_font_glyph_renders_with_flag() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -118,7 +118,7 @@ fn level2_nerd_font_glyph_renders_with_flag() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_text_fallback_shows_identifier() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -144,7 +144,7 @@ fn level2_text_fallback_shows_identifier() {
 #[cfg(feature = "image")]
 fn level2_image_protocol_fallback_renders_graphics() {
     let wezterm_available = WezTermHarness::available();
-    require_level!(Level::L2, wezterm_available, "WezTerm");
+    require_level!(Level::L2, wezterm_available, Backend::WezTerm);
 
     static SHARED_WEZTERM: biscuit_test_harness::shared::SharedHarness<
         biscuit_test_harness::wezterm::WezTermHarness,
@@ -277,7 +277,7 @@ fn level2_image_protocol_fallback_renders_graphics() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_listing_includes_multiple_names() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -305,7 +305,7 @@ fn level2_listing_includes_multiple_names() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_show_grinning_renders_unicode_glyph() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -386,7 +386,7 @@ fn run_sets(
 #[test]
 #[serial(level2_terminal)]
 fn level2_sets_single_table_renders() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -456,7 +456,7 @@ fn level2_sets_single_table_renders() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_sets_split_table_renders() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -533,7 +533,7 @@ fn run_sets_live(
 #[test]
 #[serial(level2_terminal)]
 fn level2_sets_layout_adapts_to_live_terminal_size() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     // A dedicated, owned session: this test resizes the pane, so it must not
     // perturb the shared session other tests attach to. Drop tears it down.
@@ -610,7 +610,7 @@ fn cell_right_gap(chars: &[char], left: usize, right: usize) -> usize {
 #[test]
 #[serial(level2_terminal)]
 fn level2_sets_right_alignment_and_wrapping() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -761,7 +761,7 @@ fn level2_sets_right_alignment_and_wrapping() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_styled_error_emits_sgr_red() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));

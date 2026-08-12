@@ -4,6 +4,14 @@ version = "0.1.0"
 edition = "2024"
 license = "AGPL-3.0-only"
 
+[features]
+# Bridge biscuit-terminal / darkmatter `TerminalRenderable` components
+# (CodeBlock, Table, Prose, ...) into ratatui `Text` via `TuiRenderable`.
+# Off by default: biscuit-terminal carries heavy transitive weight (syntect,
+# and resvg via biscuit-visualized) that pure input-widget consumers should
+# not pay for.
+renderables = ["dep:biscuit-terminal", "dep:ansi-to-tui"]
+
 [dependencies]
 ratatui = "0.30"
 crossterm = "0.29"
@@ -17,8 +25,32 @@ serde_yaml_ng = "0.10"
 rand = "0.9"
 nucleo-matcher = "0.3"
 
+# `renderables` feature only — see [features] above. `ansi-to-tui` 8 tracks
+# ratatui 0.30 (same pairing claudine/cli already ships).
+biscuit-terminal = { path = "../../biscuit-terminal/lib", optional = true }
+ansi-to-tui = { version = "8", optional = true }
+
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# F2: Windows console redirect for captured-stdout prompts. Only the
+# raw Win32 console APIs (CreateFileW, GetStdHandle, SetStdHandle,
+# CloseHandle) are needed; feature subset stays minimal so the
+# dependency compiles fast and stays auditable. Win32_Security is
+# required because CreateFileW's signature references SECURITY_ATTRIBUTES.
+# Win32_System_Pipes (CreatePipe) and GetFileType are dev-only — used by
+# the in-process active-redirect test to synthesize a captured-stdout
+# shape and assert the post-activation handle is the console, not the
+# pipe — but feature flags are not dev-scopable, so they live here.
+# Target-scoped so Unix builds never pull it in.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_Pipes",
+] }
 
 # Opt-out of benchmarking: interactive TUI component library; performance
 # is dominated by terminal I/O and ratatui's own rendering, neither of

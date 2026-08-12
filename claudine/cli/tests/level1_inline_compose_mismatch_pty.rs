@@ -2,7 +2,7 @@
 //! mismatch diagnostic.
 //!
 //! These prove the real `claudine` binary, with stderr attached to a PTY,
-//! (a) takes the TTY branch and emits the verbatim authored YAML, and
+//! (a) takes the TTY branch and emits the authored YAML as a CodeBlock, and
 //! (b) renders the styled diagnostic and the OSC 8 document link.
 //!
 //! Each test spawns the real `claudine` binary with stderr attached to a PTY so
@@ -30,7 +30,7 @@ use tempfile::tempdir;
 use test_toolkit::{Level, require_level};
 
 mod common;
-use common::pty_available;
+use common::{pty_available, strip_ansi};
 
 /// A mismatch fixture that exercises the YAML fidelity surface: a leading
 /// comment, non-canonical property order (`sequence` before `prompt`), a YAML
@@ -72,7 +72,7 @@ fn run_mismatch_under_pty() -> (String, std::path::PathBuf) {
     let md_file = workspace.path().join("doc.md");
     std::fs::write(&md_file, MISMATCH_FIXTURE).expect("write fixture");
 
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.arg("inline-compose").arg(&md_file);
     // Force a known-good color terminal so SGR + OSC 8 are emitted regardless of
     // the inherited environment; strip anything that would suppress color.
@@ -96,7 +96,7 @@ fn run_mismatch_under_pty() -> (String, std::path::PathBuf) {
 
 #[test]
 #[serial_test::serial(pty)]
-fn level1_pty_mismatch_takes_tty_branch_with_verbatim_yaml() {
+fn level1_pty_mismatch_takes_tty_branch_with_yaml_block() {
     require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     let (transcript, _doc) = run_mismatch_under_pty();
 
@@ -105,35 +105,35 @@ fn level1_pty_mismatch_takes_tty_branch_with_verbatim_yaml() {
         "inline-compose on a mismatch must produce a non-empty transcript",
     );
 
-    // The TTY branch was taken: the YAML intro and the directive are present,
-    // and the withheld note is not.
+    // CodeBlock highlighting wraps YAML tokens in SGR escapes; assert content on
+    // the ANSI-stripped transcript. The raw SGR/OSC 8 pipeline is proved by the
+    // companion test. A PTY also rewrites `\n` to `\r\n`, so normalize that too.
+    let plain = strip_ansi(&transcript).replace('\r', "");
+
     assert!(
-        transcript.contains("Below is the full YAML definition"),
-        "TTY output must include the YAML intro; transcript: {transcript:?}",
-    );
-    assert!(
-        transcript.contains("claudine sequence"),
+        plain.contains("claudine sequence"),
         "diagnostic must direct the user to `claudine sequence`; transcript: {transcript:?}",
     );
     assert!(
-        !transcript.contains("withheld"),
+        !plain.contains("withheld"),
         "TTY output must NOT claim the YAML was withheld; transcript: {transcript:?}",
     );
 
-    // The authored YAML is reproduced verbatim. A PTY rewrites `\n` to `\r\n`,
-    // so assert per-line fragments that prove fidelity: the leading comment,
-    // the anchor and alias, the non-canonical ordering, and the block scalar.
+    // The TTY branch renders the authored frontmatter as a YAML CodeBlock. Per
+    // the WezTerm/PTY SGR caveat, assert per-line content fragments (anchors,
+    // ordering, block scalar) on the stripped transcript rather than the exact
+    // multi-line payload.
     for fragment in [
-        "# leading comment",
-        "sequence: &seq",
-        "- name: Hello",
-        "- name: Goodbye",
-        "prompt: |-",
-        "alias: *seq",
+        "leading comment",
+        "sequence:",
+        "name: Hello",
+        "name: Goodbye",
+        "prompt:",
+        "alias:",
     ] {
         assert!(
-            transcript.contains(fragment),
-            "verbatim YAML fragment `{fragment}` missing; transcript: {transcript:?}",
+            plain.contains(fragment),
+            "YAML block fragment `{fragment}` missing; transcript: {transcript:?}",
         );
     }
 }

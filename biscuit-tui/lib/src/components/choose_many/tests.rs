@@ -79,6 +79,97 @@ fn explicit_alt_hotkey_toggles_matching_option() {
 }
 
 #[test]
+fn ctrl_shift_chord_matches_ctrl_hotkey() {
+    // A terminal that reports CONTROL|SHIFT for an uppercase chord
+    // must still match the ctrl-hotkey map.
+    let input = ChoiceInput::<String>::new("toppings", "Pick toppings").with_options(vec![
+        ChoiceOption::new("p", "Pepperoni", "pepperoni"),
+        ChoiceOption::new("m", "Mushrooms", "mushrooms").with_hotkey(HotkeySpec::Ctrl('m')),
+    ]);
+    let mut state = ChooseManyState::new(input);
+    let event = KeyEvent::new(
+        KeyCode::Char('m'),
+        KeyModifiers::CONTROL | KeyModifiers::SHIFT,
+    );
+    let outcome = ChooseMany::new().handle_event(&mut state, event);
+    assert_eq!(outcome, EventOutcome::Consumed);
+    assert!(state.is_selected(1));
+    assert_eq!(state.hover(), Some(1));
+}
+
+#[test]
+fn alt_shift_chord_matches_alt_hotkey() {
+    let input = ChoiceInput::<String>::new("toppings", "Pick toppings").with_options(vec![
+        ChoiceOption::new("p", "Pepperoni", "pepperoni"),
+        ChoiceOption::new("m", "Mushrooms", "mushrooms").with_hotkey(HotkeySpec::Alt('x')),
+    ]);
+    let mut state = ChooseManyState::new(input);
+    let event = KeyEvent::new(KeyCode::Char('x'), KeyModifiers::ALT | KeyModifiers::SHIFT);
+    let outcome = ChooseMany::new().handle_event(&mut state, event);
+    assert_eq!(outcome, EventOutcome::Consumed);
+    assert!(state.is_selected(1));
+    assert_eq!(state.hover(), Some(1));
+}
+
+#[test]
+fn ctrl_alt_chord_matches_neither_hotkey() {
+    // CONTROL|ALT is treated as ambiguous (AltGr-style) and must not
+    // be hijacked by either hotkey map.
+    let input = ChoiceInput::<String>::new("toppings", "Pick toppings").with_options(vec![
+        ChoiceOption::new("p", "Pepperoni", "pepperoni"),
+        ChoiceOption::new("m", "Mushrooms", "mushrooms").with_hotkey(HotkeySpec::Ctrl('m')),
+        ChoiceOption::new("o", "Olives", "olives").with_hotkey(HotkeySpec::Alt('o')),
+    ]);
+    let mut state = ChooseManyState::new(input);
+
+    let ctrl_chord = KeyEvent::new(
+        KeyCode::Char('m'),
+        KeyModifiers::CONTROL | KeyModifiers::ALT,
+    );
+    assert_eq!(
+        ChooseMany::new().handle_event(&mut state, ctrl_chord),
+        EventOutcome::Ignored
+    );
+    assert!(!state.is_selected(1));
+
+    let alt_chord = KeyEvent::new(
+        KeyCode::Char('o'),
+        KeyModifiers::CONTROL | KeyModifiers::ALT,
+    );
+    assert_eq!(
+        ChooseMany::new().handle_event(&mut state, alt_chord),
+        EventOutcome::Ignored
+    );
+    assert!(!state.is_selected(2));
+}
+
+#[test]
+fn bare_ctrl_and_alt_hotkeys_still_match() {
+    // Regression guard: the relaxed modifier matching must not change
+    // bare-CONTROL or bare-ALT behavior.
+    let input = ChoiceInput::<String>::new("toppings", "Pick toppings").with_options(vec![
+        ChoiceOption::new("p", "Pepperoni", "pepperoni"),
+        ChoiceOption::new("m", "Mushrooms", "mushrooms").with_hotkey(HotkeySpec::Ctrl('m')),
+        ChoiceOption::new("o", "Olives", "olives").with_hotkey(HotkeySpec::Alt('o')),
+    ]);
+    let mut state = ChooseManyState::new(input);
+
+    let ctrl = KeyEvent::new(KeyCode::Char('m'), KeyModifiers::CONTROL);
+    assert_eq!(
+        ChooseMany::new().handle_event(&mut state, ctrl),
+        EventOutcome::Consumed
+    );
+    assert!(state.is_selected(1));
+
+    let alt = KeyEvent::new(KeyCode::Char('o'), KeyModifiers::ALT);
+    assert_eq!(
+        ChooseMany::new().handle_event(&mut state, alt),
+        EventOutcome::Consumed
+    );
+    assert!(state.is_selected(2));
+}
+
+#[test]
 fn max_selections_blocks_additional_toggle_on() {
     let input = fixture_input().with_max_selections(1);
     let mut state = ChooseManyState::new(input);

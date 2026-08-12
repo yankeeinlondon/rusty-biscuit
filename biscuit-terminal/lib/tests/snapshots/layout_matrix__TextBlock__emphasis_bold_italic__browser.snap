@@ -1,0 +1,5 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: html
+---
+<p style="font-weight:bold;font-style:italic">TextBlock applies uniform block styling to a single piece of content.</p>

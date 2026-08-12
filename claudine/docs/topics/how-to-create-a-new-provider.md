@@ -28,6 +28,7 @@ Before writing any code, gather metadata about the new provider. The research pr
 | **Hooks** | `docs/research/hooks/{file}.md` | Hook event names, config file format, hook registration mechanism |
 | **CLI Information** | `docs/research/usage/{file}.md` | Entrypoints, output formats, YOLO/auto-approve, reasoning controls, ACP support |
 | **Usage Metrics** | `docs/research/usage/{file}.md` | Billing model, usage dashboard, stream protocol, session log paths |
+| **Agent Errors** | `docs/research/agent-errors/{file}.md` | Ordered structured-stream error kinds/messages/codes with per-item provenance |
 
 Each research file writes its structured findings into **Markdown frontmatter**. The frontmatter schema is the single source of truth for the next phase.
 
@@ -42,6 +43,17 @@ Each research file writes its structured findings into **Markdown frontmatter**.
 - Does it support MCP, skills, or ACP?
 - How does it accept prompts in interactive vs non-interactive mode?
 - What CLI flags control YOLO/auto-approve, reasoning, and model selection?
+- Which structured error discriminators, messages, and numeric codes are safe
+  inputs to the existing case-insensitive substring classifier?
+
+If the provider has a structured stream parser, author and validate its
+`agent-errors` research document before wiring the parser. Do not add an
+`ERROR_KEYWORDS` constant or an `error_vocabulary` facts key. Generation
+projects the provenance-bearing research objects into
+`lib/src/stream/providers/vocabulary.rs`; bucket and item order are runtime
+precedence. A provider without a parser keeps an explicit empty runtime table
+until parser onboarding makes the researched records executable and adds
+classifier fixtures.
 
 ---
 
@@ -138,7 +150,6 @@ Four trait objects on `ProviderInfo` carry dynamic behavior. Most providers only
 | `stream_protocol` | `Option<StreamProtocol>` | `Some(StreamProtocol::Jsonl)`, `Ndjson`, `StreamJson`, `WireJsonRpc`, or `None` |
 | `event_mapping` | `&'static EventMappingTable` | Per-event support level, native names, parse aliases |
 | `session_log_paths` | `&'static [PathTemplate]` | JSONL transcript file templates |
-| `session_locations` | `&'static [PathTemplate]` | Ancillary session-state directories |
 | `config_paths` | `&'static [PathTemplate]` | Config file templates (first = primary user config) |
 | `memory_files` | `&'static [PathTemplate]` | Files contributing to system prompt hierarchy |
 | `output_formats` | `&'static [OutputFormatSupport]` | Non-interactive output formats with native flags |
@@ -149,20 +160,19 @@ Four trait objects on `ProviderInfo` carry dynamic behavior. Most providers only
 | `known_gaps` | `&'static [KnownGap]` | Catalogued unknowns (can be empty) |
 | `acp` | `AcpSupport` | ACP server mode, client capability, captured events |
 | `prompt_arg_conventions` | `PromptArgConventions` | How the CLI represents a prompt on argv |
-| `static_models` | `&'static [&'static str]` | Compiled-in model catalog (empty if dynamic) |
-| `dynamic_source` | `ModelCatalogSource` | `Static`, `OpencodeCli`, etc. |
+| `model_catalog_source` | `ModelCatalogSource` | `None` or `ShellCommand { program, args }` |
 | `model_env_vars` | `&'static [&'static str]` | Provider-specific MODEL env var chain |
 | `cli_sensitive_axes` | `CliSensitiveAxes` | Which permission axes CLI flags can override |
 | `repo_home_root_files` | `&'static [&'static str]` | Root files preserved during shadow-HOME isolation |
+| `unmapped_native_events` | `&'static [UnmappedNativeEvent]` | Native hook events with no 16-event mapping |
 
-### Legacy Compatibility
+### Linking Facade
 
-Two fn-pointer fields bridge to pre-refactoring systems:
+One fn-pointer field bridges to the cross-provider linking layer:
 
-- `agent_capabilities_fn`: Returns `&'static AgentCapabilities`
 - `resource_support_fn`: Returns `&'static ProviderCapabilities`
 
-Both are built via `LazyLock` in the provider module and are tested for agreement with the typed catalog.
+It is built via `LazyLock` in the provider module and is tested for agreement with the typed catalog. (The former `agent_capabilities_fn` bridge was deleted with the legacy `AgentCapabilities` tree at retirement — see `features/2026-07-02-provider-metadata/design/module-split.md`.)
 
 ---
 

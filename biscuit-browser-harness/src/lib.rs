@@ -26,6 +26,11 @@ use std::path::PathBuf;
 
 use async_trait::async_trait;
 use chromiumoxide::browser::{Browser, BrowserConfig};
+use chromiumoxide::cdp::browser_protocol::emulation::MediaFeature;
+use chromiumoxide::cdp::browser_protocol::input::{
+    DispatchKeyEventParams, DispatchKeyEventType, DispatchMouseEventParams, DispatchMouseEventType,
+    MouseButton,
+};
 use futures_util::StreamExt;
 
 /// Environment variable that, when set to `1`, converts a missing
@@ -264,6 +269,69 @@ pub fn wrap_fragment(fragment: &str, body_background: &str) -> String {
     )
 }
 
+/// A single key press dispatched into the browser via CDP input.
+///
+/// Unlike a JS `element.focus()` / `element.click()` shortcut, a [`KeyStroke`]
+/// is delivered via CDP `Input.dispatchKeyEvent`, so it exercises the browser's
+/// own focus traversal and default-action handling — Browser-tier evidence.
+/// This is NOT OS-level input injection: CDP injects synthetic events straight
+/// into the renderer and never traverses the OS input path. Genuine OS
+/// injection (Level 3, e.g. `cliclick` synthesizing real Quartz events) is a
+/// separate mechanism. The three constants cover the interactions the
+/// Browser-tier keyboard tests need.
+#[derive(Debug, Clone, Copy)]
+pub struct KeyStroke {
+    /// The DOM `key` value (e.g. `"Tab"`, `"Enter"`).
+    pub key: &'static str,
+    /// The physical `code` value (e.g. `"Tab"`, `"Enter"`).
+    pub code: &'static str,
+    /// The Windows virtual key code Chromium expects for focus/default-action
+    /// handling (Tab = 9, Enter = 13).
+    pub windows_virtual_key_code: i64,
+    /// Whether the Shift modifier is held (drives Shift+Tab reverse traversal).
+    pub shift: bool,
+}
+
+impl KeyStroke {
+    /// Tab — advances focus to the next focusable element.
+    pub const TAB: KeyStroke = KeyStroke {
+        key: "Tab",
+        code: "Tab",
+        windows_virtual_key_code: 9,
+        shift: false,
+    };
+    /// Shift+Tab — moves focus to the previous focusable element.
+    pub const SHIFT_TAB: KeyStroke = KeyStroke {
+        key: "Tab",
+        code: "Tab",
+        windows_virtual_key_code: 9,
+        shift: true,
+    };
+    /// Enter — activates the focused element (a link's default navigation).
+    pub const ENTER: KeyStroke = KeyStroke {
+        key: "Enter",
+        code: "Enter",
+        windows_virtual_key_code: 13,
+        shift: false,
+    };
+}
+
+/// One step in a [`ChromeHarness::drive`] input sequence.
+///
+/// Steps run in order against a single page so keyboard/pointer input and the
+/// DOM reads that observe their effect share one live document — `evaluate`
+/// cannot express this because it navigates a fresh page per call.
+pub enum InputStep<'a> {
+    /// Evaluate JS against the page. The result of the **last** `Eval` step is
+    /// what [`ChromeHarness::drive`] returns.
+    Eval(&'a str),
+    /// Dispatch a real key press (keydown then keyup) via CDP input.
+    Key(KeyStroke),
+    /// Move the pointer over the center of the first element matching the
+    /// selector (real CDP `mouseMoved`), so `:hover` engages.
+    Hover(&'a str),
+}
+
 /// Default [`BrowserHarness`] backed by [`chromiumoxide`].
 ///
 /// Owns a temporary directory that holds the rendered HTML file and a
@@ -338,6 +406,124 @@ impl ChromeHarness {
             .await
             .map_err(|e| BrowserError::Command(e.to_string()))?;
         Ok(page)
+    }
+
+    /// Evaluate `script` in a freshly-navigated page after emulating the given
+    /// CSS media features via CDP `Emulation.setEmulatedMedia`.
+    ///
+    /// Each `(name, value)` pair is a media feature the page's `@media` rules
+    /// see — for example `("prefers-color-scheme", "dark")` or
+    /// `("prefers-reduced-motion", "reduce")`. The emulation and the script run
+    /// on the **same** page, which [`evaluate`](BrowserHarness::evaluate) cannot
+    /// express because it navigates a fresh page per call. Passing an empty
+    /// `features` slice is equivalent to `evaluate`.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`BrowserError::Command`] on CDP failure or when the result is
+    /// not a string.
+    pub async fn evaluate_with_media(
+        &mut self,
+        features: &[(&str, &str)],
+        script: &str,
+    ) -> Result<String, BrowserError> {
+        let page = self.page().await?;
+        if !features.is_empty() {
+            let emulated = features
+                .iter()
+                .map(|(name, value)| MediaFeature::new(*name, *value))
+                .collect();
+            page.emulate_media_features(emulated)
+                .await
+                .map_err(|e| BrowserError::Command(e.to_string()))?;
+        }
+        let value: String = page
+            .evaluate(script)
+            .await
+            .map_err(|e| BrowserError::Command(e.to_string()))?
+            .into_value()
+            .map_err(|e| BrowserError::Command(e.to_string()))?;
+        Ok(value)
+    }
+
+    /// Run an ordered [`InputStep`] sequence against a single fresh page and
+    /// return the last `Eval` step's string result (empty if none).
+    ///
+    /// This is the Browser-tier input driver: `Key`/`Hover` steps deliver key
+    /// and pointer events via CDP input, so a test proves Tab focus traversal,
+    /// pointer hover, and Enter default-action navigation through the browser's
+    /// input pipeline exercised over CDP rather than JS `.focus()`/`.click()`
+    /// shortcuts. CDP injects synthetic events into the renderer, so this is
+    /// NOT OS-level input injection (Level 3); genuine OS injection is a
+    /// separate mechanism (e.g. `cliclick`).
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`BrowserError::Command`] on CDP failure or when an `Eval`
+    /// result is not a string.
+    pub async fn drive(&mut self, steps: &[InputStep<'_>]) -> Result<String, BrowserError> {
+        let page = self.page().await?;
+        let mut last = String::new();
+        for step in steps {
+            match step {
+                InputStep::Eval(script) => {
+                    last = page
+                        .evaluate(*script)
+                        .await
+                        .map_err(|e| BrowserError::Command(e.to_string()))?
+                        .into_value()
+                        .map_err(|e| BrowserError::Command(e.to_string()))?;
+                }
+                InputStep::Key(stroke) => {
+                    let modifiers = if stroke.shift { 8 } else { 0 };
+                    for event_type in [DispatchKeyEventType::KeyDown, DispatchKeyEventType::KeyUp] {
+                        let params = DispatchKeyEventParams::builder()
+                            .r#type(event_type)
+                            .key(stroke.key)
+                            .code(stroke.code)
+                            .windows_virtual_key_code(stroke.windows_virtual_key_code)
+                            .modifiers(modifiers)
+                            .build()
+                            .map_err(BrowserError::Command)?;
+                        page.execute(params)
+                            .await
+                            .map_err(|e| BrowserError::Command(e.to_string()))?;
+                    }
+                }
+                InputStep::Hover(selector) => {
+                    // Read the element's viewport-space center, then move the
+                    // real pointer there so `:hover` matches.
+                    let coords_js = format!(
+                        "(() => {{ const el = document.querySelector('{selector}'); \
+                         if (!el) return ''; const r = el.getBoundingClientRect(); \
+                         return `${{r.left + r.width / 2}},${{r.top + r.height / 2}}`; }})()"
+                    );
+                    let coords: String = page
+                        .evaluate(coords_js)
+                        .await
+                        .map_err(|e| BrowserError::Command(e.to_string()))?
+                        .into_value()
+                        .map_err(|e| BrowserError::Command(e.to_string()))?;
+                    let (x, y) = coords
+                        .split_once(',')
+                        .and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?)))
+                        .ok_or_else(|| {
+                            BrowserError::Command(format!("hover selector had no box: {selector}"))
+                        })?;
+                    let params = DispatchMouseEventParams::builder()
+                        .r#type(DispatchMouseEventType::MouseMoved)
+                        .x(x)
+                        .y(y)
+                        .button(MouseButton::None)
+                        .build()
+                        .map_err(BrowserError::Command)?;
+                    page.execute(params)
+                        .await
+                        .map_err(|e| BrowserError::Command(e.to_string()))?;
+                }
+            }
+        }
+        Ok(last)
     }
 }
 
@@ -485,6 +671,19 @@ impl Drop for ChromeHarness {
 mod tests {
     use super::*;
     use test_toolkit::EnvGuard;
+
+    #[test]
+    fn keystroke_constants_carry_expected_codes() {
+        // Bind through locals so clippy does not fold the const reads into
+        // `assertions_on_constants`.
+        let (tab, shift_tab, enter) = (KeyStroke::TAB, KeyStroke::SHIFT_TAB, KeyStroke::ENTER);
+        assert_eq!(tab.windows_virtual_key_code, 9);
+        assert!(!tab.shift, "Tab holds no modifier");
+        assert!(shift_tab.shift, "Shift+Tab holds the Shift modifier");
+        assert_eq!(shift_tab.key, "Tab");
+        assert_eq!(enter.windows_virtual_key_code, 13);
+        assert_eq!(enter.key, "Enter");
+    }
 
     #[test]
     fn wrap_fragment_adds_body_background() {

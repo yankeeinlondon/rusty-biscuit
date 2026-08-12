@@ -1,6 +1,5 @@
 #![allow(dead_code)]
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::io::Write;
 use std::net::TcpListener;
 use std::sync::{
@@ -10,7 +9,7 @@ use std::sync::{
 use std::thread;
 
 pub fn md_cmd() -> assert_cmd::Command {
-    cargo_bin_cmd!("md")
+    assert_cmd::Command::cargo_bin("md").unwrap()
 }
 
 pub fn md_file(content: &str) -> tempfile::NamedTempFile {
@@ -102,9 +101,19 @@ pub mod baseline {
 
     /// Returns the directory holding the baseline JSON fixtures.
     pub fn dir() -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        let features_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("..")
-            .join("features")
+            .join("features");
+        let active = features_dir
+            .join("2026-06-17-cli-atheist")
+            .join("baseline")
+            .join("json");
+        if active.exists() {
+            return active;
+        }
+
+        features_dir
+            .join("_completed")
             .join("2026-06-17-cli-atheist")
             .join("baseline")
             .join("json")
@@ -172,6 +181,9 @@ pub mod baseline {
                 result = result.replace(path, "<TMP>");
             }
         }
+        if result.contains("<TMP>") {
+            result = result.replace('\\', "/");
+        }
         result
     }
 
@@ -196,6 +208,15 @@ pub mod baseline {
         // Redact both so the baseline side normalizes to `<TMP>` too.
         paths.push("/tmp/dm-baseline".to_string());
         paths.push("/private/tmp/dm-baseline".to_string());
+
+        // Redact longest paths first. `normalize_string` replaces substrings in
+        // order, so a shorter path that is a prefix of a longer one (e.g.
+        // `/tmp/dm-baseline` inside `/private/tmp/dm-baseline`, or a raw temp
+        // dir inside its `/private`-canonicalized form) would otherwise match
+        // first and leave a stray `/private` prefix. That artifact happens to
+        // align with macOS's canonicalized temp paths, so the mismatch is
+        // invisible on macOS but fails on Linux (`<TMP>/x` vs `/private<TMP>/x`).
+        paths.sort_by_key(|p| std::cmp::Reverse(p.len()));
         paths
     }
 }

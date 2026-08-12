@@ -1,6 +1,6 @@
 # Components
 
-All components implement the [`Renderable`](../../lib/src/components/renderable.rs) trait, which provides three rendering paths: `render()`, `fallback_render()`, and `display()`. Every component owns a `Layout` for margins, alignment, and word-wrap.
+All components implement the [`Renderable`](../../lib/src/components/renderable.rs) trait, which provides three rendering paths: `render()`, `fallback_render()`, and `display()`. Components follow the universal Layout & Style contract documented in the [Style Everywhere matrix](../../../renderable/features/2026-06-30-style-everywhere/matrix.md): every applicable `Layout`/`Style` property is honored on Terminal and Browser, or has an explicit `Degraded`/`N/A` rationale. Markdown degrades layout and appearance attrs to structural output (Decision D1).
 
 ## Component Index
 

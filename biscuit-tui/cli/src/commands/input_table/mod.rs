@@ -23,13 +23,35 @@
 //!
 //! `--rows` is a JSON array of per-row cell arrays; each inner array
 //! supplies typed per-cell initial values matching the column order.
+//!
+//! ## Permissive Row-Value Contracts
+//!
+//! The CLI accepts a small set of compatibility coercions for row values,
+//! documented here so schema mistakes are not confused with intentional
+//! parsing. Everything outside these contracts is an `InvalidInput` error
+//! with row/column context.
+//!
+//! - **boolean-switch** rows accept a JSON boolean, a JSON number
+//!   (non-zero is true), or one of the strings `true`, `on`, `yes`, `1`,
+//!   `false`, `off`, `no`, `0` (case-insensitive). Other strings and
+//!   any other JSON type are errors.
+//! - **text-area-input** rows accept either a JSON array of strings or a
+//!   single JSON string split on `\n`. Any other JSON type is an error.
+//! - **choose-many** rows accept either a JSON array of strings or a
+//!   single JSON string split on `,` (with whitespace trimmed and
+//!   empties dropped). Any other JSON type is an error.
+//! - **static-text**, **text-input**, and **choose-one** rows accept a
+//!   JSON string (or JSON null, treated as the empty string). Any other
+//!   JSON type is an error.
 
 use std::io::{self, Write};
 
 use clap::Args;
 use serde_json::{Value, json};
 #[cfg(test)]
-use biscuit_tui::components::input_table::BooleanSwitchConfig;
+use biscuit_tui::components::input_table::{
+    BooleanSwitchConfig, TextAreaInputConfig, TextInputConfig,
+};
 use biscuit_tui::components::input_table::CellValue;
 use biscuit_tui::{
     ABORTED_KIND, CANCELLED_KIND, FrameChromeConfig, HeightSpec, InputTable, InputTableColumn,
@@ -42,7 +64,7 @@ use crate::output::OutputMode;
 
 mod columns;
 
-use columns::{ColumnSpec, parse_columns};
+use columns::{ColumnSpec, json_kind, parse_columns};
 
 /// Arguments accepted by the `input-table` subcommand.
 #[derive(Debug, Args)]
@@ -99,7 +121,8 @@ where
     let state = if row_values.is_empty() {
         InputTableState::with_blank_rows(columns, row_count)
     } else {
-        InputTableState::new(columns, row_values)
+        InputTableState::try_new(columns, row_values)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidInput, e.to_string()))?
     };
 
     match run_prompt(state, height) {
@@ -118,6 +141,9 @@ where
 ///
 /// Each inner array is interpreted column-aware: boolean columns accept
 /// truthy/falsy values, choose-many accepts arrays or comma-strings, etc.
+/// Per-cell JSON values that do not match the documented permissive
+/// contract for the column type produce `InvalidInput` errors tagged with
+/// `row {n} column '{id}'` context.
 fn parse_rows_typed(columns: &[ColumnSpec], json: Option<&str>) -> io::Result<Vec<Row>> {
     let Some(source) = json else {
         return Ok(Vec::new());
@@ -130,85 +156,139 @@ fn parse_rows_typed(columns: &[ColumnSpec], json: Option<&str>) -> io::Result<Ve
 
     array
         .iter()
-        .map(|row| {
+        .enumerate()
+        .map(|(row_idx, row)| {
             let inner = row.as_array().ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "each row must be a JSON array")
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("--rows: row {row_idx} must be a JSON array"),
+                )
             })?;
             if inner.len() != columns.len() {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    format!("row has {} cells, expected {}", inner.len(), columns.len()),
+                    format!(
+                        "--rows: row {row_idx} has {} cells, expected {}",
+                        inner.len(),
+                        columns.len()
+                    ),
                 ));
             }
-            Ok(Row::new(
-                inner
-                    .iter()
-                    .zip(columns.iter())
-                    .map(|(val, col)| {
-                        RowCell::new(col.id().to_string(), parse_cell_value(val, col))
-                    })
-                    .collect(),
-            ))
+            let cells: Vec<RowCell> = inner
+                .iter()
+                .zip(columns.iter())
+                .map(|(val, col)| {
+                    let cv = parse_cell_value(val, col).map_err(|e| {
+                        io::Error::new(
+                            e.kind(),
+                            format!("--rows: row {row_idx} column '{}': {}", col.id(), e),
+                        )
+                    })?;
+                    Ok(RowCell::new(col.id().to_string(), cv))
+                })
+                .collect::<io::Result<_>>()?;
+            Ok(Row::new(cells))
         })
         .collect()
 }
 
 /// Parses a single JSON cell value into the appropriate `CellValue` variant
 /// based on the column type.
-fn parse_cell_value(val: &Value, col: &ColumnSpec) -> CellValue {
+///
+/// Permissive coercions (boolean from number/string allowlist, text-area
+/// from newline-split string, choose-many from comma-split string) are
+/// documented at the module level. Any other mismatch produces
+/// `InvalidInput` with the column's expected shape.
+fn parse_cell_value(val: &Value, col: &ColumnSpec) -> io::Result<CellValue> {
     match col {
-        ColumnSpec::StaticText { .. } => CellValue::StaticText(value_to_string(val)),
-        ColumnSpec::BooleanSwitch { .. } => {
-            let truthy = match val {
-                Value::Bool(b) => *b,
-                Value::String(s) => {
-                    let lower = s.trim().to_ascii_lowercase();
-                    matches!(lower.as_str(), "true" | "on" | "yes" | "1")
-                }
-                Value::Number(n) => n.as_i64().unwrap_or(0) != 0,
-                _ => false,
-            };
-            CellValue::Boolean(truthy)
-        }
-        ColumnSpec::TextInput { .. } => CellValue::Text(value_to_string(val)),
-        ColumnSpec::TextAreaInput { .. } => {
-            if let Value::Array(arr) = val {
-                CellValue::TextArea(arr.iter().map(value_to_string).collect())
-            } else {
-                let text = value_to_string(val);
-                CellValue::TextArea(text.split('\n').map(|s| s.to_string()).collect())
-            }
-        }
-        ColumnSpec::ChooseOne { .. } => {
-            let id = value_to_string(val);
-            if id.is_empty() {
+        ColumnSpec::StaticText { .. } => match val {
+            Value::String(s) => Ok(CellValue::StaticText(s.clone())),
+            Value::Null => Ok(CellValue::StaticText(String::new())),
+            other => Err(type_mismatch_err("string", other)),
+        },
+        ColumnSpec::BooleanSwitch { .. } => parse_boolean_value(val).map(CellValue::Boolean),
+        ColumnSpec::TextInput { .. } => match val {
+            Value::String(s) => Ok(CellValue::Text(s.clone())),
+            Value::Null => Ok(CellValue::Text(String::new())),
+            other => Err(type_mismatch_err("string", other)),
+        },
+        ColumnSpec::TextAreaInput { .. } => parse_text_area_value(val).map(CellValue::TextArea),
+        ColumnSpec::ChooseOne { .. } => match val {
+            Value::String(s) => Ok(if s.is_empty() {
                 CellValue::ChosenOne(None)
             } else {
-                CellValue::ChosenOne(Some(id))
-            }
-        }
-        ColumnSpec::ChooseMany { .. } => {
-            if let Value::Array(arr) = val {
-                CellValue::ChosenMany(arr.iter().map(value_to_string).collect())
-            } else {
-                let text = value_to_string(val);
-                CellValue::ChosenMany(
-                    text.split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect(),
-                )
-            }
-        }
+                CellValue::ChosenOne(Some(s.clone()))
+            }),
+            Value::Null => Ok(CellValue::ChosenOne(None)),
+            other => Err(type_mismatch_err("string", other)),
+        },
+        ColumnSpec::ChooseMany { .. } => parse_choose_many_value(val).map(CellValue::ChosenMany),
     }
 }
 
-fn value_to_string(val: &Value) -> String {
+fn parse_boolean_value(val: &Value) -> io::Result<bool> {
     match val {
-        Value::String(s) => s.clone(),
-        Value::Null => String::new(),
-        other => other.to_string(),
+        Value::Bool(b) => Ok(*b),
+        Value::Number(n) => Ok(n.as_i64().unwrap_or(0) != 0),
+        Value::String(s) => {
+            let lower = s.trim().to_ascii_lowercase();
+            match lower.as_str() {
+                "true" | "on" | "yes" | "1" => Ok(true),
+                "false" | "off" | "no" | "0" => Ok(false),
+                _ => Err(type_mismatch_err(
+                    "boolean (true|on|yes|1|false|off|no|0)",
+                    val,
+                )),
+            }
+        }
+        other => Err(type_mismatch_err(
+            "boolean (bool, number, or true|on|yes|1|false|off|no|0)",
+            other,
+        )),
     }
+}
+
+fn parse_text_area_value(val: &Value) -> io::Result<Vec<String>> {
+    match val {
+        Value::Array(arr) => arr
+            .iter()
+            .map(|v| match v {
+                Value::String(s) => Ok(s.clone()),
+                Value::Null => Ok(String::new()),
+                other => Err(type_mismatch_err("string", other)),
+            })
+            .collect(),
+        Value::String(s) => Ok(s.split('\n').map(str::to_string).collect()),
+        Value::Null => Ok(Vec::new()),
+        other => Err(type_mismatch_err("array of strings or newline-split string", other)),
+    }
+}
+
+fn parse_choose_many_value(val: &Value) -> io::Result<Vec<String>> {
+    match val {
+        Value::Array(arr) => arr
+            .iter()
+            .map(|v| match v {
+                Value::String(s) => Ok(s.clone()),
+                Value::Null => Ok(String::new()),
+                other => Err(type_mismatch_err("string", other)),
+            })
+            .collect(),
+        Value::String(s) => Ok(s
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect()),
+        Value::Null => Ok(Vec::new()),
+        other => Err(type_mismatch_err("array of strings or comma-split string", other)),
+    }
+}
+
+fn type_mismatch_err(expected: &str, found: &Value) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidInput,
+        format!("expected {expected}, got {}", json_kind(found)),
+    )
 }
 
 /// Writes typed rows as JSON or NUL-separated key=value pairs.

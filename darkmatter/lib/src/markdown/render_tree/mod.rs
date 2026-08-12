@@ -59,6 +59,7 @@
 
 pub(crate) mod build_context;
 pub(crate) mod block_extension;
+pub mod disclosure_scan;
 pub(crate) mod disclosure_style;
 pub mod code_renderer;
 // The inline source rewriter backs `fold_markdown_spanned_with_frontmatter`.
@@ -74,6 +75,8 @@ pub mod pipeline;
 pub mod source;
 #[cfg(test)]
 mod structural_gate;
+#[cfg(test)]
+mod style_tree_parity_tests;
 pub mod svg_sanitizer;
 
 #[allow(deprecated)]

@@ -26,9 +26,10 @@ use crate::{
         wrap_policy::WordWrap,
     },
 };
+use renderable::layout::Width;
 
 pub use super::cell::TableCellContent;
-use super::cell::pad_cell;
+use super::cell::{expand_tabs_with_width, pad_cell};
 pub use super::column::TableColumn;
 use super::types::{Currency, TableStyle, VerticalAlign};
 use super::width::{MeasuredColumn, TableWidthError, TableWidthMeasurements, TableWidthPlan};
@@ -116,6 +117,25 @@ use crate::discovery::detection::{ColorDepth, ColorMode};
 ///         ],
 ///     ]);
 /// ```
+///
+/// ## Layout & Style Contract
+///
+/// `Table` is an internal-layout component (spec C2/C3/C4). The shared
+/// render-tree fold resolves the outer box; `Table`'s default width hugs its
+/// content, while an explicit fixed width such as `width: 100%` fills the
+/// resolved width it receives. In the fill case, the slack sink is the last
+/// visible flexible column (spec D2). All applicable `Layout` and `Style`
+/// properties route through the fold on every target (C1).
+///
+/// The `prefer_cursor_alignment` knob (spec C5/C6) keeps a bespoke
+/// terminal-only escape hatch: ANSI cursor moves (`CSI N G`) cannot be
+/// represented in the render tree, so the cursor core is irreducible. The
+/// honored subset for that bespoke path is `margin` / `alignment` /
+/// `max_width` (outer-box placement, target-agnostic). Cursor moves
+/// replace inter-cell space padding only — they do not change the visible
+/// cell text or the outer box position. `render_bespoke` and
+/// `render_via_tree` agree on the honored subset after cursor escapes are
+/// stripped; parity is pinned in `table_parity.rs`.
 #[derive(Debug, Default, Clone)]
 pub struct Table {
     title: Option<String>,
@@ -129,6 +149,9 @@ pub struct Table {
     /// Typed style slot for row striping — the migrated home of the former
     /// `alternate_background_color` / `alternate_text_color` boolean fields.
     style: TableStyle,
+    /// Caller-supplied block appearance (color/background/emphasis/border)
+    /// overlaid onto the projected table node so both render paths carry it.
+    block_style: Style,
 }
 
 impl Table {
@@ -147,6 +170,35 @@ impl Table {
     pub fn with_columns(mut self, columns: Vec<TableColumn>) -> Self {
         self.columns = columns;
         self
+    }
+
+    /// Expand header and text-cell tabs using a terminal column interval.
+    pub(crate) fn expand_tabs_in_place(&mut self, tab_width: usize) {
+        for column in &mut self.columns {
+            if let std::borrow::Cow::Owned(header) =
+                expand_tabs_with_width(&column.header, tab_width)
+            {
+                column.header = header;
+            }
+        }
+        for row in &mut self.data {
+            for cell in row {
+                if let TableCellContent::Text(content) = cell
+                    && let std::borrow::Cow::Owned(expanded) =
+                        expand_tabs_with_width(content, tab_width)
+                {
+                    *content = expanded;
+                }
+            }
+        }
+    }
+
+    pub(crate) fn columns(&self) -> &[TableColumn] {
+        &self.columns
+    }
+
+    pub(crate) fn data(&self) -> &[Vec<TableCellContent>] {
+        &self.data
     }
 
     /// Add a row of data.
@@ -295,6 +347,7 @@ impl Table {
             layout: self.layout.clone(),
             prefer_cursor_alignment: self.prefer_cursor_alignment,
             style: self.style.clone(),
+            block_style: self.block_style.clone(),
         })
     }
 
@@ -318,6 +371,15 @@ impl Table {
     pub fn plan_widths(&self, terminal_width: u32) -> Result<TableWidthPlan, TableWidthError> {
         let available_render_width = self.available_render_width(terminal_width) as usize;
         self.plan_widths_for_render_width(available_render_width)
+    }
+
+    /// Produce the width plan using the supplied terminal's tab interval.
+    pub fn plan_widths_for_terminal(
+        &self,
+        term: &Terminal,
+    ) -> Result<TableWidthPlan, TableWidthError> {
+        let (table, _) = self.prepare_for_terminal(term);
+        table.plan_widths(term.width())
     }
 
     /// Return whether this table would need wrapping or truncation at the given width.
@@ -505,12 +567,20 @@ impl Table {
             ));
         }
 
+        let border_overhead = measurements.border_overhead;
+
         if !measurements.word_wrap_needed {
             for column in &mut measurements.columns {
                 if column.fixed_width.is_none() {
                     column.resolved_width = column.columnar_width_requirement;
                 }
             }
+
+            self.apply_width_fill(
+                &mut measurements.columns,
+                available_render_width,
+                border_overhead,
+            );
 
             let table_width = table_total_width(
                 measurements
@@ -574,6 +644,12 @@ impl Table {
             }
         }
 
+        self.apply_width_fill(
+            &mut measurements.columns,
+            available_render_width,
+            border_overhead,
+        );
+
         let table_width = table_total_width(
             measurements
                 .columns
@@ -590,6 +666,53 @@ impl Table {
             table_width,
             dropped_notes,
         })
+    }
+
+    /// Grow the last visible column when the table has an explicit width.
+    ///
+    /// Honors [`Layout::width`](renderable::layout::Layout):
+    /// - [`Width::Auto`] (the default) and [`Width::FitContent`] hug the
+    ///   content's widest line.
+    /// - [`Width::Fixed`] (e.g. `width: 100%` ⇒
+    ///   `Width::Fixed(Length::Percent(100.0))`) fills the available width.
+    ///
+    /// The fill targets the *available width already handed to the planner*, not
+    /// a freshly resolved length: whoever sizes the table's box (the render-tree
+    /// block-layout step) has already resolved the percentage / `ch` / `max_width`
+    /// into `available_render_width`, so re-resolving here would apply a
+    /// percentage twice. The last visible column absorbs the slack, capped at its
+    /// `max_width` when one is set; slack is only ever added, so a table whose
+    /// content already fills the width is unchanged.
+    fn apply_width_fill(
+        &self,
+        columns: &mut [MeasuredColumn],
+        available_render_width: usize,
+        border_overhead: usize,
+    ) {
+        if !matches!(self.layout.width, Width::Fixed(_)) {
+            return;
+        }
+
+        // Filling requires a finite width to fill to. An unbounded width — the
+        // `u32::MAX` sentinel a natural-width measurement passes — has nothing to
+        // fill, so the table hugs its content regardless of `width`.
+        if available_render_width >= u32::MAX as usize {
+            return;
+        }
+
+        let content_budget = available_render_width.saturating_sub(border_overhead);
+        let content_used: usize = columns.iter().map(|column| column.resolved_width).sum();
+        if content_budget <= content_used {
+            return;
+        }
+        let mut slack = content_budget - content_used;
+
+        if let Some(last) = columns.last_mut() {
+            if let Some(max) = last.max_width {
+                slack = slack.min(max.saturating_sub(last.resolved_width));
+            }
+            last.resolved_width += slack;
+        }
     }
 
     fn visible_column_indices(&self, available_width: u32) -> Vec<usize> {
@@ -1547,6 +1670,7 @@ impl Table {
             node.attrs.set_table_title(title);
         }
 
+        crate::components::renderable::overlay_style_onto_node(&mut node, &self.block_style);
         node
     }
 
@@ -1610,6 +1734,14 @@ impl Table {
         resolved
     }
 
+    /// Resolve terminal-specific cell content before measuring or rendering.
+    fn prepare_for_terminal(&self, term: &Terminal) -> (Table, usize) {
+        let mut table = self.clone();
+        let resolved = Self::resolve_prose_cells_in_place(&mut table, term);
+        table.expand_tabs_in_place(term.tab_width);
+        (table, resolved)
+    }
+
     /// Renders via the sanctioned bespoke escape hatch.
     ///
     /// Retained as a `#[doc(hidden)]` surface because [`Table`] supports the
@@ -1642,8 +1774,7 @@ impl Table {
     /// left to re-resolve.
     #[doc(hidden)]
     pub fn render_bespoke_instrumented(&self, term: &Terminal) -> (String, usize) {
-        let mut table = self.clone();
-        let resolved = Self::resolve_prose_cells_in_place(&mut table, term);
+        let (table, resolved) = self.prepare_for_terminal(term);
         let width = term.width();
         let (stripe_bg, stripe_fg) =
             table.resolve_stripe_escapes(&term.color_mode(), term.color_depth);
@@ -1726,6 +1857,14 @@ impl TerminalRenderable for Table {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> Style {
+        self.block_style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.block_style)
     }
 
     fn is_block_level(&self) -> bool {
@@ -2639,6 +2778,127 @@ mod tests {
         assert!(result.contains("Bob"));
     }
 
+    // ── table width planning ──────────────────────────────────────
+
+    fn two_column_table() -> Table {
+        Table::new()
+            .with_columns(vec![TableColumn::new("A"), TableColumn::new("B")])
+            .with_data(vec![vec!["x".into(), "y".into()]])
+    }
+
+    #[test]
+    fn width_auto_hugs_content_below_available() {
+        let plan = two_column_table().plan_widths(60).expect("plan");
+        assert_eq!(plan.table_width, 9, "Auto must hug content by default");
+        let widths = plan.content_widths();
+        assert_eq!(widths, vec![1, 1], "Auto must not assign slack: {widths:?}");
+    }
+
+    #[test]
+    fn width_auto_hugs_when_width_is_unbounded() {
+        let widths = two_column_table().calculate_column_widths(None);
+        assert_eq!(
+            widths,
+            vec![1, 1],
+            "unbounded width must also hug, not fill to u32::MAX; widths={widths:?}"
+        );
+    }
+
+    #[test]
+    fn width_fit_content_matches_auto_hugging_behavior() {
+        let mut table = two_column_table();
+        table.layout_mut().width = Width::FitContent;
+        let plan = table.plan_widths(60).expect("plan");
+        assert_eq!(plan.table_width, 9, "FitContent must hug content");
+    }
+
+    #[test]
+    fn default_worktree_shaped_table_does_not_expand_commits_column() {
+        let table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("Worktree"),
+                TableColumn::new("Worktree Name"),
+                TableColumn::new("Branch"),
+                TableColumn::new("Merge"),
+                TableColumn::new("Commits"),
+            ])
+            .with_data(vec![
+                vec![
+                    "Clean".into(),
+                    "main::(rusty-biscuit)".into(),
+                    "main".into(),
+                    "".into(),
+                    "+275 -55".into(),
+                ],
+                vec![
+                    "Dirty".into(),
+                    "terminal".into(),
+                    "terminal".into(),
+                    "clean".into(),
+                    "+1".into(),
+                ],
+            ]);
+
+        let plan = table.plan_widths(180).expect("plan");
+        assert!(
+            plan.table_width < 120,
+            "default table should hug content, not fill terminal width: {}",
+            plan.table_width
+        );
+        assert_eq!(
+            plan.content_widths()[4],
+            "+275 -55".len(),
+            "last column should not absorb terminal slack by default"
+        );
+    }
+
+    #[test]
+    fn width_fixed_full_fills_last_column_to_available() {
+        let mut table = two_column_table();
+        table.layout_mut().width = Width::Fixed(renderable::layout::TargetValue::universal(
+            renderable::layout::Length::Percent(100.0),
+        ));
+
+        let plan = table.plan_widths(60).expect("plan");
+        assert_eq!(
+            plan.table_width, 60,
+            "width: 100% must fill the available width"
+        );
+
+        let widths = plan.content_widths();
+        assert!(
+            widths[1] > widths[0],
+            "the last column must absorb the slack; widths={widths:?}"
+        );
+    }
+
+    #[test]
+    fn width_fixed_full_respects_last_column_max_width() {
+        // When the last column is capped, fill cannot exceed that cap, so the
+        // table may stop short of the available width rather than overflow it.
+        let mut table = Table::new()
+            .with_columns(vec![
+                TableColumn::new("A"),
+                TableColumn::new("B").with_max_width(4),
+            ])
+            .with_data(vec![vec!["x".into(), "y".into()]]);
+        table.layout_mut().width = Width::Fixed(renderable::layout::TargetValue::universal(
+            renderable::layout::Length::Percent(100.0),
+        ));
+
+        let plan = table.plan_widths(60).expect("plan");
+        assert!(
+            plan.content_widths()[1] <= 4,
+            "capped last column must not exceed its max_width; widths={:?}",
+            plan.content_widths()
+        );
+        assert!(
+            plan.table_width <= 60,
+            "fill never overflows the available width; table_width={}",
+            plan.table_width
+        );
+    }
+
     #[test]
     fn test_table_with_title() {
         let table = Table::new()
@@ -2751,6 +3011,87 @@ mod tests {
             TableCellContent::Text("hello".to_string()).to_string(),
             "hello"
         );
+        assert_eq!(
+            TableCellContent::Text("a\tb".to_string()).to_string(),
+            "a\tb"
+        );
+    }
+
+    #[test]
+    fn test_expand_tabs_uses_table_local_stops() {
+        assert_eq!(expand_tabs_with_width("\t", 4), "    ");
+        assert_eq!(expand_tabs_with_width("a\tb", 4), "a   b");
+        assert_eq!(expand_tabs_with_width("abcd\tb", 4), "abcd    b");
+        assert_eq!(expand_tabs_with_width("a\tb\n12\t3", 4), "a   b\n12  3");
+        assert_eq!(
+            expand_tabs_with_width("\x1b[31ma\x1b[0m\tb", 4),
+            "\x1b[31ma\x1b[0m   b"
+        );
+    }
+
+    fn assert_table_uses_tab_width(term: &Terminal, expected_tab_width: usize) {
+        assert_eq!(term.tab_width, expected_tab_width);
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("Key\tValue")])
+            .with_data(vec![vec!["1\t2\t3".into()]]);
+
+        let plan = table
+            .plan_widths_for_terminal(term)
+            .expect("tabbed table width plan");
+        let expected_width = ["Key\tValue", "1\t2\t3"]
+            .into_iter()
+            .map(|content| {
+                visible_width(&expand_tabs_with_width(content, expected_tab_width)) as usize
+            })
+            .max()
+            .expect("tabbed test content");
+        assert_eq!(plan.content_widths(), vec![expected_width]);
+
+        let expanded_data = expand_tabs_with_width("1\t2\t3", expected_tab_width);
+        let output = table.render(term);
+        assert!(!output.contains('\t'), "table output retained a raw tab: {output:?}");
+        assert!(output.contains(expanded_data.as_ref()));
+        let widths: Vec<u32> = output.lines().map(visible_width).collect();
+        assert!(
+            widths.windows(2).all(|pair| pair[0] == pair[1]),
+            "table borders diverged after tab expansion: {widths:?}\n{output}",
+        );
+    }
+
+    #[test]
+    fn test_table_uses_detected_terminal_tab_width() {
+        let mut term = Terminal::new();
+        term.fixed_width = Some(80);
+        let detected_tab_width = term.tab_width;
+        assert!(detected_tab_width > 0);
+        assert_table_uses_tab_width(&term, detected_tab_width);
+    }
+
+    #[test]
+    fn test_table_uses_four_column_tab_override() {
+        let term = Terminal::builder().width(80).tab_width(4).build();
+        assert_table_uses_tab_width(&term, 4);
+    }
+
+    #[test]
+    fn test_table_uses_eight_column_tab_override() {
+        let term = Terminal::builder().width(80).tab_width(8).build();
+        assert_table_uses_tab_width(&term, 8);
+    }
+
+    #[test]
+    fn test_cursor_positioned_table_expands_tabs() {
+        let table = Table::new()
+            .with_columns(vec![TableColumn::new("Value")])
+            .with_data(vec![vec!["1\t2\t3".into()]])
+            .prefer_cursor_alignment();
+        let mut term = Terminal::new_optimistic(80);
+        term.is_tty = true;
+        term.tab_width = 4;
+
+        let output = table.render_bespoke(&term);
+        assert!(!output.contains('\t'), "cursor-positioned output retained a raw tab");
+        assert!(output.contains("1   2   3"));
     }
 
     #[test]
@@ -3084,6 +3425,8 @@ mod tests {
             .with_data(vec![vec!["A".into()]])
             .prefer_cursor_alignment();
         table.layout_mut().alignment = Alignment::Center;
+        // Block alignment is observable because the default `Auto` table width
+        // hugs content instead of filling all available columns.
 
         let result = table.render_bespoke(&Terminal::new_optimistic(80));
         // With 80 width and small table, table_start should be > 1
@@ -3119,6 +3462,8 @@ mod tests {
             .with_data(vec![vec!["A".into()]])
             .prefer_cursor_alignment();
         table.layout_mut().alignment = Alignment::Right;
+        // Right alignment is observable because the default `Auto` table width
+        // hugs content instead of filling all available columns.
 
         let result = table.render_bespoke(&Terminal::new_optimistic(80));
         // With 80 width and small table (~5 chars), table should start near column 75
@@ -3366,9 +3711,8 @@ mod tests {
             .with_columns(vec![TableColumn::new("X"), TableColumn::new("Y")])
             .with_data(vec![vec!["A".into(), "B".into()]]);
 
-        // Table needs: 3 + (1 + 1) + 3 = 8 chars minimum
         let widths = table.calculate_column_widths(Some(80));
-        assert_eq!(widths, vec![1, 1]);
+        assert_eq!(widths, vec![1, 1], "default table hugs content: {widths:?}");
     }
 
     #[test]

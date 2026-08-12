@@ -1,10 +1,11 @@
-//! Performance harness for `claudine __complete`.
+//! Performance harness for `claudine __complete` and ENTER-path autocomplete.
 //!
-//! Phase 6 of the `2026-04-24-improved-shell-completions` feature. The
-//! harness builds a Cargo workspace fixture that mirrors rusty-biscuit
-//! scale (~48 packages, ~2000 markdown files), warms the OS file cache,
-//! then runs the completion engine `ITERATIONS` times against three
-//! representative cursor slots:
+//! Phase 6 of the `2026-04-24-improved-shell-completions` feature and
+//! Phase 5 of the `2026-06-14-auto-complete` feature. The harness builds
+//! a Cargo workspace fixture that mirrors rusty-biscuit scale (~48
+//! packages, ~2000 markdown files), warms the OS file cache, then runs
+//! the completion engine `ITERATIONS` times against three representative
+//! TAB cursor slots:
 //!
 //! - `claudine compose <TAB>` (empty partial, repo-prompts only)
 //! - `claudine compose pla<TAB>` (3-char partial, fuzzy + dirs)
@@ -22,17 +23,29 @@
 //! ```
 //!
 //! Optionally set `CLAUDINE_COMPLETION_PROFILE=1` and
-//! `RUST_LOG=claudine::completion=trace` to capture per-phase tracing
+//! `RUST_LOG=claudine::completion=trace` to capture per-phase timing
 //! spans during the harness run. The harness itself does not enable
 //! these — they are picked up by the spawned `claudine` binary if set in
 //! the parent environment.
+//!
+//! ## ENTER-path autocomplete latency
+//!
+//! On Unix the harness also measures the runtime autocomplete path that
+//! fires when `claudine compose|inline-compose|sequence <partial>` fails
+//! to resolve the file reference. A PTY-spawned `claudine compose pla`
+//! enters the two-pane chooser; the test cancels with `Esc` and records
+//! the wall-clock time from spawn to visible candidate list. This shares
+//! the same bounded walker as the TAB path, so the p95 target is the
+//! same ~100 ms-class budget.
 
 use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use assert_cmd::cargo::cargo_bin_cmd;
+
+#[cfg(unix)]
+use expectrl::{Expect, Session};
 
 mod common;
 use common::TestWorkspace;
@@ -151,7 +164,7 @@ fn seed_workspace(root: &Path) {
 
 fn run_complete_once(cwd: &Path, home: &Path, argv_tail: &[&str]) -> Duration {
     let current = argv_tail.len();
-    let reference = cargo_bin_cmd!("claudine");
+    let reference = assert_cmd::Command::cargo_bin("claudine").unwrap();
     let program = reference.get_program().to_os_string();
     let mut cmd = Command::new(program);
     cmd.current_dir(cwd)
@@ -275,14 +288,13 @@ fn perf_inline_compose_empty_partial_meets_target() {
 
 /// Validate the spec target against the recorded p95.
 ///
-/// The function classifies the run into one of three regions:
+/// The function classifies the run into one of two regions:
 ///
 /// - **Pass** — `p95 ≤ 100 ms`. The default no-cache plan holds.
-/// - **Warning** — `100 ms < p95 ≤ 150 ms`. Outside the spec target but
-///   inside the cache trigger; emit a warning so the team can decide
-///   whether to tune the no-cache path further.
-/// - **Cache trigger** — `p95 > 150 ms`. The harness panics so a CI run
-///   forces the team to land the fallback cache from spec §8.3.
+/// - **Fail** — `p95 > 100 ms`. The harness panics so the regression is
+///   visible in CI. When `p95` additionally exceeds the `150 ms` cache
+///   trigger, the panic message notes that the fallback cache from
+///   spec §8.3 should be implemented.
 fn assert_perf_target(label: &str, stats: Stats) {
     if stats.p95 <= TARGET_P95_MS {
         println!(
@@ -291,15 +303,225 @@ fn assert_perf_target(label: &str, stats: Stats) {
         );
         return;
     }
-    if stats.p95 <= CACHE_TRIGGER_MS {
-        println!(
-            "[perf] {label}: WARN (p95 {} ms > {} ms target but ≤ {} ms cache trigger)",
+    if stats.p95 > CACHE_TRIGGER_MS {
+        panic!(
+            "[perf] {label}: FAIL (p95 {} ms > {} ms target; also exceeds {} ms cache trigger — implement fallback cache per spec §8.3)",
             stats.p95, TARGET_P95_MS, CACHE_TRIGGER_MS,
         );
-        return;
     }
     panic!(
-        "[perf] {label}: FAIL (p95 {} ms > {} ms cache trigger — implement cache.rs per spec §8.3)",
-        stats.p95, CACHE_TRIGGER_MS,
+        "[perf] {label}: FAIL (p95 {} ms > {} ms target)",
+        stats.p95, TARGET_P95_MS,
+    );
+}
+
+// ----------------------------------------------------------------------
+// ENTER-path autocomplete latency (Unix-only; requires a PTY)
+// ----------------------------------------------------------------------
+
+/// Number of timed iterations for the ENTER-path scenario.
+///
+/// Kept lower than the TAB path because each iteration must spawn a PTY,
+/// wait for the `biscuit-tui` chooser to render, and cancel with `Esc`.
+#[cfg(unix)]
+const ENTER_ITERATIONS: usize = 20;
+
+#[cfg(unix)]
+const ENTER_WARMUP: usize = 3;
+
+/// Run one ENTER-path autocomplete iteration and return the wall-clock
+/// time from PTY spawn until the chooser's candidate list is visible.
+///
+/// The partial `pla` is intentionally non-resolving so
+/// `resolve_composition_source` falls through to
+/// `autocomplete_operation_file`. The function cancels the chooser with
+/// `Esc` as soon as a candidate path appears, so provider resolution and
+/// composition execution never run.
+#[cfg(unix)]
+fn run_enter_once(cwd: &Path, home: &Path, partial: &str) -> Duration {
+    // The init wizard intercepts stdin when no user config exists; stage
+    // an empty config so the default `prompt_for_missing = true` applies.
+    let config_dir = home.join(".claudine");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("config.json"), "{}").unwrap();
+
+    let program = assert_cmd::Command::cargo_bin("claudine").unwrap().get_program().to_os_string();
+    let mut cmd = Command::new(program);
+    cmd.current_dir(cwd)
+        .env("HOME", home)
+        .env("NO_COLOR", "1")
+        .env_remove("COMPLETE")
+        .env_remove("_CLAP_COMPLETE_INDEX")
+        .env_remove("_CLAP_IFS")
+        .args(["compose", partial]);
+
+    let mut session = Session::spawn(cmd).expect("PTY session for ENTER path");
+    let started = Instant::now();
+
+    // Drain until the chooser renders a candidate path. The partial `repo`
+    // matches the repo-root `repo-prompt-NN.md` files, so the rendered
+    // candidate labels contain `repo-prompt`.
+    let marker = "repo-prompt";
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let mut buf = Vec::new();
+    let mut scratch = [0u8; 4096];
+    loop {
+        if Instant::now() > deadline {
+            let text = String::from_utf8_lossy(&buf);
+            panic!(
+                "ENTER-path chooser did not render within 10 s; captured {} bytes:\n{text}",
+                buf.len()
+            );
+        }
+        match session.try_read(&mut scratch) {
+            Ok(0) => {
+                // No data yet; keep polling. EOF only happens when the
+                // child exits, which should not occur before we cancel.
+            }
+            Ok(n) => {
+                buf.extend_from_slice(&scratch[..n]);
+                let text = String::from_utf8_lossy(&buf);
+                if text.contains(marker) {
+                    break;
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+            Err(_) => break,
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let elapsed = started.elapsed();
+
+    // Cancel the chooser so the process exits cleanly. In raw mode Esc is
+    // the single ESC byte; the chooser returns `AutocompleteCancelled` and
+    // the CLI renders the non-TTY remediation block and exits.
+    session.send(b"\x1b").ok();
+    let _ = session.expect(expectrl::Eof);
+
+    elapsed
+}
+
+#[cfg(unix)]
+fn measure_enter(label: &str, cwd: &Path, home: &Path, partial: &str) -> Stats {
+    for _ in 0..ENTER_WARMUP {
+        let _ = run_enter_once(cwd, home, partial);
+    }
+    let samples: Vec<Duration> = (0..ENTER_ITERATIONS)
+        .map(|_| run_enter_once(cwd, home, partial))
+        .collect();
+    let stats = compute_stats(&samples);
+    println!(
+        "[perf] {label:32} mean={mean}ms p50={p50}ms p95={p95}ms p99={p99}ms max={max}ms (n={n})",
+        mean = stats.mean,
+        p50 = stats.p50,
+        p95 = stats.p95,
+        p99 = stats.p99,
+        max = stats.max,
+        n = ENTER_ITERATIONS,
+    );
+    stats
+}
+
+#[cfg(unix)]
+#[test]
+#[ignore = "performance harness; run explicitly with --ignored"]
+fn perf_enter_compose_partial_meets_target() {
+    let ws = TestWorkspace::named("enter-autocomplete-perf-compose");
+    seed_workspace(ws.path());
+    let home = fake_home(ws.path());
+
+    let stats = measure_enter(
+        "enter compose partial `repo`",
+        ws.path(),
+        &home,
+        "repo",
+    );
+    assert_perf_target("enter compose partial `repo`", stats);
+}
+
+#[cfg(not(unix))]
+#[test]
+#[ignore = "performance harness; run explicitly with --ignored"]
+fn perf_enter_compose_partial_meets_target() {
+    // The ENTER-path latency scenario requires a PTY, which is not
+    // available in a portable way on Windows. The TAB-path scenarios
+    // above still run on every platform.
+}
+
+// ----------------------------------------------------------------------
+// assert_perf_target contract — fast, platform-agnostic regression tests.
+//
+// These build `Stats` directly and drive `assert_perf_target` without
+// spawning any subprocess, so they run in the default (non-ignored)
+// suite. They pin the spec §8.1 p95 budget: any p95 over 100 ms fails,
+// which closes the loophole that let a 149 ms run pass as a "warning".
+// ----------------------------------------------------------------------
+
+fn stats_with_p95(p95: u128) -> Stats {
+    Stats {
+        p50: p95,
+        p95,
+        p99: p95,
+        max: p95,
+        mean: p95,
+    }
+}
+
+fn assert_panics(p95: u128) {
+    let result = std::panic::catch_unwind(|| {
+        assert_perf_target("probe", stats_with_p95(p95));
+    });
+    assert!(result.is_err(), "expected p95={} ms to fail the target", p95);
+}
+
+fn assert_passes(p95: u128) {
+    let result = std::panic::catch_unwind(|| {
+        assert_perf_target("probe", stats_with_p95(p95));
+    });
+    assert!(result.is_ok(), "expected p95={} ms to pass the target", p95);
+}
+
+#[test]
+fn assert_perf_target_passes_well_under_target() {
+    assert_passes(50);
+}
+
+#[test]
+fn assert_perf_target_passes_at_target_boundary() {
+    // The budget is inclusive: p95 == TARGET_P95_MS must still pass.
+    assert_passes(TARGET_P95_MS);
+}
+
+#[test]
+fn assert_perf_target_fails_just_over_target() {
+    assert_panics(101);
+}
+
+#[test]
+fn assert_perf_target_fails_in_old_warning_range() {
+    // p95 = 149 ms used to fall in the passing "warning" region; it must
+    // now fail. This is the exact regression the review called out.
+    assert_panics(149);
+}
+
+#[test]
+fn assert_perf_target_fails_over_cache_trigger_with_diagnostic() {
+    let result = std::panic::catch_unwind(|| {
+        assert_perf_target("probe", stats_with_p95(151));
+    });
+    let payload = result.unwrap_err();
+    let msg = payload
+        .downcast_ref::<String>()
+        .map(|s| s.as_str())
+        .or_else(|| payload.downcast_ref::<&'static str>().copied())
+        .unwrap_or("");
+    assert!(
+        msg.contains("100"),
+        "failure msg should mention the 100ms target: {msg}"
+    );
+    assert!(
+        msg.contains("cache") || msg.contains("§8.3"),
+        "failure msg should mention the cache fallback: {msg}"
     );
 }

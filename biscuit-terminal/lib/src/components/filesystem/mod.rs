@@ -74,6 +74,26 @@
 //!
 //! For CLI output, always use `render()` with a [`Terminal`] instance to get
 //! proper icon selection and ANSI styling based on terminal capabilities.
+//!
+//! ## Layout & Style Contract
+//!
+//! `FileSystem` is an internal-layout component (spec C2). The tree projection
+//! honors all applicable `Layout` properties (`margin`, `padding`, `width`,
+//! `max_width`, `alignment`, `word_wrap`) and `Style` properties (`color`,
+//! `background`, `emphasis`, `border`) via the shared render-tree fold (C1).
+//!
+//! - [`Width::Auto`](renderable::layout::Width::Auto) (default) and
+//!   [`Width::Fixed`](renderable::layout::Width::Fixed) fill the available
+//!   width; [`Width::FitContent`](renderable::layout::Width::FitContent) hugs
+//!   the tree's natural width.
+//! - **Slack sink** (spec D2): the entry-label region. Connector glyphs and
+//!   file/directory icons stay fixed across width modes.
+//! - The public [`TerminalRenderable::render`](crate::components::renderable::TerminalRenderable)
+//!   path remains deferred to the bespoke Nerd-Font renderer; the matrix and
+//!   parity coverage use the tree projection, which emits Unicode icons.
+//!
+//! Markdown degrades layout/appearance attrs by Decision D1 and preserves the
+//! structural file-tree syntax where the target renderer supports it.
 
 // Submodules
 pub mod error;
@@ -199,6 +219,39 @@ impl RootIconKind {
 /// - The tree is built lazily on first render or explicit call
 /// - Symlinks are shown but not followed (prevents infinite loops)
 /// - Permission errors create error-marked nodes instead of failing
+///
+/// ## Layout & Style Contract
+///
+/// `FileSystem` is an internal-layout component (spec C2) **on the tree
+/// path**: the canonical projection sets the configured [`Layout`] on the
+/// root `List` node, and the shared render-tree fold resolves the outer box.
+/// Tree connectors are forced to [`WordWrap::None`] so the connector
+/// geometry is never wrapped.
+///
+/// - [`Width::Auto`] (default), [`Width::Fixed`], and [`Width::FitContent`]
+///   resolve the outer box; the filesystem tree renders inside that box.
+/// - **Slack sink** (spec D2): the entry-label region. The connector columns
+///   (`├── ` / `└── ` / `│   `) and the icon columns stay fixed; only the
+///   entry labels absorb slack by truncating inside the resolved content
+///   width.
+/// - A fractional `Fixed(50%)` is resolved exactly once by the fold; the
+///   tree never re-resolves the raw percentage against its own narrowed box.
+///
+/// ### Terminal render gap (deferred flip)
+///
+/// The bespoke [`TerminalRenderable::render`] path remains the production
+/// terminal renderer because the target-agnostic projection emits Unicode
+/// fallback icons (📂 / 📄) that cannot reproduce the bespoke Nerd Font
+/// icons the terminal path chooses based on the live terminal's font
+/// support. The tree path's box-model contract is honored today
+/// (`margin` / `alignment` / `max_width` / `width`), and the bespoke
+/// terminal path applies the same [`Layout`] via `apply_block_layout`. A
+/// future flip will route the terminal target through the tree path once
+/// icon parity is achieved.
+///
+/// [`Width::Auto`]: renderable::layout::Width::Auto
+/// [`Width::Fixed`]: renderable::layout::Width::Fixed
+/// [`Width::FitContent`]: renderable::layout::Width::FitContent
 #[derive(Debug, Clone)]
 pub struct FileSystem {
     /// The root directory path to display.
@@ -2035,12 +2088,11 @@ impl FileSystem {
         let Some(prefix) = &self.root_prefix else {
             if is_tty {
                 let display_name = if self.file_links {
-                    let abs_path = self
-                        .root_path
-                        .canonicalize()
-                        .unwrap_or_else(|_| self.root_path.clone());
-                    Prose::new(format!("<a href=\"{}\">{}</a>", abs_path.display(), name))
-                        .render_optimistic(None)
+                    match file_url(&self.root_path) {
+                        Some(url) => Prose::new(format!("<a href=\"{url}\">{name}</a>"))
+                            .render_optimistic(None),
+                        None => name,
+                    }
                 } else {
                     name
                 };
@@ -2054,12 +2106,12 @@ impl FileSystem {
         // Dimmed-prefix root line:
         // `{icon} {dim}{prefix}{reset}{bold-blue}{target}{reset}`
         let target = if self.file_links && is_tty {
-            let abs_path = self
-                .root_path
-                .canonicalize()
-                .unwrap_or_else(|_| self.root_path.clone());
-            Prose::new(format!("<a href=\"{}\">{}</a>", abs_path.display(), name))
-                .render_optimistic(None)
+            match file_url(&self.root_path) {
+                Some(url) => {
+                    Prose::new(format!("<a href=\"{url}\">{name}</a>")).render_optimistic(None)
+                }
+                None => name,
+            }
         } else {
             name
         };
@@ -2137,12 +2189,11 @@ impl FileSystem {
             // Wrap name in an OSC8 hyperlink when file_links is enabled
             let display_name = if self.file_links && is_tty {
                 let node_path = current_path.join(name);
-                Prose::new(format!(
-                    "<a href=\"{}\">{}</a>",
-                    node_path.display(),
-                    display_name
-                ))
-                .render_optimistic(None)
+                match file_url(&node_path) {
+                    Some(url) => Prose::new(format!("<a href=\"{url}\">{display_name}</a>"))
+                        .render_optimistic(None),
+                    None => display_name,
+                }
             } else {
                 display_name
             };
@@ -2325,10 +2376,10 @@ fn glob_match(pattern: &str, filename: &str) -> bool {
 }
 
 /// Returns `true` when `path` is a clean relative path that stays within the
-/// root (no absolute prefix, no `..` components). Used to filter
+/// root (no root or drive prefix, no `..` components). Used to filter
 /// [`FileSystem::included_paths`] entries.
 fn is_safe_relative(path: &Path) -> bool {
-    if path.is_absolute() || path.as_os_str().is_empty() {
+    if path.has_root() || path.as_os_str().is_empty() {
         return false;
     }
     !path.components().any(|c| {
@@ -2337,6 +2388,18 @@ fn is_safe_relative(path: &Path) -> bool {
             std::path::Component::ParentDir | std::path::Component::Prefix(_)
         )
     })
+}
+
+/// Builds a standards-compliant file URL, resolving relative paths against the
+/// process working directory. Returns `None` when the path cannot be expressed
+/// as a file URL.
+fn file_url(path: &Path) -> Option<String> {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir().ok()?.join(path)
+    };
+    url::Url::from_file_path(absolute).ok().map(String::from)
 }
 
 /// Returns the lowercased extension (without dot) of a filename, or `None`
@@ -2925,8 +2988,10 @@ impl FileSystem {
         let entry_classes = self.fs_entry_classes(node);
         let inner_name: RenderNode = if self.file_links {
             let abs_path = current_path.join(name);
-            let url = format!("file://{}", abs_path.display());
-            RenderNode::link(url, None, vec![RenderNode::text(name)])
+            match file_url(&abs_path) {
+                Some(url) => RenderNode::link(url, None, vec![RenderNode::text(name)]),
+                None => RenderNode::text(name),
+            }
         } else {
             RenderNode::text(name)
         };
@@ -3093,11 +3158,10 @@ impl FileSystem {
                 .root_path
                 .canonicalize()
                 .unwrap_or_else(|_| self.root_path.clone());
-            RenderNode::link(
-                format!("file://{}", abs_path.display()),
-                None,
-                vec![RenderNode::text(&name)],
-            )
+            match file_url(&abs_path) {
+                Some(url) => RenderNode::link(url, None, vec![RenderNode::text(&name)]),
+                None => RenderNode::text(&name),
+            }
         } else {
             RenderNode::text(&name)
         };
@@ -5702,7 +5766,10 @@ mod tests {
         let canonical = temp.path().canonicalize().expect("canonicalize");
 
         // File should have an OSC8 link with the absolute path
-        let file_link = format!("\x1b]8;;file://{}/hello.txt\x1b\\", canonical.display());
+        let file_link = format!(
+            "\x1b]8;;{}\x1b\\",
+            file_url(&canonical.join("hello.txt")).expect("file URL")
+        );
         assert!(
             result.contains(&file_link),
             "Expected OSC8 link for hello.txt in output.\nLooking for: {:?}\nOutput: {:?}",
@@ -5711,7 +5778,10 @@ mod tests {
         );
 
         // Nested file should have full path
-        let nested_link = format!("\x1b]8;;file://{}/sub/nested.rs\x1b\\", canonical.display());
+        let nested_link = format!(
+            "\x1b]8;;{}\x1b\\",
+            file_url(&canonical.join("sub/nested.rs")).expect("file URL")
+        );
         assert!(
             result.contains(&nested_link),
             "Expected OSC8 link for sub/nested.rs in output.\nLooking for: {:?}\nOutput: {:?}",
@@ -5720,7 +5790,10 @@ mod tests {
         );
 
         // Directory should also be linked
-        let dir_link = format!("\x1b]8;;file://{}/sub\x1b\\", canonical.display());
+        let dir_link = format!(
+            "\x1b]8;;{}\x1b\\",
+            file_url(&canonical.join("sub")).expect("file URL")
+        );
         assert!(
             result.contains(&dir_link),
             "Expected OSC8 link for sub/ directory in output.\nLooking for: {:?}\nOutput: {:?}",
@@ -7665,23 +7738,14 @@ mod tests {
     /// Suggested #6 — a symlink that points at a directory must keep the
     /// bold attribute (the bespoke renderer stacks `1;34;36` SGR — bold
     /// survives even when cyan wins the foreground color).
+    #[cfg(unix)]
     #[test]
     fn render_tree_symlink_to_directory_keeps_bold_and_cyan() {
-        // Only run on platforms that support `symlink_dir`; on Windows
-        // creating directory symlinks requires elevated privileges. The
-        // unix-only `symlink` syscall works for both files and dirs.
         let temp = tempfile::tempdir().expect("create temp dir");
         let target = temp.path().join("target_dir");
         std::fs::create_dir_all(&target).unwrap();
         let link = temp.path().join("alias");
-        #[cfg(unix)]
         std::os::unix::fs::symlink(&target, &link).unwrap();
-        #[cfg(not(unix))]
-        {
-            // Skip on non-unix where directory symlinks need extra privileges.
-            let _ = link;
-            return;
-        }
 
         let mut fs = FileSystem::new(temp.path()).expect("fs");
         fs.ensure_tree_built();

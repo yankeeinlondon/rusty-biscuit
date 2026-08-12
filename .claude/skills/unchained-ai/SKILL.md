@@ -10,7 +10,7 @@ Unchained AI is the monorepo's LLM pipeline framework. It provides:
 
 - **Pipeline primitives**: typed state, composable steps (`Runnable`), serial/parallel execution
 - **Provider registry**: 13 providers with unified configuration (auth, endpoints, env vars)
-- **Model catalogs**: auto-generated provider-specific enums with metadata from Parsera
+- **Model catalogs**: auto-generated provider-specific enums with metadata from models.dev and provider-native sources
 - **Rig-core tools**: `BraveSearchTool` and `ScreenScrapeTool` implementations
 - **Agent delegation**: `OpenCodeDelegation` for external agentic CLI integration
 - **Abstract model selection**: `ModelCapability` enum for capability-based model choice
@@ -53,6 +53,7 @@ unchained-ai/
 | `ProviderModelMetadata` | `models::model_metadata` | Rich metadata (pricing, params, modalities, etc.) |
 | `ModelPricing` | `models::model_pricing` | Per-token/request pricing (USD) |
 | `ModelDefaultParameters` | `models::model_default_parameters` | Provider-recommended generation defaults |
+| `ModelIdentity` | `models::identity` | Wire-id identity grammar: family/version/variant decomposition, `latest_in_family` |
 | `CompletionBackend` | `execution` | Injectable seam for text completions |
 | `CompletionRequest` / `CompletionOutput` | `execution` | Single-turn execution surface |
 | `ResolvedParameters` | `execution` | Metadata defaults + caller overrides |
@@ -98,7 +99,7 @@ cargo run -p unchained-ai-gen -- --dry-run
 
 ## Implementation Status
 
-**Implemented**: Pipeline state/execution, Prompt building (multi-modal), `Prompt::execute()` via `complete_blocking()` + capability resolver, execution surface (`CompletionBackend`, `complete()`, `complete_blocking()`), capability-based model resolver (`models::selection`), OpenCode delegation, provider registry (13 providers), model enums (auto-generated), model metadata (Parsera + provider-native merge), rich OpenRouter metadata (pricing, architecture, default parameters), rig tools (BraveSearch, ScreenScrape), client adaptors (Z.ai, ZenMux), ModelCapability serialization, `UnchainedInferenceAdapter` in `unchained-ai-contract`, agent status detection (ClaudeCode, Codex), PTY-based status command execution, cap limit parsing, CLI binary with `limits` subcommand (terminal + JSON output)
+**Implemented**: Pipeline state/execution, Prompt building (multi-modal), `Prompt::execute()` via `complete_blocking()` + capability resolver, execution surface (`CompletionBackend`, `complete()`, `complete_blocking()`), capability-based model resolver (`models::selection`), OpenCode delegation, provider registry (13 providers), model enums (auto-generated), model metadata (models.dev + provider-native merge), rich OpenRouter metadata (pricing, architecture, default parameters), rig tools (BraveSearch, ScreenScrape), client adaptors (Z.ai, ZenMux), ModelCapability serialization, `UnchainedInferenceAdapter` in `unchained-ai-contract`, agent status detection (ClaudeCode, Codex), PTY-based status command execution, cap limit parsing, CLI binary with `limits` subcommand (terminal + JSON output)
 
 **Not implemented**: `UserContent`/`Transcribe` (placeholder structs), `ForeignAgent` trait (incomplete skeleton, not publicly exported), `SmartConcat` (scaffold), HuggingFace API module (empty)
 
@@ -106,5 +107,6 @@ cargo run -p unchained-ai-gen -- --dry-run
 
 - [Pipeline Primitives](./pipeline-primitives.md) - State, Runnable trait, grouping, atomic steps
 - [Providers and Models](./providers-and-models.md) - Provider registry, model enums, metadata, client adaptors
-- [Model Generator](./model-generator.md) - gen-models CLI, Parsera integration, enum generation
+- [Model Generator](./model-generator.md) - gen-models CLI, models.dev integration, enum generation
 - [Agent Services](./agent-services.md) - Platform detection, PTY runner, cap limit parsing, CLI usage
+- [Rig](./rig/SKILL.md) - The `rig-core` framework that underpins the `rigging` module — type-safe agents, tool calling, agentic loops, embeddings, vector-store/RAG integration, and custom providers. Reach for this when working with the provider registry, rig tools, or building agent/RAG pipelines on top of rig.

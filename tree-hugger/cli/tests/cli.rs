@@ -1,6 +1,7 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serde_json::Value;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
@@ -1434,6 +1435,9 @@ fn test_lint_json_includes_syntax_metadata() {
     assert_eq!(metadata["effective_severity"], "Error");
 }
 
+// The shim below is a `#!/bin/sh` script made executable via mode bits and put on a
+// `:`-separated PATH — three Unix-only mechanics, so the test cannot run on Windows.
+#[cfg(unix)]
 #[test]
 fn test_lint_invokes_oxlint_for_javascript() {
     let dir = tempfile::TempDir::new().unwrap();

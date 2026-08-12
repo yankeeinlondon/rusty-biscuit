@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "environments": [
+    {
+      "name": "ubuntu-latest",
+      "runner": "ubuntu-latest",
+      "native_key": "ubuntu-latest",
+      "capabilities": {
+        "tmux": true,
+        "headless_browser": true,
+        "node_pnpm": true,
+        "archive_only": false,
+        "wezterm": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
+        "kitty": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
+        "apple-terminal": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        }
+      }
+    },
+    {
+      "name": "windows-latest",
+      "runner": "windows-latest",
+      "native_key": "windows-latest",
+      "capabilities": {
+        "tmux": {
+          "available": false,
+          "reason": "no L2 terminal backend is provisionable on Windows: TmuxHarness::available() is which(\"tmux\") and tmux has no Windows port, while WezTerm/Kitty/Apple Terminal need a live GUI session. The headless wezterm-mux-server spike (plan 2.3) is deferred, separately scoped work.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
+        "headless_browser": {
+          "available": false,
+          "reason": "no headless browser is provisioned on Windows runners; the browser tier is Linux-hosted in CI. Provisioning and validating a Windows browser leg is separately scoped work.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
+        "node_pnpm": false,
+        "archive_only": false,
+        "wezterm": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
+        "kitty": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
+        "apple-terminal": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        }
+      }
+    },
+    {
+      "name": "macos-latest",
+      "runner": "macos-latest",
+      "native_key": "macos-latest",
+      "capabilities": {
+        "tmux": true,
+        "headless_browser": {
+          "available": false,
+          "reason": "no headless browser is provisioned on macOS runners; the browser tier is Linux-hosted in CI and macOS minutes bill ~10x Linux. A macOS browser leg is separately scoped work.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
+        "node_pnpm": false,
+        "archive_only": false,
+        "wezterm": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
+        "kitty": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        },
+        "apple-terminal": {
+          "available": false,
+          "reason": "GUI terminal emulator: WezTerm/Kitty/Apple Terminal need a live desktop session (or a cold-started remote-control server) that no CI runner provides. Packages whose L2 suites drive only these backends render POLICY GAP here and are covered by local test-l2 runs.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2027-01-31"
+        }
+      }
+    },
+    {
+      "name": "wsl2-ubuntu",
+      "runner": "windows-latest",
+      "native_key": "ubuntu-latest",
+      "capabilities": {
+        "tmux": {
+          "available": false,
+          "reason": "the WSL2 leg runs a prebuilt nextest archive (plan 2.2): the guest has no cargo or rustc, so it cannot build the biscuit-harness-broker binary the L2 tier needs, and no terminal server runs there. Installing tmux in the guest would satisfy which(\"tmux\") while executing zero L2 tests \u2014 the non-evidence plan 1.1 rejects. Closes when the broker ships inside the archive and the guest starts a tmux server; tractable without solving the Windows backend problem, hence the earlier expiry.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2026-12-31"
+        },
+        "headless_browser": {
+          "available": false,
+          "reason": "the WSL2 leg runs a prebuilt nextest archive in a guest with no browser provisioning; the browser tier is Linux-hosted in CI.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2026-12-31"
+        },
+        "node_pnpm": false,
+        "archive_only": true,
+        "wezterm": {
+          "available": false,
+          "reason": "GUI terminal emulator; the WSL2 guest runs a prebuilt archive with no desktop session. Same class as the tmux gap.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2026-12-31"
+        },
+        "kitty": {
+          "available": false,
+          "reason": "GUI terminal emulator; the WSL2 guest runs a prebuilt archive with no desktop session. Same class as the tmux gap.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2026-12-31"
+        },
+        "apple-terminal": {
+          "available": false,
+          "reason": "GUI terminal emulator; the WSL2 guest runs a prebuilt archive with no desktop session. Same class as the tmux gap.",
+          "owner": "@yankeeinlondon",
+          "expiry": "2026-12-31"
+        }
+      }
+    }
+  ]
+}

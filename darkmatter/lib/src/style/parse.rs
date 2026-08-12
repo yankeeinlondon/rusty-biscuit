@@ -10,7 +10,7 @@ use crate::style::error::StyleParseError;
 use crate::style::length::{HorizontalLengthError, parse_horizontal_typed};
 use crate::style::schema::StyleFrontmatter;
 use crate::style::walker;
-use crate::style::warning::{StyleWarning, StyleWarningKind};
+use crate::style::warning::{StyleSpan, StyleWarning, StyleWarningKind};
 
 /// Highest sub-spec number whose wiring is live in the renderer.
 ///
@@ -133,6 +133,7 @@ fn validate_leaf(
 ) -> Result<(), StyleParseError> {
     match leaf.leaf_type {
         LeafType::HorizontalLength => validate_horizontal_length(value, canonical_path),
+        LeafType::WidthOrMode => validate_width_or_mode(value, canonical_path),
         LeafType::RowCount => validate_row_count(value, canonical_path),
         LeafType::Color => validate_color(value, canonical_path),
         // Alignment, BackgroundEnum, StringValue, OpaqueValue — let serde
@@ -144,7 +145,20 @@ fn validate_leaf(
         | LeafType::OpaqueValue
         | LeafType::HrKind
         | LeafType::HrWeight
-        | LeafType::HrAlignment => Ok(()),
+        | LeafType::HrAlignment
+        | LeafType::CompoundStyle
+        | LeafType::WordWrap => Ok(()),
+    }
+}
+
+fn validate_width_or_mode(value: &Value, canonical_path: &str) -> Result<(), StyleParseError> {
+    match value {
+        Value::Null => Ok(()),
+        Value::String(s) => match s.trim().to_ascii_lowercase().as_str() {
+            "auto" | "fit-content" | "fit_content" => Ok(()),
+            _ => validate_horizontal_length(value, canonical_path),
+        },
+        _ => validate_horizontal_length(value, canonical_path),
     }
 }
 
@@ -277,14 +291,9 @@ fn annotate_inner(value: &Value, canonical_path: &str, warnings: &mut Vec<StyleW
 }
 
 use crate::markdown::Frontmatter;
-use crate::style::schema::hr::HrStyle;
 
 /// Parse the `style:` value from a `Frontmatter`. Returns
 /// `(StyleFrontmatter::default(), vec![])` when no `style:` key is present.
-///
-/// If a top-level `hr:` key exists in the frontmatter, its values are merged
-/// into `style.hr` as a deprecated alias, emitting
-/// [`StyleWarningKind::Deprecated`] for every field that is used.
 ///
 /// ## Errors
 ///
@@ -292,132 +301,101 @@ use crate::style::schema::hr::HrStyle;
 pub fn from_frontmatter(
     fm: &Frontmatter,
 ) -> Result<(StyleFrontmatter, Vec<StyleWarning>), StyleParseError> {
-    let (mut style, mut warnings) = match fm.as_map().get("style") {
-        Some(value) => from_json_value(value)?,
-        None => (StyleFrontmatter::default(), Vec::new()),
-    };
-
-    if let Some(hr_value) = fm.as_map().get("hr") {
-        merge_deprecated_top_level_hr(hr_value, &mut style, &mut warnings);
+    match fm.as_map().get("style") {
+        Some(value) => {
+            let (style, mut warnings) = from_json_value(value)?;
+            // When the original frontmatter text is available, range each
+            // warning at the key it flags (R-5 Priority 5). Line/column are
+            // relative to the raw YAML block (line 1 = first YAML line), so a
+            // consumer with the block's source offset (DMLS) can project them.
+            if let Some(raw) = fm.raw_source() {
+                let positions = build_yaml_position_map(raw);
+                for warning in &mut warnings {
+                    if let Some(span) = positions.get(&warning.path) {
+                        warning.source_span = Some(span.clone());
+                    }
+                }
+            }
+            Ok((style, warnings))
+        }
+        None => Ok((StyleFrontmatter::default(), Vec::new())),
     }
-
-    Ok((style, warnings))
 }
 
-/// Merge a deprecated top-level `hr:` frontmatter block into
-/// `StyleFrontmatter::hr`, field-by-field, emitting deprecation warnings.
+/// Maps each dotted YAML key path to the source span of its key token, over
+/// the raw frontmatter text (R-4 item 6).
 ///
-/// Warnings are emitted on **alias presence**, not on successful typed
-/// migration: any top-level `hr:` key (or a non-mapping `hr:` value) produces
-/// a `Deprecated` warning even if the typed `HrStyle` deserialization fails.
-/// This keeps `--strict-style` honest — strict mode rejects the deprecated
-/// alias regardless of whether the legacy block happens to also be typed-valid.
+/// Keys are the full dotted path using the spellings the author wrote (e.g.
+/// `style.page.left_margin`), so a [`StyleWarning::path`](StyleWarning) is a
+/// direct lookup. Coordinates are 1-based and relative to `yaml` (line 1 = the
+/// first line of `yaml`); `length` is the key token's length in characters.
 ///
-/// `style.hr` wins when a field is present in both; top-level `hr` only fills
-/// missing values when typed deserialization of the legacy block succeeds.
-fn merge_deprecated_top_level_hr(
-    hr_value: &serde_json::Value,
-    style: &mut StyleFrontmatter,
-    warnings: &mut Vec<StyleWarning>,
-) {
-    let serde_json::Value::Object(map) = hr_value else {
-        // Non-mapping top-level `hr:` (scalar, null, array, ...) is still
-        // alias usage. Emit a single deprecation warning so strict mode
-        // rejects the document.
-        warnings.push(StyleWarning::new(
-            "hr",
-            StyleWarningKind::Deprecated {
-                replacement: "style.hr".into(),
-            },
-        ));
-        return;
-    };
+/// ## Notes
+///
+/// The scan understands block mappings only. Keys inside a flow mapping
+/// (`page: { left-margin: 2ch }`) are not indexed, so a warning under one
+/// keeps `source_span = None` — a graceful degradation, never a wrong span.
+pub fn build_yaml_position_map(yaml: &str) -> indexmap::IndexMap<String, StyleSpan> {
+    let mut out = indexmap::IndexMap::new();
+    // Ancestor keys with their indentation, innermost last.
+    let mut stack: Vec<(usize, String)> = Vec::new();
 
-    // Pass 1: emit a Deprecated warning for every recognized legacy key
-    // present in the raw map. This must happen before any typed
-    // deserialization so invalid-but-legacy-tolerated shapes (e.g.
-    // `alignment: true`) still trip strict mode.
-    let mut emitted_any = false;
-    for key in map.keys() {
-        let (canonical_legacy_path, replacement) = match key.as_str() {
-            "width" => ("hr.width", "style.hr.width"),
-            "max-width" | "max_width" => ("hr.max-width", "style.hr.max-width"),
-            "color" => ("hr.color", "style.hr.color"),
-            "bg-color" | "bg_color" => ("hr.bg-color", "style.hr.bg-color"),
-            "alignment" => ("hr.alignment", "style.hr.alignment"),
-            "style" => ("hr.style", "style.hr.kind"),
-            "kind" => ("hr.kind", "style.hr.kind"),
-            "weight" => ("hr.weight", "style.hr.weight"),
-            _ => continue,
+    for (idx, line) in yaml.lines().enumerate() {
+        let indent = line.chars().take_while(|c| *c == ' ').count();
+        let content = &line[line.len() - line.trim_start().len()..];
+        // Blank lines, comments, and sequence items carry no mapping key.
+        if content.is_empty() || content.starts_with('#') || content.starts_with('-') {
+            continue;
+        }
+        let Some(colon) = content.find(':') else {
+            continue;
         };
-        warnings.push(StyleWarning::new(
-            canonical_legacy_path,
-            StyleWarningKind::Deprecated {
-                replacement: replacement.into(),
-            },
-        ));
-        emitted_any = true;
-    }
+        let raw_key = content[..colon].trim();
+        if raw_key.is_empty() {
+            continue;
+        }
+        let key = strip_yaml_quotes(raw_key);
 
-    // If the map has no recognized HR keys, the alias itself is still in
-    // use (and would have been a no-op silently before). Emit a top-level
-    // deprecation so strict mode rejects it.
-    if !emitted_any {
-        warnings.push(StyleWarning::new(
-            "hr",
-            StyleWarningKind::Deprecated {
-                replacement: "style.hr".into(),
-            },
-        ));
-    }
+        // Drop ancestors at the same or deeper indentation before nesting.
+        while matches!(stack.last(), Some((top, _)) if *top >= indent) {
+            stack.pop();
+        }
 
-    // Pass 2: best-effort typed migration. Build a temporary JSON object
-    // that maps the legacy top-level `hr` keys onto the `HrStyle` schema
-    // (style -> kind, everything else passes through unchanged), then merge
-    // any fields that deserialize cleanly into `style.hr`. If the typed
-    // deserialization fails, the alias warnings above still ensure strict
-    // mode rejects the document; non-strict callers just lose the legacy
-    // values, which matches the prior behavior.
-    let mut mapped = serde_json::Map::new();
-    for (key, value) in map {
-        let canonical_key = match key.as_str() {
-            "style" => "kind",
-            other => other,
+        let dotted = if stack.is_empty() {
+            key.to_string()
+        } else {
+            let mut path: String = stack
+                .iter()
+                .map(|(_, k)| k.as_str())
+                .collect::<Vec<_>>()
+                .join(".");
+            path.push('.');
+            path.push_str(key);
+            path
         };
-        mapped.insert(canonical_key.to_string(), value.clone());
+
+        out.insert(
+            dotted,
+            StyleSpan {
+                line: idx as u32 + 1,
+                column: indent as u32 + 1,
+                length: raw_key.chars().count() as u32,
+            },
+        );
+        stack.push((indent, key.to_string()));
     }
 
-    let hr_style: HrStyle = match serde_json::from_value(serde_json::Value::Object(mapped)) {
-        Ok(h) => h,
-        Err(_) => return,
-    };
+    out
+}
 
-    // Ensure `style.hr` exists so we can fill missing fields.
-    let target = style.hr.get_or_insert_with(HrStyle::default);
-
-    // Values are merged only when `style.hr` is missing that field. Warnings
-    // were already emitted in pass 1 from the raw map keys.
-    if hr_style.width.is_some() && target.width.is_none() {
-        target.width = hr_style.width;
+/// Strips a single pair of matching surrounding `"` or `'` quotes.
+fn strip_yaml_quotes(raw: &str) -> &str {
+    for quote in ['"', '\''] {
+        if raw.len() >= 2 && raw.starts_with(quote) && raw.ends_with(quote) {
+            return &raw[1..raw.len() - 1];
+        }
     }
-    if hr_style.max_width.is_some() && target.max_width.is_none() {
-        target.max_width = hr_style.max_width;
-    }
-    if hr_style.color.is_some() && target.color.is_none() {
-        target.color = hr_style.color;
-    }
-    if hr_style.bg_color.is_some() && target.bg_color.is_none() {
-        target.bg_color = hr_style.bg_color;
-    }
-    if hr_style.alignment.is_some() && target.alignment.is_none() {
-        target.alignment = hr_style.alignment;
-    }
-    if hr_style.kind.is_some() && target.kind.is_none() {
-        target.kind = hr_style.kind;
-    }
-    if hr_style.weight.is_some() && target.weight.is_none() {
-        target.weight = hr_style.weight;
-    }
+    raw
 }
 
 /// Promote schema-validation warnings (`UnknownKey`, `Deprecated`) to errors.
@@ -869,59 +847,6 @@ mod tests {
     }
 
     #[test]
-    fn from_frontmatter_top_level_hr_merges_into_style_hr() {
-        let mut fm = Frontmatter::new();
-        fm.insert("hr", json!({"style": "waves", "color": "red-500"}))
-            .unwrap();
-        let (s, w) = from_frontmatter(&fm).unwrap();
-        let hr = s.hr.expect("hr should be populated from top-level alias");
-        assert_eq!(hr.kind, Some(crate::style::schema::hr::HrKind::Waves));
-        assert!(hr.color.is_some());
-
-        let deprecated: Vec<_> = w
-            .iter()
-            .filter(|w| matches!(w.kind, StyleWarningKind::Deprecated { .. }))
-            .collect();
-        assert_eq!(deprecated.len(), 2, "expected 2 deprecated warnings: {:?}", w);
-        assert!(deprecated.iter().any(|w| w.path == "hr.style"));
-        assert!(deprecated.iter().any(|w| w.path == "hr.color"));
-    }
-
-    #[test]
-    fn from_frontmatter_style_hr_beats_top_level_hr() {
-        let mut fm = Frontmatter::new();
-        fm.insert("style", json!({"hr": {"kind": "dots"}})).unwrap();
-        fm.insert("hr", json!({"style": "waves"})).unwrap();
-        let (s, w) = from_frontmatter(&fm).unwrap();
-        let hr = s.hr.expect("hr should exist");
-        assert_eq!(hr.kind, Some(crate::style::schema::hr::HrKind::Dots));
-
-        // Top-level `hr.style` is still deprecated even when overridden.
-        assert!(w.iter().any(|w| w.path == "hr.style"));
-    }
-
-    #[test]
-    fn from_frontmatter_top_level_hr_only_fills_missing_fields() {
-        let mut fm = Frontmatter::new();
-        fm.insert("style", json!({"hr": {"kind": "waves", "weight": "thick"}}))
-            .unwrap();
-        fm.insert("hr", json!({"style": "dots", "weight": "thin", "color": "red"}))
-            .unwrap();
-        let (s, w) = from_frontmatter(&fm).unwrap();
-        let hr = s.hr.expect("hr should exist");
-        // style.hr values win.
-        assert_eq!(hr.kind, Some(crate::style::schema::hr::HrKind::Waves));
-        assert_eq!(hr.weight, Some(crate::style::schema::hr::HrWeight::Thick));
-        // Missing in style.hr, filled from top-level.
-        assert!(hr.color.is_some());
-
-        // Every key present in the deprecated top-level block emits a warning.
-        assert!(w.iter().any(|w| w.path == "hr.color"));
-        assert!(w.iter().any(|w| w.path == "hr.style"));
-        assert!(w.iter().any(|w| w.path == "hr.weight"));
-    }
-
-    #[test]
     fn into_strict_passes_clean_parse() {
         let parsed = from_json_value(&json!({"page": {"left-margin": "2ch"}})).unwrap();
         let s = into_strict(parsed).unwrap();
@@ -956,97 +881,6 @@ mod tests {
         }))
         .unwrap();
         assert!(into_strict(parsed).is_ok());
-    }
-
-    #[test]
-    fn into_strict_fails_on_top_level_hr_alias() {
-        let mut fm = Frontmatter::new();
-        fm.insert("hr", json!({"style": "waves"})).unwrap();
-        let parsed = from_frontmatter(&fm).unwrap();
-        assert!(matches!(
-            into_strict(parsed),
-            Err(StyleParseError::Strict { .. })
-        ));
-    }
-
-    #[test]
-    fn into_strict_fails_on_top_level_hr_alias_with_invalid_typed_field() {
-        // `alignment: true` cannot deserialize as `HrAlignment`. Before the
-        // fix, this silently slipped past strict mode because the typed
-        // `HrStyle` deserialization failed and no deprecation warning was
-        // ever emitted. The alias presence — not typed-success — is what
-        // strict mode must reject.
-        let mut fm = Frontmatter::new();
-        fm.insert("hr", json!({"style": "waves", "alignment": true}))
-            .unwrap();
-        let parsed = from_frontmatter(&fm).unwrap();
-        match into_strict(parsed) {
-            Err(StyleParseError::Strict { warnings }) => {
-                assert!(
-                    warnings.iter().any(|w| w.path == "hr.style"),
-                    "expected hr.style deprecation, got {:?}",
-                    warnings
-                );
-                assert!(
-                    warnings.iter().any(|w| w.path == "hr.alignment"),
-                    "expected hr.alignment deprecation, got {:?}",
-                    warnings
-                );
-            }
-            other => panic!("expected Strict error, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn into_strict_fails_on_non_mapping_top_level_hr() {
-        // A scalar top-level `hr: dashes` is still alias usage and must
-        // trip strict mode even though it can't deserialize as `HrStyle`.
-        let mut fm = Frontmatter::new();
-        fm.insert("hr", json!("dashes")).unwrap();
-        let parsed = from_frontmatter(&fm).unwrap();
-        match into_strict(parsed) {
-            Err(StyleParseError::Strict { warnings }) => {
-                assert!(
-                    warnings.iter().any(|w| w.path == "hr"
-                        && matches!(w.kind, StyleWarningKind::Deprecated { .. })),
-                    "expected hr deprecation, got {:?}",
-                    warnings
-                );
-            }
-            other => panic!("expected Strict error, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn into_strict_fails_on_empty_top_level_hr_mapping() {
-        // Even an empty `hr: {}` block names the deprecated alias; strict
-        // mode should still reject the document.
-        let mut fm = Frontmatter::new();
-        fm.insert("hr", json!({})).unwrap();
-        let parsed = from_frontmatter(&fm).unwrap();
-        match into_strict(parsed) {
-            Err(StyleParseError::Strict { warnings }) => {
-                assert!(
-                    warnings.iter().any(|w| w.path == "hr"
-                        && matches!(w.kind, StyleWarningKind::Deprecated { .. })),
-                    "expected hr deprecation, got {:?}",
-                    warnings
-                );
-            }
-            other => panic!("expected Strict error, got {:?}", other),
-        }
-    }
-
-    #[test]
-    fn top_level_hr_with_invalid_typed_field_still_emits_warnings() {
-        // Non-strict callers also see the deprecation warnings, even when
-        // the typed migration drops the field.
-        let mut fm = Frontmatter::new();
-        fm.insert("hr", json!({"style": "waves", "alignment": true}))
-            .unwrap();
-        let (_, w) = from_frontmatter(&fm).unwrap();
-        assert!(w.iter().any(|w| w.path == "hr.style"));
-        assert!(w.iter().any(|w| w.path == "hr.alignment"));
     }
 
     #[test]
@@ -1236,5 +1070,73 @@ mod tests {
             }
             other => panic!("expected Strict error, got {:?}", other),
         }
+    }
+
+    // ── R-4 item 6 / R-5 Priority 5: nested YAML position map + spans ─────
+
+    #[test]
+    fn position_map_indexes_nested_keys() {
+        let yaml = "title: Post\nstyle:\n  page:\n    left_margin: 2ch\n  table:\n    max-width: 50%\n";
+        let map = build_yaml_position_map(yaml);
+        // Top-level.
+        assert_eq!(
+            map.get("title"),
+            Some(&StyleSpan { line: 1, column: 1, length: 5 })
+        );
+        // Container and deep leaf carry indent-aware columns.
+        assert_eq!(
+            map.get("style.page"),
+            Some(&StyleSpan { line: 3, column: 3, length: 4 })
+        );
+        assert_eq!(
+            map.get("style.page.left_margin"),
+            Some(&StyleSpan { line: 4, column: 5, length: 11 })
+        );
+        assert_eq!(
+            map.get("style.table.max-width"),
+            Some(&StyleSpan { line: 6, column: 5, length: 9 })
+        );
+    }
+
+    #[test]
+    fn position_map_skips_comments_and_sequence_items() {
+        let yaml = "# a comment\nlist:\n  - one\n  - two\nkey: value\n";
+        let map = build_yaml_position_map(yaml);
+        assert!(map.contains_key("list"));
+        assert!(map.contains_key("key"));
+        // Sequence items are not mapping keys.
+        assert!(!map.keys().any(|k| k.contains("one") || k.contains("two")));
+    }
+
+    #[test]
+    fn from_frontmatter_populates_warning_span_from_raw_source() {
+        // A snake-cased leaf under `style.page` is Deprecated; with the raw
+        // frontmatter text available its warning is ranged at the key.
+        let raw = "style:\n  page:\n    left_margin: 2ch\n";
+        let mut map = crate::markdown::FrontmatterMap::new();
+        map.insert(
+            "style".to_string(),
+            json!({ "page": { "left_margin": "2ch" } }),
+        );
+        let fm = crate::markdown::Frontmatter::from_map_with_source(map, raw.to_string());
+        let (_style, warnings) = from_frontmatter(&fm).unwrap();
+        let warning = warnings
+            .iter()
+            .find(|w| w.path == "style.page.left_margin")
+            .expect("deprecated left_margin warning");
+        assert_eq!(
+            warning.source_span,
+            Some(StyleSpan { line: 3, column: 5, length: 11 }),
+        );
+    }
+
+    #[test]
+    fn from_frontmatter_without_raw_source_leaves_span_none() {
+        // Programmatic frontmatter has no raw text — the span stays `None`.
+        let mut fm = Frontmatter::new();
+        fm.insert("style", json!({ "page": { "left_margin": "2ch" } }))
+            .unwrap();
+        let (_style, warnings) = from_frontmatter(&fm).unwrap();
+        assert!(warnings.iter().all(|w| w.source_span.is_none()));
     }
 }

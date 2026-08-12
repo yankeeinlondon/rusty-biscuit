@@ -9,7 +9,6 @@
 //!
 //! Feature: `2026-04-17-cli-pre-processing`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 
@@ -55,7 +54,7 @@ fn headline_compose_with_interleaved_flag_renders_help() {
     let workspace = tempdir().unwrap();
     let fixture = write_fixture(workspace.path(), "greet.md");
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args([
             "compose",
@@ -108,7 +107,7 @@ fn headline_compose_with_trailing_help_renders_help() {
     let workspace = tempdir().unwrap();
     let fixture = write_fixture(workspace.path(), "simple.md");
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["compose", fixture.to_str().unwrap(), "--help"])
         .assert()
@@ -135,7 +134,7 @@ fn headline_compose_with_fuzzy_provider_resolves_to_claude() {
     let workspace = tempdir().unwrap();
     let fixture = write_fixture(workspace.path(), "fuzzy.md");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args([
             "compose",
@@ -172,7 +171,7 @@ fn headline_compose_with_plain_setter_behaves_as_before() {
     let workspace = tempdir().unwrap();
     let fixture = write_fixture(workspace.path(), "plain.md");
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args([
             "compose",
@@ -210,10 +209,13 @@ fn headline_compose_with_plain_setter_behaves_as_before() {
 fn headline_compose_with_setter_then_late_flags_preserves_flag_semantics() {
     let workspace = tempdir().unwrap();
     let fixture = write_fixture(workspace.path(), "clarify.md");
+    let empty_path = workspace.path().join("empty-path");
+    fs::create_dir(&empty_path).unwrap();
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("TERM_WIDTH", "120")
+        .env("PATH", empty_path)
         .args([
             "compose",
             fixture.to_str().unwrap(),
@@ -258,10 +260,13 @@ fn headline_compose_with_setter_then_late_flags_preserves_flag_semantics() {
 fn headline_compose_with_setter_before_late_flags_preserves_flag_semantics() {
     let workspace = tempdir().unwrap();
     let fixture = write_fixture(workspace.path(), "setter-first.md");
+    let empty_path = workspace.path().join("empty-path");
+    fs::create_dir(&empty_path).unwrap();
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("TERM_WIDTH", "120")
+        .env("PATH", empty_path)
         .args([
             "compose",
             fixture.to_str().unwrap(),
@@ -305,11 +310,14 @@ fn headline_compose_with_setter_before_late_flags_preserves_flag_semantics() {
 // ──────────────────────────────────────────────────────────────────────
 
 /// `--version` is a root-level flag with no subcommand; the normalizer
-/// must not touch it.
+/// must not touch it. Completion-only variables are cleared so an invoking
+/// shell cannot redirect this subprocess into clap's completion bootstrap.
 #[test]
 fn passthrough_version_flag_still_prints_version_string() {
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env_remove("COMPLETE")
+        .env_remove("_CLAP_COMPLETE_INDEX")
         .arg("--version")
         .assert()
         .success()
@@ -327,7 +335,7 @@ fn passthrough_version_flag_still_prints_version_string() {
 /// grouped help screen through Claudine's custom help handler.
 #[test]
 fn passthrough_root_help_renders_custom_help_screen() {
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .arg("--help")
         .assert()
@@ -362,7 +370,7 @@ fn non_composition_subcommands_accept_help_flag() {
         "providers",
         "agents",
     ] {
-        let output = cargo_bin_cmd!("claudine")
+        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
             .env("NO_COLOR", "1")
             .args([sub, "--help"])
             .assert()
@@ -384,7 +392,7 @@ fn non_composition_subcommands_accept_help_flag() {
 /// here; Rules 1 and 2 have nothing to rewrite.
 #[test]
 fn passthrough_hooks_describe_still_runs() {
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .args(["hooks", "--describe"])
         .assert()
@@ -434,7 +442,7 @@ fn passthrough_hooks_describe_still_runs() {
 /// Code CLI and the assertion would fail noisily.
 #[test]
 fn complete_env_short_circuits_before_argv_normalization() {
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("COMPLETE", "bash")
         .assert()
@@ -462,7 +470,7 @@ fn complete_env_short_circuits_wrapper_argv_without_launching_provider() {
     // through to the wrapper launch path and either spawn the Claude
     // Code binary or fail with a "claude not found" error on stderr.
     // The short-circuit is what keeps shell completion setup cheap.
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
         .env("COMPLETE", "bash")
         .args(["claude", "--some-passthrough-flag"])
@@ -485,13 +493,52 @@ fn complete_env_short_circuits_wrapper_argv_without_launching_provider() {
 /// actually typed instead of a silent rewrite. This closes the
 /// acceptance-criterion loop end-to-end.
 #[test]
-fn passthrough_near_miss_provider_flag_surfaces_clap_unknown_error() {
+fn non_owned_flag_after_file_is_forwarded_to_agent() {
+    // With provider-argument forwarding, a switch Claudine does not own —
+    // including a near-miss like `--claud` — placed *after* the composition
+    // file starts the agent tail and is forwarded verbatim rather than
+    // rejected by clap. The dry-run "Provider args" row audits the tail.
     let workspace = tempdir().unwrap();
     let fixture = write_fixture(workspace.path(), "near-miss.md");
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
-        .args(["compose", fixture.to_str().unwrap(), "--claud"])
+        .args([
+            "compose",
+            fixture.to_str().unwrap(),
+            "--codex",
+            "--dry-run",
+            "--claud",
+        ])
+        .assert()
+        .success();
+
+    let output = assert.get_output().clone();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    let stdout = strip_ansi(&String::from_utf8_lossy(&output.stdout));
+    let combined = format!("{stderr}{stdout}");
+
+    assert!(
+        combined.contains("Provider args") && combined.contains("--claud"),
+        "a non-owned flag after the file must be forwarded to the agent and \
+         shown in the dry-run Provider args row; got: {combined}"
+    );
+    assert!(
+        !combined.contains("unexpected argument"),
+        "clap must not reject a forwarded non-owned flag; got: {combined}"
+    );
+}
+
+#[test]
+fn non_owned_flag_before_file_errors_with_ordering_guidance() {
+    // The ordering rule: an unowned switch before the composition file is a
+    // partition error with targeted guidance, not a silent guess.
+    let workspace = tempdir().unwrap();
+    let fixture = write_fixture(workspace.path(), "near-miss.md");
+
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .env("NO_COLOR", "1")
+        .args(["compose", "--claud", fixture.to_str().unwrap()])
         .assert()
         .failure();
 
@@ -501,17 +548,7 @@ fn passthrough_near_miss_provider_flag_surfaces_clap_unknown_error() {
     let combined = format!("{stderr}{stdout}");
 
     assert!(
-        combined.contains("--claud"),
-        "clap must surface an error mentioning the user-typed `--claud` \
-         token; got: {combined}"
-    );
-    // Clap's phrasing in 4.x is "unexpected argument" — match on that
-    // shape without over-specifying the exact wording.
-    assert!(
-        combined.contains("unexpected argument")
-            || combined.contains("unrecognized argument")
-            || combined.contains("invalid value"),
-        "clap must reject `--claud` with its native unknown-argument \
-         diagnostic; got: {combined}"
+        combined.contains("--claud") && combined.contains("before the composition file"),
+        "an unowned switch before the file must surface ordering guidance; got: {combined}"
     );
 }

@@ -1,6 +1,6 @@
 //! Auto-generated provider model enum
 //!
-//! Generated: 2026-05-07T02:07:02.844849+00:00
+//! Generated: 2026-07-06T22:44:33.958972+00:00
 //! Generator: gen-models v0.1.0
 //! Provider: Gemini
 //!
@@ -16,6 +16,8 @@ use model_id::ModelId;
     returns = "crate::models::model_metadata::ModelMetadata"
 )]
 pub enum ProviderModelGemini {
+    /// Model: `antigravity-preview-05-2026`
+    Antigravity__Preview__05__2026,
     /// Model: `aqa`
     Aqa,
     /// Model: `deep-research-max-preview-04-2026`
@@ -42,10 +44,6 @@ pub enum ProviderModelGemini {
     Gemini__2_5__Flash__Lite,
     /// Model: `gemini-2.5-flash-native-audio-latest`
     Gemini__2_5__Flash__Native__Audio__Latest,
-    /// Model: `gemini-2.5-flash-native-audio-preview-09-2025`
-    Gemini__2_5__Flash__Native__Audio__Preview__09__2025,
-    /// Model: `gemini-2.5-flash-native-audio-preview-12-2025`
-    Gemini__2_5__Flash__Native__Audio__Preview__12__2025,
     /// Model: `gemini-2.5-flash-preview-tts`
     Gemini__2_5__Flash__Preview__Tts,
     /// Model: `gemini-2.5-pro`
@@ -54,22 +52,30 @@ pub enum ProviderModelGemini {
     Gemini__2_5__Pro__Preview__Tts,
     /// Model: `gemini-3-flash-preview`
     Gemini__3__Flash__Preview,
+    /// Model: `gemini-3-pro-image`
+    Gemini__3__Pro__Image,
     /// Model: `gemini-3-pro-image-preview`
     Gemini__3__Pro__Image__Preview,
     /// Model: `gemini-3-pro-preview`
     Gemini__3__Pro__Preview,
+    /// Model: `gemini-3.1-flash-image`
+    Gemini__3_1__Flash__Image,
     /// Model: `gemini-3.1-flash-image-preview`
     Gemini__3_1__Flash__Image__Preview,
+    /// Model: `gemini-3.1-flash-lite`
+    Gemini__3_1__Flash__Lite,
+    /// Model: `gemini-3.1-flash-lite-image`
+    Gemini__3_1__Flash__Lite__Image,
     /// Model: `gemini-3.1-flash-lite-preview`
     Gemini__3_1__Flash__Lite__Preview,
-    /// Model: `gemini-3.1-flash-live-preview`
-    Gemini__3_1__Flash__Live__Preview,
     /// Model: `gemini-3.1-flash-tts-preview`
     Gemini__3_1__Flash__Tts__Preview,
     /// Model: `gemini-3.1-pro-preview`
     Gemini__3_1__Pro__Preview,
     /// Model: `gemini-3.1-pro-preview-customtools`
     Gemini__3_1__Pro__Preview__Customtools,
+    /// Model: `gemini-3.5-flash`
+    Gemini__3_5__Flash,
     /// Model: `gemini-embedding-001`
     Gemini__Embedding__001,
     /// Model: `gemini-embedding-2`
@@ -80,6 +86,8 @@ pub enum ProviderModelGemini {
     Gemini__Flash__Latest,
     /// Model: `gemini-flash-lite-latest`
     Gemini__Flash__Lite__Latest,
+    /// Model: `gemini-omni-flash-preview`
+    Gemini__Omni__Flash__Preview,
     /// Model: `gemini-pro-latest`
     Gemini__Pro__Latest,
     /// Model: `gemini-robotics-er-1.5-preview`
@@ -102,12 +110,6 @@ pub enum ProviderModelGemini {
     Lyria__3__Pro__Preview,
     /// Model: `nano-banana-pro-preview`
     Nano__Banana__Pro__Preview,
-    /// Model: `veo-2.0-generate-001`
-    Veo__2_0__Generate__001,
-    /// Model: `veo-3.0-fast-generate-001`
-    Veo__3_0__Fast__Generate__001,
-    /// Model: `veo-3.0-generate-001`
-    Veo__3_0__Generate__001,
     /// Model: `veo-3.1-fast-generate-preview`
     Veo__3_1__Fast__Generate__Preview,
     /// Model: `veo-3.1-generate-preview`

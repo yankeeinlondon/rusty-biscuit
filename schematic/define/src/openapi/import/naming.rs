@@ -22,6 +22,7 @@ const RUST_KEYWORDS: &[&str] = &[
 /// - camelCase: `listUsers` -> `ListUsers`
 /// - SCREAMING_SNAKE: `LIST_USERS` -> `ListUsers`
 /// - Already PascalCase: `ListUsers` -> `ListUsers`
+/// - Dotted event names: `api_key.created` -> `ApiKeyCreated`
 ///
 /// ## Examples
 ///
@@ -32,11 +33,15 @@ const RUST_KEYWORDS: &[&str] = &[
 /// assert_eq!(to_pascal_case("list-users"), "ListUsers");
 /// assert_eq!(to_pascal_case("listUsers"), "ListUsers");
 /// assert_eq!(to_pascal_case("LIST_USERS"), "ListUsers");
+/// assert_eq!(to_pascal_case("api_key.created"), "ApiKeyCreated");
 /// ```
 pub fn to_pascal_case(s: &str) -> String {
     // Split by common separators first
+    // `.` and `:` are separators too: enum values like `api_key.created` are
+    // common in event-name schemas, and leaving them would sanitize to an
+    // underscore mid-identifier (`ApiKey_created`), which is not camel case.
     let words: Vec<&str> = s
-        .split(['_', '-', ' ', '/'])
+        .split(['_', '-', ' ', '/', '.', ':'])
         .filter(|w| !w.is_empty())
         .collect();
 
@@ -164,6 +169,58 @@ pub fn sanitize_rust_ident(s: &str) -> String {
     let lower = cleaned.to_lowercase();
     if RUST_KEYWORDS.contains(&lower.as_str()) {
         format!("{}_", cleaned)
+    } else {
+        cleaned
+    }
+}
+
+/// Sanitizes a string to be a valid Rust struct-field identifier.
+///
+/// Converts to `snake_case`, then guarantees a usable identifier by handling
+/// the three ways snake-casing alone can fall short: Rust keywords (append
+/// `_`, e.g. `type` -> `type_`), a leading digit (prepend `_`, e.g. `2fa` ->
+/// `_2fa`), and empty input (fall back to `field`).
+///
+/// ## Examples
+///
+/// ```
+/// use schematic_define::openapi::import::naming::sanitize_rust_field_ident;
+///
+/// assert_eq!(sanitize_rust_field_ident("userName"), "user_name");
+/// assert_eq!(sanitize_rust_field_ident("type"), "type_");
+/// assert_eq!(sanitize_rust_field_ident("self"), "self_");
+/// assert_eq!(sanitize_rust_field_ident("2fa"), "_2fa");
+/// assert_eq!(sanitize_rust_field_ident(""), "field");
+/// ```
+pub fn sanitize_rust_field_ident(s: &str) -> String {
+    let snake = to_snake_case(s);
+
+    // Replace any residual non-identifier characters (e.g. '@', '.').
+    let cleaned: String = snake
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    if cleaned.is_empty() {
+        return "field".to_string();
+    }
+
+    // A leading digit is the one snake_case artifact that is not a valid
+    // identifier start; prefix it rather than dropping information.
+    let cleaned = if cleaned.starts_with(|c: char| c.is_ascii_digit()) {
+        format!("_{cleaned}")
+    } else {
+        cleaned
+    };
+
+    if RUST_KEYWORDS.contains(&cleaned.as_str()) {
+        format!("{cleaned}_")
     } else {
         cleaned
     }
@@ -390,6 +447,31 @@ mod tests {
         assert_eq!(sanitize_rust_ident("user@email"), "User_email");
         // + is replaced with _ after PascalCase conversion
         assert_eq!(sanitize_rust_ident("a+b"), "A_b");
+    }
+
+    // ========== sanitize_rust_field_ident Tests ==========
+
+    #[test]
+    fn sanitize_field_snake_cases() {
+        assert_eq!(sanitize_rust_field_ident("userName"), "user_name");
+        assert_eq!(sanitize_rust_field_ident("User-Name"), "user_name");
+    }
+
+    #[test]
+    fn sanitize_field_appends_underscore_for_keywords() {
+        assert_eq!(sanitize_rust_field_ident("type"), "type_");
+        assert_eq!(sanitize_rust_field_ident("self"), "self_");
+        assert_eq!(sanitize_rust_field_ident("async"), "async_");
+    }
+
+    #[test]
+    fn sanitize_field_prefixes_leading_digit() {
+        assert_eq!(sanitize_rust_field_ident("2fa"), "_2fa");
+    }
+
+    #[test]
+    fn sanitize_field_empty_falls_back() {
+        assert_eq!(sanitize_rust_field_ident(""), "field");
     }
 
     // ========== operation_id_fallback Tests ==========

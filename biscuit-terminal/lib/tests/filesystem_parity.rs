@@ -696,3 +696,147 @@ fn render_tree_node_matches_render_tree_with_formatting_constructor() {
         .expect("render_tree_node should return Some");
     assert_eq!(from_tree, from_hook);
 }
+
+// ---------------------------------------------------------------------------
+// Width-mode slack sink (style-everywhere Phase 2, Task 2.5)
+//
+// `FileSystem` is an internal-layout component on the *tree* path: the
+// shared render-tree fold resolves the outer box from `Layout::width`, and
+// the entry-label region absorbs slack by wrapping / truncating inside the
+// resolved content width. The connector and icon columns stay fixed (D2
+// slack sink).
+//
+// The terminal `render` flip stays deferred (Nerd Font icons the bespoke
+// path emits cannot be reproduced by the target-agnostic projection), so
+// the tests below exercise the *tree* projection only — the documented
+// honored subset for the deferred-render gap.
+// ---------------------------------------------------------------------------
+
+/// Build a small connector fixture and return both the tempdir and a built
+/// `FileSystem` component ready to project.
+fn built_fs() -> (tempfile::TempDir, FileSystem) {
+    let fixture = make_connector_fixture();
+    let mut fs_component = FileSystem::new(fixture.path()).expect("build FileSystem");
+    fs_component.ensure_tree_built();
+    (fixture, fs_component)
+}
+
+#[test]
+fn tree_path_width_auto_renders_within_available() {
+    // Width::Auto (the default) — the tree fold renders the filesystem
+    // tree inside the handed width. Connector geometry is preserved.
+    let (_guard, fs_obj) = built_fs();
+    let term = test_terminal(80);
+    let out = render_via_tree(&fs_obj, &term);
+    let stripped = strip_ansi(&out);
+    let widest = stripped
+        .lines()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        widest <= 80,
+        "Width::Auto must keep the tree inside the 80-column handed width: widest={widest}"
+    );
+    assert!(
+        stripped.contains("├──") || stripped.contains("└──"),
+        "tree connectors preserved under Width::Auto: {stripped:?}"
+    );
+}
+
+#[test]
+fn tree_path_width_fixed_percent_50_does_not_double_apply() {
+    // Width::Fixed(50%) resolves the outer box to 50% of available. The
+    // filesystem tree renders inside that 40-cell box; a widest near ~20
+    // would mean the 50% was resolved twice.
+    use biscuit_terminal::utils::layout::{Length, TargetValue, Width};
+    let (_guard, mut fs_obj) = built_fs();
+    fs_obj.layout_mut().width =
+        Width::Fixed(TargetValue::universal(Length::Percent(50.0)));
+    let term = test_terminal(80);
+    let out = render_via_tree(&fs_obj, &term);
+    let stripped = strip_ansi(&out);
+    let widest = stripped
+        .lines()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        widest <= 40,
+        "Fixed(50%) caps the outer box at 40 cells: widest={widest}"
+    );
+    // The connector / icon columns are fixed and survive the narrower box.
+    assert!(
+        stripped.contains("├──") || stripped.contains("└──"),
+        "tree connectors preserved under Fixed(50%): {stripped:?}"
+    );
+}
+
+#[test]
+fn tree_path_width_fit_content_hugs_entry_labels() {
+    // FitContent hugs the natural width of the tree's entry labels. The
+    // connectors stay fixed; the entry-label region is the slack sink.
+    use biscuit_terminal::utils::layout::Width;
+    let (_guard, mut fs_obj) = built_fs();
+    fs_obj.layout_mut().width = Width::FitContent;
+    let term = test_terminal(120);
+    let out = render_via_tree(&fs_obj, &term);
+    let stripped = strip_ansi(&out);
+    let widest = stripped
+        .lines()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        widest < 120,
+        "FitContent hugs the entry labels and does not pad to full width: widest={widest}"
+    );
+}
+
+#[test]
+fn tree_path_width_fixed_full_fills_available() {
+    // Width::Fixed(100%) is the explicit fill-the-available-width contract.
+    // The filesystem tree's outer box equals the handed width.
+    use biscuit_terminal::utils::layout::{Length, TargetValue, Width};
+    let (_guard, mut fs_obj) = built_fs();
+    fs_obj.layout_mut().width =
+        Width::Fixed(TargetValue::universal(Length::Percent(100.0)));
+    let term = test_terminal(80);
+    let out = render_via_tree(&fs_obj, &term);
+    let stripped = strip_ansi(&out);
+    // The tree connector geometry is preserved; the entry labels (slack
+    // sink) are not padded to fill — they stay at their natural width — but
+    // the outer box never exceeds the available width.
+    let widest = stripped
+        .lines()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(0);
+    assert!(
+        widest <= 80,
+        "Fixed(100%) never overflows the handed width: widest={widest}"
+    );
+}
+
+#[test]
+fn tree_path_margin_and_alignment_honored() {
+    // The fold honors Layout.margin (left offset) and Layout.alignment
+    // (centering) on the tree path. The connector geometry stays fixed.
+    use biscuit_terminal::utils::layout::{Edges, Length};
+    let (_guard, mut fs_obj) = built_fs();
+    fs_obj.layout_mut().margin = Edges {
+        left: biscuit_terminal::utils::layout::TargetValue::universal(Length::ch(4)),
+        ..Edges::default()
+    };
+    let term = test_terminal(80);
+    let out = render_via_tree(&fs_obj, &term);
+    let stripped = strip_ansi(&out);
+    let indented = stripped
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .any(|l| l.starts_with("    "));
+    assert!(
+        indented,
+        "left margin of 4ch is honored on the tree path: {stripped:?}"
+    );
+}

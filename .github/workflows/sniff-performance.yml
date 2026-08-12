@@ -1,12 +1,33 @@
 name: sniff-performance
 
-# Artifact-only phase: run a narrow bench subset on every PR that
-# touches `sniff/**`, the workspace Cargo.toml, or this workflow, and
-# upload the Criterion HTML report as an artifact. This is phase A of
-# the staged CI rollout described in
-# `sniff/features/2026-04-11-performance-testing/plan.md` — the build
-# does not fail on regressions yet because the runner noise profile has
-# not been characterized.
+# Two independent signals, deliberately not merged into one gate:
+#
+#   `sniff-bench`       — PR-only, Linux-only. Runs a narrow Criterion subset
+#                         and uploads the HTML report. Artifact-only: the build
+#                         does not fail on a regression, because the hosted
+#                         runner's noise profile has not been characterized.
+#                         Phase A of the staged rollout in
+#                         `sniff/features/2026-04-11-performance-testing/plan.md`.
+#
+#   `sniff-work-counts` — scheduled + dispatch, macOS/Linux/Windows. Uploads the
+#                         work-count table per OS.
+#
+# Why work counts carry the weight: performance acceptance in sniff is
+# structural — fewer entries visited, opens, probes, parses, status walks, blob
+# loads, diffs, subprocesses, and HTTP requests for equivalent output. Counters
+# are deterministic for a fixture and comparable across machines. Wall time is
+# not: a run at load 57-87 on 16 cores reported +330% for a case whose counters
+# were byte-identical.
+#
+# Comparison rules, enforced by construction rather than by a threshold:
+#   - Compare only within one OS and one runner class. Criterion baselines are
+#     saved under the matrix OS name so a macOS run can never be diffed against
+#     a Linux one.
+#   - No universal cross-OS wall-clock threshold exists here, and none should be
+#     added. A percentage gate needs stable runners or a characterized noise
+#     band; we have neither.
+#   - A work-count regression is the actionable signal. A timing swing is a
+#     prompt to look, not a failure.
 
 on:
   pull_request:
@@ -15,9 +36,15 @@ on:
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/sniff-performance.yml"
+  schedule:
+    # Nightly, offset from bench-nightly (00:00) to avoid contending for runners.
+    - cron: "0 4 * * *"
   workflow_dispatch: {}
 
 env:
+  # The repository tracks no rustc wrapper; cleared explicitly so a stray
+  # environment value cannot silently intercept this workflow's builds.
+  RUSTC_WRAPPER: ""
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 concurrency:
@@ -27,6 +54,10 @@ concurrency:
 jobs:
   sniff-bench:
     name: Criterion (Linux)
+    # PR feedback only. The scheduled matrix carries the cross-platform signal;
+    # re-running this subset nightly would add runner cost without adding a
+    # comparison we are willing to act on.
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -72,10 +103,10 @@ jobs:
           echo "Running Criterion filter: ${pattern}"
           cargo bench \
             -p sniff \
-            --features network \
+            --features network,bench-internals \
             --bench perf \
             -- \
-            --save-baseline ci \
+            --save-baseline ci-linux \
             "${pattern}"
 
       - name: Upload Criterion report
@@ -86,3 +117,61 @@ jobs:
           path: target/criterion
           if-no-files-found: warn
           retention-days: 14
+
+  sniff-work-counts:
+    name: Work counts (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    strategy:
+      # Every leg is an independent observation. A Windows failure must not
+      # cancel the macOS evidence.
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: sniff-work-counts-${{ matrix.os }}
+
+      - name: Install system build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libssl-dev libgit2-dev
+
+      # The example materializes the same synthetic fixtures the Criterion
+      # benches use, so a counter here and a timing there describe one workload.
+      # No `--features`: this matches the harness the archived baselines in
+      # `phases/_completed/01-work-accounting/spec.md` were captured with, and changing the
+      # feature set would change what the counters mean.
+      - name: Collect work counts
+        shell: bash
+        env:
+          CARGO_TERM_COLOR: never
+        run: |
+          set -euo pipefail
+          mkdir -p work-counts
+          cargo run -q -p sniff --release --example work_counts \
+            > "work-counts/${{ matrix.os }}.md"
+          cat "work-counts/${{ matrix.os }}.md"
+
+      # Retained per OS and never diffed across OSes. Path/case/ignore semantics
+      # differ legitimately between platforms, so a cross-OS counter delta is
+      # not by itself a regression — only a same-OS delta against the previous
+      # run on the same runner class is.
+      - name: Upload work-count table
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sniff-work-counts-${{ matrix.os }}
+          path: work-counts
+          if-no-files-found: error
+          retention-days: 90

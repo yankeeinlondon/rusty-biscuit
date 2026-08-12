@@ -9,7 +9,7 @@ use claudine::provider::{PROVIDERS_DISPLAY_ORDER, Provider};
 ///
 /// The boolean flag surface is derived from [`Provider::cli_aliases`]: the
 /// first alias of each provider (`claude`, `codex`, `gemini`, `goose`,
-/// `kimi`, `opencode`, `qwen`, `roo`) is the user-facing flag name, and
+/// `kimi`, `opencode`, `qwen`) is the user-facing flag name, and
 /// the normalizer rewrites `--<first-alias>` to `--provider <as_slug()>`.
 /// Keeping the mapping derived means a new provider added with a matching
 /// clap boolean flag declaration in `SharedComposeArgs` automatically
@@ -50,28 +50,21 @@ mod tests {
     #[test]
     fn rule_1_preserves_canonical_kimi_slug() {
         let input = argv(&["claudine", "compose", "--kimi"]);
-        let expected = argv(&["claudine", "compose", "--provider", "kimi_code"]);
+        let expected = argv(&["claudine", "compose", "--provider", "kimi"]);
         assert_eq!(crate::argv::normalize(input), expected);
     }
 
     #[test]
     fn rule_1_preserves_canonical_opencode_slug() {
         let input = argv(&["claudine", "compose", "--opencode"]);
-        let expected = argv(&["claudine", "compose", "--provider", "open_code"]);
+        let expected = argv(&["claudine", "compose", "--provider", "opencode"]);
         assert_eq!(crate::argv::normalize(input), expected);
     }
 
     #[test]
     fn rule_1_preserves_canonical_qwen_slug() {
         let input = argv(&["claudine", "compose", "--qwen"]);
-        let expected = argv(&["claudine", "compose", "--provider", "qwen_code"]);
-        assert_eq!(crate::argv::normalize(input), expected);
-    }
-
-    #[test]
-    fn rule_1_preserves_canonical_roo_slug() {
-        let input = argv(&["claudine", "compose", "--roo"]);
-        let expected = argv(&["claudine", "compose", "--provider", "roo_code"]);
+        let expected = argv(&["claudine", "compose", "--provider", "qwen"]);
         assert_eq!(crate::argv::normalize(input), expected);
     }
 
@@ -82,10 +75,9 @@ mod tests {
             ("--codex", "codex"),
             ("--gemini", "gemini"),
             ("--goose", "goose"),
-            ("--kimi", "kimi_code"),
-            ("--opencode", "open_code"),
-            ("--qwen", "qwen_code"),
-            ("--roo", "roo_code"),
+            ("--kimi", "kimi"),
+            ("--opencode", "opencode"),
+            ("--qwen", "qwen"),
         ];
         for (flag, slug) in booleans {
             let input = argv(&["claudine", "compose", flag]);

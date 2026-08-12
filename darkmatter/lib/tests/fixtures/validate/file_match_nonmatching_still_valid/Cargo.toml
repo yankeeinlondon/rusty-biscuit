@@ -1,0 +1,10 @@
+# Fixture manifest for the `file_match_nonmatching_still_valid` validation case.
+#
+# The document references `./Cargo.toml` against `file(match(*.json))`. Under
+# the document-first file-reference resolution contract this resolves next to
+# `doc.md` (this file), so the file EXISTS. `match(...)` is suggestion metadata
+# only — never validation — so a present, syntactically valid reference that
+# does NOT match the configured globs (a `.toml` vs `*.json`) still validates
+# with zero problems. Bare `file` is lazy, so existence is not checked either.
+[package]
+name = "fixture-only"

@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 253
 expression: convert_yaml(yaml)
 ---
 {
@@ -7,20 +8,34 @@ expression: convert_yaml(yaml)
   "additionalProperties": true,
   "properties": {
     "config": {
-      "additionalProperties": false,
-      "properties": {
-        "host": {
-          "type": "string"
+      "anyOf": [
+        {
+          "type": "null"
         },
-        "port": {
-          "default": 8080,
-          "type": "number"
+        {
+          "additionalProperties": false,
+          "properties": {
+            "host": {
+              "type": "string"
+            },
+            "port": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "default": 8080
+            }
+          },
+          "required": [
+            "host"
+          ],
+          "type": "object"
         }
-      },
-      "required": [
-        "host"
-      ],
-      "type": "object"
+      ]
     }
   },
   "type": "object"

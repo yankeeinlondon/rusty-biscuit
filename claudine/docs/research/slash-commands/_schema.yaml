@@ -1,0 +1,27 @@
+# SimplifiedSchema for the slash-commands research topic.
+#
+# Captures provider slash/custom command support for Claudine's command linking.
+$schema:
+    created: date
+    last_updated: date(required)
+    agent: string(required)
+    model: string(required)
+
+    homepage: url
+    docs: url
+    slash_docs: url
+    support: enum(first_class,partial,convention_only,none,unknown; required)
+
+    locations: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,system,extension,other; required), path: string(required), notes: string }[]"
+    format: "{ file_names: string[], frontmatter: boolean, required_fields: string[], optional_fields: string[], argument_syntax: string, body_format: enum(markdown,yaml,json,toml,text,other,unknown), notes: string }"
+
+    # Built-in and user-defined command behavior.
+    command_model: "{ invocation: string, namespacing: string, arguments: string, output_handling: string, disabled_mechanism: string, notes: string }"
+
+    portability: "{ portable: boolean(required), non_portable_assets: string[], rewrite_needed: boolean, notes: string }"
+    cli_params: "{ flag: string(required), description: string, example: string }[]"
+    env_vars: "{ name: string(required), effect: string(required) }[]"
+
+    changes: string[]
+    requires_claudine_update: boolean(required)
+    reason: string

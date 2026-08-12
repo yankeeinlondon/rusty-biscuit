@@ -2,6 +2,7 @@ use chrono::{DateTime, NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 
+use crate::diagnostics::DiagnosticSnapshot;
 use crate::events::AgenticEvent;
 
 use crate::provider::Provider;
@@ -50,18 +51,37 @@ pub enum SyncRequest {
 }
 
 /// One per-file sync failure.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// A persisted report record, so the failure crosses this boundary as a
+/// [`DiagnosticSnapshot`] rather than a Rust error value (spec §D9). `message`
+/// stays beside it because serialization may *add* a human line — it may not
+/// replace the facets or the structured detail.
+///
+/// Not `Eq`: the snapshot's `detail` is an opaque `serde_json::Value`, which is
+/// only `PartialEq`. Nothing keys or sets on a `SyncFailure`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SyncFailure {
     /// JSONL file path that failed.
     pub source_file: String,
-    /// One-based line number that failed to parse.
+    /// One-based line number that failed to parse, or `0` for a whole-file
+    /// failure.
     pub line_number: usize,
     /// Human-readable failure message.
     pub message: String,
+    /// The machine projection of the same failure.
+    ///
+    /// `None` only for a record persisted before this field existed. `Option`
+    /// is what makes an older record readable — serde treats a missing
+    /// `Option` field as `None` — and it is also the honest representation:
+    /// such a record has no snapshot, rather than a synthesized one.
+    #[serde(default)]
+    pub diagnostic: Option<DiagnosticSnapshot>,
 }
 
 /// Result of a sync run.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+///
+/// Not `Eq` for the same reason [`SyncFailure`] is not.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SyncSummary {
     pub files_scanned: u64,
     pub files_rebuilt: u64,
@@ -300,6 +320,54 @@ pub struct TrendsReport {
     pub top_tools: Vec<DailyToolStat>,
 }
 
+/// Per-provider aggregate of one model-catalog signal kind.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriftSignalSummary {
+    pub provider: Provider,
+    /// Signal kind slug (`model_catalog_drift`, `model_resolved`,
+    /// `model_fallback`).
+    pub kind: String,
+    /// Distinct sessions that observed the signal in the range.
+    pub session_count: u64,
+    /// Total folded emissions across those sessions.
+    pub occurrences: u64,
+    pub last_seen: DateTime<Utc>,
+    /// From the most recent `model_catalog_drift` payload: ids the
+    /// provider reported that the baseline lacks. Empty for other kinds.
+    pub unexpected: Vec<String>,
+    /// From the most recent drift payload: baseline ids the provider's
+    /// listing no longer returns. Empty for other kinds.
+    pub missing: Vec<String>,
+    /// `listing` or `resolved_model` for drift rows; `None` otherwise.
+    pub observed_via: Option<String>,
+}
+
+/// One session's `family_latest` alias stamp.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AliasResolution {
+    pub session_key: String,
+    pub session_id: Option<String>,
+    pub provider: Provider,
+    /// Session end time (the stamp is written on the SessionEnd row).
+    pub ended_at: DateTime<Utc>,
+    /// The rolling alias the run requested (e.g. `opus`).
+    pub alias: String,
+    /// The family-latest release identity key the alias meant.
+    pub identity_key: String,
+    pub family_key: Option<String>,
+    /// Whether the vendored artifact was past its max age at stamp time.
+    pub stale: bool,
+    pub age_days: Option<u64>,
+}
+
+/// Model-catalog drift report wrapper for JSON output.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriftReport {
+    pub range: DateRange,
+    pub signals: Vec<DriftSignalSummary>,
+    pub aliases: Vec<AliasResolution>,
+}
+
 /// One event row within a session detail report.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SessionEvent {
@@ -410,6 +478,99 @@ mod tests {
         assert!(json.get("agent_pid").is_some(), "agent_pid key must exist");
         assert!(json["agent_pid"].is_null(), "agent_pid must be null when absent");
         assert!(json["claudine_pid"].is_null(), "claudine_pid must be null when absent");
+    }
+
+    /// D9 round-trip: every facet, the structured detail, and the one-level
+    /// cause survive serialization. A record that keeps only `message` cannot
+    /// pass this.
+    #[test]
+    fn sync_failure_round_trips_every_facet_detail_and_cause() {
+        let original = SyncFailure {
+            source_file: "/logs/a.jsonl".into(),
+            line_number: 7,
+            message: "boom".into(),
+            diagnostic: Some(DiagnosticSnapshot {
+                schema_version: 1,
+                category: "io".into(),
+                code: "io.read_failed".into(),
+                disposition: "correctable".into(),
+                origin: "environment".into(),
+                severity: "error".into(),
+                detail: serde_json::json!({ "path": "/logs/a.jsonl" }),
+                message: "could not read".into(),
+                cause: Some(crate::diagnostics::DiagnosticCause {
+                    category: "config".into(),
+                    code: "config.invalid".into(),
+                    disposition: "correctable".into(),
+                    origin: "caller".into(),
+                    severity: "error".into(),
+                    detail: serde_json::json!({ "field": null, "message": "bad line" }),
+                    message: "bad line".into(),
+                }),
+            }),
+        };
+
+        let text = serde_json::to_string(&original).unwrap();
+        let restored: SyncFailure = serde_json::from_str(&text).unwrap();
+        assert_eq!(restored, original);
+    }
+
+    /// D9 backward compatibility: a record persisted before the snapshot field
+    /// existed must still deserialize, reporting "no snapshot" rather than
+    /// failing the whole read.
+    #[test]
+    fn a_pre_snapshot_record_still_deserializes() {
+        let legacy = r#"{
+            "source_file": "/logs/old.jsonl",
+            "line_number": 3,
+            "message": "legacy failure"
+        }"#;
+
+        let restored: SyncFailure = serde_json::from_str(legacy).unwrap();
+        assert_eq!(restored.line_number, 3);
+        assert_eq!(restored.message, "legacy failure");
+        assert!(restored.diagnostic.is_none());
+
+        // Non-vacuity: the legacy payload really does omit the field, so the
+        // read above succeeds because `diagnostic` is optional — not because
+        // the fixture quietly carries a snapshot.
+        #[derive(Deserialize)]
+        #[allow(dead_code)]
+        struct RequiredSnapshot {
+            diagnostic: DiagnosticSnapshot,
+        }
+        assert!(serde_json::from_str::<RequiredSnapshot>(legacy).is_err());
+    }
+
+    /// D9 forward compatibility: a newer producer's unknown code and unknown
+    /// detail key survive an older consumer's read/write cycle untouched — the
+    /// facets are owned strings and `detail` is opaque precisely so this holds.
+    #[test]
+    fn an_unknown_code_and_detail_key_survive_a_read_write_cycle() {
+        let newer = r#"{
+            "source_file": "/logs/new.jsonl",
+            "line_number": 1,
+            "message": "from the future",
+            "diagnostic": {
+                "schema_version": 1,
+                "category": "io",
+                "code": "io.future_condition",
+                "disposition": "correctable",
+                "origin": "environment",
+                "severity": "error",
+                "detail": { "path": "/logs/new.jsonl", "future_key": [1, 2] },
+                "message": "from the future"
+            }
+        }"#;
+
+        let restored: SyncFailure = serde_json::from_str(newer).unwrap();
+        let snapshot = restored.diagnostic.as_ref().expect("a snapshot");
+        assert_eq!(snapshot.code, "io.future_condition");
+        assert_eq!(snapshot.detail["future_key"], serde_json::json!([1, 2]));
+
+        let round_tripped: SyncFailure =
+            serde_json::from_str(&serde_json::to_string(&restored).unwrap()).unwrap();
+        assert_eq!(round_tripped, restored);
     }
 
     /// Review-1 Finding 3 — event-row query DTOs expose stable nullable PID

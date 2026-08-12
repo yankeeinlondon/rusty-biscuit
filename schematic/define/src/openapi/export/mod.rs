@@ -19,6 +19,7 @@
 mod components;
 mod info;
 mod paths;
+mod parameters;
 mod request_body;
 mod responses;
 mod security;
@@ -410,6 +411,60 @@ mod tests {
     }
 
     #[test]
+    fn export_strips_reserved_marker_from_path_and_params() {
+        let api = RestApi {
+            name: "TestAPI".to_string(),
+            description: "Test".to_string(),
+            base_url: "https://api.test.com".to_string(),
+            docs_url: None,
+            auth: AuthStrategy::None,
+            auth_policy: None,
+            env_auth: vec![],
+            env_username: None,
+            headers: vec![],
+            endpoints: vec![Endpoint {
+                id: "GetModel".to_string(),
+                method: RestMethod::Get,
+                path: "/models/{+repo_id}".to_string(),
+                description: "Get a model".to_string(),
+                request: None,
+                response: ApiResponse::json_type("Model"),
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            }],
+            module_path: None,
+            request_suffix: None,
+            version: None,
+            env_mapping: None,
+        };
+        let registry = TestRegistry::new().with_schema("Model");
+        let options = ExportOptions::new();
+
+        let doc = export(&api, &registry, &options).unwrap();
+
+        // The path key renders as valid `{repo_id}`, never `{+repo_id}`.
+        assert!(doc.paths.paths.contains_key("/models/{repo_id}"));
+        assert!(!doc.paths.paths.contains_key("/models/{+repo_id}"));
+
+        // No `{+` may leak anywhere in the serialized document.
+        let json = serde_json::to_string(&doc).unwrap();
+        assert!(!json.contains("{+"), "reserved marker leaked: {json}");
+
+        if let openapiv3::ReferenceOr::Item(path_item) = &doc.paths.paths["/models/{repo_id}"] {
+            if let openapiv3::Parameter::Path { parameter_data, .. } =
+                path_item.parameters[0].as_item().unwrap()
+            {
+                assert_eq!(parameter_data.name, "repo_id");
+            } else {
+                panic!("expected a path parameter");
+            }
+        } else {
+            panic!("expected an inline path item");
+        }
+    }
+
+    #[test]
     fn export_succeeds_when_all_refs_are_resolved() {
         let api = RestApi {
             name: "TestAPI".to_string(),
@@ -447,5 +502,101 @@ mod tests {
             result.is_ok(),
             "export should succeed when all refs are resolved"
         );
+    }
+
+    /// Guards the wiring, not just the mapping: `map_parameters` had complete
+    /// unit coverage while `map_operation` still hardcoded `parameters: vec![]`,
+    /// so every exported spec shipped without query parameters.
+    #[test]
+    fn exported_operations_carry_declared_query_parameters() {
+        use crate::params::{EndpointParams, ParamDef, ParamStyle, QueryParamType};
+        use openapiv3::ReferenceOr;
+
+        let mut api = create_test_api();
+        api.endpoints = vec![Endpoint {
+            id: "ListItems".to_string(),
+            method: RestMethod::Get,
+            path: "/items".to_string(),
+            description: "List items".to_string(),
+            request: None,
+            response: ApiResponse::Empty,
+            headers: vec![],
+            params: Some(EndpointParams {
+                query: vec![ParamDef {
+                    name: "limit".to_string(),
+                    required: false,
+                    description: Some("Page size".to_string()),
+                    param_type: QueryParamType::Integer,
+                    explode: false,
+                    style: ParamStyle::Form,
+                }],
+                ..Default::default()
+            }),
+            oauth_scopes: None,
+        }];
+
+        let doc = export(&api, &TestRegistry::new(), &ExportOptions::new())
+            .expect("export should succeed");
+
+        let ReferenceOr::Item(path_item) = &doc.paths.paths["/items"] else {
+            panic!("expected an inline path item");
+        };
+        let operation = path_item.get.as_ref().expect("GET operation");
+
+        assert_eq!(
+            operation.parameters.len(),
+            1,
+            "declared query parameters must reach the exported operation"
+        );
+
+        let ReferenceOr::Item(openapiv3::Parameter::Query { parameter_data, .. }) =
+            &operation.parameters[0]
+        else {
+            panic!("expected an inline query parameter");
+        };
+        assert_eq!(parameter_data.name, "limit");
+        assert_eq!(parameter_data.description.as_deref(), Some("Page size"));
+    }
+
+    /// OpenAPI forbids duplicate entries in a parameter list; two methods on one
+    /// path each contribute the same path parameters.
+    #[test]
+    fn path_parameters_are_declared_once_per_path() {
+        use openapiv3::ReferenceOr;
+
+        let mut api = create_test_api();
+        api.endpoints = vec![
+            Endpoint {
+                id: "GetItem".to_string(),
+                method: RestMethod::Get,
+                path: "/items/{item_id}".to_string(),
+                description: "Get".to_string(),
+                request: None,
+                response: ApiResponse::Empty,
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            },
+            Endpoint {
+                id: "DeleteItem".to_string(),
+                method: RestMethod::Delete,
+                path: "/items/{item_id}".to_string(),
+                description: "Delete".to_string(),
+                request: None,
+                response: ApiResponse::Empty,
+                headers: vec![],
+                params: None,
+                oauth_scopes: None,
+            },
+        ];
+
+        let doc = export(&api, &TestRegistry::new(), &ExportOptions::new())
+            .expect("export should succeed");
+
+        let ReferenceOr::Item(path_item) = &doc.paths.paths["/items/{item_id}"] else {
+            panic!("expected an inline path item");
+        };
+
+        assert_eq!(path_item.parameters.len(), 1, "item_id declared twice");
     }
 }

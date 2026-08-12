@@ -10,24 +10,23 @@
 mod common;
 
 use common::level2::{
-    MD_BIN, assert_shim_resolves_to_built, is_same_binary, link_or_copy, md_shim,
+    assert_shim_resolves_to_built, is_same_binary, link_or_copy, md_bin, md_shim,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The shim returned by [`md_shim`] resolves to the same `md` Cargo
-/// built for this test binary (`CARGO_BIN_EXE_md`). If this ever fails,
-/// every Level 2 test in the binary is potentially exercising the wrong
-/// binary.
+/// The shim returned by [`md_shim`] resolves to the same `md` built for this
+/// test binary. If this ever fails, every Level 2 test in the binary is
+/// potentially exercising the wrong binary.
 #[test]
 fn md_shim_resolves_to_cargo_built_binary() {
     let shim_path = md_shim();
     assert!(
-        is_same_binary(Path::new(shim_path), Path::new(MD_BIN)),
+        is_same_binary(Path::new(shim_path), md_bin()),
         "md_shim() pointed at {} but the Cargo-built binary is {};\
          tests would run against the wrong binary",
         shim_path,
-        MD_BIN,
+        md_bin().display(),
     );
 }
 
@@ -39,7 +38,7 @@ fn md_shim_resolves_to_cargo_built_binary() {
 fn assert_shim_resolves_to_built_accepts_valid_link() {
     let dir = tempfile::tempdir().expect("tempdir");
     let link = dir.path().join("md-link");
-    link_or_copy(Path::new(MD_BIN), &link).expect("link_or_copy MD_BIN");
+    link_or_copy(md_bin(), &link).expect("link_or_copy md_bin");
     // Should not panic.
     assert_shim_resolves_to_built(&link);
 }

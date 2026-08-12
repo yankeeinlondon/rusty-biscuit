@@ -34,7 +34,7 @@ fn skip_if_not_enabled() -> bool {
 }
 
 fn question_binary() -> PathBuf {
-    assert_cmd::cargo::cargo_bin("question")
+    assert_cmd::cargo::cargo_bin("question").to_path_buf()
 }
 
 fn read_all_available(session: &mut expectrl::session::OsSession) -> String {

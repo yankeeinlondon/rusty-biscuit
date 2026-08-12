@@ -1,0 +1,9 @@
+{"jsonrpc":"2.0","id":"init-1","result":{"protocol_version":"1.10","server":{"name":"Kimi Code CLI","version":"1.47.0"},"slash_commands":[],"hooks":[],"capabilities":{"supports_question":true,"supports_plan_mode":true}}}
+{"jsonrpc":"2.0","method":"event","params":{"type":"TurnBegin","payload":{"user_input":"Say hello"}}}
+{"jsonrpc":"2.0","method":"event","params":{"type":"StepBegin","payload":{"n":1}}}
+{"jsonrpc":"2.0","method":"event","params":{"type":"StepRetry","payload":{"n":1,"next_attempt":2,"max_attempts":5,"wait_s":1.5,"error_type":"APIEmptyResponseError","status_code":500}}}
+{"jsonrpc":"2.0","method":"event","params":{"type":"ContentPart","payload":{"type":"text","text":"Hello!"}}}
+{"jsonrpc":"2.0","method":"event","params":{"type":"StatusUpdate","payload":{"context_usage":0.05,"context_tokens":13107,"max_context_tokens":262144,"token_usage":{"input_other":10081,"output":52,"input_cache_read":2974,"input_cache_creation":0},"message_id":"chatcmpl-110","plan_mode":false,"mcp_status":{"loading":false,"connected":1,"total":1,"tools":4,"servers":[{"name":"weather","status":"connected","tools":["forecast","alerts","radar","history"]}]}}}}
+{"jsonrpc":"2.0","method":"event","params":{"type":"Notification","payload":{"id":"notif-1","category":"task","type":"task.completed","source_kind":"background_task","source_id":"task-9","title":"Background task finished","body":"Task `lint` completed","severity":"info","created_at":1751700000.25,"payload":{"exit_code":0}}}}
+{"jsonrpc":"2.0","method":"event","params":{"type":"TurnEnd","payload":{}}}
+{"jsonrpc":"2.0","id":"prompt-2","result":{"status":"finished"}}

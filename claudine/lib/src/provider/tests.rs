@@ -152,7 +152,6 @@ fn provider_info_serializes_round_trip() {
             "acp",
             "prompt_arg_conventions",
             "session_log_paths",
-            "session_locations",
             "config_paths",
             "memory_files",
             "stream_protocol",
@@ -170,7 +169,6 @@ fn provider_info_serializes_round_trip() {
             "adapter",
             "configurator",
             "capabilities",
-            "agent_capabilities_fn",
             "resource_support_fn",
         ] {
             assert!(
@@ -178,6 +176,81 @@ fn provider_info_serializes_round_trip() {
                 "{provider:?}: serialized JSON unexpectedly contains field {key:?}"
             );
         }
+    }
+}
+
+/// Twin of claudine-gen's registry-covers-all-fields guard
+/// (`gen/tests/registry_coverage.rs`): the serialized `--describe` key
+/// list is checked in on BOTH sides — the generator asserts its mapping
+/// registry against the list, and this test binds the list to the real
+/// serialization. Adding/removing/reordering a serialized `ProviderInfo`
+/// field must update both copies (and the mapping registry).
+#[test]
+fn serialized_field_list_matches_catalog() {
+    const SERIALIZED_PROVIDER_INFO_FIELDS: &[&str] = &[
+        "provider",
+        "display_name",
+        "slug",
+        "short_name",
+        "binary",
+        "agent_offset",
+        "cli_aliases",
+        "docs_url",
+        "usage_dashboard_url",
+        "sniff_binding",
+        "supports_skills",
+        "stream_protocol",
+        "event_mapping",
+        "resource_support",
+        "session_log_paths",
+        "config_paths",
+        "memory_files",
+        "output_formats",
+        "entrypoints",
+        "system_prompt",
+        "yolo",
+        "reasoning",
+        "known_gaps",
+        "acp",
+        "prompt_arg_conventions",
+        "expected_offerings",
+        "offering_sources",
+        "model_catalog_source",
+        "model_env_vars",
+        "cli_sensitive_axes",
+        "repo_home_root_files",
+        "resume",
+        "model_cli_flag",
+        "non_interactive_conflicting_flags",
+        "billing_models",
+        "cap_policies",
+        "allowed_env_keys",
+        "display_policy",
+        "suppress_structured_stderr_on_success",
+        "supports_interactive_inline_closure",
+        "model_required_in_non_tty",
+        "platform_kind",
+        "unmapped_native_events",
+    ];
+    // serde_json without `preserve_order` sorts map keys, so membership
+    // (not order) is asserted here; the gen-side twin pins the order
+    // against the mapping registry.
+    let mut expected: Vec<&str> = SERIALIZED_PROVIDER_INFO_FIELDS.to_vec();
+    expected.sort_unstable();
+    for provider in PROVIDERS_DISPLAY_ORDER {
+        let info = provider_info(provider);
+        let json = serde_json::to_value(info).expect("provider_info serializes");
+        let keys: Vec<&str> = json
+            .as_object()
+            .expect("ProviderInfo serializes as an object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys, expected,
+            "{provider:?}: serialized field list drifted — update the checked-in list \
+             here AND in gen/tests/registry_coverage.rs, and extend the mapping registry"
+        );
     }
 }
 
@@ -241,18 +314,31 @@ fn provider_info_json_round_trips_well_known_keys() {
     );
 }
 
+/// Pins the generated expected-offering shape on kimi, the provider with
+/// both offering classes: `kimi-for-coding` is the plan endpoint (absent
+/// from the unchained-ai artifact by design, so never joined) and
+/// `kimi-k2.7-code` joins the artifact's identity key exactly.
 #[test]
-fn agent_capabilities_facade_matches_catalog() {
-    use crate::agents::agent_for;
+fn kimi_expected_offerings_carry_classification_and_artifact_join() {
+    use super::offering::OfferingClass;
 
-    for provider in PROVIDERS_DISPLAY_ORDER {
-        let from_facade = agent_for(provider).capabilities();
-        let from_catalog = provider_info(provider).agent_capabilities();
-        assert_eq!(
-            from_facade, from_catalog,
-            "{provider:?}: agent_for facade does not match provider_info catalog"
-        );
-    }
+    let kimi = provider_info(Provider::KimiCode);
+    let plan = kimi
+        .expected_offerings
+        .iter()
+        .find(|offering| offering.id == "kimi-for-coding")
+        .expect("kimi-for-coding is an expected offering");
+    assert_eq!(plan.class, OfferingClass::PlanEndpoint);
+    assert_eq!(plan.alias, Some("kimi-code"));
+    assert_eq!(plan.catalog_id, None);
+
+    let joined = kimi
+        .expected_offerings
+        .iter()
+        .find(|offering| offering.id == "kimi-k2.7-code")
+        .expect("kimi-k2.7-code is an expected offering");
+    assert_eq!(joined.class, OfferingClass::VendorApi);
+    assert_eq!(joined.catalog_id, Some("moonshotai/kimi-k-code@2.7"));
 }
 
 #[test]
@@ -286,336 +372,6 @@ fn resource_support_facade_matches_catalog() {
 }
 
 #[test]
-fn agent_capabilities_id_matches_provider() {
-    for provider in PROVIDERS_DISPLAY_ORDER {
-        let caps = provider_info(provider).agent_capabilities();
-        assert_eq!(
-            caps.meta.id, provider,
-            "{provider:?}: agent_capabilities meta.id mismatch"
-        );
-    }
-}
-
-fn path_templates_raw(paths: &[super::PathTemplate]) -> Vec<&'static str> {
-    paths.iter().map(super::PathTemplate::raw).collect()
-}
-
-fn path_bufs_raw(paths: &[std::path::PathBuf]) -> Vec<String> {
-    paths
-        .iter()
-        .map(|path| path.to_string_lossy().into_owned())
-        .collect()
-}
-
-fn assert_legacy_paths_in_catalog(
-    provider: Provider,
-    label: &str,
-    legacy_paths: &[std::path::PathBuf],
-    catalog_paths: &[super::PathTemplate],
-) {
-    let catalog_raw = path_templates_raw(catalog_paths);
-    for path in path_bufs_raw(legacy_paths) {
-        assert!(
-            catalog_raw.iter().any(|raw| *raw == path),
-            "{provider:?}: legacy {label} path {path:?} missing from typed catalog {catalog_raw:?}"
-        );
-    }
-}
-
-fn delivery_supported(delivery: super::SystemPromptDelivery) -> bool {
-    !matches!(delivery, super::SystemPromptDelivery::Unsupported)
-}
-
-fn replacement_supported(info: &super::ProviderInfo) -> bool {
-    delivery_supported(info.system_prompt.replace.interactive)
-        || delivery_supported(info.system_prompt.replace.non_interactive)
-}
-
-fn yolo_matches_legacy(legacy: Option<&str>, yolo: super::YoloSupport) -> bool {
-    let Some(legacy) = legacy else {
-        return matches!(yolo, super::YoloSupport::None);
-    };
-    let normalized = legacy.replace(' ', "=");
-    match yolo {
-        super::YoloSupport::None => false,
-        super::YoloSupport::DirectFlag { native_flag } => {
-            legacy == native_flag || normalized == native_flag
-        }
-        super::YoloSupport::DirectFlagWithAlias {
-            native_flag,
-            aliases,
-        } => {
-            legacy == native_flag
-                || normalized == native_flag
-                || aliases
-                    .iter()
-                    .any(|alias| legacy == *alias || normalized == *alias)
-        }
-        super::YoloSupport::NonInteractiveOnly {
-            non_interactive_flag,
-        } => legacy == non_interactive_flag || normalized == non_interactive_flag,
-        super::YoloSupport::EnvVar { env_var, value } => {
-            legacy.contains(env_var) && legacy.contains(value)
-        }
-    }
-}
-
-fn has_catalog_resume_entrypoint(info: &super::ProviderInfo) -> bool {
-    info.entrypoints.iter().any(|entrypoint| {
-        entrypoint.required_flags.iter().any(|flag| {
-            matches!(
-                *flag,
-                "-c" | "--continue" | "-r" | "--resume" | "resume" | "--resume-session"
-            )
-        }) || entrypoint.subcommand == Some("resume")
-    })
-}
-
-#[test]
-fn agent_capabilities_identity_and_docs_match_typed_catalog() {
-    for provider in PROVIDERS_DISPLAY_ORDER {
-        let info = provider_info(provider);
-        let caps = info.agent_capabilities();
-
-        assert_eq!(caps.meta.id, info.provider, "{provider:?}: id mismatch");
-        assert!(
-            caps.meta.display_name == info.display_name
-                || caps.meta.display_name.contains(info.display_name),
-            "{provider:?}: legacy display name {:?} does not follow typed display policy {:?}",
-            caps.meta.display_name,
-            info.display_name
-        );
-        assert_eq!(
-            caps.meta.binary, info.binary,
-            "{provider:?}: binary mismatch"
-        );
-        assert!(
-            caps.docs.homepage.is_some()
-                || caps.docs.docs.is_some()
-                || caps.docs.skills_docs.is_some()
-                || caps.docs.slash_docs.is_some()
-                || caps.docs.subagents_docs.is_some()
-                || caps.docs.scripts_docs.is_some(),
-            "{provider:?}: legacy docs surface is empty while typed docs_url is {:?}",
-            info.docs_url
-        );
-    }
-}
-
-#[test]
-fn agent_capabilities_config_paths_match_typed_catalog() {
-    for provider in PROVIDERS_DISPLAY_ORDER {
-        let info = provider_info(provider);
-        let caps = info.agent_capabilities();
-
-        assert_legacy_paths_in_catalog(
-            provider,
-            "user config",
-            &caps.config.user_files,
-            info.config_paths,
-        );
-        assert_legacy_paths_in_catalog(
-            provider,
-            "project config",
-            &caps.config.project_files,
-            info.config_paths,
-        );
-        assert_legacy_paths_in_catalog(
-            provider,
-            "local config",
-            &caps.config.local_files,
-            info.config_paths,
-        );
-    }
-}
-
-#[test]
-fn agent_capabilities_runtime_matches_typed_catalog() {
-    for provider in PROVIDERS_DISPLAY_ORDER {
-        let info = provider_info(provider);
-        let caps = info.agent_capabilities();
-        let non_interactive = &caps.runtime.non_interactive;
-
-        assert_eq!(
-            non_interactive.supported,
-            !info.entrypoints.is_empty(),
-            "{provider:?}: non-interactive support drifted"
-        );
-        assert_eq!(
-            non_interactive.structured_output_supported,
-            info.stream_protocol.is_some()
-                || info
-                    .output_formats
-                    .iter()
-                    .any(|format| !matches!(format.format, super::OutputFormat::Text)),
-            "{provider:?}: structured output support drifted"
-        );
-        if has_catalog_resume_entrypoint(info) || !non_interactive.resume_supported {
-            assert_eq!(
-                non_interactive.resume_supported,
-                has_catalog_resume_entrypoint(info),
-                "{provider:?}: resume support drifted where the typed catalog can represent it"
-            );
-        }
-
-        for entrypoint in info.entrypoints {
-            let mut fragments = vec![info.binary];
-            if let Some(subcommand) = entrypoint.subcommand {
-                fragments.push(subcommand);
-            }
-            fragments.extend(entrypoint.required_flags.iter().copied());
-            assert!(
-                non_interactive
-                    .entrypoints
-                    .iter()
-                    .any(|legacy| { fragments.iter().all(|fragment| legacy.contains(fragment)) }),
-                "{provider:?}: typed entrypoint fragments {fragments:?} missing from legacy entrypoints {:?}",
-                non_interactive.entrypoints
-            );
-        }
-
-        for output_format in info.output_formats {
-            assert!(
-                non_interactive
-                    .output_formats
-                    .iter()
-                    .any(|legacy| legacy.contains(output_format.native_name)),
-                "{provider:?}: typed output format {:?} missing from legacy output formats {:?}",
-                output_format.native_name,
-                non_interactive.output_formats
-            );
-        }
-    }
-}
-
-#[test]
-fn agent_capabilities_system_prompt_permissions_and_reasoning_match_typed_catalog() {
-    use crate::agents::ReasoningStyle;
-
-    for provider in PROVIDERS_DISPLAY_ORDER {
-        let info = provider_info(provider);
-        let caps = info.agent_capabilities();
-
-        let legacy_memory = &caps.runtime.system_prompt.memory_files;
-        for memory_file in info.memory_files {
-            assert!(
-                legacy_memory.contains(&memory_file.raw()),
-                "{provider:?}: typed memory file {:?} missing from legacy system prompt memory files {:?}",
-                memory_file.raw(),
-                legacy_memory
-            );
-        }
-        assert_eq!(
-            caps.runtime.system_prompt.full_replacement_supported,
-            replacement_supported(info),
-            "{provider:?}: system prompt replacement support drifted"
-        );
-
-        assert!(
-            yolo_matches_legacy(caps.runtime.permissions.yolo_equivalent, info.yolo),
-            "{provider:?}: legacy YOLO {:?} does not match typed {:?}",
-            caps.runtime.permissions.yolo_equivalent,
-            info.yolo
-        );
-
-        let reasoning = &caps.runtime.reasoning;
-        match info.reasoning {
-            super::ReasoningSupport::NotSupported | super::ReasoningSupport::NotDocumented => {
-                assert!(
-                    matches!(reasoning.style, ReasoningStyle::NotDocumented)
-                        || reasoning.levels_or_controls.is_empty(),
-                    "{provider:?}: legacy reasoning should be unsupported/undocumented, got {:?}",
-                    reasoning
-                );
-            }
-            super::ReasoningSupport::NamedLevels { levels, .. } => {
-                assert_eq!(
-                    reasoning.style,
-                    ReasoningStyle::NamedLevels,
-                    "{provider:?}: reasoning style drifted"
-                );
-                for level in levels {
-                    assert!(
-                        reasoning.levels_or_controls.contains(level),
-                        "{provider:?}: typed reasoning level {level:?} missing from legacy {:?}",
-                        reasoning.levels_or_controls
-                    );
-                }
-            }
-            super::ReasoningSupport::NumericBudget { flag, .. } => {
-                assert_eq!(
-                    reasoning.style,
-                    ReasoningStyle::NumericBudget,
-                    "{provider:?}: reasoning style drifted"
-                );
-                assert!(
-                    reasoning.levels_or_controls.contains(&flag),
-                    "{provider:?}: typed reasoning flag {flag:?} missing from legacy {:?}",
-                    reasoning.levels_or_controls
-                );
-            }
-            super::ReasoningSupport::BinaryToggle { on, off, .. } => {
-                assert_eq!(
-                    reasoning.style,
-                    ReasoningStyle::BinaryToggle,
-                    "{provider:?}: reasoning style drifted"
-                );
-                for control in [on, off] {
-                    assert!(
-                        reasoning.levels_or_controls.contains(&control),
-                        "{provider:?}: typed reasoning control {control:?} missing from legacy {:?}",
-                        reasoning.levels_or_controls
-                    );
-                }
-            }
-            super::ReasoningSupport::ProviderSpecific(_) => {
-                assert!(
-                    !matches!(reasoning.style, ReasoningStyle::NotDocumented)
-                        && !reasoning.levels_or_controls.is_empty(),
-                    "{provider:?}: provider-specific typed reasoning should retain legacy controls, got {:?}",
-                    reasoning
-                );
-            }
-        }
-    }
-}
-
-#[test]
-fn agent_capabilities_logging_and_known_gaps_match_typed_catalog() {
-    for provider in PROVIDERS_DISPLAY_ORDER {
-        let info = provider_info(provider);
-        let caps = info.agent_capabilities();
-        let logging = &caps.runtime.logging;
-
-        let session_log_paths = path_templates_raw(info.session_log_paths);
-        for legacy in &logging.session_locations {
-            assert!(
-                session_log_paths.contains(legacy),
-                "{provider:?}: legacy session log location {legacy:?} missing from typed session_log_paths {session_log_paths:?}"
-            );
-        }
-
-        let legacy_log_locations = &logging.log_locations;
-        for typed in path_templates_raw(info.session_locations) {
-            assert!(
-                legacy_log_locations.contains(&typed),
-                "{provider:?}: typed session location {typed:?} missing from legacy log_locations {legacy_log_locations:?}"
-            );
-        }
-
-        for legacy_gap in &caps.confidence.gaps {
-            assert!(
-                info.known_gaps
-                    .iter()
-                    .any(|gap| { gap.note == *legacy_gap || gap.tracker == Some(*legacy_gap) }),
-                "{provider:?}: legacy confidence gap {legacy_gap:?} missing from typed known_gaps {:?}",
-                info.known_gaps
-            );
-        }
-    }
-}
-
-#[test]
 fn resource_support_provider_matches_provider() {
     for provider in PROVIDERS_DISPLAY_ORDER {
         let support = provider_info(provider).resource_support();
@@ -626,34 +382,15 @@ fn resource_support_provider_matches_provider() {
     }
 }
 
-/// Drift guard: the only authoritative dispatch sites for [`Provider`] in
-/// the lib crate are the central registry and identity helpers. Every other
-/// per-domain dispatch must route through `ProviderInfo` behavior traits.
-///
-/// The scan walks `claudine/lib/src/**/*.rs` and flags files whose source
-/// contains any of the following patterns (after Rust line comments and
-/// `/* ... */` block comments are stripped):
-///
-/// 1. `match <ident> { ... Provider::<Variant> => ... }` — a `match`
-///    expression with at least one `Provider::<Variant> =>` arm,
-///    regardless of binding name (`provider`, `p`, `self`, `self.provider`,
-///    `*self`, `&*self`, etc.).
-/// 2. Standalone `Provider::<Variant> => ` arms (catches single-arm matches
-///    or `if let` ladders that drift back into per-variant dispatch).
-/// 3. `[(Provider::<Variant>, ...)]` provider tuple arrays — the exact
-///    duplicated-fact pattern Phase 2 removed from `discover_agents_full`.
-///
-/// Plain `[Provider::<Variant>, ...]` arrays are *not* flagged: they are
-/// commonly used in tests as input fixtures (display-order checks, picker
-/// preference lists, etc.) and do not represent provider facts.
-///
-/// The allow-list is intentionally narrow. Positive invariant tests
-/// (catalog round-trip, wrapper registry coverage, agent discovery, etc.)
-/// are the primary safety net; this scan is a defense-in-depth backstop.
-/// Strip Rust `//` line comments and `/* ... */` block comments from
-/// `src` so commented-out examples don't trip source-scan tests. Does NOT
+/// Strip Rust `//` line comments and `/* ... */` block comments from `src` so
+/// commented-out examples don't trip the source-scan guard below. Does NOT
 /// attempt to handle Rust strings containing `//` — false positives from
-/// string literals are rare enough to allow-list explicitly.
+/// string literals are rare and handled at the call site.
+///
+/// The package-wide `Provider` dispatch guard now lives in
+/// `claudine-cli/tests/dispatch_inventory.rs` (Phase I unified both crates into
+/// one inventory-based, site-level guard). This helper survives only for the
+/// [`detect_from_payload_has_no_provider_specific_branches`] source scan.
 fn strip_comments(src: &str) -> String {
     let mut out = String::with_capacity(src.len());
     let bytes = src.as_bytes();
@@ -679,107 +416,39 @@ fn strip_comments(src: &str) -> String {
     out
 }
 
+/// Guard against `provider/<slug>/legacy.rs` files ever returning.
+///
+/// The module split (design/module-split.md) parked each provider's legacy
+/// `AgentCapabilities` builders in a TEMPORARY `legacy.rs`; the retirement
+/// (workstream 2) deleted the tree and every `legacy.rs` with it. The set
+/// is now empty and must stay empty: any `legacy.rs` appearing under
+/// `src/provider/` fails this guard.
 #[test]
-fn no_unauthorized_match_provider_in_lib() {
-    use regex::Regex;
+fn provider_legacy_files_only_shrink() {
     use std::fs;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
 
-    fn collect_rs_files(root: &Path, out: &mut Vec<PathBuf>) {
-        let Ok(entries) = fs::read_dir(root) else {
-            return;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                collect_rs_files(&path, out);
-            } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
-                out.push(path);
-            }
-        }
-    }
-
-    let lib_src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
-    let allowed: &[&str] = &[
-        // Central registry (the one authoritative dispatch site).
-        "src/provider/registry.rs",
-        // Canonical identity helpers (slug, sniff binding, aliases, display
-        // order). These are part of the central registry surface.
-        "src/provider/identity.rs",
-        // The guard test source code itself contains the literal patterns
-        // we are scanning for. Self-allow.
-        "src/provider/tests.rs",
-        // Test fixture in the adapters module uses a `match provider`
-        // expression with `Provider::Claude => json!(...)` arms to
-        // synthesize raw payloads. Test-only fixture.
-        "src/adapters/mod.rs",
-        // `provider/methods.rs` test module uses
-        // `[(Provider::X, "expected-slug"), ...]` tuple fixtures to assert
-        // canonical serialization/Display output. The "expected-slug"
-        // strings are not duplicated provider facts — they pin the
-        // canonical surface that downstream code consumes via
-        // `Provider::as_slug()` etc.
-        "src/provider/methods.rs",
-        // `stream/providers/mod.rs` contains the `SemanticParser` factory
-        // function that matches on `Provider` to construct the correct
-        // provider-specific stream parser. This is an intentional
-        // per-provider dispatch site introduced by Phase 2.5 of the
-        // Sentrux quality remediation plan.
-        "src/stream/providers/mod.rs",
-    ];
-
-    let mut files = Vec::new();
-    collect_rs_files(&lib_src, &mut files);
-
-    // Pattern 1: `match <ident> { ... Provider::<Variant> => ... }` block
-    // — catches all match-form dispatch on Provider regardless of binding.
-    // Multiline + dot-matches-newline keeps this practical for real code.
-    let match_with_provider_arm = Regex::new(
-        r"(?s)match\s+[A-Za-z_][A-Za-z0-9_\.\*&]*\s*\{[^}]*?Provider::[A-Z][A-Za-z]+\s*=>",
-    )
-    .unwrap();
-    // Pattern 2: standalone `Provider::<Variant> => ` arms (catches
-    // alternate forms like `if let` ladders or single-arm matches that the
-    // block-level scan may not capture).
-    let provider_arm = Regex::new(r"Provider::[A-Z][A-Za-z]+\s*=>").unwrap();
-    // Pattern 3: provider tuple arrays — `[(Provider::Foo, ...)]`.
-    let provider_tuple_array = Regex::new(r"\[\s*\(\s*Provider::[A-Z]").unwrap();
-
-    let mut violators: Vec<(String, &'static str)> = Vec::new();
-    for file in &files {
-        let rel = file
-            .strip_prefix(env!("CARGO_MANIFEST_DIR"))
-            .unwrap_or(file)
-            .to_string_lossy()
-            .replace('\\', "/");
-        if allowed.iter().any(|allow| rel.ends_with(allow)) {
+    let provider_dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/provider");
+    let mut unexpected = Vec::new();
+    for entry in fs::read_dir(&provider_dir).expect("src/provider must be readable") {
+        let path = entry.expect("readable dir entry").path();
+        if !path.is_dir() || !path.join("legacy.rs").is_file() {
             continue;
         }
-        let Ok(content) = fs::read_to_string(file) else {
-            continue;
-        };
-        let stripped = strip_comments(&content);
-
-        if match_with_provider_arm.is_match(&stripped) {
-            violators.push((rel.clone(), "match-with-Provider-arm"));
-        }
-        if provider_arm.is_match(&stripped) {
-            // The block-level pattern subsumes most single-arm cases, but
-            // record separately so the diagnostic explains which pattern
-            // class fired.
-            violators.push((rel.clone(), "Provider::Variant-arm"));
-        }
-        if provider_tuple_array.is_match(&stripped) {
-            violators.push((rel, "[(Provider::...)] tuple array"));
-        }
+        let slug = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+        unexpected.push(slug);
     }
 
     assert!(
-        violators.is_empty(),
-        "Drift guard: unauthorized per-variant `Provider` dispatch found in lib crate. \
-         Route per-domain dispatch through `ProviderInfo` behavior traits, or add the \
-         file to the allow-list in `provider::tests::no_unauthorized_match_provider_in_lib` \
-         with a comment explaining why. Violators: {violators:?}"
+        unexpected.is_empty(),
+        "Provider legacy.rs file(s) found for {unexpected:?}. The legacy \
+         `AgentCapabilities` tree was retired (design/module-split.md): \
+         providers must not have a `legacy.rs`; put typed catalog data in \
+         `data.rs` and trait impls in `behavior.rs` instead."
     );
 }
 
@@ -865,10 +534,10 @@ fn stream_providers_expose_at_least_one_event() {
 // ---------------------------------------------------------------------------
 
 /// Any provider with at least one [`EventSupportLevel::Acp`] mapping row
-/// must report a non-`NotSupported` ACP server mode.
+/// must report a provider that actually speaks ACP, plus the events it
+/// captures through it.
 #[test]
 fn acp_events_imply_acp_support() {
-    use super::acp::AcpServerMode;
     use crate::events::AgenticEvent;
     use crate::provider::EventSupportLevel;
     for provider in PROVIDERS_DISPLAY_ORDER {
@@ -881,8 +550,9 @@ fn acp_events_imply_acp_support() {
         });
         if has_acp_event {
             assert!(
-                !matches!(info.acp.server_mode, AcpServerMode::NotSupported),
-                "{provider:?}: declares EventSupportLevel::Acp rows but acp.server_mode is NotSupported"
+                info.acp.is_supported(),
+                "{provider:?}: declares EventSupportLevel::Acp rows but acp.server_mode is {:?}",
+                info.acp.server_mode
             );
             assert!(
                 !info.acp.events_via_acp.is_empty(),
@@ -931,17 +601,15 @@ fn kimi_approval_request_is_acp() {
             .native_name(AgenticEvent::PermissionRequest),
         Some("ApprovalRequest")
     );
-    assert!(matches!(
-        info.acp.server_mode,
-        AcpServerMode::AvailableViaWireProxy
-    ));
+    assert!(matches!(info.acp.server_mode, AcpServerMode::Native));
     assert!(info.acp.events_via_acp.contains(&AcpEvent::ApprovalRequest));
 }
 
-/// Providers without any ACP rows report `AcpSupport::NOT_SUPPORTED`.
+/// Providers without any ACP rows capture no events via ACP. `server_mode`
+/// is deliberately NOT constrained here: it records the provider's own ACP
+/// posture (research-fed), independent of Claudine's event wiring.
 #[test]
-fn non_acp_providers_have_not_supported_acp() {
-    use super::acp::AcpServerMode;
+fn non_acp_providers_capture_no_acp_events() {
     use crate::events::AgenticEvent;
     for provider in PROVIDERS_DISPLAY_ORDER {
         let info = provider_info(provider);
@@ -949,11 +617,6 @@ fn non_acp_providers_have_not_supported_acp() {
             .iter()
             .any(|event| info.event_mapping.support_level(*event).is_acp());
         if !has_acp_event {
-            assert!(
-                matches!(info.acp.server_mode, AcpServerMode::NotSupported),
-                "{provider:?}: has no EventSupportLevel::Acp rows but acp.server_mode is {:?}",
-                info.acp.server_mode
-            );
             assert!(
                 info.acp.events_via_acp.is_empty(),
                 "{provider:?}: has no EventSupportLevel::Acp rows but acp.events_via_acp is non-empty"
@@ -969,7 +632,6 @@ fn typed_path_templates_have_non_empty_raw() {
         let info = provider_info(provider);
         let bundles: &[(&str, &[crate::provider::PathTemplate])] = &[
             ("session_log_paths", info.session_log_paths),
-            ("session_locations", info.session_locations),
             ("config_paths", info.config_paths),
             ("memory_files", info.memory_files),
             (
@@ -1052,8 +714,19 @@ fn representative_payload_for(provider: Provider) -> Option<serde_json::Value> {
         Provider::Gemini => serde_json::json!({"hook_event_name": "BeforeAgent"}),
         Provider::OpenCode => serde_json::json!({"event_type": "session.idle"}),
         Provider::KimiCode => serde_json::json!({"method": "notification"}),
-        // Goose, Qwen, and Roo do not detect via raw payload shape today.
-        Provider::Goose | Provider::QwenCode | Provider::RooCode => return None,
+        // Goose and Qwen do not detect via raw payload shape today. Kilo
+        // shares OpenCode's payload shape, so it cannot be uniquely detected
+        // from a raw payload — the wrapper path knows the provider instead. Pi
+        // has no native hooks, so it never delivers a raw hook payload at all;
+        // its `--mode json` stdout stream is parsed by PiSemanticStreamParser.
+        // Antigravity likewise delivers no raw hook payload; its
+        // `--output-format json` envelope is parsed by
+        // AntigravitySemanticStreamParser.
+        Provider::Goose
+        | Provider::QwenCode
+        | Provider::Kilo
+        | Provider::Pi
+        | Provider::Antigravity => return None,
     })
 }
 
@@ -1256,7 +929,8 @@ fn codex_system_prompt_uses_config_key_variants() {
 }
 
 /// Every provider's JSON describe surface includes typed resource
-/// portability data and excludes the legacy `AgentCapabilities` tree.
+/// portability data and excludes the retired legacy `AgentCapabilities`
+/// tree.
 #[test]
 fn provider_info_json_includes_resource_support_not_capabilities() {
     for provider in PROVIDERS_DISPLAY_ORDER {
@@ -1500,7 +1174,6 @@ fn detect_from_payload_has_no_provider_specific_branches() {
         "Provider::KimiCode",
         "Provider::Goose",
         "Provider::QwenCode",
-        "Provider::RooCode",
         "looks_like_codex_payload",
         "hook_event_name",
         "event_type",

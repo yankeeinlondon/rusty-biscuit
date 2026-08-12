@@ -80,6 +80,9 @@ pub(crate) enum Commands {
     SlashCommands(commands::slash_commands::SlashCommandsArgs),
     /// Show provider capability matrix (skill/slash/agent/hooks).
     Providers(commands::providers::ProvidersArgs),
+    /// Inspect the compiled signal-detection tables and replay their
+    /// evidence fixtures (dev/CI).
+    Signals(commands::signals::SignalsArgs),
     /// Query and sync Claudine JSONL logs through the reporting index.
     Logs(commands::logs::LogsArgs),
     /// Remove Claudine hooks from all agents.
@@ -100,6 +103,12 @@ pub(crate) enum Commands {
     Opencode(commands::wrap::WrapperArgs),
     /// Wrap Goose with Claudine preflight/env handling.
     Goose(commands::wrap::WrapperArgs),
+    /// Wrap Kilo Code with Claudine preflight/env handling.
+    Kilo(commands::wrap::WrapperArgs),
+    /// Wrap Pi with Claudine preflight/env handling.
+    Pi(commands::wrap::WrapperArgs),
+    /// Wrap Antigravity (the `agy` CLI) with Claudine preflight/env handling.
+    Antigravity(commands::wrap::WrapperArgs),
     /// Compose a Markdown document and send as prompt to an agentic CLI.
     Compose(commands::compose::ComposeArgs),
     /// Inline composition: use frontmatter prompt to generate and replace body.
@@ -107,6 +116,10 @@ pub(crate) enum Commands {
     InlineCompose(commands::compose::InlineComposeArgs),
     /// Run a serial sequence of composition steps from a single document.
     Sequence(commands::sequence::SequenceArgs),
+    /// Show the mesh NOW view: live sessions across rendezvous hosts.
+    Dashboard(commands::dashboard::DashboardArgs),
     /// Show Darkmatter runtime context, expression engine, and side effects.
     Context(commands::context::ContextArgs),
+    /// Show the diagnostic error-code contract (codes, dispositions, details).
+    Errors(commands::errors::ErrorsArgs),
 }

@@ -1,16 +1,25 @@
 ---
+description: |-
+    Runs an interactive session to clarify the passed in spec or design file.
 $schema:
-    - doc: string(required)
-    - spec: string(required)
-    - design: string(reqquired)
+    - spec: file(required; match(**/*spec*.md); eager) -> pass in a specification file for clarification
+      doc: file
+    - design: file(required; match(**/*design*.md)) -> pass in a design document for clarification
+      doc: file
 doc: "{{spec || design}}"
 interactive: true
+initialize:
+    stack:
+        - when: "spec && design"
+          action:
+            - warn: "The {{ link(prompts/clarify.md) }} prompt expects _either_ a `spec` or `design` document to be passed in but not both!"
+            # - stop: ""
 start:
     stderr: "We are starting the clarification process and will need human involvement."
     say: "Please stand by while we prepare a set of clarification questions"
 success:
     say: "Specification clarification process is now complete in {{ ctx.current_package_area || env.PACKAGE || ctx.repo || env.REPO }}"
-    message: "The specification file `{{doc.doc}}` has been completed. Now ready for a technical design specification or jumping directly to a plan."
+    message: "The specification file `{{doc.doc}}` has been clarified ({{ctx.agent}}/{{ctx.model}})"
 ---
 
 - You are acting as a senior technical analyst and design reviewer.
@@ -128,4 +137,4 @@ Drive the conversation forward through structured human-in-the-loop clarificatio
 
 ## Completion
 
-Once you have iterated over the specification file enough times that you feel it is sufficiently clear and detailed, you must set the `clarified` frontmatter property of the document ({{doc.doc}}) to "${env.AGENT}/${env.MODEL}"
+Once you have iterated over the specification file enough times that you feel it is sufficiently clear and detailed, you must set the `clarified` frontmatter property of the document ({{doc.doc}}) to "${ctx.agent}/${ctx.model}"

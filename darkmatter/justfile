@@ -1,7 +1,9 @@
 set dotenv-load
 set positional-arguments
 # set allow-duplicate-recipes := true
-set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+# `env CYG_SYS_BASHRC=1` guards against Cygwin's /etc/bash.bashrc tripping `-u`;
+# see the root justfile for the full explanation.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
 
 import "../just/lifecycle.just"
 import "../just/plan.just"
@@ -26,6 +28,8 @@ LIB_NAME := PACKAGE + " Library"
 CLI_NAME := PACKAGE + " CLI"
 LIBRARY := lowercase(PACKAGE)
 CLI := lowercase(PACKAGE) + "-cli"
+DMLS := "dmls"
+DMLS_NAME := PACKAGE + " Language Server"
 CLI_PATH := "./cli"
 DOCS := ""
 TODAY := `date +%F`
@@ -45,17 +49,17 @@ default:
     just --list | grep -v 'default'
     echo
 
-# Build the library and CLI
+# Build the library, CLI, and language server
 build *args="":
     @just _build darkmatter "{{ LIB_NAME }}" {{ args }}
     @just _build darkmatter-cli "CLI_NAME" {{ args }}
+    @just _build {{ DMLS }} "{{ DMLS_NAME }}" {{ args }}
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity {{ LIBRARY }}
-    @just _sanity {{ CLI }}
+    @just _sanity_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }}"
 
 # Test both library and CLI. Level-1 only: the slow tiers (real-terminal,
 # headless-browser, real-resource) are excluded here and run via their own
@@ -64,24 +68,17 @@ sanity:
 # `browser_`/`level2_` filter terms, so the whole binary is skipped.
 test *args="":
     #!/usr/bin/env bash
-    set -euo pipefail
-    filter='!(test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/))'
-    echo
-    echo -e "Testing {{ BOLD }}{{ LIBRARY }}{{ RESET }} package"
-    echo
-    cargo nextest run -p {{ LIBRARY }} -E "$filter" {{ args }}
-    echo
-    echo -e "✅ {{ GREEN }} all tests passing in {{ BOLD }}{{ LIBRARY }}{{ RESET }}{{ GREEN }} package{{ RESET }}"
-    echo
-    echo
-    echo -e "Testing {{ BOLD }}{{ CLI }}{{ RESET }} package"
-    echo
-    cargo nextest run -p {{ CLI }} -E "$filter" {{ args }}
-    echo
-    echo -e "✅ {{ GREEN }} all tests passing in {{ BOLD }}{{ CLI }}{{ RESET }}{{ GREEN }} package{{ RESET }}"
-    echo
+    set -uo pipefail
+    # Unlike the shared default, darkmatter's L1 contract keeps `slow_` tests.
+    export BISCUIT_TEST_FILTER='!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/))'
+    exit_code=0
+    just _test_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }}" {{ args }} || exit_code=$?
+    if (( exit_code == 130 )); then
+        exit 130
+    fi
     echo -e "👀 {{ BOLD }}Note:{{ RESET }} {{ BLUE }}just test{{ RESET }} runs Level-1 only; use {{ BLUE }}just test-l2{{ RESET }} / {{ BLUE }}just test-browser{{ RESET }} for the slow tiers"
     echo
+    exit "${exit_code}"
 
 # Level-2 (real-terminal) render-tree tests for both crates.
 #
@@ -93,8 +90,7 @@ test-l2 *args="":
     @echo -e "Running {{ BOLD }}Level-2{{ RESET }} render-tree terminal tests"
     @echo -e "{{ DIM }}- export BISCUIT_TEST_LEVEL_REQUIRED=2 to hard-fail on missing harness{{ RESET }}"
     @echo
-    @just _test_l2 {{ LIBRARY }} {{ args }}
-    @just _test_l2 {{ CLI }} {{ args }}
+    @just _test_l2_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }}" {{ args }}
 
 # darkmatter Level-3 tests
 test-l3 *args="":
@@ -111,10 +107,41 @@ test-browser *args="":
 test-real:
     @echo "test-real: not applicable for darkmatter"
 
-# Lint both the library and CLI
+# Lint the library, CLI, and language server
 lint:
     @just _lint {{ LIBRARY }}
     @just _lint {{ CLI }}
+    @just _lint {{ DMLS }}
+
+# installs the DMLS binary into binary path
+install-dmls:
+    @cargo install --path ./dmls --force
+
+# Package the DMLS VSCode extension and (re)install it into VSCode.
+#
+# `npm install` runs first so a fresh clone bundles the runtime deps
+# (node_modules is gitignored and has no lockfile — without this the
+# packaged .vsix ships no `vscode-languageclient` and silently fails to
+# activate). `--force` overwrites the same 0.0.1 build on re-runs, and the
+# vsix name is resolved dynamically so a version bump does not install a
+# stale file. A CLI install cannot refresh an already-open VSCode window,
+# so the recipe prints the reload step.
+install-vscode-package:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cd ./dmls/vscode-dmls
+    echo
+    echo "Installing extension runtime dependencies…"
+    npm install --silent
+    echo "Packaging extension…"
+    npx @vscode/vsce package --allow-missing-repository
+    vsix="$(ls -t ./*.vsix | head -1)"
+    echo "Installing ${vsix##*/} into VSCode…"
+    code --install-extension "$vsix" --force
+    echo
+    echo "Installed. If VSCode is already open, reload it to activate:"
+    echo "  Cmd+Shift+P → Developer: Reload Window"
+    echo
 
 # Report CLI source/test files over the ~500-line review soft cap.
 #
@@ -214,19 +241,6 @@ all:
 
 # ----------------------------------------------------------------------------
 
-# commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
-commit args="":
-    @echo ""
-    @echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
-    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
-    @echo ""
-    @echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
-    @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet -y {{ args }}
-    @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status 2>/dev/null || exit 0
-    @echo
-
 # Install the CLI
 install *args="":
     @echo -e "Building {{ BOLD }}biscuit-terminal{{ RESET }} library"
@@ -244,7 +258,80 @@ install *args="":
 
 # Validate the source code without doing a full build
 check:
-    @cargo check -p {{ LIBRARY }} -p {{ CLI }}
+    @cargo check -p {{ LIBRARY }} -p {{ CLI }} -p {{ DMLS }}
+    @just check-zed
+
+# Check the Zed WASM extension (zed-dmls) compiles against its wasm target.
+#
+# The extension is workspace-excluded (it targets wasm32 and carries its own
+# empty `[workspace]`), so it is checked standalone. `wasm32-wasip1` is the
+# target Zed compiles extensions for. Skips cleanly when the target is not
+# installed so the check never fails merely because the host lacks it; install
+# it with `rustup target add wasm32-wasip1` to make the compile mandatory.
+check-zed:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    target="wasm32-wasip1"
+    if ! rustup target list --installed 2>/dev/null | grep -qx "$target"; then
+        echo -e "{{ YELLOW }}skip{{ RESET }} check-zed: rust target {{ BOLD }}$target{{ RESET }} is not installed"
+        echo -e "{{ DIM }}- install it with: rustup target add $target{{ RESET }}"
+        exit 0
+    fi
+    echo -e "Checking the {{ BOLD }}Zed WASM extension{{ RESET }} (zed-dmls) against $target"
+    cargo check --manifest-path ./dmls/zed-dmls/Cargo.toml --target "$target"
+    echo -e "✅ {{ GREEN }}zed-dmls compiles for $target{{ RESET }}"
+
+# Distribution matrix (the Zed extension downloads assets by these names):
+#   macOS (universal) : dmls-<version>-macos-universal.tar.gz  (lipo aarch64+x86_64)
+#   Linux x86_64      : dmls-<version>-linux-x86_64.tar.gz
+#   Linux aarch64     : dmls-<version>-linux-aarch64.tar.gz
+#   Windows x86_64    : dmls-<version>-windows-x86_64.zip
+# CI wires the full per-target build; this recipe packages the host target.
+
+# Build a release `dmls` archive for the host, named per the distribution matrix
+dist:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version=$(cargo metadata --no-deps --format-version 1 \
+        | grep -o '"name":"dmls"[^}]*"version":"[^"]*"' \
+        | grep -o '"version":"[^"]*"' | head -1 | cut -d'"' -f4)
+    os=$(uname -s)
+    arch=$(uname -m)
+    out="./dmls/dist"
+    mkdir -p "$out"
+    case "$os" in
+        Darwin)
+            echo -e "Building {{ BOLD }}macOS universal{{ RESET }} dmls $version"
+            cargo build -p {{ DMLS }} --release --target aarch64-apple-darwin
+            cargo build -p {{ DMLS }} --release --target x86_64-apple-darwin
+            lipo -create -output "$out/dmls" \
+                ../target/aarch64-apple-darwin/release/dmls \
+                ../target/x86_64-apple-darwin/release/dmls
+            tar -C "$out" -czf "$out/dmls-$version-macos-universal.tar.gz" dmls
+            rm -f "$out/dmls"
+            echo -e "{{ GREEN }}wrote{{ RESET }} $out/dmls-$version-macos-universal.tar.gz"
+            ;;
+        Linux)
+            case "$arch" in
+                aarch64|arm64) triple="linux-aarch64" ;;
+                *)             triple="linux-x86_64" ;;
+            esac
+            echo -e "Building {{ BOLD }}$triple{{ RESET }} dmls $version"
+            cargo build -p {{ DMLS }} --release
+            cp ../target/release/dmls "$out/dmls"
+            tar -C "$out" -czf "$out/dmls-$version-$triple.tar.gz" dmls
+            rm -f "$out/dmls"
+            echo -e "{{ GREEN }}wrote{{ RESET }} $out/dmls-$version-$triple.tar.gz"
+            ;;
+        *)
+            echo -e "Building {{ BOLD }}windows-x86_64{{ RESET }} dmls $version"
+            cargo build -p {{ DMLS }} --release
+            cp ../target/release/dmls.exe "$out/dmls.exe"
+            ( cd "$out" && zip -q "dmls-$version-windows-x86_64.zip" dmls.exe )
+            rm -f "$out/dmls.exe"
+            echo -e "{{ GREEN }}wrote{{ RESET }} $out/dmls-$version-windows-x86_64.zip"
+            ;;
+    esac
 
 # ---------- benchmarking + profiling ----------
 
@@ -275,6 +362,30 @@ bench-compare name:
     @echo -e "Comparing against Criterion baseline {{ BOLD }}{{ name }}{{ RESET }}"
     @cargo bench -p {{ LIBRARY }} --benches -- --baseline {{ name }}
 
+# bench the DMLS workspace indexer against a deterministic synthetic corpus.
+# The tier is generated once under the gitignored root target/ and reused; the
+# generator is seeded (byte-identical run to run), so `rm -rf` it to refresh.
+# darkmatter-5k (default) is DSL-dense (directives/$schema/interpolation edges);
+# bench vault-5k for a same-size plain-Markdown/wiki control to isolate DSL cost.
+# Usage: `just bench-dmls [tier] [--json]`
+# tiers: tiny-100 | small-1k | vault-5k | dense-5k | darkmatter-5k (default) | pathological-1k | large-20k
+bench-dmls tier="darkmatter-5k" *args="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    corpus="../target/dmls-bench/{{ tier }}"
+    echo -e "Building {{ BOLD }}{{ DMLS_NAME }}{{ RESET }} {{ DIM }}(release){{ RESET }}"
+    cargo build -p {{ DMLS }} --release
+    bin="../target/release/dmls"
+    if [[ -d "$corpus" ]]; then
+        echo -e "{{ DIM }}Reusing {{ tier }} corpus at $corpus (rm -rf to regenerate){{ RESET }}"
+    else
+        echo -e "Generating {{ BOLD }}{{ tier }}{{ RESET }} corpus → $corpus"
+        "$bin" --gen-corpus "{{ tier }}" "$corpus"
+    fi
+    echo
+    echo -e "Bench-indexing {{ BOLD }}{{ tier }}{{ RESET }}"
+    "$bin" --bench-index "$corpus" {{ args }}
+
 # Run the latest debug build of the Claudine CLI
 cli *args="":
     @cargo run -p {{ CLI }} {{ args }}
@@ -295,6 +406,15 @@ docs_library:
     @echo
     @just _claude_file ./prompts/update-library-docs.md || ( _speak "Ran into problems updating the CLI docs for Darkmatter!" && exit 1 )
     @just _play confirmation
+
+# Regenerate the expression function table in docs/topics/darkmatter-expressions.md
+regen-expr-doc:
+    @echo
+    @echo -e "Regenerating {{ BOLD }}Darkmatter Expressions{{ RESET }} function table"
+    @echo
+    @cargo run -p darkmatter --example expression_doc_generator -- --write
+    @echo
+    @echo -e "{{ BOLD }}{{ GREEN }}Function table regenerated{{ RESET }} in docs/topics/darkmatter-expressions.md"
 
 readme:
     _readme_files darkmatter

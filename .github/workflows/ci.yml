@@ -1,0 +1,533 @@
+name: ci
+
+# Dependency-aware CI for pull requests and pushes to main. Changed workspace
+# packages are expanded through reverse Cargo dependencies and then fanned out
+# ONE JOB PER PACKAGE, with package policy read from each manifest's
+# `[package.metadata.ci]` and environment capabilities from
+# `.github/ci/environments.json`.
+#
+# `pull_request` carries NO `branches:` filter on purpose. Restricting it to
+# `main` meant a stacked pull request — one targeting another feature branch —
+# created no `ci` run at all, so its changes reached `main` having never been
+# validated on their own. Measured on PR #22, which targeted PR #21 and ran
+# nothing but `pr-health` and Socket.
+#
+# This does not multiply work: `affected_scope.py` computes scope from the
+# event's own base and head, so a stacked PR validates only its delta, and the
+# concurrency group cancels superseded runs. `pr-health.yml` mirrors this
+# applicability rule and a workflow-contract test keeps the two from drifting.
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scope:
+    name: Determine affected scope
+    runs-on: ubuntu-latest
+    outputs:
+      package_matrix: ${{ steps.scope.outputs.package_matrix }}
+      has_packages: ${{ steps.scope.outputs.has_packages }}
+      packages: ${{ steps.scope.outputs.packages }}
+      package_names: ${{ steps.scope.outputs.package_names }}
+      full_scope: ${{ steps.scope.outputs.full_scope }}
+      sniff: ${{ steps.scope.outputs.sniff }}
+      biscuit_tui: ${{ steps.scope.outputs.biscuit_tui }}
+      preflight_os: ${{ steps.scope.outputs.preflight_os }}
+      preflight_reason: ${{ steps.scope.outputs.preflight_reason }}
+      change_class: ${{ steps.scope.outputs.change_class }}
+      job_estimate: ${{ steps.scope.outputs.job_estimate }}
+      ci_tooling: ${{ steps.scope.outputs.ci_tooling }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      - name: Calculate package and area scope
+        id: scope
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BASE: ${{ github.event.before }}
+          PUSH_HEAD: ${{ github.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          scope_args=()
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            scope_args=(--all)
+          else
+            if [[ "$EVENT_NAME" == "pull_request" ]]; then
+              base="$PR_BASE"
+              head="$PR_HEAD"
+            else
+              base="$PUSH_BASE"
+              head="$PUSH_HEAD"
+            fi
+
+            if [[ -z "$base" || "$base" =~ ^0+$ ]]; then
+              scope_args=(--all)
+            else
+              mapfile -d '' changed_files < <(git diff --name-only -z "$base" "$head")
+              scope_args=()
+              # A lockfile change is scoped from its own diff rather than
+              # escalated to the whole workspace, which needs the base revision's
+              # copy. If the extraction fails the flag is simply not passed and
+              # `affected_scope.py` falls back to full scope — the safe default
+              # is never silently skipped, only ever widened.
+              if git show "$base:Cargo.lock" >base-Cargo.lock 2>/dev/null; then
+                scope_args+=(--base-lockfile base-Cargo.lock)
+              fi
+              scope_args+=(-- "${changed_files[@]}")
+            fi
+          fi
+
+          scope_json="$(python3 scripts/ci/affected_scope.py "${scope_args[@]}")"
+          packages="$(jq -c '.packages' <<<"$scope_json")"
+
+          # The full scope document is also the rollup's policy source: it
+          # carries every impacted package's resolved `[package.metadata.ci]`
+          # policy (gating and `gates = false` alike). Uploaded as an artifact
+          # so `ci-verdict` judges exactly what this run scheduled.
+          printf '%s' "$scope_json" > scope.json
+
+          # Every selected gating package fans out directly. There is no canary
+          # stage: the compile check that gates each package's own tests is a
+          # cheaper and strictly better predictor than a sample of two other
+          # packages, and it cannot stall the fan-out because it runs inside it.
+          package_matrix="$(jq -c '{include: .matrix}' <<<"$scope_json")"
+
+          {
+            echo "package_matrix=$package_matrix"
+            echo "packages=$packages"
+            echo "package_names=$(jq -c '.packages' <<<"$scope_json")"
+            # Derived from the MATRIX, not the impacted list: a change touching
+            # only `gates = false` packages impacts packages but schedules none,
+            # and an empty matrix under `has_packages=true` fails the fan-out at
+            # strategy evaluation.
+            echo "has_packages=$(jq -r '.matrix | length > 0' <<<"$scope_json")"
+            echo "full_scope=$(jq -r '.full_scope' <<<"$scope_json")"
+            echo "sniff=$(jq -r '.flags.sniff' <<<"$scope_json")"
+            echo "biscuit_tui=$(jq -r '.flags."biscuit-tui"' <<<"$scope_json")"
+            echo "ci_tooling=$(jq -r '.flags.ci_tooling' <<<"$scope_json")"
+            echo "job_estimate=$(jq -r '.job_estimate' <<<"$scope_json")"
+            echo "preflight_os=$(jq -c '.preflight_os' <<<"$scope_json")"
+            echo "preflight_reason=$(jq -r '.preflight_reason' <<<"$scope_json")"
+            echo "change_class=$(jq -r '.change_class' <<<"$scope_json")"
+          } >>"$GITHUB_OUTPUT"
+
+          # One actionable scope summary (D15).
+          {
+            echo "## CI scope"
+            echo ""
+            echo "| field | value |"
+            echo "|---|---|"
+            echo "| event | ${EVENT_NAME} |"
+            echo "| change class | $(jq -r '.change_class' <<<"$scope_json") |"
+            echo "| full scope | $(jq -r '.full_scope' <<<"$scope_json") |"
+            echo "| reason | $(jq -r '.preflight_reason' <<<"$scope_json") |"
+            echo "| preflight OS | $(jq -rc '.preflight_os | join(", ")' <<<"$scope_json") |"
+            echo "| affected packages | $(jq -r '.packages | length' <<<"$scope_json") |"
+            echo "| gating packages (matrix) | $(jq -r '.matrix | length' <<<"$scope_json") |"
+            echo "| expanded job estimate | $(jq -r '.job_estimate' <<<"$scope_json") |"
+            echo "| toolchain | $(grep '^channel' rust-toolchain.toml | cut -d'"' -f2) |"
+          } >>"$GITHUB_STEP_SUMMARY"
+      # The policy artifact the rollup reads. Small, and retention is short:
+      # it describes one run's scope, nothing else.
+      - name: Upload the resolved package policy
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-scope
+          path: scope.json
+          retention-days: 3
+          if-no-files-found: error
+
+  # Bootstrap preflight (D3). Verifies a clean runner can initialize the shared
+  # toolchain, discover scope, and pass the canonical-recipe and scope-calc
+  # guards on every selected OS BEFORE any package fans out. Matrix breadth
+  # scales with change class: a package-local change runs the scope host plus
+  # the runner OSes its environments land on; a global CI/tooling change runs
+  # all three. Package jobs depend on this, so a broken bootstrap produces one
+  # actionable failure per selected OS instead of dozens of package failures.
+  preflight:
+    name: preflight (${{ matrix.os }})
+    needs: scope
+    strategy:
+      fail-fast: false
+      matrix:
+        os: ${{ fromJSON(needs.scope.outputs.preflight_os) }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install just
+        uses: extractions/setup-just@v2
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+      - name: Verify toolchain and required tooling
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc -vV
+          cargo -V
+          just --version
+          cargo nextest --version
+          protoc --version
+      # Proves a fresh checkout runs Cargo with no rustc wrapper at all. The
+      # repository tracks none; RUSTC_WRAPPER is cleared explicitly so a stray
+      # environment value cannot mask a broken clean-checkout path.
+      - name: Cargo metadata without build acceleration
+        shell: bash
+        env:
+          RUSTC_WRAPPER: ""
+        run: cargo metadata --no-deps --format-version 1 >/dev/null
+      - name: Validate canonical area recipes
+        run: just check-canonical
+      - name: Test affected-scope calculation
+        run: python3 scripts/ci/test_affected_scope.py
+
+  package-ci:
+    name: ${{ matrix.package }}
+    needs: [scope, preflight]
+    # No stage sits in front of this. A sampled canary was tried and removed:
+    # gating on it erased 20 areas' evidence for one unrelated failure, and
+    # un-gating it left a `needs:` edge that stalled the whole fan-out whenever
+    # its scarcest leg could not get a runner. Each package now gates its own
+    # tests on its own compile check, inside `_package-ci.yml`, where the
+    # predictor is exact and cannot block anything it is unrelated to.
+    if: >-
+      !cancelled() &&
+      needs.scope.outputs.has_packages == 'true'
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.scope.outputs.package_matrix) }}
+    uses: ./.github/workflows/_package-ci.yml
+    with:
+      package: ${{ matrix.package }}
+      check-args: ${{ matrix.check_args }}
+      test-args: ${{ matrix.test_args }}
+      l1-include-slow: ${{ matrix.l1_include_slow }}
+      # `native_environments`, `l2_environments`, and `wsl` are DERIVED by
+      # `affected_scope.py` from package policy crossed with the environment
+      # capability table, so the reusable workflow receives pre-split,
+      # un-confusable inputs and cannot route `wsl2-ubuntu` into a `runs-on`
+      # matrix.
+      native-environments: ${{ toJSON(matrix.native_environments) }}
+      check-os: ${{ toJSON(matrix.check_os) }}
+      l2-environments: ${{ toJSON(matrix.l2_environments) }}
+      browser-environments: ${{ toJSON(matrix.browser_environments) }}
+      node-environments: ${{ toJSON(matrix.node_environments) }}
+      backends: ${{ toJSON(matrix.l2_backends) }}
+      runner-tools: ${{ toJSON(matrix.runner_tools) }}
+      companion-suites: ${{ toJSON(matrix.companion_suites) }}
+      native: ${{ toJSON(matrix.native) }}
+      wsl: ${{ matrix.wsl }}
+    secrets: inherit
+
+  affected-coverage:
+    name: Coverage for affected packages
+    needs: [scope, preflight]
+    if: >-
+      !cancelled() &&
+      github.event_name == 'pull_request' &&
+      needs.scope.outputs.has_packages == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      AFFECTED_PACKAGES: ${{ needs.scope.outputs.packages }}
+      FULL_SCOPE: ${{ needs.scope.outputs.full_scope }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: extractions/setup-just@v2
+      - name: Install native prerequisites
+        shell: bash
+        run: just _ensure-native-libs
+      - name: Set up the pinned toolchain with coverage components
+        run: |
+          rustc --version
+          rustup component add llvm-tools-preview
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: coverage-affected
+      - uses: taiki-e/install-action@cargo-llvm-cov
+      - name: Generate one affected-scope LCOV report
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$FULL_SCOPE" == "true" ]]; then
+            selection=(--workspace)
+          else
+            selection=()
+            mapfile -t packages < <(jq -r '.[]' <<<"$AFFECTED_PACKAGES")
+            for package in "${packages[@]}"; do
+              selection+=(-p "$package")
+            done
+          fi
+          cargo llvm-cov "${selection[@]}" --lcov --output-path lcov-affected.info
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lcov-affected
+          path: lcov-affected.info
+
+  # Specialized runtime contract (D12): orchestrated by the primary workflow,
+  # selected from affected scope, so there is one CI run per commit instead of a
+  # separate wall of path-triggered workflows. It preserves its unique runtime
+  # evidence; shared bootstrap lives in the reusable workflow it calls.
+  biscuit-tui-captured-stdout:
+    name: biscuit-tui-captured-stdout
+    needs: [scope, preflight]
+    if: >-
+      !cancelled() &&
+      needs.scope.outputs.biscuit_tui == 'true'
+    uses: ./.github/workflows/biscuit-tui-windows-captured-stdout.yml
+    secrets: inherit
+
+  # CI's own tooling — the merge-gate binary (`scripts/ci-rollup*.rs`), the
+  # scope calculator (`scripts/ci/`), and the policy store (`.github/ci/`) —
+  # is not a Cargo package, so a change to it selects nothing and would
+  # otherwise exercise nothing. This leg runs their own test suites. Its
+  # selection flag is derived by `affected_scope.py`, not hardcoded here.
+  ci-tooling:
+    name: ci-tooling (rollup + scope tests)
+    needs: [scope, preflight]
+    if: >-
+      !cancelled() &&
+      needs.scope.outputs.ci_tooling == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      - uses: taiki-e/install-action@nextest
+      - name: Test the scope calculator
+        run: python3 scripts/ci/test_affected_scope.py
+      # `--no-default-features` deselects the crates the other two bins in
+      # `scripts/` need and this one does not. Same shape as ci-verdict's build.
+      - name: Test the rollup and verdict
+        run: |
+          cargo nextest run \
+            --manifest-path scripts/Cargo.toml \
+            --no-default-features --bin ci-rollup
+
+  # THE single required branch-protection check (plan 1.3).
+  #
+  # Everything above stays visibly red when it fails, and NONE of it is a
+  # required check. That is deliberate: a required producer's failure blocks the
+  # merge directly, the baseline is never consulted, and the entire mechanism is
+  # bypassed. Only this job gates.
+  #
+  # Three properties this job must have, each earned:
+  #
+  #   1. `if: always()` — a failed or cancelled producer must not skip it.
+  #      `needs` here is a "wait for, then download from" list, not a gate.
+  #   2. `--scope` from the scope job — it is the ONLY way `ci-rollup` learns a
+  #      package was scheduled and produced NOTHING. Infer scope from the
+  #      artifacts on disk and that case is invisible by construction, which is
+  #      exactly what MISSING exists to catch. A baseline entry outside the
+  #      scope is ignored, never counted as a pass.
+  #   3. Evidence, not job names. When `needs:` skips a matrix job GitHub never
+  #      evaluates the matrix context: the whole matrix collapses into ONE
+  #      skipped job named with the raw `${{ matrix.os }}` expression (measured,
+  #      run 30323254931). Nothing here parses a display name; identity comes
+  #      from each artifact's `manifest.jsonl` and `status.json`.
+  ci-verdict:
+    name: ci-verdict
+    # Every job that can produce a result or status artifact. The `wsl` leg and
+    # each package's `check`/`lint`/`test`/`l2`/`browser` jobs are nested inside
+    # `package-ci`, so they are covered transitively.
+    needs:
+      - scope
+      - preflight
+      - package-ci
+      - affected-coverage
+      - biscuit-tui-captured-stdout
+      - ci-tooling
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      # A verdict computed from an unknown scope is not a verdict, so a broken
+      # scope job fails this check outright rather than rendering a vacuous
+      # CLEAR over an empty grid.
+      - name: Resolve the affected scope
+        id: verdict-scope
+        shell: bash
+        env:
+          SCOPE_RESULT: ${{ needs.scope.result }}
+          PACKAGE_NAMES: ${{ needs.scope.outputs.package_names }}
+        run: |
+          set -euo pipefail
+          if [ "$SCOPE_RESULT" != "success" ]; then
+            echo "the scope job concluded '$SCOPE_RESULT'; without its package list a package that produced nothing is invisible and this verdict would be vacuous" >&2
+            exit 1
+          fi
+          # `package_names` is a JSON array; `--scope` takes a comma list.
+          scope="$(jq -r 'join(",")' <<<"${PACKAGE_NAMES:-[]}")"
+          {
+            echo "scope=${scope}"
+            if [ -n "$scope" ]; then echo "has_scope=true"; else echo "has_scope=false"; fi
+          } >>"$GITHUB_OUTPUT"
+      # Omitting `name:` downloads EVERY artifact in the run into one directory
+      # per artifact — exactly the layout `--artifacts` expects.
+      - name: Download every result and status artifact
+        uses: actions/download-artifact@v4
+        with:
+          path: ci-artifacts
+          merge-multiple: false
+      # `--no-default-features` deselects biscuit-terminal, sniff, and
+      # cargo_metadata, which the other two bins in `scripts/` need and this one
+      # does not. Measured: ~8s versus 40s+. Do not drop the flag.
+      - name: Build ci-rollup
+        run: |
+          cargo build --release \
+            --manifest-path scripts/Cargo.toml \
+            --no-default-features --bin ci-rollup
+      - name: Roll up results
+        id: rollup
+        if: ${{ steps.verdict-scope.outputs.has_scope == 'true' }}
+        # The rollup's own exit 2 (a cell fails the summary gate) must not stop
+        # the verdict step below from running and explaining WHY. The verdict is
+        # what gates.
+        continue-on-error: true
+        shell: bash
+        env:
+          SCOPE: ${{ steps.verdict-scope.outputs.scope }}
+        run: |
+          set -euo pipefail
+          # download-artifact creates nothing when the run produced no artifact
+          # at all; the walker must still see an (empty) root rather than fail.
+          mkdir -p ci-artifacts
+          ./scripts/target/release/ci-rollup rollup \
+            --artifacts ci-artifacts \
+            --policy ci-artifacts/ci-scope/scope.json \
+            --environments .github/ci/environments.json \
+            --scope "$SCOPE" \
+            --out ci-results.json \
+            --run-id '${{ github.run_id }}'
+      - name: Upload the machine-readable rollup
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-results
+          path: ci-results.json
+          if-no-files-found: ignore
+      # THE gate. Exit 2 = blocked, exit 1 = the tool could not read its input
+      # (including a rollup that never wrote `ci-results.json`). Both are
+      # non-zero, so this check fails closed.
+      - name: Verdict
+        if: ${{ steps.verdict-scope.outputs.has_scope == 'true' }}
+        shell: bash
+        run: |
+          ./scripts/target/release/ci-rollup verdict \
+            --results ci-results.json \
+            --baseline .github/ci/ci-baseline.toml
+      # Success criterion 7: a docs-only change schedules no test leg anywhere,
+      # so there is nothing to verdict and this check must pass. Stated out loud
+      # rather than left as a silently green job.
+      - name: No package was scheduled
+        if: ${{ steps.verdict-scope.outputs.has_scope != 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo ""
+            echo "## CI verdict"
+            echo ""
+            echo "**CLEAR** — the affected-scope calculation selected no package, so this run scheduled no test leg and there is nothing to compare against the baseline."
+          } >>"$GITHUB_STEP_SUMMARY"
+
+  # Navigation aid for the jobs `ci-verdict` cannot yet see, and ONLY those.
+  #
+  # `ci-rollup` covers every package in the run's resolved policy. It cannot
+  # cover the bootstrap stages or the specialized workflows: those emit no
+  # `manifest.jsonl`, and can never appear in an affected scope, so their
+  # migrated baseline entries are reported `baseline-out-of-scope` and ignored
+  # (plan 3.5 is what closes this). Without a line here they would fail
+  # invisibly under a CLEAR verdict.
+  #
+  # It deliberately makes NO run-level claim. The old "No gate reported a
+  # failure" line was a green verdict computed from job results alone, which
+  # cannot see a MISSING cell, a cancelled producer, or a baselined entry that
+  # started passing — so it could and would contradict `ci-verdict`. Plan
+  # success criterion 1 asks for a single view; that view is the rollup grid.
+  #
+  # Advisory only: this job always succeeds.
+  summary:
+    name: Unrolled-up job summary
+    needs:
+      - scope
+      - preflight
+      - affected-coverage
+      - biscuit-tui-captured-stdout
+      - ci-tooling
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Classify the first actionable failure
+        shell: bash
+        env:
+          # Listed in dependency order: an earlier stage's failure is the root
+          # cause, and later stages were skipped or would only repeat it.
+          # `package-ci` is absent on purpose — every package gate is a rollup
+          # cell.
+          RESULTS: |
+            bootstrap (scope calculation):${{ needs.scope.result }}
+            bootstrap (preflight):${{ needs.preflight.result }}
+            biscuit-tui Windows captured stdout:${{ needs.biscuit-tui-captured-stdout.result }}
+            ci tooling (rollup and scope):${{ needs.ci-tooling.result }}
+            coverage:${{ needs.affected-coverage.result }}
+        run: |
+          set -euo pipefail
+          {
+            echo ""
+            echo "## Jobs outside the rollup"
+            echo ""
+          } >>"$GITHUB_STEP_SUMMARY"
+
+          first=""
+          while IFS= read -r entry; do
+            [ -n "$entry" ] || continue
+            if [ "${entry##*:}" = "failure" ]; then
+              first="${entry%:*}"
+              break
+            fi
+          done <<<"$RESULTS"
+
+          if [ -z "$first" ]; then
+            echo "No bootstrap or specialized workflow failed. **The run's verdict is \`ci-verdict\`, not this line** — package results live in the CI rollup grid above." >>"$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          {
+            echo "**First actionable failure class: ${first}**"
+            echo ""
+            echo "This stage emits no result artifacts, so it is invisible to \`ci-verdict\` until plan 3.5 makes it emit the same result schema. Open that job first — later red jobs are usually the same root cause."
+          } >>"$GITHUB_STEP_SUMMARY"

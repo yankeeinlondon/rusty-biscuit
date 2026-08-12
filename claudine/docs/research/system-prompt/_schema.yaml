@@ -1,0 +1,62 @@
+# SimplifiedSchema for the system-prompt research topic.
+#
+# Captures provider-specific mechanisms for appending to, replacing, discovering,
+# and formatting system prompts. This feeds Claudine's SystemPromptSpec and the
+# wrapper-level `--append-system-prompt` / `--replace-system-prompt` behavior.
+$schema:
+    # Date the research file was first created.
+    created: date
+
+    # Date the provider behavior was last verified.
+    last_updated: date(required)
+
+    # Agent/model that produced the research.
+    agent: string(required)
+    model: string(required)
+
+    # Primary documentation URLs for prompt/system-instruction behavior.
+    docs: url
+    system_prompt_docs: url
+
+    # Provider support classification for Claudine's two universal modes.
+    append_support: enum(native,config,env,file,indirect,none,unknown; required)
+    replace_support: enum(native,config,env,file,agent_spec,indirect,none,unknown; required)
+
+    # CLI flags, commands, or config override switches that affect system prompts.
+    cli_params: "{ flag: string(required), mode: enum(append,replace,modify,inspect,disable,other,unknown; required), value_shape: string, description: string(required), example: string, notes: string }[]"
+
+    # Non-CLI files or config surfaces that affect the effective system prompt.
+    config_sources: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,system,agent,subagent,extension,other; required), path: string(required), mode: enum(append,replace,modify,inspect,disable,other,unknown; required), format: enum(markdown,yaml,json,jsonc,toml,text,other,unknown), notes: string }[]"
+
+    # Environment variables that affect prompt discovery, replacement, export, or formatting.
+    env_vars: "{ name: string(required), effect: string(required), mode: enum(append,replace,modify,inspect,disable,other,unknown) }[]"
+
+    # Ordered effective-prompt layers when the provider documents or reveals them.
+    prompt_layers: "{ source: string(required), mode: enum(append,replace,modify,inspect,disable,other,unknown; required), scope: string[], order_notes: string, notes: string }[]"
+
+    # Whether provider-native agents or subagents can carry their own system prompt.
+    agent_prompting: "{ supported: boolean(required), definition_surface: string, inheritance: string, isolation: string, limitations: string }"
+
+    # Best known delivery strategy for Claudine's wrapper implementation.
+    claudine_delivery: "{ append_strategy: enum(inline_flag,file_flag,env_var_file,config_key_inline,config_key_file,shadow_home_file,agent_spec,unsupported,unknown; required), replace_strategy: enum(inline_flag,file_flag,env_var_file,config_key_inline,config_key_file,shadow_home_file,agent_spec,unsupported,unknown; required), temp_file_required: boolean, argv_limit: string, notes: string }"
+
+    # Format recommendations for additive and replacement prompts.
+    format_recommendations: "{ append_format: enum(markdown,xml_wrapped_markdown,yaml,json,text,other,unknown; required), replace_format: enum(markdown,xml_wrapped_markdown,yaml,json,text,other,unknown; required), rationale: string(required) }"
+
+    # Recent provider changes that affect prompt manipulation.
+    recent_changes: "{ date: string, version: string, change: string(required), impact: string }[]"
+
+    # Provider quirks, workarounds, caveats, and known failure modes.
+    quirks: string[]
+
+    # Research gaps or claims that need follow-up verification.
+    gaps: string[]
+
+    # Update-mode changelog entries.
+    changes: string[]
+
+    # Whether the discovered behavior requires a Claudine metadata or wrapper update.
+    requires_claudine_update: boolean(required)
+
+    # Short explanation for `requires_claudine_update`.
+    reason: string

@@ -1,0 +1,1629 @@
+kind: expression-function-catalog
+$schema:
+    kind: enum(expression-function-catalog; required)
+    functions:
+        "{ name: string(not-empty; required), category: string(not-empty; required),
+        order: number(integer; required), description: string(not-empty; required), overloads:
+        { parameters: { name: string(not-empty; required), type: string(not-empty; required),
+        array: boolean, optional: boolean, variadic: boolean }[], returns: { type: string(not-empty;
+        required), array: boolean, fallible: boolean }, example: { expression: string(not-empty;
+        required), result: string(required), verification: enum(executable, display-only;
+        required), reason: string(not-empty) } }[](min(1); required) }[](min(1); required)"
+functions:
+    - name: is_string
+      category: Type Predicates
+      order: 0
+      description: Returns true when the value is a string.
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_string("hello")
+                result: "true"
+                verification: executable
+    - name: is_number
+      category: Type Predicates
+      order: 1
+      description: Returns true when the value is a number.
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_number(42)
+                result: "true"
+                verification: executable
+    - name: is_array
+      category: Type Predicates
+      order: 2
+      description: Returns true when the value is an array.
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_array(items)
+                result: "true"
+                verification: executable
+    - name: is_null
+      category: Type Predicates
+      order: 3
+      description: Returns true when the value is null.
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_null(null)
+                result: "true"
+                verification: executable
+    - name: is_object
+      category: Type Predicates
+      order: 4
+      description: Returns true when the value is an object.
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_object(obj)
+                result: "true"
+                verification: executable
+    - name: is_empty
+      category: Type Predicates
+      order: 5
+      description:
+          Returns true when the value is null, empty string, empty array, or
+          empty object.
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_empty("")
+                result: "true"
+                verification: executable
+    - name: is_positive
+      category: Type Predicates
+      order: 6
+      description: Returns true when the coerced value is greater than zero.
+      overloads:
+          - parameters:
+                - name: val
+                  type: any
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: is_positive(5)
+                result: "true"
+                verification: executable
+    - name: is_negative
+      category: Type Predicates
+      order: 7
+      description: Returns true when the coerced value is less than zero.
+      overloads:
+          - parameters:
+                - name: val
+                  type: any
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: is_negative(-3)
+                result: "true"
+                verification: executable
+    - name: is_integer
+      category: Type Predicates
+      order: 8
+      description: Returns true when the value is a JSON number with no fractional component.
+      overloads:
+          - parameters:
+                - name: val
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_integer(7)
+                result: "true"
+                verification: executable
+    - name: min
+      category: Math
+      order: 9
+      description: Returns the smaller of two numbers.
+      overloads:
+          - parameters:
+                - name: a
+                  type: number
+                - name: b
+                  type: number
+            returns:
+                type: number
+                fallible: true
+            example:
+                expression: min(2, 5)
+                result: "2"
+                verification: executable
+    - name: max
+      category: Math
+      order: 10
+      description: Returns the larger of two numbers.
+      overloads:
+          - parameters:
+                - name: a
+                  type: number
+                - name: b
+                  type: number
+            returns:
+                type: number
+                fallible: true
+            example:
+                expression: max(2, 5)
+                result: "5"
+                verification: executable
+    - name: abs
+      category: Math
+      order: 11
+      description: Returns the absolute value of a number.
+      overloads:
+          - parameters:
+                - name: x
+                  type: number
+            returns:
+                type: number
+                fallible: true
+            example:
+                expression: abs(-3)
+                result: "3"
+                verification: executable
+    - name: round
+      category: Math
+      order: 55
+      description: Rounds a value to the nearest integer, with an optional default.
+      overloads:
+          - parameters:
+                - name: x
+                  type: number
+                - name: default
+                  type: number
+                  optional: true
+            returns:
+                type: number
+            example:
+                expression: round(3.7)
+                result: "4"
+                verification: executable
+    - name: first
+      category: Collection
+      order: 12
+      description: Returns the first element of an array, or null when empty.
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+                  array: true
+            returns:
+                type: any
+                fallible: true
+            example:
+                expression: first(items)
+                result: "1"
+                verification: executable
+    - name: last
+      category: Collection
+      order: 13
+      description: Returns the last element of an array, or null when empty.
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+                  array: true
+            returns:
+                type: any
+                fallible: true
+            example:
+                expression: last(items)
+                result: "3"
+                verification: executable
+    - name: has_key
+      category: Collection
+      order: 51
+      description: Returns true when the object contains the given key.
+      overloads:
+          - parameters:
+                - name: obj
+                  type: object
+                - name: key
+                  type: string
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: has_key(obj, "a")
+                result: "true"
+                verification: executable
+    - name: contains
+      category: Collection
+      order: 52
+      description: Returns true when haystack contains needle (array, object, or string).
+      overloads:
+          - parameters:
+                - name: haystack
+                  type: any
+                - name: needle
+                  type: any
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: contains("hello", "ell")
+                result: "true"
+                verification: executable
+    - name: length
+      category: Collection
+      order: 53
+      description: Returns the length of a string, array, or object.
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: number
+                fallible: true
+            example:
+                expression: length("hello")
+                result: "5"
+                verification: executable
+    - name: number
+      category: Type Conversion
+      order: 54
+      description: Converts a value to a number, with an optional default.
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+                - name: default
+                  type: any
+                  optional: true
+            returns:
+                type: number
+                fallible: true
+            example:
+                expression: number("42")
+                result: "42"
+                verification: executable
+    - name: as_line_separated
+      category: List Formatting
+      order: 82
+      description:
+          Joins a list into a newline-separated string (the default bare-array
+          rendering).
+      overloads:
+          - parameters:
+                - name: list
+                  type: any
+                  array: true
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: as_line_separated(items)
+                result: |-
+                    1
+                    2
+                    3
+                verification: display-only
+                reason: multi-line output; verified via example file
+    - name: as_csv
+      category: List Formatting
+      order: 83
+      description: Joins a list into a comma-separated string.
+      overloads:
+          - parameters:
+                - name: list
+                  type: any
+                  array: true
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: as_csv(items)
+                result: 1, 2, 3
+                verification: executable
+    - name: as_tsv
+      category: List Formatting
+      order: 84
+      description: Joins a list into a tab-separated string.
+      overloads:
+          - parameters:
+                - name: list
+                  type: any
+                  array: true
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: as_tsv(items)
+                result: "1\t2\t3"
+                verification: display-only
+                reason: tab-delimited output; verified via example file
+    - name: as_space_separated
+      category: List Formatting
+      order: 85
+      description: Joins a list into a space-separated string.
+      overloads:
+          - parameters:
+                - name: list
+                  type: any
+                  array: true
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: as_space_separated(items)
+                result: 1 2 3
+                verification: executable
+    - name: as_unordered_list
+      category: List Formatting
+      order: 86
+      description:
+          Renders a list as a Markdown unordered list, auto-nesting nested arrays
+          and object-array shapes as indented sublists.
+      overloads:
+          - parameters:
+                - name: list
+                  type: any
+                  array: true
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: as_unordered_list(items)
+                result: |-
+                    - 1
+                    - 2
+                    - 3
+                verification: display-only
+                reason: multi-line Markdown list; verified via example file
+    - name: as_ordered_list
+      category: List Formatting
+      order: 87
+      description:
+          Renders a list as a Markdown ordered list, auto-nesting nested arrays
+          and object-array shapes as indented sublists.
+      overloads:
+          - parameters:
+                - name: list
+                  type: any
+                  array: true
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: as_ordered_list(items)
+                result: |-
+                    1. 1
+                    2. 2
+                    3. 3
+                verification: display-only
+                reason: multi-line Markdown list; verified via example file
+    - name: starts_with
+      category: String Predicates
+      order: 14
+      description: Returns true when the string starts with the given prefix (case-sensitive).
+      overloads:
+          - parameters:
+                - name: x
+                  type: string
+                - name: find
+                  type: string
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: starts_with("hello", "he")
+                result: "true"
+                verification: executable
+    - name: ends_with
+      category: String Predicates
+      order: 15
+      description: Returns true when the string ends with the given suffix (case-sensitive).
+      overloads:
+          - parameters:
+                - name: x
+                  type: string
+                - name: find
+                  type: string
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: ends_with("hello", "lo")
+                result: "true"
+                verification: executable
+    - name: lower
+      category: String Mutations
+      order: 16
+      description: Converts a string to lowercase.
+      overloads:
+          - parameters:
+                - name: x
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: lower("HELLO")
+                result: hello
+                verification: executable
+    - name: upper
+      category: String Mutations
+      order: 17
+      description: Converts a string to uppercase.
+      overloads:
+          - parameters:
+                - name: x
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: upper("hello")
+                result: HELLO
+                verification: executable
+    - name: capitalize
+      category: String Mutations
+      order: 18
+      description: Capitalizes the first character of a string.
+      overloads:
+          - parameters:
+                - name: x
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: capitalize("hello")
+                result: Hello
+                verification: executable
+    - name: kebab_case
+      category: String Mutations
+      order: 19
+      description: Converts a string to kebab-case.
+      overloads:
+          - parameters:
+                - name: x
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: kebab_case("Hello World")
+                result: hello-world
+                verification: executable
+    - name: snake_case
+      category: String Mutations
+      order: 20
+      description: Converts a string to snake_case.
+      overloads:
+          - parameters:
+                - name: x
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: snake_case("Hello World")
+                result: hello_world
+                verification: executable
+    - name: camel_case
+      category: String Mutations
+      order: 21
+      description: Converts a string to camelCase.
+      overloads:
+          - parameters:
+                - name: x
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: camel_case("hello world")
+                result: helloWorld
+                verification: executable
+    - name: pascal_case
+      category: String Mutations
+      order: 22
+      description: Converts a string to PascalCase.
+      overloads:
+          - parameters:
+                - name: x
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: pascal_case("hello world")
+                result: HelloWorld
+                verification: executable
+    - name: title_case
+      category: String Mutations
+      order: 23
+      description: Converts a string to Title Case.
+      overloads:
+          - parameters:
+                - name: x
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: title_case("hello world")
+                result: Hello World
+                verification: executable
+    - name: without_date
+      category: String Mutations
+      order: 24
+      description:
+          Removes substrings that are real YYYY-MM-DD calendar dates, leaving
+          surrounding text untouched.
+      overloads:
+          - parameters:
+                - name: string
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: without_date("Note 2024-06-15")
+                result: "Note "
+                verification: executable
+    - name: ensure_leading
+      category: String Mutations
+      order: 25
+      description: Ensures the string form of a value starts with a prefix.
+      overloads:
+          - parameters:
+                - name: var
+                  type: any
+                - name: prefix
+                  type: any
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: ensure_leading("world", "hello ")
+                result: hello world
+                verification: executable
+    - name: ensure_trailing
+      category: String Mutations
+      order: 26
+      description: Ensures the string form of a value ends with a postfix.
+      overloads:
+          - parameters:
+                - name: var
+                  type: any
+                - name: postfix
+                  type: any
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: ensure_trailing("hello", " world")
+                result: hello world
+                verification: executable
+    - name: replace
+      category: String Mutations
+      order: 27
+      description: Replaces every literal occurrence of a substring; empty find is a no-op.
+      overloads:
+          - parameters:
+                - name: x
+                  type: string
+                - name: find
+                  type: string
+                - name: replacement
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: replace("a.b.c", ".", "/")
+                result: a/b/c
+                verification: executable
+    - name: replace_first
+      category: String Mutations
+      order: 28
+      description:
+          Replaces the first literal occurrence of a substring; empty find is
+          a no-op.
+      overloads:
+          - parameters:
+                - name: x
+                  type: string
+                - name: find
+                  type: string
+                - name: replacement
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: replace_first("a.b.c", ".", "/")
+                result: a/b.c
+                verification: executable
+    - name: replace_last
+      category: String Mutations
+      order: 29
+      description:
+          Replaces the last literal occurrence of a substring; empty find is
+          a no-op.
+      overloads:
+          - parameters:
+                - name: x
+                  type: string
+                - name: find
+                  type: string
+                - name: replacement
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: replace_last("a.b.c", ".", "/")
+                result: a.b/c
+                verification: executable
+    - name: terminal
+      category: Rendering
+      order: 30
+      description: Renders Prose markup to a terminal string with ANSI SGR sequences.
+      overloads:
+          - parameters:
+                - name: string
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: terminal("hello")
+                result: hello
+                verification: executable
+    - name: date
+      category: Date Formatting
+      order: 31
+      description: Reformats an ISO date/datetime string into a named human format.
+      overloads:
+          - parameters:
+                - name: iso
+                  type: string
+                - name: fmt
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: date("2024-06-15", "long")
+                result: Sat, June 15th, 2024
+                verification: executable
+    - name: is_date
+      category: Date Validators
+      order: 32
+      description: Returns true when the string is a valid ISO date (YYYY-MM-DD).
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_date("2024-06-15")
+                result: "true"
+                verification: executable
+    - name: is_date_utc
+      category: Date Validators
+      order: 33
+      description: Same as is_date (the format itself is timezone-agnostic).
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_date_utc("2024-06-15")
+                result: "true"
+                verification: executable
+    - name: is_date_time
+      category: Date Validators
+      order: 34
+      description: Returns true when the string is a valid ISO datetime.
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_date_time("2024-06-15T12:30:00")
+                result: "true"
+                verification: executable
+    - name: is_date_time_utc
+      category: Date Validators
+      order: 35
+      description: Same parse contract as is_date_time.
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_date_time_utc("2024-06-15T12:30:00Z")
+                result: "true"
+                verification: executable
+    - name: is_today
+      category: Date Validators
+      order: 36
+      description: Returns true when the date/datetime is today (local).
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_today("2024-06-15")
+                result: "true"
+                verification: display-only
+                reason: wall-clock dependent
+    - name: is_today_utc
+      category: Date Validators
+      order: 37
+      description: Returns true when the date/datetime is today (UTC).
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_today_utc("2024-06-15")
+                result: "true"
+                verification: display-only
+                reason: wall-clock dependent
+    - name: is_yesterday
+      category: Date Validators
+      order: 38
+      description: Returns true when the date/datetime is yesterday (local).
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_yesterday("2024-06-14")
+                result: "true"
+                verification: display-only
+                reason: wall-clock dependent
+    - name: is_yesterday_utc
+      category: Date Validators
+      order: 39
+      description: Returns true when the date/datetime is yesterday (UTC).
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_yesterday_utc("2024-06-14")
+                result: "true"
+                verification: display-only
+                reason: wall-clock dependent
+    - name: is_tomorrow
+      category: Date Validators
+      order: 40
+      description: Returns true when the date/datetime is tomorrow (local).
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_tomorrow("2024-06-16")
+                result: "true"
+                verification: display-only
+                reason: wall-clock dependent
+    - name: is_tomorrow_utc
+      category: Date Validators
+      order: 41
+      description: Returns true when the date/datetime is tomorrow (UTC).
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_tomorrow_utc("2024-06-16")
+                result: "true"
+                verification: display-only
+                reason: wall-clock dependent
+    - name: is_this_month
+      category: Date Validators
+      order: 42
+      description: Returns true when the date/datetime is in the current month (local).
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_this_month("2024-06-15")
+                result: "true"
+                verification: display-only
+                reason: wall-clock dependent
+    - name: is_this_month_utc
+      category: Date Validators
+      order: 43
+      description: Returns true when the date/datetime is in the current month (UTC).
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_this_month_utc("2024-06-15")
+                result: "true"
+                verification: display-only
+                reason: wall-clock dependent
+    - name: is_this_year
+      category: Date Validators
+      order: 44
+      description: Returns true when the date/datetime is in the current year (local).
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_this_year("2024-06-15")
+                result: "true"
+                verification: display-only
+                reason: wall-clock dependent
+    - name: is_this_year_utc
+      category: Date Validators
+      order: 45
+      description: Returns true when the date/datetime is in the current year (UTC).
+      overloads:
+          - parameters:
+                - name: x
+                  type: any
+            returns:
+                type: boolean
+            example:
+                expression: is_this_year_utc("2024-06-15")
+                result: "true"
+                verification: display-only
+                reason: wall-clock dependent
+    - name: date_delta
+      category: Date Arithmetic
+      order: 46
+      description:
+          Returns true when the two dates are at least the given duration apart,
+          ignoring order (duration like 14d, 2mo, 1 hour).
+      overloads:
+          - parameters:
+                - name: date1
+                  type: string
+                - name: date2
+                  type: string
+                - name: diff
+                  type: string
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: date_delta("2024-06-01", "2024-06-20", "14d")
+                result: "true"
+                verification: executable
+    - name: older_than
+      category: Date Arithmetic
+      order: 47
+      description:
+          Returns true when date1 is at least the given duration older (earlier)
+          than date2.
+      overloads:
+          - parameters:
+                - name: date1
+                  type: string
+                - name: date2
+                  type: string
+                - name: diff
+                  type: string
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: older_than("2024-06-01", "2024-06-20", "14d")
+                result: "true"
+                verification: executable
+    - name: newer_than
+      category: Date Arithmetic
+      order: 48
+      description:
+          Returns true when date1 is at least the given duration newer (later)
+          than date2.
+      overloads:
+          - parameters:
+                - name: date1
+                  type: string
+                - name: date2
+                  type: string
+                - name: diff
+                  type: string
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: newer_than("2024-06-20", "2024-06-01", "14d")
+                result: "true"
+                verification: executable
+    - name: absolute
+      category: Filesystem
+      order: 56
+      description: Resolves a file path to an absolute path.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: file
+                fallible: true
+            example:
+                expression: absolute("fixture.md")
+                result: "/path/to/fixture.md"
+                verification: display-only
+                reason:
+                    resolves to an absolute path of the resolution context, which is not
+                    portable
+    - name: relative
+      category: Filesystem
+      order: 57
+      description: Returns a best-effort relative path from the document base directory.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: file
+                fallible: true
+            example:
+                expression: relative("fixture.md")
+                result: fixture.md
+                verification: executable
+    - name: file_exists
+      category: Filesystem
+      order: 58
+      description: Returns true when the file exists (local or remote URL).
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: file_exists("fixture.md")
+                result: "true"
+                verification: executable
+    - name: has_command
+      category: Filesystem
+      order: 79
+      description:
+          Returns true when the command is found on PATH or is an existing executable
+          absolute path.
+      overloads:
+          - parameters:
+                - name: cmd
+                  type: string
+            returns:
+                type: boolean
+            example:
+                expression: has_command("sh")
+                result: "true"
+                verification: display-only
+                reason: result is host-dependent
+    - name: is_indexed_file
+      category: Filesystem
+      order: 65
+      description: Returns true when the filename stem matches the indexed grammar (base-NNN).
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: is_indexed_file("review-1.md")
+                result: "true"
+                verification: executable
+    - name: file_index
+      category: Filesystem
+      order: 66
+      description: Returns the parsed index suffix, or -1 when non-indexed.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: number
+                fallible: true
+            example:
+                expression: file_index("review-1.md")
+                result: "1"
+                verification: executable
+    - name: increment_file_index
+      category: Filesystem
+      order: 67
+      description: Increments the numeric index suffix, preserving zero-padding width.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: file
+                fallible: true
+            example:
+                expression: increment_file_index("review-1.md")
+                result: review-2.md
+                verification: executable
+    - name: decrement_file_index
+      category: Filesystem
+      order: 68
+      description: Decrements the numeric index suffix, clamped at 0.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: file
+                fallible: true
+            example:
+                expression: decrement_file_index("review-2.md")
+                result: review-1.md
+                verification: executable
+    - name: basename
+      category: Filesystem
+      order: 69
+      description: Returns the final path component including extension.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: basename("sub/note.md")
+                result: note.md
+                verification: executable
+    - name: basename_without_index
+      category: Filesystem
+      order: 70
+      description: Returns the basename with any indexed suffix removed from the stem.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: basename_without_index("review-1.md")
+                result: review.md
+                verification: executable
+    - name: dirname
+      category: Filesystem
+      order: 71
+      description: Returns the directory portion of the display path.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: dirname("sub/note.md")
+                result: sub
+                verification: executable
+    - name: ext
+      category: Filesystem
+      order: 72
+      description: Returns the final extension without the leading dot.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: ext("sub/note.md")
+                result: md
+                verification: executable
+    - name: parent_dir
+      category: Filesystem
+      order: 73
+      description: Returns the directory segment immediately above the basename.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: parent_dir("sub/note.md")
+                result: sub
+                verification: executable
+    - name: file_trailing
+      category: Filesystem
+      order: 74
+      description: Returns the last directory segment plus the basename.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: file_trailing("sub/note.md")
+                result: sub/note.md
+                verification: executable
+    - name: dir_leading
+      category: Filesystem
+      order: 75
+      description:
+          Returns the directory path above the last directory segment, dropping
+          the basename and its parent (the complement of file_trailing).
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: dir_leading("sub/note.md")
+                result: ""
+                verification: executable
+    - name: join
+      category: Filesystem
+      order: 76
+      description: Joins two path strings with normalized separators.
+      overloads:
+          - parameters:
+                - name: left
+                  type: string
+                - name: right
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: join("sub", "note.md")
+                result: sub/note.md
+                verification: executable
+    - name: link
+      category: Filesystem
+      order: 77
+      description:
+          Creates a Markdown link to a local file, using its relative path as
+          the link text.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: link("fixture.md")
+                result: "[fixture.md](/path/to/fixture.md)"
+                verification: display-only
+                reason: result includes an absolute path, which is not portable
+          - parameters:
+                - name: target
+                  type: file
+                - name: desc
+                  type: string
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: link("fixture.md", "Fixture")
+                result: "[Fixture](/path/to/fixture.md)"
+                verification: display-only
+                reason: result includes an absolute destination path, which is not portable
+    - name: has_skill
+      category: Context
+      order: 80
+      description:
+          Returns true when a skill directory exists in a user-scoped or local-scoped
+          skill root.
+      overloads:
+          - parameters:
+                - name: name
+                  type: string
+            returns:
+                type: boolean
+            example:
+                expression: has_skill("darkmatter")
+                result: "true"
+                verification: display-only
+                reason: depends on agent-specific skill roots outside the tempdir fixture
+    - name: has_local_skill
+      category: Context
+      order: 81
+      description:
+          Returns true when a skill directory exists in a local-scoped skill
+          root.
+      overloads:
+          - parameters:
+                - name: name
+                  type: string
+            returns:
+                type: boolean
+            example:
+                expression: has_local_skill("darkmatter")
+                result: "true"
+                verification: display-only
+                reason: depends on agent-specific skill roots outside the tempdir fixture
+    - name: frontmatter
+      category: Filesystem
+      order: 59
+      description: Reads the frontmatter of a Markdown file as an object.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: object
+                fallible: true
+            example:
+                expression: frontmatter("fixture.md")
+                result: '{"title":"Fixture Title"}'
+                verification: executable
+          - parameters:
+                - name: file
+                  type: file
+                - name: prop
+                  type: string
+            returns:
+                type: any
+                fallible: true
+            example:
+                expression: frontmatter("fixture.md", "title")
+                result: Fixture Title
+                verification: executable
+    - name: markdown_body_empty
+      category: Filesystem
+      order: 61
+      description: Returns true when the Markdown body has only whitespace.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: markdown_body_empty("fixture.md")
+                result: "false"
+                verification: executable
+    - name: markdown_title
+      category: Filesystem
+      order: 62
+      description: Returns the title from frontmatter or the first H1 heading.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: markdown_title("fixture.md")
+                result: Fixture Title
+                verification: executable
+    - name: validate_schema
+      category: Filesystem
+      order: 63
+      description: Validates a Markdown document against its declared schema.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: validate_schema("fixture.md")
+                result: "true"
+                verification: executable
+          - parameters:
+                - name: file
+                  type: file
+                - name: obj
+                  type: object
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: validate_schema("fixture.md", {})
+                result: "true"
+                verification: executable
+    - name: and
+      category: Logical
+      order: 49
+      description: Logical AND of all arguments. Short-circuits on first falsy value.
+      overloads:
+          - parameters:
+                - name: values
+                  type: any
+                  variadic: true
+            returns:
+                type: boolean
+            example:
+                expression: and(true, true)
+                result: "true"
+                verification: executable
+    - name: or
+      category: Logical
+      order: 50
+      description: Logical OR of all arguments. Short-circuits on first truthy value.
+      overloads:
+          - parameters:
+                - name: values
+                  type: any
+                  variadic: true
+            returns:
+                type: boolean
+            example:
+                expression: or(false, true)
+                result: "true"
+                verification: executable
+    - name: predict_conflicts
+      category: Git
+      order: 90
+      description:
+          Returns the repository-relative paths that would conflict if the
+          named local branch were merged into the caller's current branch.
+      overloads:
+          - parameters:
+                - name: branch
+                  type: string
+            returns:
+                type: string
+                array: true
+                fallible: true
+            example:
+                expression: predict_conflicts("feature/example")
+                result: src/config.rs
+                verification: display-only
+                reason:
+                    Requires a Git fixture with divergent local branch tips.
+    - name: find_first_index
+      category: Filesystem
+      order: 88
+      description:
+          Returns the lowest-indexed existing sibling in the file's directory,
+          with the unindexed base sorting first; returns the input when the
+          family has no existing member.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: file
+                fallible: true
+            example:
+                expression: find_first_index("review-2.md")
+                result: review-1.md
+                verification: executable
+    - name: find_last_index
+      category: Filesystem
+      order: 89
+      description:
+          Returns the highest-indexed existing sibling in the file's directory;
+          returns the input when the family has no existing member.
+      overloads:
+          - parameters:
+                - name: file
+                  type: file
+            returns:
+                type: file
+                fallible: true
+            example:
+                expression: find_last_index("review-1.md")
+                result: review-2.md
+                verification: executable
+    - name: branch_exists_on_remote
+      category: Git
+      order: 91
+      description:
+          Returns whether an exact branch exists in the selected remote's live
+          ref advertisement or authoritative provider API.
+      overloads:
+          - parameters: []
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: branch_exists_on_remote()
+                result: "true"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.
+          - parameters:
+                - name: branch
+                  type: string
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: branch_exists_on_remote("main")
+                result: "true"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.
+          - parameters:
+                - name: branch
+                  type: string
+                - name: remote
+                  type: string
+            returns:
+                type: boolean
+                fallible: true
+            example:
+                expression: branch_exists_on_remote("main", "origin")
+                result: "true"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.
+    - name: remote_vendor
+      category: Git
+      order: 92
+      description:
+          Returns the canonical provider token for the selected configured
+          remote, probing an ambiguous self-hosted server only when allowlisted.
+      overloads:
+          - parameters:
+                - name: remote
+                  type: string
+                  optional: true
+            returns:
+                type: 'enum("", github, gitlab, gitea, forgejo, bitbucket, azure_devops, aws_code_commit, source_hut)'
+                fallible: true
+            example:
+                expression: remote_vendor()
+                result: github
+                verification: display-only
+                reason: Requires a configured caller repository remote.
+    - name: pr
+      category: Pull Requests
+      order: 93
+      description: Returns one provider pull or merge request in canonical Markdown form.
+      overloads:
+          - parameters:
+                - name: id
+                  type: any
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: pr(123)
+                result: "[PR #123 — Fix parser](https://provider/pr/123) · open · @alice"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.
+    - name: pr_list
+      category: Pull Requests
+      order: 94
+      description:
+          Queries pull or merge requests with the canonical bounded filter vocabulary.
+          See the [provider query
+          vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys,
+          enum values, defaults, and bounds.
+      overloads:
+          - parameters:
+                - name: query
+                  type: object
+            returns:
+                type: string
+                array: true
+                fallible: true
+            example:
+                expression: 'pr_list({ state: "open", limit: 5 })'
+                result: "[PR #123 — Fix parser](https://provider/pr/123) · open · @alice"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.
+          - parameters:
+                - name: count
+                  type: number(integer)
+            returns:
+                type: string
+                array: true
+                fallible: true
+            example:
+                expression: pr_list(5)
+                result: "[PR #123 — Fix parser](https://provider/pr/123) · open · @alice"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.
+    - name: cicd
+      category: CI/CD
+      order: 95
+      description: Returns one provider-addressable CI/CD job in canonical Markdown form.
+      overloads:
+          - parameters:
+                - name: id
+                  type: any
+            returns:
+                type: string
+                fallible: true
+            example:
+                expression: cicd(456)
+                result: "[CI job #456 — test](https://provider/job/456) · failed"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.
+    - name: cicd_list
+      category: CI/CD
+      order: 96
+      description:
+          Queries CI/CD jobs with bounded direct listing or parent-execution traversal.
+          See the [provider query
+          vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys,
+          enum values, defaults, and bounds.
+      overloads:
+          - parameters:
+                - name: query
+                  type: object
+            returns:
+                type: string
+                array: true
+                fallible: true
+            example:
+                expression: 'cicd_list({ statuses: ["failed"], limit: 5 })'
+                result: "[CI job #456 — test](https://provider/job/456) · failed"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.
+          - parameters:
+                - name: count
+                  type: number(integer)
+            returns:
+                type: string
+                array: true
+                fallible: true
+            example:
+                expression: cicd_list(5)
+                result: "[CI job #456 — test](https://provider/job/456) · failed"
+                verification: display-only
+                reason: Requires an allowlisted remote-provider fixture.

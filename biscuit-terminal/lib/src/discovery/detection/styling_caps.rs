@@ -42,8 +42,6 @@ pub struct UnderlineSupport {
 /// }
 /// ```
 pub fn underline_support() -> UnderlineSupport {
-    use std::io::IsTerminal;
-
     let none = UnderlineSupport {
         straight: false,
         double: false,
@@ -53,8 +51,8 @@ pub fn underline_support() -> UnderlineSupport {
         colored: false,
     };
 
-    // If stdout is not a TTY, no styling
-    if !std::io::stdout().is_terminal() {
+    // Styling requires a terminal on one of the human-facing output streams.
+    if !super::dimensions::is_tty() {
         return UnderlineSupport {
             straight: false,
             double: false,
@@ -193,10 +191,8 @@ pub fn underline_support() -> UnderlineSupport {
 /// }
 /// ```
 pub fn italics_support() -> bool {
-    use std::io::IsTerminal;
-
-    // If stdout is not a TTY, don't use styling
-    if !std::io::stdout().is_terminal() {
+    // Styling requires a terminal on one of the human-facing output streams.
+    if !super::dimensions::is_tty() {
         return false;
     }
 
@@ -285,10 +281,8 @@ pub fn italics_support() -> bool {
 /// }
 /// ```
 pub fn dim_support() -> bool {
-    use std::io::IsTerminal;
-
-    // If stdout is not a TTY, don't use styling
-    if !std::io::stdout().is_terminal() {
+    // Styling requires a terminal on one of the human-facing output streams.
+    if !super::dimensions::is_tty() {
         return false;
     }
 

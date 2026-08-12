@@ -2,7 +2,7 @@
 
 use thiserror::Error;
 
-use super::warning::StyleWarning;
+use super::warning::{StyleSpan, StyleWarning};
 
 /// Errors that can be returned by `darkmatter::style` parsers.
 ///
@@ -50,6 +50,25 @@ pub enum StyleParseError {
     Serde(#[from] serde_json::Error),
 }
 
+impl StyleParseError {
+    /// The source span this error is anchored at, when known (R-5 Priority 5).
+    ///
+    /// Populated only for [`StyleParseError::Strict`], whose first schema
+    /// warning carries a span when the parse ran through
+    /// [`from_frontmatter`](super::parse::from_frontmatter) with the raw
+    /// frontmatter text available. The value-level typed variants
+    /// (`Structure`, `InvalidLength`, `InvalidPercent`, `InvalidColor`) carry a
+    /// dotted `path` but no span in v1 and return `None`.
+    pub fn source_span(&self) -> Option<&StyleSpan> {
+        match self {
+            StyleParseError::Strict { warnings } => {
+                warnings.iter().find_map(|w| w.source_span.as_ref())
+            }
+            _ => None,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,5 +96,36 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("2px"));
         assert!(msg.contains("unsupported unit"));
+    }
+
+    #[test]
+    fn source_span_returns_strict_warning_span() {
+        use super::super::warning::StyleWarningKind;
+        let mut warning = StyleWarning::new("style.page.lft-margin", StyleWarningKind::UnknownKey);
+        warning.source_span = Some(StyleSpan {
+            line: 3,
+            column: 5,
+            length: 11,
+        });
+        let err = StyleParseError::Strict {
+            warnings: vec![warning],
+        };
+        assert_eq!(
+            err.source_span(),
+            Some(&StyleSpan {
+                line: 3,
+                column: 5,
+                length: 11
+            })
+        );
+    }
+
+    #[test]
+    fn source_span_is_none_for_typed_variant() {
+        let err = StyleParseError::InvalidPercent {
+            path: "style.page.left-margin".to_string(),
+            value: 200.0,
+        };
+        assert_eq!(err.source_span(), None);
     }
 }

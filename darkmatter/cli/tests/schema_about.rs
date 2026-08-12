@@ -1,11 +1,32 @@
 //! Integration tests for `md schema about`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
+use darkmatter::markdown::schemas::schema_type_descriptors;
 use darkmatter::testing::strip_ansi_codes;
 use predicates::prelude::*;
 
 fn md_cmd() -> assert_cmd::Command {
-    cargo_bin_cmd!("md")
+    assert_cmd::Command::cargo_bin("md").unwrap()
+}
+
+/// Whether `keyword` renders as the left-most (`Type`) column cell of a row in
+/// the type table `section`.
+///
+/// AC8 requires each type to appear as its own row, not merely somewhere in the
+/// report. Isolating the first pipe-delimited cell and comparing it exactly is
+/// what makes this a row-level check: a keyword that only shows up inside a
+/// description or code example (e.g. `yaml`/`json` in the `expression` blurb, or
+/// the `number` inside `numberlike`) cannot satisfy it.
+fn type_table_has_row(section: &str, keyword: &str) -> bool {
+    section.lines().any(|line| {
+        let trimmed = line.trim_start();
+        let Some(after_border) = trimmed.strip_prefix('│') else {
+            return false;
+        };
+        after_border
+            .split('│')
+            .next()
+            .is_some_and(|cell| cell.trim() == keyword)
+    })
 }
 
 #[test]
@@ -20,6 +41,10 @@ fn schema_about_prints_simplified_schema_reference() {
         "Schema Shapes",
         "Type System",
         "Constraint Vocabulary",
+        "Trigger Schemas",
+        "kind: trigger-schema",
+        "Vacuous-arm lint",
+        "Match-safe constraints only",
         "use --verbose to see additional details",
     ] {
         assert!(stdout.contains(needle), "schema about missing `{needle}`");
@@ -33,30 +58,82 @@ fn schema_about_prints_simplified_schema_reference() {
 }
 
 #[test]
+fn verbose_schema_about_projects_shipped_git_context_descriptors() {
+    let output = md_cmd()
+        .args(["--verbose", "schema", "about"])
+        .output()
+        .expect("run verbose md schema about");
+    assert!(output.status.success(), "verbose schema about should succeed");
+    let stdout = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
+    let normalized = stdout.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    for needle in [
+        "ctx.branch",
+        "Current local Git branch name, or null outside a repository or at detached HEAD.",
+        "ctx.worktree",
+        "Current linked Git worktree name, or null in the main worktree or outside a repository.",
+        "ctx.merge_conflicts",
+        "Repository-relative paths currently in an unresolved Git index state.",
+    ] {
+        assert!(normalized.contains(needle), "schema about missing `{needle}`");
+    }
+}
+
+#[test]
 fn schema_about_lists_every_supported_type_keyword() {
     let mut cmd = md_cmd();
     let output = cmd.args(["schema", "about"]).output().expect("run md schema about");
-    let stdout = String::from_utf8(output.stdout).expect("utf-8 stdout");
-    for keyword in [
-        "string",
-        "date",
-        "datetime",
-        "time",
-        "number",
-        "numberlike",
-        "boolean",
-        "boolish",
-        "object",
-        "file",
-        "enum",
-        "url",
-        "email",
-        "any",
-    ] {
+    assert!(output.status.success(), "schema about should succeed");
+    let plain = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
+
+    // The type table is the authoritative surface for AC8; bound the search to
+    // it so keyword mentions in later sections (constraints, code examples)
+    // cannot stand in for a missing row.
+    let type_table = plain
+        .split("Type System")
+        .nth(1)
+        .and_then(|after_heading| after_heading.split("Any of the above types").next())
+        .expect("type system table should render before the array note");
+
+    // Exhaustive: every keyword in the public descriptor catalog must appear as
+    // a distinct row, so a renderer regression that drops any row fails here.
+    for descriptor in schema_type_descriptors() {
         assert!(
-            stdout.contains(keyword),
-            "schema about report missing type keyword `{keyword}`"
+            type_table_has_row(type_table, descriptor.keyword),
+            "type table missing a row for `{}`",
+            descriptor.keyword
         );
+    }
+
+    // Explicit AC8 guard: the two feature keywords must be visible in the test
+    // even though the loop above already covers them via the descriptor list.
+    for keyword in ["literal", "expression", "type-definition", "schema"] {
+        assert!(
+            type_table_has_row(type_table, keyword),
+            "type table missing the `{keyword}` row required by AC8"
+        );
+    }
+}
+
+#[test]
+fn schema_about_describes_semantic_meta_types() {
+    let output = md_cmd()
+        .args(["schema", "about"])
+        .output()
+        .expect("run md schema about");
+    assert!(output.status.success(), "schema about should succeed");
+    let plain = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
+    let normalized = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+
+    for needle in [
+        "type-definition",
+        "schema",
+        "mapping",
+        "sequence. Parse-only",
+        "Parse-only",
+        "DMLS",
+    ] {
+        assert!(normalized.contains(needle), "schema about missing `{needle}`");
     }
 }
 
@@ -276,6 +353,40 @@ fn schema_about_verbose_prints_advanced_sections_as_readable_lists() {
             && !plain.contains("leave original uncoerced"),
         "verbose details should use audience-facing wording instead of implementation notes"
     );
+}
+
+#[test]
+fn schema_about_verbose_prints_context_and_expression_sections() {
+    let output = md_cmd()
+        .args(["--verbose", "schema", "about"])
+        .output()
+        .expect("run verbose md schema about");
+    assert!(output.status.success());
+
+    let plain = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
+
+    // The derived `ctx.*` catalog and typed expression-function signatures are
+    // only reachable through `report.context_variables()` /
+    // `report.expression_functions()`; asserting them at the binary level guards
+    // against routing regressions the helper-level unit tests cannot catch.
+    for needle in [
+        "Context Variables",
+        "ctx.now",
+        "datetime",
+        "ctx.packages",
+        "string[]",
+        "Expression Functions",
+        "as_csv(list: any[]) -> string | error",
+    ] {
+        assert!(plain.contains(needle), "verbose schema about missing `{needle}`");
+    }
+
+    for retired in ["packages_list", "dirty_files_list"] {
+        assert!(
+            !plain.contains(retired),
+            "verbose schema about must not surface retired `_list` catalog variable `{retired}`"
+        );
+    }
 }
 
 #[test]

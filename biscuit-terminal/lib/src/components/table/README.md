@@ -88,7 +88,7 @@ Enum representing cell values with five active variants:
 
 | Variant | Wraps | Formatting |
 |---------|-------|------------|
-| `Text(String)` | `String` | As-is (supports ANSI escape codes) |
+| `Text(String)` | `String` | ANSI-aware text; terminal rendering expands horizontal tabs using `Terminal::tab_width` |
 | `Integer(i64)` | `i64` | Thousands separators (e.g., `1,234`) |
 | `Float(f64)` | `f64` | Two decimal places with thousands separators (e.g., `1,234.56`) |
 | `Currency(Currency, f64)` | `Currency` + `f64` | Symbol prefix with thousands separators (e.g., `$1,234.56`) |
@@ -202,6 +202,13 @@ Users
 ```
 
 Cell alignment follows each column's effective alignment (for example: text defaults to left, numeric types default to right), with space padding to the computed column width.
+
+Horizontal tabs in headers and cells are expanded to table-local tab stops
+before width planning. The interval comes from the supplied
+`Terminal::tab_width`, which is detected from terminfo's `init_tabs` capability
+and falls back to the standard eight columns. Normalizing tabs avoids dependence
+on terminal-global stops, which vary with the table's absolute cursor position
+and would otherwise move borders beyond their measured columns.
 
 ### Renderable Trait Integration
 

@@ -7,7 +7,6 @@ use biscuit_terminal::components::terminal_image::{
     TerminalImage, parse_filepath_and_width, parse_width_spec,
 };
 use biscuit_terminal::discovery::cursor_position::cursor_position;
-use biscuit_terminal::terminal::Terminal;
 use clap::Args as ClapArgs;
 use std::path::Path;
 use std::path::PathBuf;
@@ -48,7 +47,7 @@ pub struct ImageArgs {
 }
 
 impl Run for ImageArgs {
-    fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
+    fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         let width_str = self.width.as_ref().map(|w| w.to_string());
         let (filepath, example_cmd) = if self.example {
             let example_path = write_example_image()?;
@@ -64,7 +63,14 @@ impl Run for ImageArgs {
         let width = width_str
             .as_deref()
             .or_else(|| self.example.then_some("16"));
-        render_image(&filepath, width, &self.layout, self.meta, self.debug)?;
+        render_image(
+            &filepath,
+            width,
+            &self.layout,
+            self.meta,
+            self.debug,
+            ctx.plain,
+        )?;
 
         if let Some(cmd) = example_cmd {
             print_example_command(&cmd);
@@ -91,6 +97,7 @@ pub fn render_image(
     layout: &LayoutArgs,
     meta: bool,
     debug: bool,
+    plain: bool,
 ) -> color_eyre::Result<()> {
     let start_time = Instant::now();
 
@@ -115,7 +122,7 @@ pub fn render_image(
     apply_image_layout(&mut term_image, layout);
 
     // Get terminal capabilities
-    let terminal = Terminal::new();
+    let terminal = terminal_for_render(plain);
 
     // Debug: query cursor position BEFORE image render
     let pre_cursor = if debug { cursor_position() } else { None };
@@ -149,7 +156,11 @@ pub fn render_image(
 
         let image_rows_floor = raw_height.floor() as u32;
 
-        eprintln!("\x1b[2m--- image debug ---");
+        if plain {
+            eprintln!("--- image debug ---");
+        } else {
+            eprintln!("\x1b[2m--- image debug ---");
+        }
         eprintln!("terminal:     {}x{} (cols x rows)", term_width, term_height);
         eprintln!("cell size:    {}x{} px", cell_pw, cell_ph);
         eprintln!("image width:  {} cells", dims.image_width);
@@ -212,7 +223,11 @@ pub fn render_image(
                 eprintln!("match:        cursor advanced exactly as expected");
             }
         }
-        eprintln!("---\x1b[0m");
+        if plain {
+            eprintln!("---");
+        } else {
+            eprintln!("---\x1b[0m");
+        }
     }
 
     // Output metadata if requested

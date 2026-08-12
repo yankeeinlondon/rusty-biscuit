@@ -53,6 +53,8 @@ types through the contract surface.
 
 - `tokio` (test features incl. `rt-multi-thread`) — `#[tokio::test]` for the L1
   fake-runner suite and the gated `real_` provider tests.
+- `tracing-subscriber` (registry layer only) — captures `tracing::warn!` events
+  in tests that verify secret-free error messages after shadow-home failures.
 
 ## Update Procedure
 

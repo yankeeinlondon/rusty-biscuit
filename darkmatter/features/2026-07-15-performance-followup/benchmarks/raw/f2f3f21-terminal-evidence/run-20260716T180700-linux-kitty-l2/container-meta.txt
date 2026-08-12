@@ -1,0 +1,8 @@
+Linux fbb7a3bc8dbf 6.12.76-linuxkit #1 SMP Thu Jun 25 13:45:40 UTC 2026 aarch64 GNU/Linux
+kitty 0.26.5 created by Kovid Goyal
+KITTY_PID=21 KITTY_WINDOW_ID=1
+TERM=xterm-kitty TERM_PROGRAM=UNSET
+TMUX=UNSET ZELLIJ=UNSET STY=UNSET CI=UNSET
+stdout_is_tty=NO
+probe_exit=0
+gettext_exit=0

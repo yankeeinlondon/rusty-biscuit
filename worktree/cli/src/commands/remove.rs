@@ -76,9 +76,28 @@ pub fn run(name: &str, force: u8, delete_branch_flag: bool) -> Result<(), Worktr
             );
             eprintln!("{}", Prose::new(msg).render(&terminal));
         }
+    } else if let Some(branch) = entry.branch.as_deref() {
+        // Plain remove keeps the branch. Say so explicitly — a silently retained
+        // branch is what a later `wt create <name>` reuses as-is (stale commit).
+        let notice = build_branch_kept_notice(branch, entry.head_sha.as_deref());
+        eprintln!("{}", Prose::new(notice).render(&terminal));
     }
 
     Ok(())
+}
+
+/// Notice shown when a plain `remove` deleted the worktree but kept its branch.
+/// Surfaces the commit so the lingering branch is not a silent surprise when a
+/// later `create` of the same name reuses it as-is.
+fn build_branch_kept_notice(branch: &str, head_sha: Option<&str>) -> String {
+    let at = head_sha
+        .map(|s| format!(" (<dim>{}</dim>)", &s[..s.len().min(9)]))
+        .unwrap_or_default();
+    format!(
+        "<yellow><b>Note:</b></yellow> branch <bold>{branch}</bold>{at} was kept. \
+        Re-running <i>wt create {branch}</i> reuses it as-is.\n  \
+        <dim>Delete it with <i>wt remove {branch} -b</i> or <i>git branch -d {branch}</i>.</dim>"
+    )
 }
 
 /// Decide whether to show the confirmation prompt, per the spec matrix.
@@ -224,5 +243,21 @@ mod tests {
         let msg = build_prompt_message("feat-x", &d);
         assert!(msg.contains("has 2 non-source files"));
         assert!(msg.contains("<blue>feat-x</blue>"));
+    }
+
+    #[test]
+    fn branch_kept_notice_includes_branch_and_short_sha() {
+        let msg = build_branch_kept_notice("w-cli-heretic", Some("d4ea98a40942d4afb"));
+        assert!(msg.contains("w-cli-heretic"));
+        assert!(msg.contains("d4ea98a40")); // SHA truncated to 9 chars
+        assert!(msg.contains("wt create w-cli-heretic"));
+        assert!(msg.contains("wt remove w-cli-heretic -b"));
+    }
+
+    #[test]
+    fn branch_kept_notice_without_sha_omits_parens() {
+        let msg = build_branch_kept_notice("feat-x", None);
+        assert!(msg.contains("feat-x"));
+        assert!(!msg.contains("()"));
     }
 }

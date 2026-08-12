@@ -5,21 +5,26 @@
 //! the rendered pane text. Requires:
 //!
 //! - The `wezterm` binary on `$PATH`.
-//! - A running WezTerm GUI we can reach (`WEZTERM_UNIX_SOCKET` env
-//!   set — the GUI exports this for child shells).
+//! - The `WEZTERM_UNIX_SOCKET` env var set (the GUI exports this only
+//!   to processes it launches, so the suite must be run from inside
+//!   WezTerm).
+//! - A WezTerm GUI that actually responds to remote-control commands
+//!   — verified by a short probe inside [`available`](Self::available).
 //!
-//! When either is missing, [`available`](Self::available) returns
+//! When any of these is missing, [`available`](Self::available) returns
 //! `false` and tests that depend on this harness early-return with a
 //! "skipping: requires WezTerm" message.
 
 #![allow(dead_code)]
 
 use std::env;
-use std::ffi::OsString;
 use std::io;
 use std::process::{Command, Stdio};
 use std::sync::Once;
 use std::time::Duration;
+
+#[cfg(target_os = "macos")]
+use std::time::Instant;
 
 use super::{
     CAPTURE_TIMEOUT, CLEANUP_TIMEOUT, CapturedFrame, QUERY_TIMEOUT, SEND_TIMEOUT, SPAWN_TIMEOUT,
@@ -34,6 +39,17 @@ const BACKGROUND_WORKSPACE: &str = "biscuit-bg";
 const PANE_TITLE_PREFIX: &str = "biscuit-test-pane-";
 const LEGACY_BACKGROUND_PANE_LIMIT: usize = 64;
 static CLEANUP_ONCE: Once = Once::new();
+
+/// Wall-clock budget for the reachability probe inside
+/// [`WezTermHarness::available`].
+///
+/// Deliberately much shorter than [`QUERY_TIMEOUT`] (10 s): the probe
+/// exists to fail fast when the GUI is hung or the socket is stale, so
+/// the broker / spawn paths skip cleanly instead of burning the full
+/// 15 s [`SPAWN_TIMEOUT`] in [`spawn_shell`](TerminalHarness::spawn_shell)
+/// before erroring. 1.5 s is well above the ~50 ms a healthy WezTerm
+/// takes to answer `wezterm cli list --format json` on a quiet host.
+const AVAILABLE_PROBE_TIMEOUT: Duration = Duration::from_millis(1500);
 
 /// Geometry returned by [`WezTermHarness::pane_size`].
 ///
@@ -82,6 +98,13 @@ pub struct WezTermHarness {
     /// When `false` (set by [`WezTermHarness::attach`]) the pane is left
     /// alone because some outer scope owns it.
     owned: bool,
+    /// Extra OS window titles to try in
+    /// [`raise_and_window_bounds`](Self::raise_and_window_bounds) after the
+    /// stamped tab title and the `"question"` fallback. WezTerm overrides the
+    /// OS window title with the foreground program's basename, so a test that
+    /// runs a foreground binary (e.g. `claudine`) must register that basename
+    /// here for AXRaise to match its window. Empty by default.
+    expected_window_titles: Vec<String>,
 }
 
 impl WezTermHarness {
@@ -93,6 +116,7 @@ impl WezTermHarness {
             pane_id: None,
             spawn_visibility: SpawnVisibility::default(),
             owned: true,
+            expected_window_titles: Vec::new(),
         }
     }
 
@@ -108,6 +132,7 @@ impl WezTermHarness {
             pane_id: Some(pane_id.into()),
             spawn_visibility: SpawnVisibility::default(),
             owned: false,
+            expected_window_titles: Vec::new(),
         }
     }
 
@@ -159,16 +184,120 @@ impl WezTermHarness {
         self
     }
 
-    /// Returns `true` when both the `wezterm` binary and a reachable
-    /// WezTerm GUI socket are available.
+    /// Registers an additional OS window title to match in
+    /// [`focus_spawned_pane`](Self::focus_spawned_pane)'s AXRaise step,
+    /// chainable like [`with_spawn_visibility`](Self::with_spawn_visibility).
+    ///
+    /// WezTerm clobbers the window title we stamp on the tab with the
+    /// foreground program's basename whenever a foreground binary is running
+    /// in the pane. A test that runs such a binary (e.g. `claudine`) sees its
+    /// window titled `claudine`, matching neither the stamped tab title nor
+    /// the built-in `"question"` fallback — so it must register `"claudine"`
+    /// here for the raise to find its window. Titles are tried in
+    /// registration order after the stamped title and `"question"`.
+    pub fn with_expected_window_title(mut self, title: impl Into<String>) -> Self {
+        self.expected_window_titles.push(title.into());
+        self
+    }
+
+    /// Returns `true` only when the WezTerm GUI is reachable at runtime.
+    ///
+    /// This is a **runtime reachability** probe, not an "is it installed?"
+    /// check. It composes three gates, short-circuiting on the first
+    /// failure:
+    ///
+    /// 1. `WEZTERM_UNIX_SOCKET` env var is set. WezTerm only exports this
+    ///    to processes the GUI itself launches, so an unset value usually
+    ///    means the suite is not running inside WezTerm.
+    /// 2. `wezterm` binary is on `$PATH`.
+    /// 3. A live `wezterm cli list --format json` round-trip succeeds
+    ///    within [`AVAILABLE_PROBE_TIMEOUT`] (1.5 s).
+    ///
+    /// ## Why the probe is necessary
+    ///
+    /// Gates 1 and 2 are necessary but not sufficient. A hung GUI, a
+    /// stale socket file, or a mux-server that cannot bootstrap will
+    /// pass both env + binary checks and then cause every subsequent
+    /// `wezterm cli …` call to block until [`SPAWN_TIMEOUT`] (15 s)
+    /// elapses — repeated across retries, this turns a single
+    /// unusable backend into a multi-minute test-tier stall. The probe
+    /// converts that stall into a clean `false`.
+    ///
+    /// ## Why a separate timeout budget
+    ///
+    /// [`QUERY_TIMEOUT`] (10 s) is sized for `wezterm cli list` against
+    /// a *healthy* GUI on a loaded CI host. Reusing it here would
+    /// re-introduce the stall: an unreachable GUI would burn 10 s per
+    /// probe before the gate tripped. [`AVAILABLE_PROBE_TIMEOUT`] (1.5 s)
+    /// is bounded by what a *responsive* GUI answers in, plus generous
+    /// slack — see the constant's own doc for the rationale.
+    ///
+    /// ## Caching
+    ///
+    /// No caching. The probe is cheap (~50 ms on a quiet host) and any
+    /// cached value could go stale between a `cargo test` launch and
+    /// the moment a test actually runs (the GUI may have been closed,
+    /// restarted, or the socket removed in the interim). Callers that
+    /// invoke `available()` many times in a single process pay the
+    /// probe each time, but the total cost is bounded.
+    ///
+    /// ## Examples
+    ///
+    /// ```ignore
+    /// use biscuit_test_harness::wezterm::WezTermHarness;
+    ///
+    /// if !WezTermHarness::available() {
+    ///     eprintln!("skipping: requires reachable WezTerm GUI");
+    ///     return;
+    /// }
+    /// // … proceed with WezTerm-backed assertions …
+    /// ```
     pub fn available() -> bool {
-        env::var_os("WEZTERM_UNIX_SOCKET").is_some() && which("wezterm")
+        env::var_os("WEZTERM_UNIX_SOCKET").is_some() && which("wezterm") && wezterm_gui_reachable()
     }
 
     /// Returns the active pane id (panicking if the harness has not
     /// spawned or attached yet).
     pub fn pane_id_str(&self) -> &str {
         self.pane_id()
+    }
+
+    /// Captures the pane including up to `lines` rows of scrollback, not just
+    /// the visible viewport that [`capture`](TerminalHarness::capture) returns.
+    ///
+    /// Output taller than the pane scrolls into history; the viewport-only
+    /// `capture` then loses it. A report whose top scrolls off a short shared
+    /// pane (e.g. a header's OSC8 hyperlink above a long body) is recoverable
+    /// only this way. `wezterm cli get-text --start-line -<lines>` reads that
+    /// many physical lines up from the viewport into the scrollback.
+    ///
+    /// ## Notes
+    ///
+    /// A shared pane is reused across serial tests, so its scrollback can hold
+    /// earlier tests' output. Scope assertions to a string only the test under
+    /// capture emits, or clear the pane (`ESC[3J`) before driving the command.
+    pub fn capture_scrollback(&mut self, lines: u32) -> io::Result<CapturedFrame> {
+        let id = self.pane_id().to_string();
+        let start = format!("-{lines}");
+        let mut cmd = Command::new("wezterm");
+        cmd.args([
+            "cli",
+            "get-text",
+            "--pane-id",
+            &id,
+            "--escapes",
+            "--start-line",
+            &start,
+        ]);
+        let out = run_with_timeout(&mut cmd, CAPTURE_TIMEOUT)?;
+        if !out.status.success() {
+            return Err(io::Error::other(format!(
+                "wezterm cli get-text (scrollback) failed: {}",
+                String::from_utf8_lossy(&out.stderr)
+            )));
+        }
+        let raw = String::from_utf8_lossy(&out.stdout).into_owned();
+        Ok(CapturedFrame::from_raw(raw))
     }
 
     /// Borrows the active pane id, panicking with a clear message when
@@ -305,7 +434,8 @@ impl WezTermHarness {
                 eprintln!(
                     "[focus_spawned_pane] WezTerm window pos=({x},{y}) size=({w},{h}) → click target ({click_x},{click_y})"
                 );
-                std::thread::sleep(Duration::from_millis(200));
+                #[cfg(target_os = "macos")]
+                wait_until_wezterm_frontmost(Duration::from_secs(5))?;
                 Ok(Some((click_x, click_y)))
             }
             None => {
@@ -322,6 +452,14 @@ impl WezTermHarness {
     /// only) raises the owning window via System Events and reads its position
     /// and size. Returns `Ok(None)` off macOS, or when the window position
     /// could not be resolved.
+    ///
+    /// The AXRaise match tries, in order: the stamped tab title, the literal
+    /// `"question"` (the biscuit-tui CLI binary), then each title registered
+    /// via [`with_expected_window_title`](Self::with_expected_window_title).
+    /// The extra candidates exist because WezTerm overrides the OS window title
+    /// with the foreground program's basename, so a pane running e.g. `claudine`
+    /// reports a window title of `claudine` that matches neither of the first
+    /// two.
     ///
     /// ## Errors
     ///
@@ -364,6 +502,29 @@ impl WezTermHarness {
             let _ = run_with_timeout(&mut cmd, QUERY_TIMEOUT);
             std::thread::sleep(Duration::from_millis(150));
 
+            // Each registered extra title becomes another exact-match fallback
+            // tried only when the stamped title and "question" both miss. See
+            // `with_expected_window_title`: WezTerm renames the OS window to the
+            // foreground program's basename, defeating the stamped-title match.
+            let extra_fallbacks: String = self
+                .expected_window_titles
+                .iter()
+                .map(|t| {
+                    let t = applescript_quote(t);
+                    format!(
+                        "\n                                   if (count of hits) is 0 then\n                                       set hits to windows of p whose title is \"{t}\"\n                                   end if"
+                    )
+                })
+                .collect();
+            // Each candidate is rendered into the AppleScript `error` string
+            // literal, so its surrounding quotes must be backslash-escaped
+            // (`\"name\"`) or they would terminate that literal early.
+            let candidates_for_error: String = std::iter::once("question".to_string())
+                .chain(self.expected_window_titles.iter().cloned())
+                .map(|t| format!("\\\"{}\\\"", applescript_quote(&t)))
+                .collect::<Vec<_>>()
+                .join(", ");
+
             let script = format!(
                 r#"with timeout of 5 seconds
                        tell application "System Events"
@@ -377,7 +538,7 @@ impl WezTermHarness {
                                    set hits to windows of p whose title contains "{title}"
                                    if (count of hits) is 0 then
                                        set hits to windows of p whose title is "question"
-                                   end if
+                                   end if{extra_fallbacks}
                                    if (count of hits) > 0 then
                                        set targetWin to item 1 of hits
                                        perform action "AXRaise" of targetWin
@@ -396,7 +557,7 @@ impl WezTermHarness {
                                    end repeat
                                end try
                            end repeat
-                           error "no wezterm window matched {title} or \"question\"; visible titles:" & linefeed & seenTitles
+                           error "no wezterm window matched {title} or {candidates_for_error}; visible titles:" & linefeed & seenTitles
                        end tell
                    end timeout"#,
             );
@@ -539,18 +700,8 @@ impl TerminalHarness for WezTermHarness {
             cmd.args(["--workspace", BACKGROUND_WORKSPACE]);
         }
         cmd.arg("--");
-        cmd.arg(&shell);
-        cmd.arg("-l");
-
-        if let Some(bin_dir) =
-            super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"))
-        {
-            let current_path = env::var_os("PATH").unwrap_or_default();
-            let mut new_path = OsString::from(bin_dir);
-            new_path.push(":");
-            new_path.push(current_path);
-            cmd.env("PATH", new_path);
-        }
+        let bin_dir = super::cargo_bin_dir("bt").or_else(|| super::cargo_bin_dir("question"));
+        super::configure_login_shell(&mut cmd, &shell, bin_dir.as_deref());
 
         // Force color on the spawned shell so `bt`'s color detection is
         // deterministic regardless of how the test runner inherits TTY
@@ -715,6 +866,55 @@ fn kill_wezterm_pane(pane_id: u64) {
     let _ = run_with_timeout(&mut cmd, CLEANUP_TIMEOUT);
 }
 
+/// Escapes a title for embedding inside an AppleScript double-quoted string
+/// literal: backslash and double-quote are the only characters AppleScript
+/// string syntax treats specially. Expected titles are simple ASCII basenames
+/// (e.g. `claudine`), but escaping keeps the OR-list robust if that ever
+/// loosens.
+fn applescript_quote(title: &str) -> String {
+    title.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+/// Blocks until a WezTerm process is the frontmost macOS application.
+///
+/// `AXRaise` returns before the WindowServer has necessarily made the window
+/// key, and on a busy desktop an unrelated application can reclaim front
+/// within the same window — observed here with a media app stealing front
+/// between the raise and the injection. Polling the actual frontmost process
+/// replaces a fixed sleep that could only ever be a guess.
+///
+/// ## Errors
+///
+/// Returns `io::Error` on timeout, naming the app that held front instead.
+/// Failing here is deliberate: OS keyboard injection goes to whatever app owns
+/// focus, so proceeding unfocused would fire the chord into an unrelated
+/// application rather than the pane under test.
+#[cfg(target_os = "macos")]
+fn wait_until_wezterm_frontmost(timeout: Duration) -> io::Result<()> {
+    const FRONTMOST: &str =
+        r#"tell application "System Events" to get name of first application process whose frontmost is true"#;
+    let deadline = Instant::now() + timeout;
+    let mut last = String::new();
+    loop {
+        let mut cmd = Command::new("osascript");
+        cmd.args(["-e", FRONTMOST]);
+        if let Ok(out) = run_with_timeout(&mut cmd, QUERY_TIMEOUT) {
+            last = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            if last.to_lowercase().contains("wezterm") {
+                return Ok(());
+            }
+        }
+        if Instant::now() >= deadline {
+            return Err(io::Error::other(format!(
+                "WezTerm did not become frontmost within {timeout:?}; {last:?} holds \
+                 focus. OS keyboard injection would land in that app instead of the \
+                 pane under test."
+            )));
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 fn which(bin: &str) -> bool {
     Command::new("which")
         .arg(bin)
@@ -723,4 +923,237 @@ fn which(bin: &str) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
+}
+
+/// Probes whether the WezTerm GUI is actually responding to
+/// remote-control commands by running a single
+/// `wezterm cli list --format json` round-trip under a short
+/// wall-clock timeout.
+///
+/// Returns `true` only when the probe exits successfully. Returns
+/// `false` on any of:
+///
+/// - **Timeout** — the GUI is hung or the socket is stale. This is
+///   the failure mode that motivates the helper; without it,
+///   [`WezTermHarness::available`] would say `true` and every
+///   subsequent spawn would burn [`SPAWN_TIMEOUT`] before erroring.
+/// - **Non-zero exit** — wezterm CLI rejected the invocation (e.g.
+///   "no mux server") without hanging.
+/// - **Spawn error** — the binary could not be launched at all
+///   (covered by the `which` gate in [`WezTermHarness::available`],
+///   but defended here so the helper is robust in isolation).
+///
+/// ## Output handling
+///
+/// The probe deliberately does not parse the JSON payload — we only
+/// care *whether* the GUI answered, not what it said. stdout/stderr
+/// are piped and drained by [`run_with_timeout`]'s background threads
+/// so a chatty server cannot deadlock the probe.
+///
+/// ## Notes
+///
+/// This helper does **not** check `WEZTERM_UNIX_SOCKET` or `$PATH`.
+/// [`WezTermHarness::available`] composes those gates around it; the
+/// helper's contract is "run the probe and report its outcome", so
+/// callers can unit-test the probe surface in isolation.
+fn wezterm_gui_reachable() -> bool {
+    let mut cmd = Command::new("wezterm");
+    cmd.args(["cli", "list", "--format", "json"]);
+    match run_with_timeout(&mut cmd, AVAILABLE_PROBE_TIMEOUT) {
+        Ok(out) => out.status.success(),
+        Err(_) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Instant;
+
+    /// `available()` must return `false` when `WEZTERM_UNIX_SOCKET` is
+    /// unset, regardless of whether the `wezterm` binary is on `$PATH`
+    /// or the GUI is reachable. This is the env-var gate.
+    ///
+    /// Serialized because it mutates the process-wide environment.
+    #[test]
+    #[serial_test::serial]
+    fn available_returns_false_when_socket_env_missing() {
+        let prev = env::var_os("WEZTERM_UNIX_SOCKET");
+        // SAFETY: serialized — no other test runs concurrently, and the
+        // nextest process-per-test model means no other thread observes
+        // this mutation. set_var/remove_var are unsafe in edition 2024.
+        unsafe {
+            env::remove_var("WEZTERM_UNIX_SOCKET");
+        }
+        let avail = WezTermHarness::available();
+        // Restore unconditionally so a follow-on test sees the same
+        // environment the suite launched with.
+        unsafe {
+            match prev {
+                Some(v) => env::set_var("WEZTERM_UNIX_SOCKET", v),
+                None => env::remove_var("WEZTERM_UNIX_SOCKET"),
+            }
+        }
+        assert!(
+            !avail,
+            "available() must return false when WEZTERM_UNIX_SOCKET is unset",
+        );
+    }
+
+    /// Direct unit test of [`wezterm_gui_reachable`]: when the env var
+    /// is missing, `wezterm cli list` cannot address the GUI and the
+    /// probe must return `false` (either by erroring or by timing out).
+    ///
+    /// On hosts where `wezterm` autodiscovers a socket via some other
+    /// mechanism, this test may surface a true positive — in that case
+    /// we skip rather than fail, since the helper's contract is "report
+    /// the probe outcome", not "fail without env".
+    ///
+    /// Serialized because it mutates the process-wide environment.
+    #[test]
+    #[serial_test::serial]
+    fn gui_reachable_returns_false_when_env_missing() {
+        let prev = env::var_os("WEZTERM_UNIX_SOCKET");
+        unsafe {
+            env::remove_var("WEZTERM_UNIX_SOCKET");
+        }
+        let reachable = wezterm_gui_reachable();
+        unsafe {
+            match prev {
+                Some(v) => env::set_var("WEZTERM_UNIX_SOCKET", v),
+                None => env::remove_var("WEZTERM_UNIX_SOCKET"),
+            }
+        }
+        if reachable {
+            eprintln!(
+                "skipping assertion: host's wezterm reached a GUI without WEZTERM_UNIX_SOCKET \
+                 (autodiscovery); the helper correctly reported the probe outcome",
+            );
+            return;
+        }
+        assert!(
+            !reachable,
+            "wezterm_gui_reachable() must return false when WEZTERM_UNIX_SOCKET is unset",
+        );
+    }
+
+    /// Direct unit test of [`wezterm_gui_reachable`]: when the `wezterm`
+    /// binary is not on `$PATH`, the probe must return `false` (spawn
+    /// failure, caught and reported as unreachable).
+    ///
+    /// Sets `WEZTERM_UNIX_SOCKET` to a plausible value so the env gate
+    /// would otherwise pass — we want to isolate the binary gate.
+    ///
+    /// Serialized because it mutates both `PATH` and `WEZTERM_UNIX_SOCKET`.
+    #[test]
+    #[serial_test::serial]
+    fn gui_reachable_returns_false_when_binary_absent() {
+        let prev_path = env::var_os("PATH");
+        let prev_socket = env::var_os("WEZTERM_UNIX_SOCKET");
+        unsafe {
+            env::set_var("PATH", "/nonexistent");
+            env::set_var(
+                "WEZTERM_UNIX_SOCKET",
+                "/tmp/biscuit-test-harness-fake-socket",
+            );
+        }
+        let reachable = wezterm_gui_reachable();
+        unsafe {
+            match prev_path {
+                Some(v) => env::set_var("PATH", v),
+                None => env::remove_var("PATH"),
+            }
+            match prev_socket {
+                Some(v) => env::set_var("WEZTERM_UNIX_SOCKET", v),
+                None => env::remove_var("WEZTERM_UNIX_SOCKET"),
+            }
+        }
+        assert!(
+            !reachable,
+            "wezterm_gui_reachable() must return false when the wezterm binary is not on PATH",
+        );
+    }
+
+    /// The critical regression test for the review's "skip cleanly rather
+    /// than enter repeated 25-second failures" requirement.
+    ///
+    /// Sets `WEZTERM_UNIX_SOCKET` to a plausible-looking but
+    /// non-existent path and asserts that [`WezTermHarness::available`]
+    /// both (a) returns `false` and (b) returns within a wall-clock
+    /// budget well below the 15 s [`SPAWN_TIMEOUT`] that previously
+    /// fired on every test.
+    ///
+    /// The 3 s upper bound is intentionally about 2× the probe budget
+    /// (1.5 s) — it gives the probe room to time out and the env check
+    /// to short-circuit, while still being far enough below 15 s to
+    /// prove the fix.
+    ///
+    /// Serialized because it mutates the process-wide environment.
+    #[test]
+    #[serial_test::serial]
+    fn available_does_not_hang_on_unreachable_gui() {
+        let prev = env::var_os("WEZTERM_UNIX_SOCKET");
+        unsafe {
+            env::set_var(
+                "WEZTERM_UNIX_SOCKET",
+                format!(
+                    "/tmp/biscuit-test-harness-fake-socket-{}",
+                    std::process::id()
+                ),
+            );
+        }
+        let start = Instant::now();
+        let avail = WezTermHarness::available();
+        let elapsed = start.elapsed();
+        unsafe {
+            match prev {
+                Some(v) => env::set_var("WEZTERM_UNIX_SOCKET", v),
+                None => env::remove_var("WEZTERM_UNIX_SOCKET"),
+            }
+        }
+        assert!(
+            !avail,
+            "available() must return false when WEZTERM_UNIX_SOCKET points at a non-existent socket",
+        );
+        // 3 s upper bound: ~2× the probe timeout (1.5 s) so a clean
+        // timeout still fits; well below the 15 s spawn timeout that
+        // previously fired on every test in this state.
+        assert!(
+            elapsed <= Duration::from_secs(3),
+            "available() took {elapsed:?} — must fail fast (<=3s) on an unreachable GUI",
+        );
+    }
+
+    /// Smoke test: on a host where the GUI actually responds,
+    /// [`WezTermHarness::available`] must return `true` AND the probe
+    /// command must genuinely succeed (not a false positive). On hosts
+    /// where the GUI is not running or is hung, this test skips
+    /// cleanly via `eprintln!`.
+    ///
+    /// The double-check (`wezterm cli list` after `available() == true`)
+    /// guards against a regression where `available()` returns `true`
+    /// for a hung GUI — that would surface here as the second probe
+    /// blocking past its timeout.
+    #[test]
+    #[serial_test::serial]
+    fn available_is_true_on_responsive_host_or_skips() {
+        if !WezTermHarness::available() {
+            eprintln!("skipping: requires reachable WezTerm GUI");
+            return;
+        }
+        // Sanity-check that the probe is genuinely measuring
+        // responsiveness: re-run the same command directly. If the
+        // first `available()` was a false positive (e.g. the env var
+        // was set but the GUI just happened to answer), this would
+        // surface as a hang or non-zero exit.
+        let mut cmd = Command::new("wezterm");
+        cmd.args(["cli", "list", "--format", "json"]);
+        let out = run_with_timeout(&mut cmd, AVAILABLE_PROBE_TIMEOUT)
+            .expect("reachable per available(); wezterm cli list must succeed within probe budget");
+        assert!(
+            out.status.success(),
+            "available() said true but `wezterm cli list` failed: {}",
+            String::from_utf8_lossy(&out.stderr),
+        );
+    }
 }

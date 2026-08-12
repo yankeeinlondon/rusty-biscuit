@@ -1,0 +1,8 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: md
+---
+![```mermaid
+flowchart LR
+    A --> B --> C
+```]()

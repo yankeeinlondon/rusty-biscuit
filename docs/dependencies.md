@@ -2,6 +2,9 @@
 
 ## Recent Dependency Notes
 
+- `messenger/lib` uses `test-toolkit` only as a development dependency so its
+  desktop-stub resolver tests restore `MESSENGER_STUB_BIN_DIR` safely while
+  serializing process-environment mutation.
 - `worktree/lib` uses `biscuit-hash` for the SHA-pair cache file name. The cache
   stores deterministic ahead/behind and clean-merge results under the user cache
   directory, keyed by canonical repo-root xxHash plus branch tip SHAs.
@@ -30,12 +33,49 @@
   for `#[tokio::test]`. See
   [`biscuit-contract/docs/dependencies.md`](./biscuit-contract/docs/dependencies.md)
   for the full rationale and forbidden-class list.
+- `biscuit-terminal/lib` reads terminal-app config values via its `app_metadata`
+  module. Structured formats (TOML/YAML/JSON5) are parsed through a
+  `default-features = false` path dependency on `biscuit-file`
+  (`features = ["toml","yaml","json5"]`), which normalizes each to a single
+  `serde_json::Value` so one shared dot-path resolver reads them all — the
+  underlying `toml` / `serde_yaml_ng` / `json-five` parsers stay *indirect*. The
+  only structured parser added **directly** is `plist` (v1), for iTerm2 / Apple
+  Terminal XML+binary property lists. It also uses `url` (v2.5) to convert
+  filesystem paths into portable OSC8/file-link targets. No dependency cycle:
+  `biscuit-file` does not depend on `biscuit-terminal`.
+- `biscuit-terminal/cli` adds a path dependency on `sniff/lib` for
+  `bt about [APP]` install detection. The library remains sniff-free; this
+  dependency is CLI-only._
 - `biscuit-file/lib` uses `url` for HTTP(S) file-reference classification and
   gates `reqwest`, `bytes`, and `tokio` behind the off-by-default `fetch`
   feature for policy-enforced HTTP access.
 - `darkmatter/lib` enables `biscuit-file/fetch` and uses `reqwest`, `tokio`,
   and `url` for remote URL composition, persistent remote cache revalidation,
   and side-effect `http_post` host-policy enforcement.
+- `claudine-gen` uses `biscuit-file`'s `file-reference` feature to resolve
+  schema-constrained empirical research fixtures relative to their topic.
+- `darkmatter/lib` takes a direct `fancy-regex` dependency (already in the tree
+  transitively via `jsonschema`) so SimplifiedSchema pattern-key literal
+  precedence (Feature C) can emit negative-lookahead `patternProperties`: such
+  schemas opt into `jsonschema`'s backtracking `fancy-regex` engine, while every
+  lookaround-free schema stays on the linear (ReDoS-safe) `regex` engine.
+- `darkmatter/dmls` (`dmls`) is the Darkmatter Language Server. Protocol
+  stack: `lsp-server` (stdio framing, in-memory test connections) +
+  `lsp-types` (LSP 3.17 types) + `crossbeam-channel` (the channel family
+  `lsp-server` exposes; worker pool later). `line-index` (rust-analyzer's
+  crate) backs the source-map module and never leaks past it; `rlsp-yaml-parser`
+  (lossless byte-span YAML) backs the Phase-7 `FrontmatterAst` overlay and
+  likewise never leaks past it; `url` supplies
+  file-URI ↔ path conversion (`lsp-types` 0.97's `Uri` has none); `toml`
+  parses `.dmls.toml`; `tracing`/`tracing-subscriber` log to stderr or
+  `--log-file` only (stdout is reserved for LSP framing). Workspace discovery
+  (Phase 3) uses `ignore` (gitignore-aware walk, symlinks not followed) +
+  `globset` (include/exclude globs). Wiki-link resolution (Phase 5 / R-8) uses
+  `unicode-normalization` for NFC so a vault resolves identically across OSes.
+  Semantic authorities: `darkmatter` (lib),
+  `biscuit-file` (`file-reference` feature, default features off), and
+  `biscuit-hash` (xxHash content-hash identity for graph invalidation). See
+  [`darkmatter/docs/dependencies.md`](./darkmatter/docs/dependencies.md).
 
 ## Structure
 
@@ -57,6 +97,7 @@ This is a Rust workspace with the following modules:
 - `claudine/cli/Cargo.toml` - Hook manager CLI (`claudine`)
 - `darkmatter/lib/Cargo.toml` - Markdown parsing, rendering, syntax highlighting
 - `darkmatter/cli/Cargo.toml` - Markdown renderer CLI (`md`)
+- `darkmatter/dmls/Cargo.toml` - Darkmatter Language Server (`dmls`) (lsp-server, lsp-types, line-index, rlsp-yaml-parser, ignore, globset, unicode-normalization, biscuit-hash)
 - `homelab/lib/Cargo.toml` - Homelab device control library
 - `homelab/cli/Cargo.toml` - Homelab CLI (`homey`)
 - `model-citizen/lib/Cargo.toml` - Local LLM model management library
@@ -166,7 +207,7 @@ This is a Rust workspace with the following modules:
 
 - [claudine-cli](./claudine/cli) _v0.1.0_
 
-    _Hook manager CLI for agentic tool integration._
+    _Hook manager CLI for agentic tool integration. Uses the rendezvous client/core crates on every target to record lifecycle `requeue(...)` deferred-execution entries (UDS on Unix, named pipe on Windows) and falls back to a local durable JSONL queue when the daemon is unreachable._
 
     _Tags: workspace, cli, hooks_
 
@@ -187,6 +228,12 @@ This is a Rust workspace with the following modules:
     _Themed markdown renderer for terminal and HTML output._
 
     _Tags: workspace, cli, markdown_
+
+- [dmls](./darkmatter/dmls) _v0.1.0_
+
+    _Darkmatter Language Server: LSP 3.17 over stdio for Markdown, Darkmatter DSL, and SimplifiedSchema frontmatter._
+
+    _Tags: workspace, cli, lsp, markdown_
 
 - [homelab](./homelab) _v0.1.0_
 
@@ -480,6 +527,13 @@ This is a Rust workspace with the following modules:
 
     _Tags: environment, configuration, dotenv_
 
+- [plist](https://github.com/ebarnard/rust-plist) _v1_ [📄](https://docs.rs/plist)
+
+    _Apple property-list (XML and binary) reader/writer. Used by biscuit-terminal's
+    app-metadata value extractor to read iTerm2 / Apple Terminal config settings._
+
+    _Tags: configuration, plist, macos, parsing_
+
 - [shellexpand](https://github.com/netvl/shellexpand) _v3_ [📄](https://docs.rs/shellexpand)
 
     _Shell-like variable expansion ($VAR, ${VAR}) and tilde (~) expansion with default value support._
@@ -521,12 +575,6 @@ This is a Rust workspace with the following modules:
     _Fast base64 encoding/decoding with support for multiple alphabets and URL-safe variants._
 
     _Tags: encoding, base64, data_
-
-- [percent-encoding](https://github.com/servo/rust-url) _v2.3_ [📄](https://docs.rs/percent-encoding)
-
-    _Percent encoding and decoding for URL components following RFC 3986._
-
-    _Tags: encoding, url, web_
 
 - [urlencoding](https://github.com/bt/rust_urlencoding) _v2.1_ [📄](https://docs.rs/urlencoding)
 
@@ -806,6 +854,12 @@ This is a Rust workspace with the following modules:
 
     _Tags: graphics, gpu, macos_
 
+- [windows-sys](https://github.com/microsoft/windows-rs) _v0.61_ [📄](https://docs.rs/windows-sys)
+
+    _Raw Win32 console API bindings (`CreateFileW`, `GetStdHandle`, `SetStdHandle`, `CloseHandle`) used by `biscuit-tui` to redirect captured stdout to `CONOUT$` for interactive prompts on Windows. Console detection gates on `GetConsoleMode` via `std::io::IsTerminal`. Target-scoped to `[target.'cfg(windows)'.dependencies]`; Unix builds never pull it in._
+
+    _Tags: ffi, windows, platform_
+
 ### Proc-Macro Utilities
 
 - [proc-macro2](https://github.com/dtolnay/proc-macro2) _v1.0_ [📄](https://docs.rs/proc-macro2)
@@ -871,6 +925,10 @@ This is a Rust workspace with the following modules:
     _Word wrapping and indenting text with optimal-fit algorithm. Supports Unicode, emojis, and hyphenation._
 
     _Tags: text, wrapping, formatting_
+
+- [unicode-normalization](https://crates.io/crates/unicode-normalization) _v0.1_
+
+    _Unicode normalization forms (NFC/NFD/NFKC/NFKD). DMLS normalizes wiki-link targets and logical paths to NFC for cross-platform-identical resolution._
 
 - [unicode-width](https://crates.io/crates/unicode-width) _v0.2_
 

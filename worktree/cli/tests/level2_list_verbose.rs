@@ -18,7 +18,7 @@ use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::CapturedFrame;
 use biscuit_test_harness::TerminalHarness;
 use serial_test::serial;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 fn run_git(repo: &std::path::Path, args: &[&str]) {
     let status = Command::new("git")
@@ -106,7 +106,7 @@ fn capture_with_scrollback(harness: &TmuxHarness) -> CapturedFrame {
 #[test]
 #[serial(level2_terminal)]
 fn level2_list_verbose_renders_table_and_verbose_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let (repo, wt_path) = temp_repo_with_feature_worktree();
     let wt_display = wt_path.display().to_string();
@@ -121,7 +121,7 @@ fn level2_list_verbose_renders_table_and_verbose_in_tmux() {
 
     // Use `env -u` to ensure no image-capable env vars leak from the parent
     // terminal, so the non-image verbose path is taken.
-    let bin = cargo_bin!("wt").display().to_string();
+    let bin = cargo_bin("wt").display().to_string();
     let cmd = format!("env -u TERM_PROGRAM -u KITTY_WINDOW_ID FORCE_COLOR=1 {bin} list -v\n");
     harness.send_text(cmd.as_bytes()).expect("send_text failed");
 
@@ -161,7 +161,7 @@ fn level2_list_verbose_renders_table_and_verbose_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_list_verbose_renders_with_graph_path_active() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let (repo, wt_path) = temp_repo_with_feature_worktree();
     let wt_display = wt_path.display().to_string();
@@ -178,7 +178,7 @@ fn level2_list_verbose_renders_with_graph_path_active() {
     // tmux cannot display Kitty graphics, so Mermaid rendering falls back
     // silently — but the gather path still runs, and the table and verbose
     // section must remain visible.
-    let bin = cargo_bin!("wt").display().to_string();
+    let bin = cargo_bin("wt").display().to_string();
     harness
         .send_command_with_env(
             &format!("{bin} list -v"),
@@ -231,11 +231,7 @@ static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
 #[test]
 #[serial(level2_terminal)]
 fn level2_graph_emits_image_protocol_bytes_in_kitty() {
-    require_level!(
-        Level::L2,
-        KittyHarness::available(),
-        "Kitty remote control (set KITTY_LISTEN_ON)",
-    );
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let (repo, wt_path) = temp_repo_with_feature_worktree();
     let wt_display = wt_path.display().to_string();
@@ -252,7 +248,7 @@ fn level2_graph_emits_image_protocol_bytes_in_kitty() {
         .expect("cd failed");
     harness.settle();
 
-    let bin = cargo_bin!("wt").display().to_string();
+    let bin = cargo_bin("wt").display().to_string();
     harness
         .send_text(format!("{bin} list\n").as_bytes())
         .expect("send_text failed");

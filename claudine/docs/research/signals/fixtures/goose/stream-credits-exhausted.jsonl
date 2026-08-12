@@ -1,0 +1,1 @@
+{"type":"message","message":{"id":null,"role":"assistant","created":1751611402,"content":[{"type":"systemNotification","notificationType":"creditsExhausted","msg":"Please add credits to your account, then resend your message to continue.","data":{"top_up_url":"https://router.tetrate.ai/billing"}}],"metadata":{"userVisible":true,"agentVisible":false}}}

@@ -45,8 +45,51 @@ fn generate_get_with_path_param() {
 
     assert!(code.contains("pub struct RetrieveModelRequest"));
     assert!(code.contains("pub model: String"));
-    assert!(code.contains(r#"format!("/models/{}", self.model)"#));
+    assert!(
+        code.contains(
+            r#"format!("/models/{}", urlencoding::encode(& self.model.to_string()))"#
+        ),
+        "path encoding mismatch:\n{code}"
+    );
     assert!(code.contains(r#""GET""#));
+}
+
+#[test]
+fn reserved_path_param_is_emitted_without_encoding() {
+    // `{+repo_id}` opts out of percent-encoding so a slash-bearing value like
+    // `meta-llama/Llama-3` keeps its separators in the built URL.
+    let endpoint = make_endpoint("GetModel", RestMethod::Get, "/models/{+repo_id}", None);
+    let tokens = generate_request_struct(&endpoint);
+
+    let code = format_generated_code(&tokens).expect("Failed to format code");
+
+    // The struct field is the bare name; the `+` never reaches Rust identifiers.
+    assert!(code.contains("pub repo_id: String"));
+    assert!(
+        code.contains(r#"format!("/models/{}", self.repo_id)"#),
+        "reserved param should be raw, got:\n{code}"
+    );
+    assert!(
+        !code.contains("urlencoding::encode(& self.repo_id"),
+        "reserved param must not be percent-encoded:\n{code}"
+    );
+    assert!(
+        !code.contains("urlencoding::encode(&self.repo_id"),
+        "reserved param must not be percent-encoded:\n{code}"
+    );
+}
+
+#[test]
+fn plain_path_param_is_still_encoded() {
+    let endpoint = make_endpoint("RetrieveModel", RestMethod::Get, "/models/{model}", None);
+    let tokens = generate_request_struct(&endpoint);
+
+    let code = format_generated_code(&tokens).expect("Failed to format code");
+
+    assert!(
+        code.contains(r#"format!("/models/{}", urlencoding::encode(& self.model.to_string()))"#),
+        "plain param must stay percent-encoded:\n{code}"
+    );
 }
 
 #[test]
@@ -124,7 +167,7 @@ fn generate_delete_with_path_param() {
     assert!(code.contains("pub struct DeleteModelRequest"));
     assert!(code.contains("pub model: String"));
     assert!(code.contains(r#""DELETE""#));
-    assert!(code.contains("None")); // No body for DELETE
+    assert!(code.contains("crate::shared::RequestBody::Empty")); // No body for DELETE
 }
 
 #[test]

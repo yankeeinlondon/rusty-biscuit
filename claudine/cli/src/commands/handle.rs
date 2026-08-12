@@ -6,11 +6,27 @@ use color_eyre::eyre::{Result, bail};
 use serde_json::Value;
 use tracing::{debug, info_span};
 
-use claudine::events::detect_environment_fast;
+use claudine::events::{AgenticEvent, detect_environment_fast};
 
 use crate::cli_utils::parse_provider;
 use crate::provider_values::provider_value_parser;
 use claudine::provider::Provider;
+
+/// Kill switch shared with the wrapper's presence reporter (default on).
+const RENDEZVOUS_ENABLE_ENV: &str = "CLAUDINE_RENDEZVOUS_REPORT";
+
+/// Env key the wrapper injects into every child; reused as the session
+/// identity so hook-driven status agrees with presence/sink reports.
+const SESSION_ID_ENV: &str = "CLAUDINE_SESSION_ID";
+
+/// Env key the wrapper injects to advertise interactiveness to the hook
+/// subprocess. Trigger 2's idle producer gates on `"1"`: a non-interactive
+/// turn-complete is the agent auto-proceeding, not waiting on a human, so
+/// it must never be flagged idle.
+const INTERACTIVE_ENV: &str = "CLAUDINE_INTERACTIVE";
+
+/// Hard cap on the best-effort status report to the rendezvous daemon.
+const STATUS_REPORT_TIMEOUT: Duration = Duration::from_millis(250);
 
 /// Default overall execution deadline for a single `claudine handle` invocation.
 ///
@@ -127,6 +143,16 @@ async fn run_inner(args: HandleArgs) -> Result<i32> {
     let event_label = args.event.as_deref().unwrap_or("event");
     debug!(%provider, event = %event_label, "Handling event");
 
+    // Normalize the payload to a canonical event so a permission-ask or
+    // turn boundary can drive the dashboard status slot. Best-effort: an
+    // unrecognized payload simply reports nothing. This is the primary
+    // Trigger-1 producer — hooks fire out-of-band on BOTH the PTY and
+    // the structured launch, where the stream sink may not run.
+    let canonical_event = claudine::hook_adapters::adapter_for(provider)
+        .parse_event(&raw)
+        .ok()
+        .map(|(event, _meta)| event);
+
     let outcome = {
         let span = info_span!(
             "handle_dispatch_canonical",
@@ -136,6 +162,26 @@ async fn run_inner(args: HandleArgs) -> Result<i32> {
         let _enter = span.enter();
         claudine::dispatch::dispatch_canonical(&raw, provider, &env).await?
     };
+
+    if let Some(contribution) = canonical_event.and_then(status_contribution_for) {
+        report_session_status(contribution).await;
+    }
+
+    // Trigger 2 — interactive idle producer. Only a wrapped INTERACTIVE
+    // session's turn boundary means the agent is waiting on a human: a turn
+    // completing marks the `IdleHook` slot `idle`, the next user prompt clears
+    // it back to `active`. Writes a distinct producer slot from the Trigger-1
+    // PermissionHook report above, so the weaker `idle` never clobbers an
+    // unresolved `waiting_on_user` (the daemon reducer's precedence decides).
+    let interactive_raw = std::env::var(INTERACTIVE_ENV).ok();
+    if let Some(status) =
+        canonical_event.and_then(|event| idle_report_for(interactive_raw.as_deref(), event))
+        && let Some(session_id) = std::env::var(SESSION_ID_ENV)
+            .ok()
+            .filter(|value| !value.is_empty())
+    {
+        crate::commands::wrap::session_report::report_status(&session_id, status).await;
+    }
 
     if args.json {
         let output = serde_json::json!({
@@ -152,6 +198,119 @@ async fn run_inner(args: HandleArgs) -> Result<i32> {
     }
 
     Ok(outcome.exit_code.unwrap_or(0))
+}
+
+/// Map a canonical event onto the PermissionHook slot's status
+/// contribution, or `None` when the event is status-irrelevant.
+///
+/// A permission-ask class event raises `WaitingOnUser`; a turn boundary
+/// clears the slot back to `Active`. Both write the `PermissionHook`
+/// slot (distinct from Trigger 2's `IdleHook` slot), so the clear only
+/// ever lowers this producer's own opinion.
+fn status_contribution_for(
+    event: AgenticEvent,
+) -> Option<rendezvous_core::proto::StatusContribution> {
+    use rendezvous_core::{SessionStatusBasis as Basis, SessionStatusState as State};
+
+    let (state, basis) = match event {
+        AgenticEvent::PermissionRequest | AgenticEvent::HumanInTheLoop => {
+            (State::WaitingOnUser, Basis::PermissionAsk)
+        }
+        AgenticEvent::TurnComplete | AgenticEvent::BeforePrompt => {
+            (State::Active, Basis::Lifecycle)
+        }
+        _ => return None,
+    };
+    Some(rendezvous_core::proto::StatusContribution {
+        state: state as i32,
+        producer: rendezvous_core::StatusProducer::PermissionHook as i32,
+        basis: basis as i32,
+        revision: revision_now(),
+    })
+}
+
+/// Map a canonical event onto the interactive idle producer's status
+/// string, or `None` when this invocation must not contribute an idle
+/// signal.
+///
+/// Gated on `CLAUDINE_INTERACTIVE=1` (`interactive_raw`): a non-interactive
+/// turn-complete is the agent auto-proceeding, not waiting on a human, so it
+/// reports nothing. For an interactive session a turn completing maps to
+/// `idle` and the next user prompt to `active`; every other event is
+/// status-irrelevant here. The returned string feeds the `IdleHook` slot via
+/// [`report_status`](crate::commands::wrap::session_report::report_status).
+fn idle_report_for(interactive_raw: Option<&str>, event: AgenticEvent) -> Option<&'static str> {
+    if interactive_raw.map(str::trim) != Some("1") {
+        return None;
+    }
+    match event {
+        AgenticEvent::TurnComplete => Some("idle"),
+        AgenticEvent::BeforePrompt => Some("active"),
+        _ => None,
+    }
+}
+
+/// Producer-captured unix-ns wall clock; the daemon LWW-guards the slot
+/// against a reordered earlier report.
+fn revision_now() -> i64 {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    i64::try_from(nanos).unwrap_or(i64::MAX)
+}
+
+/// Best-effort report of a hook-driven status transition to the local
+/// rendezvous daemon. Reported as `UPDATED`, so a hook firing for a
+/// session the wrapper never STARTED (or already ENDED) is a daemon-side
+/// no-op — it never resurrects a phantom session. Every failure degrades
+/// to a `debug!`; a missing/wedged daemon must never delay a hook.
+async fn report_session_status(contribution: rendezvous_core::proto::StatusContribution) {
+    if !rendezvous_reporting_enabled() {
+        return;
+    }
+    let Some(session_id) = std::env::var(SESSION_ID_ENV)
+        .ok()
+        .filter(|value| !value.is_empty())
+    else {
+        return;
+    };
+
+    let send = async {
+        let endpoint = rendezvous_core::default_local_endpoint()?;
+        let mut client = rendezvous_client::connect(&endpoint).await?;
+        client
+            .report_session_event(rendezvous_core::ReportSessionEventRequest {
+                session_id,
+                kind: rendezvous_core::SessionEventKind::Updated as i32,
+                details_json: String::new(),
+                status: Some(contribution),
+            })
+            .await?;
+        Ok::<(), Box<dyn std::error::Error + Send + Sync>>(())
+    };
+    match tokio::time::timeout(STATUS_REPORT_TIMEOUT, send).await {
+        Ok(Ok(())) => {}
+        Ok(Err(err)) => debug!(
+            target: "claudine::handle",
+            %err,
+            "hook status report skipped (daemon unreachable)",
+        ),
+        Err(_) => debug!(
+            target: "claudine::handle",
+            "hook status report timed out",
+        ),
+    }
+}
+
+fn rendezvous_reporting_enabled() -> bool {
+    match std::env::var(RENDEZVOUS_ENABLE_ENV) {
+        Ok(raw) => !matches!(
+            raw.trim().to_ascii_lowercase().as_str(),
+            "false" | "0" | "no" | "off"
+        ),
+        Err(_) => true,
+    }
 }
 
 fn read_stdin_json() -> Result<Value> {
@@ -229,6 +388,66 @@ mod tests {
         let raw = json!({ "type": "thread.started", "thread_id": "t-1" });
         let provider = resolve_provider_inner(None, &raw, None).unwrap();
         assert_eq!(provider, Provider::Codex);
+    }
+
+    #[test]
+    fn permission_ask_events_raise_waiting_on_the_permission_hook_slot() {
+        for event in [AgenticEvent::PermissionRequest, AgenticEvent::HumanInTheLoop] {
+            let c = super::status_contribution_for(event).expect("permission ask maps");
+            assert_eq!(c.state, rendezvous_core::SessionStatusState::WaitingOnUser as i32);
+            assert_eq!(c.producer, rendezvous_core::StatusProducer::PermissionHook as i32);
+            assert_eq!(c.basis, rendezvous_core::SessionStatusBasis::PermissionAsk as i32);
+        }
+    }
+
+    #[test]
+    fn turn_boundaries_clear_the_permission_hook_slot() {
+        for event in [AgenticEvent::TurnComplete, AgenticEvent::BeforePrompt] {
+            let c = super::status_contribution_for(event).expect("turn boundary maps");
+            assert_eq!(c.state, rendezvous_core::SessionStatusState::Active as i32);
+            assert_eq!(c.producer, rendezvous_core::StatusProducer::PermissionHook as i32);
+        }
+    }
+
+    #[test]
+    fn interactive_turn_boundaries_map_to_idle_producer_states() {
+        assert_eq!(
+            super::idle_report_for(Some("1"), AgenticEvent::TurnComplete),
+            Some("idle")
+        );
+        assert_eq!(
+            super::idle_report_for(Some("1"), AgenticEvent::BeforePrompt),
+            Some("active")
+        );
+    }
+
+    #[test]
+    fn non_interactive_sessions_never_report_idle() {
+        for raw in [Some("0"), Some("false"), Some(""), None] {
+            assert_eq!(
+                super::idle_report_for(raw, AgenticEvent::TurnComplete),
+                None,
+                "raw {raw:?} must not flag idle"
+            );
+        }
+    }
+
+    #[test]
+    fn idle_producer_ignores_non_turn_boundary_events() {
+        assert_eq!(
+            super::idle_report_for(Some("1"), AgenticEvent::AfterTool),
+            None
+        );
+        assert_eq!(
+            super::idle_report_for(Some("1"), AgenticEvent::PermissionRequest),
+            None
+        );
+    }
+
+    #[test]
+    fn status_irrelevant_events_report_nothing() {
+        assert!(super::status_contribution_for(AgenticEvent::AfterTool).is_none());
+        assert!(super::status_contribution_for(AgenticEvent::Notification).is_none());
     }
 
     #[test]

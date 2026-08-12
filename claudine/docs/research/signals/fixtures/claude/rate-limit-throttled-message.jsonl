@@ -1,0 +1,1 @@
+{"type":"rate_limit_event","is_throttled":true,"retry_after_ms":5000,"message":"slow"}

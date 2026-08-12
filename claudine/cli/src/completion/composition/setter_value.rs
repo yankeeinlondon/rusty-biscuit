@@ -8,7 +8,9 @@
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
-use super::{Candidate, name_stem};
+use biscuit_file::to_portable_string;
+
+use super::{Candidate, file_name_matches};
 use crate::completion::frontmatter;
 use crate::completion::fuzzy::{self, PartialLen};
 use crate::completion::scopes::{self, ComposeMode, Scope, ScopeContext, ScopeKind};
@@ -62,23 +64,24 @@ pub(super) fn gather_committed(
         else {
             continue;
         };
-        let match_target = if is_dir {
-            name.as_str()
-        } else {
-            name_stem(&name)
-        };
-        if partial_len.matching_enabled() && !fuzzy::fuzzy_match(match_target, active) {
-            continue;
+        if partial_len.matching_enabled() {
+            let matched = if is_dir {
+                fuzzy::fuzzy_match(&name, active)
+            } else {
+                file_name_matches(&name, active)
+            };
+            if !matched {
+                continue;
+            }
         }
         let rel = match entry_path.strip_prefix(&walk_root) {
             Ok(r) => r,
             Err(_) => continue,
         };
-        let Some(rel_str) = rel.to_str() else {
-            continue;
-        };
+        let rel_str = to_portable_string(rel);
+        let dir = to_portable_string(Path::new(dir));
         let insert = if dir.is_empty() {
-            rel_str.to_string()
+            rel_str
         } else {
             format!("{}/{}", dir.trim_end_matches('/'), rel_str)
         };

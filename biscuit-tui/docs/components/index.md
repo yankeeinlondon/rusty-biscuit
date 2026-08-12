@@ -42,6 +42,7 @@ Widgets that compose or wrap other components to build more complex UIs.
 | Component | CLI Command | Purpose |
 | :--- | :--- | :--- |
 | [FrameChrome](frame_chrome.md) | *(implicit via `--border` flags)* | Wraps any component with optional border, title, and margin |
+| [SplitPane](split_pane.md) | *(library only — not a CLI command)* | Geometry-only two-pane layout primitive (`split(area) -> (Rect, Rect)`); container/layout like `FrameChrome`, not an input |
 | [Input Table](input_table.md) | `question input-table` | Grid of heterogeneous editable cells (embeds atomic widgets as columns) |
 
 ## Shared Concepts

@@ -6,6 +6,7 @@ use chrono::Utc;
 use serde::Serialize;
 use serde_json::{Value, json};
 
+use crate::diagnostics::DiagnosticSnapshot;
 use crate::error::Result;
 use crate::provider::Provider;
 use crate::provider::provider_info;
@@ -54,11 +55,16 @@ pub struct SkippedEntry {
 }
 
 /// An error during import of a single server.
+///
+/// `reason` is the human line; `diagnostic` is the machine projection of the
+/// same failure. Per §D9 the report is a serialized boundary, so the concrete
+/// error is projected once here rather than carried as a Rust value.
 #[derive(Debug, Serialize)]
 pub struct ImportError {
     pub provider: Provider,
     pub native_name: String,
     pub reason: String,
+    pub diagnostic: DiagnosticSnapshot,
 }
 
 /// Report summarizing an import operation.
@@ -122,8 +128,9 @@ impl<'a> McpImporter<'a> {
                 Err(e) => {
                     report.errors.push(ImportError {
                         provider,
-                        native_name: config_path.to_string_lossy().into(),
+                        native_name: biscuit_file::to_portable_string(&config_path),
                         reason: e.to_string(),
+                        diagnostic: DiagnosticSnapshot::from_diagnostic(&e),
                     });
                     continue;
                 }
@@ -184,7 +191,7 @@ impl<'a> McpImporter<'a> {
                 ProviderStateEntry {
                     catalog_id: existing_id.clone(),
                     native_name: native_name.into(),
-                    source: config_path.to_string_lossy().into(),
+                    source: biscuit_file::to_portable_string(config_path),
                     origin: McpOrigin::Imported,
                     last_seen: Utc::now(),
                 },
@@ -234,7 +241,7 @@ impl<'a> McpImporter<'a> {
             ProviderStateEntry {
                 catalog_id: slug.clone(),
                 native_name: native_name.into(),
-                source: config_path.to_string_lossy().into(),
+                source: biscuit_file::to_portable_string(config_path),
                 origin: McpOrigin::Imported,
                 last_seen: Utc::now(),
             },
@@ -323,26 +330,6 @@ pub(crate) fn discover_opencode_configs(repo_root: Option<&Path>) -> Vec<(PathBu
         let repo_config = root.join("opencode.json");
         if repo_config.exists() {
             configs.push((repo_config, Scope::Repo(root.to_path_buf())));
-        }
-    }
-    configs
-}
-
-pub(crate) fn discover_roo_configs(repo_root: Option<&Path>) -> Vec<(PathBuf, Scope)> {
-    let _home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
-    let mut configs = Vec::new();
-    if let Some(root) = repo_root {
-        let repo_config = root.join(".roo").join("mcp.json");
-        if repo_config.exists() {
-            configs.push((repo_config, Scope::Repo(root.to_path_buf())));
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        let global = _home
-            .join("Library/Application Support/Code/User/globalStorage/rooveterinaryinc.roo-cline/settings/mcp_settings.json");
-        if global.exists() {
-            configs.push((global, Scope::User));
         }
     }
     configs
@@ -722,63 +709,6 @@ pub(crate) fn parse_opencode_mcp(config_path: &Path) -> Result<Vec<(String, McpS
     Ok(result)
 }
 
-/// Parse Roo Code's MCP config (`.roo/mcp.json` or `mcp_settings.json`).
-pub(crate) fn parse_roo_mcp(config_path: &Path) -> Result<Vec<(String, McpServer)>> {
-    let content = fs::read_to_string(config_path)?;
-    let doc: Value = serde_json::from_str(&content)?;
-
-    // Roo uses mcpServers as an object (like Claude/Gemini)
-    let Some(servers) = doc.get("mcpServers").and_then(|v| v.as_object()) else {
-        return Ok(Vec::new());
-    };
-
-    let now = Utc::now();
-    let mut result = Vec::new();
-
-    for (name, def) in servers {
-        let transport = match def.get("transportType").and_then(|v| v.as_str()) {
-            Some("sse") => McpTransport::Sse,
-            Some("streamableHttp") => McpTransport::Http,
-            _ => McpTransport::Stdio,
-        };
-
-        let command = def
-            .get("command")
-            .and_then(|v| v.as_str())
-            .map(String::from);
-        let args = parse_string_array(def.get("args"));
-        let env = parse_string_map(def.get("env"));
-        let url = def.get("url").and_then(|v| v.as_str()).map(String::from);
-
-        let server = McpServer {
-            id: slugify(name),
-            aliases: Vec::new(),
-            transport,
-            command,
-            args,
-            cwd: None,
-            env,
-            url,
-            headers: HashMap::new(),
-            enabled_tools: Vec::new(),
-            disabled_tools: Vec::new(),
-            required: false,
-            metadata: McpServerMetadata {
-                description: None,
-                created_from: None,
-                fingerprint: String::new(),
-                created_at: now,
-                updated_at: now,
-            },
-            provider_overrides: HashMap::new(),
-        };
-
-        result.push((name.clone(), server));
-    }
-
-    Ok(result)
-}
-
 // ---------------------------------------------------------------------------
 // JSON helpers
 // ---------------------------------------------------------------------------
@@ -821,329 +751,4 @@ fn parse_command_and_args(value: Option<&Value>) -> (Option<String>, Vec<String>
 }
 
 #[cfg(test)]
-mod tests {
-    use tempfile::TempDir;
-
-    use super::*;
-
-    #[test]
-    fn parse_claude_mcp_basic() {
-        let tmp = TempDir::new().unwrap();
-        let config = tmp.path().join("claude.json");
-        fs::write(
-            &config,
-            r#"{
-                "mcpServers": {
-                    "sequential-thinking": {
-                        "command": "npx",
-                        "args": ["-y", "@anthropic/sequential-thinking"]
-                    },
-                    "slack": {
-                        "command": "npx",
-                        "args": ["-y", "@anthropic/slack-mcp"],
-                        "env": { "SLACK_TOKEN": "xoxb-1234" }
-                    }
-                }
-            }"#,
-        )
-        .unwrap();
-
-        let servers = parse_claude_mcp(&config).unwrap();
-        assert_eq!(servers.len(), 2);
-
-        let (name, server) = servers.iter().find(|(n, _)| n == "slack").unwrap();
-        assert_eq!(name, "slack");
-        assert_eq!(server.command.as_deref(), Some("npx"));
-        assert_eq!(server.env.get("SLACK_TOKEN").unwrap(), "xoxb-1234");
-    }
-
-    #[test]
-    fn parse_codex_mcp_basic() {
-        let tmp = TempDir::new().unwrap();
-        let config = tmp.path().join("config.toml");
-        fs::write(
-            &config,
-            r#"
-[mcp_servers.calendar]
-command = "npx"
-args = ["-y", "@google/calendar-mcp"]
-
-[mcp_servers.calendar.env]
-GOOGLE_TOKEN = "secret-123"
-"#,
-        )
-        .unwrap();
-
-        let servers = parse_codex_mcp(&config).unwrap();
-        assert_eq!(servers.len(), 1);
-        assert_eq!(servers[0].0, "calendar");
-        assert_eq!(servers[0].1.command.as_deref(), Some("npx"));
-        assert_eq!(servers[0].1.env.get("GOOGLE_TOKEN").unwrap(), "secret-123");
-    }
-
-    #[test]
-    fn parse_codex_mcp_preserves_known_provider_fields() {
-        let tmp = TempDir::new().unwrap();
-        let config = tmp.path().join("config.toml");
-        fs::write(
-            &config,
-            r#"
-[mcp_servers.calendar]
-command = "npx"
-args = ["-y", "@google/calendar-mcp"]
-env_vars = ["GOOGLE_TOKEN"]
-bearer_token_env_var = "CALENDAR_BEARER"
-enabled = false
-required = true
-startup_timeout_sec = 15
-tool_timeout_sec = 45
-enabled_tools = ["list_events"]
-disabled_tools = ["delete_event"]
-
-[mcp_servers.calendar.env_http_headers]
-Authorization = "AUTH_TOKEN"
-"#,
-        )
-        .unwrap();
-
-        let servers = parse_codex_mcp(&config).unwrap();
-        let server = &servers[0].1;
-        assert!(server.required);
-        assert_eq!(server.enabled_tools, vec!["list_events"]);
-        assert_eq!(server.disabled_tools, vec!["delete_event"]);
-        assert_eq!(
-            server
-                .provider_override_object("codex")
-                .unwrap()
-                .get("env_vars")
-                .unwrap(),
-            &json!(["GOOGLE_TOKEN"])
-        );
-        assert_eq!(
-            server
-                .provider_override_object("codex")
-                .unwrap()
-                .get("bearer_token_env_var")
-                .unwrap(),
-            &json!("CALENDAR_BEARER")
-        );
-        assert_eq!(
-            server
-                .provider_override_object("codex")
-                .unwrap()
-                .get("enabled")
-                .unwrap(),
-            &json!(false)
-        );
-    }
-
-    #[test]
-    fn parse_gemini_mcp_basic() {
-        let tmp = TempDir::new().unwrap();
-        let config = tmp.path().join("settings.json");
-        fs::write(
-            &config,
-            r#"{
-                "mcpServers": {
-                    "linear": {
-                        "command": "npx",
-                        "args": ["-y", "@linear/mcp"],
-                        "include-tools": ["create_issue"]
-                    }
-                }
-            }"#,
-        )
-        .unwrap();
-
-        let servers = parse_gemini_mcp(&config).unwrap();
-        assert_eq!(servers.len(), 1);
-        assert_eq!(servers[0].1.enabled_tools, vec!["create_issue"]);
-    }
-
-    #[test]
-    fn parse_opencode_mcp_basic() {
-        let tmp = TempDir::new().unwrap();
-        let config = tmp.path().join("opencode.json");
-        fs::write(
-            &config,
-            r#"{
-                "mcp": {
-                    "github": {
-                        "type": "local",
-                        "command": "gh-mcp"
-                    }
-                }
-            }"#,
-        )
-        .unwrap();
-
-        let servers = parse_opencode_mcp(&config).unwrap();
-        assert_eq!(servers.len(), 1);
-        assert_eq!(servers[0].1.transport, McpTransport::Stdio);
-    }
-
-    #[test]
-    fn parse_opencode_mcp_command_array_round_trips() {
-        let tmp = TempDir::new().unwrap();
-        let config = tmp.path().join("opencode.json");
-        fs::write(
-            &config,
-            r#"{
-                "mcp": {
-                    "github": {
-                        "type": "local",
-                        "command": ["npx", "-y", "@company/github-mcp"],
-                        "enabled": true,
-                        "timeout": 5000,
-                        "oauth": {}
-                    }
-                }
-            }"#,
-        )
-        .unwrap();
-
-        let servers = parse_opencode_mcp(&config).unwrap();
-        let server = &servers[0].1;
-        assert_eq!(server.command.as_deref(), Some("npx"));
-        assert_eq!(server.args, vec!["-y", "@company/github-mcp"]);
-        assert_eq!(
-            server
-                .provider_override_object("opencode")
-                .unwrap()
-                .get("timeout")
-                .unwrap(),
-            &json!(5000)
-        );
-    }
-
-    #[test]
-    fn import_idempotent() {
-        let tmp = TempDir::new().unwrap();
-        let catalog_path = tmp.path().join("catalog.json");
-        let state_path = tmp.path().join("state.json");
-
-        let config = tmp.path().join("claude.json");
-        fs::write(
-            &config,
-            r#"{
-                "mcpServers": {
-                    "test-server": {
-                        "command": "npx",
-                        "args": ["-y", "@test/server"]
-                    }
-                }
-            }"#,
-        )
-        .unwrap();
-
-        // First import
-        let mut catalog = McpCatalogStore::load_from(&catalog_path).unwrap();
-        let mut state = McpProviderStateStore::load_from(&state_path).unwrap();
-        {
-            let mut importer = McpImporter::new(&mut catalog, &mut state);
-            let servers = parse_claude_mcp(&config).unwrap();
-            let mut report = ImportReport::default();
-            for (native_name, server) in servers {
-                importer.process_import(
-                    Provider::Claude,
-                    &Scope::User,
-                    &config,
-                    &native_name,
-                    server,
-                    &mut report,
-                );
-            }
-            assert_eq!(report.imported.len(), 1);
-            assert!(report.merged.is_empty());
-        }
-
-        // Second import — should merge, not import
-        {
-            let mut importer = McpImporter::new(&mut catalog, &mut state);
-            let servers = parse_claude_mcp(&config).unwrap();
-            let mut report = ImportReport::default();
-            for (native_name, server) in servers {
-                importer.process_import(
-                    Provider::Claude,
-                    &Scope::User,
-                    &config,
-                    &native_name,
-                    server,
-                    &mut report,
-                );
-            }
-            assert!(report.imported.is_empty());
-            assert_eq!(report.merged.len(), 1);
-        }
-
-        assert_eq!(catalog.list_servers().len(), 1);
-    }
-
-    #[test]
-    fn import_same_fingerprint_different_name_adds_alias() {
-        let tmp = TempDir::new().unwrap();
-        let catalog_path = tmp.path().join("catalog.json");
-        let state_path = tmp.path().join("state.json");
-
-        // Claude config has "my-server"
-        let claude_config = tmp.path().join("claude.json");
-        fs::write(
-            &claude_config,
-            r#"{ "mcpServers": { "my-server": { "command": "npx", "args": ["-y", "@test/server"] } } }"#,
-        )
-        .unwrap();
-
-        // Codex config has same definition named "server"
-        let codex_config = tmp.path().join("config.toml");
-        fs::write(
-            &codex_config,
-            "[mcp_servers.server]\ncommand = \"npx\"\nargs = [\"-y\", \"@test/server\"]\n",
-        )
-        .unwrap();
-
-        let mut catalog = McpCatalogStore::load_from(&catalog_path).unwrap();
-        let mut state = McpProviderStateStore::load_from(&state_path).unwrap();
-
-        // Import from Claude first
-        {
-            let mut importer = McpImporter::new(&mut catalog, &mut state);
-            let servers = parse_claude_mcp(&claude_config).unwrap();
-            let mut report = ImportReport::default();
-            for (native_name, server) in servers {
-                importer.process_import(
-                    Provider::Claude,
-                    &Scope::User,
-                    &claude_config,
-                    &native_name,
-                    server,
-                    &mut report,
-                );
-            }
-            assert_eq!(report.imported.len(), 1);
-        }
-
-        // Import from Codex — same fingerprint, different name
-        {
-            let mut importer = McpImporter::new(&mut catalog, &mut state);
-            let servers = parse_codex_mcp(&codex_config).unwrap();
-            let mut report = ImportReport::default();
-            for (native_name, server) in servers {
-                importer.process_import(
-                    Provider::Codex,
-                    &Scope::User,
-                    &codex_config,
-                    &native_name,
-                    server,
-                    &mut report,
-                );
-            }
-            assert_eq!(report.merged.len(), 1);
-            assert!(report.merged[0].alias_added.is_some());
-        }
-
-        // Should still have only 1 server
-        assert_eq!(catalog.list_servers().len(), 1);
-        let server = catalog.get_server("my-server").unwrap();
-        assert!(server.aliases.contains(&"server".to_string()));
-    }
-}
+mod tests;

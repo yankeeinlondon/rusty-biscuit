@@ -13,6 +13,7 @@ use crate::markdown::{
     output::html::HtmlOptions,
     output::terminal::TerminalOptions,
 };
+use std::fmt::Write as _;
 use syntect::easy::HighlightLines;
 use syntect::highlighting::Color;
 use syntect::util::LinesWithEndings;
@@ -98,10 +99,7 @@ pub(crate) fn render_terminal_code_block(
         output.push_str("\x1b[0m");
 
         // Set background color for the line (applies to gutter and content)
-        output.push_str(&format!(
-            "\x1b[48;2;{};{};{}m",
-            line_bg.r, line_bg.g, line_bg.b
-        ));
+        let _ = write!(output, "\x1b[48;2;{};{};{}m", line_bg.r, line_bg.g, line_bg.b);
 
         // Visible width used by gutter + content so we can pad correctly when
         // `target_width` is set.
@@ -110,11 +108,12 @@ pub(crate) fn render_terminal_code_block(
         // Add line number gutter if enabled (with background already set)
         if line_number_width > 0 {
             // Gray foreground for line numbers, background already set above
-            output.push_str(&format!(
+            let _ = write!(
+                output,
                 "\x1b[38;2;128;128;128m{:>width$} │ ",
                 line_number,
                 width = line_number_width
-            ));
+            );
             // gutter visible width = number digits + " │ " (3 chars: space, │, space)
             visible_used += line_number_width + 3;
         } else {
@@ -133,13 +132,14 @@ pub(crate) fn render_terminal_code_block(
         for (style, text) in &ranges {
             let text_without_newline = text.trim_end_matches('\n');
             if !text_without_newline.is_empty() {
-                output.push_str(&format!(
+                let _ = write!(
+                    output,
                     "\x1b[38;2;{};{};{}m{}",
                     style.foreground.r,
                     style.foreground.g,
                     style.foreground.b,
                     text_without_newline
-                ));
+                );
                 visible_used +=
                     biscuit_terminal::utils::block_constraint::visible_width(text_without_newline)
                         as usize;
@@ -252,11 +252,12 @@ pub(crate) fn render_html_code_block(
             let line_num = idx + 1;
             let is_highlighted = meta.highlight.contains(line_num);
 
-            output.push_str(&format!(
+            let _ = write!(
+                output,
                 r#"<tr{}><td class="ln-gutter"><span class="ln">{}</span></td><td class="code-content">"#,
                 if is_highlighted { r#" class="highlighted""# } else { "" },
                 line_num
-            ));
+            );
 
             // Highlight the line
             let ranges = hl
@@ -270,13 +271,14 @@ pub(crate) fn render_html_code_block(
 
             for (style, text) in ranges {
                 let fg = style.foreground;
-                output.push_str(&format!(
+                let _ = write!(
+                    output,
                     r#"<span style="color: #{:02x}{:02x}{:02x};">{}</span>"#,
                     fg.r,
                     fg.g,
                     fg.b,
                     html_escape::encode_text(text)
-                ));
+                );
             }
 
             output.push_str("</td></tr>\n");
@@ -307,13 +309,14 @@ pub(crate) fn render_html_code_block(
 
             for (style, text) in ranges {
                 let fg = style.foreground;
-                output.push_str(&format!(
+                let _ = write!(
+                    output,
                     r#"<span style="color: #{:02x}{:02x}{:02x};">{}</span>"#,
                     fg.r,
                     fg.g,
                     fg.b,
                     html_escape::encode_text(text)
-                ));
+                );
             }
         }
 

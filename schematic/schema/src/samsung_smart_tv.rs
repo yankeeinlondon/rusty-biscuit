@@ -46,9 +46,9 @@
 //!
 //! let client = SamsungSmartTv::with_base_url("https://staging.example.com/v1");
 //! ```
-use crate::shared::{RequestParts, SchematicError};
-pub use schematic_definitions::samsung_smart_tv::*;
 use serde::{Deserialize, Serialize};
+pub use schematic_definitions::samsung_smart_tv::*;
+use crate::shared::{RequestParts, SchematicError};
 /// Request for `GetDeviceInfo` endpoint.
 ///
 /// ## Example
@@ -69,16 +69,16 @@ impl GetDeviceInfoRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/api/v2/".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for GetDeviceInfoRequest {
@@ -105,16 +105,16 @@ impl GetServerLogsRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/logs/".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for GetServerLogsRequest {
@@ -139,9 +139,7 @@ pub struct LaunchApplicationByIdRequest {
 impl LaunchApplicationByIdRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(app_id: impl Into<String>) -> Self {
-        Self {
-            app_id: app_id.into(),
-        }
+        Self { app_id: app_id.into() }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -150,23 +148,23 @@ impl LaunchApplicationByIdRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!("/api/v2/applications/{}", self.app_id);
-        Ok(("POST", path, None, vec![]))
+        let path = format!(
+            "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
+        );
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for LaunchApplicationByIdRequest {
     fn from(param: &str) -> Self {
-        Self {
-            app_id: param.to_string(),
-        }
+        Self { app_id: param.to_string() }
     }
 }
 impl From<String> for LaunchApplicationByIdRequest {
@@ -196,9 +194,7 @@ pub struct LaunchApplicationByNameRequest {
 impl LaunchApplicationByNameRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(app_name: impl Into<String>) -> Self {
-        Self {
-            app_name: app_name.into(),
-        }
+        Self { app_name: app_name.into() }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -207,16 +203,18 @@ impl LaunchApplicationByNameRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!("/ws/apps/{}", self.app_name);
-        Ok(("POST", path, None, vec![]))
+        let path = format!(
+            "/ws/apps/{}", urlencoding::encode(& self.app_name.to_string())
+        );
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for LaunchApplicationByNameRequest {
@@ -253,9 +251,7 @@ pub struct GetAppStatusRequest {
 impl GetAppStatusRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(app_id: impl Into<String>) -> Self {
-        Self {
-            app_id: app_id.into(),
-        }
+        Self { app_id: app_id.into() }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -264,23 +260,23 @@ impl GetAppStatusRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!("/api/v2/applications/{}", self.app_id);
-        Ok(("GET", path, None, vec![]))
+        let path = format!(
+            "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
+        );
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for GetAppStatusRequest {
     fn from(param: &str) -> Self {
-        Self {
-            app_id: param.to_string(),
-        }
+        Self { app_id: param.to_string() }
     }
 }
 impl From<String> for GetAppStatusRequest {
@@ -310,9 +306,7 @@ pub struct CloseAppRequest {
 impl CloseAppRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(app_id: impl Into<String>) -> Self {
-        Self {
-            app_id: app_id.into(),
-        }
+        Self { app_id: app_id.into() }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -321,23 +315,23 @@ impl CloseAppRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!("/api/v2/applications/{}", self.app_id);
-        Ok(("DELETE", path, None, vec![]))
+        let path = format!(
+            "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
+        );
+        Ok(("DELETE", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for CloseAppRequest {
     fn from(param: &str) -> Self {
-        Self {
-            app_id: param.to_string(),
-        }
+        Self { app_id: param.to_string() }
     }
 }
 impl From<String> for CloseAppRequest {
@@ -367,9 +361,7 @@ pub struct InstallAppRequest {
 impl InstallAppRequest {
     /// Creates a new request with the required path parameters.
     pub fn new(app_id: impl Into<String>) -> Self {
-        Self {
-            app_id: app_id.into(),
-        }
+        Self { app_id: app_id.into() }
     }
     /// Converts the request into (method, path, body, headers) parts.
     ///
@@ -378,23 +370,23 @@ impl InstallAppRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!("/api/v2/applications/{}", self.app_id);
-        Ok(("PUT", path, None, vec![]))
+        let path = format!(
+            "/api/v2/applications/{}", urlencoding::encode(& self.app_id.to_string())
+        );
+        Ok(("PUT", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl From<&str> for InstallAppRequest {
     fn from(param: &str) -> Self {
-        Self {
-            app_id: param.to_string(),
-        }
+        Self { app_id: param.to_string() }
     }
 }
 impl From<String> for InstallAppRequest {
@@ -466,8 +458,28 @@ impl SamsungSmartTvRequest {
             Self::GetAppStatus(_) => {
                 <GetAppStatusRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
             }
-            Self::CloseApp(_) => <CloseAppRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
-            Self::InstallApp(_) => <InstallAppRequest as crate::shared::EndpointSpec>::ENDPOINT_ID,
+            Self::CloseApp(_) => {
+                <CloseAppRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+            Self::InstallApp(_) => {
+                <InstallAppRequest as crate::shared::EndpointSpec>::ENDPOINT_ID
+            }
+        }
+    }
+    /// Returns how this endpoint's response body is decoded.
+    ///
+    /// The generic `request::<T>()` decodes JSON; it consults this to
+    /// reject text, binary, and empty endpoints up front.
+    #[must_use]
+    pub fn response_kind(&self) -> crate::shared::ResponseKind {
+        match self {
+            Self::GetDeviceInfo(_) => crate::shared::ResponseKind::Json,
+            Self::GetServerLogs(_) => crate::shared::ResponseKind::Text,
+            Self::LaunchApplicationById(_) => crate::shared::ResponseKind::Empty,
+            Self::LaunchApplicationByName(_) => crate::shared::ResponseKind::Empty,
+            Self::GetAppStatus(_) => crate::shared::ResponseKind::Json,
+            Self::CloseApp(_) => crate::shared::ResponseKind::Empty,
+            Self::InstallApp(_) => crate::shared::ResponseKind::Empty,
         }
     }
 }
@@ -533,7 +545,10 @@ impl SamsungSmartTv {
     /// Creates a new API client with the default base URL.
     pub fn new() -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec![],
             auth_strategy: schematic_define::AuthStrategy::None,
@@ -542,8 +557,8 @@ impl SamsungSmartTv {
                 env_fallback: None,
             },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
@@ -551,8 +566,7 @@ impl SamsungSmartTv {
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -565,7 +579,10 @@ impl SamsungSmartTv {
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             base_url: base_url.into(),
             env_auth: vec![],
             auth_strategy: schematic_define::AuthStrategy::None,
@@ -574,8 +591,8 @@ impl SamsungSmartTv {
                 env_fallback: None,
             },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
@@ -583,8 +600,7 @@ impl SamsungSmartTv {
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -612,8 +628,8 @@ impl SamsungSmartTv {
                 env_fallback: None,
             },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
@@ -621,8 +637,7 @@ impl SamsungSmartTv {
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -637,7 +652,10 @@ impl SamsungSmartTv {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
+    pub fn with_client_and_base_url(
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             client,
             base_url: base_url.into(),
@@ -648,8 +666,8 @@ impl SamsungSmartTv {
                 env_fallback: None,
             },
             env_username: None,
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
                     bearer_token: None,
                     basic_user: None,
                     basic_pass: None,
@@ -657,8 +675,7 @@ impl SamsungSmartTv {
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -686,12 +703,14 @@ impl SamsungSmartTv {
     /// Returns `None` if the authentication strategy is not `ApiKey`
     /// or if the API key environment variable is not set.
     pub fn api_key_header(&self) -> Option<(String, String)> {
-        let header = self
+        let (header, value_prefix) = self
             .auth_policy
             .explicit
             .iter()
             .find_map(|method| match method {
-                schematic_define::AuthMethod::ApiKey { header } => Some(header.clone()),
+                schematic_define::AuthMethod::ApiKey { header, value_prefix } => {
+                    Some((header.clone(), value_prefix.clone()))
+                }
                 _ => None,
             })
             .or_else(|| {
@@ -699,22 +718,25 @@ impl SamsungSmartTv {
                     .env_mapping()
                     .api_key
                     .as_ref()
-                    .map(|api_key| api_key.header.clone())
-            });
-        header.and_then(|header| {
-            self.headers
-                .env_mapping()
-                .api_key
-                .as_ref()
-                .and_then(|api_key| {
-                    api_key
-                        .names
-                        .names()
-                        .iter()
-                        .find_map(|env_name| std::env::var(env_name).ok())
-                })
-                .map(|value| (header, value))
-        })
+                    .map(|api_key| (api_key.header.clone(), None))
+            })?;
+        self.headers
+            .env_mapping()
+            .api_key
+            .as_ref()
+            .and_then(|api_key| {
+                api_key
+                    .names
+                    .names()
+                    .iter()
+                    .find_map(|env_name| std::env::var(env_name).ok())
+            })
+            .map(|value| {
+                let value = format!(
+                    "{}{}", value_prefix.clone().unwrap_or_default(), value
+                );
+                (header, value)
+            })
     }
     /// Creates a variant builder for customizing this API client.
     ///
@@ -910,9 +932,7 @@ impl<'a> SamsungSmartTvVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError>
-            + Send
-            + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -940,15 +960,13 @@ impl<'a> SamsungSmartTvVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError>
-            + Send
-            + Sync
-            + 'static,
+            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
     {
-        self.response_mutators.insert(
-            R::ENDPOINT_ID,
-            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-        );
+        self.response_mutators
+            .insert(
+                R::ENDPOINT_ID,
+                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+            );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -974,15 +992,17 @@ impl<'a> SamsungSmartTvVariantBuilder<'a> {
         let headers = match self.headers {
             Some(headers) => headers,
             None if has_env_auth_override
-                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) =>
-            {
-                self.base.headers.clone().with_env_mapping(
-                    schematic_define::RestApi::legacy_env_mapping_for(
-                        &auth_strategy,
-                        &env_auth,
-                        self.base.env_username.as_deref(),
-                    ),
-                )
+                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) => {
+                self.base
+                    .headers
+                    .clone()
+                    .with_env_mapping(
+                        schematic_define::RestApi::legacy_env_mapping_for(
+                            &auth_strategy,
+                            &env_auth,
+                            self.base.env_username.as_deref(),
+                        ),
+                    )
             }
             None => self.base.headers.clone(),
         };
@@ -1010,11 +1030,13 @@ impl SamsungSmartTv {
             .explicit
             .iter()
             .map(|method| match method {
-                schematic_define::AuthMethod::BearerToken { header } => match header.as_deref() {
-                    Some(header) => format!("an explicit bearer token in `{header}`"),
-                    None => "an explicit bearer token".to_string(),
-                },
-                schematic_define::AuthMethod::ApiKey { header } => {
+                schematic_define::AuthMethod::BearerToken { header } => {
+                    match header.as_deref() {
+                        Some(header) => format!("an explicit bearer token in `{header}`"),
+                        None => "an explicit bearer token".to_string(),
+                    }
+                }
+                schematic_define::AuthMethod::ApiKey { header, .. } => {
                     format!("an explicit API key in `{header}`")
                 }
                 schematic_define::AuthMethod::Basic => {
@@ -1029,20 +1051,22 @@ impl SamsungSmartTv {
     }
     fn env_fallback_var_names(&self) -> Vec<String> {
         match &self.auth_policy.env_fallback {
-            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => self
-                .headers
-                .env_mapping()
-                .bearer_token
-                .as_ref()
-                .map(|list| list.names().to_vec())
-                .unwrap_or_default(),
-            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => self
-                .headers
-                .env_mapping()
-                .api_key
-                .as_ref()
-                .map(|api_key| api_key.names.names().to_vec())
-                .unwrap_or_default(),
+            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => {
+                self.headers
+                    .env_mapping()
+                    .bearer_token
+                    .as_ref()
+                    .map(|list| list.names().to_vec())
+                    .unwrap_or_default()
+            }
+            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => {
+                self.headers
+                    .env_mapping()
+                    .api_key
+                    .as_ref()
+                    .map(|api_key| api_key.names.names().to_vec())
+                    .unwrap_or_default()
+            }
             Some(schematic_define::EnvAuthStrategy::Basic) => {
                 let mut vars = Vec::new();
                 if let Some(user) = self.headers.env_mapping().basic_user.as_ref() {
@@ -1065,10 +1089,13 @@ impl SamsungSmartTv {
             options.push(explicit_methods.join(", "));
         }
         if !env_fallback_vars.is_empty() {
-            options.push(format!(
-                "set one of the fallback env vars `{}`",
-                env_fallback_vars.join("`, `")
-            ));
+            options
+                .push(
+                    format!(
+                        "set one of the fallback env vars `{}`", env_fallback_vars
+                        .join("`, `")
+                    ),
+                );
         }
         let mut message = if options.is_empty() {
             "Authentication required.".to_string()
@@ -1087,15 +1114,19 @@ impl SamsungSmartTv {
             env_fallback_vars,
         }
     }
-    fn apply_env_fallback(&self, headers: schematic_define::Headers) -> schematic_define::Headers {
+    fn apply_env_fallback(
+        &self,
+        headers: schematic_define::Headers,
+    ) -> schematic_define::Headers {
         let env_mapping = self.headers.env_mapping().clone();
         match &self.auth_policy.env_fallback {
             Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                let token = env_mapping.bearer_token.as_ref().and_then(|list| {
-                    list.names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
+                let token = env_mapping
+                    .bearer_token
+                    .as_ref()
+                    .and_then(|list| {
+                        list.names().iter().find_map(|name| std::env::var(name).ok())
+                    });
                 match (token, header.as_deref()) {
                     (Some(token), Some(header)) => {
                         headers.use_bearer_token_with_header(token, header)
@@ -1104,32 +1135,44 @@ impl SamsungSmartTv {
                     _ => headers,
                 }
             }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { header }) => {
-                let key = env_mapping.api_key.as_ref().and_then(|api_key| {
-                    api_key
-                        .names
-                        .names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
+            Some(schematic_define::EnvAuthStrategy::ApiKey { header, value_prefix }) => {
+                let key = env_mapping
+                    .api_key
+                    .as_ref()
+                    .and_then(|api_key| {
+                        api_key
+                            .names
+                            .names()
+                            .iter()
+                            .find_map(|name| std::env::var(name).ok())
+                    });
                 match key {
-                    Some(key) => headers.header(header.clone(), key),
+                    Some(key) => {
+                        let value = format!(
+                            "{}{}", value_prefix.clone().unwrap_or_default(), key
+                        );
+                        headers.header(header.clone(), value)
+                    }
                     None => headers,
                 }
             }
             Some(schematic_define::EnvAuthStrategy::Basic) => {
-                let username = env_mapping.basic_user.as_ref().and_then(|list| {
-                    list.names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
-                let password = env_mapping.basic_pass.as_ref().and_then(|list| {
-                    list.names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
+                let username = env_mapping
+                    .basic_user
+                    .as_ref()
+                    .and_then(|list| {
+                        list.names().iter().find_map(|name| std::env::var(name).ok())
+                    });
+                let password = env_mapping
+                    .basic_pass
+                    .as_ref()
+                    .and_then(|list| {
+                        list.names().iter().find_map(|name| std::env::var(name).ok())
+                    });
                 match (username, password) {
-                    (Some(username), Some(password)) => headers.use_basic_auth(username, password),
+                    (Some(username), Some(password)) => {
+                        headers.use_basic_auth(username, password)
+                    }
                     _ => headers,
                 }
             }
@@ -1140,12 +1183,14 @@ impl SamsungSmartTv {
     fn headers_satisfy_fallback(&self, headers: &schematic_define::Headers) -> bool {
         match &self.auth_policy.env_fallback {
             Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                header.as_deref().map_or_else(
-                    || headers.has_authorization(),
-                    |header| headers.has_header(header),
-                )
+                header
+                    .as_deref()
+                    .map_or_else(
+                        || headers.has_authorization(),
+                        |header| headers.has_header(header),
+                    )
             }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { header }) => {
+            Some(schematic_define::EnvAuthStrategy::ApiKey { header, .. }) => {
                 headers.has_header(header)
             }
             Some(schematic_define::EnvAuthStrategy::Basic) => headers.has_authorization(),
@@ -1158,8 +1203,7 @@ impl SamsungSmartTv {
         if !headers.has_explicit_auth() {
             headers = self.apply_env_fallback(headers);
         }
-        if self.auth_is_required()
-            && !headers.has_explicit_auth()
+        if self.auth_is_required() && !headers.has_explicit_auth()
             && !self.headers_satisfy_fallback(&headers)
         {
             return Err(self.authentication_required_error());
@@ -1193,11 +1237,47 @@ impl SamsungSmartTv {
         for (key, value) in merged_headers {
             req_builder = req_builder.header(key.as_str(), value.as_str());
         }
-        if let Some(body) = body {
-            req_builder = req_builder
-                .header("Content-Type", "application/json")
-                .body(body);
-        }
+        req_builder = match body {
+            crate::shared::RequestBody::Empty => req_builder,
+            crate::shared::RequestBody::Json(json) => {
+                req_builder.header("Content-Type", "application/json").body(json)
+            }
+            crate::shared::RequestBody::Multipart(parts) => {
+                let mut form = reqwest::multipart::Form::new();
+                for part in parts {
+                    form = match part {
+                        crate::shared::FormPart::Text { name, value } => {
+                            form.text(name, value)
+                        }
+                        crate::shared::FormPart::Json { name, value } => {
+                            let field = reqwest::multipart::Part::text(value)
+                                .mime_str("application/json")
+                                .map_err(|e| {
+                                    SchematicError::SerializationError(e.to_string())
+                                })?;
+                            form.part(name, field)
+                        }
+                        crate::shared::FormPart::File { name, file } => {
+                            let mut field = reqwest::multipart::Part::bytes(file.bytes)
+                                .file_name(file.file_name);
+                            if let Some(mime) = file.mime {
+                                field = field
+                                    .mime_str(&mime)
+                                    .map_err(|e| {
+                                        SchematicError::SerializationError(e.to_string())
+                                    })?;
+                            }
+                            form.part(name, field)
+                        }
+                    };
+                }
+                req_builder.multipart(form)
+            }
+            crate::shared::RequestBody::UrlEncoded(pairs) => req_builder.form(&pairs),
+            crate::shared::RequestBody::Raw { content_type, bytes } => {
+                req_builder.header("Content-Type", content_type).body(bytes)
+            }
+        };
         let response = req_builder.send().await?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
@@ -1269,6 +1349,31 @@ impl SamsungSmartTv {
         &self,
         request: impl Into<SamsungSmartTvRequest>,
     ) -> Result<T, SchematicError> {
+        let request = request.into();
+        match request.response_kind() {
+            crate::shared::ResponseKind::Json => {}
+            crate::shared::ResponseKind::Text => {
+                return Err(SchematicError::WrongResponseDecoder {
+                    endpoint_id: request.endpoint_id(),
+                    kind: "text",
+                    expected_method: "request_text",
+                });
+            }
+            crate::shared::ResponseKind::Binary => {
+                return Err(SchematicError::WrongResponseDecoder {
+                    endpoint_id: request.endpoint_id(),
+                    kind: "binary",
+                    expected_method: "request_bytes",
+                });
+            }
+            crate::shared::ResponseKind::Empty => {
+                return Err(SchematicError::WrongResponseDecoder {
+                    endpoint_id: request.endpoint_id(),
+                    kind: "empty",
+                    expected_method: "request_empty",
+                });
+            }
+        }
         let (response, ctx) = self.build_and_send_request(request).await?;
         let has_pre_hook = self.variant_hooks.pre_response_json.is_some();
         let has_mutator = self
@@ -1282,7 +1387,11 @@ impl SamsungSmartTv {
                 json_value = hook(&ctx, json_value)?;
             }
             let mut result: T = serde_json::from_value(json_value)?;
-            if let Some(mutator) = self.variant_hooks.response_mutators.get(ctx.endpoint_id) {
+            if let Some(mutator) = self
+                .variant_hooks
+                .response_mutators
+                .get(ctx.endpoint_id)
+            {
                 mutator.mutate(&ctx, &mut result)?;
             }
             Ok(result)
@@ -1361,14 +1470,20 @@ impl SamsungSmartTv {
     ///
     /// Close a running application by its ID. Sends a DELETE to the application endpoint, which requests the TV terminate the app.
     #[must_use = "this returns a Future that must be awaited"]
-    pub async fn close_app(&self, request: CloseAppRequest) -> Result<(), SchematicError> {
+    pub async fn close_app(
+        &self,
+        request: CloseAppRequest,
+    ) -> Result<(), SchematicError> {
         self.request_empty(request).await
     }
     /// Convenience method for the `InstallApp` endpoint.
     ///
     /// Install (or reinstall) an application by its ID. The TV downloads and installs the app from the Samsung app store.
     #[must_use = "this returns a Future that must be awaited"]
-    pub async fn install_app(&self, request: InstallAppRequest) -> Result<(), SchematicError> {
+    pub async fn install_app(
+        &self,
+        request: InstallAppRequest,
+    ) -> Result<(), SchematicError> {
         self.request_empty(request).await
     }
 }

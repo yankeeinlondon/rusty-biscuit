@@ -1,8 +1,8 @@
 use biscuit_terminal::terminal::Terminal;
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use serde_json::{Value, json};
 
-use sniff::filesystem::git::recent_commits::{CommitDescSet, get_recent_commits_by_duration};
+use sniff::filesystem::git::recent_commits::CommitDescSet;
 use sniff::filesystem::git::{PeriodSpecifier, parse_period};
 
 use crate::args::{RecentCommitActionArg, RepoAction};
@@ -185,19 +185,6 @@ pub(crate) fn commit_family_value(commit_set: &CommitDescSet, mode: RecentCommit
             value
         }
     }
-}
-
-/// Load the default commit set used by the bare `repo --json` aggregate.
-///
-/// The aggregate uses the same default period as `sniff repo recent-commits`
-/// (last 3 days) so the parent scope matches the child's default invocation.
-pub(crate) fn default_commit_family_set(
-    base_dir: &std::path::Path,
-) -> Result<CommitDescSet, Box<dyn std::error::Error>> {
-    let duration = Duration::days(3);
-    Ok(get_recent_commits_by_duration(
-        base_dir, duration, "last 3d",
-    )?)
 }
 
 struct RecentCommitsParams {

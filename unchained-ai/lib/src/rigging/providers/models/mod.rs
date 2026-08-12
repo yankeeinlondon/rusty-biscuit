@@ -257,8 +257,9 @@ impl ProviderModel {
     /// Returns metadata for this model if available.
     ///
     /// Delegates to the underlying provider-specific enum's `metadata()` method.
-    /// Metadata is fetched from the Parsera LLM Specs API at build time
-    /// and includes context window, modalities, and capabilities.
+    /// Metadata is enriched at build time and includes context window,
+    /// modalities, pricing, capabilities, and source release dates when
+    /// available.
     #[must_use]
     pub fn metadata(&self) -> Option<&'static ProviderModelMetadata> {
         match self {
@@ -437,8 +438,8 @@ fn provider_slug(provider: Provider) -> &'static str {
         Provider::Ollama => "ollama",
         Provider::OpenAi => "openai",
         Provider::OpenRouter => "openrouter",
-        Provider::Xai => "xai",
-        Provider::Zai => "zai",
+        Provider::Xai => "x-ai",
+        Provider::Zai => "z-ai",
         Provider::ZenMux => "zenmux",
         Provider::HuggingFace => "unsupported",
     }
@@ -503,14 +504,51 @@ mod tests {
         let _openai = ProviderModel::OpenAi(ProviderModelOpenAi::O3);
         let _openrouter =
             ProviderModel::OpenRouter(ProviderModelOpenRouter::Bespoke("test".to_string()));
-        let _xai = ProviderModel::Xai(ProviderModelXai::Grok__3);
+        let _xai = ProviderModel::Xai(ProviderModelXai::Bespoke("grok-4.3".to_string()));
         let _zai = ProviderModel::Zai(ProviderModelZai::Glm__4_7);
         let _zenmux = ProviderModel::ZenMux(ProviderModelZenMux::Bespoke("test".to_string()));
     }
 
+    #[test]
+    fn test_wire_id_uses_canonical_provider_slugs() {
+        let xai = ProviderModel::Xai(ProviderModelXai::Grok__4_3);
+        assert_eq!(xai.wire_id(), "x-ai/grok-4.3");
+
+        let zai = ProviderModel::Zai(ProviderModelZai::Glm__4_5);
+        assert_eq!(zai.wire_id(), "z-ai/glm-4.5");
+    }
+
+    #[test]
+    fn test_parse_wire_id_accepts_legacy_provider_slugs() {
+        let xai = ProviderModel::parse_wire_id("xai/grok-4.3").unwrap();
+        assert_eq!(xai.wire_id(), "x-ai/grok-4.3");
+
+        let zai = ProviderModel::parse_wire_id("zai/glm-4.5").unwrap();
+        assert_eq!(zai.wire_id(), "z-ai/glm-4.5");
+    }
+
+    #[test]
+    fn test_aggregator_namespaces_decode_with_single_hyphens() {
+        let openrouter = ProviderModel::OpenRouter(ProviderModelOpenRouter::X__Ai___Grok__4_3);
+        assert_eq!(openrouter.wire_id(), "openrouter/x-ai/grok-4.3");
+
+        let zenmux = ProviderModel::ZenMux(ProviderModelZenMux::Z__Ai___Glm__4_5);
+        assert_eq!(zenmux.wire_id(), "zenmux/z-ai/glm-4.5");
+    }
+
+    #[test]
+    fn test_generated_model_ids_do_not_emit_double_hyphen_provider_namespaces() {
+        for wire_id in ProviderModel::all_wire_ids() {
+            assert!(
+                !wire_id.contains("x--ai") && !wire_id.contains("z--ai"),
+                "wire_id contains a double-hyphen provider namespace: {wire_id}"
+            );
+        }
+    }
+
     /// Test metadata accessor methods return None for unknown models.
     ///
-    /// With the empty placeholder metadata file, all models should return None.
+    /// Bespoke model IDs do not have generated metadata entries.
     #[test]
     fn test_metadata_accessors_return_none_for_unknown() {
         let model =
@@ -543,6 +581,24 @@ mod tests {
         let o3 = ProviderModelOpenAi::O3;
         let meta = o3.metadata();
         assert!(meta.is_some(), "OpenAI O3 should have metadata");
+    }
+
+    #[test]
+    fn test_direct_anthropic_models_have_priced_metadata() {
+        for model in ProviderModelAnthropic::ALL {
+            let metadata = model
+                .metadata()
+                .unwrap_or_else(|| panic!("{} is missing metadata", model.model_id()));
+            let pricing = metadata
+                .pricing
+                .as_ref()
+                .unwrap_or_else(|| panic!("{} is missing pricing", model.model_id()));
+            assert!(
+                pricing.prompt_per_token.is_some() || pricing.completion_per_token.is_some(),
+                "{} is missing per-token pricing",
+                model.model_id()
+            );
+        }
     }
 
     /// Test that Bespoke variants return None for metadata on individual enums.

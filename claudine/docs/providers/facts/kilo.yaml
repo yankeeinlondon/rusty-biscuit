@@ -1,0 +1,295 @@
+# Topic-less catalog facts for the kilo provider.
+#
+# Field-source matrix (design/catalog-generation.md): this file owns values
+# whose research topic has not landed yet. Keys are catalog field names.
+# Seeded once from the hand-written provider constants (the one-time
+# `scrape-facts` bootstrap, retired after seeding).
+# When a field's research topic lands, the mapping registry re-points the
+# field and generation ERRORS while this file still carries the key
+# (delete-on-graduate).
+#
+# Kilo Code's CLI is an OpenCode fork: it shares OpenCode's plugin event bus,
+# `run --format json` NDJSON stream, and config/agent/skill subsystem. This
+# file is seeded from opencode.yaml and diverges only where Kilo's research
+# contradicts OpenCode (stdin, gateway auth/billing, default model, XDG paths).
+stream_protocol: ndjson
+event_mapping:
+  mappings:
+  - event: session_start
+    parse_aliases:
+    - session.created
+    registration_target: true
+    support_level:
+      hook:
+        native_name: session.created
+  - event: session_end
+    parse_aliases:
+    - session.deleted
+    registration_target: true
+    support_level:
+      hook:
+        native_name: session.deleted
+  - event: before_prompt
+    parse_aliases:
+    - chat.message
+    registration_target: true
+    support_level:
+      hook:
+        native_name: chat.message
+  - event: before_tool
+    parse_aliases:
+    - tool.execute.before
+    registration_target: true
+    support_level:
+      hook:
+        native_name: tool.execute.before
+  - event: after_tool
+    parse_aliases:
+    - tool.execute.after
+    registration_target: true
+    support_level:
+      hook:
+        native_name: tool.execute.after
+  - event: tool_error
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: permission_request
+    parse_aliases:
+    - permission.ask
+    registration_target: true
+    support_level:
+      hook:
+        native_name: permission.ask
+  - event: human_in_the_loop
+    parse_aliases:
+    - permission.asked
+    registration_target: true
+    support_level:
+      hook:
+        native_name: permission.asked
+  - event: turn_complete
+    parse_aliases:
+    - session.idle
+    registration_target: true
+    support_level:
+      hook:
+        native_name: session.idle
+  - event: turn_error
+    parse_aliases:
+    - session.error
+    registration_target: true
+    support_level:
+      hook:
+        native_name: session.error
+  - event: subagent_start
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: subagent_stop
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: before_model
+    parse_aliases:
+    - chat.params
+    - chat.headers
+    - experimental.chat.system.transform
+    - experimental.chat.messages.transform
+    registration_target: true
+    support_level:
+      hook:
+        native_name: chat.params
+  - event: after_model
+    parse_aliases:
+    - message.updated
+    - message.part.updated
+    - experimental.text.complete
+    registration_target: true
+    support_level:
+      hook:
+        native_name: message.updated
+  - event: before_compact
+    parse_aliases:
+    - session.compacted
+    - session.compacting
+    - experimental.session.compacting
+    registration_target: true
+    support_level:
+      hook:
+        native_name: session.compacted
+  - event: notification
+    parse_aliases:
+    - tui.toast.show
+    - event
+    registration_target: true
+    support_level:
+      hook:
+        native_name: tui.toast.show
+resource_support:
+  agents:
+    also_reads_from: []
+    format: Markdown
+    level: Full
+    notes: null
+    properties:
+      optional:
+      - mode
+      - model
+      - temperature
+      - top_p
+      - tools
+      - permission
+      - steps
+      - color
+      - hidden
+      - disable
+      - prompt
+      required:
+      - description
+      source_doc: claudine/docs/cross-referencing/kilo.md
+    repo_path: .kilo/agents
+    user_path: .config/kilo/agents
+  commands:
+    also_reads_from: []
+    format: Markdown
+    level: Full
+    notes: null
+    properties:
+      optional:
+      - description
+      - template
+      - agent
+      - model
+      - subtask
+      required: []
+      source_doc: claudine/docs/cross-referencing/kilo.md
+    repo_path: .kilo/commands
+    user_path: .config/kilo/commands
+  provider: kilo
+  scripts:
+    also_reads_from: []
+    format: Executable
+    level: Full
+    notes: null
+    properties: null
+    repo_path: .kilo/scripts
+    user_path: .config/kilo/scripts
+  skill_frontmatter:
+    allowed_tools: false
+    compatibility: true
+    description: true
+    disable_model_invocation: false
+    license: true
+    metadata: true
+    name: true
+    user_invocable: false
+  skills:
+    also_reads_from:
+    - .claude/skills
+    - .agents/skills
+    format: Markdown
+    level: Full
+    notes: null
+    properties:
+      optional:
+      - license
+      - compatibility
+      - metadata
+      required:
+      - name
+      - description
+      source_doc: claudine/docs/cross-referencing/kilo.md
+    repo_path: .kilo/skills
+    user_path: .config/kilo/skills
+memory_files:
+- raw: AGENTS.md
+  segments: []
+output_formats:
+# Kilo's `run --auto --format json` merges non-TTY stdin into the prompt
+# (loadInput appends Bun.stdin after a newline), so stdin_supported diverges
+# from OpenCode. (research: non-interactive-sessions/kilo.md)
+- cli_flag: --format
+  companion_flags: []
+  format: json
+  native_name: json
+  selector:
+    flag: --format
+    kind: flag_value
+  stdin_supported: true
+entrypoints:
+- mode: non_interactive
+  required_flags: []
+  subcommand: run
+system_prompt:
+  append:
+    interactive: unsupported
+    non_interactive: unsupported
+  memory_files:
+  - raw: AGENTS.md
+    segments: []
+  replace:
+    interactive: unsupported
+    non_interactive: unsupported
+yolo:
+  non_interactive_only:
+    non_interactive_flag: --dangerously-skip-permissions
+reasoning: not_documented
+known_gaps: []
+acp:
+  client_supported: false
+  events_via_acp: []
+prompt_arg_conventions:
+  entrypoint: run
+  prompt_flags: []
+cli_sensitive_axes:
+  access_domain: false
+  execute_command: false
+  modify_provider_config: true
+  read_path: false
+  spawn_subagent: false
+  switch_mode: false
+  traverse_path: false
+  use_mcp_server: false
+  use_mcp_tool: false
+  write_path: false
+repo_home_root_files: []
+billing_models:
+- subscription
+- per_token
+cap_policies: []
+allowed_env_keys:
+- KILO_API_KEY
+display_policy:
+  tool_result_summary: show
+  # Kilo inherits OpenCode's `step_start` / `step_finish` phase markers, which
+  # carry no user-visible meaning (internal phase boundaries between tool
+  # batches) and produce visual noise around tool lines; the events still flow
+  # through dispatch, JSONL logging, and the LiveMetrics heartbeat.
+  info_event_suppression:
+  - step_progress
+  collapse_task_progress: false
+  suppress_subscription_rate_limit: false
+  silent_extension_kinds: []
+  stdout_noise_prefixes: []
+  # Inherited from OpenCode's shared TUI banner/build lines; Kilo-branded
+  # capture has not been taken, so these remain the OpenCode prefixes.
+  stderr_noise_prefixes:
+  - "✱ "
+  - "$ "
+  - "> build "
+  - "████ "
+  - "⚙ "
+suppress_structured_stderr_on_success: false
+supports_interactive_inline_closure: false
+model_required_in_non_tty: false
+platform_kind: agent_aggregator
+unmapped_native_events:
+- native_event: tool.definition
+  description: Mutates a tool's description and parameter schema before the tool list is sent to the model.
+  remediation: Author a Kilo plugin exporting a tool.definition hook; Claudine cannot dispatch this phase.
+# Ordered error-classification vocabulary (Phase A seed). Kilo shares
+# OpenCode's wire parser today, so this is an explicit ordered COPY of
+# OpenCode's current table (Phase B researches the copy independently; the
+# shared parser selects vocabulary by the wrapped provider's identity, not the
+# parser module name — so Kilo consumes Kilo data, not OpenCode's).

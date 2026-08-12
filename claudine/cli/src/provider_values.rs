@@ -45,7 +45,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         assert!(values.contains(&"claude".to_string()));
-        assert!(values.contains(&"open_code".to_string()));
-        assert!(values.contains(&"qwen_code".to_string()));
+        assert!(values.contains(&"opencode".to_string()));
+        assert!(values.contains(&"qwen".to_string()));
     }
 }

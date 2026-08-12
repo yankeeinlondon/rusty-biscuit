@@ -1,17 +1,19 @@
 #![allow(dead_code)]
 
 use biscuit_test_harness::shared::SharedHarness;
+use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
-use biscuit_test_harness::{CapturedFrame, TerminalHarness};
+use biscuit_test_harness::{CapturedFrame, TerminalHarness, bin_exe, strip_ansi};
 use std::fs;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
-use test_toolkit::{Level, LevelDecision, evaluate_level};
+use test_toolkit::{Backend, Level, LevelDecision, decide_harness};
 
 /// Gating decision for Level-2 WezTerm tests.
 pub fn wezterm_decision() -> LevelDecision {
-    evaluate_level(Level::L2, WezTermHarness::available(), "WezTerm")
+    decide_harness!(Level::L2, WezTermHarness::available(), Backend::WezTerm)
 }
 
 /// Process-wide shared WezTerm pane reused across every test in this file.
@@ -24,17 +26,25 @@ pub fn wezterm_decision() -> LevelDecision {
 /// `Drop` on `static` values).
 pub static SHARED_HARNESS: SharedHarness<WezTermHarness> = SharedHarness::new();
 
+/// Shared headless pane for tests that need deterministic geometry or need
+/// `COLORFGBG` to remain authoritative because tmux does not answer OSC-11.
+pub static SHARED_TMUX_HARNESS: SharedHarness<TmuxHarness> = SharedHarness::new();
+
 /// Monotonic counter for sentinel uniqueness across tests in this binary.
 static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
+static TMUX_SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// Absolute path to the `md` binary built for *this* workspace, injected by
-/// Cargo at compile time. Using it instead of a bare `md` keeps Level 2 tests
-/// from silently passing against a stale `md` installed on the host `PATH`
-/// (e.g. `~/.cargo/bin/md`) while the code under review still fails.
-pub const MD_BIN: &str = env!("CARGO_BIN_EXE_md");
+/// Absolute path to the `md` binary built for *this* workspace. Using it
+/// instead of a bare `md` keeps Level 2 tests from silently passing against a
+/// stale `md` installed on the host `PATH` (e.g. `~/.cargo/bin/md`) while the
+/// code under review still fails.
+pub fn md_bin() -> &'static Path {
+    static BIN: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+    BIN.get_or_init(|| bin_exe!("md"))
+}
 
 /// Absolute path to a `md` shim (under the system temp dir) that points at
-/// [`MD_BIN`]. Tests invoke this instead of `MD_BIN` directly because the built
+/// [`md_bin`]. Tests invoke this instead of [`md_bin`] directly because the built
 /// binary lives under `…/rusty-biscuit/…/target/debug/md`, whose path contains
 /// the substring `rust`. Embedding that path in the shell command would put
 /// `rust` into the captured command echo, where `find(|l| l.contains("rust"))`
@@ -64,7 +74,7 @@ pub fn md_shim() -> &'static str {
         let link = dir.join("md");
         // Idempotent across reruns within the same pid: replace any stale link.
         let _ = fs::remove_file(&link);
-        link_or_copy(std::path::Path::new(MD_BIN), &link).expect("create md shim");
+        link_or_copy(md_bin(), &link).expect("create md shim");
         // Fail fast if the shim does not actually point at the Cargo-built
         // binary. This catches environment-specific issues (broken link,
         // stale temp dir, permission problems) before the Level 2 pane
@@ -74,15 +84,14 @@ pub fn md_shim() -> &'static str {
     })
 }
 
-/// Verifies that the shim at `link` resolves to [`MD_BIN`] (the
-/// `CARGO_BIN_EXE_md` path baked in at compile time). Called once per
+/// Verifies that the shim at `link` resolves to [`md_bin`]. Called once per
 /// process from [`md_shim`]; failures abort the test binary so the
 /// suite cannot silently pass against a host-installed `md`.
 ///
 /// Uses [`is_same_binary`] so the check works regardless of whether the
 /// shim was created as a symlink, a hard link, or a copy (review-3 finding).
-pub fn assert_shim_resolves_to_built(link: &std::path::Path) {
-    let built = std::path::Path::new(MD_BIN);
+pub fn assert_shim_resolves_to_built(link: &Path) {
+    let built = md_bin();
     if !is_same_binary(link, built) {
         panic!(
             "md shim {} did not resolve to the Cargo-built binary {};\
@@ -125,30 +134,21 @@ pub fn link_or_copy(target: &std::path::Path, link: &std::path::Path) -> std::io
 /// Returns `true` if `candidate` and `built` point at the same file or
 /// at content-equivalent copies.
 ///
-/// Fast path: file identity (inode on Unix, volume-serial + file-index
-/// on Windows). Works for symlinks (after `metadata` follows them) and
-/// for hard links.
+/// Fast path (Unix only): inode identity. Works for symlinks (after
+/// `metadata` follows them) and for hard links.
 ///
 /// Slow path: byte-for-byte content comparison. Handles the copy
 /// fallback from [`link_or_copy`] where shim and target are different
-/// inodes but identical content.
+/// inodes but identical content. This is the only path on Windows —
+/// `MetadataExt::{volume_serial_number, file_index}` are the unstable
+/// `windows_by_handle` feature, and `rust-toolchain.toml` pins stable, so
+/// the equivalent identity check cannot be written here. Content
+/// comparison returns the same answer; it is merely slower.
 pub fn is_same_binary(candidate: &std::path::Path, built: &std::path::Path) -> bool {
     #[cfg(unix)]
     if let (Ok(ma), Ok(mb)) = (fs::metadata(candidate), fs::metadata(built)) {
         use std::os::unix::fs::MetadataExt;
         if ma.ino() == mb.ino() && ma.dev() == mb.dev() {
-            return true;
-        }
-    }
-    #[cfg(windows)]
-    if let (Ok(ma), Ok(mb)) = (fs::metadata(candidate), fs::metadata(built)) {
-        use std::os::windows::fs::MetadataExt;
-        let va = ma.volume_serial_number();
-        let ia = ma.file_index();
-        // Identity is conclusive only when both fields are present and
-        // match. `None` means the filesystem did not report the field;
-        // fall through to the content comparison below.
-        if va.is_some() && va == mb.volume_serial_number() && ia == mb.file_index() {
             return true;
         }
     }
@@ -162,6 +162,105 @@ pub fn is_same_binary(candidate: &std::path::Path, built: &std::path::Path) -> b
 /// sentinel to appear in the pane. Generous — most `md` invocations finish
 /// in well under a second; this is a safety net for first-run cold builds.
 const SENTINEL_TIMEOUT: Duration = Duration::from_secs(30);
+
+fn wait_for_tmux_sentinel(
+    harness: &mut TmuxHarness,
+    sentinel: &str,
+) -> Result<CapturedFrame, CapturedFrame> {
+    let deadline = Instant::now() + SENTINEL_TIMEOUT;
+    let mut last = CapturedFrame::from_raw(String::new());
+    while Instant::now() < deadline {
+        if let Ok(frame) = harness.capture() {
+            if frame.plain.lines().any(|line| line.trim() == sentinel) {
+                return Ok(frame);
+            }
+            last = frame;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    Err(last)
+}
+
+fn run_tmux_command(
+    harness: &mut TmuxHarness,
+    command: &str,
+    env: &[(&str, &str)],
+) -> CapturedFrame {
+    let id = TMUX_SENTINEL_COUNTER.fetch_add(1, Ordering::Relaxed);
+    let start = format!("__DM_CODE_TMUX_START_{id}__");
+    let end = format!("__DM_CODE_TMUX_DONE_{id}__");
+    let sequence = format!("printf '\\n{start}\\n'; {command}; printf '\\n{end}\\n'");
+    // Environment assignments from the harness prefix only one shell command;
+    // this child keeps them active for the whole marked sequence.
+    let wrapped = format!("sh -c {}", shell_quote(&sequence));
+    harness
+        .send_command_with_env(&wrapped, env)
+        .expect("send_command_with_env failed");
+    match wait_for_tmux_sentinel(harness, &end) {
+        Ok(frame) => output_region(frame, &start, &end),
+        Err(last) => panic!(
+            "timed out waiting for sentinel {end} after {SENTINEL_TIMEOUT:?}. \
+             last plain capture:\n{}",
+            last.plain
+        ),
+    }
+}
+
+/// Narrows a shared-pane capture to the command's output.
+///
+/// Printed start and completion markers remain unambiguous when the echoed
+/// command wraps through either marker text. The last standalone start before
+/// completion wins, excluding prompts and earlier commands from substring and
+/// color probes.
+fn output_region(frame: CapturedFrame, start: &str, end: &str) -> CapturedFrame {
+    let lines: Vec<&str> = frame.raw.split('\n').collect();
+    let stripped: Vec<String> = lines.iter().map(|line| strip_ansi(line)).collect();
+
+    let Some(end_index) = stripped.iter().rposition(|line| line.trim() == end) else {
+        return frame;
+    };
+    let Some(start_index) = stripped[..end_index]
+        .iter()
+        .rposition(|line| line.trim() == start)
+    else {
+        return frame;
+    };
+
+    CapturedFrame::from_raw(lines[start_index + 1..end_index].join("\n"))
+}
+
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// Runs the Cargo-built `md` in a headless tmux pane.
+pub fn run_md_in_tmux(
+    file_body: &str,
+    shell_prefix: Option<&str>,
+    extra_args: &str,
+    env: &[(&str, &str)],
+) -> CapturedFrame {
+    let dir = tempdir().expect("create markdown fixture directory");
+    let file_path = dir.path().join("layout.md");
+    fs::write(&file_path, file_body).expect("write markdown fixture");
+
+    let mut guard = SHARED_TMUX_HARNESS
+        .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
+    let harness = guard.as_mut().expect("tmux harness present");
+
+    run_tmux_command(harness, "clear", &[]);
+    // A shared pane may retain a fixture directory deleted by an earlier test.
+    // Establishing this live directory also gives FileReference a valid CWD.
+    let fixture_dir = shell_quote(&dir.path().to_string_lossy());
+    let md_command = format!(
+        "cd {fixture_dir} && {} layout.md {extra_args}",
+        shell_quote(md_shim())
+    );
+    let command = shell_prefix
+        .map(|prefix| format!("{prefix}; {md_command}"))
+        .unwrap_or(md_command);
+    run_tmux_command(harness, &command, env)
+}
 
 /// Polls the pane every 50 ms looking for `sentinel`, returning the final
 /// captured frame once it appears. Returns the last attempted capture on

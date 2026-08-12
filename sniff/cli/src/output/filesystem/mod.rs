@@ -344,13 +344,55 @@ fn format_commit_line(
     }
 }
 
+/// Format the commit header for the `hash` subcommand.
+///
+/// Includes the SHA, conventional commit type/scope, timestamp, and author,
+/// but not the commit description. The SHA is rendered as an OSC8 hyperlink
+/// when `commit_url` is `Some`.
+fn format_commit_hash_header(
+    commit: &sniff::filesystem::git::CommitInfo,
+    commit_url: Option<&str>,
+) -> String {
+    let cc = ConventionalCommit::parse(&commit.message);
+    let (date_str, time_str, use_on) = format_commit_datetime(&commit.timestamp);
+    let short_sha = &commit.sha[0..7];
+    let sha_display = match commit_url {
+        Some(url) => format!("<a href=\"{url}\"><b>{short_sha}</b></a>"),
+        None => format!("<dim><i>{short_sha}</i></dim>"),
+    };
+    let date_prefix = if use_on { "<i>on</i> " } else { "" };
+    let refs_part = format_ref_decorations(&commit.refs);
+    let user_part = format!(
+        " <dim><i>by </i></dim><b><indigo-500>{}</indigo-500></b>",
+        commit.author
+    );
+
+    if let Some(ref op) = cc.operation {
+        let scope_part = cc
+            .scope
+            .as_ref()
+            .map(|s| format!("(<dim>{}</dim>)", s))
+            .unwrap_or_default();
+        format!(
+            "[{}] <b><yellow>{}</yellow></b>{} <i>at</i> <blue><b>{}</b></blue> {}<blue>{}</blue>{}{}",
+            sha_display, op, scope_part, time_str, date_prefix, date_str, refs_part, user_part,
+        )
+    } else {
+        // Non-conventional commit
+        format!(
+            "[{}] <i>at</i> <blue><b>{}</b></blue> {}<blue><b>{}</b></blue>{}{}",
+            sha_display, time_str, date_prefix, date_str, refs_part, user_part,
+        )
+    }
+}
+
 /// Render detailed information for a single commit looked up by `hash` subcommand.
 ///
-/// Shows the commit as a one-liner followed by a list of files changed.
+/// Shows the commit header, description, body bullet points, and files changed.
 pub fn render_hash_section(
     commit: &sniff::filesystem::git::CommitInfo,
     files: &[(std::path::PathBuf, sniff::filesystem::git::DeltaKind)],
-    verbose: u8,
+    _verbose: u8,
     commit_url: Option<&str>,
 ) -> String {
     use sniff::filesystem::git::DeltaKind;
@@ -362,10 +404,29 @@ pub fn render_hash_section(
     let status_title = Prose::new("<b><u>Commit</u></b>");
     writeln!(out, "\n{}\n", status_title.render(&terminal)).unwrap();
 
-    let commit_line = format_commit_line(commit, verbose, commit_url);
-    let rendered = Prose::new(commit_line.as_str()).render(&terminal);
-    let list = UnorderedList::new(vec![rendered]);
-    writeln!(out, "{}", list.render(&terminal)).unwrap();
+    // Header line: [sha] type(scope) at time date by author
+    let header = format_commit_hash_header(commit, commit_url);
+    writeln!(out, "{}", Prose::new(header.as_str()).render(&terminal)).unwrap();
+
+    // First line of the commit message (description)
+    let cc = ConventionalCommit::parse(&commit.message);
+    let description = cc.description.trim();
+    if !description.is_empty() {
+        writeln!(out).unwrap();
+        writeln!(out, "{}", Prose::new(description).render(&terminal)).unwrap();
+    }
+
+    // === Body bullet points (commit message body) ===
+    let (_, bullet_points) = sniff::filesystem::git::parse_commit_message(&commit.message);
+    if !bullet_points.is_empty() {
+        writeln!(out).unwrap();
+        let items: Vec<String> = bullet_points
+            .iter()
+            .map(|bp| Prose::new(bp.as_str()).render(&terminal))
+            .collect();
+        let list = UnorderedList::new(items).with_bullet("  - ");
+        writeln!(out, "{}", list.render(&terminal)).unwrap();
+    }
 
     // === Files Section ===
     if files.is_empty() {
@@ -373,7 +434,7 @@ pub fn render_hash_section(
     }
 
     let files_title = Prose::new("<b><u>Files changed</u></b>");
-    writeln!(out, "{}\n", files_title.render(&terminal)).unwrap();
+    writeln!(out, "\n{}\n", files_title.render(&terminal)).unwrap();
 
     let file_items: Vec<String> = files
         .iter()
@@ -382,13 +443,17 @@ pub fn render_hash_section(
             let (dir, name) = split_path(&path_str);
             let dir_part = if dir.is_empty() { String::new() } else { dir };
             match kind {
-                DeltaKind::Added => format!("<lime>{}: {}<b>{}</b></lime>", kind, dir_part, name),
-                DeltaKind::Modified => {
-                    format!("<yellow>{}: {}<b>{}</b></yellow>", kind, dir_part, name)
+                DeltaKind::Added => {
+                    format!("<lime><i>{}</i></lime> {}<b>{}</b>", kind, dir_part, name)
                 }
-                DeltaKind::Deleted => format!("<red>{}: {}<b>{}</b></red>", kind, dir_part, name),
+                DeltaKind::Modified => {
+                    format!("<yellow><i>{}</i></yellow> {}<b>{}</b>", kind, dir_part, name)
+                }
+                DeltaKind::Deleted => {
+                    format!("<red><i>{}</i></red> {}<b>{}</b>", kind, dir_part, name)
+                }
                 DeltaKind::Renamed | DeltaKind::Copied => {
-                    format!("<cyan>{}: {}<b>{}</b></cyan>", kind, dir_part, name)
+                    format!("<cyan><i>{}</i></cyan> {}<b>{}</b>", kind, dir_part, name)
                 }
             }
         })
@@ -477,7 +542,7 @@ fn build_git_status_items(
     // Add staged files
     for file in &staged {
         let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let absolute = git.repo_root.join(&file.path).display().to_string().replace(std::path::MAIN_SEPARATOR, "/");
         let linked_path = format_git_status_filepath(&path, &absolute);
         let action = file.action.label();
         // Only show diff stats for modified files (not created/deleted)
@@ -494,7 +559,7 @@ fn build_git_status_items(
     // Add unstaged files
     for file in &modified {
         let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let absolute = git.repo_root.join(&file.path).display().to_string().replace(std::path::MAIN_SEPARATOR, "/");
         let linked_path = format_git_status_filepath(&path, &absolute);
         let action = file.action.label();
         let diff_stats = format_diff_stats(file.lines_added, file.lines_removed);
@@ -506,7 +571,7 @@ fn build_git_status_items(
 
     for file in &untracked {
         let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let absolute = git.repo_root.join(&file.path).display().to_string().replace(std::path::MAIN_SEPARATOR, "/");
         let linked_path = format_git_status_filepath(&path, &absolute);
         let line = format!("<dim>untracked: {linked_path}</dim>");
         status_items.push(line);
@@ -520,7 +585,7 @@ fn build_git_status_items(
         .collect();
     for file in &conflicted {
         let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string();
+        let absolute = git.repo_root.join(&file.path).display().to_string().replace(std::path::MAIN_SEPARATOR, "/");
         let linked_path = format_git_status_filepath(&path, &absolute);
         let line = format!("<red>conflicted: {linked_path}</red>");
         status_items.push(line);
@@ -555,7 +620,12 @@ fn render_header(title: &str, terminal: &Terminal) -> String {
 /// `../project`, or `.` instead of a home-abbreviated absolute path.
 fn worktree_path_link(path: &std::path::Path, current_worktree: &std::path::Path) -> String {
     let absolute = path.display().to_string();
-    let label = relative_path_between(current_worktree, path);
+    // Both sides must share one canonical form before prefix math: detection
+    // reports repo roots canonicalized (UNC-prefixed on Windows) while the
+    // current directory arrives verbatim, and the two forms share no
+    // components, which would degenerate the label to the absolute path.
+    let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    let label = relative_path_between(&canon(current_worktree), &canon(path));
     format!("<blue><a href=\"{absolute}\">{label}</a></blue>")
 }
 
@@ -586,24 +656,57 @@ fn worktree_path_link_absolute(path: &std::path::Path) -> String {
 /// home directory itself.
 fn alias_path(path: &Path) -> String {
     let vars: Vec<(std::ffi::OsString, std::ffi::OsString)> = std::env::vars_os().collect();
-    let home = std::env::var_os("HOME").map(PathBuf::from);
+    // `dirs::home_dir()` resolves the platform home directory (USERPROFILE /
+    // known-folder on Windows), not just `$HOME`, so the `~` form works there.
+    let home = dirs::home_dir();
     alias_path_with(path, &vars, home.as_deref())
 }
 
-/// Environment variables whose values are absolute paths but denote *transient
-/// shell position* (the current / previous directory) rather than a stable
-/// named root. Offsetting against them yields a label that changes on every
-/// `cd`, so they are skipped. Variables whose values are not absolute paths
+/// Environment variables whose values are absolute paths that must never be
+/// surfaced as a `${VAR}` alias.
+///
+/// `PWD` / `OLDPWD` denote *transient shell position* (the current / previous
+/// directory): offsetting against them yields a label that changes on every
+/// `cd`. On Windows, `USERPROFILE` mirrors the home directory (already rendered
+/// as `~` via [`dirs::home_dir`]) and `HOMEDRIVE` / `HOMEPATH` are bare or
+/// partial roots (`C:\`, `\Users\ken`) that would alias almost every path to a
+/// confusing `${HOMEDRIVE}\...`. Variables whose values are not absolute paths
 /// (`TERM`, `LANG`, `SHLVL`, ...) are already filtered by the `is_absolute`
 /// check below and need no entry here.
-const POSITIONAL_PATH_VARS: &[&str] = &["PWD", "OLDPWD"];
+const SKIP_ALIAS_VARS: &[&str] = &["PWD", "OLDPWD", "USERPROFILE", "HOMEDRIVE", "HOMEPATH"];
+
+/// Compares two environment variable names for equality.
+///
+/// Windows treats environment variable names case-insensitively, so matching is
+/// ASCII-case-insensitive there; Unix-like hosts keep exact, case-sensitive
+/// matching. The flag is passed explicitly rather than read from `cfg!` so
+/// Windows behavior is exercisable in tests on any host.
+fn env_name_eq(a: &str, b: &str, case_insensitive: bool) -> bool {
+    if case_insensitive {
+        a.eq_ignore_ascii_case(b)
+    } else {
+        a == b
+    }
+}
 
 /// Pure core of [`alias_path`], with the environment supplied explicitly so it
-/// can be tested without mutating global process state.
+/// can be tested without mutating global process state. Env-var-name case
+/// sensitivity follows the host: case-insensitive on Windows, exact elsewhere.
 fn alias_path_with(
     path: &Path,
     vars: &[(std::ffi::OsString, std::ffi::OsString)],
     home: Option<&Path>,
+) -> String {
+    alias_path_with_case(path, vars, home, cfg!(windows))
+}
+
+/// Pure core of [`alias_path_with`] with env-var-name case sensitivity supplied
+/// explicitly so Windows behavior is testable on any host.
+fn alias_path_with_case(
+    path: &Path,
+    vars: &[(std::ffi::OsString, std::ffi::OsString)],
+    home: Option<&Path>,
+    case_insensitive_names: bool,
 ) -> String {
     // "Longest prefix" is measured in path components, not bytes, so a trailing
     // slash in an env value can't spuriously outrank a real ancestor.
@@ -612,11 +715,14 @@ fn alias_path_with(
     let mut best: Option<(String, PathBuf, usize)> = None;
     for (name, value) in vars {
         let name = name.to_string_lossy();
-        if POSITIONAL_PATH_VARS.contains(&name.as_ref()) {
+        if SKIP_ALIAS_VARS
+            .iter()
+            .any(|v| env_name_eq(name.as_ref(), v, case_insensitive_names))
+        {
             continue;
         }
         let value = PathBuf::from(value);
-        if !value.is_absolute() || !path.starts_with(&value) {
+        if !(value.is_absolute() || value.has_root()) || !path.starts_with(&value) {
             continue;
         }
         let components = value.components().count();
@@ -654,7 +760,10 @@ fn join_alias(prefix: &str, rel: &Path) -> String {
     if rel.as_os_str().is_empty() {
         prefix.to_string()
     } else {
-        format!("{prefix}/{}", rel.display())
+        format!(
+            "{prefix}/{}",
+            rel.display().to_string().replace(std::path::MAIN_SEPARATOR, "/")
+        )
     }
 }
 
@@ -664,13 +773,15 @@ fn join_alias(prefix: &str, rel: &Path) -> String {
 /// segments and/or the remaining target components. Falls back to the target's
 /// absolute display when the paths do not share a common prefix.
 fn relative_path_between(base: &std::path::Path, target: &std::path::Path) -> String {
-    use std::path::{Component, MAIN_SEPARATOR_STR};
+    use std::path::Component;
 
     if let Ok(rel) = target.strip_prefix(base) {
         return if rel.as_os_str().is_empty() {
             ".".to_string()
         } else {
-            rel.display().to_string()
+            rel.display()
+                .to_string()
+                .replace(std::path::MAIN_SEPARATOR, "/")
         };
     }
 
@@ -678,7 +789,7 @@ fn relative_path_between(base: &std::path::Path, target: &std::path::Path) -> St
         let ups = rel.components().count();
         return std::iter::repeat_n("..", ups)
             .collect::<Vec<_>>()
-            .join(MAIN_SEPARATOR_STR);
+            .join("/");
     }
 
     let base_components: Vec<_> = base.components().collect();
@@ -713,7 +824,7 @@ fn relative_path_between(base: &std::path::Path, target: &std::path::Path) -> St
     if parts.is_empty() {
         ".".to_string()
     } else {
-        parts.join(MAIN_SEPARATOR_STR)
+        parts.join("/")
     }
 }
 
@@ -765,15 +876,26 @@ pub fn render_git_section(
     }
 
     // === Worktrees Section ===
-    // Always rendered — even with zero linked worktrees — so the "0 other
-    // active worktrees" summary is shown (Case B's required output).
+    // The dedicated Worktrees section is only rendered when the repo has at
+    // least one linked worktree. When we are in the main worktree and none are
+    // defined there is nothing to enumerate, so instead of an empty section two
+    // trailing bullets are appended to the Status list above (a blank-line-
+    // separated repo-location line and a "no worktrees" note).
     //
     // Case selection is by *physical location* (`in_worktree`): are we running
     // inside the main worktree or a linked one? Branch spelling (`== "main"`)
     // misclassifies detached HEAD, `master`-default repos, and any non-main
     // branch checked out in the main worktree — none of which have a usable
-    // entry in the linked-worktree-only `worktrees` map.
-    {
+    // entry in the linked-worktree-only `worktrees` map. Running inside a linked
+    // worktree (`in_worktree`) always implies at least one worktree exists.
+    if !git.in_worktree && git.worktrees.is_empty() {
+        out.push('\n');
+        let repo_link = worktree_path_link_absolute(&git.repo_root);
+        let mut extra = UnorderedList::empty();
+        extra.add(Prose::new(format!("this repo is located at {repo_link}")));
+        extra.add(Prose::new("no <i>worktrees</i> are defined".to_string()));
+        writeln!(out, "{}", extra.render(&terminal)).unwrap();
+    } else {
         out.push('\n');
         writeln!(out, "{}", render_header("Worktrees", &terminal)).unwrap();
         out.push('\n');
@@ -1732,10 +1854,10 @@ mod tests {
         }
 
         #[test]
-        fn git_status_no_worktrees_still_renders_case_b_with_zero_count() {
-            // A repo with no linked worktrees is the common case. Case B must
-            // still render the current (main) worktree and a zero "other" count
-            // rather than omitting the section entirely.
+        fn git_status_no_worktrees_omits_section_and_adds_status_bullets() {
+            // A repo with no linked worktrees is the common case. The dedicated
+            // Worktrees section is suppressed; the repo location and a "no
+            // worktrees" note are appended as trailing Status bullets instead.
             let mut git = make_git_info(vec![]);
             git.worktrees = HashMap::new();
             git.current_branch = Some("main".to_string());
@@ -1744,16 +1866,22 @@ mod tests {
             let output = render_git_section(&git, 10, 0, false, None, None);
 
             assert!(
-                output.contains("Worktrees"),
-                "Worktrees section must render even with no linked worktrees"
+                !output.contains("Worktrees"),
+                "Worktrees section must be omitted with no linked worktrees: {output}"
             );
             assert!(
-                output.contains("Current Worktree:"),
-                "Case B must show the current worktree"
+                !output.contains("Current Worktree:"),
+                "no Current Worktree heading when the section is omitted: {output}"
             );
             assert!(
-                output.contains("there are 0 other active worktrees in this repo"),
-                "Case B must report a zero other-worktree count: {output}"
+                output.contains("this repo is located at"),
+                "repo location bullet is present: {output}"
+            );
+            // "worktrees" carries `<i>…</i>` markup, so assert the surrounding
+            // plain fragments rather than the styled word.
+            assert!(
+                output.contains("are defined"),
+                "'no worktrees are defined' bullet is present: {output}"
             );
             assert!(
                 output.contains("Status"),
@@ -1947,15 +2075,91 @@ mod tests {
             );
         }
 
+        // The Windows-shaped tests below simulate drive letters with a leading
+        // `/c/` or `/d/` component so the prefix logic is exercised identically
+        // on Unix and Windows hosts (`std::path` separators are host-specific,
+        // but the component-prefix comparisons are not). Case sensitivity is
+        // passed explicitly via `alias_path_with_case` so the Windows branch is
+        // testable on this macOS host.
+
+        #[test]
+        fn alias_path_windows_drive_letter_path_uses_home_tilde() {
+            let path = PathBuf::from("/c/Users/ken/project");
+            assert_eq!(
+                alias_path_with_case(&path, &[], Some(Path::new("/c/Users/ken")), true),
+                "~/project"
+            );
+        }
+
+        #[test]
+        fn alias_path_windows_skips_userprofile_alias() {
+            // USERPROFILE mirrors the home dir; even with home unknown it must
+            // not surface as `${USERPROFILE}`, falling back to the absolute path.
+            let path = PathBuf::from("/c/Users/ken/project");
+            let vars = env(&[("USERPROFILE", "/c/Users/ken")]);
+            assert_eq!(
+                alias_path_with_case(&path, &vars, None, true),
+                "/c/Users/ken/project"
+            );
+        }
+
+        #[test]
+        fn alias_path_windows_env_var_names_are_case_insensitive() {
+            // On Windows `oldpwd` and `OLDPWD` name the same variable, so the
+            // lowercase spelling must be skipped too, yielding `~` rather than
+            // `${oldpwd}`. The same input is case-sensitive on Unix.
+            let path = PathBuf::from("/c/Users/ken/wt/proj");
+            let vars = env(&[("oldpwd", "/c/Users/ken/wt/proj")]);
+            assert_eq!(
+                alias_path_with_case(&path, &vars, Some(Path::new("/c/Users/ken")), true),
+                "~/wt/proj"
+            );
+            // Case-sensitive (Unix) host: `oldpwd` is a distinct, longer prefix
+            // than home, so it offsets as `${oldpwd}`.
+            assert_eq!(
+                alias_path_with_case(&path, &vars, Some(Path::new("/c/Users/ken")), false),
+                "${oldpwd}"
+            );
+        }
+
+        #[test]
+        fn alias_path_windows_does_not_alias_across_drives() {
+            // Home on the D: drive must not alias a path on the C: drive.
+            let path = PathBuf::from("/c/projects/app");
+            let vars = env(&[("PROJ", "/d/projects")]);
+            assert_eq!(
+                alias_path_with_case(&path, &vars, Some(Path::new("/d/Users/ken")), true),
+                "/c/projects/app"
+            );
+        }
+
         #[test]
         fn git_status_main_worktree_on_non_main_branch_is_case_b() {
             // Regression: a non-main branch checked out in the MAIN worktree
-            // (in_worktree == false) must render Case B, not vanish. Selecting
-            // by branch spelling produced empty output here.
+            // (in_worktree == false) must render Case B, not vanish and not be
+            // misclassified as Case A. Selecting by branch spelling produced
+            // empty output here. A linked worktree is present so the Worktrees
+            // section renders (the empty case is covered separately).
             let mut git = make_git_info(vec![]);
             git.repo_root = PathBuf::from("/repo");
             git.in_worktree = false;
             git.current_branch = Some("feature-x".to_string());
+            git.worktrees.insert(
+                "linked".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "linked".to_string(),
+                    filepath: PathBuf::from("/repo-linked"),
+                    sha: "abc123".to_string(),
+                    dirty: false,
+                    ahead: 0,
+                    behind: 0,
+                    base_branch: "main".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: false,
+                },
+            );
 
             let output = render_git_section(&git, 10, 0, false, None, None);
 
@@ -1964,7 +2168,7 @@ mod tests {
                 "main worktree on a non-main branch must still show Case B: {output}"
             );
             assert!(
-                output.contains("there are 0 other active worktrees in this repo"),
+                output.contains("there are 1 other active worktrees in this repo"),
                 "must report the other-worktree count: {output}"
             );
             assert!(
@@ -1976,11 +2180,28 @@ mod tests {
         #[test]
         fn git_status_master_default_main_worktree_is_case_b() {
             // A repository whose primary branch is `master` is still the main
-            // worktree (in_worktree == false) and must render Case B.
+            // worktree (in_worktree == false) and must render Case B. A linked
+            // worktree is present so the Worktrees section renders.
             let mut git = make_git_info(vec![]);
             git.repo_root = PathBuf::from("/repo");
             git.in_worktree = false;
             git.current_branch = Some("master".to_string());
+            git.worktrees.insert(
+                "linked".to_string(),
+                sniff::filesystem::git::WorktreeInfo {
+                    branch: "linked".to_string(),
+                    filepath: PathBuf::from("/repo-linked"),
+                    sha: "abc123".to_string(),
+                    dirty: false,
+                    ahead: 0,
+                    behind: 0,
+                    base_branch: "master".to_string(),
+                    has_conflicts: false,
+                    merged: false,
+                    changed_files: 0,
+                    is_current: false,
+                },
+            );
 
             let output = render_git_section(&git, 10, 0, false, None, None);
 
@@ -3105,6 +3326,65 @@ mod tests {
                 &[MonorepoStandard::Nx, MonorepoStandard::Lerna],
             );
             assert_eq!(label, "Nx + Lerna (using pnpm workspaces)");
+        }
+    }
+
+    mod hash_section {
+        use super::*;
+
+        fn commit_with_message(message: &str) -> CommitInfo {
+            CommitInfo {
+                sha: "1234567890abcdef".to_string(),
+                message: message.to_string(),
+                author: "Test User".to_string(),
+                timestamp: Utc::now(),
+                remotes: None,
+                refs: vec![],
+            }
+        }
+
+        #[test]
+        fn renders_body_bullet_points() {
+            let msg = "feat: add thing\n\n- first bullet\n- second bullet";
+            let commit = commit_with_message(msg);
+            let out = render_hash_section(&commit, &[], 0, None);
+            assert!(
+                out.contains("first bullet"),
+                "expected first bullet in output:\n{out}"
+            );
+            assert!(
+                out.contains("second bullet"),
+                "expected second bullet in output:\n{out}"
+            );
+        }
+
+        #[test]
+        fn renders_commit_header_with_author() {
+            let msg = "feat: add thing\n\n- first bullet";
+            let commit = commit_with_message(msg);
+            let out = render_hash_section(&commit, &[], 0, None);
+            assert!(
+                out.contains("Test User"),
+                "expected author attribution in output:\n{out}"
+            );
+            assert!(
+                out.contains("add thing"),
+                "expected subject in output:\n{out}"
+            );
+            assert!(
+                out.contains("first bullet"),
+                "expected first bullet in output:\n{out}"
+            );
+        }
+
+        #[test]
+        fn omits_bullet_section_when_no_body() {
+            let commit = commit_with_message("feat: add thing");
+            let out = render_hash_section(&commit, &[], 0, None);
+            assert!(
+                out.contains("add thing"),
+                "expected subject in output:\n{out}"
+            );
         }
     }
 }

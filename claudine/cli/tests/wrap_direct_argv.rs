@@ -1,4 +1,5 @@
-use assert_cmd::cargo::cargo_bin_cmd;
+#![cfg(unix)]
+
 use std::fs;
 use tempfile::tempdir;
 
@@ -29,8 +30,11 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine")
+        .unwrap()
+        .current_dir(workspace.path())
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("PATH", &path_dir)
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_ARGS_FILE", &args_path)
@@ -102,7 +106,8 @@ exit 0
 "#,
     );
 
-    cargo_bin_cmd!("claudine")
+    assert_cmd::Command::cargo_bin("claudine")
+        .unwrap()
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("GOOSE_MODEL", "test-model")

@@ -13,8 +13,11 @@ use serde::{Deserialize, Serialize};
 use crate::Result;
 use crate::error::SniffError;
 use crate::filesystem::git::GitRepo;
+use crate::performance;
+use crate::performance::counters;
 
 use super::cargo::{cargo_package_name, cargo_package_version};
+use super::detection::probe_exists;
 use super::go::go_module_name_from_content;
 use super::npm::{npm_package_name, npm_package_version};
 use super::python::{pyproject_package_name, pyproject_package_version};
@@ -90,6 +93,11 @@ pub fn detect_repo_identity(dir: &Path) -> Result<RepoIdentity> {
 /// Returns [`SniffError::NotARepository`] if the handle points at a path with
 /// no working directory (bare repositories are not supported here).
 pub fn detect_repo_identity_with_repo(git_repo: &GitRepo) -> Result<RepoIdentity> {
+    if git_repo.is_bare() {
+        return Err(SniffError::NotARepository(
+            git_repo.repo_root().to_path_buf(),
+        ));
+    }
     let root = git_repo.repo_root();
     let monorepo = detect_repo_structure(root)?;
     let (is_monorepo, package_count) = match monorepo {
@@ -97,7 +105,7 @@ pub fn detect_repo_identity_with_repo(git_repo: &GitRepo) -> Result<RepoIdentity
         _ => (false, None),
     };
 
-    let name = resolve_name(root);
+    let name = resolve_name(root, git_repo);
     let version = resolve_version(root);
     let language = if is_monorepo {
         None
@@ -115,11 +123,16 @@ pub fn detect_repo_identity_with_repo(git_repo: &GitRepo) -> Result<RepoIdentity
 }
 
 /// Resolve the display name in priority order: manifest → remote → dir name.
-fn resolve_name(root: &Path) -> String {
+///
+/// The remote step reads through the caller's already-discovered `git_repo`
+/// rather than rediscovering: it is reached whenever `root` carries no manifest
+/// name, so a path-based lookup here would cost a repository discovery on every
+/// such repository.
+fn resolve_name(root: &Path, git_repo: &GitRepo) -> String {
     if let Some(name) = manifest_name(root) {
         return name;
     }
-    if let Some(name) = remote_basename(root) {
+    if let Some(name) = remote_basename(git_repo) {
         return name;
     }
     root.file_name()
@@ -144,7 +157,7 @@ fn manifest_name(root: &Path) -> Option<String> {
     {
         return Some(name);
     }
-    if let Ok(content) = std::fs::read_to_string(root.join("go.mod"))
+    if let Some(content) = read_counted(&root.join("go.mod"))
         && let Some(module) = go_module_name_from_content(&content)
     {
         // `module github.com/owner/repo` → use the trailing segment.
@@ -159,11 +172,9 @@ fn manifest_name(root: &Path) -> Option<String> {
     None
 }
 
-fn remote_basename(root: &Path) -> Option<String> {
+fn remote_basename(git_repo: &GitRepo) -> Option<String> {
     // `origin` if present, otherwise the first configured remote with a URL.
-    let url = crate::filesystem::preferred_remote_url(root)
-        .ok()
-        .flatten()?;
+    let url = crate::filesystem::git::api::preferred_remote_url_with_repo(git_repo)?;
     parse_remote_basename(&url)
 }
 
@@ -212,7 +223,7 @@ fn resolve_version(root: &Path) -> Option<String> {
 }
 
 fn resolve_language(root: &Path) -> Option<String> {
-    if root.join("Cargo.toml").exists() {
+    if probe_exists(&root.join("Cargo.toml")) {
         return Some("Rust".to_string());
     }
     if let Some(value) = read_json(&root.join("package.json")) {
@@ -230,10 +241,10 @@ fn resolve_language(root: &Path) -> Option<String> {
             "JavaScript".to_string()
         });
     }
-    if root.join("pyproject.toml").exists() || root.join("setup.py").exists() {
+    if probe_exists(&root.join("pyproject.toml")) || probe_exists(&root.join("setup.py")) {
         return Some("Python".to_string());
     }
-    if root.join("go.mod").exists() {
+    if probe_exists(&root.join("go.mod")) {
         return Some("Go".to_string());
     }
     None
@@ -242,15 +253,27 @@ fn resolve_language(root: &Path) -> Option<String> {
 /// Read and parse a TOML manifest at `path`, returning `None` on any I/O or
 /// parse failure. Used by the identity detectors and the version aggregator.
 pub(crate) fn read_toml(path: &Path) -> Option<toml_crate::Value> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = read_counted(path)?;
     toml_crate::from_str(&content).ok()
 }
 
 /// Read and parse a JSON manifest at `path`, returning `None` on any I/O or
 /// parse failure. Used by the identity detectors and the version aggregator.
 pub(crate) fn read_json(path: &Path) -> Option<serde_json::Value> {
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = read_counted(path)?;
     serde_json::from_str(&content).ok()
+}
+
+/// Read a manifest for identity resolution, recording the work.
+///
+/// The identity path deliberately bypasses `ManifestStore`: it resolves one
+/// root and exits, so it reads each manifest at most once anyway.
+fn read_counted(path: &Path) -> Option<String> {
+    performance::increment_counter(counters::FS_FILE_OPENS, 1);
+    let content = std::fs::read_to_string(path).ok()?;
+    performance::increment_counter(counters::FS_BYTES_READ, content.len() as u64);
+    performance::increment_counter(counters::REPO_MANIFEST_PARSES, 1);
+    Some(content)
 }
 
 #[cfg(test)]

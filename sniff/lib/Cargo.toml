@@ -53,8 +53,9 @@ which = { version = "8.0.0", default-features = false, features = ["real-sys"] }
 
 [features]
 default = []
+bench-internals = []
 metrics = ["dep:metrics"]
-network = ["dep:reqwest", "dep:tokio", "dep:futures", "reqwest/rustls"]
+network = ["dep:reqwest", "dep:tokio", "dep:futures", "reqwest/rustls", "biscuit-file/fetch"]
 remote = ["network"]
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -67,8 +68,13 @@ zbus = "5"
 [target.'cfg(target_os = "windows")'.dependencies]
 windows = { version = "0.62", features = [
     "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_Services",
     "Win32_System_Environment",
+    "Win32_System_JobObjects",
+    "Win32_Security_Authorization",
+    "Win32_System_Threading",
 ] }
 winreg = "0.55"
 
@@ -76,7 +82,15 @@ winreg = "0.55"
 criterion = { version = "0.5", features = ["html_reports"] }
 # Fixture writes gix has no API for (worktree-snapshot commits, checkout,
 # linked-worktree creation) + the libgit2 parity oracle. See note above.
-git2 = "0.20.3"
+git2 = { version = "0.20.3", default-features = false }
+# libgit2-sys >= 0.18.6 (libgit2 1.9.6) swapped its bundled regex backend from PCRE1
+# to PCRE2 and exports it unprefixed. pcre2-sys — reached from this crate's own
+# `hyperpolyglot` dependency — defines the same `pcre2_*_8` symbols, so MSVC's linker
+# rejects the duplicates (LNK2005 -> LNK1169) in every test target that links both.
+# Unix linkers tolerate it, so this is a Windows-only build break. `git2` is a
+# dev-dependency with network transports disabled, so the ceiling costs nothing
+# until upstream isolates its bundled symbols.
+libgit2-sys = ">=0.18.3, <0.18.6"
 proptest = "1"
 serial_test = "3"
 tempfile = "3"
@@ -87,3 +101,7 @@ wiremock = "0.6"
 [[bench]]
 name = "perf"
 harness = false
+
+# CI policy: the L1 suite runs with the `remote` feature (network probes).
+[package.metadata.ci.tests]
+features = ["remote"]

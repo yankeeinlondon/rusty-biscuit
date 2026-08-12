@@ -1,0 +1,4 @@
+kind: schema-trigger
+name: Memory Trigger
+description: TODO
+match:

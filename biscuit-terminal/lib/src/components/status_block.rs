@@ -65,6 +65,34 @@ const DEFAULT_BORDER: &str = "┃ ";
 ///     .hint("Check the template syntax and retry.");
 /// let _ = block; // see TerminalRenderable / BrowserRenderable / MarkdownRenderable
 /// ```
+///
+/// ## Layout & Style Contract
+///
+/// `StatusBlock` is an internal-layout component (spec C2). It projects to a
+/// [`Root`](renderable::tree::NodeKind::Root) carrying the configured
+/// [`Layout`] on the root node; the shared render-tree fold resolves the
+/// outer box, and the body / hint text wraps inside the resolved content
+/// width:
+///
+/// - [`Width::Auto`] (the constructor default's `WrapProse(8, None)` word
+///   wrap) and [`Width::Fixed`] **fill** the available width by wrapping the
+///   body / hint; [`Width::FitContent`] hugs short body content.
+/// - **Slack sink** (spec D2): the message / body region. The header icon,
+///   severity color, status prefix, and the thick left border chrome (`┃ `)
+///   stay fixed across width modes — only the body text column absorbs slack
+///   by wrapping.
+/// - The typed thick left [`Border`] is lowered by the shared fold, not
+///   re-implemented as bespoke chrome on the default path; only an arbitrary
+///   string prefix (set via [`StatusBlock::border`]) routes through
+///   [`StatusBlock::render_bespoke`] because the render tree cannot express
+///   target-specific prefix strings.
+/// - A fractional `Fixed(50%)` is resolved exactly once by the fold; the
+///   body wraps to the resolved content width and never re-resolves the raw
+///   percentage (the `Fixed(50%) → 25%` double-application bug).
+///
+/// [`Width::Auto`]: renderable::layout::Width::Auto
+/// [`Width::Fixed`]: renderable::layout::Width::Fixed
+/// [`Width::FitContent`]: renderable::layout::Width::FitContent
 #[derive(Debug, Clone)]
 pub struct StatusBlock {
     severity: StatusState,
@@ -74,6 +102,7 @@ pub struct StatusBlock {
     border_color: Option<Color>,
     border: String,
     layout: Layout,
+    style: Style,
 }
 
 impl StatusBlock {
@@ -94,6 +123,7 @@ impl StatusBlock {
                 word_wrap: WordWrap::WrapProse(Some(8), None),
                 ..Layout::default()
             },
+            style: Style::default(),
         }
     }
 
@@ -335,6 +365,7 @@ impl StatusBlock {
         // the node returned by `render_tree()` without applying the optional
         // `tree_layout()` hook.
         root.attrs.set_layout(&self.layout);
+        crate::components::renderable::overlay_style_onto_node(&mut root, &self.style);
         root
     }
 
@@ -473,6 +504,14 @@ impl TerminalRenderable for StatusBlock {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> Style {
+        self.style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.style)
     }
 
     fn is_block_level(&self) -> bool {
@@ -1078,7 +1117,7 @@ mod tests {
     fn html_page_includes_fragment() {
         let block = StatusBlock::new(StatusState::Info).body("Body");
         let page = BrowserRenderable::render_html_page(&block, None);
-        let html = page.render();
+        let html = page.render().expect("render");
         assert!(html.contains("<html"));
         assert!(html.contains("<body>"));
         assert!(html.contains("<blockquote"));

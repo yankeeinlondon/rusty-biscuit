@@ -44,6 +44,18 @@
         "summary": "Returns Elo ratings for text-to-image models.",
         "description": "Returns Elo ratings for text-to-image models.",
         "operationId": "ListTextToImageModels",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_categories",
+            "description": "Include a breakdown of Elo scores by category.",
+            "schema": {
+              "type": "boolean"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -125,6 +137,18 @@
         "summary": "Returns Elo ratings for text-to-video models.",
         "description": "Returns Elo ratings for text-to-video models.",
         "operationId": "ListTextToVideoModels",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_categories",
+            "description": "Include a breakdown of Elo scores by category.",
+            "schema": {
+              "type": "boolean"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",
@@ -152,6 +176,18 @@
         "summary": "Returns Elo ratings for image-to-video models.",
         "description": "Returns Elo ratings for image-to-video models.",
         "operationId": "ListImageToVideoModels",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "include_categories",
+            "description": "Include a breakdown of Elo scores by category.",
+            "schema": {
+              "type": "boolean"
+            },
+            "explode": false,
+            "style": "form"
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful JSON response",

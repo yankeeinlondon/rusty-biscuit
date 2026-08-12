@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 80
 expression: "convert_atom(\"number(integer; min(0))\")"
 ---
 {
@@ -7,8 +8,15 @@ expression: "convert_atom(\"number(integer; min(0))\")"
   "additionalProperties": true,
   "properties": {
     "field": {
-      "minimum": 0,
-      "type": "integer"
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "minimum": 0,
+          "type": "integer"
+        }
+      ]
     }
   },
   "type": "object"

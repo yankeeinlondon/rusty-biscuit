@@ -1,11 +1,23 @@
 ---
 lessons_learned: "@.claudine/memory/commits.md"
-timeout: 15m
+timeout: 30m
 step_timeout: 12m
 show_system_prompt: false
 operation: commit
 agent: opencode
 model: minimax/MiniMax-M3
+initialize:
+    stack:
+        - when: "length(ctx.staged_files) == 0"
+          action:
+              - message: "🤨  `just commit` was called in **{{ctx.area}}** but there were no staged filed to commit!"
+              - warn: "no staged files to commit so exiting commit task"
+              - stop
+success:
+    message: "staged files committed in {{ctx.area}}"
+    stack:
+        - action:
+              - shell: "just gitnexus"
 ---
 
 # Commit Staged Files
@@ -45,6 +57,13 @@ It is important that the git operations you perform do not interfere with this e
 This monorepo has the following packages:
 
 ::shell sniff repo packages
+
+::block when="ctx.current_package_area"
+However you've started this session in the "{{ctx.current_package_area}}" package area so the most relevant packages to focus on are:
+
+::shell sniff repo packages --package-area '{{ctx.current_package_area}}'
+
+::end-block
 
 Of these packages, the following ones appear to have changes _staged_ for commit:
 

@@ -1,0 +1,16 @@
+{
+  "directory": "/workspace/project",
+  "payload": {
+    "id": "evt_scrubbed_status_overloaded",
+    "type": "session.status",
+    "properties": {
+      "sessionID": "ses_scrubbed",
+      "status": {
+        "type": "retry",
+        "attempt": 1,
+        "message": "gemini is currently overloaded",
+        "next": 1000
+      }
+    }
+  }
+}

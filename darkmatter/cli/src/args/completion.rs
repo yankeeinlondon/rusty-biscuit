@@ -89,22 +89,12 @@ pub fn complete_markdown_files_from(
                 continue;
             }
 
-            let mut display_path = if current_path.is_absolute() {
-                path.to_string_lossy().to_string()
+            let selected = if current_path.is_absolute() {
+                path.as_path()
             } else {
-                path.strip_prefix(base_dir)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .to_string()
+                path.strip_prefix(base_dir).unwrap_or(&path)
             };
-
-            if display_path.starts_with("./") {
-                display_path = display_path.trim_start_matches("./").to_string();
-            }
-
-            if is_dir && !display_path.ends_with('/') {
-                display_path.push('/');
-            }
+            let display_path = candidate_value(selected, is_dir);
 
             if seen.insert(display_path.clone()) {
                 candidates.push(CompletionCandidate::new(display_path));
@@ -116,10 +106,55 @@ pub fn complete_markdown_files_from(
     candidates
 }
 
+/// Renders one completion candidate from the path the completer selected.
+///
+/// ## Notes
+///
+/// A candidate never mixes spelling conventions. When
+/// [`biscuit_file::try_portable_string`] declines — a UNC, device-namespace, or
+/// irreducible verbatim path has no faithful `/`-separated spelling — the value
+/// keeps its native `\` separators, so the directory marker must be native too.
+/// A `\\server\share\docs/` candidate reads back as neither convention, and the
+/// shell would offer it as a literal completion value.
+fn candidate_value(selected: &Path, is_dir: bool) -> String {
+    let portable = biscuit_file::try_portable_string(selected);
+    let is_portable = portable.is_some();
+    let mut value = portable.unwrap_or_else(|| biscuit_file::to_portable_string(selected));
+
+    if is_portable && value.starts_with("./") {
+        value = value.trim_start_matches("./").to_string();
+    }
+
+    if is_dir {
+        let separator = if is_portable {
+            '/'
+        } else {
+            std::path::MAIN_SEPARATOR
+        };
+        if !value.ends_with(separator) {
+            value.push(separator);
+        }
+    }
+
+    value
+}
+
 /// Completes supported list indentation widths.
 pub fn complete_indent_values(current: &OsStr) -> Vec<CompletionCandidate> {
     let current_str = current.to_string_lossy();
     let mut candidates: Vec<_> = ["2", "4", "8"]
+        .into_iter()
+        .filter(|value| value.starts_with(current_str.as_ref()))
+        .map(CompletionCandidate::new)
+        .collect();
+    candidates.sort_by(|a, b| a.get_value().cmp(b.get_value()));
+    candidates
+}
+
+/// Completes common fixed-width wrapping targets.
+pub fn complete_fixed_width_values(current: &OsStr) -> Vec<CompletionCandidate> {
+    let current_str = current.to_string_lossy();
+    let mut candidates: Vec<_> = ["40", "60", "80", "100", "120"]
         .into_iter()
         .filter(|value| value.starts_with(current_str.as_ref()))
         .map(CompletionCandidate::new)
@@ -158,10 +193,6 @@ mod tests {
             .collect()
     }
 
-    fn normalize_path(path: &str) -> String {
-        path.replace('\\', "/")
-    }
-
     #[test]
     fn complete_indent_values_lists_valid_widths() {
         let values = completion_values(complete_indent_values(OsStr::new("")));
@@ -169,6 +200,18 @@ mod tests {
 
         let values = completion_values(complete_indent_values(OsStr::new("4")));
         assert_eq!(values, vec!["4"]);
+
+        let values = completion_values(complete_indent_values(OsStr::new("8")));
+        assert_eq!(values, vec!["8"]);
+    }
+
+    #[test]
+    fn complete_fixed_width_values_lists_common_widths() {
+        let values = completion_values(complete_fixed_width_values(OsStr::new("")));
+        assert_eq!(values, vec!["100", "120", "40", "60", "80"]);
+
+        let values = completion_values(complete_fixed_width_values(OsStr::new("8")));
+        assert_eq!(values, vec!["80"]);
     }
 
     #[test]
@@ -204,10 +247,6 @@ mod tests {
             temp_dir.path(),
             OsStr::new(""),
         ));
-        let root_values: Vec<_> = root_values
-            .into_iter()
-            .map(|value| normalize_path(&value))
-            .collect();
         assert!(root_values.contains(&"README.md".to_string()));
         assert!(root_values.contains(&"docs/".to_string()));
         assert!(!root_values.iter().any(|value| value.ends_with("notes.txt")));
@@ -216,10 +255,6 @@ mod tests {
             temp_dir.path(),
             OsStr::new("docs/"),
         ));
-        let docs_values: Vec<_> = docs_values
-            .into_iter()
-            .map(|value| normalize_path(&value))
-            .collect();
         assert!(docs_values.contains(&"docs/guide.md".to_string()));
         assert!(docs_values.contains(&"docs/deep/".to_string()));
 
@@ -227,11 +262,69 @@ mod tests {
             temp_dir.path(),
             OsStr::new("docs/deep/"),
         ));
-        let deep_values: Vec<_> = deep_values
-            .into_iter()
-            .map(|value| normalize_path(&value))
-            .collect();
         assert!(deep_values.contains(&"docs/deep/nested.md".to_string()));
+    }
+
+    /// A UNC directory has no faithful portable spelling, so its value and its
+    /// directory marker both stay native. The mixed `\\server\share\docs/` form
+    /// is exactly what the decline signal exists to prevent.
+    #[test]
+    #[cfg(windows)]
+    fn unc_directory_candidate_stays_native() {
+        let value = candidate_value(Path::new(r"\\server\share\docs"), true);
+        assert_eq!(value, r"\\server\share\docs\");
+        assert!(
+            !value.contains('/'),
+            "candidate mixed separator conventions: {value:?}"
+        );
+    }
+
+    /// The same rule, reached through the enumerating entry point rather than
+    /// the renderer, because selection sits between the two: `is_absolute`
+    /// decides whether a candidate keeps the enumerated path or is stripped
+    /// back to a base-relative one, and only the first branch can produce a
+    /// declined spelling at all.
+    ///
+    /// A trailing dot is the cheapest local decline available. It is creatable
+    /// only through the verbatim namespace and is precisely what makes the
+    /// legacy spelling unfaithful, so no SMB share has to be reachable for the
+    /// native-fallback path to be exercised.
+    #[test]
+    #[cfg(windows)]
+    fn declined_directory_completes_without_mixing_separators() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let verbatim_root = std::fs::canonicalize(temp_dir.path()).unwrap();
+        let declined_dir = verbatim_root.join("trailing.");
+        std::fs::create_dir(&declined_dir).unwrap();
+        std::fs::create_dir(declined_dir.join("nested")).unwrap();
+        std::fs::write(declined_dir.join("guide.md"), "# Guide").unwrap();
+        assert!(
+            biscuit_file::try_portable_string(&declined_dir).is_none(),
+            "fixture must be a path with no faithful portable spelling"
+        );
+
+        let current = format!("{}\\", declined_dir.display());
+        let values = completion_values(complete_markdown_files_from(
+            temp_dir.path(),
+            OsStr::new(&current),
+        ));
+
+        assert!(
+            values.contains(&format!("{current}guide.md")),
+            "expected the native file candidate, got: {values:?}"
+        );
+        assert!(
+            values.contains(&format!("{current}nested\\")),
+            "expected a natively terminated directory candidate, got: {values:?}"
+        );
+        assert!(
+            values.iter().all(|value| !value.contains('/')),
+            "a candidate mixed separator conventions: {values:?}"
+        );
+
+        // The legacy removal `TempDir` performs on drop cannot delete a
+        // trailing-dot name, so the verbatim spelling has to do it here.
+        std::fs::remove_dir_all(&declined_dir).unwrap();
     }
 
     #[test]
@@ -243,11 +336,7 @@ mod tests {
             temp_dir.path(),
             OsStr::new("REA"),
         ));
-        assert!(
-            values
-                .iter()
-                .any(|value| normalize_path(value) == "README.md")
-        );
+        assert!(values.iter().any(|value| value == "README.md"));
     }
 
     #[test]

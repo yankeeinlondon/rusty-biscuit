@@ -1,0 +1,13 @@
+# Human-owned overrides for the qwen provider. Each entry WINS over the
+# field's declared source during generation (whole-key replacement) and MUST
+# carry a `reason:`. Keys are catalog field names; an override for a field
+# with no mapping-registry entry is a generation error.
+model_env_vars:
+    value: ["QWEN_MODEL"]
+    reason: >-
+        agent-models research records OPENAI_MODEL and ANTHROPIC_MODEL
+        (protocol-specific vars shared with other providers); consulting
+        them in the wrapper MODEL selection chain would cross-contaminate
+        providers (research notes QWEN_MODEL as the provider-specific
+        alias). Pin QWEN_MODEL until the wrapper env contract is
+        redesigned (Phase D).

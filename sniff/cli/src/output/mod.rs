@@ -68,7 +68,7 @@ pub(crate) use hardware::{
     render_memory_section, render_storage_section,
 };
 pub(crate) use network::render_network_section;
-pub(crate) use os::render_os_section;
+pub(crate) use os::{render_os_section, render_runtime_environment};
 
 /// Filter mode for output - determines which subsection to display.
 ///

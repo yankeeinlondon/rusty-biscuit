@@ -48,9 +48,9 @@
 //!
 //! let client = UnfoldedCircleCoreRest::with_base_url("https://staging.example.com/v1");
 //! ```
-use crate::shared::{RequestParts, SchematicError};
-pub use schematic_definitions::unfolded_circle::core_rest::*;
 use serde::{Deserialize, Serialize};
+pub use schematic_definitions::unfolded_circle::core_rest::*;
+use crate::shared::{RequestParts, SchematicError};
 /// Request for `Login` endpoint.
 ///
 /// ## Example
@@ -82,21 +82,21 @@ impl LoginCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/pub/login".to_string();
         Ok((
             "POST",
             path,
-            Some(
+            crate::shared::RequestBody::Json(
                 serde_json::to_string(&self.body)
-                    .map_err(|e| SchematicError::SerializationError(e.to_string()))?,
+                    .map_err(|e| { SchematicError::SerializationError(e.to_string()) })?,
             ),
             vec![],
         ))
@@ -131,16 +131,16 @@ impl LogoutCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/pub/logout".to_string();
-        Ok(("POST", path, None, vec![]))
+        Ok(("POST", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for LogoutCoreRestRequest {
@@ -167,16 +167,16 @@ impl GetSystemInfoCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/system".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for GetSystemInfoCoreRestRequest {
@@ -203,35 +203,62 @@ impl ExportBackupCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/system/backup/export".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for ExportBackupCoreRestRequest {
     type Response = bytes::Bytes;
     const ENDPOINT_ID: &'static str = "ExportBackup";
 }
+/// Body for the `RestoreBackup` endpoint, sent as `multipart/form-data`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RestoreBackupForm {
+    pub file: crate::shared::FormFile,
+}
+impl RestoreBackupForm {
+    /// Converts the body into its multipart parts.
+    pub fn into_form_parts(self) -> Vec<crate::shared::FormPart> {
+        let mut parts = Vec::new();
+        {
+            let value = self.file;
+            parts.push(crate::shared::FormPart::file("file", value));
+        }
+        parts
+    }
+}
 /// Request for `RestoreBackup` endpoint.
 ///
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::unfolded_circle_core_rest::RestoreBackupCoreRestRequest;
+/// use schematic_schema::unfolded_circle_core_rest::{RestoreBackupCoreRestRequest, RestoreBackupForm};
 ///
-/// let request = RestoreBackupCoreRestRequest::default()
+/// let body = RestoreBackupForm {
+///     // ... set required fields ...
+///     ..Default::default()
+/// };
+/// let request = RestoreBackupCoreRestRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct RestoreBackupCoreRestRequest {}
+pub struct RestoreBackupCoreRestRequest {
+    /// Request body
+    pub body: RestoreBackupForm,
+}
 impl RestoreBackupCoreRestRequest {
+    /// Creates a new request with the required path parameters and body.
+    pub fn new(body: RestoreBackupForm) -> Self {
+        Self { body }
+    }
     /// Converts the request into (method, path, body, headers) parts.
     ///
     /// ## Returns
@@ -239,42 +266,75 @@ impl RestoreBackupCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/system/backup/restore".to_string();
-        Ok(("PUT", path, None, vec![]))
+        Ok((
+            "PUT",
+            path,
+            crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
+            vec![],
+        ))
+    }
+}
+impl From<RestoreBackupForm> for RestoreBackupCoreRestRequest {
+    fn from(body: RestoreBackupForm) -> Self {
+        Self { body }
     }
 }
 impl crate::shared::EndpointSpec for RestoreBackupCoreRestRequest {
     type Response = BackupRestoreReportItems;
     const ENDPOINT_ID: &'static str = "RestoreBackup";
 }
+/// Body for the `UploadResource` endpoint, sent as `multipart/form-data`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UploadResourceForm {
+    pub file: crate::shared::FormFile,
+}
+impl UploadResourceForm {
+    /// Converts the body into its multipart parts.
+    pub fn into_form_parts(self) -> Vec<crate::shared::FormPart> {
+        let mut parts = Vec::new();
+        {
+            let value = self.file;
+            parts.push(crate::shared::FormPart::file("file", value));
+        }
+        parts
+    }
+}
 /// Request for `UploadResource` endpoint.
 ///
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::unfolded_circle_core_rest::UploadResourceCoreRestRequest;
+/// use schematic_schema::unfolded_circle_core_rest::{UploadResourceCoreRestRequest, UploadResourceForm};
 ///
-/// let request = UploadResourceCoreRestRequest::new("resource_type_value")
+/// let body = UploadResourceForm {
+///     // ... set required fields ...
+///     ..Default::default()
+/// };
+/// let request = UploadResourceCoreRestRequest::new("resource_type_value", body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UploadResourceCoreRestRequest {
     /// Path parameter: resource_type
     pub resource_type: String,
+    /// Request body
+    pub body: UploadResourceForm,
 }
 impl UploadResourceCoreRestRequest {
-    /// Creates a new request with the required path parameters.
-    pub fn new(resource_type: impl Into<String>) -> Self {
+    /// Creates a new request with the required path parameters and body.
+    pub fn new(resource_type: impl Into<String>, body: UploadResourceForm) -> Self {
         Self {
             resource_type: resource_type.into(),
+            body,
         }
     }
     /// Converts the request into (method, path, body, headers) parts.
@@ -284,30 +344,23 @@ impl UploadResourceCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!("/resources/{}", self.resource_type);
-        Ok(("POST", path, None, vec![]))
-    }
-}
-impl From<&str> for UploadResourceCoreRestRequest {
-    fn from(param: &str) -> Self {
-        Self {
-            resource_type: param.to_string(),
-        }
-    }
-}
-impl From<String> for UploadResourceCoreRestRequest {
-    fn from(param: String) -> Self {
-        Self {
-            resource_type: param,
-        }
+        let path = format!(
+            "/resources/{}", urlencoding::encode(& self.resource_type.to_string())
+        );
+        Ok((
+            "POST",
+            path,
+            crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
+            vec![],
+        ))
     }
 }
 impl crate::shared::EndpointSpec for UploadResourceCoreRestRequest {
@@ -333,7 +386,10 @@ pub struct GetResourceCoreRestRequest {
 }
 impl GetResourceCoreRestRequest {
     /// Creates a new request with the required path parameters.
-    pub fn new(resource_type: impl Into<String>, resource_id: impl Into<String>) -> Self {
+    pub fn new(
+        resource_type: impl Into<String>,
+        resource_id: impl Into<String>,
+    ) -> Self {
         Self {
             resource_type: resource_type.into(),
             resource_id: resource_id.into(),
@@ -346,35 +402,65 @@ impl GetResourceCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!("/resources/{}/{}", self.resource_type, self.resource_id);
-        Ok(("GET", path, None, vec![]))
+        let path = format!(
+            "/resources/{}/{}", urlencoding::encode(& self.resource_type.to_string()),
+            urlencoding::encode(& self.resource_id.to_string())
+        );
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for GetResourceCoreRestRequest {
     type Response = bytes::Bytes;
     const ENDPOINT_ID: &'static str = "GetResource";
 }
+/// Body for the `InstallCustomIntegration` endpoint, sent as `multipart/form-data`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct InstallCustomIntegrationForm {
+    pub file: crate::shared::FormFile,
+}
+impl InstallCustomIntegrationForm {
+    /// Converts the body into its multipart parts.
+    pub fn into_form_parts(self) -> Vec<crate::shared::FormPart> {
+        let mut parts = Vec::new();
+        {
+            let value = self.file;
+            parts.push(crate::shared::FormPart::file("file", value));
+        }
+        parts
+    }
+}
 /// Request for `InstallCustomIntegration` endpoint.
 ///
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::unfolded_circle_core_rest::InstallCustomIntegrationCoreRestRequest;
+/// use schematic_schema::unfolded_circle_core_rest::{InstallCustomIntegrationCoreRestRequest, InstallCustomIntegrationForm};
 ///
-/// let request = InstallCustomIntegrationCoreRestRequest::default()
+/// let body = InstallCustomIntegrationForm {
+///     // ... set required fields ...
+///     ..Default::default()
+/// };
+/// let request = InstallCustomIntegrationCoreRestRequest::new(body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct InstallCustomIntegrationCoreRestRequest {}
+pub struct InstallCustomIntegrationCoreRestRequest {
+    /// Request body
+    pub body: InstallCustomIntegrationForm,
+}
 impl InstallCustomIntegrationCoreRestRequest {
+    /// Creates a new request with the required path parameters and body.
+    pub fn new(body: InstallCustomIntegrationForm) -> Self {
+        Self { body }
+    }
     /// Converts the request into (method, path, body, headers) parts.
     ///
     /// ## Returns
@@ -382,42 +468,75 @@ impl InstallCustomIntegrationCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/intg/install".to_string();
-        Ok(("POST", path, None, vec![]))
+        Ok((
+            "POST",
+            path,
+            crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
+            vec![],
+        ))
+    }
+}
+impl From<InstallCustomIntegrationForm> for InstallCustomIntegrationCoreRestRequest {
+    fn from(body: InstallCustomIntegrationForm) -> Self {
+        Self { body }
     }
 }
 impl crate::shared::EndpointSpec for InstallCustomIntegrationCoreRestRequest {
     type Response = IntegrationDriverInfo;
     const ENDPOINT_ID: &'static str = "InstallCustomIntegration";
 }
+/// Body for the `UploadCustomIrCodeSet` endpoint, sent as `multipart/form-data`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct UploadCustomIrCodeSetForm {
+    pub file: crate::shared::FormFile,
+}
+impl UploadCustomIrCodeSetForm {
+    /// Converts the body into its multipart parts.
+    pub fn into_form_parts(self) -> Vec<crate::shared::FormPart> {
+        let mut parts = Vec::new();
+        {
+            let value = self.file;
+            parts.push(crate::shared::FormPart::file("file", value));
+        }
+        parts
+    }
+}
 /// Request for `UploadCustomIrCodeSet` endpoint.
 ///
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::unfolded_circle_core_rest::UploadCustomIrCodeSetCoreRestRequest;
+/// use schematic_schema::unfolded_circle_core_rest::{UploadCustomIrCodeSetCoreRestRequest, UploadCustomIrCodeSetForm};
 ///
-/// let request = UploadCustomIrCodeSetCoreRestRequest::new("code_set_id_value")
+/// let body = UploadCustomIrCodeSetForm {
+///     // ... set required fields ...
+///     ..Default::default()
+/// };
+/// let request = UploadCustomIrCodeSetCoreRestRequest::new("code_set_id_value", body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct UploadCustomIrCodeSetCoreRestRequest {
     /// Path parameter: code_set_id
     pub code_set_id: String,
+    /// Request body
+    pub body: UploadCustomIrCodeSetForm,
 }
 impl UploadCustomIrCodeSetCoreRestRequest {
-    /// Creates a new request with the required path parameters.
-    pub fn new(code_set_id: impl Into<String>) -> Self {
+    /// Creates a new request with the required path parameters and body.
+    pub fn new(code_set_id: impl Into<String>, body: UploadCustomIrCodeSetForm) -> Self {
         Self {
             code_set_id: code_set_id.into(),
+            body,
         }
     }
     /// Converts the request into (method, path, body, headers) parts.
@@ -427,54 +546,75 @@ impl UploadCustomIrCodeSetCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!("/ir/codes/custom/{}", self.code_set_id);
-        Ok(("POST", path, None, vec![]))
-    }
-}
-impl From<&str> for UploadCustomIrCodeSetCoreRestRequest {
-    fn from(param: &str) -> Self {
-        Self {
-            code_set_id: param.to_string(),
-        }
-    }
-}
-impl From<String> for UploadCustomIrCodeSetCoreRestRequest {
-    fn from(param: String) -> Self {
-        Self { code_set_id: param }
+        let path = format!(
+            "/ir/codes/custom/{}", urlencoding::encode(& self.code_set_id.to_string())
+        );
+        Ok((
+            "POST",
+            path,
+            crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
+            vec![],
+        ))
     }
 }
 impl crate::shared::EndpointSpec for UploadCustomIrCodeSetCoreRestRequest {
     type Response = CodeSetUploadResult;
     const ENDPOINT_ID: &'static str = "UploadCustomIrCodeSet";
 }
+/// Body for the `InstallCustomComponent` endpoint, sent as `multipart/form-data`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct InstallCustomComponentForm {
+    pub file: crate::shared::FormFile,
+}
+impl InstallCustomComponentForm {
+    /// Converts the body into its multipart parts.
+    pub fn into_form_parts(self) -> Vec<crate::shared::FormPart> {
+        let mut parts = Vec::new();
+        {
+            let value = self.file;
+            parts.push(crate::shared::FormPart::file("file", value));
+        }
+        parts
+    }
+}
 /// Request for `InstallCustomComponent` endpoint.
 ///
 /// ## Example
 ///
 /// ```text
-/// use schematic_schema::unfolded_circle_core_rest::InstallCustomComponentCoreRestRequest;
+/// use schematic_schema::unfolded_circle_core_rest::{InstallCustomComponentCoreRestRequest, InstallCustomComponentForm};
 ///
-/// let request = InstallCustomComponentCoreRestRequest::new("custom_component_value")
+/// let body = InstallCustomComponentForm {
+///     // ... set required fields ...
+///     ..Default::default()
+/// };
+/// let request = InstallCustomComponentCoreRestRequest::new("custom_component_value", body)
 ///;
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct InstallCustomComponentCoreRestRequest {
     /// Path parameter: custom_component
     pub custom_component: String,
+    /// Request body
+    pub body: InstallCustomComponentForm,
 }
 impl InstallCustomComponentCoreRestRequest {
-    /// Creates a new request with the required path parameters.
-    pub fn new(custom_component: impl Into<String>) -> Self {
+    /// Creates a new request with the required path parameters and body.
+    pub fn new(
+        custom_component: impl Into<String>,
+        body: InstallCustomComponentForm,
+    ) -> Self {
         Self {
             custom_component: custom_component.into(),
+            body,
         }
     }
     /// Converts the request into (method, path, body, headers) parts.
@@ -484,30 +624,24 @@ impl InstallCustomComponentCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
-        let path = format!("/system/install/{}", self.custom_component);
-        Ok(("POST", path, None, vec![]))
-    }
-}
-impl From<&str> for InstallCustomComponentCoreRestRequest {
-    fn from(param: &str) -> Self {
-        Self {
-            custom_component: param.to_string(),
-        }
-    }
-}
-impl From<String> for InstallCustomComponentCoreRestRequest {
-    fn from(param: String) -> Self {
-        Self {
-            custom_component: param,
-        }
+        let path = format!(
+            "/system/install/{}", urlencoding::encode(& self.custom_component
+            .to_string())
+        );
+        Ok((
+            "POST",
+            path,
+            crate::shared::RequestBody::Multipart(self.body.into_form_parts()),
+            vec![],
+        ))
     }
 }
 impl crate::shared::EndpointSpec for InstallCustomComponentCoreRestRequest {
@@ -534,16 +668,16 @@ impl QueryLogsTextCoreRestRequest {
     /// A tuple of:
     /// - HTTP method as a static string (e.g., "GET", "POST")
     /// - Fully substituted path string with query parameters
-    /// - Optional JSON body string
+    /// - The request body as a `RequestBody`
     /// - Endpoint-specific headers as key-value pairs
     ///
     /// ## Errors
     ///
-    /// Returns `SchematicError::SerializationError` if the request body
-    /// fails to serialize to JSON.
+    /// Returns `SchematicError::SerializationError` if a JSON request body
+    /// fails to serialize.
     pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
         let path = "/system/logs".to_string();
-        Ok(("GET", path, None, vec![]))
+        Ok(("GET", path, crate::shared::RequestBody::Empty, vec![]))
     }
 }
 impl crate::shared::EndpointSpec for QueryLogsTextCoreRestRequest {
@@ -642,6 +776,26 @@ impl UnfoldedCircleCoreRestRequest {
             }
         }
     }
+    /// Returns how this endpoint's response body is decoded.
+    ///
+    /// The generic `request::<T>()` decodes JSON; it consults this to
+    /// reject text, binary, and empty endpoints up front.
+    #[must_use]
+    pub fn response_kind(&self) -> crate::shared::ResponseKind {
+        match self {
+            Self::Login(_) => crate::shared::ResponseKind::Json,
+            Self::Logout(_) => crate::shared::ResponseKind::Empty,
+            Self::GetSystemInfo(_) => crate::shared::ResponseKind::Json,
+            Self::ExportBackup(_) => crate::shared::ResponseKind::Binary,
+            Self::RestoreBackup(_) => crate::shared::ResponseKind::Json,
+            Self::UploadResource(_) => crate::shared::ResponseKind::Json,
+            Self::GetResource(_) => crate::shared::ResponseKind::Binary,
+            Self::InstallCustomIntegration(_) => crate::shared::ResponseKind::Json,
+            Self::UploadCustomIrCodeSet(_) => crate::shared::ResponseKind::Json,
+            Self::InstallCustomComponent(_) => crate::shared::ResponseKind::Json,
+            Self::QueryLogsText(_) => crate::shared::ResponseKind::Text,
+        }
+    }
 }
 impl From<LoginCoreRestRequest> for UnfoldedCircleCoreRestRequest {
     fn from(req: LoginCoreRestRequest) -> Self {
@@ -719,41 +873,55 @@ impl UnfoldedCircleCoreRest {
     /// Base URL for the API.
     pub const BASE_URL: &'static str = "http://remote.local/api";
     /// Official API documentation URL, if available.
-    pub const DOCS_URL: Option<&'static str> =
-        Some("https://unfoldedcircle.github.io/core-api/rest/");
+    pub const DOCS_URL: Option<&'static str> = Some(
+        "https://unfoldedcircle.github.io/core-api/rest/",
+    );
     /// Creates a new API client with the default base URL.
     pub fn new() -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec![
-                "UCR_CORE_API_KEY".to_string(),
-                "UNFOLDED_CIRCLE_API_KEY".to_string(),
+                "UCR_CORE_API_KEY".to_string(), "UNFOLDED_CIRCLE_API_KEY".to_string()
             ],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::BearerToken { header: None }],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken { header: None }),
+                explicit: vec![
+                    schematic_define::AuthMethod::BearerToken { header : None }
+                ],
+                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
+                    header: None,
+                }),
             },
             env_username: Some("UCR_CORE_USER".to_string()),
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "UCR_CORE_API_KEY".to_string(),
-                        "UNFOLDED_CIRCLE_API_KEY".to_string(),
-                    ])),
-                    basic_user: Some(schematic_define::EnvList::new(vec![
-                        "UCR_CORE_USER".to_string(),
-                    ])),
-                    basic_pass: Some(schematic_define::EnvList::new(vec![
-                        "UCR_CORE_PASSWORD".to_string(),
-                    ])),
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(
+                            vec![
+                                "UCR_CORE_API_KEY".to_string(), "UNFOLDED_CIRCLE_API_KEY"
+                                .to_string()
+                            ],
+                        ),
+                    ),
+                    basic_user: Some(
+                        schematic_define::EnvList::new(vec!["UCR_CORE_USER".to_string()]),
+                    ),
+                    basic_pass: Some(
+                        schematic_define::EnvList::new(
+                            vec!["UCR_CORE_PASSWORD".to_string()],
+                        ),
+                    ),
                     api_key: None,
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -766,36 +934,49 @@ impl UnfoldedCircleCoreRest {
     /// ```
     pub fn with_base_url(base_url: impl Into<String>) -> Self {
         Self {
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
             base_url: base_url.into(),
             env_auth: vec![
-                "UCR_CORE_API_KEY".to_string(),
-                "UNFOLDED_CIRCLE_API_KEY".to_string(),
+                "UCR_CORE_API_KEY".to_string(), "UNFOLDED_CIRCLE_API_KEY".to_string()
             ],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::BearerToken { header: None }],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken { header: None }),
+                explicit: vec![
+                    schematic_define::AuthMethod::BearerToken { header : None }
+                ],
+                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
+                    header: None,
+                }),
             },
             env_username: Some("UCR_CORE_USER".to_string()),
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "UCR_CORE_API_KEY".to_string(),
-                        "UNFOLDED_CIRCLE_API_KEY".to_string(),
-                    ])),
-                    basic_user: Some(schematic_define::EnvList::new(vec![
-                        "UCR_CORE_USER".to_string(),
-                    ])),
-                    basic_pass: Some(schematic_define::EnvList::new(vec![
-                        "UCR_CORE_PASSWORD".to_string(),
-                    ])),
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(
+                            vec![
+                                "UCR_CORE_API_KEY".to_string(), "UNFOLDED_CIRCLE_API_KEY"
+                                .to_string()
+                            ],
+                        ),
+                    ),
+                    basic_user: Some(
+                        schematic_define::EnvList::new(vec!["UCR_CORE_USER".to_string()]),
+                    ),
+                    basic_pass: Some(
+                        schematic_define::EnvList::new(
+                            vec!["UCR_CORE_PASSWORD".to_string()],
+                        ),
+                    ),
                     api_key: None,
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -817,33 +998,43 @@ impl UnfoldedCircleCoreRest {
             client,
             base_url: Self::BASE_URL.to_string(),
             env_auth: vec![
-                "UCR_CORE_API_KEY".to_string(),
-                "UNFOLDED_CIRCLE_API_KEY".to_string(),
+                "UCR_CORE_API_KEY".to_string(), "UNFOLDED_CIRCLE_API_KEY".to_string()
             ],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::BearerToken { header: None }],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken { header: None }),
+                explicit: vec![
+                    schematic_define::AuthMethod::BearerToken { header : None }
+                ],
+                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
+                    header: None,
+                }),
             },
             env_username: Some("UCR_CORE_USER".to_string()),
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "UCR_CORE_API_KEY".to_string(),
-                        "UNFOLDED_CIRCLE_API_KEY".to_string(),
-                    ])),
-                    basic_user: Some(schematic_define::EnvList::new(vec![
-                        "UCR_CORE_USER".to_string(),
-                    ])),
-                    basic_pass: Some(schematic_define::EnvList::new(vec![
-                        "UCR_CORE_PASSWORD".to_string(),
-                    ])),
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(
+                            vec![
+                                "UCR_CORE_API_KEY".to_string(), "UNFOLDED_CIRCLE_API_KEY"
+                                .to_string()
+                            ],
+                        ),
+                    ),
+                    basic_user: Some(
+                        schematic_define::EnvList::new(vec!["UCR_CORE_USER".to_string()]),
+                    ),
+                    basic_pass: Some(
+                        schematic_define::EnvList::new(
+                            vec!["UCR_CORE_PASSWORD".to_string()],
+                        ),
+                    ),
                     api_key: None,
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -858,38 +1049,51 @@ impl UnfoldedCircleCoreRest {
     ///     .unwrap();
     /// let api = Api::with_client_and_base_url(custom_client, "http://localhost:8080");
     /// ```
-    pub fn with_client_and_base_url(client: reqwest::Client, base_url: impl Into<String>) -> Self {
+    pub fn with_client_and_base_url(
+        client: reqwest::Client,
+        base_url: impl Into<String>,
+    ) -> Self {
         Self {
             client,
             base_url: base_url.into(),
             env_auth: vec![
-                "UCR_CORE_API_KEY".to_string(),
-                "UNFOLDED_CIRCLE_API_KEY".to_string(),
+                "UCR_CORE_API_KEY".to_string(), "UNFOLDED_CIRCLE_API_KEY".to_string()
             ],
-            auth_strategy: schematic_define::AuthStrategy::BearerToken { header: None },
+            auth_strategy: schematic_define::AuthStrategy::BearerToken {
+                header: None,
+            },
             auth_policy: schematic_define::AuthPolicy {
-                explicit: vec![schematic_define::AuthMethod::BearerToken { header: None }],
-                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken { header: None }),
+                explicit: vec![
+                    schematic_define::AuthMethod::BearerToken { header : None }
+                ],
+                env_fallback: Some(schematic_define::EnvAuthStrategy::BearerToken {
+                    header: None,
+                }),
             },
             env_username: Some("UCR_CORE_USER".to_string()),
-            headers: schematic_define::Headers::default().with_env_mapping(
-                schematic_define::EnvMapping {
-                    bearer_token: Some(schematic_define::EnvList::new(vec![
-                        "UCR_CORE_API_KEY".to_string(),
-                        "UNFOLDED_CIRCLE_API_KEY".to_string(),
-                    ])),
-                    basic_user: Some(schematic_define::EnvList::new(vec![
-                        "UCR_CORE_USER".to_string(),
-                    ])),
-                    basic_pass: Some(schematic_define::EnvList::new(vec![
-                        "UCR_CORE_PASSWORD".to_string(),
-                    ])),
+            headers: schematic_define::Headers::default()
+                .with_env_mapping(schematic_define::EnvMapping {
+                    bearer_token: Some(
+                        schematic_define::EnvList::new(
+                            vec![
+                                "UCR_CORE_API_KEY".to_string(), "UNFOLDED_CIRCLE_API_KEY"
+                                .to_string()
+                            ],
+                        ),
+                    ),
+                    basic_user: Some(
+                        schematic_define::EnvList::new(vec!["UCR_CORE_USER".to_string()]),
+                    ),
+                    basic_pass: Some(
+                        schematic_define::EnvList::new(
+                            vec!["UCR_CORE_PASSWORD".to_string()],
+                        ),
+                    ),
                     api_key: None,
                     oauth_client_id: None,
                     oauth_client_secret: None,
                     oauth_redirect_uri: None,
-                },
-            ),
+                }),
             variant_hooks: crate::shared::VariantHooks::default(),
         }
     }
@@ -917,12 +1121,14 @@ impl UnfoldedCircleCoreRest {
     /// Returns `None` if the authentication strategy is not `ApiKey`
     /// or if the API key environment variable is not set.
     pub fn api_key_header(&self) -> Option<(String, String)> {
-        let header = self
+        let (header, value_prefix) = self
             .auth_policy
             .explicit
             .iter()
             .find_map(|method| match method {
-                schematic_define::AuthMethod::ApiKey { header } => Some(header.clone()),
+                schematic_define::AuthMethod::ApiKey { header, value_prefix } => {
+                    Some((header.clone(), value_prefix.clone()))
+                }
                 _ => None,
             })
             .or_else(|| {
@@ -930,22 +1136,25 @@ impl UnfoldedCircleCoreRest {
                     .env_mapping()
                     .api_key
                     .as_ref()
-                    .map(|api_key| api_key.header.clone())
-            });
-        header.and_then(|header| {
-            self.headers
-                .env_mapping()
-                .api_key
-                .as_ref()
-                .and_then(|api_key| {
-                    api_key
-                        .names
-                        .names()
-                        .iter()
-                        .find_map(|env_name| std::env::var(env_name).ok())
-                })
-                .map(|value| (header, value))
-        })
+                    .map(|api_key| (api_key.header.clone(), None))
+            })?;
+        self.headers
+            .env_mapping()
+            .api_key
+            .as_ref()
+            .and_then(|api_key| {
+                api_key
+                    .names
+                    .names()
+                    .iter()
+                    .find_map(|env_name| std::env::var(env_name).ok())
+            })
+            .map(|value| {
+                let value = format!(
+                    "{}{}", value_prefix.clone().unwrap_or_default(), value
+                );
+                (header, value)
+            })
     }
     /// Creates a variant builder for customizing this API client.
     ///
@@ -1148,9 +1357,7 @@ impl<'a> UnfoldedCircleCoreRestVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 serde_json::Value,
-            ) -> Result<serde_json::Value, crate::shared::SchematicError>
-            + Send
-            + Sync
+            ) -> Result<serde_json::Value, crate::shared::SchematicError> + Send + Sync
             + 'static,
     {
         self.pre_response_json = Some(std::sync::Arc::new(hook));
@@ -1178,15 +1385,13 @@ impl<'a> UnfoldedCircleCoreRestVariantBuilder<'a> {
         F: Fn(
                 &crate::shared::ResponseContext,
                 &mut R::Response,
-            ) -> Result<(), crate::shared::SchematicError>
-            + Send
-            + Sync
-            + 'static,
+            ) -> Result<(), crate::shared::SchematicError> + Send + Sync + 'static,
     {
-        self.response_mutators.insert(
-            R::ENDPOINT_ID,
-            std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
-        );
+        self.response_mutators
+            .insert(
+                R::ENDPOINT_ID,
+                std::sync::Arc::new(crate::shared::TypedMutator::new(hook)),
+            );
         self
     }
     /// Builds the variant API client with the configured options.
@@ -1212,15 +1417,17 @@ impl<'a> UnfoldedCircleCoreRestVariantBuilder<'a> {
         let headers = match self.headers {
             Some(headers) => headers,
             None if has_env_auth_override
-                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) =>
-            {
-                self.base.headers.clone().with_env_mapping(
-                    schematic_define::RestApi::legacy_env_mapping_for(
-                        &auth_strategy,
-                        &env_auth,
-                        self.base.env_username.as_deref(),
-                    ),
-                )
+                || !matches!(auth_update, schematic_define::UpdateStrategy::NoChange) => {
+                self.base
+                    .headers
+                    .clone()
+                    .with_env_mapping(
+                        schematic_define::RestApi::legacy_env_mapping_for(
+                            &auth_strategy,
+                            &env_auth,
+                            self.base.env_username.as_deref(),
+                        ),
+                    )
             }
             None => self.base.headers.clone(),
         };
@@ -1248,11 +1455,13 @@ impl UnfoldedCircleCoreRest {
             .explicit
             .iter()
             .map(|method| match method {
-                schematic_define::AuthMethod::BearerToken { header } => match header.as_deref() {
-                    Some(header) => format!("an explicit bearer token in `{header}`"),
-                    None => "an explicit bearer token".to_string(),
-                },
-                schematic_define::AuthMethod::ApiKey { header } => {
+                schematic_define::AuthMethod::BearerToken { header } => {
+                    match header.as_deref() {
+                        Some(header) => format!("an explicit bearer token in `{header}`"),
+                        None => "an explicit bearer token".to_string(),
+                    }
+                }
+                schematic_define::AuthMethod::ApiKey { header, .. } => {
                     format!("an explicit API key in `{header}`")
                 }
                 schematic_define::AuthMethod::Basic => {
@@ -1267,20 +1476,22 @@ impl UnfoldedCircleCoreRest {
     }
     fn env_fallback_var_names(&self) -> Vec<String> {
         match &self.auth_policy.env_fallback {
-            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => self
-                .headers
-                .env_mapping()
-                .bearer_token
-                .as_ref()
-                .map(|list| list.names().to_vec())
-                .unwrap_or_default(),
-            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => self
-                .headers
-                .env_mapping()
-                .api_key
-                .as_ref()
-                .map(|api_key| api_key.names.names().to_vec())
-                .unwrap_or_default(),
+            Some(schematic_define::EnvAuthStrategy::BearerToken { .. }) => {
+                self.headers
+                    .env_mapping()
+                    .bearer_token
+                    .as_ref()
+                    .map(|list| list.names().to_vec())
+                    .unwrap_or_default()
+            }
+            Some(schematic_define::EnvAuthStrategy::ApiKey { .. }) => {
+                self.headers
+                    .env_mapping()
+                    .api_key
+                    .as_ref()
+                    .map(|api_key| api_key.names.names().to_vec())
+                    .unwrap_or_default()
+            }
             Some(schematic_define::EnvAuthStrategy::Basic) => {
                 let mut vars = Vec::new();
                 if let Some(user) = self.headers.env_mapping().basic_user.as_ref() {
@@ -1303,10 +1514,13 @@ impl UnfoldedCircleCoreRest {
             options.push(explicit_methods.join(", "));
         }
         if !env_fallback_vars.is_empty() {
-            options.push(format!(
-                "set one of the fallback env vars `{}`",
-                env_fallback_vars.join("`, `")
-            ));
+            options
+                .push(
+                    format!(
+                        "set one of the fallback env vars `{}`", env_fallback_vars
+                        .join("`, `")
+                    ),
+                );
         }
         let mut message = if options.is_empty() {
             "Authentication required.".to_string()
@@ -1325,15 +1539,19 @@ impl UnfoldedCircleCoreRest {
             env_fallback_vars,
         }
     }
-    fn apply_env_fallback(&self, headers: schematic_define::Headers) -> schematic_define::Headers {
+    fn apply_env_fallback(
+        &self,
+        headers: schematic_define::Headers,
+    ) -> schematic_define::Headers {
         let env_mapping = self.headers.env_mapping().clone();
         match &self.auth_policy.env_fallback {
             Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                let token = env_mapping.bearer_token.as_ref().and_then(|list| {
-                    list.names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
+                let token = env_mapping
+                    .bearer_token
+                    .as_ref()
+                    .and_then(|list| {
+                        list.names().iter().find_map(|name| std::env::var(name).ok())
+                    });
                 match (token, header.as_deref()) {
                     (Some(token), Some(header)) => {
                         headers.use_bearer_token_with_header(token, header)
@@ -1342,32 +1560,44 @@ impl UnfoldedCircleCoreRest {
                     _ => headers,
                 }
             }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { header }) => {
-                let key = env_mapping.api_key.as_ref().and_then(|api_key| {
-                    api_key
-                        .names
-                        .names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
+            Some(schematic_define::EnvAuthStrategy::ApiKey { header, value_prefix }) => {
+                let key = env_mapping
+                    .api_key
+                    .as_ref()
+                    .and_then(|api_key| {
+                        api_key
+                            .names
+                            .names()
+                            .iter()
+                            .find_map(|name| std::env::var(name).ok())
+                    });
                 match key {
-                    Some(key) => headers.header(header.clone(), key),
+                    Some(key) => {
+                        let value = format!(
+                            "{}{}", value_prefix.clone().unwrap_or_default(), key
+                        );
+                        headers.header(header.clone(), value)
+                    }
                     None => headers,
                 }
             }
             Some(schematic_define::EnvAuthStrategy::Basic) => {
-                let username = env_mapping.basic_user.as_ref().and_then(|list| {
-                    list.names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
-                let password = env_mapping.basic_pass.as_ref().and_then(|list| {
-                    list.names()
-                        .iter()
-                        .find_map(|name| std::env::var(name).ok())
-                });
+                let username = env_mapping
+                    .basic_user
+                    .as_ref()
+                    .and_then(|list| {
+                        list.names().iter().find_map(|name| std::env::var(name).ok())
+                    });
+                let password = env_mapping
+                    .basic_pass
+                    .as_ref()
+                    .and_then(|list| {
+                        list.names().iter().find_map(|name| std::env::var(name).ok())
+                    });
                 match (username, password) {
-                    (Some(username), Some(password)) => headers.use_basic_auth(username, password),
+                    (Some(username), Some(password)) => {
+                        headers.use_basic_auth(username, password)
+                    }
                     _ => headers,
                 }
             }
@@ -1378,12 +1608,14 @@ impl UnfoldedCircleCoreRest {
     fn headers_satisfy_fallback(&self, headers: &schematic_define::Headers) -> bool {
         match &self.auth_policy.env_fallback {
             Some(schematic_define::EnvAuthStrategy::BearerToken { header }) => {
-                header.as_deref().map_or_else(
-                    || headers.has_authorization(),
-                    |header| headers.has_header(header),
-                )
+                header
+                    .as_deref()
+                    .map_or_else(
+                        || headers.has_authorization(),
+                        |header| headers.has_header(header),
+                    )
             }
-            Some(schematic_define::EnvAuthStrategy::ApiKey { header }) => {
+            Some(schematic_define::EnvAuthStrategy::ApiKey { header, .. }) => {
                 headers.has_header(header)
             }
             Some(schematic_define::EnvAuthStrategy::Basic) => headers.has_authorization(),
@@ -1396,8 +1628,7 @@ impl UnfoldedCircleCoreRest {
         if !headers.has_explicit_auth() {
             headers = self.apply_env_fallback(headers);
         }
-        if self.auth_is_required()
-            && !headers.has_explicit_auth()
+        if self.auth_is_required() && !headers.has_explicit_auth()
             && !self.headers_satisfy_fallback(&headers)
         {
             return Err(self.authentication_required_error());
@@ -1431,11 +1662,47 @@ impl UnfoldedCircleCoreRest {
         for (key, value) in merged_headers {
             req_builder = req_builder.header(key.as_str(), value.as_str());
         }
-        if let Some(body) = body {
-            req_builder = req_builder
-                .header("Content-Type", "application/json")
-                .body(body);
-        }
+        req_builder = match body {
+            crate::shared::RequestBody::Empty => req_builder,
+            crate::shared::RequestBody::Json(json) => {
+                req_builder.header("Content-Type", "application/json").body(json)
+            }
+            crate::shared::RequestBody::Multipart(parts) => {
+                let mut form = reqwest::multipart::Form::new();
+                for part in parts {
+                    form = match part {
+                        crate::shared::FormPart::Text { name, value } => {
+                            form.text(name, value)
+                        }
+                        crate::shared::FormPart::Json { name, value } => {
+                            let field = reqwest::multipart::Part::text(value)
+                                .mime_str("application/json")
+                                .map_err(|e| {
+                                    SchematicError::SerializationError(e.to_string())
+                                })?;
+                            form.part(name, field)
+                        }
+                        crate::shared::FormPart::File { name, file } => {
+                            let mut field = reqwest::multipart::Part::bytes(file.bytes)
+                                .file_name(file.file_name);
+                            if let Some(mime) = file.mime {
+                                field = field
+                                    .mime_str(&mime)
+                                    .map_err(|e| {
+                                        SchematicError::SerializationError(e.to_string())
+                                    })?;
+                            }
+                            form.part(name, field)
+                        }
+                    };
+                }
+                req_builder.multipart(form)
+            }
+            crate::shared::RequestBody::UrlEncoded(pairs) => req_builder.form(&pairs),
+            crate::shared::RequestBody::Raw { content_type, bytes } => {
+                req_builder.header("Content-Type", content_type).body(bytes)
+            }
+        };
         let response = req_builder.send().await?;
         if !response.status().is_success() {
             let status = response.status().as_u16();
@@ -1507,6 +1774,31 @@ impl UnfoldedCircleCoreRest {
         &self,
         request: impl Into<UnfoldedCircleCoreRestRequest>,
     ) -> Result<T, SchematicError> {
+        let request = request.into();
+        match request.response_kind() {
+            crate::shared::ResponseKind::Json => {}
+            crate::shared::ResponseKind::Text => {
+                return Err(SchematicError::WrongResponseDecoder {
+                    endpoint_id: request.endpoint_id(),
+                    kind: "text",
+                    expected_method: "request_text",
+                });
+            }
+            crate::shared::ResponseKind::Binary => {
+                return Err(SchematicError::WrongResponseDecoder {
+                    endpoint_id: request.endpoint_id(),
+                    kind: "binary",
+                    expected_method: "request_bytes",
+                });
+            }
+            crate::shared::ResponseKind::Empty => {
+                return Err(SchematicError::WrongResponseDecoder {
+                    endpoint_id: request.endpoint_id(),
+                    kind: "empty",
+                    expected_method: "request_empty",
+                });
+            }
+        }
         let (response, ctx) = self.build_and_send_request(request).await?;
         let has_pre_hook = self.variant_hooks.pre_response_json.is_some();
         let has_mutator = self
@@ -1520,7 +1812,11 @@ impl UnfoldedCircleCoreRest {
                 json_value = hook(&ctx, json_value)?;
             }
             let mut result: T = serde_json::from_value(json_value)?;
-            if let Some(mutator) = self.variant_hooks.response_mutators.get(ctx.endpoint_id) {
+            if let Some(mutator) = self
+                .variant_hooks
+                .response_mutators
+                .get(ctx.endpoint_id)
+            {
                 mutator.mutate(&ctx, &mut result)?;
             }
             Ok(result)
@@ -1588,7 +1884,10 @@ impl UnfoldedCircleCoreRest {
     ///
     /// Invalidate the active cookie session created by Login. Typical usage is explicit sign-out in long-running admin tools.
     #[must_use = "this returns a Future that must be awaited"]
-    pub async fn logout(&self, request: LogoutCoreRestRequest) -> Result<(), SchematicError> {
+    pub async fn logout(
+        &self,
+        request: LogoutCoreRestRequest,
+    ) -> Result<(), SchematicError> {
         self.request_empty(request).await
     }
     /// Convenience method for the `ExportBackup` endpoint.

@@ -379,37 +379,15 @@ Both commands flow through the same unified pipeline: `execute_composition_reque
 
 ## Harness System
 
-The harness system turns non-interactive prompts into structured jobs with typed validations and programmatic recovery. It activates when the composition source's effective frontmatter contains harness properties (`pre_checks`, `post_checks`, `timeout`, or handler declarations).
+The harness wraps non-interactive prompts with timeout enforcement, shell-audit pre-flight, runtime attempt classification, and lifecycle recovery infrastructure. Gating, verification, and recovery are expressed through the prompt's [lifecycle stack](lifecycle.md) — `when:` guards plus the `error` / `skip` / `proxy` / `retry` / `resume` / `defer` lifecycle actions — not a separate validation/handler DSL.
 
-### Pre-Checks
+### Gating, Verification, and Recovery
 
-Run before the provider launches. If any fail, the session does not start. Available checks:
+- **Gating** (does this run even start?) lives in the `initialize`/`start` stacks: guard with `when:` and `Skip`, `Proxy`, or `Error` out before the agent is invoked.
+- **Verification** (did the run do what it claimed?) lives in the `success`/`finalize` stacks: raise an `Error` lifecycle action when a `when:` contract is unmet.
+- **Recovery** (what to do on failure) lives in the `failure`/`blocked` stacks via `retry`, `resume`, or `proxy` — and, because flow control is universal, in any other event's stack too.
 
-- `file_exists`, `dir_exists` — path existence
-- `json_file_exists`, `yaml_file_exists`, `toml_file_exists` — file existence with format validation
-- `has_write_permission` — OS writability + provider sandbox policy
-- `no_dirty_source_code` / `has_dirty_source_code` — git working tree state
-- `shell_command` — arbitrary shell command (approved via Darkmatter shell policy)
-
-### Post-Checks
-
-Run after the provider completes. Available checks include all pre-check types plus:
-
-- `file_changed` / `file_unchanged` — compare against pre-run snapshot
-- `frontmatter_prop_changed` / `frontmatter_prop_unchanged` / `frontmatter_prop_equals` — frontmatter comparison
-- `response_length_at_least` / `response_length_at_most` — response size bounds
-- `response_includes` / `response_missing` — content assertions
-
-### Handlers
-
-When checks fail, handlers define recovery actions:
-
-- **retry** — re-run the same prompt (with configurable max retries)
-- **resume** — continue from the provider's session (requires session ID)
-- **redirect** — switch to a different source document
-- **deviate** — execute a shell command, then re-evaluate post-checks
-
-A programmatic `handle` property accepts a shell command that receives failure context as JSON on stdin and returns a handler action as JSON on stdout.
+The retired `pre_checks` / `post_checks` / `handle_*` / `handle` / `deviate` frontmatter keys now reject with a typed `RemovedValidationKey` diagnostic; see [Composition — Migrating from the Retired Harness DSL](composition.md#migrating-from-the-retired-harness-dsl).
 
 ### Timeout
 
@@ -422,9 +400,9 @@ strings (`30s`, `5m`, `2h`):
 | Step silence | `step_timeout` | `--step-timeout <DURATION>` | Deadline for silence between stream events. Resets on every `SemanticEvent`; fires when `last_event_at` is older than the budget. |
 
 At either deadline, Claudine sends SIGTERM to the child; after a 5-second
-grace period, SIGKILL. Both timeouts surface as the same
-`FailureEvent::Timeout` variant, so a single `handle_timeout` handler can
-recover either case.
+grace period, SIGKILL. Both timeouts surface as the same timeout failure and
+route to the `failure` lifecycle event, where a `Retry` or `Resume` action
+can recover either case.
 
 **Wall-clock precedence.** When both budgets expire in the same poll, the
 wall-clock timeout wins — the loop checks it first, and the step-silence

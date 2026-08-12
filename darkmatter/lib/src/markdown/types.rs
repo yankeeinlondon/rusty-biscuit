@@ -10,6 +10,7 @@ use biscuit_terminal::terminal::Terminal;
 use indexmap::IndexMap;
 use thiserror::Error;
 
+use crate::markdown::compose::expression::ExpressionError;
 use crate::markdown::errors::blocks;
 use crate::markdown::schemas::ValidationProblem;
 
@@ -21,6 +22,27 @@ use biscuit_terminal::errors::SourceContext;
 /// are serialized in the same order they appeared in the source document.
 pub type FrontmatterMap = IndexMap<String, serde_json::Value>;
 
+/// Where an interpolation error's failing expression physically lives.
+///
+/// `OnDisk` carries a real [`SourceContext`] for a frontmatter region that maps
+/// to a file, so the renderer can show a focused, line-numbered excerpt.
+/// `Effective` is the late-binding fallback — DM2 event-time resolution and body
+/// text have no stable on-disk locus to slice, so the resolved/expression text is
+/// carried instead. Modeling both keeps the excerpt renderer total: it never
+/// fabricates line numbers for a region that does not exist on disk.
+#[derive(Debug, Clone)]
+pub enum SourceRef {
+    /// Compose-time: the error maps to a real frontmatter region in a file.
+    OnDisk(SourceContext),
+    /// Late-binding or body text: no stable on-disk locus; carry the text.
+    Effective {
+        /// The resolved value or raw expression to display in lieu of a slice.
+        rendered: String,
+        /// The frontmatter key the expression originated from, when known.
+        origin_key: Option<String>,
+    },
+}
+
 /// Errors that can occur when working with Markdown documents.
 #[derive(Error, Debug)]
 pub enum MarkdownError {
@@ -30,6 +52,17 @@ pub enum MarkdownError {
         ctx: SourceContext,
         #[source]
         source: YamlParseError,
+    },
+
+    /// The document opens with a near-miss frontmatter fence (e.g. `----`)
+    /// wrapping YAML-shaped content. Frontmatter fences must be exactly `---`.
+    #[error("frontmatter fence must be exactly `---`, found `{found}` on line {line} in {}", .ctx.display.display())]
+    FrontmatterFenceMismatch {
+        /// Boxed to keep `MarkdownError` small (a `SourceContext` is large),
+        /// matching the boxing convention of the other heavy variants.
+        ctx: Box<SourceContext>,
+        found: String,
+        line: usize,
     },
 
     /// Failed to merge frontmatter.
@@ -63,6 +96,29 @@ pub enum MarkdownError {
     /// Transform pipeline error.
     #[error("Transform error: {0}")]
     Transform(String),
+
+    /// A frontmatter or body `{{ … }}` interpolation failed to evaluate.
+    ///
+    /// The typed evaluation `cause` is preserved verbatim; this wrapper adds only
+    /// *scope* — which frontmatter key (`None` for body text), the expression
+    /// span, and where it lives ([`SourceRef`]). The rendered block derives its
+    /// headline and hint from `cause`, never from the mechanism word
+    /// "interpolation", so the author sees the root cause (e.g. an invalid file
+    /// path) rather than the layer that surfaced it.
+    #[error("interpolation of `{expression}` failed: {cause}")]
+    Interpolation {
+        /// The frontmatter key whose whole value failed, or `None` for body text.
+        key: Option<String>,
+        /// The `{{ … }}` span text that failed.
+        expression: String,
+        /// Where the failing expression physically lives. Boxed to keep
+        /// `MarkdownError` small (the `SourceContext` it can carry is large),
+        /// matching the boxing convention of the other heavy variants.
+        source: Box<SourceRef>,
+        /// The typed evaluation cause. Boxed for the same size reason.
+        #[source]
+        cause: Box<ExpressionError>,
+    },
 
     /// Transclusion pipeline error.
     #[error("Transclusion error: {0}")]
@@ -190,6 +246,50 @@ impl From<crate::markdown::reference::ReferenceError> for MarkdownError {
 /// Result type for markdown operations.
 pub type MarkdownResult<T> = Result<T, MarkdownError>;
 
+impl MarkdownError {
+    /// Anchors a [`MarkdownError::Interpolation`] to a real on-disk frontmatter
+    /// region so the rendered block can show an OSC8-linked prompt file and a
+    /// focused YAML excerpt.
+    ///
+    /// The interpolation error is built deep in the engine with a
+    /// [`SourceRef::Effective`] placeholder, because the engine has only the
+    /// expression text — not the document's [`SourceContext`]. This method is
+    /// called at the compose-pipeline boundary, where the document *is* in
+    /// scope, to upgrade that placeholder to [`SourceRef::OnDisk`]. A
+    /// `SourceContext` whose `display` path is `"unknown"` (in-memory/stdin
+    /// compose with no file locus) leaves the error untouched so the renderer
+    /// keeps the late-binding presentation rather than linking a non-file.
+    ///
+    /// Errors that are not `Interpolation`, or whose `source` is already
+    /// `OnDisk`, pass through unchanged.
+    pub(crate) fn with_on_disk_source(self, ctx: &SourceContext) -> Self {
+        match self {
+            MarkdownError::Interpolation {
+                key,
+                expression,
+                source,
+                cause,
+            } => {
+                let source = match *source {
+                    SourceRef::Effective { .. }
+                        if ctx.display != std::path::Path::new("unknown") =>
+                    {
+                        Box::new(SourceRef::OnDisk(ctx.clone()))
+                    }
+                    other => Box::new(other),
+                };
+                MarkdownError::Interpolation {
+                    key,
+                    expression,
+                    source,
+                    cause,
+                }
+            }
+            other => other,
+        }
+    }
+}
+
 impl BlockError for MarkdownError {
     fn status_block(&self, term: &Terminal) -> StatusBlock {
         match self {
@@ -207,6 +307,9 @@ impl BlockError for MarkdownError {
             MarkdownError::FrontmatterParse { ctx, source } => {
                 blocks::frontmatter_parse_block(ctx.clone(), source)
             }
+            MarkdownError::FrontmatterFenceMismatch { ctx, found, line } => {
+                blocks::frontmatter_fence_mismatch_block(ctx.as_ref().clone(), found, *line)
+            }
             MarkdownError::FrontmatterMerge(message) => blocks::frontmatter_merge_block(message),
             MarkdownError::FileLoad(source) => blocks::file_load_block(source),
             MarkdownError::UrlFetch(source) => blocks::url_fetch_block(source),
@@ -215,6 +318,12 @@ impl BlockError for MarkdownError {
             MarkdownError::InvalidLineRange(message) => blocks::invalid_line_range_block(message),
             MarkdownError::Serialization(source) => blocks::serialization_block(source),
             MarkdownError::Transform(message) => blocks::transform_block(message),
+            MarkdownError::Interpolation {
+                key,
+                expression,
+                source,
+                cause,
+            } => blocks::interpolation_block(key.as_deref(), expression, source, cause),
             MarkdownError::RenderTree(source) => blocks::render_tree_block(&source.to_string()),
             MarkdownError::MalformedStoredHash { property, reason } => {
                 blocks::malformed_stored_hash_block(property, reason)

@@ -101,7 +101,7 @@ A few behaviours worth knowing:
 
 - `additionalProperties` is `true` — documents may carry extra tooling-specific frontmatter without tripping the schema.
 - Unrecognized constraints are a **hard error at compile time**, so typos surface immediately rather than being silently ignored.
-- `file` property values resolve from the **current working directory** at validation time (note: this differs from `$schema` *file references*, which resolve from the document's directory).
+- `file` is **lazy by default**: a bare `file` value is only checked for syntactic validity (it must parse as a biscuit-file reference) and is never resolved against the filesystem. Add `eager` (`file(eager)`) to require the referenced file to exist. For document-backed validation, an implicit reference such as `spec.md` searches the containing repository before the prompt document's directory; an explicit `./spec.md` or `../spec.md` is source-relative only. The captured launch area is retained for diagnostics, not searched. Only legacy callers that configure no document anchor resolve from the ambient current working directory. `match(...)` shapes path *suggestions* only and never rejects a value.
 
 ## Baseline Schemas
 
@@ -111,6 +111,13 @@ A **baseline** is a schema that every validated document inherits — useful for
 md schema validate post.md --schema ./schemas/baseline.yaml
 md schema validate post.md          # falls back to $BASELINE_SCHEMA
 ```
+
+`md compose` has its own baseline default: it injects the Darkmatter base
+frontmatter schema unless you pass `--no-baseline-schema` or set
+`DARKMATTER_NO_BASELINE_SCHEMA=1`. Pass `--baseline-schema <path>` to replace
+that default with a custom SimplifiedSchema YAML baseline. `md schema validate`
+does not inject the Darkmatter base schema by default; it keeps the explicit
+`--schema` / `BASELINE_SCHEMA` behavior shown above.
 
 ```rust
 let api = DarkmatterSchemas::new()
@@ -166,7 +173,7 @@ Schema validation also runs as an **always-on stage inside the compose pipeline*
 ```
 Apply --set / --state overrides
   └─ Frontmatter Interpolation     ({{ var }})
-      └─ Schema Validation          ◄── here (validate + coerce)
+      └─ Schema Validation          ◄── here (bind + coerce + validate)
           └─ Frontmatter Shell Expansion ($(cmd))
               └─ … rest of pipeline
 ```
@@ -176,12 +183,46 @@ This placement is deliberate:
 - It runs **after** `--set` / `--state` and interpolation, so a schema-required field can be satisfied by an override or a template. A document with `spec: ""` plus `--set spec=design.md` validates fine — validation sees the *effective* frontmatter.
 - It runs **before** shell expansion, preserving fail-fast: an invalid schema aborts the run before any side-effecting `$(...)` command executes.
 
-When a document declares no `$schema` and no baseline is configured, the stage is a complete no-op. Library callers can inject a workspace-wide baseline without a CLI flag:
+By default, `md compose` validates documents with no `$schema` against the
+Darkmatter base frontmatter schema. Use `--no-baseline-schema` or
+`DARKMATTER_NO_BASELINE_SCHEMA=1` for raw compose behavior; with no document
+`$schema` and no baseline, the stage is a complete no-op. Use
+`--baseline-schema <path>` to replace the default baseline for that invocation.
+Library callers can inject a workspace-wide baseline directly:
 
 ```rust
 let opts = ComposeOptions::default()
     .with_baseline_schema(my_baseline);   // SimplifiedSchema
 ```
+
+### Optional parameter bindings
+
+During composition, an absent top-level property becomes an explicit `null`
+binding when the document's inline or referenced SimplifiedSchema declares it
+as optional and gives it no `default(...)`. This happens after the first
+frontmatter-interpolation pass and before coercion and validation. Later stages
+can therefore distinguish a declared-but-unset parameter from an undeclared
+root, while authored values and caller overrides remain unchanged. Explicit
+`null`, an empty string, `false`, zero, and empty collections are all preserved.
+
+This binding behavior is deliberately narrow:
+
+- baseline and trigger-schema properties remain validation policy and do not
+  create bindings;
+- raw JSON Schema, root-union declarations, nested properties, required
+  properties, and properties with `default(...)` do not create bindings; and
+- a compose run with no effective schema does not create bindings.
+
+The standalone validation APIs remain passive and never mutate the document.
+Because the first frontmatter-interpolation pass precedes schema validation, it
+cannot reference a binding that will only be materialized by this stage. Body
+interpolation and later compose stages can use the binding. Repeating the schema
+stage is idempotent, and serialized composed frontmatter retains the `null` key.
+
+This means `md compose` and `md schema validate` can intentionally diverge when a
+document has no `$schema`: compose sees the default Darkmatter base schema, while
+schema validation is vacuously valid unless `--schema` or `BASELINE_SCHEMA` is
+provided.
 
 ### The shell-deferral contract
 
@@ -234,6 +275,37 @@ Coercion also never *parses into* a constrained string type: a number landing in
 
 For root unions, Darkmatter coerces against each arm in order and commits the first arm that validates post-coercion.
 
+### Eager-`file` value normalization
+
+Coercion has a sibling write-back pass that fires only on the **eager** `file` type. When a property is declared `file(eager)` (the eager marker is the compiled-schema `format: darkmatter-file`) and its value validates, the stored value is **rewritten to its resolved, repo-relative path** — the same projection `relative(value)` / `dirname(value)` already produce. After the rewrite, the document state is uniformly resolved: `spec` and `dirname(spec)` agree by construction, so an author never needs to hand-prepend `{{ctx.area}}` to make a derived path match.
+
+The rewrite runs at the same two surfaces as coercion (the explicit library API and the compose stage's write-back) and is **idempotent**: re-validating an already-rewritten value is a fixpoint, so compose → re-compose never drifts.
+
+**Triggered on:**
+
+- a present, non-null string value under `file(eager)` / `format: darkmatter-file` — including top-level properties, inline-object sub-properties, array-of-`file(eager)` elements, and the committed arm of a root or property union.
+
+**Left verbatim (never rewritten):**
+
+- `string`-typed properties, even when their value looks path-shaped — `string` is the literal-text contract.
+- bare (lazy) `file` properties — `format: darkmatter-file-reference` is syntax-only and may legitimately name a file that does not exist yet (e.g. a `review_file` this run is about to produce).
+- a value that resolves to a remote URL — there is no local path to project.
+- an absent or `null` optional `file(eager)` property.
+- a value still holding a `$(...)` shell expression or unresolved `{{ ... }}` template — the post-shell re-validation handles it once it expands.
+
+**Read-only validation contract.** Library callers that use `validate` / `validate_with_positions` keep their current contract: validation coerces on a working copy and **does not mutate** the caller's `serde_json::Value`. The eager-`file` rewrite is opt-in via the explicit [`EffectiveSchema::normalize_frontmatter`](../../lib/src/markdown/schemas/mod.rs) API; compose calls it on its accepted effective schema so the normalized values are what downstream interpolation, lifecycle events, and `inline-compose` see.
+
+Stored values use `/` path separators on every OS, so a committed eager-`file` reference is portable across macOS, Linux, and Windows.
+
+Caller-originated eager-file overrides are the exception to the document-authored
+rewrite. A `set` value resolves against the caller's captured launch-area context
+and remains an absolute, native path in effective frontmatter. Path functions,
+comparisons, lifecycle state, and other typed consumers therefore retain the
+caller-owned filesystem identity. When that value is interpolated into Markdown
+body text, Darkmatter uses a separate portable presentation value; direct
+variables and static member/index selections share this presentation behavior
+without changing effective frontmatter.
+
 ## Interaction With `--set` and `--state`
 
 Because the compose stage validates the *effective* frontmatter, overrides participate fully:
@@ -244,6 +316,9 @@ md compose doc.md --set '{spec: "design.md"}'
 
 - `--state` fills missing or null values before validation.
 - `--set` overrides values before validation.
+- An eager-file `--set` value keeps its resolved absolute native identity in
+  effective frontmatter while body interpolation renders its separate portable
+  presentation value.
 
 So `spec: ""` + `--set spec=design.md` validates, while `spec: "design.md"` + `--set spec=""` fails. The same applies to transcluded children: a parent's `::file set=` overlay is applied before the child's schema stage, so the parent can satisfy a child's required property.
 

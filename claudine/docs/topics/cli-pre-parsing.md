@@ -12,10 +12,10 @@ through normalization into `Cli::parse_from` — explains why the
 pre-parser exists at all, and captures the best practices that keep
 the layer maintainable as the CLI surface grows.
 
-- Pre-parser implementation: [`claudine/cli/src/argv.rs`](../../cli/src/argv.rs)
+- Pre-parser implementation: [`claudine/cli/src/argv/mod.rs`](../../cli/src/argv/mod.rs)
 - Pre-parser wiring: [`claudine/cli/src/main.rs`](../../cli/src/main.rs)
 - Clap surface: [`claudine/cli/src/args.rs`](../../cli/src/args.rs)
-- Feature spec: `2026-04-17-cli-pre-processing`
+- Feature spec: `claudine/features/_completed/2026-04-17-cli-pre-processing/spec.md`
 - Rule-by-rule reference: [argv-normalization.md](./argv-normalization.md)
 
 ## Pipeline overview
@@ -28,10 +28,10 @@ flowchart LR
         R1["Rule 1 — provider boolean rewrite<br/><i>composition subcommands only</i>"]
         R2["Rule 2 — fuzzy --provider value"]
         R4["Rule 4 — --help / -h hoist<br/><i>composition subcommands only</i>"]
-        R3["Rule 3 — -- separator insertion<br/><i>composition subcommands only</i>"]
-        R1 --> R2 --> R4 --> R3
+        R1 --> R2 --> R4
     end
-    B --> C["--plain pre-scan<br/>(sets NO_COLOR)"]
+    B --> PP["partition_composition_tail<br/>(Claudine argv + provider tail)"]
+    PP --> C["--plain pre-scan<br/>(sets NO_COLOR)"]
     C --> D["parse_cli_from"]
     subgraph D["parse_cli_from"]
         direction TB
@@ -53,21 +53,22 @@ therefore never pre-parses.
 ## Pre-parsing stage
 
 `argv::normalize` is the single entry point above `clap`. It accepts
-the raw `Vec<OsString>` from `std::env::args_os()`, applies four rewrite
+the raw `Vec<OsString>` from `std::env::args_os()`, applies three rewrite
 rules in a fixed order, and returns the rewritten vector:
 
 | Rule | Purpose | Gated on |
 |---|---|---|
-| **Rule 1** | `--claude` / `--codex` / `--gemini` / `--goose` / `--kimi` / `--opencode` / `--qwen` / `--roo` → `--provider <slug>` | `compose`, `inline-compose`, `sequence` |
+| **Rule 1** | Catalog-derived `--<provider>` booleans → `--provider <slug>` | `compose`, `inline-compose`, `sequence` |
 | **Rule 2** | Fuzzy canonicalization of `--provider <value>` and `--provider=<value>` via `Provider::fuzzy_match_cli_name` | Any subcommand (flag-driven) |
 | **Rule 4** | Hoist a trailing `--help` / `-h` to argv position 1 so the root custom help handler fires | `compose`, `inline-compose`, `sequence` |
-| **Rule 3** | Insert a single `--` separator before the first `key=value` setter that follows an interleaved flag after a previously seen positional | `compose`, `inline-compose`, `sequence` |
 
-Rule 4 runs **before** Rule 3 so `--help` is lifted out of the trailing
-setter region before the `--` separator lands. If Rule 3 ran first, it
-would bury `--help` inside clap's trailing raw-value bucket and the
-downstream positional parser would misclassify it as a second file
-reference.
+**Retired: Rule 3.** A former Rule 3 inserted a synthetic `--` separator to
+protect trailing setters. It was removed when composition gained
+provider-argument forwarding (a synthetic `--` collided with an authored `--`
+boundary). Its job — plus forwarding the agent tail — now belongs to the
+post-normalization ownership partition, `argv::partition_composition_tail`,
+described in [argv-normalization.md](./argv-normalization.md#provider-argument-partition).
+Rule 4 still runs so `--help` is hoisted before the partition sees it.
 
 For the token-level semantics of each rule — including every pass-through
 guarantee and the full corner-case matrix — see
@@ -88,11 +89,11 @@ The normalizer never mutates argv when any of the following hold:
    `OsString` values are copied verbatim.
 4. **Argv with fewer than two elements** — nothing downstream needs
    parsing.
-5. **Non-composition subcommands** — Rules 1, 3, and 4 are gated to the
+5. **Non-composition subcommands** — Rules 1 and 4 are gated to the
    composition trio. Wrapper subcommands (`claude`, `codex`, `gemini`,
-   `goose`, `kimi`, `opencode`, `qwen`) and every other subcommand pass
-   through unchanged. Rule 2 remains flag-driven so `--provider`
-   resolution works regardless of subcommand.
+   `goose`, `kimi`, `opencode`, `qwen`, `kilo`, `pi`, `antigravity`) and every
+   other subcommand pass through unchanged. Rule 2 remains flag-driven so
+   `--provider` resolution works regardless of subcommand.
 
 ## Clap parsing stage
 
@@ -137,13 +138,14 @@ Several properties of the clap surface shape the pre-parser's rules:
   `--help` / `-h` into the root handler on those subcommands.
 - `ComposeArgs`, `InlineComposeArgs`, and `SequenceArgs` each expose a
   greedy multi-value positional (`#[arg(num_args = 1..)]`) that collects
-  files plus `key=value` setters in any order. That positional is what
-  makes trailing `--help` get absorbed as a value. Rule 3 fixes that
-  without disabling help recognition.
-- The eight provider booleans on `SharedComposeArgs` are retained only
-  as clap help entries and shell-completion hints. Rule 1 rewrites them
-  before clap sees them, so `explicit_provider()` reads a single field
-  (`self.provider`) instead of re-resolving eight booleans.
+  files plus `key=value` setters in any order. The ownership partition
+  removes the agent tail before clap sees it, so this positional only ever
+  receives the file and Claudine setters; Rule 4 handles the trailing
+  `--help` case separately.
+- The original seven provider booleans on `SharedComposeArgs` are retained only
+  as clap help entries. Rule 1 accepts every catalog-derived provider boolean,
+  including providers without a dedicated struct field, and rewrites it before
+  clap sees it. `explicit_provider()` therefore reads only `self.provider`.
 - `Provider::fuzzy_match_cli_name` is the single source of truth for
   fuzzy provider name resolution. Rule 2 delegates to it so the same
   fuzzy behavior applied to `--provider <value>` remains intact after
@@ -173,21 +175,19 @@ it as the help flag. The tip is actively misleading — the user did not
 want `--help` as a value.
 
 This is structurally unavoidable in clap's derive model without giving
-up either the greedy positional or help recognition. The pre-parser
-converts the argv into a shape clap already handles correctly
-(`--help` hoisted to a root-level flag position, `--` inserted before
-the trailing setters).
+up either the greedy positional or help recognition. The pre-parser and
+ownership partition convert argv into a shape clap already handles correctly:
+`--help` is hoisted to a root-level flag position, and the provider tail is
+removed before clap receives composition setters.
 
-### 2. Eight provider booleans plus `--provider`
+### 2. Catalog-derived provider booleans plus `--provider`
 
-The composition surface accepts provider selection nine ways: eight
-boolean flags (`--claude`, `--codex`, `--gemini`, `--goose`, `--kimi`,
-`--opencode`, `--qwen`, `--roo`) plus the canonical `--provider
-<value>`. Without normalization, downstream code has to re-resolve all
-nine every time it needs the selected provider. Rewriting booleans into
-`--provider <slug>` collapses those nine representations into one and
-removes the need for an `explicit_provider()` helper that inspects eight
-fields.
+The composition surface accepts one boolean flag for every compiled provider,
+plus the canonical `--provider <value>`. Without normalization, downstream
+code would have to re-resolve every representation whenever it needs the
+selected provider. Rewriting booleans into `--provider <slug>` collapses those
+representations into one and lets `explicit_provider()` read only the canonical
+field.
 
 ### 3. Fuzzy provider matching existed but was applied inconsistently
 
@@ -234,26 +234,23 @@ untouched" unit test. Without that, the pre-parser can silently start
 rewriting inputs it should leave alone. This contract is documented in
 the `argv.rs` module docs and is the first thing to check in review.
 
-### 3. Keep `COMPOSITION_FLAGS_WITH_VALUE` in lockstep with the clap surface
+### 3. Derive the owned-flag surface from clap, never a hand-maintained list
 
-Rule 3 classifies tokens as flag / flag-with-value / positional /
-setter. A value-bearing flag whose value is mistaken for a positional
-will fire Rule 3 in the wrong place, so the
-`COMPOSITION_FLAGS_WITH_VALUE` table in `argv.rs` must mirror the clap
-`#[arg(...)]` surface of `SharedComposeArgs` and `SequenceArgs`.
+The ownership partition must know which composition-argv tokens Claudine owns
+(and whether each consumes a value) to decide where the agent tail begins and
+which flags to reclaim from it. `OwnedFlags::for_composition` in
+`argv/partition.rs` derives that surface by introspecting the root `Cli`
+globals plus the `ComposeArgs`/`SequenceArgs` clap definitions — never a
+second hand-maintained constant.
 
-The drift-detection test
-`composition_flags_with_value_matches_clap_surface` iterates
-`ComposeArgs::augment_args(...)` and `SequenceArgs::augment_args(...)`
-at test time and asserts that every value-bearing clap flag is present
-in the constant. When you add a new value-bearing composition flag,
-extend the constant and run `cargo test -p claudine-cli argv::tests` —
-the test turns drift into a compile-green test failure instead of a
-silent bug.
+The drift-detection test `owned_surface_is_derived_from_clap_and_non_empty`
+asserts the derived surface is populated and contains representative value and
+boolean flags, so a refactor that breaks the derivation surfaces as a test
+failure instead of a silent forwarding bug.
 
 ### 4. Gate rules narrowly
 
-Rules 1, 3, and 4 are gated to composition subcommands. Rule 2 is
+Rules 1 and 4 are gated to composition subcommands. Rule 2 is
 flag-driven and applies anywhere `--provider` appears. Expanding a
 rule's scope — e.g. firing Rule 1 on wrapper subcommands — breaks
 wrapper passthrough: a user typing `claudine claude --gemini file.md`
@@ -324,12 +321,12 @@ greedy-positional + `--help` interaction).
 
 ## Testing
 
-- **Unit tests** live in `argv.rs` under `#[cfg(test)] mod tests` and
-  cover every rewrite rule, each boolean-to-slug mapping, every
-  pass-through guarantee, and a dense Rule 3 corner-case matrix. They
-  include a drift-detection test that iterates the clap surface to
-  verify `COMPOSITION_FLAGS_WITH_VALUE` mirrors every value-bearing
-  flag.
+- **Unit tests** live in the `argv` module (`mod.rs` and `partition.rs`)
+  under `#[cfg(test)] mod tests` and cover every rewrite rule, each
+  boolean-to-slug mapping, every pass-through guarantee, and the ownership
+  partition (implicit/explicit tails, owned-flag reclaim, ordering errors,
+  setter-vs-tail classification). They include a drift-detection test that
+  iterates the clap surface to verify the derived owned-flag surface.
 - **Integration tests** live in
   [`claudine/cli/tests/argv_normalization.rs`](../../cli/tests/argv_normalization.rs)
   and drive the compiled `claudine` binary end-to-end through the
@@ -341,4 +338,4 @@ greedy-positional + `--help` interaction).
   ensure the wrapper lenient pass continues to accept unknown tokens
   after any pre-parser change.
 
-Reference: feature `2026-04-17-cli-pre-processing`.
+Reference: `claudine/features/_completed/2026-04-17-cli-pre-processing/spec.md`.

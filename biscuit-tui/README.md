@@ -39,6 +39,7 @@ The library provides six interactive input components, each following the same a
 - **`KeyBindings`** — fully configurable bindings (defaults include vim `h`/`j`/`k`/`l`)
 - **`ComponentTheme`** — centralized visual constants (glyphs, styles, colors)
 - **`FrameChrome`** / **`FrameChromeConfig`** — optional borders, margins, and height specs
+- **`SplitPane`** / **`SplitDirection`** / **`SplitRatio`** — geometry-only two-pane layout primitive (`SplitPane::split(area) -> (Rect, Rect)`); a *container/layout* primitive like `FrameChrome`, not a 7th input component (captures no value, handles no input). `Auto` direction resolved from the area shape, 50/50 default; ratios clamp on construction
 - **`FuzzyFilter`** — fast fuzzy search over option labels via `nucleo-matcher`
 - **`ValidationState`** — uniform read access to submit-time validation errors
 

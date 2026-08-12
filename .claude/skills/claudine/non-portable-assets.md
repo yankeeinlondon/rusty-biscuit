@@ -30,7 +30,6 @@ Some providers use fundamentally different file formats, blocked before property
 | **Gemini** | TOML commands | `name`, `description` | Closest to viable conversion; `prompt` field replaces body |
 | **Goose** | YAML recipes | `title` (not `name`), `description` | Different property names; `extensions` instead of `tools` |
 | **KimiCode** | YAML agents | `name`, `system_prompt_path` (required), `tools` (structured, required) | Two required properties have no Claude equivalent |
-| **RooCode** | YAML modes | `slug`, `name`, `roleDefinition`, `groups` (all required) | `slug`, `groups` have no Claude equivalent; `roleDefinition` != `description` |
 
 These surface as `FormatIncompatible` exceptions and are filtered before property-level checks.
 

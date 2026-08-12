@@ -99,14 +99,51 @@ Body interpolation runs after text replacement and page blocks have been applied
         - the second line will resolve to the string literal "unknown"
 
 
+## Interpolation Literals
+
+When you want to *show* the `{{ ... }}` syntax rather than evaluate it, wrap the span in an extra pair of braces: `{{{ ... }}}`. This interpolation literal composes to the literal text `{{ ... }}` and the content is never evaluated.
+
+```md
+Use `{{{ name }}}` to reference the `name` frontmatter value.
+```
+
+After compose, the body above becomes:
+
+```md
+Use `{{ name }}` to reference the `name` frontmatter value.
+```
+
+### Recognition rules
+
+- A literal opens only at **exactly three consecutive `{` characters**. Four or more braces in a row (e.g. `{{{{`) fall through to the existing `{{` scanner behavior.
+- A literal closes at the **first subsequent `}}}`**. Because the first `}}}` terminates the literal, content cannot itself contain `}}}`; use a fenced code block to document such a span.
+- An **unclosed** `{{{` with no later `}}}` is not a literal. The scanner falls back to the legacy `{{` behavior at the same position, preserving the current malformed-expression diagnostic.
+- Literals inside **fenced and indented code blocks** are treated as plain text and are not converted. Inline code spans are scanned, so `{{{ ... }}}` is the correct way to write literal interpolation syntax inside backticks.
+- Empty content is allowed: `{{{}}}` becomes `{{}}` and `{{{ }}}` becomes `{{ }}`.
+
+### Examples
+
+```md
+Tight form: {{{x}}} becomes {{x}}.
+Empty form: {{{}}} becomes {{}}.
+Adjacent: {{ a }}{{{ b }}} evaluates a and emits {{ b }} literally.
+Nested expression: {{{ {{ x }} }}} becomes {{ {{ x }} }} with x unevaluated.
+```
+
+### Frontmatter literals
+
+A literal in a frontmatter value is always text. `key: "{{{ x }}}"` resolves to the string `{{ x }}` and survives both frontmatter interpolation passes, including the pass that brackets frontmatter shell expansion.
+
+
 ## Implementation
 
 The current implementation uses a source-first scanner approach (single-pass rewrite):
 
-- A scanner finds `{{ ... }}` spans in the document body. Inline code spans (single backticks) are interpolated by default, since the templating pattern `` `var_{{ phase }}` `` is a common use case. Fenced and indented code blocks are skipped.
+- A scanner finds `{{{ ... }}}` spans in the document body, and also recognizes `{{{ ... }}}` interpolation literals. Inline code spans (single backticks) are interpolated by default, since the templating pattern `` `var_{{ phase }}` `` is a common use case, and literals inside inline code convert to literal `{{{ ... }}}` text. Fenced and indented code blocks are skipped.
 - Each expression is parsed with a dedicated tokenizer and evaluator
 - The interpolation context is built from the effective state (frontmatter + external state), `ctx.*` runtime values, and `env.*` environment variables
 - Replacements are applied from the end of the string backward to preserve offsets
+- Literal conversion (`{{{ ... }}}` → `{{{ ... }}}`) happens after the final scan pass over a surface, so a literal introduced by a replacement value is also converted exactly once
 
 See the source modules:
 

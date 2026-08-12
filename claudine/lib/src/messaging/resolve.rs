@@ -375,8 +375,9 @@ mod tests {
 
     #[test]
     fn absolute_path_unchanged() {
-        let result = resolve_image_path("/absolute/path.png", None, None);
-        assert_eq!(result, PathBuf::from("/absolute/path.png"));
+        let absolute = std::env::current_dir().unwrap().join("absolute/path.png");
+        let result = resolve_image_path(absolute.to_str().unwrap(), None, None);
+        assert_eq!(result, absolute);
     }
 
     #[test]

@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 65
 expression: "convert_atom(\"datetime\")"
 ---
 {
@@ -7,8 +8,15 @@ expression: "convert_atom(\"datetime\")"
   "additionalProperties": true,
   "properties": {
     "field": {
-      "format": "date-time",
-      "type": "string"
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "format": "darkmatter-datetime",
+          "type": "string"
+        }
+      ]
     }
   },
   "type": "object"

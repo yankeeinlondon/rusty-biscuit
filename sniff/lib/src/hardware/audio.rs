@@ -4,7 +4,8 @@
 //! APIs:
 //! - **macOS**: CoreAudio for full device enumeration (channels, sample rates)
 //! - **Linux**: Parses `/proc/asound/cards` for ALSA card names
-//! - **Windows**: Queries `Win32_SoundDevice` via `wmic`
+//! - **Windows**: Queries `Win32_SoundDevice` via a PowerShell CIM probe
+//!   (`Get-CimInstance`); the deprecated `wmic` tool is no longer used
 
 use serde::{Deserialize, Serialize};
 
@@ -679,6 +680,20 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
         .map(|s| parse_alsa_pcm(&s))
         .unwrap_or_default();
 
+    build_alsa_devices(cards, &directions)
+}
+
+/// Merges parsed ALSA cards with their PCM direction flags into audio devices.
+///
+/// A card absent from `directions` falls back to output-only. This is the path
+/// taken when `/proc/asound/pcm` is missing or unreadable: the directions map is
+/// empty, so every card defaults to playback, matching ALSA's convention that a
+/// bare card exposes output.
+#[cfg(target_os = "linux")]
+fn build_alsa_devices(
+    cards: Vec<AlsaCard>,
+    directions: &std::collections::HashMap<u32, AlsaCardDirections>,
+) -> Vec<AudioDeviceInfo> {
     let mut devices = Vec::with_capacity(cards.len());
     for card in cards {
         let dirs = directions
@@ -708,61 +723,133 @@ pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
     devices
 }
 
-/// Detects audio devices on Windows via `wmic`.
+/// Classifies a Windows sound-device name into an [`AudioDeviceKind`].
 ///
-/// Queries `Win32_SoundDevice` for device names and status. Device kind is
-/// inferred from the name (USB, Bluetooth, HDMI). Channel counts and sample
-/// rates are not available from this source.
-#[cfg(target_os = "windows")]
-pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
-    let output = std::process::Command::new("wmic")
-        .args(["path", "Win32_SoundDevice", "get", "Name,Status"])
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .output();
+/// Channel counts and sample rates are not available from `Win32_SoundDevice`,
+/// so the kind is inferred from the device name alone.
+#[cfg(any(target_os = "windows", test))]
+fn classify_windows_audio_kind(name: &str) -> AudioDeviceKind {
+    let upper = name.to_uppercase();
+    if upper.contains("HDMI") {
+        AudioDeviceKind::Hdmi
+    } else if upper.contains("USB") {
+        AudioDeviceKind::Usb
+    } else if upper.contains("BLUETOOTH") {
+        AudioDeviceKind::Bluetooth
+    } else if upper.contains("VIRTUAL") {
+        AudioDeviceKind::Virtual
+    } else {
+        AudioDeviceKind::Unknown
+    }
+}
 
-    let output = match output {
-        Ok(o) if o.status.success() => String::from_utf8_lossy(&o.stdout).to_string(),
-        _ => return Vec::new(),
-    };
+/// Splits one CSV record into fields, honoring double-quoted fields with
+/// embedded commas and `""`-escaped quotes — the format `ConvertTo-Csv` emits.
+#[cfg(any(target_os = "windows", test))]
+fn parse_csv_record(line: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut field = String::new();
+    let mut in_quotes = false;
+    let mut chars = line.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '"' if in_quotes && chars.peek() == Some(&'"') => {
+                field.push('"');
+                chars.next();
+            }
+            '"' => in_quotes = !in_quotes,
+            ',' if !in_quotes => fields.push(std::mem::take(&mut field)),
+            _ => field.push(c),
+        }
+    }
+    fields.push(field);
+    fields
+}
 
+/// Parses CSV output from
+/// `Get-CimInstance Win32_SoundDevice | Select-Object Name,Status | ConvertTo-Csv`
+/// into `(name, status)` pairs.
+///
+/// The `"Name","Status"` header row and any row without a non-empty `Name`
+/// field are skipped, so blank, malformed, or name-less rows contribute no
+/// devices. `Status` is captured for callers that want it but may be empty when
+/// PowerShell reports a null status.
+#[cfg(any(target_os = "windows", test))]
+fn parse_cim_sound_devices(contents: &str) -> Vec<(String, String)> {
     let mut devices = Vec::new();
-    for (idx, line) in output.lines().skip(1).enumerate() {
-        let line = line.trim();
-        if line.is_empty() {
+    for line in contents.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
             continue;
         }
-
-        // wmic output: "Name      Status" — status is the last word
-        let name = line
-            .rsplit_once(char::is_whitespace)
-            .map(|(n, _)| n.trim())
-            .unwrap_or(line)
-            .to_string();
-
-        let name_upper = name.to_uppercase();
-        let kind = if name_upper.contains("HDMI") {
-            AudioDeviceKind::Hdmi
-        } else if name_upper.contains("USB") {
-            AudioDeviceKind::Usb
-        } else if name_upper.contains("BLUETOOTH") {
-            AudioDeviceKind::Bluetooth
-        } else if name_upper.contains("VIRTUAL") {
-            AudioDeviceKind::Virtual
-        } else {
-            AudioDeviceKind::Unknown
+        let fields = parse_csv_record(trimmed);
+        // Skip the `"Name","Status"` header emitted by ConvertTo-Csv.
+        if fields.first().is_some_and(|f| f == "Name") {
+            continue;
+        }
+        let Some(name) = fields.first().map(|f| f.trim()).filter(|f| !f.is_empty()) else {
+            continue;
         };
+        let status = fields
+            .get(1)
+            .map(|f| f.trim().to_string())
+            .unwrap_or_default();
+        devices.push((name.to_string(), status));
+    }
+    devices
+}
 
-        devices.push(AudioDeviceInfo {
+/// Runs a PowerShell command, returning stdout on success or `None` on missing
+/// PowerShell, non-zero exit, or timeout.
+///
+/// The probe is best-effort: any failure reports no devices rather than
+/// hanging.
+#[cfg(any(target_os = "windows", test))]
+fn powershell_audio_args(command: &str) -> [&str; 4] {
+    ["-NoProfile", "-NonInteractive", "-Command", command]
+}
+
+#[cfg(target_os = "windows")]
+fn run_powershell_with_timeout(command: &str, timeout: std::time::Duration) -> Option<String> {
+    let output = crate::process::run_with_timeout(
+        "powershell",
+        &powershell_audio_args(command),
+        timeout,
+    )
+    .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    Some(output.stdout_lossy().into_owned())
+}
+
+/// Detects audio devices on Windows via a PowerShell CIM probe.
+///
+/// Queries `Win32_SoundDevice` with `Get-CimInstance` for device names and
+/// status. Device kind is inferred from the name (USB, Bluetooth, HDMI).
+/// Channel counts and sample rates are not available from this source. Missing
+/// PowerShell, a failed query, or a parse failure reports no devices.
+#[cfg(target_os = "windows")]
+pub fn detect_audio_devices() -> Vec<AudioDeviceInfo> {
+    const COMMAND: &str = "Get-CimInstance Win32_SoundDevice | Select-Object Name,Status | ConvertTo-Csv -NoTypeInformation";
+
+    let Some(output) =
+        run_powershell_with_timeout(COMMAND, crate::process::timeouts::WINDOWS_AUDIO)
+    else {
+        return Vec::new();
+    };
+
+    parse_cim_sound_devices(&output)
+        .into_iter()
+        .enumerate()
+        .map(|(idx, (name, _status))| AudioDeviceInfo {
+            kind: classify_windows_audio_kind(&name),
             name,
             uid: format!("win-audio-{idx}"),
-            kind,
             direction: AudioDirection::Output,
             ..Default::default()
-        });
-    }
-
-    devices
+        })
+        .collect()
 }
 
 /// Stub implementation for platforms without audio detection.
@@ -930,6 +1017,19 @@ mod tests {
         assert!(card.has_capture);
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn alsa_missing_pcm_falls_back_to_output_only() {
+        // An empty directions map stands in for a missing or unreadable
+        // /proc/asound/pcm. Every detected card must then default to
+        // output-only rather than disappearing.
+        let cards = parse_alsa_cards(" 0 [PCH            ]: HDA-Intel - HDA Intel PCH\n");
+        let directions = std::collections::HashMap::new();
+        let devices = build_alsa_devices(cards, &directions);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].direction, AudioDirection::Output);
+    }
+
     #[test]
     fn uid_pair_key_strips_trailing_numeric_segment() {
         assert_eq!(
@@ -1074,5 +1174,124 @@ mod tests {
             classify_alsa_kind("Sony WH-1000XM5 (Bluetooth)"),
             AudioDeviceKind::Bluetooth
         );
+    }
+
+    #[test]
+    fn cim_parses_healthy_devices() {
+        let sample = "\"Name\",\"Status\"\n\
+\"Realtek High Definition Audio\",\"OK\"\n\
+\"NVIDIA High Definition Audio\",\"OK\"\n";
+        let devices = parse_cim_sound_devices(sample);
+        assert_eq!(devices.len(), 2);
+        assert_eq!(
+            devices[0],
+            ("Realtek High Definition Audio".to_string(), "OK".to_string())
+        );
+        assert_eq!(devices[1].0, "NVIDIA High Definition Audio");
+        assert_eq!(devices[1].1, "OK");
+    }
+
+    #[test]
+    fn cim_handles_missing_status() {
+        // PowerShell renders a null Status as an empty quoted field; a row with
+        // no Status column at all must still yield the device with empty status.
+        let sample = "\"Name\",\"Status\"\n\
+\"USB Audio Device\",\"\"\n\
+\"Bare Name Without Status Column\"\n";
+        let devices = parse_cim_sound_devices(sample);
+        assert_eq!(devices.len(), 2);
+        assert_eq!(devices[0], ("USB Audio Device".to_string(), String::new()));
+        assert_eq!(
+            devices[1],
+            ("Bare Name Without Status Column".to_string(), String::new())
+        );
+    }
+
+    #[test]
+    fn cim_skips_malformed_and_empty_rows() {
+        // A blank line, a quoted-empty name, and a whitespace-only name all
+        // contribute no device.
+        let sample = "\"Name\",\"Status\"\n\
+\n\
+\"\",\"OK\"\n\
+\"   \",\"OK\"\n\
+\"Speakers (High Definition Audio)\",\"OK\"\n";
+        let devices = parse_cim_sound_devices(sample);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].0, "Speakers (High Definition Audio)");
+    }
+
+    #[test]
+    fn cim_preserves_commas_inside_quoted_names() {
+        let sample = "\"Name\",\"Status\"\n\"Speakers, Rear\",\"OK\"\n";
+        let devices = parse_cim_sound_devices(sample);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].0, "Speakers, Rear");
+    }
+
+    #[test]
+    fn classify_windows_audio_kind_matches_categories() {
+        assert_eq!(
+            classify_windows_audio_kind("Intel HDMI Audio"),
+            AudioDeviceKind::Hdmi
+        );
+        assert_eq!(
+            classify_windows_audio_kind("Generic USB Audio"),
+            AudioDeviceKind::Usb
+        );
+        assert_eq!(
+            classify_windows_audio_kind("Bluetooth Hands-Free"),
+            AudioDeviceKind::Bluetooth
+        );
+        assert_eq!(
+            classify_windows_audio_kind("VB-Audio Virtual Cable"),
+            AudioDeviceKind::Virtual
+        );
+        assert_eq!(
+            classify_windows_audio_kind("Realtek High Definition Audio"),
+            AudioDeviceKind::Unknown
+        );
+    }
+
+    #[test]
+    fn windows_audio_probe_constructs_noninteractive_powershell_command() {
+        assert_eq!(
+            powershell_audio_args("Get-CimInstance Win32_SoundDevice"),
+            [
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-CimInstance Win32_SoundDevice"
+            ]
+        );
+        assert_eq!(
+            crate::process::timeouts::WINDOWS_AUDIO,
+            std::time::Duration::from_secs(5)
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_audio_probe_drains_large_stdout_and_stderr() {
+        let output = run_powershell_with_timeout(
+            "[Console]::Out.Write(('o' * 1048576 -join '')); [Console]::Error.Write(('e' * 1048576 -join ''))",
+            std::time::Duration::from_secs(30),
+        )
+        .expect("verbose PowerShell probe should complete");
+
+        assert_eq!(output.len(), 1_048_576);
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_audio_probe_honors_injected_deadline() {
+        let started = std::time::Instant::now();
+        let output = run_powershell_with_timeout(
+            "Start-Sleep -Seconds 30",
+            std::time::Duration::from_millis(100),
+        );
+
+        assert!(output.is_none());
+        assert!(started.elapsed() < std::time::Duration::from_secs(5));
     }
 }

@@ -1,0 +1,85 @@
+speed(nested): single-pass entry inspection in walk_for_nested_markers
+
+Rewrite `walk_for_nested_markers` (sniff/lib/src/filesystem/repo/nested.rs)
+to detect nested-workspace markers from the filenames the `ignore` walker
+already yields, instead of re-probing the filesystem once per directory.
+
+* Syscall reduction: the old loop ran ~13 `path.join(marker).exists()`
+  stats plus one `std::fs::read_dir` for *every* walked directory. On the
+  rusty-biscuit worktree (~1,521 walked dirs) that is ~21,000 redundant
+  syscalls/invocation. The new loop does zero extra syscalls: marker
+  evidence is matched in-memory against yielded entry names, so the
+  single batched `ignore` walk is the only I/O.
+
+  Measured on the sniff worktree (release build, warm cache), head to
+  head against the pre-refactor binary built from the same commit:
+
+    `repo packages --perf` Total (internal ms), 5 runs each:
+      pre:  73.4 / 62.5 / 61.0 / 64.4 / 63.1
+      post: 61.0 / 62.7 / 61.0 / 63.0 / 63.4
+    warm wall (`time repo packages`): pre ~0.06-0.08s, post ~0.06-0.08s
+
+  Warm-cache wall time is essentially unchanged because the eliminated
+  `exists()`/`read_dir` probes were served from the directory-entry
+  cache and therefore cheap; the dominant warm cost is the walk itself
+  plus cargo-workspace expansion and structure assembly. The win is in
+  *contention surface*: under the write-heavy parallel-load scenario
+  that originally surfaced this (Claudine's `commit.md` compose running
+  `sniff repo packages` while subagents `git commit` in parallel plus a
+  background `cargo build`), each of the 21,000 syscalls could stall
+  independently and push the command past the 10s compose-shell timeout.
+  Collapsing them into the single walk removes that amplification. The
+  spec's >1.8s read-load spike was not reproducible with a read-only
+  `find target/` load on this host (both pre and post stayed ~63-72ms),
+  but the syscall-count reduction is the structural fix for the
+  write-contention failure mode that motivated the change.
+
+* Intentional behavior change (documented in spec.md "Intentional
+  Behavior Change"): a *gitignored* marker file inside a non-gitignored
+  directory is no longer detected. The old `exists()` probe bypassed the
+  walker's `git_ignore` filter; the new loop only sees walker-yielded
+  files. Marker files (`package.json`, `pnpm-workspace.yaml`, `pom.xml`,
+  `*.sln`, ...) are conventionally committed, so the risk is judged
+  negligible, and preserving the old semantics would require disabling
+  `git_ignore` (re-exploding the walk into `node_modules`). Pinned by
+  the new `test_gitignored_nested_marker_is_not_detected`.
+
+* `parent == root` skip preserved via `path.parent() == Some(root)`, and
+  the loop now inspects non-directory entries only. A directory whose
+  name happens to match a marker (e.g. `nested/package.json/`) is no
+  longer treated as evidence — the true marker contract is a file. The
+  root entry the walker yields naturally fails the parent-equality check.
+
+* Windows ASCII case-insensitive marker-name matching is added via the
+  new `marker_name_matches` helper (`cfg!(windows)` →
+  `eq_ignore_ascii_case`, Unix → byte-exact), matching what the old
+  `path.join(marker).exists()` accepted on case-insensitive filesystems
+  without changing Unix behavior. The `.sln` / `.slnx` suffix check
+  stays a plain case-sensitive `ends_with`, preserving its historical
+  byte-exact contract on every platform. Pinned by
+  `marker_name_matches_is_exact_on_unix_and_case_insensitive_on_windows`.
+
+* `WalkBuilder` settings are byte-for-byte unchanged: `hidden(false)`,
+  `git_ignore(true)`, `git_global(true)`, `git_exclude(true)`, and the
+  `filter_entry` closure pruning `should_skip_directory_name` directories
+  (`node_modules`, `target`, `dist`, `build`, ...). Sort/dedup
+  invariants (`standards.sort_by_key(|s| s.spec().id)`,
+  `candidates.sort_by(|a,b| a.root.cmp(&b.root))`, dedup per root) are
+  preserved, so the returned `Vec<Candidate>` shape is identical for any
+  repo whose markers are committed.
+
+* CLI output byte-identity verified against the pre-refactor binary
+  (built from the same commit via an isolated git worktree + target
+  dir): `sniff repo packages`, `--json`, `--plain`, `--md`, and
+  `--list` are byte-identical on both the rusty-biscuit Cargo-root
+  worktree (no nested JS/.NET layers) and a materialized nested fixture
+  (Cargo root + nested pnpm workspace + .NET `.sln`). The aggregate
+  `sniff repo --json`, `repo is-monorepo --json`, and
+  `repo package-count --json` are byte-identical too.
+
+Tests: existing nested-detection regression tests stay green; new L1
+tests in sniff/lib/tests/{fixtures,integration}.rs cover the
+single-pass pnpm+.NET discovery, the root-marker skip, the
+`node_modules` prune guard, the gitignored-marker delta, and the
+two-platform `marker_name_matches` contract. `just test` and
+`just lint` (clippy -D warnings) clean.

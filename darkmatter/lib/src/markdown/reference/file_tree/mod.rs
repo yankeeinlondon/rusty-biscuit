@@ -28,9 +28,12 @@ use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Layout, LayoutTerminalExt};
 
 use crate::markdown::Markdown;
+use crate::markdown::compose::{ComposeContext, ComposeOptions};
 use crate::markdown::reference::ReferenceError;
 use crate::markdown::reference::types::{ReferenceGraph, ReferenceGraphOptions};
-use crate::markdown::reference::validate::{ReferenceValidationOptions, ReferenceValidationReport};
+use crate::markdown::reference::validate::{
+    self, ReferenceValidationOptions, ReferenceValidationReport,
+};
 use crate::markdown::types::MarkdownError;
 
 pub use model::{
@@ -165,14 +168,28 @@ impl FileTree {
     }
 
     /// Creates a FileTree from an already-loaded Markdown document.
+    ///
+    /// ## Notes
+    ///
+    /// The graph and validation options share one runtime context, captured
+    /// from `md` rather than eagerly. Taking `ReferenceGraphOptions::default()`
+    /// and `ReferenceValidationOptions::default()` instead would run the
+    /// repo-wide sniff scan (git, repo, file changes, languages, docs, OS,
+    /// hardware, GPU) *twice* — 2.8s measured on this working tree — before the
+    /// tree knows whether the document reads any `ctx.*` at all.
     pub fn from_markdown(md: Markdown) -> Self {
+        let base_dir = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let compose =
+            ComposeOptions::new_with_context(ComposeContext::capture_for_document(&base_dir, &md));
+        let graph_options = ReferenceGraphOptions::with_compose(compose);
+        let validation_options = ReferenceValidationOptions::with_graph(graph_options.clone());
         Self {
             md,
             follow: false,
             do_validate: false,
             show_root: true,
-            graph_options: ReferenceGraphOptions::default(),
-            validation_options: ReferenceValidationOptions::default(),
+            graph_options,
+            validation_options,
             layout: Layout::default(),
             model: None,
             graph: None,
@@ -238,10 +255,14 @@ impl FileTree {
         let report = if self.do_validate {
             let mut val_opts = self.validation_options.clone();
             val_opts.graph = self.graph_options.clone();
-            Some(self.md.validate_references(val_opts).map_err(|e| match e {
-                MarkdownError::Reference(re) => FileTreeError::Reference(*re),
-                other => FileTreeError::Markdown(other),
-            })?)
+            // Eligible for the fresh seam: the graph was built a few lines
+            // above from this FileTree's own `md` and `graph_options` in this
+            // same method, with no caller handoff in between — descendant
+            // re-verification would only re-confirm identities captured there.
+            Some(
+                validate::validate_fresh_graph(&self.md, &val_opts, &graph)
+                    .map_err(FileTreeError::Reference)?,
+            )
         } else {
             None
         };

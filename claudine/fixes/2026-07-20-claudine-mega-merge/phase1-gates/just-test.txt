@@ -1,0 +1,761 @@
+Revision: 1fdbfb3e92d9c9a3cf648f00974f5686d949484b
+Worktree: /Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1
+Working directory: claudine
+Command: just test
+Exit status: 124
+Classification: timed-out
+Timeout policy: SIGINT at 60s; SIGKILL 5s later
+
+[[STDOUT]]
+
+Testing [1mclaudine-catalog-types[0m package
+
+ℹ️ using [32mcargo nextest run[0m
+
+✅ [32m all tests passing in [1mclaudine-catalog-types[0m[32m package[0m
+
+
+Testing [1mclaudine[0m package
+
+ℹ️ using [32mcargo nextest run[0m
+[[STDERR]]
+    Updating crates.io index
+     Locking 1444 packages to latest compatible versions
+      Adding alsa v0.11.0 (available: v0.12.0)
+      Adding axum-test v16.4.1 (available: v21.0.0)
+      Adding axum-test v18.7.0 (available: v21.0.0)
+      Adding bech32 v0.11.1 (available: v0.12.0)
+      Adding cargo_metadata v0.19.2 (available: v0.23.1)
+      Adding chromiumoxide v0.7.0 (available: v0.9.1)
+      Adding comfy-table v7.1.4 (available: v7.2.2)
+      Adding criterion v0.5.1 (available: v0.8.2)
+      Adding ed25519-dalek v2.2.0 (available: v3.0.0)
+      Adding expectrl v0.8.0 (available: v0.9.0)
+      Adding fancy-regex v0.17.0 (available: v0.18.0)
+      Adding flume v0.11.1 (available: v0.12.0)
+      Adding fs4 v0.13.1 (available: v1.1.0)
+      Adding generic-array v0.14.7 (available: v0.14.9)
+      Adding geo v0.29.3 (available: v0.33.1)
+      Adding git2 v0.20.4 (available: v0.21.0)
+      Adding gix v0.84.0 (available: v0.85.0)
+      Adding i_float v1.6.0 (available: v1.16.0)
+      Adding i_overlay v1.9.4 (available: v1.10.0)
+      Adding i_shape v1.6.0 (available: v1.18.0)
+      Adding infer v0.19.0 (available: v0.22.0)
+      Adding jsonschema v0.42.2 (available: v0.48.2)
+      Adding jsonwebtoken v9.3.1 (available: v10.4.0)
+      Adding lopdf v0.39.0 (available: v0.44.0)
+      Adding lsp-server v0.8.0 (available: v0.10.0)
+      Adding matchit v0.8.4 (available: v0.8.6)
+      Adding maxminddb v0.27.3 (available: v0.30.0)
+      Adding mdns-sd v0.12.0 (available: v0.20.2)
+      Adding mermaid-rs-renderer v0.2.2 (available: v0.3.1)
+      Adding pdf-extract v0.10.0 (available: v0.12.0)
+      Adding pdfium-render v0.8.37 (available: v0.9.3)
+      Adding petname v2.0.2 (available: v3.1.0)
+      Adding prettyplease v0.2.37 (available: v0.3.0)
+      Adding proc-macro-crate v2.0.0 (available: v2.0.2)
+      Adding quick-xml v0.39.4 (available: v0.41.0)
+      Adding rand v0.8.7 (available: v0.10.2)
+      Adding rand v0.9.5 (available: v0.10.2)
+      Adding rand_core v0.6.4 (available: v0.10.1)
+      Adding rcgen v0.13.2 (available: v0.14.8)
+      Adding redb v2.6.3 (available: v4.1.0)
+      Adding reqwest v0.12.28 (available: v0.13.4)
+      Adding resvg v0.45.1 (available: v0.47.0)
+      Adding rig-core v0.31.0 (available: v0.40.0)
+      Adding rstest v0.25.0 (available: v0.26.1)
+      Adding rusqlite v0.31.0 (available: v0.40.1)
+      Adding scraper v0.25.0 (available: v0.27.0)
+      Adding sha2 v0.10.9 (available: v0.11.0)
+      Adding similar v2.7.0 (available: v3.1.1)
+      Adding sqlx v0.8.0 (available: v0.8.6)
+      Adding sqlx-core v0.8.0 (available: v0.8.6)
+      Adding sqlx-macros v0.8.0 (available: v0.8.6)
+      Adding sqlx-macros-core v0.8.0 (available: v0.8.6)
+      Adding sqlx-mysql v0.8.0 (available: v0.8.6)
+      Adding sqlx-postgres v0.8.0 (available: v0.8.6)
+      Adding sqlx-sqlite v0.8.0 (available: v0.8.6)
+      Adding symphonia v0.5.5 (available: v0.6.0)
+      Adding syn v2.0.119 (available: v3.0.3)
+      Adding sysinfo v0.38.4 (available: v0.39.6)
+      Adding tokio-tungstenite v0.28.0 (available: v0.30.0)
+      Adding toml v0.8.23 (available: v1.1.3+spec-1.1.0)
+      Adding tower-http v0.6.11 (available: v0.7.0)
+      Adding tree-sitter-scala v0.24.1 (available: v0.26.0)
+      Adding tree-sitter-zsh v0.56.0 (available: v0.63.4)
+      Adding which v7.0.3 (available: v8.0.5)
+      Adding winreg v0.55.0 (available: v0.56.0)
+   Compiling proc-macro2 v1.0.107
+   Compiling quote v1.0.47
+   Compiling unicode-ident v1.0.24
+   Compiling serde_core v1.0.229
+   Compiling autocfg v1.5.1
+   Compiling serde v1.0.229
+   Compiling heck v0.5.0
+   Compiling zmij v1.0.23
+   Compiling serde_json v1.0.151
+   Compiling memchr v2.8.3
+   Compiling itoa v1.0.18
+   Compiling num-traits v0.2.19
+   Compiling syn v3.0.3
+   Compiling syn v2.0.119
+   Compiling strum_macros v0.28.0
+   Compiling strum v0.28.0
+   Compiling serde_derive v1.0.229
+   Compiling chrono v0.4.45
+   Compiling claudine-catalog-types v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/claudine/catalog-types)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.18s
+────────────
+ Nextest run ID 5c95fef6-68bf-4bf6-a0c6-f88392456ffe with nextest profile: default
+    Starting 21 tests across 1 binary
+        PASS [   0.008s] ( 1/21) claudine-catalog-types family::tests::family_key_strips_everything_after_the_first_marker
+        PASS [   0.008s] ( 2/21) claudine-catalog-types offering::tests::variant_names_are_snake_case_wire_forms
+        PASS [   0.008s] ( 3/21) claudine-catalog-types billing_model::tests::variant_names_are_snake_case_wire_forms
+        PASS [   0.008s] ( 4/21) claudine-catalog-types resume_support::tests::variant_names_are_snake_case_wire_forms
+        PASS [   0.008s] ( 5/21) claudine-catalog-types platform_kind::tests::variant_names_are_snake_case_wire_forms
+        PASS [   0.008s] ( 6/21) claudine-catalog-types platform_kind::tests::serde_wire_forms_match_catalog_shape
+        PASS [   0.009s] ( 7/21) claudine-catalog-types signal::tests::cap_scope_serializes_to_a_bare_string
+        PASS [   0.009s] ( 8/21) claudine-catalog-types billing_model::tests::serde_wire_forms_match_catalog_shape
+        PASS [   0.009s] ( 9/21) claudine-catalog-types model_catalog_source::tests::serde_wire_forms_match_catalog_shape
+        PASS [   0.010s] (10/21) claudine-catalog-types acp_server_mode::tests::variant_names_are_snake_case_wire_forms
+        PASS [   0.010s] (11/21) claudine-catalog-types offering::tests::serde_wire_forms_match_catalog_shape
+        PASS [   0.010s] (12/21) claudine-catalog-types model_catalog_source::tests::variant_names_are_snake_case_wire_forms
+        PASS [   0.010s] (13/21) claudine-catalog-types resume_support::tests::serde_wire_forms_match_catalog_shape
+        PASS [   0.010s] (14/21) claudine-catalog-types acp_server_mode::tests::serde_wire_forms_match_catalog_shape
+        PASS [   0.010s] (15/21) claudine-catalog-types signal::tests::kind_matches_payload_variant
+        PASS [   0.010s] (16/21) claudine-catalog-types model_catalog_source::tests::into_static_str_covers_the_data_variant
+        PASS [   0.006s] (17/21) claudine-catalog-types signal::tests::qwen_loop_type_tokens_are_screaming_snake
+        PASS [   0.006s] (18/21) claudine-catalog-types signal::tests::signal_kind_member_list_is_frozen
+        PASS [   0.006s] (19/21) claudine-catalog-types signal::tests::static_str_names_are_snake_case
+        PASS [   0.006s] (20/21) claudine-catalog-types vocab::tests::confidence_ranks_source_code_highest
+        PASS [   0.007s] (21/21) claudine-catalog-types signal::tests::serde_names_are_snake_case
+────────────
+     Summary [   0.015s] 21 tests run: 21 passed, 0 skipped
+   Compiling libc v0.2.189
+   Compiling cfg-if v1.0.4
+   Compiling memchr v2.8.3
+   Compiling bitflags v2.13.1
+   Compiling serde_core v1.0.229
+   Compiling once_cell v1.21.4
+   Compiling regex-syntax v0.8.11
+   Compiling smallvec v1.15.2
+   Compiling version_check v0.9.5
+   Compiling serde v1.0.229
+   Compiling crc32fast v1.5.0
+   Compiling thiserror v2.0.19
+   Compiling stable_deref_trait v1.2.1
+   Compiling crossbeam-utils v0.8.22
+   Compiling equivalent v1.0.2
+   Compiling syn v2.0.119
+   Compiling syn v3.0.3
+   Compiling aho-corasick v1.1.4
+   Compiling getrandom v0.4.3
+   Compiling tinyvec_macros v0.1.1
+   Compiling allocator-api2 v0.2.21
+   Compiling foldhash v0.2.0
+   Compiling fastrand v2.5.0
+   Compiling zerocopy v0.8.55
+   Compiling tinyvec v1.12.0
+   Compiling generic-array v0.14.7
+   Compiling parking_lot_core v0.9.12
+   Compiling typenum v1.20.1
+   Compiling regex-automata v0.4.16
+   Compiling scopeguard v1.2.0
+   Compiling hashbrown v0.17.1
+   Compiling unicode-normalization v0.1.25
+   Compiling lock_api v0.4.14
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.9
+   Compiling zerocopy-derive v0.8.55
+   Compiling same-file v1.0.6
+   Compiling gix-trace v0.1.20
+   Compiling num-traits v0.2.19
+   Compiling log v0.4.33
+   Compiling getrandom v0.3.4
+   Compiling crossbeam-channel v0.5.16
+   Compiling zlib-rs v0.6.6
+   Compiling byteorder v1.5.0
+   Compiling rustix v1.1.4
+   Compiling walkdir v2.5.0
+   Compiling pin-project-lite v0.2.17
+   Compiling pkg-config v0.3.33
+   Compiling heapless v0.8.0
+   Compiling bstr v1.13.0
+   Compiling hash32 v0.3.1
+   Compiling crypto-common v0.1.7
+   Compiling block-buffer v0.10.4
+   Compiling arrayvec v0.7.8
+   Compiling simd-adler32 v0.3.10
+   Compiling adler2 v2.0.1
+   Compiling jiff-core v0.1.0
+   Compiling synstructure v0.13.2
+   Compiling digest v0.10.7
+   Compiling ahash v0.8.12
+   Compiling core-foundation-sys v0.8.7
+   Compiling bytes v1.12.1
+   Compiling miniz_oxide v0.8.9
+   Compiling futures-core v0.3.33
+   Compiling gix-validate v0.11.2
+   Compiling gix-error v0.2.5
+   Compiling zerofrom-derive v0.1.7
+   Compiling jiff v0.2.34
+   Compiling fnv v1.0.7
+   Compiling yoke-derive v0.8.2
+   Compiling encoding_rs v0.8.35
+   Compiling flate2 v1.1.9
+   Compiling libm v0.2.16
+   Compiling futures-sink v0.3.33
+   Compiling zerovec-derive v0.11.3
+   Compiling tokio-macros v2.7.1
+   Compiling percent-encoding v2.3.2
+   Compiling errno v0.3.14
+   Compiling jobserver v0.1.35
+   Compiling cpufeatures v0.2.17
+   Compiling memmap2 v0.9.11
+   Compiling faster-hex v0.10.0
+   Compiling zerofrom v0.1.8
+   Compiling gix-utils v0.3.4
+   Compiling parking_lot v0.12.5
+   Compiling sha1 v0.10.7
+   Compiling signal-hook-registry v1.4.8
+   Compiling cc v1.3.0
+   Compiling socket2 v0.6.5
+   Compiling mio v1.2.2
+   Compiling serde_json v1.0.151
+   Compiling slab v0.4.12
+   Compiling gix-date v0.15.6
+   Compiling yoke v0.8.3
+   Compiling indexmap v2.14.0
+   Compiling displaydoc v0.2.6
+   Compiling sha1-checked v0.10.0
+   Compiling tracing-core v0.1.36
+   Compiling prodash v31.0.0
+   Compiling crossbeam-epoch v0.9.20
+   Compiling base64 v0.22.1
+   Compiling cmake v0.1.58
+   Compiling tokio v1.53.1
+   Compiling zerovec v0.11.6
+   Compiling futures-channel v0.3.33
+   Compiling gix-actor v0.41.1
+   Compiling gix-chunk v0.7.2
+   Compiling tracing-attributes v0.1.31
+   Compiling nonempty v0.12.0
+   Compiling fs_extra v1.3.0
+   Compiling crossbeam-deque v0.8.7
+   Compiling bitflags v1.3.2
+   Compiling dunce v1.0.5
+   Compiling gix-quote v0.7.2
+   Compiling futures-macro v0.3.33
+   Compiling lazy_static v1.5.0
+   Compiling tempfile v3.27.0
+   Compiling futures-io v0.3.33
+   Compiling futures-task v0.3.33
+   Compiling zeroize v1.9.0
+   Compiling ppv-lite86 v0.2.21
+   Compiling aws-lc-sys v0.43.0
+   Compiling tinystr v0.8.3
+   Compiling http v1.4.2
+   Compiling either v1.16.0
+   Compiling tracing v0.1.44
+   Compiling bytemuck v1.25.2
+   Compiling core_maths v0.1.1
+   Compiling ring v0.17.14
+   Compiling unicode-bom v2.0.3
+   Compiling writeable v0.6.3
+   Compiling aws-lc-rs v1.17.3
+   Compiling weezl v0.1.12
+   Compiling rayon-core v1.13.0
+   Compiling futures-util v0.3.33
+   Compiling litemap v0.8.2
+   Compiling ttf-parser v0.25.1
+   Compiling rustls-pki-types v1.15.0
+   Compiling potential_utf v0.1.5
+   Compiling zerotrie v0.2.4
+   Compiling core-foundation v0.10.1
+   Compiling security-framework-sys v2.17.0
+   Compiling httparse v1.10.1
+   Compiling icu_locale_core v2.2.0
+   Compiling unicode-properties v0.1.4
+   Compiling icu_properties_data v2.2.0
+   Compiling icu_normalizer_data v2.2.0
+   Compiling utf8_iter v1.0.4
+   Compiling static_assertions v1.1.0
+   Compiling security-framework v3.7.0
+   Compiling getrandom v0.2.17
+   Compiling unicode-bidi v0.3.18
+   Compiling untrusted v0.9.0
+   Compiling kstring v2.0.4
+   Compiling icu_collections v2.2.0
+   Compiling icu_provider v2.2.0
+   Compiling http-body v1.1.0
+   Compiling tokio-util v0.7.19
+   Compiling rand_core v0.9.5
+   Compiling nom v8.0.0
+   Compiling num-conv v0.2.2
+   Compiling system-configuration-sys v0.6.0
+   Compiling powerfmt v0.2.0
+   Compiling siphasher v1.0.3
+   Compiling deranged v0.5.8
+   Compiling rustls v0.23.42
+   Compiling time-core v0.1.9
+   Compiling rayon v1.12.0
+   Compiling gix-sec v0.14.1
+   Compiling icu_normalizer v2.2.0
+   Compiling block-padding v0.3.3
+   Compiling hashbrown v0.16.1
+   Compiling shell-words v1.1.1
+   Compiling atomic-waker v1.1.2
+   Compiling subtle v2.6.1
+   Compiling try-lock v0.2.5
+   Compiling icu_properties v2.2.0
+   Compiling tower-service v0.3.3
+   Compiling h2 v0.4.15
+   Compiling inout v0.1.4
+   Compiling rand_chacha v0.9.0
+   Compiling core-foundation v0.9.4
+   Compiling time v0.3.54
+   Compiling want v0.3.1
+   Compiling filetime v0.2.29
+   Compiling gix-bitmap v0.3.2
+   Compiling winnow v1.0.4
+   Compiling cipher v0.4.4
+   Compiling form_urlencoded v1.2.2
+   Compiling ipnet v2.12.0
+   Compiling rand v0.9.5
+   Compiling arrayref v0.3.9
+   Compiling system-configuration v0.7.0
+   Compiling http-body-util v0.1.4
+   Compiling iana-time-zone v0.1.65
+   Compiling rustversion v1.0.23
+   Compiling bytecount v0.6.9
+   Compiling glob v0.3.4
+   Compiling ryu v1.0.23
+   Compiling idna_adapter v1.2.2
+   Compiling compression-core v0.4.32
+   Compiling num-integer v0.1.46
+   Compiling sync_wrapper v1.0.2
+   Compiling toml_parser v1.1.2+spec-1.1.0
+   Compiling gix-imara-diff v0.2.3
+   Compiling tower-layer v0.3.3
+   Compiling unicode-general-category v1.1.0
+   Compiling objc2 v0.6.4
+   Compiling getrandom v0.1.16
+   Compiling compression-codecs v0.4.38
+   Compiling nom_locate v5.0.0
+   Compiling idna v1.1.0
+   Compiling tower v0.5.3
+   Compiling ecb v0.1.2
+   Compiling cbc v0.1.2
+   Compiling aes v0.8.4
+   Compiling async-compression v0.4.42
+   Compiling clru v0.6.3
+   Compiling stringprep v0.1.5
+   Compiling sha2 v0.10.9
+   Compiling md-5 v0.10.6
+   Compiling pom v1.1.0
+   Compiling mime v0.3.17
+   Compiling camino v1.2.4
+   Compiling rangemap v1.7.1
+   Compiling objc2-encode v4.1.0
+   Compiling ref-cast v1.0.26
+   Compiling num-bigint v0.4.8
+   Compiling clang-sys v1.8.1
+   Compiling uuid v1.24.0
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling symphonia-core v0.5.5
+   Compiling maybe-async v0.2.11
+   Compiling arc-swap v1.9.2
+   Compiling anyhow v1.0.104
+   Compiling toml_writer v1.1.2+spec-1.1.0
+   Compiling regex v1.13.1
+   Compiling num-rational v0.4.2
+   Compiling cfb v0.7.3
+   Compiling rand_core v0.5.1
+   Compiling adobe-cmap-parser v0.4.1
+   Compiling type1-encoding-parser v0.1.1
+   Compiling euclid v0.20.14
+   Compiling fdeflate v0.3.7
+   Compiling serde_spanned v1.1.1
+   Compiling semver v1.0.28
+   Compiling equator-macro v0.4.2
+   Compiling slotmap v1.1.1
+   Compiling quick-error v2.0.1
+   Compiling postscript v0.14.1
+   Compiling minimal-lexical v0.2.1
+   Compiling float-cmp v0.9.0
+   Compiling unsafe-libyaml v0.2.11
+   Compiling cff-parser v0.1.0
+   Compiling toml v1.1.3+spec-1.1.0
+   Compiling infer v0.19.0
+   Compiling equator v0.4.2
+   Compiling objc2-core-foundation v0.3.2
+   Compiling symphonia-metadata v0.5.5
+   Compiling strict-num v0.1.1
+   Compiling nom v7.1.3
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.19
+   Compiling ref-cast-impl v1.0.26
+   Compiling strum_macros v0.28.0
+   Compiling rgb v0.8.53
+   Compiling blake3 v1.8.5
+   Compiling libloading v0.8.9
+   Compiling linked-hash-map v0.5.6
+   Compiling color_quant v1.1.0
+   Compiling siphasher v0.3.11
+   Compiling bindgen v0.72.1
+   Compiling paste v1.0.15
+   Compiling cexpr v0.6.0
+   Compiling phf_shared v0.8.0
+   Compiling itertools v0.13.0
+   Compiling yaml-rust v0.4.5
+   Compiling tiny-skia-path v0.11.4
+   Compiling strum v0.28.0
+   Compiling aligned-vec v0.6.4
+   Compiling rand_chacha v0.2.2
+   Compiling rand_pcg v0.2.1
+   Compiling num-complex v0.4.6
+   Compiling pcre2-sys v0.2.10
+   Compiling half v2.7.1
+   Compiling serde_derive_internals v0.29.1
+   Compiling indexmap v1.9.3
+   Compiling data-encoding v2.11.0
+   Compiling utf8parse v0.2.2
+   Compiling constant_time_eq v0.4.2
+   Compiling shlex v1.3.0
+   Compiling unicode-bidi-mirroring v0.4.0
+   Compiling rustc-hash v2.1.3
+   Compiling unicode-script v0.5.8
+   Compiling unicode-ccc v0.4.0
+   Compiling zune-core v0.5.1
+   Compiling byteorder-lite v0.1.0
+   Compiling anstyle-parse v1.0.0
+   Compiling schemars_derive v1.2.1
+   Compiling image-webp v0.2.4
+   Compiling zune-jpeg v0.5.15
+   Compiling rustybuzz v0.20.1
+   Compiling rand v0.7.3
+   Compiling v_frame v0.3.9
+   Compiling fontdb v0.23.0
+   Compiling globset v0.4.19
+   Compiling polycool v0.4.0
+   Compiling simplecss v0.2.2
+   Compiling as-slice v0.2.1
+   Compiling dyn-clone v1.0.20
+   Compiling anstyle-query v1.1.5
+   Compiling hashbrown v0.12.3
+   Compiling xmlwriter v0.1.0
+   Compiling xxhash-rust v0.8.18
+   Compiling colorchoice v1.0.5
+   Compiling pico-args v0.5.0
+   Compiling data-url v0.3.2
+   Compiling unicase v2.9.0
+   Compiling utf-8 v0.7.6
+   Compiling anstyle v1.0.14
+   Compiling built v0.8.1
+   Compiling unicode-vo v0.1.0
+   Compiling termcolor v1.4.1
+   Compiling av-scenechange v0.14.1
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling unicode-width v0.1.14
+   Compiling rav1e v0.8.1
+   Compiling aligned v0.4.3
+   Compiling kurbo v0.13.1
+   Compiling ignore v0.4.31
+   Compiling anstream v1.0.0
+   Compiling phf_generator v0.8.0
+   Compiling textwrap v0.11.0
+   Compiling gif v0.14.2
+   Compiling symphonia-utils-xiph v0.5.5
+   Compiling png v0.17.16
+   Compiling rustls-native-certs v0.8.4
+   Compiling atty v0.2.14
+   Compiling arg_enum_proc_macro v0.3.4
+   Compiling profiling-procmacros v1.0.18
+   Compiling pulp v0.22.3
+   Compiling no_std_io2 v0.9.4
+   Compiling gix-path v0.12.2
+   Compiling gix-packetline v0.21.5
+   Compiling lopdf v0.38.0
+   Compiling ansi_term v0.12.1
+   Compiling option-ext v0.2.0
+   Compiling pastey v0.1.1
+   Compiling strsim v0.11.1
+   Compiling y4m v0.8.0
+   Compiling vec_map v0.8.2
+   Compiling clap_lex v1.1.0
+   Compiling strsim v0.8.0
+   Compiling dirs-sys v0.5.0
+   Compiling profiling v1.0.18
+   Compiling bitstream-io v4.10.0
+   Compiling clap_builder v4.6.2
+   Compiling clap v2.34.0
+   Compiling tiny-skia v0.11.4
+   Compiling pcre2 v0.2.11
+   Compiling phf_codegen v0.8.0
+   Compiling svgtypes v0.16.1
+   Compiling av1-grain v0.2.5
+   Compiling phf v0.8.0
+   Compiling objc2-io-kit v0.3.2
+   Compiling clap_derive v4.6.4
+   Compiling gix-features v0.48.1
+   Compiling gix-config-value v0.18.1
+   Compiling gix-command v0.9.1
+   Compiling gix-url v0.36.2
+   Compiling maybe-rayon v0.1.1
+   Compiling tokio-stream v0.1.18
+   Compiling hyper v1.11.0
+   Compiling itertools v0.14.0
+   Compiling onig_sys v69.9.3
+   Compiling ordered-float v2.10.1
+   Compiling num_cpus v1.17.0
+   Compiling biscuit-hash v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/biscuit-hash/lib)
+   Compiling kurbo v0.11.3
+   Compiling num-derive v0.4.2
+   Compiling roxmltree v0.21.1
+   Compiling gix-hash v0.25.1
+   Compiling gix-fs v0.21.2
+   Compiling gix-glob v0.26.1
+   Compiling simd_helpers v0.1.0
+   Compiling extended v0.1.0
+   Compiling gix-transport v0.57.2
+   Compiling imgref v1.12.2
+   Compiling polyglot_tokenizer v0.2.1
+   Compiling noop_proc_macro v0.3.0
+   Compiling imagesize v0.14.0
+   Compiling pulp-wasm-simd-flag v0.1.1
+   Compiling unicode-width v0.2.2
+   Compiling native-tls v0.2.18
+   Compiling urlencoding v2.1.3
+   Compiling new_debug_unreachable v1.0.6
+   Compiling reborrow v0.5.5
+   Compiling gix-hashtable v0.15.2
+   Compiling gix-commitgraph v0.37.1
+   Compiling usvg v0.46.0
+   Compiling gix-attributes v0.33.2
+   Compiling gix-ignore v0.21.1
+   Compiling loop9 v0.1.5
+   Compiling symphonia-format-riff v0.5.5
+   Compiling gix-object v0.61.0
+   Compiling svgtypes v0.15.3
+   Compiling sysinfo v0.38.4
+   Compiling dirs v6.0.0
+   Compiling symphonia-format-ogg v0.5.5
+   Compiling symphonia-codec-vorbis v0.5.5
+   Compiling symphonia-bundle-mp3 v0.5.5
+   Compiling async-trait v0.1.91
+   Compiling serde_repr v0.1.21
+   Compiling symphonia-codec-pcm v0.5.5
+   Compiling phf_shared v0.13.1
+   Compiling hyper-util v0.1.20
+   Compiling chrono v0.4.45
+   Compiling url v2.5.8
+   Compiling cargo-platform v0.1.9
+   Compiling hashbrown v0.14.5
+   Compiling gix-pathspec v0.18.1
+   Compiling cargo_metadata v0.19.2
+   Compiling json-five v0.3.1
+   Compiling gix-revwalk v0.32.0
+   Compiling gix-filter v0.31.0
+   Compiling dashmap v6.2.1
+   Compiling tower-http v0.6.11
+   Compiling gix-traverse v0.58.0
+   Compiling gix-revision v0.46.0
+   Compiling gix-pack v0.71.0
+   Compiling serde_yaml_ng v0.10.0
+   Compiling gix-tempfile v23.0.2
+   Compiling openapiv3 v2.2.0
+   Compiling lopdf v0.39.0
+   Compiling schemars v1.2.1
+   Compiling gix-lock v23.0.1
+   Compiling serde_yaml v0.8.26
+   Compiling clap v4.6.4
+   Compiling gix-ref v0.64.0
+   Compiling gix-index v0.52.0
+   Compiling gix-refspec v0.42.0
+   Compiling gix-shallow v0.12.1
+   Compiling coreaudio-sys v0.2.18
+   Compiling serde-value v0.7.0
+   Compiling sharded-slab v0.1.7
+   Compiling gix-odb v0.81.0
+   Compiling tracing-log v0.2.0
+   Compiling which v8.0.5
+   Compiling getifaddrs v0.6.2
+   Compiling hyperpolyglot v0.1.7
+   Compiling zune-inflate v0.2.54
+   Compiling avif-serialize v0.8.9
+   Compiling matchers v0.2.0
+   Compiling quick-xml v0.41.0
+   Compiling thread_local v1.1.10
+   Compiling zune-core v0.4.12
+   Compiling imagesize v0.13.0
+   Compiling pdf-extract v0.10.0
+   Compiling ucd-trie v0.1.7
+   Compiling roxmltree v0.20.0
+   Compiling bit_field v0.10.3
+   Compiling litrs v1.0.0
+   Compiling ec4rs v1.2.0
+   Compiling bit-vec v0.8.0
+   Compiling nu-ansi-term v0.50.3
+   Compiling pulldown-cmark v0.13.4
+   Compiling fax v0.2.7
+   Compiling pxfm v0.1.30
+   Compiling lebe v0.5.3
+   Compiling bit-set v0.8.0
+   Compiling tracing-subscriber v0.3.23
+   Compiling tiff v0.11.3
+   Compiling exr v1.74.2
+   Compiling document-features v0.2.12
+   Compiling usvg v0.45.1
+   Compiling json5 v1.3.1
+   Compiling phf_generator v0.13.1
+   Compiling gix-discover v0.52.0
+   Compiling gix-config v0.57.0
+   Compiling gix-protocol v0.62.0
+   Compiling plist v1.10.0
+   Compiling zune-jpeg v0.4.21
+   Compiling gix-worktree v0.53.0
+   Compiling ravif v0.13.0
+   Compiling moxcms v0.8.1
+   Compiling twilight-model v0.17.1
+   Compiling symphonia v0.5.5
+   Compiling resvg v0.46.0
+   Compiling getopts v0.2.24
+   Compiling mime_guess v2.0.5
+   Compiling gix-diff v0.64.0
+   Compiling gix-dir v0.26.0
+   Compiling gif v0.13.3
+   Compiling png v0.18.1
+   Compiling block2 v0.6.2
+   Compiling num-iter v0.1.46
+   Compiling qoi v0.4.1
+   Compiling pulldown-cmark-escape v0.11.0
+   Compiling vcpkg v0.2.15
+   Compiling alloc-no-stdlib v2.0.4
+   Compiling renderable v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/renderable)
+   Compiling borrow-or-share v0.2.4
+   Compiling libsqlite3-sys v0.28.0
+   Compiling alloc-stdlib v0.2.4
+   Compiling rustc_version v0.4.1
+   Compiling fluent-uri v0.4.1
+   Compiling num v0.4.3
+   Compiling objc2-foundation v0.3.2
+   Compiling resvg v0.45.1
+   Compiling mermaid-rs-renderer v0.2.2
+   Compiling tokio-native-tls v0.3.1
+   Compiling playa v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/playa/lib)
+   Compiling phf_macros v0.13.1
+   Compiling crossterm v0.29.0
+   Compiling bincode v1.3.3
+   Compiling ansi_colours v1.2.3
+   Compiling futures-executor v0.3.33
+   Compiling unic-langid-impl v0.9.6
+   Compiling console v0.16.4
+   Compiling layout-rs v0.1.3
+   Compiling gix-merge v0.17.0
+   Compiling gix-submodule v0.31.0
+   Compiling gix-status v0.31.0
+   Compiling outref v0.5.2
+   Compiling dtoa v1.0.11
+   Compiling home v0.5.12
+   Compiling vsimd v0.8.0
+   Compiling toml_edit v0.25.13+spec-1.1.0
+   Compiling termini v1.0.0
+   Compiling dtoa-short v0.3.5
+   Compiling uuid-simd v0.8.0
+   Compiling referencing v0.42.2
+   Compiling unic-langid v0.9.6
+   Compiling phf v0.13.1
+   Compiling hyper-tls v0.6.0
+   Compiling fraction v0.15.4
+   Compiling rstest_macros v0.25.0
+   Compiling brotli-decompressor v5.0.3
+   Compiling fancy-regex v0.17.0
+   Compiling email_address v0.2.9
+   Compiling serde_urlencoded v0.7.1
+   Compiling twilight-http-ratelimiting v0.17.1
+   Compiling phf_shared v0.12.1
+   Compiling gix v0.84.0
+   Compiling terminal_size v0.4.4
+   Compiling cssparser-macros v0.7.0
+   Compiling unicode-id v0.3.6
+   Compiling num-cmp v0.1.0
+   Compiling chrono-tz v0.10.4
+   Compiling plotters-backend v0.3.7
+   Compiling env_home v0.1.0
+   Compiling ciborium-io v0.2.2
+   Compiling plotters-svg v0.3.7
+   Compiling which v7.0.3
+   Compiling ciborium-ll v0.2.2
+   Compiling jsonschema v0.42.2
+   Compiling cssparser v0.37.0
+   Compiling markdown v1.0.0
+   Compiling phf v0.12.1
+   Compiling reqwest v0.12.28
+   Compiling proc-macro-crate v3.5.0
+   Compiling futures v0.3.33
+   Compiling pulldown-cmark-to-cmark v22.0.0
+   Compiling hashlink v0.9.1
+   Compiling itertools v0.10.5
+   Compiling onig v6.5.3
+   Compiling secrecy v0.10.3
+   Compiling wait-timeout v0.2.1
+   Compiling quick-xml v0.39.4
+   Compiling cast v0.3.0
+   Compiling fallible-iterator v0.3.0
+   Compiling quick-error v1.2.3
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling similar v2.7.0
+   Compiling html-escape v0.2.14
+   Compiling relative-path v1.9.3
+   Compiling gender_guesser v0.2.0
+   Compiling rusty-fork v0.3.1
+   Compiling criterion-plot v0.5.0
+   Compiling ciborium v0.2.2
+   Compiling syntect v5.3.0
+   Compiling plotters v0.3.7
+   Compiling claudine-catalog-types v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/claudine/catalog-types)
+   Compiling objc2-core-location v0.3.2
+   Compiling rusqlite v0.31.0
+   Compiling tinytemplate v1.2.1
+   Compiling image v0.25.10
+   Compiling objc2-user-notifications v0.3.2
+   Compiling rand_xorshift v0.4.0
+   Compiling is-terminal v0.4.17
+   Compiling serial_test_derive v3.5.0
+   Compiling tracing-test-macro v0.2.6
+   Compiling futures-timer v3.0.4
+   Compiling unarray v0.1.4
+   Compiling oorandom v11.1.5
+   Compiling anes v0.1.6
+   Compiling proptest v1.11.0
+   Compiling serial_test v3.5.0
+   Compiling criterion v0.5.1
+   Compiling tracing-test v0.2.6
+   Compiling rstest v0.25.0
+   Compiling test-toolkit v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/tools/test-toolkit)
+   Compiling two-face v0.5.1
+   Compiling biscuit-visualized v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/biscuit-visualized/src)
+   Compiling viuer v0.11.0
+   Compiling twilight-validate v0.17.0
+   Compiling twilight-util v0.17.0
+   Compiling rustls-webpki v0.103.13
+   Compiling tokio-rustls v0.26.4
+   Compiling rustls-platform-verifier v0.7.0
+   Compiling tungstenite v0.26.2
+   Compiling hyper-rustls v0.27.9
+   Compiling reqwest v0.13.4
+   Compiling twilight-http v0.17.1
+   Compiling tokio-tungstenite v0.26.2
+   Compiling biscuit-file v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/biscuit-file/lib)
+   Compiling schematic-define v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/schematic/define)
+   Compiling biscuit-terminal v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/biscuit-terminal/lib)
+   Compiling schematic-definitions v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/schematic/definitions)
+   Compiling schematic-schema v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/schematic/schema)
+   Compiling sniff v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/sniff/lib)
+   Compiling messenger v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/messenger/lib)
+   Compiling darkmatter v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/darkmatter/lib)
+   Compiling biscuit-speaks v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/biscuit-speaks/lib)
+   Compiling claudine v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/claudine-mega-merge-integration-20260721-phase1/claudine/lib)
+error: recipe `_test` was terminated by signal 2
+error: recipe `test` failed on line 85 with exit code 130

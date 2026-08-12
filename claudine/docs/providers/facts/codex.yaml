@@ -1,0 +1,320 @@
+# Topic-less catalog facts for the codex provider.
+#
+# Field-source matrix (design/catalog-generation.md): this file owns values
+# whose research topic has not landed yet. Keys are catalog field names.
+# Seeded once from the hand-written provider constants (the one-time
+# `scrape-facts` bootstrap, retired after seeding).
+# When a field's research topic lands, the mapping registry re-points the
+# field and generation ERRORS while this file still carries the key
+# (delete-on-graduate).
+stream_protocol: jsonl
+event_mapping:
+  mappings:
+  - event: session_start
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: thread.started
+        protocol: jsonl
+  - event: session_end
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: before_prompt
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: turn.started
+        protocol: jsonl
+  - event: before_tool
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: item.started
+        protocol: jsonl
+  - event: after_tool
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: item.completed
+        protocol: jsonl
+  - event: tool_error
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: error
+        protocol: jsonl
+  - event: permission_request
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: human_in_the_loop
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: tool/requestUserInput
+        protocol: jsonl
+  - event: turn_complete
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      hook:
+        native_name: turn.completed
+  - event: turn_error
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: turn.failed
+        protocol: jsonl
+  - event: subagent_start
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: subagent_stop
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: before_model
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: after_model
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: agent_message
+        protocol: jsonl
+  - event: before_compact
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: notification
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: reasoning
+        protocol: jsonl
+resource_support:
+  agents:
+    also_reads_from: []
+    format: Markdown
+    level: Full
+    notes: null
+    properties: null
+    repo_path: .codex/agents
+    user_path: .codex/agents
+  # Codex custom prompts are deprecated but still supported from user scope.
+  # Codex docs state prompt files live in the local Codex home and are not
+  # shared through the repository, so repo_path is intentionally EMPTY (not
+  # absent). TODO: remove the commands entry when Codex fully drops prompt
+  # files. (Comment preserved from the hand-written codex data.rs.)
+  commands:
+    also_reads_from: []
+    format: Markdown
+    level: CustomFormat
+    notes: Deprecated custom prompts; user scope only; prefer skills
+    properties:
+      optional:
+      - description
+      - argument-hint
+      required: []
+      source_doc: claudine/docs/cross-referencing/codex.md
+    repo_path: ''
+    user_path: .codex/prompts
+  provider: codex
+  scripts:
+    also_reads_from: []
+    format: Executable
+    level: Full
+    notes: null
+    properties: null
+    repo_path: .codex/scripts
+    user_path: .codex/scripts
+  skill_frontmatter:
+    allowed_tools: false
+    compatibility: true
+    description: true
+    disable_model_invocation: false
+    license: true
+    metadata: true
+    name: true
+    user_invocable: false
+  skills:
+    also_reads_from:
+    - .claude/skills
+    - .agents/skills
+    format: Markdown
+    level: Full
+    notes: null
+    properties:
+      optional:
+      - license
+      - compatibility
+      - metadata
+      required:
+      - name
+      - description
+      source_doc: claudine/docs/cross-referencing/codex.md
+    repo_path: .codex/skills
+    user_path: .codex/skills
+memory_files:
+- raw: ~/.codex/AGENTS.override.md
+  segments: []
+- raw: ~/.codex/AGENTS.md
+  segments: []
+- raw: AGENTS.md
+  segments: []
+output_formats:
+- cli_flag: null
+  companion_flags: []
+  format: text
+  native_name: text
+  selector:
+    kind: default
+  stdin_supported: true
+- cli_flag: --json
+  companion_flags: []
+  format: json
+  native_name: jsonl
+  selector:
+    flag: --json
+    kind: flag
+  stdin_supported: true
+# The stream record is the structured-stream ground truth (migrated verbatim
+# from the retired CodexWrapper::apply_structured_stream override): Codex's
+# structured stream is `exec --json` (JSONL), not `--output-schema`.
+- cli_flag: --json
+  companion_flags: []
+  format: stream
+  native_name: jsonl
+  selector:
+    flag: --json
+    kind: flag
+  stdin_supported: true
+# schema-json is a single JSON document conforming to a schema — a `json`
+# format, not a stream. Kept (re-labeled from `stream`) so native-output
+# detection of `--output-schema` argv is preserved; `--output json` still
+# resolves to the first json record (jsonl) above.
+- cli_flag: --output-schema
+  companion_flags: []
+  format: json
+  native_name: schema-json
+  selector:
+    flag: --output-schema
+    kind: flag_value
+  stdin_supported: true
+entrypoints:
+- mode: non_interactive
+  required_flags: []
+  subcommand: exec
+- mode: interactive
+  required_flags: []
+  subcommand: review
+- mode: non_interactive
+  required_flags: []
+  subcommand: exec review
+- mode: non_interactive
+  required_flags: []
+  subcommand: exec resume
+system_prompt:
+  append:
+    interactive:
+      config_key_inline:
+        flag: -c
+        key: developer_instructions
+    non_interactive:
+      config_key_inline:
+        flag: -c
+        key: developer_instructions
+  memory_files:
+  - raw: ~/.codex/AGENTS.override.md
+    segments: []
+  - raw: ~/.codex/AGENTS.md
+    segments: []
+  - raw: AGENTS.md
+    segments: []
+  replace:
+    interactive:
+      config_key_file:
+        flag: -c
+        key: model_instructions_file
+    non_interactive:
+      config_key_file:
+        flag: -c
+        key: model_instructions_file
+yolo:
+  direct_flag:
+    native_flag: --dangerously-bypass-approvals-and-sandbox
+reasoning:
+  named_levels:
+    flag: model_reasoning_effort
+    levels:
+    - minimal
+    - low
+    - medium
+    - high
+    - xhigh
+known_gaps: []
+acp:
+  client_supported: false
+  events_via_acp: []
+prompt_arg_conventions:
+  entrypoint: exec
+  prompt_flags: []
+cli_sensitive_axes:
+  access_domain: true
+  execute_command: true
+  modify_provider_config: true
+  read_path: true
+  spawn_subagent: false
+  switch_mode: false
+  traverse_path: true
+  use_mcp_server: false
+  use_mcp_tool: false
+  write_path: true
+repo_home_root_files: []
+billing_models:
+- subscription
+- per_token
+cap_policies: []
+allowed_env_keys:
+- OPENAI_API_KEY
+- CODEX_API_KEY
+display_policy:
+  # Codex tool results carry the useful detail in the body: when a
+  # successful non-file result has a renderable body, the one-line summary
+  # is suppressed and the body renders as a BlockQuote at Normal verbosity.
+  tool_result_summary: prefer_body
+  info_event_suppression: []
+  collapse_task_progress: false
+  suppress_subscription_rate_limit: false
+  # Unknown/unmodeled item lifecycle markers. When the inner `item.type` is
+  # something Claudine does not classify (new Codex builds, experimental
+  # item types), the parser falls back to a ProviderExtension. Leaking
+  # `codex/item.started · {...}` onto stderr is noise — the underlying
+  # detail is what callers care about, and the raw event is still in the
+  # JSONL log.
+  silent_extension_kinds:
+  - item.started
+  - item.completed
+  stdout_noise_prefixes: []
+  stderr_noise_prefixes:
+  - "Reading prompt from stdin..."
+suppress_structured_stderr_on_success: false
+supports_interactive_inline_closure: true
+model_required_in_non_tty: false
+platform_kind: vendor_platform
+unmapped_native_events: []
+# Ordered error-classification vocabulary (Phase A seed, transcribed verbatim
+# from lib/src/stream/providers/codex.rs::ERROR_KEYWORDS). Sequence order IS
+# the cascade order (first substring hit wins). The repeated api_remote bucket
+# is the "late ApiRemote" second pass after Interrupted.

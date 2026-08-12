@@ -1,226 +1,182 @@
 ---
 name: sniff
-description: Expert knowledge for sniff-lib and sniff-cli, a cross-platform system detection library and CLI for Rust. Use when detecting OS/hardware/network/filesystem info, program detection, service detection, adding new detection capabilities, or optimizing detection performance.
-hash: 3cd50ffff2b8b5db-07a77a2a7523fdf0
-last_updated: 2026-06-17
+description: Expert guidance for the cross-platform `sniff` Rust library and CLI. Use when discovering host hardware, OS, network, programs, services, filesystems, Git repositories, worktrees, monorepo packages, remote providers, or when changing Sniff request tiers, observation reuse, work counters, CLI output, and macOS/Linux/Windows behavior.
 ---
 
-# sniff
+# Sniff
 
-Cross-platform system detection library and CLI for Rust.
+Sniff observes hosts and repositories through the `sniff` library and `sniff`
+CLI. Its central contract is request-scoped discovery: observe expensive state
+once, project it to multiple outputs, and make cost visible through stable work
+counters.
 
-## Capabilities
+## Platform contract
 
-| Category | Detection |
-|----------|-----------|
-| OS | Distribution, kernel, architecture, package managers, locale, timezone, NTP status |
-| Hardware | CPU (with SIMD), GPU (Metal), memory, storage, audio devices |
-| Network | Interface enumeration with IPv4/IPv6, WAN IP (TTL-cached) |
-| Filesystem | Git repos, monorepos, languages, file types, EditorConfig, docs, blast radius, justfiles, recent commits, package-manager/test-runner usage collapse |
-| Programs | 9 categories with macOS bundle support, install + remote-bash consent (parallel via Rayon, shared executable index). The 9th category — test runners — resolves via PATH, project-local bins (`node_modules/.bin`, `vendor/bin`, `.venv/bin`, …), and parent binaries, reporting an `availability` discriminator instead of a bare boolean. |
-| Services | 10+ init systems (systemd, launchd, OpenRC, runit, etc.) |
-| Packages | 110+ package manager abstraction |
-| Remote | GitHub, GitLab, Gitea, Bitbucket repository metadata |
+Supported targets are macOS, Linux, and Windows. WSL follows the Linux compile
+and runtime path; it does not cross into native Windows detectors.
 
-## API Tiers
+- Gate Unix- and OS-specific imports with `cfg`.
+- Build `PATH` with `std::env::join_paths`; never hard-code `:` or `;`.
+- Use bounded subprocess helpers from `process`; never poll a child with piped
+  output that is not being drained.
+- Windows audio detection uses PowerShell CIM, not `wmic`.
+- `current_user_id()` returns the effective Unix UID or Windows process-token
+  SID without subprocess, registry, environment-variable, or network fallback.
+  It is on-demand and absent from normal host inventory and caches.
 
-Three levels of API, from simplest to most flexible:
+Read [architecture.md](architecture.md) before changing request costs, shared
+walks, Git/worktree behavior, subprocess policy, or remote snapshots.
 
-### Tier 1: Convenience (full defaults)
+## API tiers
+
+### Convenience
 
 ```rust
 use sniff::detect;
+
 let result = detect()?;
 ```
 
-### Tier 2: Plan-based (fine-grained control)
+`DetectionPlan::default()` requests all domains at safe defaults. It does not
+enable the optional NTP network probe.
+
+### Request plan
 
 ```rust
 use sniff::{detect_with_plan, request::*};
 
 let plan = DetectionPlan::new()
-    .os(OsRequest::summary())           // Core identity only
-    .hardware(HardwareRequest::summary()) // CPU + memory only
-    .without_network()                   // Skip entirely
+    .os(OsRequest::summary())
+    .hardware(HardwareRequest::summary())
+    .without_network()
     .filesystem(
         FilesystemRequest::new()
-            .git(GitRequest::summary())  // Branch + dirty flag
-            .repo(RepoRequest::structure()) // Workspace tools only
-            .without_docs()
+            .git(GitRequest::identity())
+            .repo(RepoRequest::structure())
+            .without_docs(),
     );
+
 let result = detect_with_plan(plan)?;
 ```
 
-### Tier 3: Module-level (expert composition)
+### Focused modules
 
-```rust
-use sniff::filesystem::git::GitRepo;
-use sniff::hardware::detect_hardware_summary;
-use sniff::os::detect_os_with_request;
+Use module-level APIs when a caller needs one bounded fact, such as
+`GitRepo::discover`, `current_user_id`, or a focused provider query. Do not use
+full host detection as a convenience wrapper around one fact.
 
-// Pick exactly what you need
-let git = GitRepo::discover(path)?;
-let hw = detect_hardware_summary()?;
+`SniffConfig` remains a compatibility surface, but new code should use request
+plans.
+
+## Request-cost tiers
+
+| Request | Cost/contract |
+|---|---|
+| `GitRequest::identity()` | Repository identity only; no working-tree status walk |
+| `minimal()` / `summary()` | Branch and dirty flag; no commits or worktrees |
+| `full()` | Commits, per-file stats, worktrees; no unified diffs or network |
+| `deep()` | Adds unified diffs, branch detail, containment, and explicit remote refresh |
+| `RepoRequest::structure()` | Membership and minimum package identity only |
+| `RepoRequest::focused(...)` | Selected manifest-backed facts without full inventory |
+| `RepoRequest::full()` | Inventory-backed enrichment and repository-wide observations |
+
+`GitMetadataRequest` narrows legacy coarse requests; it never widens them.
+`metadata: None` derives legacy behavior and is required for serialized-plan
+compatibility.
+
+## Aggregate versus focused semantics
+
+Aggregate output is a projection of one captured observation. It must not call
+focused discovery repeatedly.
+
+- Bare `sniff repo --json` returns consolidated identity, context, worktrees,
+  branches, and dirty/staged/unstaged/untracked scope buckets.
+- Network-primary (`remote`, `pr`) and parameterized (`hash`) commands are not
+  part of the aggregate, and aggregate reporting makes no network requests.
+- Focused commands retain richer contracts and may request details that the
+  aggregate deliberately omits.
+- Repo-level version collapses to a string only when all discovered packages
+  expose one distinct version; otherwise it is null.
+
+Worktree projection has two distinct paths:
+
+- Aggregate Git/worktree output uses captured metadata and performs zero linked
+  repository opens in the ordinary path.
+- Focused worktree inspection may validate registered targets. It omits an
+  absent stale registration but reports an existing corrupt repository.
+
+Conflict prediction operates on captured committed tips in memory. It must not
+fetch, run hooks or subprocesses, consult the live index, or mutate the
+worktree. Actual live-index conflicts and predicted branch conflicts remain
+separate APIs.
+
+## Remote authority
+
+`resolve_remote_at` is the selection authority for configured remotes.
+Classification stays local when possible; ambiguous self-hosted HTTP(S) hosts
+require exact-host consent before probing.
+
+`RemoteRepoSnapshot` captures metadata, default branch, and tree once per
+report. Providers project documents and CI/CD from that snapshot. A downstream
+provider that overrides `list_documents_with` must also override
+`list_documents` to avoid default-method recursion.
+
+`FocusedProviderClient` performs bounded pull-request and CI/CD queries. It
+preserves provider/repository identity, pagination bounds, host policy,
+credential scope, and typed malformed/missing/auth/rate-limit/capability/
+transport errors. Never collapse a focused provider error to an empty list.
+
+Read [remote-and-repository.md](remote-and-repository.md) for topology,
+worktree, aggregate, and remote details.
+
+## Performance invariants
+
+Judge optimization by work removed, not wall-clock timing. Stable counters live
+in `sniff/lib/src/performance/counters.rs`; an absent counter means zero.
+
+- Instrument one chokepoint per unit of work.
+- Check `performance::is_collecting()` before clocks or formatted names.
+- Propagate `WorkerCollector` into every spawned, Rayon, or parallel-walker
+  worker; otherwise work silently disappears from the report.
+- Attribute a high aggregate counter to call site and path before optimizing.
+- Compare counters only against a compatible phase, OS, runner class, and
+  request shape.
+
+Read [performance.md](performance.md) before adding counters, parallel work,
+filesystem walks, Git diff/blob work, or interpreting archived baselines.
+
+## Topic routing
+
+| Topic | File |
+|---|---|
+| Request architecture, shared work, subprocess policy | [architecture.md](architecture.md) |
+| Repository topology, worktrees, aggregate and remote contracts | [remote-and-repository.md](remote-and-repository.md) |
+| Work counters and baseline gotchas | [performance.md](performance.md) |
+| CLI catalog and output modes | [cli.md](cli.md) |
+| Program catalog, lookup, and install CLI | [programs.md](programs.md) |
+| Add or change a detector/category/install implementation | [extending.md](extending.md) |
+| Service detection | [services.md](services.md) |
+| Adding detection capabilities | [extending.md](extending.md) |
+
+Load only the reference matching the active subsystem.
+
+## Testing and verification
+
+Use the Sniff package-area recipes:
+
+```sh
+cd sniff
+just build
+just test
+just lint
 ```
 
-### Legacy: SniffConfig (still supported)
+`just test` enables the `remote` feature. A test behind `remote` or `network`
+that is run without that feature does not compile or execute and is not valid
+coverage. Cross-platform compile guards must enable the same feature.
 
-```rust
-use sniff::{detect_with_config, SniffConfig};
-let config = SniffConfig::new()
-    .base_dir(PathBuf::from("."))
-    .deep(true)           // Equivalent to GitRequest::deep()
-    .commit_count(20)
-    .skip_network();
-let result = detect_with_config(config)?;
-```
-
-## Request Types
-
-| Type | Presets | Controls |
-|------|---------|----------|
-| `OsRequest` | `summary()`, `full()` | Package managers, locale, timezone, NTP status (up to 10s on Linux) |
-| `HardwareRequest` | `summary()`, `full()` | Storage, GPU, audio (~1.5s macOS) |
-| `NetworkRequest` | `interfaces_only()`, `full()` | WAN IP lookup (HTTP); `.force_refresh(true)` bypasses the TTL cache |
-| `GitRequest` | `identity()`, `summary()`, `full()`, `deep()` | Commits, per-file stats, worktrees, unified diffs, remote refresh |
-| `RepoRequest` | `structure()`, `full()` | Per-package language scanning (10-50x slower than `structure()`) |
-| `FilesystemRequest` | `new()` (default full) | Composes git + repo + file inventory + formatting + docs |
-| `DetectionPlan` | `new()` (default full) | Composes all four domains (os, hardware, network, filesystem) |
-
-**Git preset cheat sheet:**
-- `identity()` -- repo root, branch, HEAD id, worktree flag, base repo root, and org/repo only. **No working-tree status walk**, no commits, no branches, no remotes, no config. This is the new floor below `minimal()`.
-- `minimal()` / `summary()` -- branch + dirty *flag* only (no per-category counts, no commits, no worktrees). The two presets are currently byte-identical.
-- `full()` -- 10 commits, per-file change stats, worktrees; no unified diffs, no network
-- `deep()` -- adds full unified diffs, remote refresh, branch details, and per-commit containment
-- Every preset except `identity()` runs a working-tree status walk. Use `identity()` when you only need repository identity, or use the Tier-3 `GitRepo::discover().repo_root()` handle for bare repo-root access.
-
-## Key Types
-
-| Type | Description |
-|------|-------------|
-| `SniffResult` | Top-level: os, hardware, network, filesystem (all `Option<T>`) |
-| `DetectionPlan` | Plan-based config with per-domain request types |
-| `ProgramsInfo` | 9 category fields with shared `ExecutableIndex` + parallel Rayon detection. `test_runners` carries `InstalledTestRunners` (`Vec<TestRunnerEntry>` with `Availability` discriminators `installed` / `local` / `via_parent` / `not_found`). |
-| `ServicesInfo` | Init system + service list (via `ServiceManager::detect()`) |
-| `Package` | Package path, languages, managers, dependencies |
-| `GitRepo` | `gix::Repository` handle from trusted discovery. All git access (status, diff, history, refs, remotes, config, worktrees) is pure-Rust gix; git2/libgit2 is gone from production and retained only as a dev-dependency for test/bench fixtures. |
-| `BranchInfo` | Local branch projection with branch name, current flag, tip SHA, upstream, ahead/behind counts, and whether any locally known remote-tracking ref points at the branch tip. `upstream`/`ahead`/`behind` serialize as `null` when no upstream is configured (distinguishing "no tracking data" from an even `0`). Default branch detection uses known refs only; refresh requires explicit opt-in. |
-| `get_current_worktree_name` | Early-return helper: returns the basename of the linked worktree directory, or `None` if in the main worktree |
-| `MonorepoStandard` | Standard-based monorepo descriptor (Cargo, pnpm, Nx, Bazel, etc.) with `BinarySpec` and advisory `InvocationTemplate`s |
-| `DetectedStandard` | Detected instance of a `MonorepoStandard`, including a `ResolvedBinary` (`Path`, `Wrapper`, or missing) and version satisfaction |
-| `MonorepoLayer` | One layer of the repo topology; includes `authority`, `orchestrators`, `provenance`, and `packages` (repo-relative path references matching `Package.relative`) |
-
-## Monorepo Topology Model
-
-`RepoInfo` exposes two additive fields for the standard-based model:
-
-- `monorepo_standards: Vec<DetectedStandard>` — every standard whose root marker matched, each with its resolved acting binary and `DetectionConfidence`.
-- `monorepo_layers: Vec<MonorepoLayer>` — membership layers, one per root. Each layer has an `authority` (the standard that defines membership), zero or more `orchestrators` (standards that only run tasks across packages), and `packages` — repo-relative path strings that each resolve to exactly one entry in `RepoInfo.packages`.
-
-A standard can hold one or more `Role`s:
-
-- `DefinesMembership` — declares which packages belong to the monorepo.
-- `OrchestratesTasks` — runs tasks across packages.
-- `ManagesDependencies` — resolves and installs dependencies.
-
-### Authority vs. Orchestrator
-
-- Authorities own the package list (`CargoWorkspace`, `PnpmWorkspaces`, `GoWorkspace`, `Bazel`, etc.).
-- Orchestrators ride on top of an authority and appear in `MonorepoLayer::orchestrators`. A repo with only an orchestrator (e.g. an `nx.json` and no workspace authority) is **not** reported as a monorepo.
-- Orchestrator-only standards (`Nx`, `Turborepo`, `Lerna`) never appear as `Package.standard`; they only appear as orchestrators on a layer whose authority owns the packages.
-- A layer can have multiple standards when a membership authority and one or more orchestrators share the same root (e.g. pnpm + Nx).
-
-### Package Catalog
-
-The canonical package catalog is `RepoInfo.packages`. Each package carries its owning `standard` and `provenance` directly:
-
-- `Package.standard` — the membership authority that owns this package (`CargoWorkspace`, `PnpmWorkspaces`, etc.).
-- `Package.provenance` — how the boundary was derived (`Globbed`, `RootExplicit`, `LeafMarkers`, `Lockfile`, `ManifestScan`, etc.).
-
-`MonorepoLayer.packages` does not duplicate package metadata; it holds repo-relative paths that point into the canonical catalog.
-
-### Unified Topology Model
-
-The legacy `MonorepoTool` enum, `RepoInfo.monorepo_tool` / `workspace_tools`, and `Package.discovery_sources` were removed during the monorepo type unification. The `MonorepoStandard` / `MonorepoLayer` / `Package.standard` / `Package.provenance` model is now the sole surface:
-
-- `RepoInfo.monorepo_standards` lists every detected standard with its acting binary and confidence.
-- `RepoInfo.monorepo_layers` lists membership layers; each layer has one `authority` and zero or more `orchestrators`.
-- `RepoInfo.packages` is the canonical catalog; each package carries `standard` and `provenance`.
-- `MonorepoLayer.packages` contains repo-relative path strings that each resolve to exactly one `RepoInfo.packages[].relative` entry.
-
-CLI text derives the one-liner from `RepoInfo::primary_layer()`. The shared label helper composes `{orchestrator_label} (using {authority_label})` when an orchestrator is present, otherwise `{authority_label}` alone. Both parts read each standard's `spec().label` (e.g. `cargo`, `pnpm workspaces`, `Nx`) — never `display_name`. JSON output no longer contains `monorepo_tool`, `workspace_tools`, or `discovery_sources`.
-
-## Shared-Work Highlights
-
-- **Top-level concurrency**: OS, hardware, network, filesystem run in scoped threads via `detect_with_plan`
-- **Staged filesystem**: git → repo → file inventory → formatting → docs; each stage reuses earlier work
-- **Shared repo inventory**: full repo detection returns its `FileInventory` alongside the `RepoInfo` via `detect_repo_with_inventory`, so the file-inventory stage skips rescanning
-- **Manifest Index**: single walk records every `Cargo.toml`/`package.json`/`pyproject.toml`/`go.mod` for full repo mode; structure mode skips it entirely
-- **Git status layers**: counts-only vs full file changes vs full unified diffs, selectable via `GitRequest` flags
-- **Parallel remote fetch**: deep git mode fetches multiple remotes concurrently with bounded parallelism; `GIT_TERMINAL_PROMPT=0` is preserved to avoid interactive hangs
-- **Ancestry-walk containment**: per-commit remote containment is computed with a single ancestry walk per remote, cached in a `HashMap<Oid, Vec<remote>>`
-- **ExecutableIndex**: scans `PATH` + macOS bundles once, shared across all 9 program categories via `Arc`. The test-runner category additionally consults a cwd-sensitive `LocalBinIndex` for project-local bin dirs.
-- **CLI async model**: the CLI is a single-shot command runner; most paths are synchronous (git, filesystem, subprocess) and run directly in the async entrypoint. `spawn_blocking` is avoided unless true concurrent async work exists
-
-## CLI
-
-```bash
-sniff                      # Show help
-sniff --json               # Full system info (JSON output)
-sniff hardware             # Hardware only (text output)
-sniff cpu                  # Just CPU info
-sniff audio-devices        # Audio input/output devices
-sniff software             # All program categories
-sniff software editors     # Just editors
-sniff software editors install  # Install an editor (interactive)
-sniff software test-runners   # Test runners with availability discriminator
-sniff software agents      # AI CLI tools
-sniff services             # System services
-sniff docs                 # Markdown documents
-sniff topics               # Table of available topics
-sniff just                 # Justfiles and recipes
-sniff repo                 # Repository name (bare `sniff repo` is distinct from `sniff repo name`)
-sniff repo name            # Repository name only
-sniff repo name -v         # Repository name only (verbose styling)
-sniff repo is-monorepo     # Monorepo label (e.g. `cargo`; `false` if not). Exits non-zero when false unless `--no-error`. `--json` emits `{ "is_monorepo": true, "authority": "...", "orchestrators": [...] }` / `{ "is_monorepo": false }`
-sniff repo package-count   # Number of discovered packages (`{ "package-count": N }` with --json)
-sniff repo version         # Declared version(s) for the current package/area/repo context — scoped like `repo test-runner`; `--all`/`--package`/`--package-area` override the CWD scope; `--json` returns `{ "versions": [ { version, packages, sources: [ { manifest, path, href, inherited, packages } ] } ] }`
-sniff repo package-manager # Package manager(s) for the current package/area/repo context (`--csv`, `--list`, `--md`, `--json`)
-sniff repo test-runner     # Declared test runner(s) for the current package/area/repo context with evidence (`--csv`, `--list`, `--md`, `--json`)
-sniff repo git-status      # Git status with commit history
-sniff repo language        # Primary programming language for the repository
-sniff repo worktree        # Linked worktree name (exit 1 if main worktree)
-sniff repo worktrees       # List all worktrees (default, --md, --list, --csv, --verbose, --json)
-sniff repo branches        # Local branches from known refs (`--refresh-remotes` opts into fetch)
-sniff repo package-dependencies # Internal workspace dependency graph (`--ui` for diagram)
-sniff repo dependencies    # External package dependencies with family filters
-sniff repo remote origin   # Inspect remote repository
-sniff repo pr              # List open pull requests
-sniff repo pr --status merged  # List merged pull requests
-sniff repo recent-commits 1w  # Commits from last week
-sniff repo source-code-changes today  # Today's source changes
-sniff blast-radius         # Docs affected by dirty changes
-sniff hardware --json      # Subcommand with JSON output
-```
-
-**Output modes:**
-- No subcommand: help (use `--json` for full JSON)
-- With subcommand: Text (default), `--json` for JSON, `--plain` for unstyled
-
-**`sniff repo --json` aggregate:**
-Bare `sniff repo --json` returns the consolidated `SniffRepo` projection with snake_case top-level keys. Identity fields remain top-level (`name`, `version`, `language`, `is_monorepo`, `package_count`, `root`), the repo-wide `package_manager` and `test_runner` facts collapse across all packages to `string | string[] | null`, cwd-relative facts live under `context`, worktrees and branches appear once as top-level arrays, and change data is grouped into four `ScopeBucket` objects: `dirty`, `staged`, `unstaged`, and `untracked`. Each bucket contains `files`, `source_code`, `documentation`, `packages`, and `package_areas` arrays. Aggregate `git_status` is intentionally lean (`current_branch`, `config`, compact `file_changes`, and dirty/staged/unstaged/untracked counts), while focused commands such as `repo git-status --json`, `repo structure --json`, and `repo recent-commits --json` keep their richer contracts. Network-primary subcommands (`remote`, `pr`) and parameterized subcommands (`hash`) are excluded, and no network requests are made by the aggregate.
-
-The aggregate's top-level `version` is the **`AggregateScope::Repo` collapse**: exactly one distinct version across all packages → that string; zero or more-than-one distinct versions → `null` (e.g. a pure-virtual Cargo workspace with uniform member versions now reports the version string instead of `null`). The focused `sniff repo version --json` shape is `{ "versions": [ { version, packages, sources: [ { manifest, path, href, inherited, packages } ] } ] }`.
-
-## Detailed Topics
-
-- [Programs](./programs.md) - 9 categories, macOS bundle detection, test-runner availability
-- [Services](./services.md) - Init systems, service listing
-- [Extending](./extending.md) - Add new detection capabilities
-- [Architecture](../../../sniff/docs/sniff-library-architecture.md) - Cost model, shared-work design
-- If you are working with the `gitoxide` crate -- which is used in Sniff for all **git** operations -- then make sure you use the 'rust-devops' skill!
-
-## Resources
-
-- [CLI README](../../../sniff/cli/README.md) - Complete CLI usage
-- [Library README](../../../sniff/lib/README.md) - API reference
+Use exact original regression inputs and assert dependent projections and work
+counters, not only the immediate return value. For repository/config/parser
+artifacts, include passive corpus coverage plus an end-to-end CLI test through
+the real shipped artifact. Do not run workspace-wide Cargo gates for a
+Sniff-only change; include only dependency-derived downstream packages.

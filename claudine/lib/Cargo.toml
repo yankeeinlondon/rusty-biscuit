@@ -13,6 +13,7 @@ harness = false
 
 [dependencies]
 # Internal
+claudine-catalog-types = { path = "../catalog-types" }
 sniff = { path = "../../sniff/lib" }
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash", "blake3"] }
 biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "json5"] }
@@ -22,6 +23,7 @@ biscuit-speaks = { path = "../../biscuit-speaks/lib", features = ["playa"] }
 messenger = { path = "../../messenger/lib", default-features = false, features = ["discord", "slack", "signal", "whatsapp", "desktop"] }
 secrecy = "0.10"
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
+renderable = { path = "../../renderable" }
 
 # Serialization
 serde = { version = "1.0", features = ["derive"] }
@@ -73,16 +75,41 @@ rusqlite = { version = "0.31", features = ["bundled", "chrono", "serde_json"] }
 walkdir = "2.5"
 
 # Executable lookup
-which = "7"
+which = "8"
 
 # Shell-words parsing for bash params
 shell-words = "1"
 
+# Enum variant-name reflection for the render dispatch-table completeness test
+strum = { version = "0.28", features = ["derive"] }
+
+[target.'cfg(unix)'.dependencies]
+# Process-group termination for task shell commands: `kill(-pgid, …)` is the
+# only way to reach descendants a command backgrounded (see
+# `composition/sequence/task/shell.rs`).
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+# Job Object ownership of a task shell command's process tree, mirroring the
+# CLI wrap path. No `Win32_System_Console`: this path terminates the Job
+# directly and sends no console control events.
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_System_JobObjects",
+    "Win32_System_Threading",
+    # Thread enumeration for the suspended-spawn → Job-assign → resume
+    # sequence: std exposes no thread handle, so the initial thread is found
+    # via a Toolhelp snapshot (see `composition/sequence/task/shell.rs`).
+    "Win32_System_Diagnostics_ToolHelp",
+] }
+
 [dev-dependencies]
+dunce = "1"
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "sync", "time"] }
 serial_test = "3"
 serde_json = "1.0"
 criterion = "0.5"
 proptest = "1.6"
 rstest = "0.25"
+tracing-test = "0.2"
 test-toolkit = { path = "../../tools/test-toolkit" }

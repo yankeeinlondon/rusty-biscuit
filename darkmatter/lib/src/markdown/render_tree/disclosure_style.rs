@@ -17,7 +17,11 @@ pub fn common_style_to_disclosure_hints(style: &CommonStyle) -> DisclosureStyleH
     let mut changed = false;
 
     if let Some(width) = style.width.as_ref() {
-        layout.width = Width::Fixed(TargetValue::universal(width.clone()));
+        layout.width = match width.as_width() {
+            Width::Auto => Width::Auto,
+            Width::FitContent => Width::FitContent,
+            Width::Fixed(tv) => Width::Fixed(tv.clone()),
+        };
         changed = true;
     }
 
@@ -33,11 +37,17 @@ pub fn common_style_to_disclosure_hints(style: &CommonStyle) -> DisclosureStyleH
 
     let color = style.color.as_ref().map(StyleColor::to_paint_color);
     let bg_color = style.bg_color.as_ref().map(StyleColor::to_paint_color);
+    let emphasis = style.emphasis.as_ref().map(|e| e.to_text_emphasis());
+    let border = style.border.as_ref().map(|b| b.as_border().clone());
+    let word_wrap = style.word_wrap.map(|w| w.to_word_wrap());
 
     DisclosureStyleHints {
         layout: if changed { Some(layout) } else { None },
         color,
         bg_color,
+        emphasis,
+        border,
+        word_wrap,
     }
 }
 
@@ -85,11 +95,67 @@ pub fn parse_disclosure_opener_style(rest: &str) -> (Option<CommonStyle>, Option
     }
 }
 
+/// Returns the byte spans of the leading recognized `key=value` style tokens in
+/// a `::disclosure` opener remainder, in source order.
+///
+/// Uses the same left-to-right consumption rule as
+/// [`parse_disclosure_opener_style`]: whitespace-separated `key=value` tokens
+/// are consumed until the first token that is not a recognized style pair.
+/// Everything after the last returned span is summary text. Spans are byte
+/// offsets into `rest`. This is the span-aware companion used by the read-only
+/// disclosure scanner; it shares [`try_apply_style_token`] so the set of
+/// recognized tokens can never drift from the render path.
+pub fn disclosure_style_token_spans(rest: &str) -> Vec<std::ops::Range<usize>> {
+    let mut spans = Vec::new();
+    let mut style = CommonStyle::default();
+    let bytes = rest.as_bytes();
+    let mut idx = 0usize;
+
+    loop {
+        while idx < bytes.len() && bytes[idx].is_ascii_whitespace() {
+            idx += 1;
+        }
+        if idx >= bytes.len() {
+            break;
+        }
+        let start = idx;
+        while idx < bytes.len() && !bytes[idx].is_ascii_whitespace() {
+            idx += 1;
+        }
+        let end = idx;
+        let token = &rest[start..end];
+
+        let recognized = token
+            .split_once('=')
+            .map(|(key, value)| (key.trim(), value.trim()))
+            .filter(|(_, value)| !value.is_empty())
+            .is_some_and(|(key, value)| try_apply_style_token(key, value, &mut style));
+
+        if recognized {
+            spans.push(start..end);
+        } else {
+            break;
+        }
+    }
+
+    spans
+}
+
 fn try_apply_style_token(key: &str, value: &str, style: &mut CommonStyle) -> bool {
     match key {
         "width" => {
             if let Ok(len) = crate::style::length::parse_horizontal_typed(value) {
-                style.width = Some(len);
+                style.width = Some(crate::style::schema::common::WidthOrMode::Width(
+                    Width::Fixed(TargetValue::universal(len)),
+                ));
+                true
+            } else if matches!(value.trim().to_ascii_lowercase().as_str(), "auto" | "fit-content" | "fit_content") {
+                let mode = match value.trim().to_ascii_lowercase().as_str() {
+                    "auto" => Width::Auto,
+                    "fit-content" | "fit_content" => Width::FitContent,
+                    _ => unreachable!(),
+                };
+                style.width = Some(crate::style::schema::common::WidthOrMode::Width(mode));
                 true
             } else {
                 false
@@ -126,6 +192,69 @@ fn try_apply_style_token(key: &str, value: &str, style: &mut CommonStyle) -> boo
             } else {
                 false
             }
+        }
+        "margin" => {
+            if let Ok(len) = crate::style::length::parse_horizontal_typed(value) {
+                style.margin = Some(crate::style::schema::common::ComponentEdges(
+                    renderable::layout::Edges::all(len),
+                ));
+                true
+            } else {
+                false
+            }
+        }
+        "padding" => {
+            if let Ok(len) = crate::style::length::parse_horizontal_typed(value) {
+                style.padding = Some(crate::style::schema::common::ComponentEdges(
+                    renderable::layout::Edges::all(len),
+                ));
+                true
+            } else {
+                false
+            }
+        }
+        "word-wrap" | "word_wrap" => {
+            let wrap = match value.trim().to_ascii_lowercase().as_str() {
+                "none" => crate::style::schema::common::ComponentWordWrap::None,
+                "wrap" | "wrap-prose" | "wrap_prose" => {
+                    crate::style::schema::common::ComponentWordWrap::Wrap
+                }
+                "truncate" => crate::style::schema::common::ComponentWordWrap::Truncate,
+                _ => return false,
+            };
+            style.word_wrap = Some(wrap);
+            true
+        }
+        "border" => {
+            let border = match value.trim().to_ascii_lowercase().as_str() {
+                "true" | "thin" => crate::style::schema::common::ComponentBorder(
+                    renderable::style::Border {
+                        sides: renderable::style::BorderSides::All,
+                        ..Default::default()
+                    },
+                ),
+                "false" | "none" => crate::style::schema::common::ComponentBorder(
+                    renderable::style::Border {
+                        sides: renderable::style::BorderSides::None,
+                        ..Default::default()
+                    },
+                ),
+                "medium" | "thick" => {
+                    let weight = match value.trim().to_ascii_lowercase().as_str() {
+                        "medium" => renderable::style::BorderWeight::Medium,
+                        "thick" => renderable::style::BorderWeight::Thick,
+                        _ => unreachable!(),
+                    };
+                    crate::style::schema::common::ComponentBorder(renderable::style::Border {
+                        weight,
+                        sides: renderable::style::BorderSides::All,
+                        ..Default::default()
+                    })
+                }
+                _ => return false,
+            };
+            style.border = Some(border);
+            true
         }
         _ => false,
     }

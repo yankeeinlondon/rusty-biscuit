@@ -1,0 +1,13 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: block
+---
+VIA_RENDER
+
+
+The shared render-tree fold resolves the full Layout and Style surface for a plain block node.
+---
+VIA_TREE_DIRECT
+
+
+The shared render-tree fold resolves the full Layout and Style surface for a plain block node.

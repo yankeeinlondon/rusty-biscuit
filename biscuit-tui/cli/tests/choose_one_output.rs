@@ -1,11 +1,11 @@
 mod common;
+use test_toolkit::{Level, require_level};
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 #[test]
 fn choose_one_help_lists_options_flags() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--help"])
         .assert()
         .success()
@@ -21,7 +21,7 @@ fn choose_one_help_lists_options_flags() {
 
 #[test]
 fn choose_one_rejects_unknown_flag() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one", "--nonsense"])
         .assert()
         .failure()
@@ -33,7 +33,7 @@ fn choose_one_rejects_unknown_flag() {
 
 #[test]
 fn choose_one_fails_when_no_option_source_provided() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one"])
         .assert()
         .failure()
@@ -42,7 +42,7 @@ fn choose_one_fails_when_no_option_source_provided() {
 
 #[test]
 fn choose_one_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args([
             "choose-one",
             "--csv",
@@ -60,7 +60,7 @@ fn choose_one_reaches_event_loop_then_exits_with_error_when_stdin_is_not_a_tty()
 
 #[test]
 fn choose_one_accepts_output_flag_at_global_position() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["--output", "json", "choose-one", "--help"])
         .assert()
         .success()
@@ -68,7 +68,12 @@ fn choose_one_accepts_output_flag_at_global_position() {
 }
 
 #[test]
-fn choose_one_submits_raw_output_via_real_tty() {
+fn level2_choose_one_submits_raw_output_via_pty() {
+    require_level!(
+        Level::L2,
+        common::expect_driver_available(),
+        "expect (PTY script driver)"
+    );
     let output = common::run_question_in_pty(
         &[
             "--output",

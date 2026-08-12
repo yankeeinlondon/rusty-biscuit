@@ -1,0 +1,49 @@
+# SimplifiedSchema for the plugins research topic.
+#
+# Captures provider plugin/container support for distributing bundled agent
+# resources such as Agent Skills, scripts, slash commands, subagents, MCP
+# servers, hooks, prompts, and other extension surfaces.
+$schema:
+    created: date
+    last_updated: date(required)
+    agent: string(required)
+    model: string(required)
+
+    homepage: url
+    docs: url
+    plugin_docs: url
+
+    # Plugin/container support classification for Claudine linking.
+    support: enum(first_class,partial,convention_only,none,unknown; required)
+
+    # Plugin installation and search locations by OS/scope.
+    locations: "{ os: enum(macos,linux,windows; required), scope: enum(user,repo,system,marketplace,extension,other; required), path: string(required), notes: string }[]"
+
+    # Plugin manifest/package format and metadata.
+    manifest: "{ file_names: string[], format: enum(markdown,yaml,json,jsonc,toml,text,archive,repo,other,unknown; required), required_fields: string[], optional_fields: string[], package_layout: string, notes: string }"
+
+    # Install, update, remove, enable, disable, and trust behavior.
+    lifecycle: "{ install: string, update: string, remove: string, enable_disable: string, trust: string, versioning: string, notes: string }"
+
+    # Resource types a plugin can package.
+    packaged_resources: "{ skills: enum(full,partial,none,unknown; required), scripts: enum(full,partial,none,unknown; required), slash_commands: enum(full,partial,none,unknown; required), subagents: enum(full,partial,none,unknown; required), mcp_servers: enum(full,partial,none,unknown; required), hooks: enum(full,partial,none,unknown; required), prompts: enum(full,partial,none,unknown; required), config: enum(full,partial,none,unknown; required), assets: enum(full,partial,none,unknown; required), other: string[] }"
+
+    # How packaged resources are discovered and ordered relative to user/repo resources.
+    discovery: "{ mechanism: string(required), precedence: string, namespacing: string, conflicts: string, notes: string }"
+
+    # Runtime and security behavior for plugin-provided resources.
+    security: "{ trust_model: string, permissions: string, sandbox_interaction: string, credential_access: string, update_risk: string, notes: string }"
+
+    # Marketplace, registry, or distribution behavior.
+    distribution: "{ marketplace: boolean(required), registry_url: url, source_types: string[], publishing: string, private_distribution: string, notes: string }"
+
+    # Claudine linking/extraction classification.
+    portability: "{ link_plugin_as_unit: boolean(required), extract_resources: boolean(required), portable_resources: string[], non_portable_assets: string[], rewrite_needed: boolean, notes: string }"
+
+    cli_params: "{ flag: string(required), description: string, example: string }[]"
+    env_vars: "{ name: string(required), effect: string(required) }[]"
+
+    gaps: string[]
+    changes: string[]
+    requires_claudine_update: boolean(required)
+    reason: string

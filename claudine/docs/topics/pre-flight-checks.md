@@ -4,12 +4,11 @@ Before any Claudine wrapper session launches a provider, it needs to know that e
 
 ## Why This Exists
 
-Shell commands can appear in four places during a Claudine session:
+Shell commands can appear in three places during a Claudine session:
 
 1. **Template `::shell` directives** — Darkmatter's compose pipeline executes these during document composition. A prompt like `commit.md` might contain `::shell sniff repo packages` to inject dynamic content.
 2. **Frontmatter `$(cmd)` expressions** — top-level frontmatter string values of the form `$(command arg ...)` are evaluated by Darkmatter's frontmatter shell expansion phase, with the command's trimmed `stdout` written back into the frontmatter. Example: `today: $(date +%Y-%m-%d)`.
-3. **Harness pre-checks and post-checks** — validation rules of type `shell_command` run before and after the provider session.
-4. **Harness handlers** — recovery actions that include shell commands. These are conditional (they only fire when a specific failure occurs) but they still need pre-authorization because there is no opportunity to prompt the user mid-session.
+3. **Lifecycle `shell` stack actions** — positional `shell: "…"` actions and key/value `{ action: shell, command: "…" }` actions declared in any reachable lifecycle stack (`initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, `loop`). Some are conditional (guarded by `when:` or reachable only on a recovery path) but they still need pre-authorization because there is no opportunity to prompt the user mid-session.
 
 Without pre-flight, a shell command that lacks whitelist coverage would either block the process waiting for interactive approval that will never come (in a non-interactive session) or fail with a confusing error deep inside the composition pipeline. The pre-flight eliminates both problems by resolving all approvals upfront.
 
@@ -23,7 +22,7 @@ Prompt resolved → Pre-flight shell approval → Provider launches
 
 ### Two-Phase Discovery
 
-Claudine discovers shell commands in two phases because harness properties can only be read from the **effective (composed) frontmatter**, which is not available until after Darkmatter composition runs. But composition itself needs the pre-approved command set to execute `::shell` directives. This creates a dependency:
+Claudine discovers shell commands in two phases because lifecycle stack properties can only be read from the **effective (composed) frontmatter**, which is not available until after Darkmatter composition runs. But composition itself needs the pre-approved command set to execute `::shell` directives. This creates a dependency:
 
 ```
 Phase 1: Discover template ::shell directives
@@ -31,16 +30,16 @@ Phase 1: Discover template ::shell directives
          → pass approved set to Darkmatter composition
          → composition produces effective frontmatter
 
-Phase 2: Parse harness plan from effective frontmatter
-         → discover harness commands
+Phase 2: Parse lifecycle stacks from effective frontmatter
+         → discover lifecycle shell commands
          → approve them (reusing the shared approval cache)
 ```
 
 Both phases share a single **approval cache** — an `Arc<Mutex<HashMap>>` that maps normalized command strings to approval decisions. When a command approved in phase 1 also appears in phase 2 (e.g. the same `curl` call in both a template directive and a pre-check), the cache hit skips the duplicate prompt. From the user's perspective this appears as a single approval loop.
 
-The `claudine claude` / `claudine codex` passthrough path uses only phase 2 because it has no template composition step — it parses the harness plan directly from the source file's frontmatter and preflights harness commands in a single pass.
+The `claudine claude` / `claudine codex` passthrough path uses only phase 2 because it has no template composition step — it parses the lifecycle stacks directly from the source file's frontmatter and preflights their shell commands in a single pass.
 
-The `claudine sequence` orchestrator runs both phases **per step** during its upfront discovery loop, so every template and harness command across every step is approved before any provider session starts. See [Sequence Execution](#sequence-execution) below.
+The `claudine sequence` orchestrator runs both phases **per step** during its upfront discovery loop, so every template and lifecycle command across every step is approved before any provider session starts. See [Sequence Execution](#sequence-execution) below.
 
 ### Phase 1: Template Directives
 
@@ -48,20 +47,17 @@ Claudine asks Darkmatter to walk the full document graph and return every `::she
 
 Each command is checked against shell policy (blacklist, whitelist, approval cache) and, if not already approved, the user is prompted. Once all template commands are approved, the approved set is passed to Darkmatter as `pre_approved_commands` on the `ComposeOptions` and composition proceeds.
 
-### Phase 2: Harness Commands
+### Phase 2: Lifecycle Shell Commands
 
-After composition, Claudine parses the harness plan from the effective frontmatter and discovers harness shell commands:
-
-- **Harness checks**: `pre_checks` and `post_checks` of type `shell_command`.
-- **Harness handlers**: `deviate` actions and programmatic `handle` declarations.
+After composition, Claudine walks every reachable lifecycle stack in the effective frontmatter and discovers its `shell` actions — positional `shell: "…"` actions and key/value `{ action: shell, command: "…" }` actions across `initialize`, `start`, `success`, `blocked`, `failure`, `finalize`, and `loop`.
 
 These commands flow through the same `resolve_shell_approvals` function and the same shared approval cache. Any command already approved in phase 1 is a cache hit. Only genuinely new commands trigger additional prompts.
 
 ### Per-Attempt Audit (Passthrough Only)
 
-In the passthrough wrapper path (`claudine claude`, `claudine codex`), the harness loop re-audits shell commands on every attempt (retry, redirect). This is necessary because the source file may change between iterations — a redirect handler can point to a different file with different `::shell` directives. The per-attempt audit reads the raw source text and discovers source-page directives via line-level scanning.
+In the passthrough wrapper path (`claudine claude`, `claudine codex`), the harness loop re-audits shell commands on every attempt (`Retry`, `Proxy`). This is necessary because the source file may change between iterations — a `Proxy` action can point to a different file with different `::shell` directives. The per-attempt audit reads the raw source text and discovers source-page directives via line-level scanning.
 
-Composition flows (`claudine compose`, `claudine inline-compose`) do **not** re-audit on each attempt. Template directives were discovered through Darkmatter's graph walker (which respects `::block when="false"` guards), and harness commands were approved in phase 2. The approval handler is frozen after the first attempt so redirect/retry iterations cannot trigger new interactive prompts — only cached or whitelisted commands pass.
+Composition flows (`claudine compose`, `claudine inline-compose`) do **not** re-audit on each attempt. Template directives were discovered through Darkmatter's graph walker (which respects `::block when="false"` guards), and lifecycle shell commands were approved in phase 2. The approval handler is frozen after the first attempt so `Proxy`/`Retry` iterations cannot trigger new interactive prompts — only cached or whitelisted commands pass.
 
 ### Approval Policy
 
@@ -158,11 +154,11 @@ The pre-flight uses the same `.darkmatter-shell-whitelist` and `.darkmatter-shel
 
 ### Non-Interactive Sessions
 
-Pre-flight is especially important for non-interactive sessions where there is no terminal available for mid-session prompts. But it runs on all wrapper commands — including interactive sessions started with a prompt — because the shell commands in the template and harness execute before the interactive session begins.
+Pre-flight is especially important for non-interactive sessions where there is no terminal available for mid-session prompts. But it runs on all wrapper commands — including interactive sessions started with a prompt — because the shell commands in the template and lifecycle stacks execute before the interactive session begins.
 
-### Harness Validations
+### Lifecycle Shell Actions
 
-Shell-based validations (`shell_command` in pre-checks and post-checks) and shell-based handlers (`deviate`, programmatic `handle`) are included in the pre-flight scan. This means all shell commands across the entire session lifecycle are authorized upfront, not just those in the template.
+Shell actions declared anywhere in the lifecycle stacks (positional `shell: "…"` actions and key/value `{ action: shell, command: "…" }` actions) are included in the pre-flight scan. This means all shell commands across the entire session lifecycle are authorized upfront, not just those in the template.
 
 ### Sequence Execution
 
@@ -171,7 +167,7 @@ When running a sequence (`claudine sequence <file>`, declared via the `sequence`
 1. Builds the step-specific `ComposeOptions` (because `--set` overlays differ per step).
 2. Runs the **template pre-flight** to discover and approve `::shell` directives (and frontmatter `$(...)` expressions) for that step.
 3. Prepares the composition so the effective frontmatter is available.
-4. Parses the harness plan from the effective frontmatter and runs the **harness pre-flight** to approve `shell_command` validations and `deviate`/`handle` recovery actions for that step.
+4. Walks the lifecycle stacks in the effective frontmatter and runs the **lifecycle shell pre-flight** to approve every reachable `shell` action for that step.
 5. Caches the prepared composition for reuse during execution.
 
-All steps share the same approval cache, so a command approved on step 1 is not re-prompted on step 5. Cumulatively approved commands are merged and passed to each step's composition run. Once the discovery loop finishes, **every shell command across every step — template and harness — has already been approved**, and the operator can walk away while the sequence executes. A failure during Phase 1 (bad template, unparseable harness plan, denied approval) aborts the whole sequence before any step runs.
+All steps share the same approval cache, so a command approved on step 1 is not re-prompted on step 5. Cumulatively approved commands are merged and passed to each step's composition run. Once the discovery loop finishes, **every shell command across every step — template and lifecycle — has already been approved**, and the operator can walk away while the sequence executes. A failure during Phase 1 (bad template, unparseable lifecycle stacks, denied approval) aborts the whole sequence before any step runs.

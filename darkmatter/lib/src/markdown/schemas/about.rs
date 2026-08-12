@@ -24,7 +24,7 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
     SchemaTypeDescriptor {
         keyword: "string",
         description: "Text.",
-        accepted_constraints: "min, max, not-empty, pattern, default, required",
+        accepted_constraints: "min, max, not-empty, pattern, suggest, default, required",
         json_schema_effect: "{ \"type\": \"string\" } plus minLength / maxLength / pattern / default",
     },
     SchemaTypeDescriptor {
@@ -35,20 +35,20 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
     },
     SchemaTypeDescriptor {
         keyword: "datetime",
-        description: "ISO-8601 datetime.",
+        description: "ISO-8601 datetime; the timezone offset is optional.",
         accepted_constraints: "default, required",
-        json_schema_effect: "{ \"type\": \"string\", \"format\": \"date-time\" }",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-datetime\" }",
     },
     SchemaTypeDescriptor {
         keyword: "time",
         description: "Time of day with optional timezone.",
         accepted_constraints: "default, required",
-        json_schema_effect: "{ \"type\": \"string\", \"format\": \"time\" }",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-time\" }",
     },
     SchemaTypeDescriptor {
         keyword: "number",
         description: "A numeric value.",
-        accepted_constraints: "min, max, integer, default, required",
+        accepted_constraints: "min, max, integer, suggest, default, required",
         json_schema_effect: "{ \"type\": \"number\" } (or `integer` when `integer` is set) with optional minimum / maximum",
     },
     SchemaTypeDescriptor {
@@ -77,9 +77,9 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
     },
     SchemaTypeDescriptor {
         keyword: "file",
-        description: "A path-like file reference. Use `match(...)` to restrict accepted paths.",
-        accepted_constraints: "match(glob, ...), default, required",
-        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-file\" } plus x-darkmatter-match when `match(...)` is set",
+        description: "A path-like file reference. Lazy by default (syntax-only); add `eager` to require the file to exist. Use `match(...)` to suggest accepted paths.",
+        accepted_constraints: "eager, match(glob, ...), default, required",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-file-reference\" } (lazy); `file(eager)` emits `format: darkmatter-file` (eager existence check). `match(...)` is suggestion metadata only and is not emitted.",
     },
     SchemaTypeDescriptor {
         keyword: "enum",
@@ -98,6 +98,30 @@ pub const SCHEMA_TYPE_DESCRIPTORS: &[SchemaTypeDescriptor] = &[
         description: "RFC 5322 addr-spec.",
         accepted_constraints: "default, required",
         json_schema_effect: "{ \"type\": \"string\", \"format\": \"email\" }",
+    },
+    SchemaTypeDescriptor {
+        keyword: "literal",
+        description: "The value must equal exactly one scalar of any scalar type. Bare `true`/`false` types as boolean, a bare numberlike token as number, and quoted or any other bare token as string. Replaces the single-member enum and makes discriminated unions first-class. Coerces a document value to the literal's scalar type (`\"2\"` against `literal(2)` → `2`); string literals never coerce.",
+        accepted_constraints: "<value>; default; required",
+        json_schema_effect: "{ \"const\": <value> } with the value's lexed type, wrapped by the optional-nullable wrapper; `literal(x)[]` places the `const` under `items`",
+    },
+    SchemaTypeDescriptor {
+        keyword: "expression",
+        description: "A string that must parse under the Darkmatter expression grammar. Parse-only and never evaluated — the third content-format string type alongside `yaml` and `json`. Native boolean/number values coerce to their string forms (`true` → `\"true\"`); mappings and sequences are type mismatches.",
+        accepted_constraints: "default, required, generated",
+        json_schema_effect: "{ \"type\": \"string\", \"format\": \"darkmatter-expression\" }",
+    },
+    SchemaTypeDescriptor {
+        keyword: "type-definition",
+        description: "One complete SimplifiedSchema property definition carried by a YAML string, mapping, or sequence. Parse-only and side-effect-free; DMLS uses it for schema-language completion, hover, and diagnostics.",
+        accepted_constraints: "default, required, generated",
+        json_schema_effect: "{ \"type\": [\"string\", \"object\", \"array\"], \"x-darkmatter-type-definition\": true }",
+    },
+    SchemaTypeDescriptor {
+        keyword: "schema",
+        description: "One complete `$schema` declaration carried by a YAML string, mapping, or sequence. Parse-only and side-effect-free; DMLS uses it for declaration completion, hover, and diagnostics.",
+        accepted_constraints: "default, required, generated",
+        json_schema_effect: "{ \"type\": [\"string\", \"object\", \"array\"], \"x-darkmatter-schema\": true }",
     },
     SchemaTypeDescriptor {
         keyword: "any",
@@ -136,6 +160,15 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         argument_arity: "1",
         description: "Provides the value to use when the property is absent.",
         json_schema_effect: "parent's `default` set to the argument",
+    },
+    SchemaConstraintDescriptor {
+        name: "generated",
+        keyword: "generated",
+        form: "generated",
+        target_types: "all types",
+        argument_arity: "0",
+        description: "The value is supplied by the host runtime (e.g. Darkmatter context capture), not authored in static frontmatter. Orthogonal to `required`, which controls type/nullability.",
+        json_schema_effect: "emits `x-darkmatter-generated: true`; suppresses the property's static-`required` entry so authored documents validate cleanly when the host has not yet supplied the value",
     },
     // ── shared scalar / array bounds ───────────────────────────────────
     SchemaConstraintDescriptor {
@@ -195,15 +228,34 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         description: "Lists the allowed values. At least one member is required.",
         json_schema_effect: "enum list of supplied members",
     },
+    // ── literal ────────────────────────────────────────────────────────
+    SchemaConstraintDescriptor {
+        name: "<value>",
+        keyword: "<value>",
+        form: "literal(value)",
+        target_types: "literal",
+        argument_arity: "1",
+        description: "The single scalar value the property must equal. Typed like YAML: bare `true`/`false` → boolean, bare numberlike → number, quoted or any other bare token → string. Exactly one value; use `enum(...)` for a set.",
+        json_schema_effect: "const set to the typed value",
+    },
     // ── file ───────────────────────────────────────────────────────────
+    SchemaConstraintDescriptor {
+        name: "eager",
+        keyword: "eager",
+        form: "eager",
+        target_types: "file",
+        argument_arity: "0",
+        description: "Require the referenced file to exist at validation time. Without it, `file` is lazy (syntax-only).",
+        json_schema_effect: "emits `format: darkmatter-file` (eager) instead of the lazy `darkmatter-file-reference`",
+    },
     SchemaConstraintDescriptor {
         name: "match",
         keyword: "match",
         form: "match(glob, ...)",
         target_types: "file",
         argument_arity: "1+",
-        description: "Glob patterns the file path must match. Patterns starting with `!` exclude.",
-        json_schema_effect: "x-darkmatter-match set to the glob list",
+        description: "Glob patterns that shape file path suggestions (completion). Patterns starting with `!` exclude. Suggestion metadata only — not validated.",
+        json_schema_effect: "none (suggestion metadata; never lowered into the compiled JSON Schema)",
     },
     // ── url ────────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
@@ -214,6 +266,16 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         argument_arity: "1+",
         description: "Allowed URL schemes (lowercased).",
         json_schema_effect: "x-darkmatter-url-scheme set to the scheme list",
+    },
+    // ── advisory suggestions ───────────────────────────────────────────
+    SchemaConstraintDescriptor {
+        name: "suggest",
+        keyword: "suggest",
+        form: "suggest(value, ...)",
+        target_types: "string | number",
+        argument_arity: "1+",
+        description: "Advisory completion candidates for DMLS. Non-validating: a document value is valid when it satisfies the underlying type and constraints, whether or not it appears in the list. At most one `suggest(...)` per complete property definition (including across property-union atoms). Array forms (`string[]`, `number[]`) describe individual elements, not whole arrays.",
+        json_schema_effect: "emits `x-darkmatter-suggest: [interpreted values]` on the scalar or array `items` schema in declaration order; never lowered to `examples` or `x-darkmatter-example`",
     },
     // ── array ──────────────────────────────────────────────────────────
     SchemaConstraintDescriptor {
@@ -257,6 +319,12 @@ pub const SCHEMA_SHAPE_DESCRIPTORS: &[SchemaShapeDescriptor] = &[
         form: "{ prop: type-expr, ... }",
         example: "{ foo: string(required), bar: number }",
         description: "Use this to validate a nested object without creating a separate schema file.",
+    },
+    SchemaShapeDescriptor {
+        name: "Nested mapping object",
+        form: "YAML mapping under a property",
+        example: "addr:\n  street: string\n  zip: number",
+        description: "Use a YAML mapping as a property value to declare a nested object shape. Equivalent to the inline object literal for the cases both forms can express; the mapping form additionally permits sequence union arms without quoting.",
     },
 ];
 
@@ -388,8 +456,8 @@ pub const VALIDATION_BEHAVIOR_DESCRIPTORS: &[ValidationBehaviorDescriptor] = &[
     },
     ValidationBehaviorDescriptor {
         name: "File references",
-        rule: "`file` values resolve through biscuit-file.",
-        description: "Relative file paths are resolved from the current document context.",
+        rule: "`file` is lazy (syntax-only); `file(eager)` checks existence.",
+        description: "Bare `file` only validates that the value parses as a biscuit-file reference. Add `eager` to require the resolved file to exist; relative paths resolve from the current document context.",
     },
     ValidationBehaviorDescriptor {
         name: "Schema detection",
@@ -416,6 +484,79 @@ pub const VALIDATION_BEHAVIOR_DESCRIPTORS: &[ValidationBehaviorDescriptor] = &[
 /// Returns all validation behavior descriptors in display order.
 pub fn validation_behavior_descriptors() -> &'static [ValidationBehaviorDescriptor] {
     VALIDATION_BEHAVIOR_DESCRIPTORS
+}
+
+/// Trigger-schema grammar forms, in display order.
+pub const TRIGGER_GRAMMAR_DESCRIPTORS: &[TriggerGrammarDescriptor] = &[
+    TriggerGrammarDescriptor {
+        name: "Envelope",
+        form: "kind: trigger-schema",
+        description: "Claims a discovered YAML file as a trigger envelope; `$schema` is its merge-compatible object-schema payload.",
+    },
+    TriggerGrammarDescriptor {
+        name: "Property condition",
+        form: "property: type-expr",
+        description: "A bare expression is an optional guard; `required` makes it a presence gate. Present values must satisfy the type and match-safe constraints.",
+    },
+    TriggerGrammarDescriptor {
+        name: "$path",
+        form: "$path: glob | [glob, ...]",
+        description: "Matches the case-sensitive, boundary-relative path with `/` separators. Basename globs match in any directory and `!` patterns exclude.",
+    },
+    TriggerGrammarDescriptor {
+        name: "all",
+        form: "all: [condition, ...]",
+        description: "Matches when every child condition matches.",
+    },
+    TriggerGrammarDescriptor {
+        name: "any",
+        form: "any: [condition, ...]",
+        description: "Matches when at least one child condition matches.",
+    },
+    TriggerGrammarDescriptor {
+        name: "none",
+        form: "none: [condition, ...]",
+        description: "Matches when no child condition matches.",
+    },
+    TriggerGrammarDescriptor {
+        name: "min-match",
+        form: "min-match: { count: N, of: [condition, ...] }",
+        description: "Matches when at least N of the child conditions match.",
+    },
+    TriggerGrammarDescriptor {
+        name: "Outer OR arms",
+        form: "match: [arm, ...]",
+        description: "A mapping is one arm; a sequence of arm mappings is OR'd. Mixing property and structural keys in one mapping is invalid.",
+    },
+    TriggerGrammarDescriptor {
+        name: "Vacuous-arm lint",
+        form: "each arm requires a positive gate",
+        description: "Every satisfiable arm must require presence through `required` or `$path`, outside `none`; an arm that could match every document is rejected.",
+    },
+];
+
+/// Returns trigger-schema grammar descriptors in display order.
+pub fn trigger_grammar_descriptors() -> &'static [TriggerGrammarDescriptor] {
+    TRIGGER_GRAMMAR_DESCRIPTORS
+}
+
+/// Constraints accepted by trigger property conditions.
+pub const MATCH_SAFE_CONSTRAINT_DESCRIPTORS: &[MatchSafeConstraintDescriptor] = &[
+    MatchSafeConstraintDescriptor { keyword: "required", description: "Requires the property to be present." },
+    MatchSafeConstraintDescriptor { keyword: "<members>", description: "Restricts `enum` to literal members." },
+    MatchSafeConstraintDescriptor { keyword: "pattern", description: "Matches a string against a regular expression." },
+    MatchSafeConstraintDescriptor { keyword: "min", description: "Checks a minimum value, length, or item count." },
+    MatchSafeConstraintDescriptor { keyword: "max", description: "Checks a maximum value, length, or item count." },
+    MatchSafeConstraintDescriptor { keyword: "integer", description: "Requires an integral numeric value." },
+    MatchSafeConstraintDescriptor { keyword: "not-empty", description: "Requires non-whitespace string content." },
+    MatchSafeConstraintDescriptor { keyword: "unique", description: "Requires distinct array items." },
+    MatchSafeConstraintDescriptor { keyword: "min-keys", description: "Checks a minimum object key count." },
+    MatchSafeConstraintDescriptor { keyword: "max-keys", description: "Checks a maximum object key count." },
+];
+
+/// Returns the constraint subset accepted in trigger matches.
+pub fn match_safe_constraint_descriptors() -> &'static [MatchSafeConstraintDescriptor] {
+    MATCH_SAFE_CONSTRAINT_DESCRIPTORS
 }
 
 // ── Descriptor types ────────────────────────────────────────────────────
@@ -454,6 +595,20 @@ pub struct SchemaConstraintDescriptor {
     pub description: &'static str,
     /// Effect on the generated Draft 2020-12 JSON Schema fragment.
     pub json_schema_effect: &'static str,
+}
+
+impl SchemaConstraintDescriptor {
+    /// Whether this constraint is accepted in a postfix `[](…)` array-level
+    /// constraint list.
+    ///
+    /// The array surface is a separate question from a type descriptor's
+    /// `accepted_constraints`, which describes the *item* atom. This reads the
+    /// same [`target_types`](Self::target_types) contract the catalog already
+    /// publishes, so the two cannot drift apart.
+    pub fn accepts_array_level(&self) -> bool {
+        self.target_types == "all types"
+            || self.target_types.split(" | ").any(|target| target == "array")
+    }
 }
 
 /// Descriptor for a single schema shape / grammar form.
@@ -502,6 +657,26 @@ pub struct ValidationBehaviorDescriptor {
     pub description: &'static str,
 }
 
+/// Descriptor for one trigger-schema grammar form.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TriggerGrammarDescriptor {
+    /// Author-facing name of the grammar form.
+    pub name: &'static str,
+    /// Concise YAML surface form.
+    pub form: &'static str,
+    /// Semantics and relevant restrictions.
+    pub description: &'static str,
+}
+
+/// Descriptor for one constraint accepted in trigger matching.
+#[derive(Debug, Clone, PartialEq)]
+pub struct MatchSafeConstraintDescriptor {
+    /// Canonical constraint keyword.
+    pub keyword: &'static str,
+    /// Match-time behavior.
+    pub description: &'static str,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -510,6 +685,44 @@ mod tests {
     use crate::markdown::schemas::simplified::grammar;
     use crate::markdown::schemas::simplified::{PropertyDef, SimplifiedSchema, TypeExpr};
     use std::collections::HashSet;
+
+    /// The array-level constraint set the catalog publishes is the set a
+    /// postfix `[](…)` list actually accepts.
+    ///
+    /// Only one direction is a grammar fact. `parse_one_constraint` is
+    /// deliberately permissive about level — `string[](integer)` parses and
+    /// lowers to a meaningless array-level `Integer` — so the catalog, not the
+    /// parser, is the authority on which constraints an editor should offer
+    /// there. The exact-set assertion pins that authority.
+    #[test]
+    fn array_level_constraint_set_is_published_and_parseable() {
+        let accepted: HashSet<&str> = SCHEMA_CONSTRAINT_DESCRIPTORS
+            .iter()
+            .filter(|descriptor| descriptor.accepts_array_level())
+            .map(|descriptor| descriptor.keyword)
+            .collect();
+        assert_eq!(
+            accepted,
+            HashSet::from(["required", "default", "generated", "min", "max", "unique"]),
+        );
+        for keyword in accepted {
+            let form = match keyword {
+                "default" => "default(1)".to_string(),
+                "min" | "max" => format!("{keyword}(1)"),
+                keyword => keyword.to_string(),
+            };
+            let parsed = grammar::parse_type_expr("p", &format!("string[]({form})"));
+            assert!(parsed.is_ok(), "`{form}` at array level: {parsed:?}");
+        }
+        // `suggest` describes individual elements, so the grammar rejects it on
+        // the array surface and the catalog must not offer it there.
+        assert!(!SCHEMA_CONSTRAINT_DESCRIPTORS
+            .iter()
+            .find(|descriptor| descriptor.keyword == "suggest")
+            .expect("suggest descriptor")
+            .accepts_array_level());
+        assert!(grammar::parse_type_expr("p", "string[](suggest(a))").is_err());
+    }
 
     /// Every `SimplifiedType` variant has exactly one type descriptor, and
     /// every type descriptor maps to a parseable implemented type.
@@ -535,6 +748,10 @@ mod tests {
             SimplifiedType::Enum,
             SimplifiedType::Url,
             SimplifiedType::Email,
+            SimplifiedType::Literal,
+            SimplifiedType::Expression,
+            SimplifiedType::TypeDefinition,
+            SimplifiedType::Schema,
             SimplifiedType::Any,
         ] {
             implemented.insert(ty.as_keyword());
@@ -581,6 +798,7 @@ mod tests {
         for c in [
             Constraint::Required,
             Constraint::Default(serde_json::Value::Null),
+            Constraint::Generated,
             Constraint::Min(0.0),
             Constraint::Max(0.0),
             Constraint::Integer,
@@ -588,7 +806,10 @@ mod tests {
             Constraint::MaxLen(0),
             Constraint::NotEmpty,
             Constraint::Pattern(String::new()),
+            Constraint::Suggest(Vec::new()),
             Constraint::Members(Vec::new()),
+            Constraint::LiteralValue(serde_json::Value::Null),
+            Constraint::Eager,
             Constraint::Match(Vec::new()),
             Constraint::Scheme(Vec::new()),
             Constraint::Unique,
@@ -716,6 +937,60 @@ mod tests {
         let _ = inline_object_rule_descriptors();
         let _ = coercion_rule_descriptors();
         let _ = validation_behavior_descriptors();
+        let _ = trigger_grammar_descriptors();
+        let _ = match_safe_constraint_descriptors();
+    }
+
+    #[test]
+    fn trigger_combinator_descriptor_set_matches_grammar() {
+        use crate::markdown::schemas::triggers::grammar::{COMBINATOR_KEYS, PATH_KEY};
+
+        let described: HashSet<&str> = TRIGGER_GRAMMAR_DESCRIPTORS
+            .iter()
+            .filter_map(|descriptor| {
+                COMBINATOR_KEYS.contains(&descriptor.name).then_some(descriptor.name)
+            })
+            .collect();
+        assert_eq!(described, COMBINATOR_KEYS.iter().copied().collect());
+        assert!(TRIGGER_GRAMMAR_DESCRIPTORS.iter().any(|d| d.name == PATH_KEY));
+    }
+
+    #[test]
+    fn match_safe_constraint_descriptor_set_matches_implementation() {
+        use crate::markdown::schemas::triggers::grammar::is_match_safe_constraint;
+
+        let constraints = [
+            Constraint::Required,
+            Constraint::Default(serde_json::Value::Null),
+            Constraint::Generated,
+            Constraint::Min(0.0),
+            Constraint::Max(0.0),
+            Constraint::Integer,
+            Constraint::MinLen(0),
+            Constraint::MaxLen(0),
+            Constraint::NotEmpty,
+            Constraint::Pattern(String::new()),
+            Constraint::Suggest(Vec::new()),
+            Constraint::Members(Vec::new()),
+            Constraint::Eager,
+            Constraint::Match(Vec::new()),
+            Constraint::Scheme(Vec::new()),
+            Constraint::Unique,
+            Constraint::MinItems(0),
+            Constraint::MaxItems(0),
+            Constraint::MinKeys(0),
+            Constraint::MaxKeys(0),
+        ];
+        let implemented: HashSet<&str> = constraints
+            .iter()
+            .filter(|constraint| is_match_safe_constraint(constraint))
+            .map(Constraint::keyword)
+            .collect();
+        let described: HashSet<&str> = MATCH_SAFE_CONSTRAINT_DESCRIPTORS
+            .iter()
+            .map(|descriptor| descriptor.keyword)
+            .collect();
+        assert_eq!(described, implemented);
     }
 
     /// Descriptor examples in the shape catalog parse to a
@@ -792,8 +1067,92 @@ mod tests {
                         atom.ty
                     );
                 }
+                "Nested mapping object" => {
+                    // The example is a top-level mapping with one property
+                    // whose value is itself a mapping. It must parse as a
+                    // Single schema whose sole property lowers to an
+                    // inline-object atom.
+                    let value: serde_yaml_ng::Value =
+                        serde_yaml_ng::from_str(d.example).expect("yaml must parse");
+                    let schema = parse_yaml_schema(&value)
+                        .expect("nested-mapping example must parse as a SimplifiedSchema");
+                    let shape = match schema {
+                        SimplifiedSchema::Single(s) => s,
+                        other => panic!("expected Single, got {other:?}"),
+                    };
+                    let prop = shape
+                        .properties
+                        .values()
+                        .next()
+                        .expect("nested-mapping example must declare at least one property");
+                    let atom = match prop {
+                        PropertyDef::Single(a) => a,
+                        other => panic!("expected Single atom, got {other:?}"),
+                    };
+                    assert!(
+                        matches!(atom.ty, TypeExpr::InlineObject(_)),
+                        "Nested mapping object example did not lower to TypeExpr::InlineObject: {:?}",
+                        atom.ty
+                    );
+                }
                 other => panic!("unexpected shape descriptor: {other}"),
             }
         }
+    }
+
+    /// The `suggest(...)` descriptor advertises eligibility on `string` and
+    /// `number`. This test verifies that every advertised eligible type
+    /// accepts the constraint and every excluded type rejects it, so the
+    /// catalog and the grammar cannot drift.
+    #[test]
+    fn suggest_descriptor_eligibility_matches_grammar() {
+        fn accepts(type_expr: &str) -> bool {
+            grammar::parse_type_expr("test", type_expr).is_ok()
+        }
+
+        // Eligible scalar types (per descriptor `target_types`).
+        assert!(accepts("string(suggest(red, green))"));
+        assert!(accepts("number(suggest(1, 2, 3))"));
+        assert!(accepts("number(integer; suggest(80, 443))"));
+
+        // Eligible array forms — candidates describe individual elements.
+        assert!(accepts("string(suggest(alpha, beta))[]"));
+        assert!(accepts("number(integer; suggest(1, 2, 3))[]"));
+
+        // Ineligible types must reject the constraint.
+        let ineligible = [
+            "boolean(suggest(true))",
+            "boolish(suggest(true))",
+            "numberlike(suggest(1))",
+            "date(suggest(2024-01-01))",
+            "datetime(suggest(2024-01-01T00:00:00Z))",
+            "time(suggest(12:00))",
+            "url(suggest(https://example.com))",
+            "email(suggest(a@b.com))",
+            "enum(suggest(x))",
+            "any(suggest(x))",
+            "object(suggest(x))",
+            "file(suggest(x))",
+        ];
+        for expr in ineligible {
+            assert!(
+                !accepts(expr),
+                "`suggest(...)` should be rejected on `{expr}` per the descriptor catalog"
+            );
+        }
+    }
+
+    /// The descriptor catalog's `suggest` entry uses keyword `suggest`, which
+    /// must round-trip through [`Constraint::keyword`].
+    #[test]
+    fn suggest_descriptor_keyword_matches_constraint() {
+        let descriptor = SCHEMA_CONSTRAINT_DESCRIPTORS
+            .iter()
+            .find(|d| d.keyword == "suggest")
+            .expect("suggest descriptor must exist");
+        assert_eq!(
+            Constraint::Suggest(Vec::new()).keyword(),
+            descriptor.keyword,
+        );
     }
 }

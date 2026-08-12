@@ -46,7 +46,7 @@ use common::{capture_until, send_bt_command};
 use serial_test::serial;
 use sha2::{Digest, Sha256};
 use std::time::Duration;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 /// Process-shared Kitty window reused across the Kitty-targeting tests
 /// in this file. A `clear` is sent before each command so prior renders
@@ -141,11 +141,7 @@ fn case_for(cmd: &str) -> &'static DiagramCase {
 /// protocol, verifying `\x1b_G` APC bytes appear in the captured raw
 /// pane output.
 fn assert_renders_in_kitty(case: &DiagramCase) {
-    require_level!(
-        Level::L2,
-        KittyHarness::available(),
-        "Kitty remote control (set KITTY_LISTEN_ON)",
-    );
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
@@ -166,7 +162,7 @@ fn assert_renders_in_kitty(case: &DiagramCase) {
          plain:\n{}",
         case.cmd,
         case.arg,
-        &frame.raw.chars().take(400).collect::<String>(),
+        frame.raw.chars().take(400).collect::<String>(),
         frame.plain,
     );
 }
@@ -177,11 +173,7 @@ fn assert_renders_in_kitty(case: &DiagramCase) {
 /// `render_time_ms`) that the CLI emits to stderr — proving the image
 /// pipeline executed end-to-end (not the fenced-block fallback).
 fn assert_renders_in_wezterm(case: &DiagramCase) {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -372,11 +364,7 @@ fn level2_graph_expression_renders_in_wezterm() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_diagram_width_respects_pane_columns() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -428,11 +416,7 @@ fn level2_diagram_width_respects_pane_columns() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_diagram_width_kitty_apc_columns() {
-    require_level!(
-        Level::L2,
-        KittyHarness::available(),
-        "Kitty remote control (set KITTY_LISTEN_ON)",
-    );
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
@@ -451,7 +435,7 @@ fn level2_diagram_width_kitty_apc_columns() {
         panic!(
             "could not extract Kitty APC payload from --width 50% render.\n\
              pane cols: {pane_cols}\nraw first 400:\n{:?}",
-            &frame.raw.chars().take(400).collect::<String>(),
+            frame.raw.chars().take(400).collect::<String>(),
         )
     });
 
@@ -511,11 +495,7 @@ fn level2_diagram_width_kitty_apc_columns() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_inverse_flag_changes_background_in_capture() {
-    require_level!(
-        Level::L2,
-        KittyHarness::available(),
-        "Kitty remote control (set KITTY_LISTEN_ON)",
-    );
+    require_level!(Level::L2, KittyHarness::available(), Backend::Kitty);
 
     let mut guard = SHARED_KITTY
         .get_or_init(|| KittyHarness::shared_or_spawn().expect("attach/spawn kitty"));
@@ -533,7 +513,7 @@ fn level2_inverse_flag_changes_background_in_capture() {
         panic!(
             "could not extract Kitty APC payload from default render.\n\
              raw first 400:\n{:?}",
-            &frame1.raw.chars().take(400).collect::<String>(),
+            frame1.raw.chars().take(400).collect::<String>(),
         )
     });
 
@@ -549,7 +529,7 @@ fn level2_inverse_flag_changes_background_in_capture() {
         panic!(
             "could not extract Kitty APC payload from --inverse render.\n\
              raw first 400:\n{:?}",
-            &frame2.raw.chars().take(400).collect::<String>(),
+            frame2.raw.chars().take(400).collect::<String>(),
         )
     });
 
@@ -574,7 +554,7 @@ fn level2_inverse_flag_changes_background_in_capture() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_diagram_fallback_when_no_image_protocol() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -597,12 +577,12 @@ fn level2_diagram_fallback_when_no_image_protocol() {
     assert!(
         !frame.raw.contains("\x1b_G"),
         "Kitty APC bytes leaked into tmux capture; fallback path failed. raw:\n{:?}",
-        &frame.raw.chars().take(400).collect::<String>(),
+        frame.raw.chars().take(400).collect::<String>(),
     );
     assert!(
         !frame.raw.contains("\x1b]1337;File="),
         "iTerm2 OSC bytes leaked into tmux capture; fallback path failed. raw:\n{:?}",
-        &frame.raw.chars().take(400).collect::<String>(),
+        frame.raw.chars().take(400).collect::<String>(),
     );
 }
 

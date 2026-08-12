@@ -28,7 +28,7 @@ Note: the `unchained-ai` workspace includes `lib`, `cli`, and `gen`; `model_id` 
 - Implemented:
     - pipeline/state primitives and validation
     - provider registry and generated provider model enums
-    - Parsera-backed metadata generation and runtime metadata lookup
+    - models.dev-backed metadata generation and runtime metadata lookup
     - Provider-native metadata merging (OpenRouter pricing, parameters, architecture)
     - OpenCode delegation primitive
     - agent cap monitoring for Claude Code and Codex

@@ -6,6 +6,7 @@
 use super::runtime::ComposeContext;
 use super::ContextMergeDiagnostic;
 use super::merge::CtxMergeError;
+use crate::markdown::compose::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
 use crate::markdown::frontmatter::MergeStrategy;
 use serde_json::Value;
 use std::collections::HashMap;
@@ -108,6 +109,30 @@ pub(crate) fn merge_replace_maps(
     }
 }
 
+/// Coerces a named-object value to its `name` string in inline string context.
+///
+/// Returns `Some(name)` only when `path` exactly matches one of the
+/// caller-supplied `keys` (so a dotted path such as `state.age` never matches
+/// `state`), `value` is an object, and its `name` field is a string. Any other
+/// shape returns `None`, leaving the normal scalar coercion in charge. This is
+/// the opt-in hook behind [`ComposeOptions::with_name_coercion_keys`]; it is
+/// applied on the inline `get_string` surfaces only, never on the typed `get`
+/// path, so whole-value spans, dotted paths, and comparisons keep the object.
+///
+/// [`ComposeOptions::with_name_coercion_keys`]: super::ComposeOptions::with_name_coercion_keys
+pub(crate) fn coerce_named_object(path: &str, value: &Value, keys: &[String]) -> Option<String> {
+    if !keys.iter().any(|k| k == path) {
+        return None;
+    }
+    match value {
+        Value::Object(obj) => match obj.get("name") {
+            Some(Value::String(name)) => Some(name.clone()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
 /// Resolved state available to replacement and interpolation stages.
 ///
 /// This struct holds the merged result of:
@@ -125,6 +150,15 @@ pub struct EffectiveState {
 
     /// Diagnostics from context capture and merge.
     ctx_diagnostics: Vec<ContextMergeDiagnostic>,
+
+    /// Frontmatter keys whose object values render their `name` field when
+    /// interpolated in inline string context. Empty by default; only the
+    /// inline `get_string` path consults it.
+    name_coercion_keys: Vec<String>,
+
+    /// Alternate values used only when a side-effect-free variable/member/index
+    /// path is rendered into Markdown body text.
+    presentation_values: HashMap<String, Value>,
 }
 
 impl EffectiveState {
@@ -157,6 +191,8 @@ impl EffectiveState {
             data,
             context,
             ctx_diagnostics: Vec::new(),
+            name_coercion_keys: Vec::new(),
+            presentation_values: HashMap::new(),
         }
     }
 
@@ -179,8 +215,9 @@ impl EffectiveState {
         // before the bare-name `ctx.*` fallback, so a missing `doc.*` never
         // collapses into `ctx.*`.
         if super::super::expression::doc_namespace::is_doc_namespace(path) {
-            let root = Value::Object(self.data.clone().into_iter().collect());
-            return super::super::expression::doc_namespace::resolve_doc_namespace(path, &root);
+            return super::super::expression::doc_namespace::resolve_doc_namespace_in_map(
+                path, &self.data,
+            );
         }
 
         // Handle special prefixes
@@ -207,7 +244,13 @@ impl EffectiveState {
     /// - `bool` -> `"true"` or `"false"`
     /// - `array/object` -> JSON string
     pub fn get_string(&self, path: &str) -> String {
-        match self.get(path) {
+        let value = self.get(path);
+        if let Some(resolved) = &value
+            && let Some(name) = coerce_named_object(path, resolved, &self.name_coercion_keys)
+        {
+            return name;
+        }
+        match value {
             None => String::new(),
             Some(Value::Null) => String::new(),
             Some(Value::String(s)) => s,
@@ -220,6 +263,10 @@ impl EffectiveState {
     /// Returns the underlying data map.
     pub fn data(&self) -> &HashMap<String, Value> {
         &self.data
+    }
+
+    pub(crate) fn presentation_values(&self) -> &HashMap<String, Value> {
+        &self.presentation_values
     }
 
     /// Returns the runtime context.
@@ -310,6 +357,24 @@ impl super::super::expression::EvaluationLookup for EffectiveState {
     fn get_string(&self, path: &str) -> String {
         self.get_string(path)
     }
+
+    fn is_valid_context_variable(&self, name: &str) -> bool {
+        if CONTEXT_VARIABLE_DESCRIPTORS.iter().any(|d| d.name == name) {
+            return true;
+        }
+        self.get_context_value(name).is_some()
+    }
+
+    fn context_variable_names(&self) -> &[&'static str] {
+        use std::sync::LazyLock;
+        static NAMES: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
+            CONTEXT_VARIABLE_DESCRIPTORS
+                .iter()
+                .map(|d| d.name)
+                .collect()
+        });
+        NAMES.as_slice()
+    }
 }
 
 /// Wraps an [`EffectiveState`] with a [`ResolutionContext`] so any surface that
@@ -355,6 +420,21 @@ impl super::super::expression::EvaluationLookup for ResolvingLookup<'_> {
     fn resolution_context(&self) -> Option<super::super::expression::ResolutionContext> {
         Some(self.resolution_context.clone())
     }
+
+    fn resolution_context_ref(&self) -> Option<&super::super::expression::ResolutionContext> {
+        // Borrowed path (Finding 12): body interpolation evaluates every
+        // read-side function through this adapter; returning a borrow avoids
+        // cloning the context per call.
+        Some(&self.resolution_context)
+    }
+
+    fn is_valid_context_variable(&self, name: &str) -> bool {
+        self.state.is_valid_context_variable(name)
+    }
+
+    fn context_variable_names(&self) -> &[&'static str] {
+        self.state.context_variable_names()
+    }
 }
 
 /// Builder for creating effective state with specific merge strategies.
@@ -366,6 +446,8 @@ pub struct EffectiveStateBuilder {
     replace_parent_wins: bool,
     context: Option<ComposeContext>,
     allow_ctx_override: bool,
+    name_coercion_keys: Vec<String>,
+    presentation_values: HashMap<String, Value>,
 }
 
 impl EffectiveStateBuilder {
@@ -378,6 +460,8 @@ impl EffectiveStateBuilder {
             replace_parent_wins: false,
             context: None,
             allow_ctx_override: false,
+            name_coercion_keys: Vec::new(),
+            presentation_values: HashMap::new(),
         }
     }
 
@@ -424,6 +508,24 @@ impl EffectiveStateBuilder {
         self
     }
 
+    /// Sets the frontmatter keys whose object values render their `name` field
+    /// when interpolated in inline string context (`{{key}}`).
+    ///
+    /// Empty by default (no behavior change). See
+    /// [`coerce_named_object`] for the exact coercion rule.
+    #[must_use]
+    pub fn with_name_coercion_keys(mut self, keys: Vec<String>) -> Self {
+        self.name_coercion_keys = keys;
+        self
+    }
+
+    /// Sets alternate values used only for side-effect-free body path presentation.
+    #[must_use]
+    pub(crate) fn with_presentation_values(mut self, values: HashMap<String, Value>) -> Self {
+        self.presentation_values = values;
+        self
+    }
+
     /// Builds the effective state.
     ///
     /// After merging frontmatter/external state, materializes the runtime `ctx`
@@ -434,6 +536,14 @@ impl EffectiveStateBuilder {
     /// Returns `CtxMergeError::InvalidUserCtx` when the document defines `ctx`
     /// as a non-object value and `allow_ctx_override` is false.
     pub fn build(self) -> Result<EffectiveState, CtxMergeError> {
+        // A full capture is the safe default here, unlike `ComposeOptions::new`.
+        // `build` materializes `ctx` into `data` as a fixed snapshot, and no
+        // later stage re-reads it, so a group missing here renders empty rather
+        // than being fetched on demand. The compose pipeline can narrow this
+        // safely because it sees the document and captures what the document
+        // names; a bare builder sees neither, so narrowing would silently blank
+        // `ctx.*`. Callers that read no runtime context should pass
+        // [`ComposeContext::capture_minimal`] explicitly.
         let context = self.context.unwrap_or_else(ComposeContext::capture);
 
         let frontmatter_value = Value::Object(self.frontmatter.clone().into_iter().collect());
@@ -489,6 +599,8 @@ impl EffectiveStateBuilder {
             data,
             context,
             ctx_diagnostics,
+            name_coercion_keys: self.name_coercion_keys,
+            presentation_values: self.presentation_values,
         })
     }
 }
@@ -968,6 +1080,96 @@ mod tests {
         let base = to_map(json!({"a": 1, "b": {"c": 2}}));
         let effective = apply_set_overrides(&base, None, &[]);
         assert_eq!(Value::Object(effective), Value::Object(base));
+    }
+
+    // ── coerce_named_object (Sequence Plus name coercion) ─────────────
+
+    #[test]
+    fn coerce_named_object_exact_key_with_string_name() {
+        let keys = vec!["state".to_string()];
+        let value = json!({ "name": "alpha", "index": 1 });
+        assert_eq!(
+            coerce_named_object("state", &value, &keys),
+            Some("alpha".to_string())
+        );
+    }
+
+    #[test]
+    fn coerce_named_object_non_matching_key_is_none() {
+        let keys = vec!["state".to_string()];
+        let value = json!({ "name": "alpha" });
+        assert_eq!(coerce_named_object("other", &value, &keys), None);
+    }
+
+    #[test]
+    fn coerce_named_object_object_without_string_name_is_none() {
+        let keys = vec!["state".to_string()];
+        // name is a number, not a string
+        assert_eq!(
+            coerce_named_object("state", &json!({ "name": 7 }), &keys),
+            None
+        );
+        // no name field at all
+        assert_eq!(
+            coerce_named_object("state", &json!({ "index": 1 }), &keys),
+            None
+        );
+    }
+
+    #[test]
+    fn coerce_named_object_non_object_value_is_none() {
+        let keys = vec!["state".to_string()];
+        assert_eq!(coerce_named_object("state", &json!("alpha"), &keys), None);
+        assert_eq!(coerce_named_object("state", &json!(42), &keys), None);
+    }
+
+    #[test]
+    fn coerce_named_object_dotted_path_does_not_match_exact_key() {
+        // `state.age` must NOT match the `state` key — exact match only.
+        let keys = vec!["state".to_string()];
+        let value = json!({ "name": "alpha" });
+        assert_eq!(coerce_named_object("state.age", &value, &keys), None);
+    }
+
+    fn state_with_name_coercion(fm: HashMap<String, Value>, keys: Vec<String>) -> EffectiveState {
+        EffectiveStateBuilder::new()
+            .with_frontmatter(fm)
+            .with_context(test_context())
+            .with_name_coercion_keys(keys)
+            .build()
+            .unwrap()
+    }
+
+    #[test]
+    fn get_string_coerces_named_object_when_key_is_set() {
+        let mut fm = HashMap::new();
+        fm.insert("state".to_string(), json!({ "name": "alpha", "index": 1 }));
+
+        let state = state_with_name_coercion(fm, vec!["state".to_string()]);
+
+        // Inline string context renders the `name` field.
+        assert_eq!(state.get_string("state"), "alpha");
+        // Dotted path is unaffected — the age scalar still coerces normally.
+        // (Here `state.index` is the scalar under the object.)
+        assert_eq!(state.get_string("state.index"), "1");
+        // Typed lookup keeps the full object.
+        assert_eq!(
+            state.get("state"),
+            Some(json!({ "name": "alpha", "index": 1 }))
+        );
+    }
+
+    #[test]
+    fn get_string_without_coercion_keys_renders_json() {
+        let value = json!({ "name": "alpha", "index": 1 });
+        let mut fm = HashMap::new();
+        fm.insert("state".to_string(), value.clone());
+
+        // Empty keys → legacy behavior: the whole object as a JSON string
+        // (byte-identical to the value's own `to_string`, whatever key order
+        // serde_json is configured for).
+        let state = state_with_name_coercion(fm, Vec::new());
+        assert_eq!(state.get_string("state"), value.to_string());
     }
 
     #[test]

@@ -1,0 +1,778 @@
+//! Layer-ownership tests.
+//!
+//! Each test names the transition it models and asserts which layers survive
+//! it. The point is not that the constructors work; it is that the four
+//! layers cannot be confused for one another.
+
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use indexmap::IndexMap;
+
+use super::*;
+use crate::composition::MAX_PROXY_HOPS;
+use crate::composition::lifecycle::LifecycleSignal;
+use crate::composition::types::{CompositionMode, SharedApprovalCache};
+
+fn cache() -> SharedApprovalCache {
+    Arc::new(Mutex::new(HashMap::new()))
+}
+
+fn doc(name: &str) -> PathBuf {
+    PathBuf::from(format!("/prompts/{name}.md"))
+}
+
+fn provenance(source: &str, signal: LifecycleSignal, chain: Vec<PathBuf>) -> ProxyProvenance {
+    ProxyProvenance::new(doc(source), ActionLocation::new(signal, 0, 0), chain)
+}
+
+fn overlay_of(pairs: &[(&str, serde_json::Value)]) -> IndexMap<String, serde_json::Value> {
+    pairs
+        .iter()
+        .map(|(k, v)| ((*k).to_string(), v.clone()))
+        .collect()
+}
+
+fn request(target: &str, overlay: &[(&str, serde_json::Value)]) -> EvaluatedProxyRequest {
+    EvaluatedProxyRequest::new(
+        format!("@prompts/{target}.md"),
+        overlay_of(overlay),
+        provenance("router", LifecycleSignal::Initialize, vec![doc("router")]),
+    )
+}
+
+/// The coordinator's normal happy path, used as the fixture for the handoff
+/// tests below.
+fn commit(ledger: &mut RunLedger, target: &str, overlay: &[(&str, serde_json::Value)])
+-> ProxyHandoff {
+    let resolved = ResolvedProxyTarget::from_resolver(doc(target));
+    let approval = ledger
+        .access()
+        .approve_hop(resolved)
+        .expect("hop should be approved");
+    let handoff = ProxyHandoff::commit(request(target, overlay), approval);
+    ledger.access().record_proxy(&handoff);
+    handoff
+}
+
+mod handoff_state {
+    use super::*;
+
+    #[test]
+    fn commit_takes_its_path_from_the_approval_not_the_authored_string() {
+        let mut ledger = RunLedger::new(doc("router"), cache());
+        let handoff = commit(&mut ledger, "target", &[]);
+
+        // The authored reference survives for diagnostics, but the path that
+        // downstream preparation will open is the resolver's, not a re-read of
+        // the authored string.
+        assert_eq!(handoff.authored_target(), "@prompts/target.md");
+        assert_eq!(handoff.resolved_target(), doc("target"));
+    }
+
+    #[test]
+    fn evaluated_request_carries_the_overlay_and_provenance_through_commit() {
+        let mut ledger = RunLedger::new(doc("router"), cache());
+        let handoff = commit(
+            &mut ledger,
+            "target",
+            &[("phase", serde_json::json!(2)), ("live", serde_json::json!(true))],
+        );
+
+        assert_eq!(handoff.overlay().get("phase"), Some(&serde_json::json!(2)));
+        assert_eq!(handoff.overlay().get("live"), Some(&serde_json::json!(true)));
+        assert_eq!(handoff.provenance().source_path(), doc("router"));
+        assert_eq!(handoff.provenance().signal(), LifecycleSignal::Initialize);
+    }
+
+    #[test]
+    fn action_location_renders_the_dotted_property_path() {
+        let location = ActionLocation::new(LifecycleSignal::Failure, 1, 2);
+        assert_eq!(location.to_string(), "failure.stack[1].action[2]");
+    }
+
+    #[test]
+    fn omitted_with_installs_an_empty_overlay_rather_than_forwarding() {
+        let mut ledger = RunLedger::new(doc("router"), cache());
+        let first = commit(&mut ledger, "a", &[("carried", serde_json::json!("yes"))]);
+        let prepared = PreparedDocument::from_handoff(first, prepared_composition());
+        assert!(!prepared.overlay().is_empty());
+
+        // `a` proxies on without a `with:`. The target gets its own (empty)
+        // overlay, not `a`'s.
+        let second = commit(&mut ledger, "b", &[]);
+        let next = PreparedDocument::from_handoff(second, prepared_composition());
+        assert!(next.overlay().is_empty());
+    }
+}
+
+mod run_ledger {
+    use super::*;
+
+    #[test]
+    fn chain_is_seeded_with_the_origin_so_a_self_proxy_is_a_cycle_on_the_first_hop() {
+        let mut ledger = RunLedger::new(doc("router"), cache());
+        assert!(ledger.contains_document(&doc("router")));
+        assert_eq!(ledger.hops(), 0);
+
+        let rejection = ledger
+            .access()
+            .approve_hop(ResolvedProxyTarget::from_resolver(doc("router")))
+            .expect_err("a document proxying to itself is a cycle");
+        assert_eq!(rejection, HopRejection::Cycle);
+    }
+
+    #[test]
+    fn an_a_b_a_cycle_is_rejected() {
+        let mut ledger = RunLedger::new(doc("a"), cache());
+        commit(&mut ledger, "b", &[]);
+
+        let rejection = ledger
+            .access()
+            .approve_hop(ResolvedProxyTarget::from_resolver(doc("a")))
+            .expect_err("A->B->A is a cycle");
+        assert_eq!(rejection, HopRejection::Cycle);
+        assert_eq!(ledger.hops(), 1);
+    }
+
+    #[test]
+    fn hop_budget_exhausts_at_max_proxy_hops() {
+        let mut ledger = RunLedger::new(doc("origin"), cache());
+        // The origin occupies one chain slot, so the chain reaches
+        // MAX_PROXY_HOPS after MAX_PROXY_HOPS - 1 hops.
+        for i in 0..(MAX_PROXY_HOPS - 1) {
+            commit(&mut ledger, &format!("hop{i}"), &[]);
+        }
+        assert_eq!(ledger.chain().len(), MAX_PROXY_HOPS);
+
+        let rejection = ledger
+            .access()
+            .approve_hop(ResolvedProxyTarget::from_resolver(doc("one-too-many")))
+            .expect_err("the hop budget is exhausted");
+        assert_eq!(rejection, HopRejection::BudgetExhausted);
+    }
+
+    #[test]
+    fn a_rejected_hop_does_not_extend_the_chain() {
+        let mut ledger = RunLedger::new(doc("a"), cache());
+        commit(&mut ledger, "b", &[]);
+        let before = ledger.chain().to_vec();
+
+        let _ = ledger
+            .access()
+            .approve_hop(ResolvedProxyTarget::from_resolver(doc("a")));
+
+        assert_eq!(ledger.chain(), before.as_slice());
+    }
+
+    #[test]
+    fn proxy_extends_the_ledger_and_never_resets_it() {
+        let approvals = cache();
+        approvals.lock().unwrap().insert(
+            "ls -la".to_string(),
+            crate::harness::shell::CachedApprovalDecision::Allowed,
+        );
+        let mut ledger = RunLedger::new(doc("router"), approvals);
+        let anchor = ledger.command_started();
+
+        commit(&mut ledger, "a", &[]);
+        commit(&mut ledger, "b", &[]);
+
+        // Hop accounting bounds a *chain* of documents, so a handoff extends
+        // it rather than starting over.
+        assert_eq!(ledger.hops(), 2);
+        assert_eq!(ledger.chain(), [doc("router"), doc("a"), doc("b")]);
+        // Command-wide timing and the approval cache are invocation state:
+        // they outlive every document in the chain.
+        assert_eq!(ledger.command_started(), anchor);
+        assert!(ledger.approval_cache().lock().unwrap().contains_key("ls -la"));
+    }
+
+    #[test]
+    fn transition_provenance_is_recorded_for_diagnostics() {
+        let mut ledger = RunLedger::new(doc("router"), cache());
+        commit(&mut ledger, "target", &[]);
+        ledger
+            .access()
+            .record_transition(TransitionRecord::Retry { attempt: 2 });
+
+        assert_eq!(ledger.transitions().len(), 2);
+        match &ledger.transitions()[0] {
+            TransitionRecord::Proxy {
+                provenance,
+                resolved_target,
+            } => {
+                assert_eq!(provenance.source_path(), doc("router"));
+                assert_eq!(resolved_target, &doc("target"));
+            }
+            other => panic!("expected a recorded proxy, got {other:?}"),
+        }
+        assert_eq!(ledger.transitions()[1], TransitionRecord::Retry { attempt: 2 });
+    }
+
+    #[test]
+    fn contains_document_is_the_one_chain_membership_answer() {
+        let mut ledger = RunLedger::new(doc("router"), cache());
+        commit(&mut ledger, "target", &[]);
+
+        assert!(ledger.contains_document(&doc("router")));
+        assert!(ledger.contains_document(&doc("target")));
+        assert!(!ledger.contains_document(&doc("elsewhere")));
+    }
+}
+
+mod invocation_inputs {
+    use super::*;
+
+    fn draft() -> InvocationInputsDraft {
+        InvocationInputsDraft::new(
+            "router.md".to_string(),
+            CompositionMode::ChainedDocument,
+            PathBuf::from("/repo"),
+        )
+    }
+
+    #[test]
+    fn frozen_inputs_expose_reads_only() {
+        let mut d = draft();
+        d.yolo = true;
+        d.set_overrides = Some(serde_json::json!({ "phase": 2 }));
+        let inputs = d.freeze();
+
+        // Reads work through Deref; there is no DerefMut, so the compile_fail
+        // doctest on `InvocationInputs` covers the mutation half.
+        assert!(inputs.yolo);
+        assert_eq!(inputs.file_ref, "router.md");
+        assert_eq!(
+            inputs.set_overrides,
+            Some(serde_json::json!({ "phase": 2 }))
+        );
+    }
+
+    #[test]
+    fn caller_overrides_are_unchanged_by_a_proxy() {
+        let mut d = draft();
+        d.set_overrides = Some(serde_json::json!({ "phase": 2 }));
+        let inputs = d.freeze();
+        let mut ledger = RunLedger::new(doc("router"), cache());
+
+        // The target's `with:` says phase 9; the caller said phase 2.
+        commit(&mut ledger, "target", &[("phase", serde_json::json!(9))]);
+
+        // The caller stays authoritative at every document: a handoff cannot
+        // reach into invocation inputs at all.
+        assert_eq!(inputs.set_overrides, Some(serde_json::json!({ "phase": 2 })));
+    }
+}
+
+mod active_document_state {
+    use super::*;
+
+    #[test]
+    fn initial_state_starts_at_iteration_one_attempt_one_with_no_budgets() {
+        let state = ActiveDocumentState::initial();
+        assert_eq!(state.iteration().number(), 1);
+        assert_eq!(state.iteration().attempt().number(), 1);
+        assert_eq!(state.iteration().retry_budget().ceiling(), None);
+        assert_eq!(state.iteration().resume_budget().ceiling(), None);
+        assert_eq!(state.iteration().attempt().session_id(), None);
+    }
+
+    #[test]
+    fn retry_replaces_the_attempt_slice_and_drops_the_session() {
+        let mut state = ActiveDocumentState::initial();
+        state.iteration_mut().attempt_mut().adopt_session("s-1".into());
+        state
+            .iteration_mut()
+            .attempt_mut()
+            .record_outcome(AttemptOutcome::Failed);
+
+        state.iteration_mut().retry_attempt();
+
+        // Retry starts a fresh provider session.
+        assert_eq!(state.iteration().attempt().number(), 2);
+        assert_eq!(state.iteration().attempt().session_id(), None);
+        assert_eq!(state.iteration().attempt().last_outcome(), None);
+        // Still the same document iteration.
+        assert_eq!(state.iteration().number(), 1);
+    }
+
+    #[test]
+    fn resume_replaces_the_attempt_slice_but_retains_the_live_session() {
+        let mut state = ActiveDocumentState::initial();
+        state.iteration_mut().attempt_mut().adopt_session("s-1".into());
+
+        state
+            .iteration_mut()
+            .resume_attempt("s-1".into(), Some("keep going".into()));
+
+        assert_eq!(state.iteration().attempt().number(), 2);
+        assert_eq!(state.iteration().attempt().session_id(), Some("s-1"));
+        assert_eq!(state.iteration().attempt().resume_followup(), Some("keep going"));
+    }
+
+    fn a_key(provider: &str) -> SessionCompatibilityKey {
+        SessionCompatibilityKey {
+            provider: provider.to_string(),
+            ..SessionCompatibilityKey::default()
+        }
+    }
+
+    #[test]
+    fn resume_carries_the_session_compatibility_key_forward_with_the_session() {
+        let mut state = ActiveDocumentState::initial();
+        state.iteration_mut().attempt_mut().adopt_session("s-1".into());
+        let key = a_key("claude");
+        state
+            .iteration_mut()
+            .attempt_mut()
+            .set_compat_key(key.clone());
+
+        state
+            .iteration_mut()
+            .resume_attempt("s-1".into(), Some("keep going".into()));
+
+        // The key that opened the session travels forward so the resumed attempt
+        // can compare its refreshed plan against it.
+        assert_eq!(state.iteration().attempt().compat_key(), Some(&key));
+    }
+
+    #[test]
+    fn retry_drops_the_compatibility_key_because_it_opens_a_fresh_session() {
+        let mut state = ActiveDocumentState::initial();
+        state
+            .iteration_mut()
+            .attempt_mut()
+            .set_compat_key(a_key("claude"));
+
+        state.iteration_mut().retry_attempt();
+
+        assert_eq!(state.iteration().attempt().compat_key(), None);
+    }
+
+    #[test]
+    fn retry_cannot_reset_its_own_budget_by_replacing_the_attempt() {
+        let mut state = ActiveDocumentState::initial();
+        // A `retry: { max_attempts: 2 }` firing at attempt 1 ceilings at 3.
+        let ceiling = state.iteration_mut().retry_budget_mut().ceiling_for(1, 2);
+        assert_eq!(ceiling, 3);
+
+        state.iteration_mut().retry_attempt();
+        // Firing again at attempt 2 must reuse the established ceiling, not
+        // recompute 2 + 2 = 4 and drift out of reach forever.
+        assert_eq!(state.iteration_mut().retry_budget_mut().ceiling_for(2, 2), 3);
+        state.iteration_mut().retry_attempt();
+        assert_eq!(state.iteration_mut().retry_budget_mut().ceiling_for(3, 2), 3);
+
+        // Budget exhausted at the ceiling.
+        assert!(state.iteration().retry_budget().permits(2));
+        assert!(!state.iteration().retry_budget().permits(3));
+    }
+
+    #[test]
+    fn retry_and_resume_budgets_have_separate_labeled_homes() {
+        let mut state = ActiveDocumentState::initial();
+        state.iteration_mut().retry_budget_mut().ceiling_for(1, 2);
+
+        // Spending retry budget must not spend resume budget.
+        assert_eq!(state.iteration().retry_budget().ceiling(), Some(3));
+        assert_eq!(state.iteration().resume_budget().ceiling(), None);
+        assert_eq!(
+            state.iteration().retry_budget().kind(),
+            ControlBudgetKind::Retry
+        );
+        assert_eq!(
+            state.iteration().resume_budget().kind(),
+            ControlBudgetKind::Resume
+        );
+    }
+
+    #[test]
+    fn advancing_the_loop_gives_the_next_iteration_fresh_budgets() {
+        let mut state = ActiveDocumentState::initial();
+        state.iteration_mut().retry_budget_mut().ceiling_for(1, 2);
+        state.iteration_mut().retry_attempt();
+        state
+            .iteration_mut()
+            .mutations_mut()
+            .insert("phase".into(), serde_json::json!(2));
+
+        state.advance_iteration();
+
+        assert_eq!(state.iteration().number(), 2);
+        assert_eq!(state.iteration().attempt().number(), 1);
+        assert_eq!(state.iteration().retry_budget().ceiling(), None);
+        assert!(state.iteration().mutations().is_empty());
+    }
+
+    #[test]
+    fn proxy_discards_active_document_execution_state() {
+        let mut source = ActiveDocumentState::initial();
+        source.iteration_mut().retry_budget_mut().ceiling_for(1, 2);
+        source.iteration_mut().attempt_mut().adopt_session("s-1".into());
+        source.iteration_mut().retry_attempt();
+        source.advance_iteration();
+
+        // What the coordinator builds for a freshly adopted target.
+        let target = ActiveDocumentState::initial();
+
+        assert_eq!(target.iteration().number(), 1);
+        assert_eq!(target.iteration().attempt().number(), 1);
+        assert_eq!(target.iteration().attempt().session_id(), None);
+        assert_eq!(target.iteration().retry_budget().ceiling(), None);
+        assert_eq!(target.iteration().resume_budget().ceiling(), None);
+    }
+}
+
+mod session_compatibility_key {
+    use super::*;
+
+    /// A fully populated key; each facet test clones this and flips one field.
+    fn base_key() -> SessionCompatibilityKey {
+        SessionCompatibilityKey {
+            provider: "claude".to_string(),
+            model: Some("claude-sonnet".to_string()),
+            binary: "claude@/usr/bin/claude".to_string(),
+            resume_protocol: "claude:true".to_string(),
+            workspace_cwd: "/repo".to_string(),
+            permission_mode: "prompt".to_string(),
+            interactivity: "non-interactive".to_string(),
+            structured_output: "true:false".to_string(),
+            system_prompt: "none".to_string(),
+            mcp_servers: vec!["fs".to_string(), "git".to_string()],
+            extra: std::collections::BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn an_unchanged_key_is_compatible_with_itself() {
+        let key = base_key();
+        assert!(key.is_compatible(&key));
+        assert!(key.incompatibilities(&key).is_empty());
+    }
+
+    /// Each launch facet, flipped in isolation, must flip the key to
+    /// incompatible and name exactly that facet.
+    #[test]
+    fn each_facet_change_is_named_in_isolation() {
+        type Mutate = fn(&mut SessionCompatibilityKey);
+        let cases: &[(&str, Mutate)] = &[
+            ("provider", |k| k.provider = "codex".to_string()),
+            ("model", |k| k.model = Some("gpt-5".to_string())),
+            ("profile/binary", |k| k.binary = "codex@/usr/bin/codex".to_string()),
+            ("resume protocol", |k| k.resume_protocol = "claude:false".to_string()),
+            ("workspace CWD", |k| k.workspace_cwd = "/other".to_string()),
+            ("permission mode", |k| k.permission_mode = "bypass".to_string()),
+            ("interactivity", |k| k.interactivity = "interactive".to_string()),
+            ("structured-output mode", |k| k.structured_output = "false:false".to_string()),
+            ("system prompt", |k| k.system_prompt = "digest-2".to_string()),
+            ("MCP server set", |k| k.mcp_servers = vec!["fs".to_string()]),
+        ];
+        for (facet, mutate) in cases {
+            let base = base_key();
+            let mut changed = base.clone();
+            mutate(&mut changed);
+            let named = base.incompatibilities(&changed);
+            assert_eq!(
+                named,
+                vec![facet.to_string()],
+                "changing `{facet}` must name exactly that facet",
+            );
+            assert!(!base.is_compatible(&changed));
+        }
+    }
+
+    #[test]
+    fn dropping_a_pinned_model_is_an_incompatibility() {
+        let base = base_key();
+        let mut changed = base.clone();
+        changed.model = None;
+        assert_eq!(base.incompatibilities(&changed), vec!["model".to_string()]);
+    }
+
+    #[test]
+    fn mcp_server_set_compares_by_membership_not_order() {
+        let base = base_key();
+        let mut reordered = base.clone();
+        reordered.mcp_servers = vec!["git".to_string(), "fs".to_string()];
+        // The extractor sorts the set, so a producer that lists servers in a
+        // different order must still compare equal here.
+        reordered.mcp_servers.sort();
+        let mut sorted_base = base.clone();
+        sorted_base.mcp_servers.sort();
+        assert!(sorted_base.is_compatible(&reordered));
+    }
+
+    #[test]
+    fn provider_specific_identity_is_named_by_key() {
+        let base = base_key();
+        let mut changed = base.clone();
+        changed
+            .extra
+            .insert("workspace_trust".to_string(), "off".to_string());
+        assert_eq!(
+            base.incompatibilities(&changed),
+            vec!["provider identity `workspace_trust`".to_string()],
+        );
+    }
+
+    #[test]
+    fn multiple_changed_facets_are_all_named() {
+        let base = base_key();
+        let mut changed = base.clone();
+        changed.model = Some("other".to_string());
+        changed.workspace_cwd = "/elsewhere".to_string();
+        let named = base.incompatibilities(&changed);
+        assert!(named.contains(&"model".to_string()));
+        assert!(named.contains(&"workspace CWD".to_string()));
+        assert_eq!(named.len(), 2);
+    }
+}
+
+mod prepared_document {
+    use super::*;
+
+    #[test]
+    fn direct_preparation_has_no_overlay_and_no_provenance() {
+        let prepared = PreparedDocument::direct(prepared_composition());
+        assert!(prepared.overlay().is_empty());
+        assert!(prepared.provenance().is_none());
+    }
+
+    #[test]
+    fn overlay_and_provenance_survive_a_canonical_refresh() {
+        let mut ledger = RunLedger::new(doc("router"), cache());
+        let handoff = commit(&mut ledger, "target", &[("phase", serde_json::json!(2))]);
+        let prepared = PreparedDocument::from_handoff(handoff, prepared_composition());
+
+        // Retry / resume / loop refresh: new composition, same overlay.
+        let refreshed = prepared.refreshed(prepared_composition());
+
+        assert_eq!(
+            refreshed.overlay().values().get("phase"),
+            Some(&serde_json::json!(2))
+        );
+        assert_eq!(
+            refreshed.provenance().map(ProxyProvenance::source_path),
+            Some(doc("router").as_path())
+        );
+    }
+
+    #[test]
+    fn overlay_exposes_property_names_without_values_for_status_and_tracing() {
+        let mut ledger = RunLedger::new(doc("router"), cache());
+        let handoff = commit(
+            &mut ledger,
+            "target",
+            &[("token", serde_json::json!("s3cret"))],
+        );
+        let prepared = PreparedDocument::from_handoff(handoff, prepared_composition());
+
+        let names: Vec<_> = prepared.overlay().property_names().collect();
+        assert_eq!(names, ["token"]);
+    }
+}
+
+mod transitions {
+    use super::*;
+    use crate::composition::CompositionError;
+
+    #[test]
+    fn a_proxy_hands_off_source_ownership_but_a_retry_does_not() {
+        let proxy: DocumentTransition = DocumentTransition::Proxy(request("target", &[]));
+        assert!(proxy.hands_off_source());
+        assert!(DocumentTransition::<CompositionError>::Complete.hands_off_source());
+        assert!(!DocumentTransition::<CompositionError>::Retry.hands_off_source());
+        assert!(!DocumentTransition::<CompositionError>::Continue.hands_off_source());
+        assert!(
+            !DocumentTransition::<CompositionError>::Resume {
+                session: "s-1".into(),
+                message: None,
+            }
+            .hands_off_source()
+        );
+    }
+
+    #[test]
+    fn abort_preserves_its_concrete_error_rather_than_a_string() {
+        #[derive(Debug, Clone, PartialEq)]
+        struct DriverError {
+            code: u8,
+        }
+
+        // A CLI-side producer aborts with its own error type: the library
+        // neither erases it nor depends on it.
+        let transition: DocumentTransition<DriverError> = DocumentTransition::Abort(
+            TransitionAbort::new(Some(LifecycleSignal::Failure), DriverError { code: 7 }),
+        );
+
+        match transition {
+            DocumentTransition::Abort(abort) => {
+                assert_eq!(abort.signal(), Some(LifecycleSignal::Failure));
+                assert_eq!(abort.source(), &DriverError { code: 7 });
+                assert_eq!(abort.into_source(), DriverError { code: 7 });
+            }
+            other => panic!("expected an abort, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn map_abort_retypes_the_error_and_leaves_other_variants_alone() {
+        let abort: DocumentTransition<u8> =
+            DocumentTransition::Abort(TransitionAbort::new(None, 7u8));
+        let lifted: DocumentTransition<String> = abort.map_abort(|code| format!("code {code}"));
+        match lifted {
+            DocumentTransition::Abort(a) => assert_eq!(a.source(), "code 7"),
+            other => panic!("expected an abort, got {other:?}"),
+        }
+
+        let retry: DocumentTransition<u8> = DocumentTransition::Retry;
+        assert_eq!(retry.map_abort(|_| String::new()), DocumentTransition::Retry);
+    }
+}
+
+/// A minimal prepared composition. The canonical preparation service (Phase 5)
+/// is what will really build these; these tests only care that the
+/// prepared-document layer carries one.
+fn prepared_composition() -> crate::composition::types::PreparedComposition {
+    use crate::composition::types::{
+        CompositionClosurePlan, EffectiveSelectionHints, PreparedComposition,
+    };
+
+    PreparedComposition {
+        schema_verdict_deferred: false,
+        mode: CompositionMode::ChainedDocument,
+        resolved_path: doc("target"),
+        source_repo_root: None,
+        prompt: String::new(),
+        effective_frontmatter: serde_json::json!({}),
+        selection_hints: EffectiveSelectionHints::default(),
+        closure: CompositionClosurePlan::Direct,
+        lifecycle: crate::composition::LifecycleConfig::default(),
+        compose_perf: None,
+        dropped_optionals: Vec::new(),
+        warnings: Vec::new(),
+        deferred_lifecycle_keys: Vec::new(),
+        input_layers: Default::default(),
+        entry: crate::composition::DocumentEntryReason::Direct,
+        compose_context: darkmatter::markdown::compose::ComposeContext::capture_for_content(std::path::Path::new("."), ""),
+    }
+}
+
+// -- overlay redaction ------------------------------------------------------
+//
+// Phase 12 of `features/2026-07-13-proxy-with`: status may report that a
+// hand-off *includes* an overlay and tracing may record property names and
+// counts, but neither may print overlay values — an overlay is evaluated from
+// the source's live state and can carry a token, a key, or anything else
+// `{{ ... }}` reached. `Debug` is the realistic leak: it is one
+// `tracing::debug!(?handoff)` away from being live, and a derived impl prints
+// every value verbatim. These tests are what stop a future `#[derive(Debug)]`
+// from silently reopening that.
+
+/// A value distinctive enough that no incidental formatting could produce it.
+const SECRET: &str = "sk-live-51H8xQ2zZzZzZ";
+
+fn secret_overlay() -> Vec<(&'static str, serde_json::Value)> {
+    vec![
+        ("api_token", serde_json::json!(SECRET)),
+        ("nested", serde_json::json!({ "inner_key": SECRET })),
+        ("listed", serde_json::json!([SECRET])),
+    ]
+}
+
+#[test]
+fn an_evaluated_request_debug_names_properties_but_never_values() {
+    let rendered = format!("{:?}", request("target", &secret_overlay()));
+
+    assert!(
+        !rendered.contains(SECRET),
+        "`EvaluatedProxyRequest`'s Debug leaked an overlay value — including one \
+         nested inside an object or an array, which a shallow redaction would \
+         miss; got {rendered}"
+    );
+    for property in ["api_token", "nested", "listed"] {
+        assert!(
+            rendered.contains(property),
+            "the property name must survive: naming what a hand-off carries is \
+             explicitly allowed and is what makes the status useful; got {rendered}"
+        );
+    }
+    assert!(
+        rendered.contains("<redacted>"),
+        "the redaction must be visible rather than the value silently omitted, \
+         so a reader can tell the difference between an empty overlay and a \
+         withheld one; got {rendered}"
+    );
+}
+
+#[test]
+fn a_committed_handoff_debug_names_properties_but_never_values() {
+    let mut ledger = RunLedger::new(doc("router"), SharedApprovalCache::default());
+    let handoff = commit(&mut ledger, "target", &secret_overlay());
+    let rendered = format!("{handoff:?}");
+
+    assert!(
+        !rendered.contains(SECRET),
+        "`ProxyHandoff`'s Debug leaked an overlay value; got {rendered}"
+    );
+    assert!(
+        rendered.contains("api_token") && rendered.contains("<redacted>"),
+        "the handoff must still name its overlay properties; got {rendered}"
+    );
+    assert!(
+        rendered.contains("target"),
+        "the target is not a secret and must stay visible for diagnostics; \
+         got {rendered}"
+    );
+}
+
+/// `PreparedDocument` derives `Debug` and holds a `DocumentOverlay`, so the
+/// overlay's own impl is what protects it. A `{:?}` on a prepared document is
+/// the most likely accidental leak of the three: it is the type a debugging
+/// session reaches for.
+#[test]
+fn a_prepared_document_debug_never_prints_overlay_values() {
+    let mut ledger = RunLedger::new(doc("router"), SharedApprovalCache::default());
+    let handoff = commit(&mut ledger, "target", &secret_overlay());
+    let prepared = PreparedDocument::from_handoff(handoff, prepared_composition());
+
+    let rendered = format!("{prepared:?}");
+    assert!(
+        !rendered.contains(SECRET),
+        "a prepared document's Debug leaked its overlay through `DocumentOverlay`; \
+         got {rendered}"
+    );
+    assert!(
+        format!("{:?}", prepared.overlay()).contains("api_token"),
+        "the overlay still names its properties"
+    );
+}
+
+/// The values are still *reachable* — redaction is about accidental printing,
+/// not about the coordinator being unable to use the overlay it carries. A
+/// redaction that broke this would be a bug, not extra safety.
+#[test]
+fn redaction_does_not_hide_overlay_values_from_the_code_that_needs_them() {
+    let mut ledger = RunLedger::new(doc("router"), SharedApprovalCache::default());
+    let handoff = commit(&mut ledger, "target", &secret_overlay());
+
+    assert_eq!(
+        handoff.overlay().get("api_token"),
+        Some(&serde_json::json!(SECRET)),
+        "the overlay's values must remain readable by the layers that apply them"
+    );
+
+    let prepared = PreparedDocument::from_handoff(handoff, prepared_composition());
+    assert_eq!(
+        prepared.overlay().values().get("api_token"),
+        Some(&serde_json::json!(SECRET))
+    );
+    assert_eq!(
+        prepared.overlay().property_names().collect::<Vec<_>>(),
+        vec!["api_token", "nested", "listed"],
+        "`property_names` is the sanctioned status accessor and preserves \
+         authored order"
+    );
+}

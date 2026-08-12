@@ -1,6 +1,6 @@
 # Claudine Unified Events Design
 
-This document defines the unified event model for Claudine: a system that normalizes lifecycle events from 8 agentic CLI providers into 16 canonical hooks, then dispatches configurable actions (TTS, sound effects, logging, shell commands) when those hooks fire.
+This document defines the unified event model for Claudine: a system that normalizes lifecycle events from every compiled agentic CLI provider into 16 canonical hooks, then dispatches configurable actions (TTS, sound effects, logging, shell commands) when those hooks fire.
 
 ## Design Target and Migration Scope
 
@@ -12,7 +12,12 @@ When there is a mismatch between this design and the existing code:
 2. The mismatch is treated as migration work.
 3. Compatibility behavior (when needed) is called out explicitly.
 
-## Supported CLIs
+The detailed research below documents the original seven-provider design set.
+The generated provider catalog and the event-support matrix in the Claudine
+architecture skill are authoritative for the current ten-provider roster,
+which also includes Kilo, Pi, and Antigravity.
+
+## Original Design CLIs
 
 | # | CLI | Vendor | Events | Design Reference |
 |---|-----|--------|:------:|------------------|
@@ -23,7 +28,6 @@ When there is a mismatch between this design and the existing code:
 | 5 | Kimi Code | Moonshot AI | 15 | [designs/kimi-code.md](designs/kimi-code.md) |
 | 6 | OpenCode | OpenCode AI | 16 | [designs/opencode.md](designs/opencode.md) |
 | 7 | Qwen CLI | Alibaba | 7 | [designs/qwen-cli.md](designs/qwen-cli.md) |
-| 8 | Roo Code | Roo | 47 | [designs/roo-code.md](designs/roo-code.md) |
 
 ---
 
@@ -186,58 +190,32 @@ Most fragmented surface model with three independent integration surfaces. Only 
 
 Unique: Permission priority chain (excludeTools > plan mode > yolo mode > allowedTools > callback > default deny), fire-and-forget SubagentPreToolUse (not even awaited), 60-second callback timeout with auto-deny.
 
-### 1.8 Roo Code
-
-**47 events** | CLI EventEmitter + stream-json + VS Code API | **0 blocking**
-
-Largest event surface but all observational. Flow control uses explicit client method calls (approve, reject, respond). Rich agent state machine with delegation lifecycle.
-
-| Native Event (key subset) | Blocking | AgenticEvent |
-|---|:---:|---|
-| WaitingForInput | - | `human_in_the_loop` |
-| TaskCompleted | - | `turn_complete` |
-| Error | - | `turn_error` |
-| StreamingStarted | - | `before_model` |
-| StreamingEnded | - | `after_model` |
-| ToolUseOutput | - | `before_tool` |
-| ToolResultOutput | - | `after_tool` |
-| TaskCreated | - | `session_start` |
-| TaskAborted | - | `session_end` |
-| TaskSpawned | - | `subagent_start` |
-| TaskDelegationCompleted | - | `subagent_stop` |
-| TaskToolFailed | - | `tool_error` |
-| ModeChanged | - | `notification` |
-
-30 additional events (UI focus, state granularity, query-response, eval, streaming partials) have no unified mapping.
-
-Unique: 10 ClientAction methods for flow control, AgentLoopState machine (NoTask, Running, Streaming, WaitingForInput, Idle, Resumable), ClineAsk types (11 variants), delegation lifecycle (TaskSpawned -> TaskDelegated -> TaskDelegationCompleted -> TaskDelegationResumed), cost tracking (CostInfo).
-
 ---
 
 ## 2. Cross-CLI Comparison
 
 ### 2.1 AgenticEvent Coverage Matrix
 
-| AgenticEvent | Claude | Codex | Gemini | Goose | Kimi | OpenCode | Qwen | Roo |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| `session_start` | H | S | H | - | - | H | S | E |
-| `session_end` | H | - | H | S | - | H | S | E |
-| `before_prompt` | H | S | H | - | W | H | - | - |
-| `before_tool` | H | S | H | - | W | H | S | E* |
-| `after_tool` | H | S | H | - | W | H | S | E* |
-| `tool_error` | H | - | - | - | W | - | - | E |
-| `permission_request` | H | - | - | - | W | H | C | - |
-| `notification` | H | S | H | S | W | H | S | E |
-| `subagent_start` | H | - | - | S | W | - | - | E |
-| `subagent_stop` | H | - | - | S | W | - | S | E |
-| `turn_complete` | H | H | H | S | W | H | S | E |
-| `turn_error` | - | S | - | S | W | H | S | E |
-| `before_model` | - | - | H | S | - | H | - | E |
-| `after_model` | - | S | H | S | W | H | S | E |
-| `before_compact` | H | - | H | - | W | H | - | - |
-| `human_in_the_loop` | - | - | - | - | W | H | - | E |
+| AgenticEvent | Claude | Codex | Gemini | Goose | Kimi | OpenCode | Qwen |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| `session_start` | H | S | H | - | - | H | S |
+| `session_end` | H | - | H | S | - | H | S |
+| `before_prompt` | H | S | H | - | W | H | - |
+| `before_tool` | H | S | H | - | W | H | S |
+| `after_tool` | H | S | H | - | W | H | S |
+| `tool_error` | H | - | - | - | W | - | - |
+| `permission_request` | H | - | - | - | W | H | C |
+| `notification` | H | S | H | S | W | H | S |
+| `subagent_start` | H | - | - | S | W | - | - |
+| `subagent_stop` | H | - | - | S | W | - | S |
+| `turn_complete` | H | H | H | S | W | H | S |
+| `turn_error` | - | S | - | S | W | H | S |
+| `before_model` | - | - | H | S | - | H | - |
+| `after_model` | - | S | H | S | W | H | S |
+| `before_compact` | H | - | H | - | W | H | - |
+| `human_in_the_loop` | - | - | - | - | W | H | - |
 
-**Legend:** H = Hook (config-file), S = Stream/NonHook, W = Wire/RPC, C = SDK Callback, E = EventEmitter, E* = Observational only, - = Not supported
+**Legend:** H = Hook (config-file), S = Stream/NonHook, W = Wire/RPC, C = SDK Callback, - = Not supported
 
 ### 2.2 Blocking Capability
 
@@ -250,17 +228,15 @@ Unique: 10 ClientAction methods for flow control, AgentLoopState machine (NoTask
 | Qwen CLI | 1 | 7 | SDK callback response |
 | Codex CLI | 0 | 10 | Fire-and-forget |
 | Goose | 0 | 7 | Purely observe-only |
-| Roo Code | 0 | 47 | Observational; flow via client methods |
 
 ### 2.3 Delivery Mechanisms
 
 | Mechanism | CLIs | Protocol |
 |---|---|---|
 | Shell command (JSON I/O) | Claude, Gemini | JSON on stdin, JSON on stdout, exit codes |
-| JSONL stream | Codex, Goose, Qwen, Roo | Newline-delimited JSON output |
+| JSONL stream | Codex, Goose, Qwen | Newline-delimited JSON output |
 | JSON-RPC 2.0 | Kimi | Bidirectional over stdin/stdout |
 | In-process plugin | OpenCode | JS/TS function, input/output mutation |
-| CLI EventEmitter | Roo | Programmatic callback registration |
 | SDK callback | Qwen | Rust async function |
 | Config notify | Codex | Shell command with CLI argument |
 | Env var hook | Goose | `GOOSE_STATUS_HOOK` shell command |
@@ -269,7 +245,7 @@ Unique: 10 ClientAction methods for flow control, AgentLoopState machine (NoTask
 
 ## 3. Unified Design
 
-This is the core section. It defines the types, traits, and dispatch logic that allow Claudine to operate across all 8 CLIs through a single abstraction layer.
+This is the core section. It defines the types, traits, and dispatch logic that allow Claudine to operate across every compiled provider identity through a single abstraction layer.
 
 ### 3.1 `AgenticEvent` Enum
 
@@ -278,7 +254,7 @@ The 16-variant normalized event enum is the canonical hook set for the refactor 
 ```rust
 use serde::{Deserialize, Serialize};
 
-/// Normalized lifecycle events across all 8 supported agentic CLI providers.
+/// Normalized lifecycle events across supported agentic CLI providers.
 ///
 /// Each variant represents a lifecycle moment that Claudine can observe and
 /// react to. Provider adapters convert their native events into this enum
@@ -308,7 +284,7 @@ pub enum AgenticEvent {
 
 ### 3.1.1 `Provider` Enum (Canonical Set)
 
-The provider enum is also part of the canonical design surface. Roo Code is a first-class provider in this design.
+The provider enum is also part of the canonical design surface.
 
 ```rust
 use serde::{Deserialize, Serialize};
@@ -325,7 +301,6 @@ pub enum Provider {
     KimiCode,
     OpenCode,
     QwenCode,
-    RooCode,
 }
 ```
 
@@ -418,7 +393,7 @@ pub trait ProviderAdapter: Send + Sync {
     /// Return the exit code that should be used for the given response.
     ///
     /// Only relevant for shell-based providers (Claude, Gemini).
-    /// Returns `None` for providers that don't use exit codes (Kimi, OpenCode, Qwen, Roo).
+    /// Returns `None` for providers that don't use exit codes (Kimi, OpenCode, Qwen).
     fn exit_code(&self, event: &AgenticEvent, response: &HookResponse) -> Option<i32>;
 }
 
@@ -430,7 +405,6 @@ static GOOSE_ADAPTER: GooseAdapter = GooseAdapter;
 static KIMI_ADAPTER: KimiCodeAdapter = KimiCodeAdapter;
 static OPENCODE_ADAPTER: OpenCodeAdapter = OpenCodeAdapter;
 static QWEN_ADAPTER: QwenCliAdapter = QwenCliAdapter;
-static ROO_ADAPTER: RooCodeAdapter = RooCodeAdapter;
 
 /// Factory function that returns the appropriate adapter for a provider.
 pub fn adapter_for(provider: Provider) -> &'static dyn ProviderAdapter {
@@ -442,7 +416,6 @@ pub fn adapter_for(provider: Provider) -> &'static dyn ProviderAdapter {
         Provider::KimiCode => &KIMI_ADAPTER,
         Provider::OpenCode => &OPENCODE_ADAPTER,
         Provider::QwenCode => &QWEN_ADAPTER,
-        Provider::RooCode => &ROO_ADAPTER,
     }
 }
 ```
@@ -517,7 +490,6 @@ Provider-specific fields that do not fit the common schema go into `extra`:
 | Kimi Code | `step_number`, `approval_id`, `display_blocks`, `content_variant`, `subagent_nested_event_type` |
 | OpenCode | `bus_event_type`, `plugin_context`, `auth_method` |
 | Qwen CLI | `approval_mode`, `permission_priority`, `subagent_id`, `can_use_tool_timeout_secs` |
-| Roo Code | `agent_loop_state`, `required_action`, `cline_ask`, `cost_info`, `task_id` |
 
 `extra` is intentionally open-ended and should preserve provider-native key naming when useful for debugging (`thread-id` vs `thread_id`, etc.).
 
@@ -969,24 +941,24 @@ Earlier Claudine builds accepted `{{env.VAR | "default"}}` (single pipe) as a fa
 
 #### AgenticEvent to Native Events
 
-| AgenticEvent | Claude Code | Codex CLI | Gemini CLI | Goose | Kimi Code | OpenCode | Qwen CLI | Roo Code |
-|---|---|---|---|---|---|---|---|---|
-| `session_start` | SessionStart | ThreadStarted | SessionStart | -- | -- | session.created | StreamSessionStart | TaskCreated |
-| `session_end` | SessionEnd | -- | SessionEnd | Complete | -- | session.deleted | StreamResult | TaskAborted |
-| `before_prompt` | UserPromptSubmit | TurnStarted | BeforeAgent | -- | TurnBegin | chat.message | -- | -- |
-| `before_tool` | PreToolUse | ItemStarted (`command_execution`, `file_change`, `mcp_tool_call`) | BeforeTool | -- | ToolCall, ToolCallPart, ToolCallRequest | tool.execute.before | SubagentPreToolUse | ToolUseOutput |
-| `after_tool` | PostToolUse | ItemCompleted | AfterTool | -- | ToolResult | tool.execute.after | SubagentPostToolUse | ToolResultOutput |
-| `tool_error` | PostToolUseFailure | -- | -- | -- | ToolResult (is_error=true) | -- | -- | TaskToolFailed |
-| `permission_request` | PermissionRequest | -- | -- | -- | ApprovalRequest, ApprovalResponse | permission.ask | CanUseTool | -- |
-| `notification` | Notification | ItemUpdated (`agent_message`, `reasoning`, `web_search`, `plan_update`) | Notification | Notification, ModelChange | StatusUpdate, StepBegin, CompactionEnd | event (bus) | -- | ModeChanged |
-| `subagent_start` | SubagentStart | -- | -- | Notification (`subagent_tool_request`) | SubagentEvent | -- | -- | TaskSpawned |
-| `subagent_stop` | SubagentStop | -- | -- | Notification (`tasks_complete`) | SubagentEvent (done) | -- | SubagentStop | TaskDelegationCompleted |
-| `turn_complete` | Stop, TeammateIdle, TaskCompleted | TurnCompleted, AfterAgent | AfterAgent | StatusWaiting | TurnEnd | session.idle | -- | TaskCompleted |
-| `turn_error` | -- | TurnFailed, Error | -- | Error | StepInterrupted | session.error | -- | Error |
-| `before_model` | -- | -- | BeforeModel, BeforeToolSelection | StatusThinking | -- | chat.params, chat.headers, Experimental* | -- | StreamingStarted |
-| `after_model` | -- | ItemUpdated | AfterModel | Message | ContentPart | ExperimentalTextComplete | StreamAssistantMessage | StreamingEnded |
-| `before_compact` | PreCompact | -- | PreCompress | -- | CompactionBegin | ExperimentalSessionCompacting | -- | -- |
-| `human_in_the_loop` | -- | -- | -- | -- | ApprovalRequest | permission.asked (observational event-bus signal) | -- | WaitingForInput |
+| AgenticEvent | Claude Code | Codex CLI | Gemini CLI | Goose | Kimi Code | OpenCode | Qwen CLI |
+|---|---|---|---|---|---|---|---|
+| `session_start` | SessionStart | ThreadStarted | SessionStart | -- | -- | session.created | StreamSessionStart |
+| `session_end` | SessionEnd | -- | SessionEnd | Complete | -- | session.deleted | StreamResult |
+| `before_prompt` | UserPromptSubmit | TurnStarted | BeforeAgent | -- | TurnBegin | chat.message | -- |
+| `before_tool` | PreToolUse | ItemStarted (`command_execution`, `file_change`, `mcp_tool_call`) | BeforeTool | -- | ToolCall, ToolCallPart, ToolCallRequest | tool.execute.before | SubagentPreToolUse |
+| `after_tool` | PostToolUse | ItemCompleted | AfterTool | -- | ToolResult | tool.execute.after | SubagentPostToolUse |
+| `tool_error` | PostToolUseFailure | -- | -- | -- | ToolResult (is_error=true) | -- | -- |
+| `permission_request` | PermissionRequest | -- | -- | -- | ApprovalRequest, ApprovalResponse | permission.ask | CanUseTool |
+| `notification` | Notification | ItemUpdated (`agent_message`, `reasoning`, `web_search`, `plan_update`) | Notification | Notification, ModelChange | StatusUpdate, StepBegin, CompactionEnd | event (bus) | -- |
+| `subagent_start` | SubagentStart | -- | -- | Notification (`subagent_tool_request`) | SubagentEvent | -- | -- |
+| `subagent_stop` | SubagentStop | -- | -- | Notification (`tasks_complete`) | SubagentEvent (done) | -- | SubagentStop |
+| `turn_complete` | Stop, TeammateIdle, TaskCompleted | TurnCompleted, AfterAgent | AfterAgent | StatusWaiting | TurnEnd | session.idle | -- |
+| `turn_error` | -- | TurnFailed, Error | -- | Error | StepInterrupted | session.error | -- |
+| `before_model` | -- | -- | BeforeModel, BeforeToolSelection | StatusThinking | -- | chat.params, chat.headers, Experimental* | -- |
+| `after_model` | -- | ItemUpdated | AfterModel | Message | ContentPart | ExperimentalTextComplete | StreamAssistantMessage |
+| `before_compact` | PreCompact | -- | PreCompress | -- | CompactionBegin | ExperimentalSessionCompacting | -- |
+| `human_in_the_loop` | -- | -- | -- | -- | ApprovalRequest | permission.asked (observational event-bus signal) | -- |
 
 Mapping caveats:
 
@@ -1000,24 +972,24 @@ Mapping caveats:
 
 This table shows which provider-event combinations support blocking (the hook can return a response that influences agent behavior):
 
-| AgenticEvent | Claude | Codex | Gemini | Goose | Kimi | OpenCode | Qwen | Roo |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| `session_start` | -- | -- | -- | -- | -- | -- | -- | -- |
-| `session_end` | -- | -- | -- | -- | -- | -- | -- | -- |
-| `before_prompt` | **B** | -- | **B** | -- | -- | -- | -- | -- |
-| `before_tool` | **B** | -- | **B** | -- | **B** | **B** | -- | -- |
-| `after_tool` | **B*** | -- | **B** | -- | -- | -- | -- | -- |
-| `tool_error` | -- | -- | -- | -- | -- | -- | -- | -- |
-| `permission_request` | **B** | -- | -- | -- | **B** | **B** | **B** | -- |
-| `notification` | -- | -- | -- | -- | -- | -- | -- | -- |
-| `subagent_start` | -- | -- | -- | -- | -- | -- | -- | -- |
-| `subagent_stop` | **B** | -- | -- | -- | -- | -- | -- | -- |
-| `turn_complete` | **B** | -- | **B** | -- | -- | -- | -- | -- |
-| `turn_error` | -- | -- | -- | -- | -- | -- | -- | -- |
-| `before_model` | -- | -- | **B** | -- | -- | -- | -- | -- |
-| `after_model` | -- | -- | **B** | -- | -- | -- | -- | -- |
-| `before_compact` | -- | -- | -- | -- | -- | -- | -- | -- |
-| `human_in_the_loop` | -- | -- | -- | -- | **B** | -- | -- | -- |
+| AgenticEvent | Claude | Codex | Gemini | Goose | Kimi | OpenCode | Qwen |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| `session_start` | -- | -- | -- | -- | -- | -- | -- |
+| `session_end` | -- | -- | -- | -- | -- | -- | -- |
+| `before_prompt` | **B** | -- | **B** | -- | -- | -- | -- |
+| `before_tool` | **B** | -- | **B** | -- | **B** | **B** | -- |
+| `after_tool` | **B*** | -- | **B** | -- | -- | -- | -- |
+| `tool_error` | -- | -- | -- | -- | -- | -- | -- |
+| `permission_request` | **B** | -- | -- | -- | **B** | **B** | **B** |
+| `notification` | -- | -- | -- | -- | -- | -- | -- |
+| `subagent_start` | -- | -- | -- | -- | -- | -- | -- |
+| `subagent_stop` | **B** | -- | -- | -- | -- | -- | -- |
+| `turn_complete` | **B** | -- | **B** | -- | -- | -- | -- |
+| `turn_error` | -- | -- | -- | -- | -- | -- | -- |
+| `before_model` | -- | -- | **B** | -- | -- | -- | -- |
+| `after_model` | -- | -- | **B** | -- | -- | -- | -- |
+| `before_compact` | -- | -- | -- | -- | -- | -- | -- |
+| `human_in_the_loop` | -- | -- | -- | -- | **B** | -- | -- |
 
 **B** = Blocking supported (return value influences agent behavior)
 
@@ -1153,7 +1125,7 @@ The response flow handles the fundamental asymmetry between providers that suppo
 // No exit code (in-process)
 ```
 
-**Non-blocking providers** (Codex, Goose, Qwen stream, Roo):
+**Non-blocking providers** (Codex, Goose, Qwen stream):
 
 The `Call` action still executes (its output is logged), but `format_response()` returns `Value::Null` and the response is discarded. This allows a single config to work across all providers -- blocking where supported, observing where not.
 
@@ -1404,12 +1376,12 @@ The design does not introduce a separate `UnifiedHook` enum. The existing `Agent
 
 ### 4.2 Adapter Pattern for Provider Diversity
 
-The 8 CLIs use fundamentally different architectures:
+The provider CLIs use fundamentally different architectures:
 
 | Architecture | CLIs |
 |---|---|
 | Shell commands with JSON I/O and exit codes | Claude Code, Gemini CLI |
-| JSONL/NDJSON output streams | Codex, Goose, Qwen, Roo |
+| JSONL/NDJSON output streams | Codex, Goose, Qwen |
 | JSON-RPC 2.0 bidirectional protocol | Kimi Code |
 | In-process JS/TS plugin functions | OpenCode |
 | Rust SDK async callbacks | Qwen (CanUseTool only) |
@@ -1418,7 +1390,7 @@ The `ProviderAdapter` trait abstracts over all of these. Each adapter knows how 
 
 ### 4.3 Graceful Degradation for Non-Blocking Providers
 
-Only 5 of 8 CLIs support any form of blocking (Claude, Gemini, OpenCode, Kimi, Qwen), and even among those, the number of blockable events varies from 1 (Qwen) to 7 (Claude). The unified model handles this through the `can_block` flag:
+Within the original seven-provider research set, five CLIs support some form of blocking (Claude, Gemini, OpenCode, Kimi, Qwen), and the number of blockable events varies by provider. The unified model handles this through the `can_block` flag:
 
 1. Every `ResolvedHook` carries a `can_block` boolean set by the adapter for the specific event
 2. `Call` actions always execute regardless of `can_block` (for side effects and logging)
@@ -1439,7 +1411,6 @@ Several native events map to the same `AgenticEvent` variant with information lo
 | Gemini tool selection | BeforeToolSelection | `before_model` |
 | Kimi tool lifecycle | ToolCall, ToolCallPart, ToolCallRequest | `before_tool` |
 | Kimi orchestration markers | StepBegin, CompactionEnd | `notification` |
-| Roo UI/state events | 30+ events | (unmapped) |
 
 This is by design. The unified model captures **lifecycle semantics meaningful for action dispatch** -- play a sound when a tool runs, speak when a turn completes, log when an error occurs. Provider-specific implementation details are preserved in `EventMeta::extra` for users who need fine-grained control. The per-provider event enums (in `designs/*.md`) remain available for provider-specific logic.
 

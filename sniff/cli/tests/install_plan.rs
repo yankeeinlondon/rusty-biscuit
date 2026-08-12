@@ -1,11 +1,12 @@
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use serde_json::Value;
+#[cfg(unix)]
 use tempfile::TempDir;
 
 #[test]
 fn install_plan_vim_renders_text_output() {
-    cargo_bin_cmd!("sniff")
+    assert_cmd::Command::cargo_bin("sniff")
+        .unwrap()
         .args(["software", "editors", "install-plan", "vim"])
         .assert()
         .success()
@@ -14,7 +15,8 @@ fn install_plan_vim_renders_text_output() {
 
 #[test]
 fn install_plan_vim_json_returns_program_field() {
-    let output = cargo_bin_cmd!("sniff")
+    let output = assert_cmd::Command::cargo_bin("sniff")
+        .unwrap()
         .args(["software", "editors", "install-plan", "vim", "--json"])
         .assert()
         .success()
@@ -30,7 +32,8 @@ fn install_plan_vim_json_returns_program_field() {
 
 #[test]
 fn install_plan_unknown_program_errors() {
-    cargo_bin_cmd!("sniff")
+    assert_cmd::Command::cargo_bin("sniff")
+        .unwrap()
         .args(["software", "install-plan", "definitely-not-a-real-thing"])
         .assert()
         .failure()
@@ -40,7 +43,8 @@ fn install_plan_unknown_program_errors() {
 #[test]
 fn install_dry_run_does_not_execute() {
     // Dry-run must always succeed because nothing actually runs.
-    cargo_bin_cmd!("sniff")
+    assert_cmd::Command::cargo_bin("sniff")
+        .unwrap()
         .args(["software", "editors", "install", "vim", "--dry-run", "-y"])
         .assert()
         .success();
@@ -48,7 +52,8 @@ fn install_dry_run_does_not_execute() {
 
 #[test]
 fn install_via_unknown_manager_errors_with_valid_list() {
-    cargo_bin_cmd!("sniff")
+    assert_cmd::Command::cargo_bin("sniff")
+        .unwrap()
         .args([
             "software",
             "editors",
@@ -74,7 +79,8 @@ fn install_via_unknown_manager_errors_with_valid_list() {
 /// exercises the `--via` override path.
 #[test]
 fn install_plan_via_brew_selects_brew_or_fails_cleanly() {
-    let output = cargo_bin_cmd!("sniff")
+    let output = assert_cmd::Command::cargo_bin("sniff")
+        .unwrap()
         .args([
             "software",
             "editors",
@@ -116,9 +122,10 @@ fn install_plan_via_brew_selects_brew_or_fails_cleanly() {
 
 /// Helper: point HOME at a tempdir so HostCapabilities doesn't touch the real
 /// cache file. Returns the tempdir (must stay alive) and a ready Command.
+#[cfg(unix)]
 fn cmd_with_tmp_home() -> (TempDir, assert_cmd::Command) {
     let tmp = tempfile::tempdir().unwrap();
-    let mut cmd = cargo_bin_cmd!("sniff");
+    let mut cmd = assert_cmd::Command::cargo_bin("sniff").unwrap();
     cmd.env("HOME", tmp.path());
     (tmp, cmd)
 }
@@ -142,7 +149,8 @@ fn install_plan_force_rebuilds_cache() {
     // Seed a garbage cache.
     std::fs::write(&cache, "garbage").unwrap();
 
-    cargo_bin_cmd!("sniff")
+    assert_cmd::Command::cargo_bin("sniff")
+        .unwrap()
         .env("HOME", tmp.path())
         .args(["software", "editors", "install-plan", "vim", "--force"])
         .assert()
@@ -156,7 +164,8 @@ fn install_plan_force_rebuilds_cache() {
 fn install_plan_no_sudo_never_selects_sudo_method() {
     // We can't force a deterministic host, but we can assert that any
     // selected option has requires_sudo = false when --no-sudo is passed.
-    let output = cargo_bin_cmd!("sniff")
+    let output = assert_cmd::Command::cargo_bin("sniff")
+        .unwrap()
         .args([
             "software",
             "editors",

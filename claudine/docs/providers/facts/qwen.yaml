@@ -1,0 +1,258 @@
+# Topic-less catalog facts for the qwen provider.
+#
+# Field-source matrix (design/catalog-generation.md): this file owns values
+# whose research topic has not landed yet. Keys are catalog field names.
+# Seeded once from the hand-written provider constants (the one-time
+# `scrape-facts` bootstrap, retired after seeding).
+# When a field's research topic lands, the mapping registry re-points the
+# field and generation ERRORS while this file still carries the key
+# (delete-on-graduate).
+stream_protocol: stream-json
+event_mapping:
+  mappings:
+  - event: session_start
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: session_end
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: before_prompt
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: before_tool
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: after_tool
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: tool_error
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: permission_request
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: CanUseTool
+        protocol: stream-json
+  - event: human_in_the_loop
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: turn_complete
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: result
+        protocol: stream-json
+  - event: turn_error
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: result
+        protocol: stream-json
+  - event: subagent_start
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: subagent_stop
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: before_model
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: after_model
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: assistant
+        protocol: stream-json
+  - event: before_compact
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: notification
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      stream_parse:
+        native_name: system
+        protocol: stream-json
+resource_support:
+  agents:
+    also_reads_from: []
+    format: Markdown
+    level: Full
+    notes: null
+    properties:
+      optional:
+      - tools
+      - color
+      required:
+      - name
+      - description
+      source_doc: claudine/docs/cross-referencing/qwen-cli.md
+    repo_path: .qwen/agents
+    user_path: .qwen/agents
+  commands:
+    also_reads_from: []
+    format: Markdown
+    level: Full
+    notes: Markdown custom commands; TOML remains deprecated fallback
+    properties:
+      optional:
+      - description
+      required: []
+      source_doc: claudine/docs/cross-referencing/qwen-cli.md
+    repo_path: .qwen/commands
+    user_path: .qwen/commands
+  provider: qwen_code
+  scripts:
+    also_reads_from: []
+    format: Executable
+    level: Full
+    notes: null
+    properties: null
+    repo_path: .qwen/scripts
+    user_path: .qwen/scripts
+  skill_frontmatter:
+    allowed_tools: true
+    compatibility: false
+    description: true
+    disable_model_invocation: false
+    license: false
+    metadata: false
+    name: true
+    user_invocable: false
+  skills:
+    also_reads_from: []
+    format: Markdown
+    level: Full
+    notes: Skills support is experimental
+    properties:
+      optional: []
+      required:
+      - name
+      - description
+      source_doc: claudine/docs/cross-referencing/qwen-cli.md
+    repo_path: .qwen/skills
+    user_path: .qwen/skills
+memory_files:
+- raw: ~/.qwen/QWEN.md
+  segments: []
+- raw: QWEN.md
+  segments: []
+output_formats:
+- cli_flag: null
+  companion_flags: []
+  format: text
+  native_name: text
+  selector:
+    kind: default
+  stdin_supported: true
+- cli_flag: --output-format
+  companion_flags: []
+  format: json
+  native_name: json
+  selector:
+    flag: --output-format
+    kind: flag_value
+  stdin_supported: true
+- cli_flag: --output-format
+  companion_flags: []
+  format: stream
+  native_name: stream-json
+  selector:
+    flag: --output-format
+    kind: flag_value
+  stdin_supported: true
+entrypoints:
+- mode: non_interactive
+  required_flags: []
+  subcommand: null
+system_prompt:
+  append:
+    interactive:
+      inline_flag:
+        flag: --append-system-prompt
+    non_interactive:
+      inline_flag:
+        flag: --append-system-prompt
+  memory_files:
+  - raw: ~/.qwen/QWEN.md
+    segments: []
+  - raw: QWEN.md
+    segments: []
+  replace:
+    interactive:
+      inline_flag:
+        flag: --system-prompt
+    non_interactive:
+      inline_flag:
+        flag: --system-prompt
+yolo:
+  direct_flag:
+    native_flag: --yolo
+reasoning:
+  numeric_budget:
+    default: null
+    flag: thinking_budget
+    max: 32768
+    min: 0
+known_gaps: []
+acp:
+  client_supported: false
+  events_via_acp: []
+prompt_arg_conventions:
+  entrypoint: null
+  prompt_flags:
+  - -p
+  - --prompt
+cli_sensitive_axes:
+  access_domain: false
+  execute_command: true
+  modify_provider_config: true
+  read_path: false
+  spawn_subagent: false
+  switch_mode: false
+  traverse_path: false
+  use_mcp_server: true
+  use_mcp_tool: true
+  write_path: false
+repo_home_root_files: []
+billing_models:
+- prepaid_credits
+- subscription
+- per_token
+cap_policies: []
+allowed_env_keys:
+- DASHSCOPE_API_KEY
+- QWEN_API_KEY
+display_policy:
+  tool_result_summary: show
+  info_event_suppression: []
+  collapse_task_progress: false
+  suppress_subscription_rate_limit: false
+  silent_extension_kinds: []
+  stdout_noise_prefixes: []
+  stderr_noise_prefixes: []
+suppress_structured_stderr_on_success: false
+supports_interactive_inline_closure: false
+model_required_in_non_tty: false
+platform_kind: vendor_platform
+unmapped_native_events: []
+# Ordered error-classification vocabulary (Phase A seed, transcribed verbatim
+# from lib/src/stream/providers/qwen.rs::ERROR_KEYWORDS). Sequence order IS the
+# cascade order; the repeated api_remote bucket is the "late ApiRemote" second
+# pass after Interrupted.

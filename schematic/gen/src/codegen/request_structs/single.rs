@@ -9,7 +9,7 @@
 use proc_macro2::TokenStream;
 use quote::{format_ident, quote};
 
-use crate::codegen::request_structs::shared::{QueryParamInfo, to_snake_case};
+use crate::codegen::request_structs::shared::{QueryParamInfo, param_field_name};
 
 /// Generates `From<&str>` and `From<String>` impls for single-param no-body request structs.
 ///
@@ -31,7 +31,7 @@ pub fn generate_from_string_impls(
 ) -> TokenStream {
     // Only generate From impls for single-param no-body no-query-param structs
     if path_params.len() == 1 && !has_body && query_params.is_empty() {
-        let field_name = format_ident!("{}", path_params[0]);
+        let field_name = format_ident!("{}", param_field_name(path_params[0]));
         quote! {
             impl From<&str> for #struct_name {
                 fn from(param: &str) -> Self {
@@ -47,11 +47,11 @@ pub fn generate_from_string_impls(
         }
     } else if path_params.len() == 1 && !has_body && !query_params.is_empty() {
         // Single path param with query params - still generate From but initialize query params
-        let field_name = format_ident!("{}", path_params[0]);
+        let field_name = format_ident!("{}", param_field_name(path_params[0]));
         let query_field_inits: Vec<_> = query_params
             .iter()
             .map(|qp| {
-                let name = format_ident!("{}", to_snake_case(&qp.name));
+                let name = format_ident!("{}", param_field_name(&qp.name));
                 quote! { #name: None }
             })
             .collect();

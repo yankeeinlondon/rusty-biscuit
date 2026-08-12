@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 277
 expression: convert_yaml(yaml)
 ---
 {
@@ -11,7 +12,14 @@ expression: convert_yaml(yaml)
         "additionalProperties": false,
         "properties": {
           "host": {
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "null"
+              },
+              {
+                "type": "string"
+              }
+            ]
           }
         },
         "type": "object"

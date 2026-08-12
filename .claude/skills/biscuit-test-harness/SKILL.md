@@ -80,10 +80,45 @@ via `skip_with_reason("<X>")` when it returns `false`. No `#[ignore]`.
 | `WezTermHarness` | `wezterm` on `$PATH` **and** `WEZTERM_UNIX_SOCKET` set. |
 | `KittyHarness` | `kitty` on `$PATH` **and** `KITTY_LISTEN_ON` set. |
 | `AppleTerminalHarness` | macOS, `CI != 1`, `osascript` can reach Terminal.app. |
-| `cliclick` (L3) | `cliclick` on `$PATH` (macOS only). |
+| `cliclick` (L3, macOS) | `cliclick` on `$PATH` — checks neither platform nor permission. Gate *additionally* on `cliclick::accessibility_trusted()`, which covers both. |
+| `xdotool` (L3, Linux) | Linux, `xdotool` on `$PATH`, **and** `DISPLAY` set. Wayland reports unavailable and skips. |
+| `win_input` (L3, Windows) | Windows and a working `powershell`. |
 
-`BISCUIT_TEST_LEVEL_REQUIRED=2` (or `3`) flips skips into hard failures — set
-on hosts where the tooling *must* be present.
+`BISCUIT_TEST_LEVEL_REQUIRED=2` (or `3`) flips skips into hard failures, but
+all-or-nothing: it also panics the GUI backends a headless runner cannot host.
+Prefer **`BISCUIT_TEST_REQUIRED_BACKENDS`** for L2 — a comma-separated,
+case-insensitive list of the stable identifiers `tmux`, `wezterm`, `kitty`,
+`apple-terminal`. Named backends hard-fail when unavailable; every other backend
+still skips cleanly. Identifiers match exactly (`wez` is an error, not a
+near-miss), and the same spellings appear in each package's
+`[package.metadata.ci.tests]` `l2-backends`.
+
+```bash
+BISCUIT_TEST_REQUIRED_BACKENDS=tmux just test-l2   # tmux fatal, GUI backends skip
+```
+
+Naming a backend requires the gate to carry that backend's identity, so pass a
+`Backend` rather than a bare label:
+
+```rust
+use test_toolkit::{require_level, Backend, Level};
+
+require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+```
+
+A plain string label still works, and remains correct for composite or
+non-backend requirements — `"PTY (/dev/ptmx)"`, `"WezTerm + cliclick"` — where
+no single backend applies. Those gates contribute no execution evidence by
+design and can neither satisfy nor block the variable.
+
+**Availability is not execution.** A host with `tmux` installed and zero
+tmux-backed tests selected still exits 0, having verified nothing. When
+`BISCUIT_TEST_REQUIRED_BACKENDS` is set, each gate therefore appends a
+`{backend, test, decision}` record to `$STAGE/backend-executions.jsonl`, and
+`just test-l2` brackets the tier with `backend-proof reset` / `backend-proof
+verify` (`tools/test-toolkit`, `--features backend-proof`) so a required backend
+that ran no test fails the tier. Recording is off — no file I/O at all — when
+the variable is unset. See the `rust-testing` skill for the full contract.
 
 ## The "which terminal am I running inside" gotcha
 
@@ -166,11 +201,33 @@ runs nextest with `-j 1`, and tears the panes down in a trap. Tests use
 `<Backend>Harness::shared_or_spawn()` to attach to that pane and fall
 back to per-process spawning when the env var is missing.
 
-## Level 3 — `cliclick`
+**Parallel self-spawn mode (`BISCUIT_L2_THREADS`).** The shared-pane +
+`-j 1` model serializes the *entire* tier for the sake of whichever tests
+attach to the shared pane. An area whose L2 suite is dominated by
+self-isolating tests (each spawns its OWN session/PTY — e.g. claudine)
+sets `BISCUIT_L2_THREADS=N` (claudine uses `min(cores, 8)`): `_test_l2`
+then skips the broker, exports no `BISCUIT_SHARED_*`, and runs nextest at
+`-j N`. With the env var unset, every `shared_or_spawn()` takes its
+fallback branch and spawns an *owned*, `Drop`-cleaned pane, so there is
+no shared resource to contend for. Default (`1`/unset) keeps the serial
+shared-pane path. Backstop: claudine-cli L2 carries a 1 s leak-grace
+override in `.config/nextest.toml` for concurrent child teardown.
 
-`src/cliclick.rs` wraps the `cliclick` Homebrew utility to synthesize
-real macOS Quartz keyboard events — the **only** way to verify
-"what bytes does the terminal emit when the user presses bare Ctrl?".
+## Level 3 — OS keyboard injection
+
+One injector module per platform, each with its own `available()` that
+skips cleanly off its platform. Level 3 is the **only** way to verify
+"what bytes does the terminal emit when the user presses this chord?".
+
+| Module | Platform | Mechanism |
+|--------|----------|-----------|
+| `src/cliclick.rs` | macOS | `cliclick` (Quartz `CGEvent`), plus System Events for modified chords |
+| `src/xdotool.rs` | Linux / X11 | `xdotool key` via the XTEST extension |
+| `src/win_input.rs` | Windows | PowerShell driving `SendKeys.SendWait` |
+
+Window selection is by **unique** title match on all three: zero or
+several matches is an error, never a first-match guess — injecting
+Ctrl+C into the wrong window looks identical to a broken product.
 
 Rules:
 
@@ -181,7 +238,47 @@ Rules:
 - **Bare-modifier press** is structurally unreliable via `cliclick`.
   Chord injection (`Ctrl+R`) works; bare modifiers need an L2
   raw-kitty-bytes test instead.
-- Linux callers would need `xdotool` (not implemented).
+- `xdotool` must never be passed `--window` — that switches it from
+  XTEST to `XSendEvent`, whose flagged events terminals ignore as
+  untrusted. Focus the window first, then inject globally.
+
+### Never steal focus outside a `level3_` file
+
+`SpawnVisibility::Foreground` and `focus_spawned_pane()` raise a GUI
+terminal over whatever the user is doing. The `level3_` filename prefix
+is what keeps them behind the `level3_` nextest filterset **and** the
+`RUN_LEVEL3=1` opt-in — `just test` and `just test-l2` exclude
+`test(/level3_/)`, so a focus-stealing test in any other file runs
+unannounced on someone's desktop.
+
+Claudine enforces this at L1 via
+`cli/tests/test_placement.rs::focus_stealing_apis_stay_in_keyboard_tier_files`,
+which scans comment-stripped test sources. Copy that guard into other
+areas that grow L3 coverage.
+
+Corollary trap: **a test *name* must not contain `level3_`** unless the
+test really is L3 — the filtersets match by substring, so a name like
+`focus_apis_stay_in_level3_files` silently excludes itself from every
+recipe that would run it.
+
+`just test-l3` also **refuses to start unattended**: with no TTY it
+exits non-zero unless `BISCUIT_L3_TAKE_FOCUS=1` authorizes the run, so
+an agent, hook, or CI job cannot hijack an active desktop session. From
+a terminal it prompts first. Never set that variable on an agent's
+behalf — it exists for a human who knows the machine is free.
+
+If a focus-stealing test cannot be made to pass reliably, fix the
+*harness*, not the test. Two changes turned Claudine's L3 sequence
+Ctrl+C test from never-green to reliable, and both are the kind of
+thing to reach for first:
+
+- poll until the terminal is genuinely frontmost (`AXRaise` returns
+  before the WindowServer has made the window key) rather than sleeping
+  a fixed interval and hoping;
+- send modified chords via AppleScript `keystroke … using <mod> down`,
+  which carries the flag on the same key event. cliclick's
+  `kd:ctrl t:c ku:ctrl` emits the modifier and the letter as *separate*
+  events, so they race — measured 7/10 delivery versus 24/24.
 
 ## Defensive cleanup
 
@@ -214,6 +311,7 @@ AppleScript state).
 | `cleanup_stale_terminal_harness_resources()` | Best-effort tagged-resource sweep. |
 | `detect_shell()` | POSIX shell pick (`bash` → `sh` → `$SHELL`). |
 | `cargo_bin_dir(name)` | Locate a built cargo binary's directory for `PATH` augmentation. |
+| `bin_exe!("name")` | `PathBuf` of a workspace binary, resolved at run time so an archived run (the `wsl2-ubuntu` leg) finds it. Never spawn `env!("CARGO_BIN_EXE_…")` directly. |
 | `apply_color_forcing_env(&mut Command)` | Set `FORCE_COLOR`/`CLICOLOR_FORCE`/`TERM`/`COLORTERM`, clear `NO_COLOR`. |
 | `wait_for_prompt(&mut harness)` | Poll `capture()` until `$`/`#`/`%` (5 s cap). |
 | `run_with_timeout` / `run_with_stdin_timeout` | Wall-clock timeout with pipe-deadlock-safe draining. |

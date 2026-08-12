@@ -1,0 +1,14 @@
+kind_buckets:
+- kind: api_remote
+  needles: [billing, rate_limit, ratelimit, quota, overload, api_error, upstream, server]
+- kind: configuration
+  needles: [auth, permission, config]
+- kind: interrupted
+  needles: [interrupt, cancel, abort]
+msg_buckets:
+- kind: api_remote
+  needles: [rate limit, quota, billing, credit, api error, overloaded]
+- kind: configuration
+  needles: [api key, authentication, not authorized, permission denied]
+- kind: interrupted
+  needles: [interrupt, cancel, aborted]

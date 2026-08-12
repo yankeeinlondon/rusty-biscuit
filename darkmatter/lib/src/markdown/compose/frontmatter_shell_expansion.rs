@@ -33,16 +33,259 @@ use super::shell_expansion::store::resolve_policy_paths;
 use super::shell_expansion::tokenize::{parse_pipeline, tokenize};
 use super::shell_expansion::types::{
     ChainOperator, ErrorHandling, PipelineRuntime, ShellCommandOrigin, ShellDirective,
-    ShellExpansionError, ShellPipeline, ShellPolicyPaths,
+    ShellExpansionError, ShellPipeline, ShellPolicyPaths, frontmatter_key_line,
 };
-use super::shell_expansion::{PreparedShellDirective, execute_prepared_directive, prepare_directive};
+use super::shell_expansion::{
+    PreparedShellDirective, execute_prepared_directive, prepare_directive,
+};
 use super::{ComposeOptions, ComposeWarning};
 use crate::markdown::frontmatter::Frontmatter;
+use crate::markdown::span::{SourceSpan, Spanned};
 use crate::markdown::types::MarkdownResult;
 use biscuit_terminal::errors::SourceContext;
 use rayon::prelude::*;
 use serde_json::Value;
 use std::collections::HashMap;
+
+/// A recognized trailing suffix on a frontmatter `$(...)` value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FrontmatterShellSuffix {
+    /// `::timeout:N` — a per-directive timeout in whole seconds.
+    Timeout(u64),
+    /// `::no-cache` — bypass the per-compose command cache.
+    NoCache,
+}
+
+/// One chain action of a spanned frontmatter `$(...)` pipeline (the segments
+/// between top-level `&&` / `||` operators).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontmatterShellAction {
+    /// Byte span of the action's text (trimmed).
+    pub span: SourceSpan,
+    /// Byte spans of the action's whitespace-delimited tokens (quote/paren
+    /// aware). The first token is the executable position.
+    pub tokens: Vec<SourceSpan>,
+}
+
+/// A spanned frontmatter `$(...)` command pipeline.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontmatterShellPipeline {
+    /// Byte span of the whole inner command (excluding delimiters/suffixes).
+    pub span: SourceSpan,
+    /// One entry per chain action, in source order.
+    pub actions: Vec<FrontmatterShellAction>,
+}
+
+/// A spanned frontmatter `$(...)` ternary `COND ? THEN : ELSE`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontmatterShellTernary {
+    /// Byte span of the condition expression (trimmed).
+    pub condition_span: SourceSpan,
+    /// Byte span of the then-branch (trimmed).
+    pub then_span: SourceSpan,
+    /// Byte span of the else-branch (trimmed).
+    pub else_span: SourceSpan,
+}
+
+/// The parsed body of a spanned frontmatter `$(...)` value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FrontmatterShellBody {
+    /// A bare command pipeline.
+    Pipeline(FrontmatterShellPipeline),
+    /// A conditional `COND ? THEN : ELSE`.
+    Ternary(FrontmatterShellTernary),
+}
+
+/// A read-only, span-carrying mirror of a frontmatter `$(...)` shell value.
+///
+/// Produced by [`parse_frontmatter_shell_value_spanned`]. Every span is a byte
+/// offset into the original value string. This is a *description*, not a runnable
+/// directive: it exposes no execution surface, so a language server can offer
+/// hover, folding, and command-token navigation over a `$(...)` value without any
+/// risk of running it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FrontmatterShellValue {
+    /// Byte span of the whole `$(...)` value including delimiters and suffixes.
+    pub span: SourceSpan,
+    /// Byte span of the opening `$(`.
+    pub open_span: SourceSpan,
+    /// Byte span of the closing `)`.
+    pub close_span: SourceSpan,
+    /// Byte span of the inner command text between `$(` and `)`.
+    pub inner_span: SourceSpan,
+    /// Recognized trailing suffixes with their spans, in source order.
+    pub suffixes: Vec<Spanned<FrontmatterShellSuffix>>,
+    /// The parsed body — a pipeline or a ternary.
+    pub body: FrontmatterShellBody,
+}
+
+/// Parses a frontmatter string value into a read-only, span-carrying
+/// [`FrontmatterShellValue`], or `None` when the value is not a whole-value
+/// `$( … )` shell expression.
+///
+/// The whole-value `$( … )` rule is defined on the trimmed value (so a padded
+/// `"  $(echo ok)  "` parses identically), and all reported spans are byte
+/// offsets into the *original* `value` — leading whitespace is accounted for.
+/// The parse is lenient and never executes: a value that opens `$(` but never
+/// closes it, or carries an unrecognized suffix, still yields the spans that
+/// could be recovered (unrecognized trailing content simply ends suffix
+/// scanning). It shares the executor's [`unquoted_closing_paren_offset`],
+/// [`split_top_level_ternary`], and [`split_at_chain_operators`] helpers so its
+/// view of structure never drifts from the run-time path.
+pub fn parse_frontmatter_shell_value_spanned(value: &str) -> Option<FrontmatterShellValue> {
+    let base = value.len() - value.trim_start().len();
+    let trimmed = value.trim();
+
+    let rest = trimmed.strip_prefix("$(")?;
+    let close_rel = unquoted_closing_paren_offset(rest)?;
+
+    // Offsets are computed relative to `trimmed`, then shifted by `base` to land
+    // in the original `value`.
+    let inner_start = base + 2;
+    let inner_end = inner_start + close_rel;
+    let close_pos = inner_end; // the `)` byte
+    let open_span = base..base + 2;
+    let close_span = close_pos..close_pos + 1;
+    let inner_span = inner_start..inner_end;
+    let inner = &rest[..close_rel];
+
+    let after_close = &rest[close_rel + 1..];
+    let suffix_base = close_pos + 1;
+    let suffixes = scan_suffix_spans(after_close, suffix_base);
+
+    let body = match split_top_level_ternary(inner) {
+        Some((cond, then_b, else_b)) => FrontmatterShellBody::Ternary(FrontmatterShellTernary {
+            condition_span: trimmed_subspan(inner, inner_start, cond),
+            then_span: trimmed_subspan(inner, inner_start, then_b),
+            else_span: trimmed_subspan(inner, inner_start, else_b),
+        }),
+        None => {
+            let actions = split_at_chain_operators(inner)
+                .into_iter()
+                .map(|segment| {
+                    let seg_offset = inner_start + subslice_offset(inner, segment);
+                    let span = trimmed_subspan(inner, inner_start, segment);
+                    let tokens = shell_token_spans(segment)
+                        .into_iter()
+                        .map(|r| seg_offset + r.start..seg_offset + r.end)
+                        .collect();
+                    FrontmatterShellAction { span, tokens }
+                })
+                .collect();
+            FrontmatterShellBody::Pipeline(FrontmatterShellPipeline {
+                span: inner_span.clone(),
+                actions,
+            })
+        }
+    };
+
+    Some(FrontmatterShellValue {
+        span: base..base + trimmed.len(),
+        open_span,
+        close_span,
+        inner_span,
+        suffixes,
+        body,
+    })
+}
+
+/// Byte offset of `child` within `parent`; `child` must be a subslice of
+/// `parent` (as produced by the shared split helpers).
+fn subslice_offset(parent: &str, child: &str) -> usize {
+    child.as_ptr() as usize - parent.as_ptr() as usize
+}
+
+/// Span of `child` (trimmed) within `parent`, shifted to absolute coordinates
+/// by adding `parent_base`. `child` must be a subslice of `parent`.
+fn trimmed_subspan(parent: &str, parent_base: usize, child: &str) -> SourceSpan {
+    let offset = subslice_offset(parent, child);
+    let leading = child.len() - child.trim_start().len();
+    let trimmed = child.trim();
+    let start = parent_base + offset + leading;
+    start..start + trimmed.len()
+}
+
+/// Scans the text after the closing `)` for `::timeout:N` / `::no-cache`
+/// suffixes, returning each recognized suffix with its span (base-shifted).
+///
+/// Lenient: scanning stops at the first unrecognized token rather than erroring,
+/// because this is a passive analyzer.
+fn scan_suffix_spans(after_close: &str, base: usize) -> Vec<Spanned<FrontmatterShellSuffix>> {
+    let mut out = Vec::new();
+    let mut suffix = after_close;
+    let mut offset = base;
+
+    while !suffix.is_empty() {
+        if let Some(rest) = suffix.strip_prefix("::no-cache") {
+            let len = suffix.len() - rest.len();
+            out.push(Spanned::new(FrontmatterShellSuffix::NoCache, offset..offset + len));
+            offset += len;
+            suffix = rest;
+        } else if let Some(rest) = suffix.strip_prefix("::timeout:") {
+            let digits_end = rest.find("::").unwrap_or(rest.len());
+            let digits = &rest[..digits_end];
+            match digits.parse::<u64>() {
+                Ok(value) => {
+                    let len = suffix.len() - rest.len() + digits_end;
+                    out.push(Spanned::new(
+                        FrontmatterShellSuffix::Timeout(value),
+                        offset..offset + len,
+                    ));
+                    offset += len;
+                    suffix = &rest[digits_end..];
+                }
+                Err(_) => break,
+            }
+        } else {
+            break;
+        }
+    }
+
+    out
+}
+
+/// Byte spans of the whitespace-delimited tokens in a shell action, respecting
+/// single/double quotes and backslash escapes. Offsets are relative to `s`.
+fn shell_token_spans(s: &str) -> Vec<SourceSpan> {
+    let mut spans = Vec::new();
+    let mut in_single = false;
+    let mut in_double = false;
+    let mut escaped = false;
+    let mut start: Option<usize> = None;
+
+    for (idx, ch) in s.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        match ch {
+            '\\' if !in_single => {
+                start.get_or_insert(idx);
+                escaped = true;
+            }
+            '\'' if !in_double => {
+                start.get_or_insert(idx);
+                in_single = !in_single;
+            }
+            '"' if !in_single => {
+                start.get_or_insert(idx);
+                in_double = !in_double;
+            }
+            c if c.is_whitespace() && !in_single && !in_double => {
+                if let Some(st) = start.take() {
+                    spans.push(st..idx);
+                }
+            }
+            _ => {
+                start.get_or_insert(idx);
+            }
+        }
+    }
+    if let Some(st) = start.take() {
+        spans.push(st..s.len());
+    }
+    spans
+}
 
 /// Parsed shape of a `$(...)` frontmatter shell expression.
 ///
@@ -160,6 +403,9 @@ pub(crate) struct FrontmatterShellDirective {
     #[allow(dead_code)] // Inspected by parser tests; production uses `directive_reachable_pipelines`.
     pub pipeline: Option<ShellPipeline>,
     pub ast: FrontmatterShellAst,
+    /// 1-indexed file line of the frontmatter key when it can be resolved from
+    /// the source context; `None` otherwise.
+    pub line: Option<usize>,
 }
 
 /// Result of frontmatter shell expansion.
@@ -172,46 +418,24 @@ pub(crate) struct FrontmatterShellExpansionReport {
     pub warnings: Vec<ComposeWarning>,
 }
 
-/// Parses a single frontmatter string value for shell expression.
+/// Parses the suffix tail that follows the closing `)` of a `$(...)` shell
+/// expression.
 ///
-/// Returns `Some` if the value matches `$(cmd)` or `$(cmd)::timeout:N`.
+/// Two suffixes are recognized — `::timeout:N` and the `::no-cache` cache
+/// opt-out — in any order. Each may appear at most once; anything else (any
+/// non-suffix trailing content) is a hard parse error. This grammar is shared
+/// between [`parse_shell_value`] and the leak-guard shape detector so the
+/// supported suffix forms live in exactly one place.
 ///
-/// ## Rules
+/// ## Errors
 ///
-/// - Value must start with `$(`
-/// - Must have a closing `)` — either at the end, or followed by `::timeout:N`
-/// - If `::timeout:N` suffix present: extract it, validate N > 0
-/// - Extract the inner command string between `$(` and `)`
-/// - Tokenize with the existing tokenizer
-/// - If `original_value` is provided (pre-interpolation snapshot), check the
-///   executable-token interpolation rule:
-///   - Find the executable portion in the ORIGINAL string (first token between
-///     `$(` and first whitespace)
-///   - If that portion contains `{{` and `}}`, reject (return None)
-///   - Also check after pipe/chain operators in the original for executable-position
-///     interpolation
-/// - Return an error for any parse/validation failure once the value matches
-///   the `$(` shell-expression shape
-pub(crate) fn parse_shell_value(
-    value: &str,
+/// Returns a key-tagged [`ShellExpansionError::ParseDirective`] for a duplicate
+/// suffix, an invalid/zero timeout value, or any non-suffix trailing content.
+fn parse_shell_suffixes(
+    after_close: &str,
     key: &str,
-    original_value: Option<&str>,
     ctx: &SourceContext,
-) -> Result<Option<FrontmatterShellDirective>, ShellExpansionError> {
-    // Must start with $(
-    if !value.starts_with("$(") {
-        return Ok(None);
-    }
-
-    let rest = &value[2..];
-    let close_pos = find_unquoted_closing_paren(rest, key, ctx)?;
-
-    let inner_command = &rest[..close_pos];
-    let after_close = &rest[close_pos + 1..];
-
-    // Parse the suffixes after the closing paren. Two are recognized —
-    // `::timeout:N` and the `::no-cache` cache opt-out — in any order. Each may
-    // appear at most once; anything else is a hard parse error.
+) -> Result<(Option<std::time::Duration>, bool), ShellExpansionError> {
     let mut timeout_override = None;
     let mut no_cache = false;
     let mut suffix = after_close;
@@ -261,6 +485,60 @@ pub(crate) fn parse_shell_value(
             ));
         }
     }
+    Ok((timeout_override, no_cache))
+}
+
+/// Parses a single frontmatter string value for shell expression.
+///
+/// Returns `Some` if the value matches `$(cmd)` or `$(cmd)::timeout:N`.
+///
+/// ## Rules
+///
+/// - The value and the `original_value` snapshot are trimmed first; the
+///   whole-value `$( … )` rule is defined on that trimmed boundary, so
+///   `"  $(echo ok)  "` parses identically to `"$(echo ok)"`
+/// - Trimmed value must start with `$(` (a mixed literal whose trimmed form
+///   starts with other text returns `Ok(None)` and is left to other handling)
+/// - Must have a closing `)` — either at the end, or followed by `::timeout:N`
+/// - If `::timeout:N` suffix present: extract it, validate N > 0
+/// - Extract the inner command string between `$(` and `)`
+/// - Tokenize with the existing tokenizer
+/// - If `original_value` is provided (pre-interpolation snapshot), check the
+///   executable-token interpolation rule:
+///   - Find the executable portion in the ORIGINAL string (first token between
+///     `$(` and first whitespace)
+///   - If that portion contains `{{` and `}}`, reject (return None)
+///   - Also check after pipe/chain operators in the original for executable-position
+///     interpolation
+/// - Return an error for any parse/validation failure once the value matches
+///   the `$(` shell-expression shape
+pub(crate) fn parse_shell_value(
+    value: &str,
+    key: &str,
+    original_value: Option<&str>,
+    ctx: &SourceContext,
+) -> Result<Option<FrontmatterShellDirective>, ShellExpansionError> {
+    // The whole-value `$( … )` rule is defined on the trimmed value, so a padded
+    // value (`"  $(echo ok)  "`) parses and expands identically to its trimmed
+    // form. The pre-interpolation snapshot is trimmed to the same boundary so
+    // ternary structure and executable-interpolation checks see the same body.
+    // A mixed literal whose trimmed form does not open `$(` still returns
+    // `Ok(None)` below and stays outside this strict rule.
+    let value = value.trim();
+    let original_value = original_value.map(str::trim);
+
+    // Must start with $(
+    if !value.starts_with("$(") {
+        return Ok(None);
+    }
+
+    let rest = &value[2..];
+    let close_pos = find_unquoted_closing_paren(rest, key, ctx)?;
+
+    let inner_command = &rest[..close_pos];
+    let after_close = &rest[close_pos + 1..];
+
+    let (timeout_override, no_cache) = parse_shell_suffixes(after_close, key, ctx)?;
 
     // The original (pre-interpolation) inner text drives ternary structure
     // detection and per-branch executable-interpolation validation. If no
@@ -315,6 +593,7 @@ pub(crate) fn parse_shell_value(
                 then_branch,
                 else_branch,
             },
+            line: None,
         }));
     }
 
@@ -374,6 +653,7 @@ pub(crate) fn parse_shell_value(
         no_cache,
         pipeline: Some(pipeline.clone()),
         ast: FrontmatterShellAst::Pipeline(pipeline),
+        line: None,
     }))
 }
 
@@ -953,22 +1233,28 @@ fn split_at_chain_operators(input: &str) -> Vec<&str> {
 /// Scans all top-level string-valued frontmatter entries and returns candidates.
 ///
 /// Only examines top-level keys — nested objects and arrays are ignored.
+/// Keys present in `exclude_keys` are skipped entirely (DM1 passthrough).
 pub(crate) fn scan_frontmatter(
     frontmatter: &Frontmatter,
     pre_interpolation_snapshot: Option<&HashMap<String, String>>,
     ctx: &SourceContext,
+    exclude_keys: &std::collections::HashSet<String>,
 ) -> Result<Vec<FrontmatterShellDirective>, ShellExpansionError> {
     let mut directives = Vec::new();
     let fm = frontmatter.as_map();
 
     for (key, value) in fm.iter() {
+        if exclude_keys.contains(key) {
+            continue;
+        }
         // Only process top-level string values
         if let Value::String(s) = value {
             let original = pre_interpolation_snapshot
                 .and_then(|map| map.get(key))
                 .map(|s| s.as_str());
 
-            if let Some(directive) = parse_shell_value(s, key, original, ctx)? {
+            if let Some(mut directive) = parse_shell_value(s, key, original, ctx)? {
+                directive.line = frontmatter_key_line(ctx, key);
                 directives.push(directive);
             }
         }
@@ -996,9 +1282,14 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     pre_interpolation_snapshot: Option<&HashMap<String, String>>,
     ctx: &SourceContext,
 ) -> MarkdownResult<FrontmatterShellExpansionReport> {
-    let candidates = scan_frontmatter(frontmatter, pre_interpolation_snapshot, ctx)?;
+    let candidates = scan_frontmatter(frontmatter, pre_interpolation_snapshot, ctx, &options.exclude_keys)?;
 
     if candidates.is_empty() {
+        // No directives to execute, but a scan-skipped whole-value `$(...)`
+        // (e.g. one behind leading whitespace) could still be sitting in
+        // frontmatter. Enabled shell expansion must never leave a raw
+        // expansion-form value behind, so guard even on the no-op path.
+        validate_no_whole_value_shell_leak(frontmatter, ctx, &options.exclude_keys)?;
         return Ok(FrontmatterShellExpansionReport {
             replacements: 0,
             approvals_used: 0,
@@ -1015,8 +1306,8 @@ pub(crate) fn execute_frontmatter_shell_expansion(
     // so non-ternary inputs don't pay the cloning cost. The real run carries a
     // resolution context so a ternary condition and its selected branch can use
     // the read-side functions (`file_exists`, `frontmatter`, …) and `doc.*`.
-    // Frontmatter is local-only (Decision B): this context never attaches a
-    // remote-fetch runtime, so a remote URL argument here fails loudly.
+    // Authorized remote reads use the same run-local runtime as body
+    // interpolation, so equivalent calls share policy and single-flight state.
     let resolution_context = options.frontmatter_resolution_context();
     let mut seed_state: Option<FrontmatterSeedState> = None;
 
@@ -1138,6 +1429,11 @@ pub(crate) fn execute_frontmatter_shell_expansion(
         warnings.extend(exec_warnings);
         fm_mut.insert(key, Value::String(stdout.trim().to_string()));
     }
+
+    // Post-expansion leak guard: after replacements, no top-level value may
+    // still be a whole-value `$(...)` candidate (e.g. command output that
+    // reproduced `$( … )`). Such a value is leaked executable state, not text.
+    validate_no_whole_value_shell_leak(frontmatter, ctx, &options.exclude_keys)?;
 
     let approvals_used = runtime.shell.take_recent_approval_count();
 
@@ -1277,11 +1573,11 @@ fn evaluate_ternary_condition(
         )
     })?;
 
-    let value = evaluate(&parsed, state).map_err(|message| {
+    let value = evaluate(&parsed, state).map_err(|error| {
         frontmatter_parse_error(
             key,
             ctx,
-            format!("Frontmatter shell ternary condition must be a boolean expression: {message}"),
+            format!("Frontmatter shell ternary condition must be a boolean expression: {error}"),
         )
     })?;
 
@@ -1315,6 +1611,7 @@ fn prepare_branch_pipeline(
         indent: String::new(),
         origin: ShellCommandOrigin::Frontmatter {
             key: candidate.key.clone(),
+            line: candidate.line,
         },
         error_handling: ErrorHandling::default(),
         timeout_override: candidate.timeout_override,
@@ -1451,12 +1748,12 @@ fn evaluate_value_branch(
         )
     })?;
 
-    let value = evaluate(&parsed, state).map_err(|message| {
+    let value = evaluate(&parsed, state).map_err(|error| {
         frontmatter_parse_error(
             key,
             ctx,
             format!(
-                "Frontmatter shell ternary {} evaluation failed: {message}",
+                "Frontmatter shell ternary {} evaluation failed: {error}",
                 position.name()
             ),
         )
@@ -1499,6 +1796,141 @@ fn interpolate_branch_text(
     Ok(rewrite.output)
 }
 
+/// Post-expansion leak guard for top-level frontmatter string values.
+///
+/// After enabled frontmatter shell expansion has run, no top-level value may
+/// still be a whole-value `$(...)` shell-expansion candidate. A surviving
+/// candidate means executable state leaked as raw syntax — e.g. a command whose
+/// own output reproduced `$( … )`, or a `$(...)` value behind leading
+/// whitespace that the strict-start scan skipped. Frontmatter values that are
+/// exactly an expansion form are executable state, not text, and must resolve
+/// or fail loudly rather than reach the composed document verbatim.
+///
+/// Candidate recognition is delegated to [`is_whole_value_shell_candidate`],
+/// which reuses [`parse_shell_value`] so the `$( … )` grammar and supported
+/// suffix rules (`::timeout` / `::no-cache`) are defined in exactly one place.
+/// Mixed literals (`literal $(echo ok)`) and values with trailing content after
+/// the closing paren are not whole-value candidates and pass through unchanged.
+///
+/// ## Errors
+///
+/// Returns a key-tagged [`ShellExpansionError::ParseDirective`] for the first
+/// surviving whole-value candidate, carrying the frontmatter key, the offending
+/// expression text, and source location when [`SourceContext`] can locate the
+/// key.
+fn validate_no_whole_value_shell_leak(
+    frontmatter: &Frontmatter,
+    ctx: &SourceContext,
+    exclude_keys: &std::collections::HashSet<String>,
+) -> Result<(), ShellExpansionError> {
+    for (key, value) in frontmatter.as_map().iter() {
+        if exclude_keys.contains(key) {
+            continue;
+        }
+        if let Value::String(s) = value {
+            match is_whole_value_shell_candidate(s, key, ctx) {
+                WholeValueShellShape::NotCandidate => {}
+                WholeValueShellShape::CleanDirective => {
+                    let trimmed = s.trim();
+                    return Err(frontmatter_parse_error(
+                        key,
+                        ctx,
+                        format!(
+                            "Frontmatter shell expression `{trimmed}` survived shell expansion as a raw \
+                             whole-value `$( … )` candidate. A frontmatter value that is exactly a `$( … )` \
+                             expansion is executable state, not text; it must resolve during shell \
+                             expansion, so a surviving candidate (e.g. command output that reproduced \
+                             `$( … )`) is rejected rather than leaked into the composed frontmatter."
+                        ),
+                    ));
+                }
+                // A whole-value shape that fails the shared parser (malformed,
+                // unclosed, or no-command) is executable state that cannot be
+                // expanded — fatal, not lenient. Propagate the underlying parse
+                // error so the original diagnostic (e.g. missing `)`, no-command
+                // `{{ }}` suggestion) reaches the caller.
+                WholeValueShellShape::ShapeButError(err) => return Err(err),
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Classification of a trimmed frontmatter string value with respect to the
+/// whole-value `$( … )` shell-expansion shape.
+enum WholeValueShellShape {
+    /// Not a whole-value `$( … )` value: ordinary text, a mixed literal with a
+    /// non-`$(` prefix, or a `$( … )` followed by non-suffix trailing content
+    /// (`$(echo ok) trailing`). Left to existing behavior — the guard skips it.
+    NotCandidate,
+    /// A whole-value `$( … )` that cleanly parses to a directive. A surviving
+    /// instance is a fatal leak (executable state reaching the composed
+    /// document verbatim).
+    CleanDirective,
+    /// A whole-value `$( … )` *shape* (unclosed, or a clean close followed only
+    /// by valid suffixes) that nonetheless fails the shared parser. Carries the
+    /// underlying parse error to propagate as fatal.
+    ShapeButError(ShellExpansionError),
+}
+
+/// Classifies `value`, after trimming, with respect to the whole-value `$( … )`
+/// shell-expansion shape.
+///
+/// A value that does not open `$(` is ordinary text ([`NotCandidate`]). When it
+/// does open `$(`, the closing paren and any suffix tail decide the shape:
+///
+/// - **Unclosed** (no unquoted closing `)`): a whole-value shape whose body
+///   cannot parse — returns [`ShapeButError`] carrying the missing-paren error.
+/// - **Clean close followed only by valid suffixes** (`::no-cache` /
+///   `::timeout:N`, any order, each at most once): a whole-value shape. If the
+///   directive then parses, [`CleanDirective`]; otherwise [`ShapeButError`]
+///   carrying the body's parse error (e.g. the no-command diagnostic).
+/// - **Clean close followed by non-suffix content** (`$(echo ok) trailing`): a
+///   trailing-literal mixed value — [`NotCandidate`], left lenient.
+///
+/// Close detection reuses [`find_unquoted_closing_paren`] and suffix detection
+/// reuses [`parse_shell_suffixes`], so the `$( … )` grammar lives in one place.
+///
+/// [`NotCandidate`]: WholeValueShellShape::NotCandidate
+/// [`CleanDirective`]: WholeValueShellShape::CleanDirective
+/// [`ShapeButError`]: WholeValueShellShape::ShapeButError
+fn is_whole_value_shell_candidate(
+    value: &str,
+    key: &str,
+    ctx: &SourceContext,
+) -> WholeValueShellShape {
+    let trimmed = value.trim();
+    if !trimmed.starts_with("$(") {
+        return WholeValueShellShape::NotCandidate;
+    }
+
+    let rest = &trimmed[2..];
+    let close_pos = match find_unquoted_closing_paren(rest, key, ctx) {
+        Ok(pos) => pos,
+        // Unclosed whole-value shape: not expandable, must be fatal.
+        Err(err) => return WholeValueShellShape::ShapeButError(err),
+    };
+
+    let after_close = &rest[close_pos + 1..];
+    // Non-suffix trailing content (`$(echo ok) trailing`) is a trailing-literal
+    // mixed value, not a whole-value shape — stay lenient. Valid suffixes keep
+    // the whole-value shape, so a body parse error below still escalates.
+    if parse_shell_suffixes(after_close, key, ctx).is_err() {
+        return WholeValueShellShape::NotCandidate;
+    }
+
+    match parse_shell_value(trimmed, key, None, ctx) {
+        Ok(Some(_)) => WholeValueShellShape::CleanDirective,
+        // The body of a whole-value shape failed to parse (e.g. a no-command
+        // body). Propagate that diagnostic as fatal.
+        Err(err) => WholeValueShellShape::ShapeButError(err),
+        // `Ok(None)` is unreachable for a `$(`-opening value (the parser returns
+        // `Ok(None)` only when the value does not start with `$(`), but treat it
+        // defensively as not-a-candidate.
+        Ok(None) => WholeValueShellShape::NotCandidate,
+    }
+}
+
 fn frontmatter_parse_error(
     key: &str,
     ctx: &SourceContext,
@@ -1508,6 +1940,7 @@ fn frontmatter_parse_error(
         ctx: Box::new(ctx.clone()),
         origin: ShellCommandOrigin::Frontmatter {
             key: key.to_string(),
+            line: frontmatter_key_line(ctx, key),
         },
         message: message.into(),
     }
@@ -1531,6 +1964,24 @@ fn find_unquoted_closing_paren(
     key: &str,
     ctx: &SourceContext,
 ) -> Result<usize, ShellExpansionError> {
+    unquoted_closing_paren_offset(rest).ok_or_else(|| {
+        frontmatter_parse_error(
+            key,
+            ctx,
+            "Missing closing ')' in frontmatter shell expression",
+        )
+    })
+}
+
+/// Returns the byte offset of the top-level, unquoted `)` that closes a
+/// `$(...)` body opened at the start of `rest`, or `None` when the body is
+/// never closed.
+///
+/// Shared by [`find_unquoted_closing_paren`] (which adds error context) and the
+/// read-only span parser [`parse_frontmatter_shell_value_spanned`], so both
+/// agree on what "top-level" means: outside single/double quotes and outside any
+/// nested `( … )` pair.
+fn unquoted_closing_paren_offset(rest: &str) -> Option<usize> {
     let mut in_single = false;
     let mut in_double = false;
     let mut escaped = false;
@@ -1553,16 +2004,12 @@ fn find_unquoted_closing_paren(
             '"' if !in_single => in_double = !in_double,
             '(' if !in_single && !in_double => paren_depth += 1,
             ')' if !in_single && !in_double && paren_depth > 0 => paren_depth -= 1,
-            ')' if !in_single && !in_double => return Ok(idx),
+            ')' if !in_single && !in_double => return Some(idx),
             _ => {}
         }
     }
 
-    Err(frontmatter_parse_error(
-        key,
-        ctx,
-        "Missing closing ')' in frontmatter shell expression",
-    ))
+    None
 }
 
 fn first_token_portion(input: &str) -> &str {
@@ -1594,1865 +2041,13 @@ fn first_token_portion(input: &str) -> &str {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    fn test_ctx() -> SourceContext {
-        SourceContext::new(
-            std::path::PathBuf::from("/test"),
-            std::path::PathBuf::from("test"),
-            String::new(),
-        )
-    }
-
-    fn parse_shell_value(
-        value: &str,
-        key: &str,
-        original_value: Option<&str>,
-    ) -> Result<Option<FrontmatterShellDirective>, ShellExpansionError> {
-        super::parse_shell_value(value, key, original_value, &test_ctx())
-    }
-
-    #[test]
-    fn ternary_condition_uses_read_side_functions_with_context() {
-        // A `$()` ternary condition evaluated at the real run carries the
-        // resolution context, so `file_exists(...)` resolves against base_dir.
-        use crate::markdown::compose::ComposeContext;
-        let dir = tempfile::TempDir::new().unwrap();
-        std::fs::write(dir.path().join("Cargo.toml"), "[package]").unwrap();
-        let rc = super::super::expression::ResolutionContext::new(dir.path().to_path_buf());
-        let state = FrontmatterSeedState::new(
-            std::collections::HashMap::new(),
-            ComposeContext::fixed_for_testing(),
-        )
-        .with_resolution_context(Some(rc));
-
-        assert!(
-            evaluate_ternary_condition("file_exists('Cargo.toml')", &state, "k", &test_ctx())
-                .unwrap()
-        );
-        assert!(
-            !evaluate_ternary_condition("file_exists('nope.toml')", &state, "k", &test_ctx())
-                .unwrap()
-        );
-    }
-
-    #[test]
-    fn ternary_condition_without_context_fails_loudly() {
-        // The context-free seed state (preflight-style) cannot evaluate a
-        // read-side function and surfaces a parse/eval error rather than
-        // silently selecting a branch.
-        use crate::markdown::compose::ComposeContext;
-        let state = FrontmatterSeedState::new(
-            std::collections::HashMap::new(),
-            ComposeContext::fixed_for_testing(),
-        );
-        assert!(
-            evaluate_ternary_condition("file_exists('Cargo.toml')", &state, "k", &test_ctx())
-                .is_err()
-        );
-    }
-
-    #[allow(dead_code)]
-    fn scan_frontmatter(
-        frontmatter: &Frontmatter,
-        pre_interpolation_snapshot: Option<&std::collections::HashMap<String, String>>,
-    ) -> Result<Vec<FrontmatterShellDirective>, ShellExpansionError> {
-        super::scan_frontmatter(frontmatter, pre_interpolation_snapshot, &test_ctx())
-    }
-
-    #[allow(dead_code)]
-    fn execute_frontmatter_shell_expansion(
-        frontmatter: &mut Frontmatter,
-        options: &ComposeOptions,
-        runtime: &mut PipelineRuntime,
-        pre_interpolation_snapshot: Option<&std::collections::HashMap<String, String>>,
-    ) -> MarkdownResult<FrontmatterShellExpansionReport> {
-        super::execute_frontmatter_shell_expansion(
-            frontmatter,
-            options,
-            runtime,
-            pre_interpolation_snapshot,
-            &test_ctx(),
-        )
-    }
-
-    #[test]
-    fn detects_simple_shell_expression() {
-        let result = parse_shell_value("$(echo hello)", "key", None);
-        assert!(result.is_ok());
-        let directive = result.unwrap().unwrap();
-        assert_eq!(directive.executable, "echo");
-        assert_eq!(directive.args, vec!["hello"]);
-        assert_eq!(directive.raw_command, "echo hello");
-        assert!(directive.timeout_override.is_none());
-    }
-
-    #[test]
-    fn detects_expression_with_timeout() {
-        let result = parse_shell_value("$(pwd)::timeout:3", "key", None);
-        assert!(result.is_ok());
-        let directive = result.unwrap().unwrap();
-        assert_eq!(directive.executable, "pwd");
-        assert_eq!(directive.args.len(), 0);
-        assert_eq!(
-            directive.timeout_override,
-            Some(std::time::Duration::from_secs(3))
-        );
-    }
-
-    #[test]
-    fn ignores_non_shell_string() {
-        let result = parse_shell_value("plain text", "key", None);
-        assert!(matches!(result, Ok(None)));
-    }
-
-    #[test]
-    fn ignores_partial_match_no_closing() {
-        let result = parse_shell_value("$(echo hello", "key", None);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn ignores_embedded_expression() {
-        let result = parse_shell_value("prefix $(cmd) suffix", "key", None);
-        assert!(matches!(result, Ok(None)));
-    }
-
-    #[test]
-    fn rejects_zero_timeout() {
-        let result = parse_shell_value("$(echo)::timeout:0", "key", None);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn rejects_non_integer_timeout() {
-        let result = parse_shell_value("$(echo)::timeout:abc", "key", None);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn detects_no_cache_suffix() {
-        let directive = parse_shell_value("$(uuidgen)::no-cache", "key", None)
-            .unwrap()
-            .unwrap();
-        assert_eq!(directive.executable, "uuidgen");
-        assert!(directive.no_cache);
-        assert!(directive.timeout_override.is_none());
-    }
-
-    #[test]
-    fn no_cache_defaults_false_without_suffix() {
-        let directive = parse_shell_value("$(uuidgen)", "key", None)
-            .unwrap()
-            .unwrap();
-        assert!(!directive.no_cache);
-    }
-
-    #[test]
-    fn no_cache_combines_with_timeout_either_order() {
-        let a = parse_shell_value("$(uuidgen)::no-cache::timeout:5", "key", None)
-            .unwrap()
-            .unwrap();
-        assert!(a.no_cache);
-        assert_eq!(a.timeout_override, Some(std::time::Duration::from_secs(5)));
-
-        let b = parse_shell_value("$(uuidgen)::timeout:5::no-cache", "key", None)
-            .unwrap()
-            .unwrap();
-        assert!(b.no_cache);
-        assert_eq!(b.timeout_override, Some(std::time::Duration::from_secs(5)));
-    }
-
-    #[test]
-    fn rejects_invalid_suffix_after_expression() {
-        let result = parse_shell_value("$(uuidgen)::bogus", "key", None);
-        assert!(result.is_err());
-        assert!(
-            result
-                .unwrap_err()
-                .to_string()
-                .contains("Unexpected trailing content")
-        );
-    }
-
-    #[test]
-    fn rejects_duplicate_no_cache_suffix() {
-        let result = parse_shell_value("$(uuidgen)::no-cache::no-cache", "key", None);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn rejects_interpolated_executable() {
-        let original = "$({{cmd}} arg)";
-        let resolved = "$(ls arg)";
-        let result = parse_shell_value(resolved, "key", Some(original));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn rejects_interpolated_executable_after_or_operator() {
-        let original = "$(false || {{cmd}} arg)";
-        let resolved = "$(false || echo arg)";
-        let err = parse_shell_value(resolved, "key", Some(original)).unwrap_err();
-        match err {
-            ShellExpansionError::ParseDirective { message, .. } => {
-                assert!(
-                    message.contains("may not come from interpolation"),
-                    "unexpected message: {message}"
-                );
-            }
-            other => panic!("Expected ParseDirective, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn rejects_interpolated_executable_after_and_operator() {
-        let original = "$(true && {{cmd}} arg)";
-        let resolved = "$(true && echo arg)";
-        let err = parse_shell_value(resolved, "key", Some(original)).unwrap_err();
-        match err {
-            ShellExpansionError::ParseDirective { message, .. } => {
-                assert!(
-                    message.contains("may not come from interpolation"),
-                    "unexpected message: {message}"
-                );
-            }
-            other => panic!("Expected ParseDirective, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn rejects_interpolated_executable_in_third_chain_segment() {
-        let original = "$(true && false || {{cmd}} arg)";
-        let resolved = "$(true && false || echo arg)";
-        let result = parse_shell_value(resolved, "key", Some(original));
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn accepts_interpolated_argument_after_chain_operator() {
-        let original = "$(false || echo {{file}})";
-        let resolved = "$(false || echo README.md)";
-        let result = parse_shell_value(resolved, "key", Some(original));
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn ignores_chain_operators_inside_quotes() {
-        // `||` inside single quotes is literal, not a chain operator,
-        // so the interpolation here is in argument position, not executable.
-        let original = "$(echo 'a || {{cmd}}')";
-        let resolved = "$(echo 'a || hello')";
-        let result = parse_shell_value(resolved, "key", Some(original));
-        assert!(result.is_ok());
-    }
-
-    #[test]
-    fn accepts_interpolated_argument() {
-        let original = "$(dirname {{file}})";
-        let resolved = "$(dirname README.md)";
-        let result = parse_shell_value(resolved, "key", Some(original));
-        assert!(result.is_ok());
-        let directive = result.unwrap().unwrap();
-        assert_eq!(directive.executable, "dirname");
-        assert_eq!(directive.args, vec!["README.md"]);
-    }
-
-    #[test]
-    fn accepts_no_interpolation_at_all() {
-        let original = "$(echo hello)";
-        let result = parse_shell_value(original, "key", Some(original));
-        assert!(result.is_ok());
-        let directive = result.unwrap().unwrap();
-        assert_eq!(directive.executable, "echo");
-        assert_eq!(directive.args, vec!["hello"]);
-    }
-
-    #[test]
-    fn accepts_closing_paren_inside_quoted_argument() {
-        let result = parse_shell_value("$(printf ')')", "key", None).unwrap();
-        let directive = result.unwrap();
-        assert_eq!(directive.executable, "printf");
-        assert_eq!(directive.args, vec![")"]);
-    }
-
-    #[test]
-    fn scan_finds_shell_in_top_level_strings() {
-        let mut fm = Frontmatter::new();
-        fm.insert("cmd1", json!("$(echo hello)")).unwrap();
-        fm.insert("plain", json!("not a shell command")).unwrap();
-        fm.insert("cmd2", json!("$(pwd)")).unwrap();
-        fm.insert("number", json!(42)).unwrap();
-
-        let directives = scan_frontmatter(&fm, None).unwrap();
-        assert_eq!(directives.len(), 2);
-        assert!(directives.iter().any(|d| d.key == "cmd1"));
-        assert!(directives.iter().any(|d| d.key == "cmd2"));
-    }
-
-    #[test]
-    fn scan_skips_nested_objects() {
-        let mut fm = Frontmatter::new();
-        fm.insert("outer", json!({"inner": "$(echo nested)"}))
-            .unwrap();
-        fm.insert("top", json!("$(echo top)")).unwrap();
-
-        let directives = scan_frontmatter(&fm, None).unwrap();
-        assert_eq!(directives.len(), 1);
-        assert_eq!(directives[0].key, "top");
-    }
-
-    #[test]
-    fn scan_skips_arrays() {
-        let mut fm = Frontmatter::new();
-        fm.insert("arr", json!(["$(echo one)", "$(echo two)"]))
-            .unwrap();
-        fm.insert("top", json!("$(echo top)")).unwrap();
-
-        let directives = scan_frontmatter(&fm, None).unwrap();
-        assert_eq!(directives.len(), 1);
-        assert_eq!(directives[0].key, "top");
-    }
-
-    #[test]
-    fn scan_errors_on_malformed_shell_expression() {
-        let mut fm = Frontmatter::new();
-        fm.insert("bad", json!("$(echo hi)::timeout:0")).unwrap();
-
-        let err = scan_frontmatter(&fm, None).unwrap_err();
-        match err {
-            ShellExpansionError::ParseDirective { origin, .. } => {
-                assert_eq!(
-                    origin,
-                    ShellCommandOrigin::Frontmatter {
-                        key: "bad".to_string()
-                    }
-                );
-            }
-            other => panic!("Expected ParseDirective, got {other:?}"),
-        }
-    }
-
-    fn unwrap_ternary(
-        directive: &FrontmatterShellDirective,
-    ) -> (&str, &Branch, &Branch) {
-        match &directive.ast {
-            FrontmatterShellAst::Ternary {
-                condition_source,
-                then_branch,
-                else_branch,
-            } => (condition_source.as_str(), then_branch, else_branch),
-            FrontmatterShellAst::Pipeline(_) => {
-                panic!("expected Ternary AST, got Pipeline")
-            }
-        }
-    }
-
-    #[test]
-    fn split_top_level_ternary_basic() {
-        let (cond, then_s, else_s) =
-            super::split_top_level_ternary("{{has_spec}} ? basename '{{spec}}' : ''")
-                .expect("ternary should split");
-        assert_eq!(cond.trim(), "{{has_spec}}");
-        assert_eq!(then_s.trim(), "basename '{{spec}}'");
-        assert_eq!(else_s.trim(), "''");
-    }
-
-    #[test]
-    fn split_top_level_ternary_quotes_protect_punctuation() {
-        // `?` and `:` inside single/double quotes are not top-level.
-        assert!(super::split_top_level_ternary("echo 'is it?'").is_none());
-        assert!(super::split_top_level_ternary("echo \"a : b\"").is_none());
-    }
-
-    #[test]
-    fn split_top_level_ternary_parens_protect_punctuation() {
-        // Parenthesized sub-expression in the condition is masked.
-        let (cond, then_s, else_s) =
-            super::split_top_level_ternary("(a ? b) ? then_cmd : else_cmd")
-                .expect("outer ternary should split");
-        assert_eq!(cond.trim(), "(a ? b)");
-        assert_eq!(then_s.trim(), "then_cmd");
-        assert_eq!(else_s.trim(), "else_cmd");
-    }
-
-    #[test]
-    fn split_top_level_ternary_question_without_colon_returns_none() {
-        assert!(super::split_top_level_ternary("a ? b").is_none());
-    }
-
-    #[test]
-    fn parses_basic_ternary() {
-        let original = "$({{has_spec}} ? basename '{{spec}}' : '')";
-        let resolved = "$(true ? basename '/tmp/spec.md' : '')";
-        let directive = parse_shell_value(resolved, "spec_file", Some(original))
-            .expect("parse should succeed")
-            .expect("directive should be returned");
-        let (cond, then_b, else_b) = unwrap_ternary(&directive);
-        assert_eq!(cond, "{{has_spec}}");
-        // Branches now carry the ORIGINAL slice; resolved text is produced
-        // by per-branch interpolation at execute time.
-        match then_b {
-            Branch::Pipeline { original_text } => {
-                assert_eq!(original_text.trim(), "basename '{{spec}}'");
-            }
-            _ => panic!("expected then-branch pipeline"),
-        }
-        assert!(matches!(else_b, Branch::Empty));
-        assert!(directive.pipeline.is_none());
-    }
-
-    #[test]
-    fn parses_ternary_with_both_pipeline_branches() {
-        let inner = "$(cond ? echo yes : echo no)";
-        let directive = parse_shell_value(inner, "key", None)
-            .unwrap()
-            .expect("directive should parse");
-        let (cond, then_b, else_b) = unwrap_ternary(&directive);
-        assert_eq!(cond, "cond");
-        match (then_b, else_b) {
-            (
-                Branch::Pipeline { original_text: then_text },
-                Branch::Pipeline { original_text: else_text },
-            ) => {
-                assert_eq!(then_text.trim(), "echo yes");
-                assert_eq!(else_text.trim(), "echo no");
-            }
-            _ => panic!("expected both branches to be pipelines"),
-        }
-    }
-
-    #[test]
-    fn parses_ternary_with_double_quoted_empty_branch() {
-        let inner = r#"$(cond ? echo yes : "")"#;
-        let directive = parse_shell_value(inner, "key", None)
-            .unwrap()
-            .expect("directive should parse");
-        let (_cond, _then_b, else_b) = unwrap_ternary(&directive);
-        assert!(matches!(else_b, Branch::Empty));
-    }
-
-    #[test]
-    fn ternary_question_without_colon_errors() {
-        let inner = "$({{cond}} ? echo yes)";
-        let err = parse_shell_value(inner, "key", None).unwrap_err();
-        match err {
-            ShellExpansionError::ParseDirective { message, .. } => {
-                assert!(
-                    message.contains("missing ':'"),
-                    "unexpected message: {message}"
-                );
-            }
-            other => panic!("Expected ParseDirective, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ternary_rejects_interpolated_executable_in_then_branch() {
-        let original = "$(cond ? {{cmd}} arg : '')";
-        let resolved = "$(cond ? echo arg : '')";
-        let err = parse_shell_value(resolved, "key", Some(original)).unwrap_err();
-        match err {
-            ShellExpansionError::ParseDirective { message, .. } => {
-                assert!(
-                    message.contains("may not come from interpolation"),
-                    "unexpected message: {message}"
-                );
-                assert!(
-                    message.contains("then-branch"),
-                    "expected branch label in message: {message}"
-                );
-            }
-            other => panic!("Expected ParseDirective, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ternary_rejects_interpolated_executable_in_else_branch() {
-        let original = "$(cond ? echo yes : {{cmd}} arg)";
-        let resolved = "$(cond ? echo yes : echo arg)";
-        let err = parse_shell_value(resolved, "key", Some(original)).unwrap_err();
-        match err {
-            ShellExpansionError::ParseDirective { message, .. } => {
-                assert!(
-                    message.contains("may not come from interpolation"),
-                    "unexpected message: {message}"
-                );
-                assert!(
-                    message.contains("else-branch"),
-                    "expected branch label in message: {message}"
-                );
-            }
-            other => panic!("Expected ParseDirective, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ternary_allows_interpolated_argument_in_branch() {
-        let original = "$(cond ? basename {{file}} : '')";
-        let resolved = "$(cond ? basename README.md : '')";
-        let directive = parse_shell_value(resolved, "key", Some(original))
-            .unwrap()
-            .expect("directive should parse");
-        let (_, then_b, _) = unwrap_ternary(&directive);
-        match then_b {
-            Branch::Pipeline { original_text } => {
-                // Branch retains the original {{file}} placeholder; expansion
-                // happens at execute time via per-branch interpolation.
-                assert_eq!(original_text.trim(), "basename {{file}}");
-            }
-            _ => panic!("expected pipeline branch"),
-        }
-    }
-
-    #[test]
-    fn ternary_empty_condition_errors() {
-        let inner = "$( ? echo yes : '')";
-        let err = parse_shell_value(inner, "key", None).unwrap_err();
-        match err {
-            ShellExpansionError::ParseDirective { message, .. } => {
-                assert!(
-                    message.contains("condition"),
-                    "unexpected message: {message}"
-                );
-            }
-            other => panic!("Expected ParseDirective, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ternary_branch_command_pipeline_with_chain_operators() {
-        let inner = "$(cond ? echo a && echo b : echo c)";
-        let directive = parse_shell_value(inner, "key", None)
-            .unwrap()
-            .expect("directive should parse");
-        let (_, then_b, _) = unwrap_ternary(&directive);
-        match then_b {
-            Branch::Pipeline { original_text } => {
-                assert_eq!(original_text.trim(), "echo a && echo b");
-            }
-            _ => panic!("expected pipeline branch"),
-        }
-    }
-
-    #[test]
-    fn ternary_quote_protected_punctuation_is_not_split() {
-        // The `?` is inside single quotes — the directive is a plain pipeline.
-        let inner = "$(echo 'is it?')";
-        let directive = parse_shell_value(inner, "key", None)
-            .unwrap()
-            .expect("directive should parse");
-        match directive.ast {
-            FrontmatterShellAst::Pipeline(_) => {}
-            FrontmatterShellAst::Ternary { .. } => {
-                panic!("expected Pipeline AST, got Ternary")
-            }
-        }
-    }
-
-    #[test]
-    fn ternary_rejects_nested_in_then_branch() {
-        // Review finding 3: a second top-level `?` (here turning the then-
-        // branch into another ternary `b ? echo two : echo three`) must be
-        // refused at parse time rather than silently tokenized.
-        let inner = "$(a ? b ? echo two : echo three : echo c)";
-        let err = parse_shell_value(inner, "key", None).unwrap_err();
-        match err {
-            ShellExpansionError::ParseDirective { message, .. } => {
-                assert!(
-                    message.contains("nested ternaries are not supported")
-                        && message.contains("additional separator-style '?'")
-                        && message.contains("then-branch"),
-                    "unexpected message: {message}"
-                );
-            }
-            other => panic!("Expected ParseDirective, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ternary_rejects_nested_in_else_branch() {
-        // Review finding 3: a second top-level `?` in the else-branch is
-        // also rejected.
-        let inner = "$(a ? echo one : b ? echo two : echo three)";
-        let err = parse_shell_value(inner, "key", None).unwrap_err();
-        match err {
-            ShellExpansionError::ParseDirective { message, .. } => {
-                assert!(
-                    message.contains("nested ternaries are not supported")
-                        && message.contains("additional separator-style '?'")
-                        && message.contains("else-branch"),
-                    "unexpected message: {message}"
-                );
-            }
-            other => panic!("Expected ParseDirective, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ternary_accepts_bare_colon_in_else_branch_argument() {
-        // A bare top-level `:` in a branch is valid pipeline content —
-        // URLs and key:value arguments commonly contain it — so it must
-        // not be rejected as a nested ternary. After the outer split, the
-        // else-branch text `echo two : echo three` parses as a single
-        // command with three arguments.
-        let inner = "$(a ? echo one : echo two : echo three)";
-        let directive = parse_shell_value(inner, "key", None)
-            .unwrap()
-            .expect("directive should parse");
-        let (_, _, else_b) = unwrap_ternary(&directive);
-        match else_b {
-            Branch::Pipeline { original_text } => {
-                assert_eq!(original_text.trim(), "echo two : echo three");
-            }
-            _ => panic!("expected pipeline else-branch"),
-        }
-    }
-
-    #[test]
-    fn ternary_accepts_url_with_colon_in_then_branch() {
-        // Review finding 2: `:` inside a URL argument is normal pipeline
-        // content and must round-trip through both branches.
-        let inner = "$(flag ? echo http://example.com : echo none)";
-        let directive = parse_shell_value(inner, "key", None)
-            .unwrap()
-            .expect("directive should parse");
-        let (_, then_b, _) = unwrap_ternary(&directive);
-        match then_b {
-            Branch::Pipeline { original_text } => {
-                assert_eq!(original_text.trim(), "echo http://example.com");
-            }
-            _ => panic!("expected pipeline then-branch"),
-        }
-    }
-
-    #[test]
-    fn ternary_accepts_url_with_colon_in_else_branch() {
-        let inner = "$(flag ? echo none : echo http://example.com)";
-        let directive = parse_shell_value(inner, "key", None)
-            .unwrap()
-            .expect("directive should parse");
-        let (_, _, else_b) = unwrap_ternary(&directive);
-        match else_b {
-            Branch::Pipeline { original_text } => {
-                assert_eq!(original_text.trim(), "echo http://example.com");
-            }
-            _ => panic!("expected pipeline else-branch"),
-        }
-    }
-
-    #[test]
-    fn ternary_branch_boundaries_pin_to_original_snapshot() {
-        // Review finding 1: when an interpolated condition introduces
-        // top-level `?` / `:` punctuation, the resolved inner naively
-        // re-split would shift branch boundaries and let condition text
-        // bleed into the then-branch executable. Anchoring the AST to the
-        // original snapshot keeps the then-branch text statically equal to
-        // what the author wrote.
-        let original = "$({{cond}} ? basename README.md : '')";
-        // Suppose `cond` was rendered to the literal text `true ? date : false`
-        // by an earlier interpolation pass.
-        let resolved = "$(true ? date : false ? basename README.md : '')";
-        let directive = parse_shell_value(resolved, "key", Some(original))
-            .expect("parse should succeed")
-            .expect("directive should be returned");
-        let (cond, then_b, else_b) = unwrap_ternary(&directive);
-        assert_eq!(cond, "{{cond}}");
-        match then_b {
-            Branch::Pipeline { original_text } => {
-                // Critically, the then-branch text is the ORIGINAL slice
-                // (`basename README.md`), NOT the resolved slice (`date`)
-                // that a naive resplit would have produced.
-                assert_eq!(original_text.trim(), "basename README.md");
-            }
-            _ => panic!("expected pipeline then-branch"),
-        }
-        assert!(matches!(else_b, Branch::Empty));
-    }
-
-    #[test]
-    fn ternary_separator_requires_whitespace_padding() {
-        // Review-3 medium finding: the separator detection contract requires
-        // whitespace padding on both sides of `?` and `:`. An unpadded `?`
-        // like `flag? echo yes : ''` is parsed as part of the executable
-        // token (`flag?`) — not as a ternary separator. This lock-in test
-        // documents that the implementation matches the spec's
-        // whitespace-padded rule rather than a raw "any top-level `?`" rule.
-        let inner = "$(flag? echo yes : '')";
-        let directive = parse_shell_value(inner, "key", None)
-            .unwrap()
-            .expect("directive should parse");
-        match directive.ast {
-            FrontmatterShellAst::Pipeline(ref pipeline) => {
-                assert_eq!(pipeline.actions[0].command.executable, "flag?");
-            }
-            FrontmatterShellAst::Ternary { .. } => {
-                panic!("expected Pipeline AST, got Ternary — separator must require whitespace padding")
-            }
-        }
-    }
-
-    #[test]
-    fn ternary_with_timeout_preserves_timeout() {
-        let inner = "$(cond ? echo yes : '')::timeout:5";
-        let directive = parse_shell_value(inner, "key", None)
-            .unwrap()
-            .expect("directive should parse");
-        assert!(matches!(directive.ast, FrontmatterShellAst::Ternary { .. }));
-        assert_eq!(
-            directive.timeout_override,
-            Some(std::time::Duration::from_secs(5))
-        );
-    }
-
-    // ── §2 token-resolution ladder ────────────────────────────────────────
-
-    /// A name guaranteed not to resolve on `PATH`, used to exercise the
-    /// bare-name → frontmatter-property rung of the ladder.
-    const ABSENT_ON_PATH: &str = "dm_definitely_not_a_real_binary_xyz";
-
-    #[test]
-    fn classify_quoted_numeric_and_boolean_literals_are_values() {
-        assert_eq!(super::classify_executed_body("'hello'"), BodyClass::Value);
-        assert_eq!(super::classify_executed_body("\"hello\""), BodyClass::Value);
-        assert_eq!(super::classify_executed_body("42"), BodyClass::Value);
-        assert_eq!(super::classify_executed_body("3.14"), BodyClass::Value);
-        assert_eq!(super::classify_executed_body("true"), BodyClass::Value);
-        assert_eq!(super::classify_executed_body("false"), BodyClass::Value);
-    }
-
-    #[test]
-    fn classify_true_false_are_never_commands_even_when_on_path() {
-        // `true` and `false` are real executables on most systems, but the
-        // ladder pins them to the boolean literal.
-        assert_eq!(super::classify_executed_body("true"), BodyClass::Value);
-        assert_eq!(super::classify_executed_body("false"), BodyClass::Value);
-    }
-
-    #[test]
-    fn classify_expression_function_is_a_safe_value() {
-        // Trailing parentheses mark a safe expression function — no shell
-        // executable can contain `(`/`)`.
-        assert_eq!(
-            super::classify_executed_body("file_exists('Cargo.toml')"),
-            BodyClass::Value
-        );
-        assert_eq!(
-            super::classify_executed_body("markdown_title('a', 'b')"),
-            BodyClass::Value
-        );
-    }
-
-    #[test]
-    fn classify_path_bearing_token_is_always_a_command() {
-        // Path-bearing tokens are executables, never properties — even when no
-        // such file exists.
-        assert_eq!(
-            super::classify_executed_body("/usr/bin/doit"),
-            BodyClass::Command
-        );
-        assert_eq!(super::classify_executed_body("./doit"), BodyClass::Command);
-    }
-
-    #[test]
-    fn classify_bare_name_on_path_is_a_command() {
-        // `echo` is universally present.
-        assert_eq!(super::classify_executed_body("echo"), BodyClass::Command);
-    }
-
-    #[test]
-    fn classify_bare_name_not_on_path_is_a_property_value() {
-        assert_eq!(
-            super::classify_executed_body(ABSENT_ON_PATH),
-            BodyClass::Value
-        );
-    }
-
-    #[test]
-    fn classify_doc_namespace_is_always_a_property_value() {
-        // `doc.*` resolves the frontmatter property even when a same-named
-        // executable exists on `PATH`.
-        assert_eq!(super::classify_executed_body("doc.echo"), BodyClass::Value);
-        assert_eq!(super::classify_executed_body("doc.build"), BodyClass::Value);
-        assert_eq!(super::classify_executed_body("doc"), BodyClass::Value);
-    }
-
-    #[test]
-    fn classify_multi_token_body_is_a_command() {
-        assert_eq!(
-            super::classify_executed_body("echo hello"),
-            BodyClass::Command
-        );
-        assert_eq!(
-            super::classify_executed_body("sniff repo dirty-files"),
-            BodyClass::Command
-        );
-    }
-
-    #[test]
-    fn classify_empty_string_literal_is_empty() {
-        assert_eq!(super::classify_executed_body("''"), BodyClass::Empty);
-        assert_eq!(super::classify_executed_body("\"\""), BodyClass::Empty);
-    }
-
-    #[test]
-    fn non_ternary_all_expression_value_errors_with_brace_suggestion() {
-        // A bare `$()` that resolves to a value (here an expression function)
-        // is a user error — steer them toward `{{ … }}`.
-        let err = parse_shell_value("$(file_exists('x'))", "spec", None).unwrap_err();
-        match err {
-            ShellExpansionError::ParseDirective { message, .. } => {
-                assert!(
-                    message.contains("no shell command") && message.contains("{{"),
-                    "expected a {{{{ }}}} suggestion, got: {message}"
-                );
-            }
-            other => panic!("Expected ParseDirective, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ternary_with_no_command_branch_errors_with_brace_suggestion() {
-        // Both branches are string literals; the condition is an expression
-        // function — the whole `$()` is expression content with no command.
-        let err = parse_shell_value("$( file_exists('x') ? 'a' : 'b' )", "spec", None)
-            .unwrap_err();
-        match err {
-            ShellExpansionError::ParseDirective { message, .. } => {
-                assert!(
-                    message.contains("no shell command") && message.contains("{{"),
-                    "expected a {{{{ }}}} suggestion, got: {message}"
-                );
-            }
-            other => panic!("Expected ParseDirective, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn ternary_value_branch_is_classified_as_value_not_pipeline() {
-        // A literal fallback branch is a value, not a command pipeline; the
-        // command branch keeps the directive valid.
-        let directive = parse_shell_value("$(flag ? echo run : 'fallback')", "k", None)
-            .unwrap()
-            .expect("directive should parse");
-        let (_, then_b, else_b) = unwrap_ternary(&directive);
-        assert!(matches!(then_b, Branch::Pipeline { .. }));
-        match else_b {
-            Branch::Value { source } => assert_eq!(source.trim(), "'fallback'"),
-            other => panic!("expected a value else-branch, got {other:?}"),
-        }
-    }
-
-    #[test]
-    fn mixed_expression_condition_with_command_branches_parses() {
-        // The spec's intermixing example: the condition is expression content
-        // (`file_exists(...)`) and both branches are real shell pipelines.
-        let directive =
-            parse_shell_value("$( file_exists('Cargo.toml') ? cargo build : make )", "k", None)
-                .unwrap()
-                .expect("directive should parse");
-        let (cond, then_b, else_b) = unwrap_ternary(&directive);
-        assert_eq!(cond, "file_exists('Cargo.toml')");
-        assert!(matches!(then_b, Branch::Pipeline { .. }));
-        assert!(matches!(else_b, Branch::Pipeline { .. }));
-    }
-}
+#[path = "frontmatter_shell_expansion/tests/spanned_value_tests.rs"]
+mod spanned_value_tests;
 
 #[cfg(test)]
-mod execution_tests {
-    use super::*;
-    use crate::markdown::compose::cache::CacheAccessMode;
-    use crate::markdown::compose::shell_expansion::types::{
-        PipelineRuntime, ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest,
-        ShellExpansionError, ShellExpansionOptions,
-    };
-    use crate::markdown::compose::ComposeOptions;
-    use crate::markdown::frontmatter::Frontmatter;
-    use serde_json::json;
-    use serial_test::serial;
-    use std::path::PathBuf;
-    use std::sync::Arc;
-    use std::time::Duration;
-    use tempfile::TempDir;
-
-    fn fm_from_json(data: serde_json::Value) -> Frontmatter {
-        let map: crate::markdown::types::FrontmatterMap = match data {
-            serde_json::Value::Object(obj) => obj.into_iter().collect(),
-            _ => Default::default(),
-        };
-        Frontmatter::from_map(map)
-    }
-
-    fn test_ctx() -> SourceContext {
-        SourceContext::new(PathBuf::from("/test"), PathBuf::from("test"), String::new())
-    }
-
-    fn execute_frontmatter_shell_expansion(
-        frontmatter: &mut Frontmatter,
-        options: &ComposeOptions,
-        runtime: &mut PipelineRuntime,
-        pre_interpolation_snapshot: Option<&std::collections::HashMap<String, String>>,
-    ) -> crate::markdown::types::MarkdownResult<FrontmatterShellExpansionReport> {
-        super::execute_frontmatter_shell_expansion(
-            frontmatter,
-            options,
-            runtime,
-            pre_interpolation_snapshot,
-            &test_ctx(),
-        )
-    }
-
-    struct MockApproval;
-    impl ShellApprovalHandler for MockApproval {
-        fn approve(
-            &self,
-            _request: ShellApprovalRequest,
-        ) -> Result<ShellApprovalDecision, ShellExpansionError> {
-            Ok(ShellApprovalDecision::AllowOnce)
-        }
-    }
-
-    fn make_runtime() -> PipelineRuntime {
-        PipelineRuntime::new(16, CacheAccessMode::Off, None)
-    }
-
-    fn find_python() -> Option<PathBuf> {
-        ["python3", "python"]
-            .into_iter()
-            .find_map(|candidate| which::which(candidate).ok())
-            .filter(|path| !path.as_os_str().is_empty())
-    }
-
-    #[test]
-    fn execute_replaces_frontmatter_value_with_output() {
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "greeting": "$(echo hello world)"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("greeting"), Some(&json!("hello world")));
-    }
-
-    #[test]
-    fn execute_trims_output_whitespace() {
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "val": "$(echo '  padded  ')"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("val"), Some(&json!("padded")));
-    }
-
-    #[test]
-    fn execute_skips_non_shell_values() {
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "title": "Hello",
-            "count": 42,
-            "cmd": "$(echo result)"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("title"), Some(&json!("Hello")));
-        assert_eq!(fm.as_map().get("count"), Some(&json!(42)));
-        assert_eq!(fm.as_map().get("cmd"), Some(&json!("result")));
-    }
-
-    #[test]
-    fn execute_no_candidates_returns_empty_report() {
-        let mut fm = fm_from_json(json!({
-            "title": "Hello",
-            "count": 42
-        }));
-        let options = ComposeOptions::new();
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 0);
-        assert_eq!(report.approvals_used, 0);
-    }
-
-    #[test]
-    fn execute_frontmatter_uses_stdout_only() {
-        let Some(python) = find_python() else {
-            return;
-        };
-
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "val": format!(
-                "$({} -c \"import sys; sys.stdout.write('out'); sys.stderr.write('warn')\")",
-                python.display()
-            )
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("val"), Some(&json!("out")));
-    }
-
-    #[test]
-    fn execute_timeout_fallback_emits_warning() {
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "val": "$(sleep 1)"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            timeout: Duration::from_millis(100),
-            timeout_behavior:
-                super::super::shell_expansion::types::ShellTimeoutBehavior::EmptyString,
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(fm.as_map().get("val"), Some(&json!("")));
-        assert_eq!(report.warnings.len(), 1);
-        assert!(report.warnings[0].message.contains("timed out"));
-    }
-
-    #[test]
-    fn execute_pipeline_timeout_fallback_emits_warning() {
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "val": "$(sleep 1 && echo after)"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            timeout: Duration::from_millis(100),
-            timeout_behavior:
-                super::super::shell_expansion::types::ShellTimeoutBehavior::EmptyString,
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(fm.as_map().get("val"), Some(&json!("after")));
-        assert_eq!(report.warnings.len(), 1);
-        assert!(report.warnings[0].message.contains("timed out"));
-    }
-
-    #[test]
-    #[serial]
-    fn execute_frontmatter_commands_concurrently() {
-        let Some(python) = find_python() else {
-            return;
-        };
-
-        // Each command records a wall-clock start timestamp, then sleeps briefly.
-        // Concurrent execution => both commands start within startup jitter of
-        // each other. Serial execution => the second start is delayed by the
-        // first command's full sleep. Comparing start offsets (rather than total
-        // wall-clock time) keeps the test fast and immune to interpreter startup
-        // variance.
-        let temp_dir = TempDir::new().unwrap();
-        let stamp_cmd = || {
-            format!(
-                "$({} -c \"import time; print(time.time(), end=''); time.sleep(0.3)\")",
-                python.display()
-            )
-        };
-        let mut fm = fm_from_json(json!({
-            "one": stamp_cmd(),
-            "two": stamp_cmd()
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            timeout: Duration::from_secs(2),
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-
-        assert_eq!(report.replacements, 2);
-        let start_time = |key: &str| -> f64 {
-            fm.as_map()
-                .get(key)
-                .and_then(|value| value.as_str())
-                .unwrap_or_default()
-                .parse()
-                .unwrap_or_else(|_| panic!("expected numeric start timestamp for `{key}`"))
-        };
-        let start_skew = (start_time("one") - start_time("two")).abs();
-        assert!(
-            start_skew < 0.2,
-            "expected commands to start concurrently (skew < 0.2s), got {start_skew}s \
-             — commands appear to have run serially"
-        );
-    }
-
-    #[test]
-    fn ternary_truthy_condition_runs_then_branch() {
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "flag": true,
-            "out": "$(flag ? echo yes : echo no)"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("out"), Some(&json!("yes")));
-    }
-
-    #[test]
-    fn ternary_falsy_condition_runs_else_branch() {
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "flag": false,
-            "out": "$(flag ? echo yes : echo no)"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("out"), Some(&json!("no")));
-    }
-
-    #[test]
-    fn ternary_empty_branch_short_circuits_to_empty_string() {
-        // Phase 4: the unselected then-branch must still be allowlisted, so
-        // pre-approve `echo yes` and pin policy_root to an isolated dir to
-        // avoid picking up the repo whitelist. Selecting the empty branch then
-        // short-circuits to "" without executing any shell command.
-        let temp_dir = TempDir::new().unwrap();
-        let mut approved = std::collections::HashSet::new();
-        approved.insert("echo yes".to_string());
-
-        let mut fm = fm_from_json(json!({
-            "flag": false,
-            "out": "$(flag ? echo yes : '')"
-        }));
-        let options = ComposeOptions::new()
-            .with_pre_approved_commands(approved)
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
-                ..Default::default()
-            });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(report.approvals_used, 0);
-        assert_eq!(fm.as_map().get("out"), Some(&json!("")));
-    }
-
-    #[test]
-    fn ternary_then_branch_must_be_allowlisted_even_when_else_selected() {
-        // Phase 4.3: an unallowlisted command in the then-branch fails the
-        // entire directive even when the else-branch (Empty) is selected at
-        // runtime. The then-branch is a multi-token shell command (`echo
-        // unapproved`) — the §2 ladder classifies it as a command requiring
-        // approval, not as a value branch.
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "flag": false,
-            "out": "$(flag ? echo unapproved : '')"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let err = match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None)
-        {
-            Ok(_) => panic!("expected directive to fail"),
-            Err(err) => err,
-        };
-        let msg = err.to_string();
-        assert!(
-            msg.to_lowercase().contains("approval"),
-            "expected approval-required error for unselected branch, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn ternary_else_branch_must_be_allowlisted_even_when_then_selected() {
-        // Phase 4.3: an unallowlisted command in the else-branch fails the
-        // entire directive even when the then-branch is selected at runtime.
-        // The else-branch is a multi-token shell command (`echo unapproved`).
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "flag": true,
-            "out": "$(flag ? '' : echo unapproved)"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let err = match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None)
-        {
-            Ok(_) => panic!("expected directive to fail"),
-            Err(err) => err,
-        };
-        let msg = err.to_string();
-        assert!(
-            msg.to_lowercase().contains("approval"),
-            "expected approval-required error for unselected branch, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn ternary_partial_preapproval_fails_with_unselected_branch_command() {
-        // Phase 4.3: pre-approving only the then-branch's command is not
-        // enough — the else-branch's command must also be in the reachable
-        // pre-approved set even though it would not have been selected.
-        let temp_dir = TempDir::new().unwrap();
-        let mut approved = std::collections::HashSet::new();
-        approved.insert("echo yes".to_string());
-        // `echo no` intentionally omitted.
-
-        let mut fm = fm_from_json(json!({
-            "flag": true,
-            "out": "$(flag ? echo yes : echo no)"
-        }));
-        let options = ComposeOptions::new()
-            .with_pre_approved_commands(approved)
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
-                ..Default::default()
-            });
-        let mut runtime = make_runtime();
-
-        let err = match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None)
-        {
-            Ok(_) => panic!("expected directive to fail"),
-            Err(err) => err,
-        };
-        let msg = err.to_string();
-        assert!(
-            msg.contains("not pre-approved") && msg.contains("echo no"),
-            "expected pre-approval rejection naming `echo no`, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn ternary_both_branches_allowlisted_succeeds() {
-        // Phase 4.2: when every reachable command is allowlisted, the
-        // directive succeeds and the selected branch's output is used.
-        let temp_dir = TempDir::new().unwrap();
-        let mut approved = std::collections::HashSet::new();
-        approved.insert("echo yes".to_string());
-        approved.insert("echo no".to_string());
-
-        let mut fm = fm_from_json(json!({
-            "flag": true,
-            "out": "$(flag ? echo yes : echo no)"
-        }));
-        let options = ComposeOptions::new()
-            .with_pre_approved_commands(approved)
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
-                ..Default::default()
-            });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("out"), Some(&json!("yes")));
-    }
-
-    #[test]
-    fn ternary_with_brace_wrapped_condition_resolves_via_seed_state() {
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "has_value": true,
-            "out": "$({{has_value}} ? echo present : '')"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("out"), Some(&json!("present")));
-    }
-
-    #[test]
-    fn ternary_with_stringified_false_condition_selects_else_branch() {
-        // Review finding 2: when a frontmatter value is itself rendered from
-        // a template (`has_spec: "{{ false }}"`), the post-interpolation
-        // value is the string `"false"`. The condition `{{has_spec}}` must
-        // be recognized as boolean-false — not as a truthy non-empty string
-        // — and select the else-branch.
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "has_spec": "false",
-            "spec_file": "$({{has_spec}} ? echo present : '')"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("spec_file"), Some(&json!("")));
-    }
-
-    #[test]
-    fn ternary_with_stringified_true_condition_selects_then_branch() {
-        // Symmetric to the false case: a stringified `"true"` condition
-        // selects the then-branch.
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "has_spec": "true",
-            "spec_file": "$({{has_spec}} ? echo present : '')"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("spec_file"), Some(&json!("present")));
-    }
-
-    #[test]
-    fn ternary_condition_interpolation_cannot_bleed_into_then_branch_executable() {
-        // Review finding 1: a condition variable whose value contains
-        // top-level `?` / `:` punctuation must not shift the then-branch
-        // boundary or let condition text become a branch executable. With
-        // the original snapshot anchoring the branch slices, the
-        // then-branch runs the static `basename README.md` (or doesn't run
-        // at all, depending on how the rewritten condition evaluates), but
-        // it never tokenizes anything from the condition text.
-        let temp_dir = TempDir::new().unwrap();
-        // `cond` is itself the literal string `"true ? date : false"`. Once
-        // it lands in the directive value, a naive split-of-resolved would
-        // pick `date` as the then-branch executable.
-        let mut fm = fm_from_json(json!({
-            "cond": "true ? date : false",
-            "out": "$(true ? date : false ? basename README.md : '')"
-        }));
-        let mut snapshot = std::collections::HashMap::new();
-        snapshot.insert(
-            "out".to_string(),
-            "$({{cond}} ? basename README.md : '')".to_string(),
-        );
-
-        let mut approved = std::collections::HashSet::new();
-        approved.insert("basename README.md".to_string());
-
-        let options = ComposeOptions::new()
-            .with_pre_approved_commands(approved)
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
-                ..Default::default()
-            });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, Some(&snapshot))
-                .unwrap();
-        assert_eq!(report.replacements, 1);
-        // Result is either `README` (basename ran from the then-branch) or
-        // `""` (else-branch selected); either way, `date` from the
-        // condition text must not be the executable that ran.
-        let out = fm
-            .as_map()
-            .get("out")
-            .and_then(|v| v.as_str())
-            .unwrap_or_default()
-            .to_string();
-        assert!(
-            out == "README" || out.is_empty(),
-            "expected branch text to remain anchored to the original snapshot; got {out:?}"
-        );
-    }
-
-    #[test]
-    fn ternary_branch_arg_interpolation_cannot_inject_new_action() {
-        // Review 2 finding 1: an interpolation in argument position must
-        // not be able to introduce `&& date` (or any other chain
-        // continuation) after the executable-interpolation check has
-        // already accepted the branch. Even though the then-branch's
-        // static executable is `basename`, a malicious `spec` value with
-        // an embedded `&& date` would extend the pipeline to two
-        // additional actions. The shape-preservation guard must catch the
-        // action-count drift and reject the directive.
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "has_spec": true,
-            // Crafted value: closes the outer single quote, chains `date`,
-            // then reopens a quote so the surrounding directive still
-            // tokenizes cleanly.
-            "spec": "README.md' && date && echo '",
-            "out": "$({{has_spec}} ? basename '{{spec}}' : '')"
-        }));
-        let mut snapshot = std::collections::HashMap::new();
-        snapshot.insert(
-            "out".to_string(),
-            "$({{has_spec}} ? basename '{{spec}}' : '')".to_string(),
-        );
-
-        let mut approved = std::collections::HashSet::new();
-        approved.insert("basename".to_string());
-        approved.insert("date".to_string());
-        approved.insert("echo".to_string());
-
-        let options = ComposeOptions::new()
-            .with_pre_approved_commands(approved)
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
-                ..Default::default()
-            });
-        let mut runtime = make_runtime();
-
-        let err =
-            match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, Some(&snapshot))
-            {
-                Ok(_) => panic!("expected directive to fail with a shape-preservation error"),
-                Err(err) => err,
-            };
-        let msg = err.to_string();
-        assert!(
-            msg.contains("changed from 1 action") || msg.contains("introduce new chain operators"),
-            "expected pipeline-shape error mentioning action count, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn ternary_branch_quoted_interpolation_breakout_is_rejected() {
-        // Review 2 finding 1: a `{{spec}}` interpolation inside double
-        // quotes must not be able to introduce a closing `"` followed by
-        // additional commands. Depending on how the resolved text lands,
-        // the directive is rejected either by the shape guard (action
-        // count drift) or by the tokenizer (unterminated quote). Both
-        // refuse to execute the smuggled command — that is what matters.
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "has_spec": true,
-            "spec": "README.md\" && evil",
-            "out": "$({{has_spec}} ? basename \"{{spec}}\" : '')"
-        }));
-        let mut snapshot = std::collections::HashMap::new();
-        snapshot.insert(
-            "out".to_string(),
-            "$({{has_spec}} ? basename \"{{spec}}\" : '')".to_string(),
-        );
-
-        let mut approved = std::collections::HashSet::new();
-        approved.insert("basename".to_string());
-        approved.insert("evil".to_string());
-
-        let options = ComposeOptions::new()
-            .with_pre_approved_commands(approved)
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
-                ..Default::default()
-            });
-        let mut runtime = make_runtime();
-
-        let err =
-            match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, Some(&snapshot))
-            {
-                Ok(_) => panic!("expected quote-breakout to fail"),
-                Err(err) => err,
-            };
-        let msg = err.to_string();
-        assert!(
-            msg.contains("changed from 1 action")
-                || msg.contains("introduce new chain operators")
-                || msg.contains("Unterminated double quote")
-                || msg.contains("Unterminated single quote"),
-            "expected pipeline-shape or tokenizer rejection, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn non_ternary_arg_interpolation_cannot_inject_new_action() {
-        // The same static-command-invariant applies to bare (non-ternary)
-        // pipelines: an interpolated argument value may not introduce
-        // additional `&&` / `||` actions even when the executable token is
-        // statically `basename`. In a real compose run, frontmatter
-        // interpolation has already rewritten `{{spec}}` before shell
-        // expansion runs — so `out`'s value here is the RESOLVED text and
-        // the snapshot carries the ORIGINAL with the placeholder intact.
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "spec": "README.md' && date && echo '",
-            "out": "$(basename 'README.md' && date && echo '')"
-        }));
-        let mut snapshot = std::collections::HashMap::new();
-        snapshot.insert("out".to_string(), "$(basename '{{spec}}')".to_string());
-
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let err =
-            match execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, Some(&snapshot))
-            {
-                Ok(_) => panic!("expected non-ternary directive to fail"),
-                Err(err) => err,
-            };
-        let msg = err.to_string();
-        assert!(
-            msg.contains("changed from 1 action") || msg.contains("introduce new chain operators"),
-            "expected pipeline-shape error mentioning action count, got: {msg}"
-        );
-    }
-
-    #[test]
-    fn ternary_condition_supports_infix_and() {
-        // Review-3 high finding: condition-mode infix `&&` must lower to
-        // `and(a, b)` and select the then-branch when both operands are
-        // truthy. The non-condition `parse` entrypoint refuses bare `&&`
-        // outside `{{ }}` interpolation; only `parse_condition` accepts it.
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "a": true,
-            "b": true,
-            "out": "$(a && b ? echo yes : echo no)"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("out"), Some(&json!("yes")));
-    }
-
-    #[test]
-    fn ternary_condition_infix_and_selects_else_when_one_falsy() {
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "a": true,
-            "b": false,
-            "out": "$(a && b ? echo yes : echo no)"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(fm.as_map().get("out"), Some(&json!("no")));
-        assert_eq!(report.replacements, 1);
-    }
-
-    #[test]
-    fn ternary_condition_supports_infix_or() {
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "a": false,
-            "b": true,
-            "out": "$(a || b ? echo yes : echo no)"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("out"), Some(&json!("yes")));
-    }
-
-    #[test]
-    fn ternary_condition_supports_negation() {
-        // Condition-mode parses `!flag` as `not(flag)`.
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "flag": false,
-            "out": "$(!flag ? echo yes : echo no)"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("out"), Some(&json!("yes")));
-    }
-
-    #[test]
-    fn ternary_condition_supports_comparison() {
-        // The spec's "single boolean expression" contract includes
-        // comparisons. `count == 3` must evaluate to true and select the
-        // then-branch.
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "count": 3,
-            "out": "$(count == 3 ? echo equal : echo unequal)"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("out"), Some(&json!("equal")));
-    }
-
-    #[test]
-    fn ternary_condition_supports_nested_expression_ternary() {
-        // Condition-mode supports `?:` inside the condition expression
-        // itself. Here `(flag ? true : false)` evaluates to `true`, which
-        // selects the outer then-branch.
-        let temp_dir = TempDir::new().unwrap();
-        let mut fm = fm_from_json(json!({
-            "flag": true,
-            "out": "$((flag ? true : false) ? echo yes : echo no)"
-        }));
-        let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            policy_root: Some(temp_dir.path().to_path_buf()),
-            approval_handler: Some(Arc::new(MockApproval)),
-            ..Default::default()
-        });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("out"), Some(&json!("yes")));
-    }
-
-    #[test]
-    fn ternary_branch_url_with_colon_argument_executes() {
-        // Review 2 finding 2: a bare `:` inside a branch argument (here
-        // part of a URL) must not be misclassified as a nested ternary.
-        let temp_dir = TempDir::new().unwrap();
-        let mut approved = std::collections::HashSet::new();
-        approved.insert("echo http://example.com".to_string());
-        approved.insert("echo none".to_string());
-
-        let mut fm = fm_from_json(json!({
-            "flag": true,
-            "out": "$(flag ? echo http://example.com : echo none)"
-        }));
-        let options = ComposeOptions::new()
-            .with_pre_approved_commands(approved)
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
-                ..Default::default()
-            });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("out"), Some(&json!("http://example.com")));
-    }
-
-    // ── §2 value branches and preflight ───────────────────────────────────
-
-    #[test]
-    fn ternary_value_branch_resolves_literal_fallback() {
-        // The else-branch is a string-literal value. When selected it resolves
-        // to that value with no shell invocation; the then-branch command must
-        // still be allowlisted.
-        let temp_dir = TempDir::new().unwrap();
-        let mut approved = std::collections::HashSet::new();
-        approved.insert("echo run".to_string());
-
-        let mut fm = fm_from_json(json!({
-            "flag": false,
-            "out": "$(flag ? echo run : 'fallback')"
-        }));
-        let options = ComposeOptions::new()
-            .with_pre_approved_commands(approved)
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
-                ..Default::default()
-            });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(report.approvals_used, 0);
-        assert_eq!(fm.as_map().get("out"), Some(&json!("fallback")));
-    }
-
-    #[test]
-    fn ternary_value_branch_absent_property_resolves_to_empty() {
-        // A bare property name that does not exist resolves to `null`, which
-        // renders as an empty string.
-        let temp_dir = TempDir::new().unwrap();
-        let mut approved = std::collections::HashSet::new();
-        approved.insert("echo run".to_string());
-
-        let mut fm = fm_from_json(json!({
-            "flag": false,
-            "out": "$(flag ? echo run : dm_absent_property_xyz)"
-        }));
-        let options = ComposeOptions::new()
-            .with_pre_approved_commands(approved)
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
-                ..Default::default()
-            });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("out"), Some(&json!("")));
-    }
-
-    #[test]
-    fn ternary_doc_namespace_branch_resolves_property_over_executable() {
-        // `doc.echo` resolves the frontmatter property even though `echo` is a
-        // real executable on PATH.
-        let temp_dir = TempDir::new().unwrap();
-        let mut approved = std::collections::HashSet::new();
-        approved.insert("cat README".to_string());
-
-        let mut fm = fm_from_json(json!({
-            "flag": false,
-            "echo": "property-value",
-            "out": "$(flag ? cat README : doc.echo)"
-        }));
-        let options = ComposeOptions::new()
-            .with_pre_approved_commands(approved)
-            .with_shell(ShellExpansionOptions {
-                policy_root: Some(temp_dir.path().to_path_buf()),
-                ..Default::default()
-            });
-        let mut runtime = make_runtime();
-
-        let report =
-            execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
-        assert_eq!(report.replacements, 1);
-        assert_eq!(fm.as_map().get("out"), Some(&json!("property-value")));
-    }
-
-    #[test]
-    fn preflight_enumerates_command_branch_and_excludes_value_branch() {
-        // Discovery enumerates reachable command pipelines without evaluating
-        // the condition. The string-literal value branch contributes no
-        // command, so only the command branch surfaces for approval.
-        let directive = super::parse_shell_value(
-            "$(some_undefined_flag ? echo yes : 'literal')",
-            "out",
-            None,
-            &test_ctx(),
-        )
-        .unwrap()
-        .unwrap();
-        let fm = fm_from_json(json!({}));
-        let options = ComposeOptions::new();
-
-        let pipelines =
-            super::directive_reachable_pipelines(&directive, &fm, &options, &test_ctx()).unwrap();
-        assert_eq!(pipelines.len(), 1);
-        assert_eq!(pipelines[0].actions[0].command.executable, "echo");
-    }
-
-    #[test]
-    fn preflight_excludes_safe_function_branch_from_approval() {
-        // A `name(...)` expression function is a safe function — it spawns no
-        // process and is never enumerated for approval.
-        let directive = super::parse_shell_value(
-            "$(flag ? cat file : markdown_body_empty('x'))",
-            "out",
-            None,
-            &test_ctx(),
-        )
-        .unwrap()
-        .unwrap();
-        let fm = fm_from_json(json!({}));
-        let options = ComposeOptions::new();
-
-        let pipelines =
-            super::directive_reachable_pipelines(&directive, &fm, &options, &test_ctx()).unwrap();
-        assert_eq!(pipelines.len(), 1);
-        assert_eq!(pipelines[0].actions[0].command.executable, "cat");
-    }
-}
+#[path = "frontmatter_shell_expansion/tests/tests.rs"]
+mod tests;
+
+#[cfg(test)]
+#[path = "frontmatter_shell_expansion/tests/execution_tests.rs"]
+mod execution_tests;

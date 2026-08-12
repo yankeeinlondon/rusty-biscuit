@@ -80,12 +80,13 @@ mod tests {
 
     #[test]
     fn detect_area_errors_when_not_in_repo() {
-        let tmp = std::env::temp_dir();
-        let err = detect_area(&tmp).expect_err("temp dir should not be a repo");
-        // Accept either NotInRepo or NotMonorepo depending on host setup;
-        // the contract is "fails when no monorepo present".
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let err = detect_area(tmp.path()).expect_err("empty dir should not be a repo");
+        // Repo detection only inspects the given root and below — it never
+        // walks upward — so an isolated empty dir is deterministically not a
+        // repo, regardless of what the host temp root looks like.
         assert!(
-            matches!(err, AreaError::NotInRepo | AreaError::NotMonorepo),
+            matches!(err, AreaError::NotInRepo),
             "got unexpected variant: {err:?}"
         );
     }

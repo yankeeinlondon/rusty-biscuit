@@ -1038,3 +1038,143 @@ fn markdown_body_only_has_leading_blank_and_body_rows() {
         "second quoted row must be the body: {md}"
     );
 }
+
+// ---------------------------------------------------------------------------
+// Width-mode slack sink (style-everywhere Phase 2, Task 2.4)
+//
+// StatusBlock is an internal-layout component: the shared render-tree fold
+// resolves the outer box from `Layout::width`, and the body text wraps inside
+// the resolved content width. The header icon, severity glyph, status prefix,
+// and the thick left border chrome are all FIXED (D2 slack sink). Only the
+// body / message region absorbs slack by wrapping.
+// ---------------------------------------------------------------------------
+
+/// Renders a `StatusBlock` tree projection to a terminal string at the given
+/// width, ANSI-stripped for content comparison.
+fn render_status_block_tree(block: &StatusBlock, width: u32) -> String {
+    let term = test_terminal(width);
+    let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
+    let node = <StatusBlock as TreeRenderable>::render_tree(block);
+    strip_ansi(
+        &render_terminal_node(&node, &opts)
+            .expect("status-block tree render should succeed")
+            .output,
+    )
+}
+
+/// Max char-count over the lines of a rendered block.
+fn widest_line(rendered: &str) -> usize {
+    rendered.lines().map(|line| line.chars().count()).max().unwrap_or(0)
+}
+
+/// A long body sentence that wraps at any realistic terminal width.
+const LONG_BODY: &str = "This is a deliberately long status-block body whose single \
+sentence keeps going well past any reasonable terminal column so that the render \
+tree is forced to wrap the body text onto several successive lines at the \
+available content width.";
+
+#[test]
+fn width_auto_body_wraps_to_available() {
+    use biscuit_terminal::utils::layout::{Layout, Width};
+    let mut block = StatusBlock::new(StatusState::Info).body(LONG_BODY);
+    block.layout_mut().width = Width::Auto;
+    block.layout_mut().margin = Default::default();
+    block.layout_mut().word_wrap = biscuit_terminal::utils::wrap_policy::WordWrap::WrapProse(
+        None,
+        None,
+    );
+    let _ = Layout::default(); // document the layout path
+    let rendered = render_status_block_tree(&block, 80);
+    let widest = widest_line(&rendered);
+    let line_count = rendered.lines().filter(|l| !l.trim().is_empty()).count();
+    assert!(
+        widest <= 80,
+        "body must wrap within width 80: widest={widest}"
+    );
+    assert!(
+        line_count > 1,
+        "body must use the full width to wrap onto multiple lines: {rendered:?}"
+    );
+}
+
+#[test]
+fn width_fixed_percent_50_does_not_double_apply() {
+    use biscuit_terminal::utils::layout::{Length, TargetValue, Width};
+    let mut block = StatusBlock::new(StatusState::Info).body(LONG_BODY);
+    block.layout_mut().width =
+        Width::Fixed(TargetValue::universal(Length::Percent(50.0)));
+    block.layout_mut().margin = Default::default();
+    let rendered = render_status_block_tree(&block, 80);
+    let widest = widest_line(&rendered);
+    // 50% of width 80 = 40 cells for the outer box. A widest of ~20 would
+    // mean the 50% was resolved twice (box=40, then wrapped to 50% of 40 =
+    // 20) — the double-application bug this guards against.
+    assert!(
+        widest <= 40,
+        "50% of width 80 caps the body at 40 cells: widest={widest}"
+    );
+    assert!(
+        widest > 20,
+        "widest ~20 would mean the 50% was applied twice: widest={widest}"
+    );
+}
+
+#[test]
+fn width_fixed_full_wraps_body_to_available() {
+    use biscuit_terminal::utils::layout::{Length, TargetValue, Width};
+    let mut block = StatusBlock::new(StatusState::Info).body(LONG_BODY);
+    block.layout_mut().width =
+        Width::Fixed(TargetValue::universal(Length::Percent(100.0)));
+    block.layout_mut().margin = Default::default();
+    let rendered = render_status_block_tree(&block, 80);
+    let widest = widest_line(&rendered);
+    assert!(
+        widest <= 80,
+        "Fixed(100%) wraps the body within width 80: widest={widest}"
+    );
+    let line_count = rendered.lines().filter(|l| !l.trim().is_empty()).count();
+    assert!(
+        line_count > 1,
+        "Fixed(100%) must use the full width so the long body wraps: {rendered:?}"
+    );
+}
+
+#[test]
+fn width_fit_content_hugs_short_body() {
+    use biscuit_terminal::utils::layout::Width;
+    let mut block = StatusBlock::new(StatusState::Info).body("Ab Cd Ef.");
+    block.layout_mut().width = Width::FitContent;
+    block.layout_mut().margin = Default::default();
+    let rendered = render_status_block_tree(&block, 80);
+    let widest = widest_line(&rendered);
+    assert!(
+        widest < 80,
+        "FitContent hugs short body content and does not pad to full width: widest={widest}"
+    );
+}
+
+#[test]
+fn border_chrome_stays_fixed_across_width_modes() {
+    // D2 slack sink: the thick left border chrome (`┃ `) stays fixed across
+    // width modes — only the body text column absorbs slack by wrapping.
+    use biscuit_terminal::utils::layout::{Length, TargetValue, Width};
+    for width in [
+        Width::Auto,
+        Width::FitContent,
+        Width::Fixed(TargetValue::universal(Length::Percent(50.0))),
+    ] {
+        let label = format!("{width:?}");
+        let mut block = StatusBlock::new(StatusState::Error).body("Body line.");
+        block.layout_mut().width = width;
+        block.layout_mut().margin = Default::default();
+        let rendered = render_status_block_tree(&block, 80);
+        let body_line = rendered
+            .lines()
+            .find(|l| l.contains("Body line."))
+            .unwrap_or_else(|| panic!("body line present under {label}: {rendered:?}"));
+        assert!(
+            body_line.starts_with('┃'),
+            "thick left border glyph is fixed under any width mode: {body_line:?}"
+        );
+    }
+}

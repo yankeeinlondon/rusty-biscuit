@@ -17,6 +17,23 @@ It is read-only by construction: an expression can inspect context, call pure
 functions, and read files, but it can never mutate state. Mutation is the
 separate concern of the [side-effect engine](side-effects.md).
 
+## Runtime-accessible descriptions
+
+Every expression descriptor — functions *and* language semantics — implements
+the shared `Described` trait from `darkmatter::catalog`. This powers exact lookup,
+fuzzy suggestion, and plain-text error enrichment inside the evaluator:
+
+- `describe(expression_function_descriptors(), "upper(x)")` returns the matching
+  function descriptor.
+- `suggest(expression_function_descriptors(), "uper", 1)` returns `upper(x)`.
+- `describe_for_error(descriptor)` emits a plain-text line with signature,
+  description, and verified example.
+
+When evaluation fails with `Unknown function: uper`, the error message appends
+the nearest match's signature, description, and example. Arity errors likewise
+append the correct signature and example for the matched function. The error
+text itself remains plain text; Claudine owns any terminal styling.
+
 ## How evaluation works
 
 The engine lives in `darkmatter/lib/src/markdown/compose/expression/` and runs a
@@ -65,40 +82,44 @@ is truthy.
 
 ### Interpolation vs. condition mode
 
-The single most important distinction, because `||` and `&&` change meaning:
+The single most important distinction, because `||` changes meaning between the
+two surfaces (`&&` does not — it is logical AND in both):
 
 | Surface | `||` means | `&&` |
 |---------|------------|------|
-| `{{ … }}` (interpolation) | **fallback** — first truthy value wins | rejected at parse time |
+| `{{ … }}` (interpolation) | **fallback** — first truthy value wins | logical AND |
 | `when="…"` (condition) | **logical OR** — returns a boolean | logical AND |
 
 The function forms `and(...)` / `or(...)` are valid in *both* modes.
 
 ## Functions
 
-Functions are the extensible part of the language. They are registered in
-**authoritative typed tables** in
-`darkmatter/lib/src/markdown/compose/expression/functions.rs`:
+Functions are the extensible part of the language. Handler-free metadata is
+authored in `darkmatter/docs/schemas/expression-functions.yaml`; runtime
+behavior is bound by canonical name in domain slices under
+`darkmatter/lib/src/markdown/compose/expression/functions/`:
 
-- `PURE_FUNCTIONS` — pure functions resolved by `dispatch()` (type predicates,
+- `FunctionHandler::Pure` — functions resolved by `dispatch()` (type predicates,
   math, collections, string predicates/mutations, date formatting/validators,
   type conversion).
-- `FS_FUNCTIONS` — context-aware functions resolved by `dispatch_fs()` that need
+- `FunctionHandler::Context` — functions resolved by `dispatch_fs()` that need
   a `ResolutionContext` (`absolute`, `relative`, `file_exists`, `frontmatter`,
   `markdown_body_empty`, `markdown_title`, `validate_schema`).
-- **Lazy logical operators** — `and(...)` / `or(...)`, which short-circuit and
-  therefore cannot go through the eager dispatchers; named in
-  `LAZY_OPERATOR_NAMES`.
+- lazy bindings — `and(...)` / `or(...)`, which short-circuit and therefore do
+  not carry an eager handler.
 
-Each registration carries the full set of **signatures** it answers to,
-including overloads and optional/variadic arity:
+Each runtime binding carries only its canonical name, aliases, evaluation mode,
+and handler. The cached registry joins it to catalog descriptors, including
+overloads and optional/variadic arity:
 
 ```rust
-PureFunction { canonical: "number", aliases: &[], signatures: &["number(x, [default])"], handler: number_fn }
-FsFunction   { canonical: "frontmatter", aliases: &[], signatures: &["frontmatter(file)", "frontmatter(file, prop)"], handler: … }
+FunctionBinding { canonical: "number", aliases: &[], evaluation: EvaluationMode::Pure, handler: Some(FunctionHandler::Pure(number_fn)) }
+FunctionBinding { canonical: "frontmatter", aliases: &[], evaluation: EvaluationMode::Context, handler: Some(FunctionHandler::Context(frontmatter_fn)) }
 ```
 
-These tables are the single source of truth for *what the evaluator recognizes*.
+The catalog is the source of truth for metadata; bindings are the source of
+truth for executable behavior and aliases. Registry initialization requires
+bidirectional canonical-name parity between them.
 
 ## How the `--expressions` report is built
 
@@ -106,45 +127,52 @@ These tables are the single source of truth for *what the evaluator recognizes*.
 kinds of content:
 
 1. **The function catalog** — rendered directly from
-   `expression_function_descriptors()` (`EXPRESSION_FUNCTION_DESCRIPTORS` in
-   `expression/catalog.rs`). The CLI groups descriptors by `category` (each
+   `expression_function_descriptors()`. The CLI groups descriptors by `category` (each
    category emitted once, even though the catalog is physically laid out by
    implementation grouping) and orders within a category by the descriptor's
    `order`. **This part cannot drift from the catalog** — it *is* the catalog.
 
 2. **The language-semantics sections** — operator precedence, truthiness, unary,
    comparison, arithmetic, variable access, mode table, and null propagation.
-   These are **hand-written literal arrays in `context.rs`**
-   (`render_expressions_precedence`, `render_expressions_truthiness`, …). They
-   mirror the behavior of the lexer/parser/evaluator but are *not* derived from
-   any Darkmatter type. **This is the engine's primary residual drift surface**
-   — see [Drift Control](drift.md#next-steps).
+   These are rendered from typed descriptor catalogs in
+   `expression/semantics.rs` that are anchored to the parser and evaluator:
+   `operator_precedence_matches_parser` asserts the precedence catalog matches
+   the parser's own table, and per-catalog `*_examples_evaluate_correctly` tests
+   run every example through the real `evaluate` pipeline. **No hand-written
+   literal arrays remain in the CLI.**
+
+## Narrative documentation parity
+
+The function table in `darkmatter/docs/topics/darkmatter-expressions.md` is
+regenerated from `expression_function_descriptors()` by
+`just darkmatter regen-expr-doc`. The generated region is guarded by
+`narrative_doc_function_table_matches_catalog`, which fails the build if the
+committed doc diverges from the catalog output.
 
 ## How to add an expression function
 
-1. **Implement and register it.** Add a handler and a `PureFunction` (or
-   `FsFunction`) entry in `functions.rs`, listing every signature/overload.
-2. **Describe it.** Add an `ExpressionFunctionDescriptor` to
-   `EXPRESSION_FUNCTION_DESCRIPTORS` in `catalog.rs`.
-3. The `--expressions` function table needs **no change** — it reads the catalog.
+1. Add signatures, descriptions, ordering, and examples to
+   `darkmatter/docs/schemas/expression-functions.yaml`.
+2. Add the handler and its runtime binding to the owning domain module.
+3. The `--expressions` function table needs **no change** — it reads the
+   catalog projection through `expression_function_descriptors()`.
 
 ## Drift control for the function catalog
 
-The catalog and the runtime registry are two parallel lists, kept in exact,
-overload-aware lockstep by tests in `expression/catalog.rs`:
+The authored catalog and runtime bindings are joined by canonical name and
+guarded by registry invariants and behavior tests:
 
-- **`descriptor_signature_set_equals_dispatchable_signature_set`** — bidirectional
-  set equality between `EXPRESSION_FUNCTION_DESCRIPTORS` and
-  `dispatchable_signatures()` (the runtime surface enumerated from
-  `PURE_FUNCTIONS` + `FS_FUNCTIONS` + lazy operators). Comparing *signatures*
-  (with arity), not just names, means a stray or missing overload fails too.
+- Registry invariants reject duplicate canonical names, alias collisions, and
+  missing entries on either side of the catalog/binding boundary.
 - **`every_descriptor_overload_is_dispatchable_at_its_declared_arity`** — an
   end-to-end proof: each descriptor is parsed and run through the real
   `evaluate` pipeline at its declared arity. A descriptor whose handler was
   removed yields `Unknown function`; a bogus overload yields an arity error.
 - **`lazy_operators_are_dispatchable`** and **`unknown_function_is_rejected`**
   anchor the two ends (real operators dispatch; a fake name is rejected).
+- **`every_example_evaluates_to_its_declared_result`** runs each descriptor's
+  `Example` through the evaluator and asserts the rendered output equals the
+  declared `result`.
 
 So: add a function to only the catalog *or* only the registry, and the build
-fails. The language-semantics prose, however, has no such guard — that gap is
-the subject of [Drift Control](drift.md).
+fails. The language-semantics prose is catalog-driven and parity-checked too.

@@ -3,7 +3,9 @@ set positional-arguments := true
 
 # set allow-duplicate-recipes
 
-set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+# `env CYG_SYS_BASHRC=1` guards against Cygwin's /etc/bash.bashrc tripping `-u`;
+# see the root justfile for the full explanation.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
 
 import "../just/lifecycle.just"
 import "../just/plan.just"
@@ -53,19 +55,11 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity unchained-ai
-    @just _sanity unchained-ai-contract
-    @just _sanity unchained-ai-cli
-    @just _sanity unchained-ai-gen
-    @just _sanity model_id
+    @just _sanity_all "unchained-ai unchained-ai-contract unchained-ai-cli unchained-ai-gen model_id"
 
 # Test both library and CLI.
 test *args="":
-    @just _test unchained-ai {{ args }}
-    @just _test unchained-ai-contract {{ args }}
-    @just _test unchained-ai-cli {{ args }}
-    @just _test unchained-ai-gen {{ args }}
-    @just _test model_id {{ args }}
+    @just _test_all "unchained-ai unchained-ai-contract unchained-ai-cli unchained-ai-gen model_id" {{ args }}
 
 # not applicable: unchained-ai has no real-terminal (Level-2) tests
 test-l2:
@@ -150,9 +144,13 @@ check:
 generate-models *args="":
     @echo ""
     @echo -e "{{ BOLD }}Regenerating unchained-ai provider models & metadata{{ RESET }}"
-    @echo -e "{{ ITALIC }}Fetching live model lists from provider APIs and metadata from Parsera...{{ RESET }}"
+    @echo -e "{{ ITALIC }}Fetching live model lists from provider APIs and metadata from models.dev...{{ RESET }}"
     @echo ""
     @cargo run -p unchained-ai-gen -- -v {{ args }}
+
+# Re-emit the committed model-catalog artifact (offline; see artifacts/README.md)
+artifact:
+    @cargo run -p unchained-ai-gen --bin emit-catalog
 
 # Outdated packages
 outdated:

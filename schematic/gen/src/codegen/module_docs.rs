@@ -10,6 +10,17 @@ use quote::quote;
 use schematic_define::{AuthStrategy, RestApi, RestMethod};
 use std::collections::BTreeMap;
 
+/// Collapses a multi-line endpoint description into a single doc-list line.
+///
+/// Spec descriptions routinely span paragraphs and contain their own Markdown
+/// lists. Emitted verbatim into a `//!` bullet they read as unindented list
+/// continuations, which rustdoc renders wrongly and clippy flags as
+/// `doc_lazy_continuation`.
+fn summarize(description: &str) -> String {
+    let first_paragraph = description.split("\n\n").next().unwrap_or(description);
+    first_paragraph.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 /// Builds module-level documentation for a generated API client.
 ///
 /// The builder generates documentation sections including:
@@ -93,7 +104,7 @@ impl<'a> ModuleDocBuilder<'a> {
                     header_name
                 )
             }
-            AuthStrategy::ApiKey { header } => {
+            AuthStrategy::ApiKey { header, .. } => {
                 format!("Uses API key authentication via the `{}` header.", header)
             }
             AuthStrategy::Basic => "Uses HTTP Basic authentication.".to_string(),
@@ -147,7 +158,8 @@ impl<'a> ModuleDocBuilder<'a> {
 
     /// Generates the features section.
     ///
-    /// Lists all endpoints grouped by HTTP method.
+    /// Lists all endpoints grouped by HTTP method, each description flattened
+    /// by [`summarize`].
     fn features_section(&self) -> String {
         let categories = self.categorize_endpoints();
         if categories.is_empty() {
@@ -158,7 +170,7 @@ impl<'a> ModuleDocBuilder<'a> {
         for (method, endpoints) in &categories {
             lines.push(format!("**{}**:", method));
             for (id, desc) in endpoints {
-                lines.push(format!("- `{}` - {}", id, desc));
+                lines.push(format!("- `{}` - {}", id, summarize(desc)));
             }
             lines.push(String::new());
         }
@@ -371,6 +383,7 @@ mod tests {
         let mut api = make_test_api();
         api.auth = AuthStrategy::ApiKey {
             header: "X-API-Key".to_string(),
+            value_prefix: None,
         };
         let builder = ModuleDocBuilder::new(&api);
         let auth = builder.auth_section();

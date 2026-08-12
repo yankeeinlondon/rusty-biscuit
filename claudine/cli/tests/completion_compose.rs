@@ -9,8 +9,7 @@
 //!   surface in compose mode.
 //! - `inline-compose` targets (files with a `prompt` frontmatter key) do
 //!   **not** surface.
-//! - `@`-prefixed partials resolve to relative paths (the `@` sigil is
-//!   stripped on selection).
+//! - `@`-prefixed partials preserve the shared FileReference insertion prefix.
 //! - Prefix-length progression: 0 chars → no directories; 3+ chars →
 //!   directories are surfaced with a trailing `/`.
 //! - `docs/` and `.claude/skills/` — inline-compose-only extras — do NOT
@@ -89,44 +88,38 @@ fn compose_word_partial_renders_repo_claudine_scope() {
 }
 
 #[test]
-fn compose_empty_partial_renders_user_global_scope() {
-    let ws = TestWorkspace::named("complete-compose-user-global-empty");
+fn compose_empty_partial_from_nested_cwd_renders_repo_scope() {
+    let ws = TestWorkspace::named("complete-compose-nested-repo-empty");
     seed_cargo_workspace(ws.path());
-    let home = fake_home(ws.path());
+    let nested = ws.path().join("pkg").join("src");
+    fs::create_dir_all(&nested).unwrap();
     write_file(
-        &home.join(".claudine").join("prompts").join("plan.md"),
+        &ws.path().join(".claudine").join("prompts").join("plan.md"),
         "# plan\n",
     );
 
-    let got = run_complete_with_home(ws.path(), &home, &["compose", ""]);
+    let got = run_complete(&nested, &["compose", ""]);
     assert!(
-        got.iter().any(|c| c == "~/.claudine/prompts/plan.md"),
-        "user-global prompt must render home-relative: {got:?}"
-    );
-    assert!(
-        !got.iter().any(|c| c == "prompts/plan.md"),
-        "user-global prompt must not collapse to prompts/: {got:?}"
+        got.iter().any(|c| c == ".claudine/prompts/plan.md"),
+        "repo prompt must render relative to the repo root from nested cwd: {got:?}"
     );
 }
 
 #[test]
-fn compose_word_partial_renders_user_global_scope() {
-    let ws = TestWorkspace::named("complete-compose-user-global-word");
+fn compose_word_partial_from_nested_cwd_renders_repo_scope() {
+    let ws = TestWorkspace::named("complete-compose-nested-repo-word");
     seed_cargo_workspace(ws.path());
-    let home = fake_home(ws.path());
+    let nested = ws.path().join("pkg").join("src");
+    fs::create_dir_all(&nested).unwrap();
     write_file(
-        &home.join(".claudine").join("prompts").join("plan.md"),
+        &ws.path().join(".claudine").join("prompts").join("plan.md"),
         "# plan\n",
     );
 
-    let got = run_complete_with_home(ws.path(), &home, &["compose", "plan"]);
+    let got = run_complete(&nested, &["compose", "plan"]);
     assert!(
-        got.iter().any(|c| c == "~/.claudine/prompts/plan.md"),
-        "user-global word match must render home-relative: {got:?}"
-    );
-    assert!(
-        !got.iter().any(|c| c == "prompts/plan.md"),
-        "user-global word match must not collapse to prompts/: {got:?}"
+        got.iter().any(|c| c == ".claudine/prompts/plan.md"),
+        "repo word match must render relative to the repo root from nested cwd: {got:?}"
     );
 }
 
@@ -329,7 +322,7 @@ fn compose_plain_git_committed_dir_uses_git_root() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn compose_magic_path_strips_sigil_and_renders_relative() {
+fn compose_magic_keeps_sigil_and_renders_filename() {
     let ws = TestWorkspace::named("complete-compose-magic");
     seed_cargo_workspace(ws.path());
     let prompts = ws.path().join("prompts");
@@ -337,21 +330,23 @@ fn compose_magic_path_strips_sigil_and_renders_relative() {
 
     let got = run_complete(ws.path(), &["compose", "@plan"]);
     assert!(
-        got.iter().any(|c| c == "prompts/plan.md"),
-        "@ sigil must strip on selection; got: {got:?}"
+        got.iter().any(|c| c == "@plan.md"),
+        "magic must keep `@` and render the filename only; got: {got:?}"
     );
     assert!(
-        !got.iter().any(|c| c.starts_with('@')),
-        "no @-prefixed candidates should be emitted: {got:?}"
+        got.iter().all(|c| c.starts_with('@') && !c.contains('/')),
+        "every magic candidate must be `@<basename>`: {got:?}"
     );
 }
 
 #[test]
-fn compose_magic_repo_prompts_shadows_repo_claudine_and_user() {
+fn compose_magic_dedups_duplicate_basename_across_tiers() {
     let ws = TestWorkspace::named("complete-compose-magic-repo-first");
     seed_cargo_workspace(ws.path());
     let home = fake_home(ws.path());
 
+    // Same filename in three scopes collapses to a single `@plan.md`; the
+    // closest scope owns the rank and runtime resolves the nearest file.
     write_file(&ws.path().join("prompts").join("plan.md"), "# repo\n");
     write_file(
         &ws.path().join(".claudine").join("prompts").join("plan.md"),
@@ -365,13 +360,13 @@ fn compose_magic_repo_prompts_shadows_repo_claudine_and_user() {
     let got = run_complete_with_home(ws.path(), &home, &["compose", "@plan"]);
     assert_eq!(
         got,
-        vec!["prompts/plan.md".to_string()],
-        "repo prompts hit must suppress lower-priority tiers"
+        vec!["@plan.md".to_string()],
+        "duplicate basename across tiers must collapse to one entry"
     );
 }
 
 #[test]
-fn compose_magic_repo_claudine_shadows_user_when_repo_prompts_absent() {
+fn compose_magic_surfaces_filename_present_in_one_tier() {
     let ws = TestWorkspace::named("complete-compose-magic-claudine-first");
     seed_cargo_workspace(ws.path());
     let home = fake_home(ws.path());
@@ -388,27 +383,26 @@ fn compose_magic_repo_claudine_shadows_user_when_repo_prompts_absent() {
     let got = run_complete_with_home(ws.path(), &home, &["compose", "@plan"]);
     assert_eq!(
         got,
-        vec![".claudine/prompts/plan.md".to_string()],
-        "repo .claudine hit must suppress user-global tier"
+        vec!["@plan.md".to_string()],
+        "duplicate basename collapses regardless of which tiers hold it"
     );
 }
 
 #[test]
-fn compose_magic_user_global_emits_when_no_repo_tier_matches() {
-    let ws = TestWorkspace::named("complete-compose-magic-user-only");
+fn compose_magic_surfaces_repo_claudine_only_filename() {
+    let ws = TestWorkspace::named("complete-compose-magic-repo-claudine-only");
     seed_cargo_workspace(ws.path());
-    let home = fake_home(ws.path());
 
     write_file(
-        &home.join(".claudine").join("prompts").join("plan.md"),
-        "# user\n",
+        &ws.path().join(".claudine").join("prompts").join("plan.md"),
+        "# repo claudine\n",
     );
 
-    let got = run_complete_with_home(ws.path(), &home, &["compose", "@plan"]);
+    let got = run_complete(ws.path(), &["compose", "@plan"]);
     assert_eq!(
         got,
-        vec!["~/.claudine/prompts/plan.md".to_string()],
-        "user-global hit should emit only when no repo tier matches"
+        vec!["@plan.md".to_string()],
+        "a filename present only in the repo .claudine scope must still surface"
     );
 }
 
@@ -513,10 +507,7 @@ fn compose_rejects_non_utf8_markdown() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn compose_magic_path_shaped_prompts_slash_plan_resolves() {
-    // Finding #4: `@prompts/plan` must resolve against the repo-scope
-    // `prompts/` root and emit `prompts/plan.md`. The `prompts` portion
-    // is peeled off so the join does not double up.
+fn compose_magic_path_shaped_prompts_slash_plan_retains_scope() {
     let ws = TestWorkspace::named("complete-compose-magic-path-shaped");
     seed_cargo_workspace(ws.path());
     let prompts = ws.path().join("prompts");
@@ -524,21 +515,13 @@ fn compose_magic_path_shaped_prompts_slash_plan_resolves() {
 
     let got = run_complete(ws.path(), &["compose", "@prompts/plan"]);
     assert!(
-        got.iter().any(|c| c == "prompts/plan.md"),
-        "path-shaped magic `@prompts/plan` must resolve to `prompts/plan.md`: {got:?}"
+        got.iter().any(|c| c == "@prompts/plan.md"),
+        "path-shaped magic must retain the shared scope: {got:?}"
     );
 }
 
 #[test]
-fn compose_magic_path_shaped_claudine_prompts_resolves() {
-    // Finding #4: `@.claudine/prompts/plan` must resolve against the
-    // repo-scope `.claudine/prompts/` root and emit
-    // `.claudine/prompts/plan.md`. Scope leaf is `prompts`, so `dir`
-    // `.claudine/prompts` peels the `prompts` segment; the remaining
-    // `.claudine` join is not a directory under the scope, so the repo
-    // `.claudine/prompts` scope itself is the only hit (via raw join
-    // fallback on non-matching leaf elsewhere — see walk-root
-    // resolution).
+fn compose_magic_path_shaped_claudine_prompts_retains_scope() {
     let ws = TestWorkspace::named("complete-compose-magic-claudine");
     seed_cargo_workspace(ws.path());
     let claudine = ws.path().join(".claudine").join("prompts");
@@ -546,13 +529,13 @@ fn compose_magic_path_shaped_claudine_prompts_resolves() {
 
     let got = run_complete(ws.path(), &["compose", "@.claudine/prompts/plan"]);
     assert!(
-        got.iter().any(|c| c == ".claudine/prompts/plan.md"),
-        "path-shaped magic `@.claudine/prompts/plan` must resolve: {got:?}"
+        got.iter().any(|c| c == "@.claudine/prompts/plan.md"),
+        "path-shaped magic must retain the shared scope: {got:?}"
     );
 }
 
 #[test]
-fn compose_plain_git_magic_renders_repo_claudine_relative() {
+fn compose_plain_git_magic_renders_filename() {
     let ws = TestWorkspace::named("complete-compose-plain-git-magic-claudine");
     seed_plain_git_repo(ws.path());
     let nested = ws.path().join("nested").join("child");
@@ -565,8 +548,8 @@ fn compose_plain_git_magic_renders_repo_claudine_relative() {
     let got = run_complete(&nested, &["compose", "@.claudine/prompts/plan"]);
     assert_eq!(
         got,
-        vec![".claudine/prompts/plan.md".to_string()],
-        "plain git magic should render repo .claudine path relative to git root"
+        vec!["@.claudine/prompts/plan.md".to_string()],
+        "plain-git magic must retain the shared authored scope"
     );
 }
 
@@ -675,74 +658,53 @@ fn compose_empty_partial_still_does_not_surface_repo_dirs() {
 }
 
 // ---------------------------------------------------------------------
-// magic-mode directory parity (review-3 finding 4)
+// magic mode is filename-only (no directory candidates)
 // ---------------------------------------------------------------------
 
 #[test]
-fn compose_magic_short_prefix_surfaces_repo_dirs() {
-    // Review-3 finding 4: `@d<TAB>` mirrors Word-mode dir behavior. Both
-    // `docs/` and `features/` (matching the prefix `d`) must surface
-    // alongside any user-global file-tier hit. The directory walk runs
-    // regardless of which file tier won the shadow check.
+fn compose_magic_short_prefix_surfaces_no_dirs() {
+    // Filename-magic contract: `@d<TAB>` surfaces matching prompt files as
+    // `@<basename>` and NEVER a directory — directory drilling is a
+    // Word-mode (non-`@`) behavior.
     let ws = TestWorkspace::named("complete-compose-magic-short-dirs");
     seed_cargo_workspace(ws.path());
-    let home = fake_home(ws.path());
     write_file(
-        &home.join(".claudine").join("prompts").join("daily.md"),
+        &ws.path().join(".claudine").join("prompts").join("daily.md"),
         "# d\n",
     );
     fs::create_dir_all(ws.path().join("docs")).unwrap();
     fs::create_dir_all(ws.path().join("features")).unwrap();
 
-    let got = run_complete_with_home(ws.path(), &home, &["compose", "@d"]);
+    let got = run_complete(ws.path(), &["compose", "@d"]);
     assert!(
-        got.iter().any(|c| c == "docs/"),
-        "magic short prefix must surface `docs/`: {got:?}"
+        got.iter().any(|c| c == "@daily.md"),
+        "magic short prefix must surface the matching file: {got:?}"
     );
     assert!(
-        !got.iter().any(|c| c == "features/"),
-        "starting-substring `d` must NOT surface `features/`: {got:?}"
+        !got.iter().any(|c| c.ends_with('/')),
+        "magic mode must never surface directories: {got:?}"
     );
 }
 
 #[test]
-fn compose_magic_dirs_independent_of_file_tier_shadow() {
-    // Review-3 finding 4 (key invariant): the file-tier shadowing rule
-    // (review-plan-2 Phase 2) only applies to file candidates. The
-    // repo-wide directory walk runs independently — so even when a
-    // higher-priority scope wins the file tier and shadows lower tiers,
-    // matching directories still surface.
+fn compose_magic_never_surfaces_directories() {
+    // Magic mode emits only `@<basename>` file candidates; a real directory
+    // whose name matches the partial must not appear.
     let ws = TestWorkspace::named("complete-compose-magic-dirs-independent");
     seed_cargo_workspace(ws.path());
     let home = fake_home(ws.path());
 
-    // Repo prompts file tier wins (highest priority).
     write_file(&ws.path().join("prompts").join("plan.md"), "# repo plan\n");
-    // User-global file is shadowed by the repo file-tier win.
-    write_file(
-        &home
-            .join(".claudine")
-            .join("prompts")
-            .join("planning")
-            .join("something.md"),
-        "# something\n",
-    );
-    // Real `planning/` directory at repo root — must surface
-    // independently of the file shadow.
+    // Real `planning/` directory at repo root — must NOT surface under `@`.
     fs::create_dir_all(ws.path().join("planning")).unwrap();
 
     let got = run_complete_with_home(ws.path(), &home, &["compose", "@pl"]);
     assert!(
-        got.iter().any(|c| c == "prompts/plan.md"),
-        "repo file tier must win: {got:?}"
+        got.iter().any(|c| c == "@plan.md"),
+        "magic must surface the matching file: {got:?}"
     );
     assert!(
-        !got.iter()
-            .any(|c| c.contains("something") || c.starts_with("~/")),
-        "user-global file must be shadowed: {got:?}"
-    );
-    assert!(
-        got.iter().any(|c| c == "planning/"),
-        "directory walk runs unconditionally: {got:?}"
+        !got.iter().any(|c| c.ends_with('/')),
+        "magic mode must not surface directories: {got:?}"
     );
 }

@@ -14,6 +14,22 @@ pub fn parse_indent_size(s: &str) -> Result<usize, String> {
     }
 }
 
+/// Parses `--fixed-width`, accepting practical Markdown wrap columns from 1 to 1000.
+///
+/// The upper bound rejects accidental huge values while still allowing any
+/// realistic terminal/editor width.
+pub fn parse_fixed_width(s: &str) -> Result<usize, String> {
+    let value = s
+        .parse::<usize>()
+        .map_err(|_| format!("'{s}' is not a valid positive integer"))?;
+
+    if (1..=1000).contains(&value) {
+        Ok(value)
+    } else {
+        Err("--fixed-width must be between 1 and 1000".to_string())
+    }
+}
+
 /// Parses a theme name string into ThemePair.
 pub fn parse_theme_name(s: &str) -> Result<ThemePair, String> {
     ThemePair::try_from(s).map_err(|e| e.to_string())
@@ -122,6 +138,21 @@ mod tests {
     fn parse_indent_size_rejects_invalid() {
         assert!(parse_indent_size("3").is_err());
         assert!(parse_indent_size("abc").is_err());
+    }
+
+    #[test]
+    fn parse_fixed_width_accepts_valid_values() {
+        assert_eq!(parse_fixed_width("1"), Ok(1));
+        assert_eq!(parse_fixed_width("80"), Ok(80));
+        assert_eq!(parse_fixed_width("1000"), Ok(1000));
+    }
+
+    #[test]
+    fn parse_fixed_width_rejects_invalid_values() {
+        assert!(parse_fixed_width("0").is_err());
+        assert!(parse_fixed_width("1001").is_err());
+        assert!(parse_fixed_width("abc").is_err());
+        assert!(parse_fixed_width("-1").is_err());
     }
 
     #[test]

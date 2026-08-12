@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 95
 expression: "convert_atom(\"boolish\")"
 ---
 {
@@ -9,16 +10,23 @@ expression: "convert_atom(\"boolish\")"
     "field": {
       "anyOf": [
         {
-          "type": "boolean"
+          "type": "null"
         },
         {
-          "enum": [
-            "true",
-            "false",
-            "True",
-            "False",
-            "TRUE",
-            "FALSE"
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "enum": [
+                "true",
+                "false",
+                "True",
+                "False",
+                "TRUE",
+                "FALSE"
+              ]
+            }
           ]
         }
       ]

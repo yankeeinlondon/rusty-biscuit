@@ -1,0 +1,126 @@
+total ids: 687
+family inferred: 686 (99.9%)
+version parsed: 489 (71.2%) | date-pin only: 60 | bare (no version/date/rolling): 105
+distinct vendor/family keys: 273
+cross-source identity groups (same model, >1 source): 130
+
+== latest-of-family demo ==
+latest 'anthropic/claude-sonnet*' -> zenmux/anthropic/claude-sonnet-4.6  (v[4, 6] pin='' [12 members])
+latest 'anthropic/claude-opus*' -> zenmux/anthropic/claude-opus-4.7  (v[4, 7] pin='' [16 members])
+latest 'moonshotai/kimi-k*' -> zenmux/moonshotai/kimi-k2.6  (v[2, 6] pin='' [13 members])
+latest 'openai/gpt*' -> zenmux/openai/gpt-5.5-pro  (v[5, 5] pin='' [88 members])
+latest 'google/gemini-flash*' -> gemini/gemini-3.1-flash-live-preview  (v[3, 1] pin='' [28 members])
+latest 'zai/glm*' -> zenmux/z-ai/glm-5.1  (v[5, 1] pin='' [33 members])
+
+== top families ==
+  32  openai/gpt
+  31  qwen/qwen
+  19  zai/glm
+  17  google/gemini-flash
+  16  anthropic/claude-opus
+  14  xai/grok
+  13  google/gemini-pro
+  13  meta/llama
+  12  anthropic/claude-sonnet
+  11  google/gemma
+  11  minimax/minimax-m
+  11  mistral/mistral-medium
+  10  moonshotai/kimi-k
+  10  qwen/qwen-plus
+   9  google/gemini-flash-lite
+   9  mistral/ministral
+   9  mistral/mistral
+   9  openai/gpt-codex
+   8  mistral/mistral-large
+   8  openai/gpt-mini
+
+== sample cross-source groups ==
+anthropic|claude-haiku|3.5||
+      openrouter/anthropic/claude-3.5-haiku
+      zenmux/anthropic/claude-3.5-haiku
+anthropic|claude-haiku|4.5||
+      anthropic/claude-haiku-4-5-20251001
+      openrouter/anthropic/claude-haiku-4.5
+      zenmux/anthropic/claude-haiku-4.5
+anthropic|claude-opus|4.1||
+      anthropic/claude-opus-4-1-20250805
+      openrouter/anthropic/claude-opus-4.1
+      zenmux/anthropic/claude-opus-4.1
+anthropic|claude-opus|4.5||
+      anthropic/claude-opus-4-5-20251101
+      openrouter/anthropic/claude-opus-4.5
+      zenmux/anthropic/claude-opus-4.5
+anthropic|claude-opus|4.6||
+      anthropic/claude-opus-4-6
+      openrouter/anthropic/claude-opus-4.6
+      zenmux/anthropic/claude-opus-4.6
+anthropic|claude-opus|4.7||
+      anthropic/claude-opus-4-7
+      openrouter/anthropic/claude-opus-4.7
+      zenmux/anthropic/claude-opus-4.7
+anthropic|claude-opus|4||
+      anthropic/claude-opus-4-20250514
+      openrouter/anthropic/claude-opus-4
+      zenmux/anthropic/claude-opus-4
+anthropic|claude-sonnet|3.7||
+      openrouter/anthropic/claude-3.7-sonnet
+      openrouter/anthropic/claude-3.7-sonnet:thinking
+      zenmux/anthropic/claude-3.7-sonnet
+anthropic|claude-sonnet|4.5||
+      anthropic/claude-sonnet-4-5-20250929
+      openrouter/anthropic/claude-sonnet-4.5
+      zenmux/anthropic/claude-sonnet-4.5
+anthropic|claude-sonnet|4.6||
+      anthropic/claude-sonnet-4-6
+      openrouter/anthropic/claude-sonnet-4.6
+      zenmux/anthropic/claude-sonnet-4.6
+anthropic|claude-sonnet|4||
+      anthropic/claude-sonnet-4-20250514
+      openrouter/anthropic/claude-sonnet-4
+      zenmux/anthropic/claude-sonnet-4
+deepseek|deepseek-r-0528|1||
+      openrouter/deepseek/deepseek-r1-0528
+      zenmux/deepseek/deepseek-r1-0528
+
+== bare oddities (no version, date, or rolling marker) ==
+  gemini/aqa  -> family='aqa' (no version/date)
+  gemini/gemini-embedding-001  -> family='gemini-001' (no version/date)
+  gemini/nano-banana-pro-preview  -> family='nano-banana-pro' (no version/date)
+  groq/canopylabs/orpheus-arabic-saudi  -> family='orpheus-arabic-saudi' (no version/date)
+  groq/groq/compound  -> family='compound' (no version/date)
+  groq/groq/compound-mini  -> family='compound-mini' (no version/date)
+  groq/openai/gpt-oss-120b  -> family='gpt-oss' (no version/date)
+  groq/openai/gpt-oss-20b  -> family='gpt-oss' (no version/date)
+  groq/openai/gpt-oss-safeguard-20b  -> family='gpt-oss-safeguard' (no version/date)
+  mistral/codestral-embed  -> family='codestral' (no version/date)
+  mistral/mistral-embed  -> family='mistral' (no version/date)
+  mistral/mistral-medium  -> family='mistral-medium' (no version/date)
+  mistral/mistral-vibe-cli-fast  -> family='mistral-vibe-cli' (no version/date)
+  mistral/mistral-vibe-cli-with-tools  -> family='mistral-vibe-cli-with-tools' (no version/date)
+  mistral/open-mistral-nemo  -> family='open-mistral-nemo' (no version/date)
+  openai/o3  -> family='o3' (no version/date)
+  openai/o3-mini  -> family='o3-mini' (no version/date)
+  openai/o4-mini  -> family='o4-mini' (no version/date)
+  openrouter/alfredpros/codellama-7b-instruct-solidity  -> family='codellama-solidity' (no version/date)
+  openrouter/alibaba/tongyi-deepresearch-30b-a3b  -> family='tongyi-deepresearch' (no version/date)
+  openrouter/alpindale/goliath-120b  -> family='goliath' (no version/date)
+  openrouter/arcee-ai/coder-large  -> family='coder-large' (no version/date)
+  openrouter/arcee-ai/maestro-reasoning  -> family='maestro-reasoning' (no version/date)
+  openrouter/arcee-ai/spotlight  -> family='spotlight' (no version/date)
+  openrouter/arcee-ai/trinity-large-preview  -> family='trinity-large' (no version/date)
+  openrouter/arcee-ai/trinity-large-thinking  -> family='trinity-large' (no version/date)
+  openrouter/arcee-ai/trinity-mini  -> family='trinity-mini' (no version/date)
+  openrouter/arcee-ai/virtuoso-large  -> family='virtuoso-large' (no version/date)
+  openrouter/baidu/cobuddy:free  -> family='cobuddy' (no version/date)
+  openrouter/baidu/qianfan-ocr-fast:free  -> family='qianfan' (no version/date)
+  openrouter/cognitivecomputations/dolphin-mistral-24b-venice-edition:free  -> family='dolphin-mistral-venice-edition' (no version/date)
+  openrouter/cohere/command-a  -> family='command-a' (no version/date)
+  openrouter/deepseek/deepseek-chat  -> family='deepseek' (no version/date)
+  openrouter/google/gemma-3n-e4b-it  -> family='gemma-3n-e4b' (no version/date)
+  openrouter/mancer/weaver  -> family='weaver' (no version/date)
+  openrouter/mistralai/devstral-medium  -> family='devstral-medium' (no version/date)
+  openrouter/mistralai/devstral-small  -> family='devstral-small' (no version/date)
+  openrouter/mistralai/mistral-large  -> family='mistral-large' (no version/date)
+  openrouter/mistralai/mistral-nemo  -> family='mistral-nemo' (no version/date)
+  openrouter/mistralai/mistral-saba  -> family='mistral' (no version/date)
+

@@ -145,8 +145,8 @@ impl Markdown {
                 return Err(ShellExpansionError::ApprovalRequired {
                     ctx: Box::new(ctx.clone()),
                     command: entry.normalized.clone(),
-                    whitelist_path: policy_paths.whitelist.clone(),
-                    blacklist_path: policy_paths.blacklist.clone(),
+                    whitelist_path: Box::new(policy_paths.whitelist.clone()),
+                    blacklist_path: Box::new(policy_paths.blacklist.clone()),
                     origin: entry.origin.clone(),
                 });
             };
@@ -304,7 +304,7 @@ mod lifecycle_tests {
     fn preflight_lifecycle_blocks_frontmatter_when_body_denied() {
         let temp = TempDir::new().unwrap();
         let sentinel = temp.path().join("sentinel");
-        let sentinel_str = sentinel.display().to_string();
+        let sentinel_str = biscuit_file::to_portable_string(&sentinel);
 
         let content = format!(
             "---\nsentinel: \"$(touch {sentinel_str})\"\n---\n::shell echo body-cmd\n"

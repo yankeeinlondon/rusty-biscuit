@@ -1,0 +1,18 @@
+{
+  "directory": "/workspace/project",
+  "payload": {
+    "id": "evt_scrubbed_promotion_limit",
+    "type": "session.error",
+    "properties": {
+      "sessionID": "ses_scrubbed",
+      "error": {
+        "name": "APIError",
+        "data": {
+          "message": "Promotion model limit reached",
+          "isRetryable": false,
+          "responseBody": "{\"error\":{\"code\":\"PROMOTION_MODEL_LIMIT_REACHED\",\"message\":\"Promotion model limit reached\"}}"
+        }
+      }
+    }
+  }
+}

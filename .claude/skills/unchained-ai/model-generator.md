@@ -4,7 +4,7 @@ Detailed reference for the `unchained-ai-gen` binary in `unchained-ai/gen/`.
 
 ## Purpose
 
-Auto-generates provider model enum files and metadata lookup tables by querying live provider APIs and the Parsera LLM Specs API.
+Auto-generates provider model enum files and metadata lookup tables by querying live provider APIs and the models.dev catalog.
 
 ## CLI Usage
 
@@ -42,16 +42,16 @@ gen/src/
 ├── provider_metadata/      # Provider-native metadata parsers
 │   ├── mod.rs              # Dispatcher routing to provider-specific parsers
 │   └── openrouter.rs       # OpenRouter metadata extraction (pricing, params, etc.)
-├── parsera.rs              # Parsera LLM Specs API integration
+├── models_dev.rs           # models.dev catalog fetch, matching, guards, and field mapping
 └── errors.rs               # GeneratorError type
 ```
 
 ### Pipeline
 
-1. **Fetch Parsera specs** - Single fetch at startup from `api.parsera.org/v1/llm-specs` (with 2s delay + 1 retry on failure; graceful degradation on failure)
+1. **Fetch models.dev catalog** - Single fetch at startup from `https://models.dev/api.json` (30s timeout, 2s delay + 1 retry on failure); degraded responses fail generation loudly
 2. **Fetch provider models** - Parallel queries to each provider's `/models` endpoint using API keys from environment; raw metadata preserved per model
 3. **Parse provider-native metadata** - Route raw JSON through provider-specific parsers (e.g., OpenRouter) to extract pricing, architecture, default parameters
-4. **Merge metadata** - Priority: Provider-Native > Parsera for overlapping fields; both sources fill gaps
+4. **Match and merge metadata** - Match models.dev rows within each provider bucket; priority is provider-native > models.dev for overlapping fields, with both sources filling gaps
 5. **Generate enum files** - One `.rs` file per provider with `#[derive(ModelId)]` enum
 6. **Generate compact metadata file** - `metadata_generated.rs` mapping model IDs to `ModelMetadata` (with `..Default::default()` for brevity)
 7. **Generate rich OpenRouter metadata file** - `metadata_openrouter_generated.rs` with full `ProviderModelMetadata` entries including pricing, parameters, etc.
@@ -68,30 +68,39 @@ Takes a provider name and model ID list, produces Rust source containing:
 
 Variant naming uses `enum_variant_name_from_wire_id()` from `build/enum_name.rs` which converts wire IDs to valid Rust identifiers (e.g., `gpt-4o` becomes `Gpt__4o`, `claude-3-5-haiku-20241022` becomes `Claude__3__5__Haiku__20241022`).
 
-### Parsera Integration (`parsera.rs`)
+### models.dev Integration (`models_dev.rs`)
 
-Fetches model specs from [Parsera LLM Specs API](https://api.parsera.org/v1/llm-specs).
+Fetches model specs from [models.dev](https://models.dev) and maps them into `ProviderModelMetadata`.
 
 **Fetch strategy**:
 - Fetched once at startup before processing any providers
 - 30-second request timeout
-- On failure: wait 2 seconds, retry once
-- If both attempts fail: continue with empty metadata
+- On failure: wait 2 seconds, retry once; if both attempts fail, return an error
+- Validate the live response has at least 50 provider buckets
+- Validate roster-critical buckets are present and non-empty: `anthropic`, `google`, `moonshotai`, `openai`, `openrouter`, `xai`, `zai`, `deepseek`, `groq`, and `mistral`
 
-**Model ID matching** (`find_parsera_metadata`):
-1. **Exact match** - Direct lookup by model ID
-2. **Date suffix stripping** - Remove `-YYYYMMDD` suffixes (e.g., `claude-3-5-haiku-20241022` -> `claude-3-5-haiku`)
-3. **Family fallback** - Match against Parsera's `family` field
+**Provider bucketing**:
+- Direct keys: `anthropic`, `deepseek`, `groq`, `mistral`, `moonshotai`, `openai`, `openrouter`
+- Renamed keys: `gemini -> google`, `x-ai -> xai`, `z-ai -> zai`
+- No models.dev bucket: `ollama`, `zenmux`
 
-**Metadata fields from Parsera**:
+**Model ID matching** (`find_models_dev_metadata`):
+1. **Exact match** - Direct lookup by provider-local model ID
+2. **Identity-aware match** - Parse both generated and models.dev IDs with `ModelIdentity::parse`, compare identity keys, prefer exact date-pin agreement, then the unpinned row
+3. **Ambiguity refusal** - If identity candidates remain ambiguous, report no match instead of guessing
+
+**Metadata fields from models.dev**:
 - `display_name` (e.g., "GPT-4o mini")
 - `family` (e.g., "gpt-4o-mini")
 - `context_window` (tokens)
 - `max_output_tokens` (tokens)
 - `modalities` (input/output arrays: text, image, audio, video)
-- `capabilities` (e.g., "function_calling", "structured_output")
+- `capabilities` from canonical tokens: `function_calling`, `structured_output`, `reasoning`, `file_input`
+- `pricing` from per-million USD models.dev costs converted to per-token USD by dividing by `1e6`
+- `knowledge_cutoff`
+- `release_date` as a source release-date string
 
-Note: `default_temperature` is NOT provided by Parsera (only available from Mistral's native API).
+Note: `temperature`, `reasoning_options`, and `last_updated` from models.dev are intentionally not mapped. `created` remains native-source metadata; models.dev `release_date` is kept separate.
 
 ## Output
 

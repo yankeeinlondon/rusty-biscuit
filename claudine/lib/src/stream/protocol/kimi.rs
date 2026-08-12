@@ -6,8 +6,13 @@
 //! on every field; unknown `event.type` / `request.type` discriminants fail
 //! typed deserialization so the semantic parser can fall back to a raw
 //! `ProviderExtension` event.
+//!
+//! Wire 1.10 also introduced on-disk session surfaces — background-task
+//! directories (`tasks/`) and compaction snapshots (`context_{N}.jsonl`) —
+//! that are known but deliberately unmodeled here (deferred; they are
+//! storage artifacts, not wire envelopes).
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 // ----------------------------------------------------------------------------
@@ -30,6 +35,17 @@ use serde_json::Value;
 // whose `type` discriminates the typed `KimiWireEvent`. Request params are
 // decoded into `KimiRequestParams` whose `type` discriminates the typed
 // `KimiWireRequest`.
+
+/// Wire protocol versions this Claudine release can drive. The CLI wiring
+/// advertises the newest entry on its `initialize` request; the semantic
+/// parser accepts any response version in this window and emits a terminal
+/// remediation-bearing `Configuration` error for anything else.
+///
+/// The Wire protocol version is an axis independent of both product version
+/// lines — the legacy Python kimi-cli 1.x (state under `~/.kimi`) and the
+/// TypeScript Kimi Code binary 0.x (state under `~/.kimi-code` /
+/// `KIMI_CODE_HOME`) each negotiate their own Wire revision.
+pub const SUPPORTED_WIRE_PROTOCOL_VERSIONS: &[&str] = &["1.9", "1.10"];
 
 /// Classified JSON-RPC envelope received from `kimi --wire`.
 #[derive(Debug)]
@@ -217,6 +233,11 @@ impl KimiRequestParams {
 /// so it dispatches on the discriminator while consuming the payload as a
 /// strongly-typed struct. Unknown event types fail typed deserialization and
 /// the parser surfaces them via the raw fallback path.
+///
+/// The Wire 1.10 additions (`StepRetry`, `StatusUpdate.mcp_status`, the
+/// richer `Notification` payload) are sourced from the Python kimi-cli Wire
+/// source (`wire/types.py`); parity for the TypeScript kimi-code binary is
+/// unconfirmed — research marks its wire envelope coverage partial.
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", content = "payload")]
 pub enum KimiWireEvent {
@@ -228,6 +249,8 @@ pub enum KimiWireEvent {
     StepBegin(KimiStepBegin),
     #[serde(rename = "StepInterrupted")]
     StepInterrupted(KimiStepInterrupted),
+    #[serde(rename = "StepRetry")]
+    StepRetry(KimiStepRetry),
     #[serde(rename = "SteerInput")]
     SteerInput(KimiSteerInput),
     #[serde(rename = "CompactionBegin")]
@@ -348,6 +371,27 @@ pub struct KimiStepInterrupted {
     pub reason: Option<String>,
 }
 
+/// `StepRetry` payload (Wire 1.10) — an API call inside a step failed and is
+/// being retried. `wait_s` is the backoff delay in float seconds;
+/// `error_type` is the originating exception class (e.g.
+/// `APIEmptyResponseError`); `status_code` is the HTTP status when one was
+/// observed.
+#[derive(Debug, Default, Deserialize)]
+pub struct KimiStepRetry {
+    #[serde(default)]
+    pub n: Option<u64>,
+    #[serde(default)]
+    pub next_attempt: Option<u64>,
+    #[serde(default)]
+    pub max_attempts: Option<u64>,
+    #[serde(default)]
+    pub wait_s: Option<f64>,
+    #[serde(default)]
+    pub error_type: Option<String>,
+    #[serde(default)]
+    pub status_code: Option<i64>,
+}
+
 /// `SteerInput` payload — out-of-band steering directive from the user.
 #[derive(Debug, Default, Deserialize)]
 pub struct KimiSteerInput {
@@ -405,7 +449,7 @@ pub struct KimiWireStatusUpdate {
     #[serde(default)]
     pub plan_mode: Option<bool>,
     #[serde(default)]
-    pub mcp_status: Option<Value>,
+    pub mcp_status: Option<KimiMcpStatusSnapshot>,
 }
 
 impl KimiWireStatusUpdate {
@@ -460,7 +504,44 @@ impl KimiWireTokenUsage {
     }
 }
 
-/// `Notification` event payload — server-emitted info notice.
+/// `mcp_status` block on `StatusUpdate` (Wire 1.10) — aggregate MCP server
+/// connection state. Derives `Serialize` (unlike sibling payload structs)
+/// so the parser can project the snapshot into event `extra`.
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct KimiMcpStatusSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub loading: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connected: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub servers: Option<Vec<KimiMcpServerSnapshot>>,
+}
+
+/// Per-server entry in `mcp_status.servers`. `status` is one of `pending`,
+/// `connecting`, `connected`, `failed`, `unauthorized`.
+#[derive(Debug, Default, Deserialize, Serialize)]
+pub struct KimiMcpServerSnapshot {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tools: Option<Vec<String>>,
+}
+
+/// `Notification` event payload — server-emitted notice.
+///
+/// Decodes both notification shapes additively: the Wire 1.9 fields
+/// (`level`/`title`/`message`/`source` — also the shape Claudine's own
+/// synthetic warning envelopes use) and the Wire 1.10 replacement payload
+/// (`id`/`category`/`type`/`source_kind`/`source_id`/`title`/`body`/
+/// `severity`/`created_at`/`payload`). The parser resolves the message as
+/// `message` → `body` → `title` and the warning level as `level` →
+/// `severity` so both revisions render.
 #[derive(Debug, Default, Deserialize)]
 pub struct KimiWireNotification {
     #[serde(default)]
@@ -471,6 +552,26 @@ pub struct KimiWireNotification {
     pub message: Option<String>,
     #[serde(default)]
     pub source: Option<String>,
+    #[serde(default)]
+    pub id: Option<String>,
+    #[serde(default)]
+    pub category: Option<String>,
+    #[serde(default, rename = "type")]
+    pub notification_type: Option<String>,
+    #[serde(default)]
+    pub source_kind: Option<String>,
+    #[serde(default)]
+    pub source_id: Option<String>,
+    #[serde(default)]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub severity: Option<String>,
+    /// Float Unix timestamp; unit/timezone are not formally specified
+    /// upstream.
+    #[serde(default)]
+    pub created_at: Option<f64>,
+    #[serde(default)]
+    pub payload: Option<Value>,
 }
 
 /// `PlanDisplay` event payload — Kimi plan-mode rendering surface.
@@ -790,15 +891,55 @@ impl KimiApprovalRequest {
 /// `QuestionRequest` request payload — server-initiated user-input prompt.
 /// Should not arrive in v1 (Claudine declares `supports_question: false` on
 /// initialize). If it does, the parser surfaces a `Warning` and the IO loop
-/// auto-responds with a synthetic empty answer.
+/// auto-responds with a synthetic empty answer keyed on the JSON-RPC
+/// envelope `id` (not the payload `id` or `tool_call_id`).
+///
+/// Two wire shapes coexist: since Wire 1.4 the payload is
+/// `{id, tool_call_id, questions: [...]}`; older wires sent a flat
+/// `{id, question, options}`. Both field sets are kept so either shape
+/// deserializes; use [`Self::primary_question`] instead of reading the
+/// fields directly.
 #[derive(Debug, Default, Deserialize)]
 pub struct KimiQuestionRequest {
     #[serde(default)]
     pub id: Option<String>,
     #[serde(default)]
+    pub tool_call_id: Option<String>,
+    /// Current wire (>= 1.4): list of question items.
+    #[serde(default)]
+    pub questions: Option<Vec<KimiQuestionItem>>,
+    /// Legacy flat shape: single question text.
+    #[serde(default)]
     pub question: Option<String>,
+    /// Legacy flat shape: option list.
     #[serde(default)]
     pub options: Option<Value>,
+}
+
+impl KimiQuestionRequest {
+    /// First question text across both wire shapes: the first non-empty
+    /// `questions[].question` when present, else the legacy flat `question`.
+    pub fn primary_question(&self) -> Option<&str> {
+        self.questions
+            .as_ref()
+            .and_then(|items| items.iter().find_map(|item| item.question.as_deref()))
+            .or(self.question.as_deref())
+    }
+}
+
+/// One entry of `QuestionRequest.questions` (Wire >= 1.4).
+#[derive(Debug, Default, Deserialize)]
+pub struct KimiQuestionItem {
+    #[serde(default)]
+    pub question: Option<String>,
+    #[serde(default)]
+    pub header: Option<String>,
+    /// `[{label, description}]` per the wire schema; kept open-shaped since
+    /// Claudine never renders options (it auto-answers empty).
+    #[serde(default)]
+    pub options: Option<Value>,
+    #[serde(default)]
+    pub multi_select: Option<bool>,
 }
 
 /// `ToolCallRequest` request payload — server asks the client to execute a
@@ -836,6 +977,10 @@ pub struct KimiHookRequest {
 pub struct KimiPromptResult {
     #[serde(default)]
     pub status: Option<String>,
+    /// Step count accompanying the terminal status; observed alongside
+    /// `max_steps_reached`, where it carries the configured loop limit.
+    #[serde(default)]
+    pub steps: Option<u64>,
 }
 
 impl KimiPromptResult {
@@ -883,712 +1028,4 @@ pub struct KimiServerCapabilities {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    // ------------------------------------------------------------------
-    // Wire-mode (JSON-RPC 2.0) protocol tests
-    // ------------------------------------------------------------------
-
-    use std::path::PathBuf;
-
-    fn fixture_path(name: &str) -> PathBuf {
-        let mut p = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        p.push("src/stream/protocol/fixtures/kimi");
-        p.push(name);
-        p
-    }
-
-    fn load_fixture_lines(name: &str) -> Vec<Value> {
-        let raw = std::fs::read_to_string(fixture_path(name))
-            .unwrap_or_else(|e| panic!("read fixture {name}: {e}"));
-        let mut out = Vec::new();
-        for (idx, line) in raw.lines().enumerate() {
-            let trimmed = line.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            let value: Value = serde_json::from_str(trimmed)
-                .unwrap_or_else(|e| panic!("parse {name} line {}: {e}", idx + 1));
-            out.push(value);
-        }
-        out
-    }
-
-    fn classify_lines(name: &str) -> Vec<KimiEnvelope> {
-        load_fixture_lines(name)
-            .into_iter()
-            .filter_map(KimiEnvelope::classify)
-            .collect()
-    }
-
-    #[test]
-    fn envelope_classifies_notification() {
-        let value = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "event",
-            "params": {"type": "TurnEnd", "payload": {}},
-        });
-        let env = KimiEnvelope::classify(value).expect("classified");
-        let KimiEnvelope::Notification(params) = env else {
-            panic!("expected Notification");
-        };
-        assert_eq!(params.event_type, "TurnEnd");
-    }
-
-    #[test]
-    fn envelope_classifies_request() {
-        let value = serde_json::json!({
-            "jsonrpc": "2.0",
-            "method": "request",
-            "id": "req-1",
-            "params": {"type": "ApprovalRequest", "payload": {"id": "a"}},
-        });
-        let env = KimiEnvelope::classify(value).expect("classified");
-        let KimiEnvelope::Request { id, params } = env else {
-            panic!("expected Request");
-        };
-        assert_eq!(id.as_str(), Some("req-1"));
-        assert_eq!(params.request_type, "ApprovalRequest");
-    }
-
-    #[test]
-    fn envelope_classifies_success_response() {
-        let value = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": "prompt-2",
-            "result": {"status": "finished"},
-        });
-        let env = KimiEnvelope::classify(value).expect("classified");
-        let KimiEnvelope::SuccessResponse { id, result } = env else {
-            panic!("expected SuccessResponse");
-        };
-        assert_eq!(id.as_str(), Some("prompt-2"));
-        let parsed: KimiPromptResult = serde_json::from_value(result).unwrap();
-        assert_eq!(
-            parsed.status.as_deref(),
-            Some(KimiPromptResult::STATUS_FINISHED)
-        );
-    }
-
-    #[test]
-    fn envelope_classifies_error_response() {
-        let value = serde_json::json!({
-            "jsonrpc": "2.0",
-            "id": "prompt-2",
-            "error": {"code": -32004, "message": "Auth expired", "data": null},
-        });
-        let env = KimiEnvelope::classify(value).expect("classified");
-        let KimiEnvelope::ErrorResponse { id, error } = env else {
-            panic!("expected ErrorResponse");
-        };
-        assert_eq!(id.as_str(), Some("prompt-2"));
-        assert_eq!(error.code, KimiJsonRpcError::AUTH_EXPIRED);
-        assert_eq!(error.message, "Auth expired");
-    }
-
-    #[test]
-    fn envelope_returns_none_for_unknown_shape() {
-        let value = serde_json::json!({"jsonrpc": "2.0"});
-        assert!(KimiEnvelope::classify(value).is_none());
-    }
-
-    #[test]
-    fn notification_params_decodes_typed_event() {
-        let params = KimiNotificationParams {
-            event_type: "StepBegin".into(),
-            payload: serde_json::json!({"n": 3}),
-        };
-        let event = params.into_event().expect("typed event");
-        let KimiWireEvent::StepBegin(payload) = event else {
-            panic!("expected StepBegin");
-        };
-        assert_eq!(payload.n, Some(3));
-    }
-
-    #[test]
-    fn notification_params_unknown_event_type_returns_none() {
-        let params = KimiNotificationParams {
-            event_type: "FuturisticEvent".into(),
-            payload: Value::Null,
-        };
-        assert!(params.into_event().is_none());
-    }
-
-    #[test]
-    fn request_params_decodes_typed_request() {
-        let params = KimiRequestParams {
-            request_type: "ApprovalRequest".into(),
-            payload: serde_json::json!({
-                "id": "abc",
-                "tool_call_id": "tool_x",
-                "sender": "Shell",
-                "action": "run command",
-                "description": "Run command `ls`",
-                "display": [{"type": "shell", "language": "bash", "command": "ls"}]
-            }),
-        };
-        let request = params.into_request().expect("typed request");
-        let KimiWireRequest::Approval(approval) = request else {
-            panic!("expected Approval");
-        };
-        assert_eq!(approval.id.as_deref(), Some("abc"));
-        assert_eq!(approval.tool_call_id.as_deref(), Some("tool_x"));
-        assert_eq!(approval.shell_command(), Some("ls".into()));
-    }
-
-    #[test]
-    fn request_params_unknown_request_type_returns_none() {
-        let params = KimiRequestParams {
-            request_type: "FuturisticRequest".into(),
-            payload: Value::Null,
-        };
-        assert!(params.into_request().is_none());
-    }
-
-    #[test]
-    fn wire_event_unknown_type_fails_typed() {
-        let envelope = serde_json::json!({"type": "FuturisticEvent", "payload": {}});
-        let result: Result<KimiWireEvent, _> = serde_json::from_value(envelope);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn wire_request_unknown_type_fails_typed() {
-        let envelope = serde_json::json!({"type": "FuturisticRequest", "payload": {}});
-        let result: Result<KimiWireRequest, _> = serde_json::from_value(envelope);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn turn_begin_user_input_text_handles_string() {
-        let envelope = serde_json::json!({
-            "type": "TurnBegin",
-            "payload": {"user_input": "Hi how are you?"},
-        });
-        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
-        let KimiWireEvent::TurnBegin(payload) = event else {
-            panic!("expected TurnBegin");
-        };
-        assert_eq!(payload.user_input_text(), Some("Hi how are you?".into()));
-    }
-
-    #[test]
-    fn turn_begin_user_input_text_handles_array() {
-        let envelope = serde_json::json!({
-            "type": "TurnBegin",
-            "payload": {"user_input": [
-                {"type": "text", "text": "Hi "},
-                {"type": "text", "text": "Bob"}
-            ]},
-        });
-        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
-        let KimiWireEvent::TurnBegin(payload) = event else {
-            panic!("expected TurnBegin");
-        };
-        assert_eq!(payload.user_input_text(), Some("Hi Bob".into()));
-    }
-
-    #[test]
-    fn content_part_text_resolves_text() {
-        let envelope = serde_json::json!({
-            "type": "ContentPart",
-            "payload": {"type": "text", "text": "Hi Bob!"},
-        });
-        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
-        let KimiWireEvent::ContentPart(part) = event else {
-            panic!("expected ContentPart");
-        };
-        assert!(part.is_text());
-        assert!(!part.is_thinking());
-        assert_eq!(part.resolved_text(), Some("Hi Bob!"));
-    }
-
-    #[test]
-    fn content_part_think_resolves_thinking() {
-        let envelope = serde_json::json!({
-            "type": "ContentPart",
-            "payload": {"type": "think", "think": "The user...", "encrypted": null},
-        });
-        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
-        let KimiWireEvent::ContentPart(part) = event else {
-            panic!("expected ContentPart");
-        };
-        assert!(part.is_thinking());
-        assert!(!part.is_text());
-        assert_eq!(part.resolved_text(), Some("The user..."));
-    }
-
-    #[test]
-    fn content_part_image_url_returns_no_inline_text() {
-        let envelope = serde_json::json!({
-            "type": "ContentPart",
-            "payload": {"type": "image_url", "image_url": "https://example.test/x.png"},
-        });
-        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
-        let KimiWireEvent::ContentPart(part) = event else {
-            panic!("expected ContentPart");
-        };
-        assert_eq!(part.resolved_text(), None);
-    }
-
-    #[test]
-    fn status_update_computes_percent_from_fraction() {
-        let envelope = serde_json::json!({
-            "type": "StatusUpdate",
-            "payload": {
-                "context_usage": 0.06,
-                "context_tokens": 15969,
-                "max_context_tokens": 262144,
-                "token_usage": {"input_other": 10081, "output": 52, "input_cache_read": 5888, "input_cache_creation": 0},
-                "message_id": "chatcmpl-abc",
-                "plan_mode": false,
-                "mcp_status": null
-            }
-        });
-        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
-        let KimiWireEvent::StatusUpdate(status) = event else {
-            panic!("expected StatusUpdate");
-        };
-        let pct = status.computed_context_percent().expect("percent");
-        assert!((pct - 6.0).abs() < 0.01, "percent was {pct}");
-        let usage = status.token_usage.as_ref().expect("token_usage");
-        assert_eq!(usage.total_input(), Some(10081 + 5888));
-        assert_eq!(usage.cache_read_input(), Some(5888));
-        assert_eq!(status.message_id.as_deref(), Some("chatcmpl-abc"));
-    }
-
-    #[test]
-    fn status_update_computes_percent_from_token_counters() {
-        let envelope = serde_json::json!({
-            "type": "StatusUpdate",
-            "payload": {"context_tokens": 100, "max_context_tokens": 200}
-        });
-        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
-        let KimiWireEvent::StatusUpdate(status) = event else {
-            panic!("expected StatusUpdate");
-        };
-        assert_eq!(status.computed_context_percent(), Some(50.0));
-    }
-
-    #[test]
-    fn tool_call_arguments_string_round_trip() {
-        let envelope = serde_json::json!({
-            "type": "ToolCall",
-            "payload": {
-                "type": "function",
-                "id": "tool_x",
-                "function": {"name": "Shell", "arguments": ""},
-                "extras": null
-            }
-        });
-        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
-        let KimiWireEvent::ToolCall(mut call) = event else {
-            panic!("expected ToolCall");
-        };
-        assert_eq!(call.resolved_tool_id(), Some("tool_x"));
-        assert_eq!(call.resolved_tool_name(), Some("Shell"));
-        // Empty initial arguments — subsequent ToolCallPart deltas accumulate the body.
-        assert_eq!(call.take_arguments_string().as_deref(), Some(""));
-    }
-
-    #[test]
-    fn parse_arguments_string_decodes_valid_json() {
-        let parsed = KimiToolCall::parse_arguments_string(r#"{"command":"ls"}"#).unwrap();
-        let value = parsed.expect("parsed");
-        assert_eq!(value.get("command").and_then(Value::as_str), Some("ls"));
-    }
-
-    #[test]
-    fn parse_arguments_string_returns_none_for_empty() {
-        let parsed = KimiToolCall::parse_arguments_string("").unwrap();
-        assert!(parsed.is_none());
-        let parsed = KimiToolCall::parse_arguments_string("   ").unwrap();
-        assert!(parsed.is_none());
-    }
-
-    #[test]
-    fn parse_arguments_string_passthrough_on_malformed_json() {
-        let err = KimiToolCall::parse_arguments_string("{not json").unwrap_err();
-        assert_eq!(err, "{not json");
-    }
-
-    #[test]
-    fn tool_call_part_carries_argument_delta() {
-        let envelope = serde_json::json!({
-            "type": "ToolCallPart",
-            "payload": {"arguments_part": "{\"command\":"}
-        });
-        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
-        let KimiWireEvent::ToolCallPart(part) = event else {
-            panic!("expected ToolCallPart");
-        };
-        assert_eq!(part.arguments_part.as_deref(), Some("{\"command\":"));
-    }
-
-    #[test]
-    fn tool_result_returns_status_and_output() {
-        let envelope = serde_json::json!({
-            "type": "ToolResult",
-            "payload": {
-                "tool_call_id": "tool_x",
-                "return_value": {
-                    "is_error": false,
-                    "output": "hello-from-kimi\n",
-                    "message": "Command executed successfully.",
-                    "display": [],
-                    "extras": null
-                }
-            }
-        });
-        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
-        let KimiWireEvent::ToolResult(mut result) = event else {
-            panic!("expected ToolResult");
-        };
-        assert_eq!(result.resolved_tool_id(), Some("tool_x"));
-        assert_eq!(result.derived_status(), "success");
-        let output = result.take_output().expect("output");
-        assert_eq!(output.as_str(), Some("hello-from-kimi\n"));
-    }
-
-    #[test]
-    fn tool_result_marks_errors() {
-        let envelope = serde_json::json!({
-            "type": "ToolResult",
-            "payload": {
-                "tool_call_id": "tool_y",
-                "return_value": {"is_error": true, "output": "permission denied"}
-            }
-        });
-        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
-        let KimiWireEvent::ToolResult(result) = event else {
-            panic!("expected ToolResult");
-        };
-        assert!(result.is_error());
-        assert_eq!(result.derived_status(), "error");
-    }
-
-    #[test]
-    fn approval_request_extracts_shell_command() {
-        let envelope = serde_json::json!({
-            "type": "ApprovalRequest",
-            "payload": {
-                "id": "appr-1",
-                "tool_call_id": "tool_x",
-                "sender": "Shell",
-                "action": "run command",
-                "description": "Run command `echo hi`",
-                "source_kind": "foreground_turn",
-                "source_id": "src-1",
-                "display": [{"type": "shell", "language": "bash", "command": "echo hi"}]
-            }
-        });
-        let request: KimiWireRequest = serde_json::from_value(envelope).unwrap();
-        let KimiWireRequest::Approval(approval) = request else {
-            panic!("expected Approval");
-        };
-        assert_eq!(approval.shell_command(), Some("echo hi".into()));
-        assert_eq!(approval.action.as_deref(), Some("run command"));
-    }
-
-    #[test]
-    fn approval_request_no_shell_returns_none() {
-        let envelope = serde_json::json!({
-            "type": "ApprovalRequest",
-            "payload": {
-                "id": "appr-2",
-                "display": [{"type": "markdown", "body": "..."}]
-            }
-        });
-        let request: KimiWireRequest = serde_json::from_value(envelope).unwrap();
-        let KimiWireRequest::Approval(approval) = request else {
-            panic!("expected Approval");
-        };
-        assert_eq!(approval.shell_command(), None);
-    }
-
-    #[test]
-    fn subagent_event_decodes_nested_event() {
-        let envelope = serde_json::json!({
-            "type": "SubagentEvent",
-            "payload": {
-                "parent_tool_call_id": "tool_p",
-                "agent_id": "ab1",
-                "subagent_type": "explore",
-                "event": {
-                    "type": "StepBegin",
-                    "payload": {"n": 1}
-                }
-            }
-        });
-        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
-        let KimiWireEvent::SubagentEvent(sub) = event else {
-            panic!("expected SubagentEvent");
-        };
-        assert_eq!(sub.subagent_type.as_deref(), Some("explore"));
-        let nested = sub.nested_event().expect("nested");
-        let KimiWireEvent::StepBegin(payload) = nested else {
-            panic!("expected nested StepBegin");
-        };
-        assert_eq!(payload.n, Some(1));
-    }
-
-    #[test]
-    fn approval_response_event_round_trip() {
-        let envelope = serde_json::json!({
-            "type": "ApprovalResponse",
-            "payload": {"request_id": "abc", "response": "approve", "feedback": ""}
-        });
-        let event: KimiWireEvent = serde_json::from_value(envelope).unwrap();
-        let KimiWireEvent::ApprovalResponse(echo) = event else {
-            panic!("expected ApprovalResponse");
-        };
-        assert_eq!(echo.request_id.as_deref(), Some("abc"));
-        assert_eq!(echo.response.as_deref(), Some("approve"));
-    }
-
-    #[test]
-    fn initialize_result_decodes_capabilities() {
-        let result = serde_json::json!({
-            "protocol_version": "1.9",
-            "server": {"name": "Kimi Code CLI", "version": "1.38.0"},
-            "slash_commands": [],
-            "hooks": [],
-            "capabilities": {"supports_question": true, "supports_plan_mode": false}
-        });
-        let parsed: KimiInitializeResult = serde_json::from_value(result).unwrap();
-        assert_eq!(parsed.protocol_version.as_deref(), Some("1.9"));
-        let server = parsed.server.expect("server");
-        assert_eq!(server.name.as_deref(), Some("Kimi Code CLI"));
-        let caps = parsed.capabilities.expect("capabilities");
-        assert_eq!(caps.supports_question, Some(true));
-        assert_eq!(caps.supports_plan_mode, Some(false));
-    }
-
-    #[test]
-    fn prompt_result_recognizes_known_statuses() {
-        for status in [
-            KimiPromptResult::STATUS_FINISHED,
-            KimiPromptResult::STATUS_CANCELLED,
-            KimiPromptResult::STATUS_MAX_STEPS_REACHED,
-            KimiPromptResult::STATUS_STEERED,
-        ] {
-            let v = serde_json::json!({"status": status});
-            let parsed: KimiPromptResult = serde_json::from_value(v).unwrap();
-            assert_eq!(parsed.status.as_deref(), Some(status));
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Fixture replay tests
-    // ------------------------------------------------------------------
-
-    #[test]
-    fn wire_greet_fixture_classifies_every_line() {
-        let envelopes = classify_lines("wire-greet.jsonl");
-        assert!(!envelopes.is_empty());
-        let mut notif = 0;
-        let mut requests = 0;
-        let mut success = 0;
-        let mut errors = 0;
-        for env in &envelopes {
-            match env {
-                KimiEnvelope::Notification(_) => notif += 1,
-                KimiEnvelope::Request { .. } => requests += 1,
-                KimiEnvelope::SuccessResponse { .. } => success += 1,
-                KimiEnvelope::ErrorResponse { .. } => errors += 1,
-            }
-        }
-        assert!(notif > 0, "expected at least one notification");
-        assert!(
-            success >= 2,
-            "expected initialize and prompt success responses, got {success}"
-        );
-        assert_eq!(requests, 0, "greet fixture should have no server requests");
-        assert_eq!(errors, 0, "greet fixture should have no error responses");
-    }
-
-    #[test]
-    fn wire_greet_fixture_produces_typed_events() {
-        let envelopes = classify_lines("wire-greet.jsonl");
-        let mut typed = 0;
-        let mut think_parts = 0;
-        let mut text_parts = 0;
-        let mut turn_begin = 0;
-        let mut turn_end = 0;
-        let mut status_updates = 0;
-        for env in envelopes {
-            if let KimiEnvelope::Notification(params) = env
-                && let Some(typed_event) = params.into_event()
-            {
-                typed += 1;
-                match typed_event {
-                    KimiWireEvent::TurnBegin(_) => turn_begin += 1,
-                    KimiWireEvent::TurnEnd(_) => turn_end += 1,
-                    KimiWireEvent::StatusUpdate(_) => status_updates += 1,
-                    KimiWireEvent::ContentPart(part) => {
-                        if part.is_thinking() {
-                            think_parts += 1;
-                        } else if part.is_text() {
-                            text_parts += 1;
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        assert!(typed > 0);
-        assert_eq!(turn_begin, 1, "expected exactly one TurnBegin");
-        assert_eq!(turn_end, 1, "expected exactly one TurnEnd");
-        assert!(status_updates >= 1, "expected at least one StatusUpdate");
-        assert!(think_parts > 0, "expected reasoning ContentPart deltas");
-        assert!(text_parts > 0, "expected assistant text ContentPart deltas");
-    }
-
-    #[test]
-    fn wire_greet_fixture_prompt_status_finished() {
-        let envelopes = classify_lines("wire-greet.jsonl");
-        let mut last_prompt_status: Option<String> = None;
-        for env in envelopes {
-            if let KimiEnvelope::SuccessResponse { id, result } = env
-                && id.as_str() == Some("prompt-2")
-                && let Ok(parsed) = serde_json::from_value::<KimiPromptResult>(result)
-            {
-                last_prompt_status = parsed.status;
-            }
-        }
-        assert_eq!(
-            last_prompt_status.as_deref(),
-            Some(KimiPromptResult::STATUS_FINISHED)
-        );
-    }
-
-    #[test]
-    fn wire_tool_shell_fixture_covers_tool_lifecycle() {
-        let envelopes = classify_lines("wire-tool-shell.jsonl");
-        let mut tool_calls = 0;
-        let mut tool_call_parts = 0;
-        let mut tool_results = 0;
-        let mut approval_requests = 0;
-        let mut approval_responses = 0;
-        for env in envelopes {
-            match env {
-                KimiEnvelope::Notification(params) => {
-                    if let Some(typed) = params.into_event() {
-                        match typed {
-                            KimiWireEvent::ToolCall(_) => tool_calls += 1,
-                            KimiWireEvent::ToolCallPart(_) => tool_call_parts += 1,
-                            KimiWireEvent::ToolResult(_) => tool_results += 1,
-                            KimiWireEvent::ApprovalResponse(_) => approval_responses += 1,
-                            _ => {}
-                        }
-                    }
-                }
-                KimiEnvelope::Request { params, .. } => {
-                    if let Some(KimiWireRequest::Approval(_)) = params.into_request() {
-                        approval_requests += 1;
-                    }
-                }
-                _ => {}
-            }
-        }
-        assert!(tool_calls >= 1, "expected at least one ToolCall");
-        assert!(tool_call_parts > 0, "expected ToolCallPart deltas");
-        assert!(tool_results >= 1, "expected at least one ToolResult");
-        assert!(approval_requests >= 1, "expected ApprovalRequest");
-        assert!(approval_responses >= 1, "expected ApprovalResponse echo");
-    }
-
-    #[test]
-    fn wire_tool_shell_fixture_arguments_decode() {
-        let envelopes = classify_lines("wire-tool-shell.jsonl");
-        let mut arg_buffer = String::new();
-        let mut tool_call_seen = false;
-        for env in envelopes {
-            if let KimiEnvelope::Notification(params) = env
-                && let Some(typed) = params.into_event()
-            {
-                match typed {
-                    KimiWireEvent::ToolCall(mut call) => {
-                        tool_call_seen = true;
-                        if let Some(initial) = call.take_arguments_string() {
-                            arg_buffer.push_str(&initial);
-                        }
-                    }
-                    KimiWireEvent::ToolCallPart(part) => {
-                        if let Some(delta) = part.arguments_part {
-                            arg_buffer.push_str(&delta);
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-        assert!(tool_call_seen);
-        let parsed = KimiToolCall::parse_arguments_string(&arg_buffer)
-            .unwrap()
-            .expect("parsed args");
-        assert_eq!(
-            parsed.get("command").and_then(Value::as_str),
-            Some("echo hello-from-kimi")
-        );
-    }
-
-    #[test]
-    fn wire_subagent_fixture_nested_events_decode() {
-        let envelopes = classify_lines("wire-subagent.jsonl");
-        let mut subagent_count = 0;
-        let mut nested_typed = 0;
-        for env in envelopes {
-            if let KimiEnvelope::Notification(params) = env
-                && let Some(KimiWireEvent::SubagentEvent(sub)) = params.into_event()
-            {
-                subagent_count += 1;
-                if sub.nested_event().is_some() {
-                    nested_typed += 1;
-                }
-            }
-        }
-        assert!(subagent_count > 0, "expected at least one SubagentEvent");
-        assert!(
-            nested_typed > 0,
-            "expected at least one nested event to decode"
-        );
-    }
-
-    #[test]
-    fn wire_cancelled_fixture_prompt_status_cancelled() {
-        let envelopes = classify_lines("wire-cancelled.jsonl");
-        let mut prompt_status: Option<String> = None;
-        for env in envelopes {
-            if let KimiEnvelope::SuccessResponse { id, result } = env
-                && id.as_str() == Some("prompt-2")
-                && let Ok(parsed) = serde_json::from_value::<KimiPromptResult>(result)
-            {
-                prompt_status = parsed.status;
-            }
-        }
-        assert_eq!(
-            prompt_status.as_deref(),
-            Some(KimiPromptResult::STATUS_CANCELLED)
-        );
-    }
-
-    #[test]
-    fn wire_auth_expired_fixture_classifies_error_response() {
-        let envelopes = classify_lines("wire-auth-expired.jsonl");
-        let mut found_auth_expired = false;
-        for env in envelopes {
-            if let KimiEnvelope::ErrorResponse { id, error } = env
-                && id.as_str() == Some("prompt-2")
-                && error.code == KimiJsonRpcError::AUTH_EXPIRED
-            {
-                found_auth_expired = true;
-            }
-        }
-        assert!(
-            found_auth_expired,
-            "expected an AUTH_EXPIRED error response on prompt-2"
-        );
-    }
-}
+mod tests;

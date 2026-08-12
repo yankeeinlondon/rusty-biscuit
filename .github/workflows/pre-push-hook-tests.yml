@@ -1,0 +1,59 @@
+name: pre-push-hook-tests
+
+# Path-filtered test workflow for the .githooks/ shell hooks and the
+# `just` recipes that orchestrate them. Runs whenever the hook, its
+# tests, or shared just recipes change so neither the R3 hook-mode
+# contract (off / warn / strict / invalid, --no-verify hint, red failure
+# styling, area override, and changed-areas fallback) nor the R2
+# `changed-areas` heuristic itself can regress silently.
+
+on:
+  push:
+    paths:
+      - ".githooks/**"
+      - "justfile"
+      - "just/**"
+      - ".github/workflows/pre-push-hook-tests.yml"
+  pull_request:
+    paths:
+      - ".githooks/**"
+      - "justfile"
+      - "just/**"
+      - ".github/workflows/pre-push-hook-tests.yml"
+  workflow_dispatch: {}
+
+env:
+  # The repository tracks no rustc wrapper; cleared explicitly so a stray
+  # environment value cannot silently intercept this workflow's builds.
+  RUSTC_WRAPPER: ""
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: pre-push-hook-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Hook + changed-areas tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        # The `changed-areas` heuristic uses `git rev-parse @{u}` and
+        # `git diff <upstream>..HEAD`, which require enough history to
+        # resolve the upstream ref. The recipe tests build their own
+        # fresh repos, so a shallow clone is sufficient for them, but
+        # we fetch full history defensively in case future tests grow
+        # to inspect the real working tree.
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install just
+        uses: extractions/setup-just@v2
+
+      - name: Run pre-push hook tests
+        run: just test-pre-push-hook
+
+      - name: Run changed-areas recipe tests
+        run: just test-changed-areas

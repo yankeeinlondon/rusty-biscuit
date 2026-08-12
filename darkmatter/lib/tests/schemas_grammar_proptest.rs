@@ -27,7 +27,24 @@ fn type_strategy() -> impl Strategy<Value = SimplifiedType> {
         Just(SimplifiedType::File),
         Just(SimplifiedType::Url),
         Just(SimplifiedType::Email),
+        Just(SimplifiedType::Literal),
+        Just(SimplifiedType::Expression),
+        Just(SimplifiedType::TypeDefinition),
+        Just(SimplifiedType::Schema),
         Just(SimplifiedType::Any),
+    ]
+}
+
+/// A typed literal value across all authorable scalar forms, including
+/// quoting-sensitive strings (`a, b`) and strings that would otherwise
+/// re-type on re-parse (`true`, `2` when produced by `bare_word`).
+fn literal_value() -> impl Strategy<Value = serde_json::Value> {
+    prop_oneof![
+        bare_word().prop_map(serde_json::Value::String),
+        (bare_word(), bare_word())
+            .prop_map(|(a, b)| serde_json::Value::String(format!("{a}, {b}"))),
+        (-100_000i64..100_000).prop_map(|n| serde_json::json!(n)),
+        any::<bool>().prop_map(serde_json::Value::Bool),
     ]
 }
 
@@ -104,8 +121,23 @@ fn item_constraints_for(ty: SimplifiedType) -> impl Strategy<Value = Vec<Constra
         SimplifiedType::Enum => proptest::collection::vec(bare_word(), 1..5)
             .prop_map(|members| vec![Constraint::Members(members)])
             .boxed(),
-        // Other types only accept universal constraints — handled via the
-        // outer `universal` strategy below.
+        SimplifiedType::Literal => literal_value()
+            .prop_map(|value| vec![Constraint::LiteralValue(value)])
+            .boxed(),
+        SimplifiedType::TypeDefinition => prop_oneof![
+            Just(vec![]),
+            Just(vec![Constraint::Generated]),
+            Just(vec![Constraint::Default(serde_json::json!("string"))]),
+        ]
+        .boxed(),
+        SimplifiedType::Schema => prop_oneof![
+            Just(vec![]),
+            Just(vec![Constraint::Generated]),
+            Just(vec![Constraint::Default(serde_json::json!("./schema.yaml"))]),
+        ]
+        .boxed(),
+        // Other types (including `expression`) only accept universal
+        // constraints — handled via the outer `universal` strategy below.
         _ => Just(vec![]).boxed(),
     };
 

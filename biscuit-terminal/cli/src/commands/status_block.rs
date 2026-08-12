@@ -1,8 +1,8 @@
 use crate::args::LayoutArgs;
 use crate::commands::color_parse::parse_color;
 use crate::commands::shared::{
-    apply_renderable_layout, detect_terminal_honoring_force_color, emit_vertical_margins,
-    print_example_command, render_markdown_with_layout_frontmatter,
+    apply_renderable_layout, emit_vertical_margins, print_example_command,
+    render_markdown_with_layout_frontmatter, terminal_for_render,
 };
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::components::prose::Prose;
@@ -106,7 +106,7 @@ pub struct StatusBlockArgs {
 }
 
 impl Run for StatusBlockArgs {
-    fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
+    fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         // Resolve severity. `required_unless_present = "example"` guarantees
         // it is present when `--example` is not set.
         let severity: StatusState = if self.example {
@@ -181,7 +181,7 @@ impl Run for StatusBlockArgs {
         }
 
         // Terminal (default).
-        let term = detect_terminal_honoring_force_color();
+        let term = terminal_for_render(ctx.plain);
         let output = block.render(&term);
         emit_vertical_margins(&self.layout, || {
             println!("{}", output);

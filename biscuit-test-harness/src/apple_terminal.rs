@@ -1346,6 +1346,7 @@ mod tests {
         );
     }
 
+    #[cfg(target_os = "macos")]
     #[test]
     fn registry_path_uses_tmpdir_or_tmp() {
         let path = registry_path();

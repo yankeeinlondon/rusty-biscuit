@@ -22,7 +22,7 @@ pub fn load_user_defaults() -> Result<McpDefaults> {
 pub fn save_user_defaults(defaults: &McpDefaults) -> Result<()> {
     let path = defaults_path();
     let content = serde_json::to_string_pretty(defaults)?;
-    atomic_write(&path, content.as_bytes())
+    Ok(atomic_write(&path, content.as_bytes())?)
 }
 
 /// Set user-scope defaults (replacing any existing).
@@ -49,7 +49,7 @@ pub fn load_repo_defaults(repo_root: &Path) -> Result<Option<McpDefaults>> {
 pub fn save_repo_defaults(repo_root: &Path, defaults: &McpDefaults) -> Result<()> {
     let path = repo_defaults_path(repo_root);
     let content = serde_json::to_string_pretty(defaults)?;
-    atomic_write(&path, content.as_bytes())
+    Ok(atomic_write(&path, content.as_bytes())?)
 }
 
 /// Set repo-scope defaults (replacing any existing).

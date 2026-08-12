@@ -2,28 +2,54 @@
 //!
 //! Splits a shell block body into logical commands, handling line continuations.
 
+use std::ops::Range;
+
 use super::types::{ShellBlockCommand, ShellBlockError, SourceExcerpt};
 use crate::markdown::compose::parse_utils::strip_blockquote_prefix;
 
-/// Split a shell block body into logical commands.
+/// A raw logical command grouped from a shell-block body, before tokenization.
+///
+/// Carries the continuation-folded command text and its byte extent within the
+/// body so both the compose executor and the passive
+/// [`scan_shell_block_commands`](crate::markdown::compose::directives_api::scan_shell_block_commands)
+/// scanner share one splitting geometry.
+pub(crate) struct RawShellCommand {
+    /// The continuation-folded command text (block-quote markers stripped).
+    pub raw_command: String,
+    /// Byte span of the command's physical extent within the body.
+    pub physical_span: Range<usize>,
+    /// 1-based line number where the command starts.
+    pub start_line: usize,
+}
+
+/// Groups a shell-block body into raw logical commands without tokenizing.
+///
+/// This is the single splitting authority shared by the compose executor
+/// ([`split_logical_commands`]) and the passive language-server scanner.
 ///
 /// ## Rules
 ///
 /// - Blank physical lines are ignored.
-/// - A non-empty line starts a new logical command (or continues the current one).
-/// - A line ending with an unescaped `\` joins with the next non-blank line
-///   (one space separator).
-/// - Each logical command is tokenized using the shell expansion tokenizer.
+/// - Block-quote markers (`> `) are stripped so a quoted block exposes the bare
+///   command; byte offsets still index into `body`.
+/// - A line ending with an unescaped `\` joins the next non-blank line with one
+///   space separator.
+///
+/// The returned `Option` is a trailing command whose final physical line ended
+/// in an unterminated `\` continuation. It is reported separately so the
+/// executor can reject it as a parse error while a passive scan can still
+/// surface the best-effort command it collected.
 ///
 /// `body_start_line` is the absolute 1-based line number where the body begins.
-pub(crate) fn split_logical_commands(
+pub(crate) fn group_logical_commands(
     body: &str,
     body_start_line: usize,
-) -> Result<Vec<ShellBlockCommand>, ShellBlockError> {
+) -> (Vec<RawShellCommand>, Option<RawShellCommand>) {
     let mut commands = Vec::new();
     let mut current_lines: Vec<String> = Vec::new();
     let mut current_start_line: Option<usize> = None;
     let mut current_start_byte: Option<usize> = None;
+    let mut last_end_byte: usize = 0;
     let mut in_continuation = false;
 
     for (i, (raw_line, raw_line_start)) in physical_lines(body).into_iter().enumerate() {
@@ -51,6 +77,7 @@ pub(crate) fn split_logical_commands(
             current_start_line = Some(line_number);
             current_start_byte = Some(line_start);
         }
+        last_end_byte = line_start + line.len();
 
         if is_continuation {
             // Remove trailing backslash and any whitespace before it
@@ -61,71 +88,103 @@ pub(crate) fn split_logical_commands(
             current_lines.push(line.to_string());
             in_continuation = false;
 
-            // End of command
-            let raw = current_lines.join(" ");
-            let start_line = current_start_line.unwrap();
-            let start_byte = current_start_byte.unwrap();
-            let end_byte = line_start + line.len();
-
-            let synthetic_ctx = biscuit_terminal::errors::SourceContext::new(
-                std::path::PathBuf::from("<shell-block>"),
-                std::path::PathBuf::from("<shell-block>"),
-                raw.clone(),
-            );
-            let shell_tokens =
-                crate::markdown::compose::shell_expansion::tokenize::tokenize(&raw, &synthetic_ctx)
-                    .map_err(|e| ShellBlockError::Parse {
-                        line: start_line,
-                        message: format!("Command tokenization failed: {e}"),
-                        excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
-                        source_file: None,
-                    })?;
-
-            let pipeline = crate::markdown::compose::shell_expansion::tokenize::parse_pipeline(
-                &shell_tokens,
-                &synthetic_ctx,
-            )
-            .map_err(|e| ShellBlockError::Parse {
-                line: start_line,
-                message: format!("Command parsing failed: {e}"),
-                excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
-                source_file: None,
-            })?;
-
-            if pipeline.actions.is_empty() {
-                return Err(ShellBlockError::Parse {
-                    line: start_line,
-                    message: "Empty command after tokenization".to_string(),
-                    excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
-                    source_file: None,
-                });
-            }
-
-            let executable = pipeline.actions[0].command.executable.clone();
-            let args = pipeline.actions[0].command.args.clone();
-
-            commands.push(ShellBlockCommand {
-                raw_command: raw,
-                executable,
-                args,
-                pipeline,
-                physical_span: start_byte..end_byte,
-                start_line,
+            commands.push(RawShellCommand {
+                raw_command: current_lines.join(" "),
+                physical_span: current_start_byte.take().unwrap()..last_end_byte,
+                start_line: current_start_line.take().unwrap(),
             });
 
             current_lines.clear();
-            current_start_line = None;
-            current_start_byte = None;
         }
     }
 
-    // Handle unterminated continuation
-    if in_continuation || !current_lines.is_empty() {
-        let start_line = current_start_line.unwrap_or(body_start_line);
-        return Err(ShellBlockError::Parse {
+    let dangling = if in_continuation || !current_lines.is_empty() {
+        let start_byte = current_start_byte.unwrap_or(0);
+        Some(RawShellCommand {
+            raw_command: current_lines.join(" "),
+            physical_span: start_byte..last_end_byte.max(start_byte),
+            start_line: current_start_line.unwrap_or(body_start_line),
+        })
+    } else {
+        None
+    };
+
+    (commands, dangling)
+}
+
+/// Split a shell block body into logical commands.
+///
+/// Groups body lines via [`group_logical_commands`] (the shared splitting
+/// geometry), then tokenizes each command with the shell expansion tokenizer.
+///
+/// `body_start_line` is the absolute 1-based line number where the body begins.
+pub(crate) fn split_logical_commands(
+    body: &str,
+    body_start_line: usize,
+) -> Result<Vec<ShellBlockCommand>, ShellBlockError> {
+    let (groups, dangling) = group_logical_commands(body, body_start_line);
+    let mut commands = Vec::new();
+
+    for group in groups {
+        let RawShellCommand {
+            raw_command: raw,
+            physical_span,
+            start_line,
+        } = group;
+
+        let synthetic_ctx = biscuit_terminal::errors::SourceContext::new(
+            std::path::PathBuf::from("<shell-block>"),
+            std::path::PathBuf::from("<shell-block>"),
+            raw.clone(),
+        );
+        let shell_tokens =
+            crate::markdown::compose::shell_expansion::tokenize::tokenize(&raw, &synthetic_ctx)
+                .map_err(|e| ShellBlockError::Parse {
+                    line: start_line,
+                    message: format!("Command tokenization failed: {e}"),
+                    excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
+                    source_file: None,
+                })?;
+
+        let pipeline = crate::markdown::compose::shell_expansion::tokenize::parse_pipeline(
+            &shell_tokens,
+            &synthetic_ctx,
+        )
+        .map_err(|e| ShellBlockError::Parse {
             line: start_line,
-            message: "Unterminated line continuation".to_string(),
+            message: format!("Command parsing failed: {e}"),
             excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
+            source_file: None,
+        })?;
+
+        if pipeline.actions.is_empty() {
+            return Err(ShellBlockError::Parse {
+                line: start_line,
+                message: "Empty command after tokenization".to_string(),
+                excerpt: SourceExcerpt::from_text(body, start_line, body_start_line, 2),
+                source_file: None,
+            });
+        }
+
+        let executable = pipeline.actions[0].command.executable.clone();
+        let args = pipeline.actions[0].command.args.clone();
+
+        commands.push(ShellBlockCommand {
+            raw_command: raw,
+            executable,
+            args,
+            pipeline,
+            physical_span,
+            start_line,
+        });
+    }
+
+    // Handle unterminated continuation
+    if let Some(dangling) = dangling {
+        return Err(ShellBlockError::Parse {
+            line: dangling.start_line,
+            message: "Unterminated line continuation".to_string(),
+            excerpt: SourceExcerpt::from_text(body, dangling.start_line, body_start_line, 2),
             source_file: None,
         });
     }

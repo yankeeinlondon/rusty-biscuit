@@ -1,13 +1,33 @@
 use assert_cmd::Command;
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 fn bf() -> Command {
-    cargo_bin_cmd!("bf")
+    assert_cmd::Command::cargo_bin("bf").unwrap()
 }
 
 fn fixture(name: &str) -> String {
     format!("{}/tests/fixtures/{name}", env!("CARGO_MANIFEST_DIR"))
+}
+
+/// Runs a successful `bf` invocation and returns its stdout without the
+/// trailing newline.
+///
+/// The reference assertions below need the value itself, not a substring
+/// predicate: whether a path is absolute is a question for `std::path`, and the
+/// `starts_with("/")` these tests used to spell it with is a claim only a
+/// Unix-rooted path can satisfy.
+fn stdout_line(args: &[&str]) -> String {
+    let output = bf().args(args).output().unwrap();
+    assert!(
+        output.status.success(),
+        "`bf {}` failed: {}",
+        args.join(" "),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8(output.stdout)
+        .expect("bf writes UTF-8")
+        .trim_end()
+        .to_string()
 }
 
 // ── Format conversion (file input) ──────────────────────────────────
@@ -421,23 +441,28 @@ fn input_format_override() {
 
 // ── File reference resolution ────────────────────────────────────────
 
+/// The resolved path is printed as portable text, so the `/`-separated
+/// expectations below hold on every host rather than only on Unix.
 #[test]
 fn reference_resolves_relative_path_to_absolute() {
-    bf().arg("reference")
-        .arg("./Cargo.toml")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("biscuit-file/cli/Cargo.toml"))
-        .stdout(predicate::str::starts_with("/"));
+    let resolved = stdout_line(&["reference", "./Cargo.toml"]);
+    assert!(
+        resolved.ends_with("biscuit-file/cli/Cargo.toml"),
+        "expected a portable spelling, got {resolved:?}"
+    );
+    assert!(
+        std::path::Path::new(&resolved).is_absolute(),
+        "expected an absolute path, got {resolved:?}"
+    );
 }
 
 #[test]
 fn reference_alias_ref_works() {
-    bf().arg("ref")
-        .arg("./Cargo.toml")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("biscuit-file/cli/Cargo.toml"));
+    let resolved = stdout_line(&["ref", "./Cargo.toml"]);
+    assert!(
+        resolved.ends_with("biscuit-file/cli/Cargo.toml"),
+        "expected a portable spelling, got {resolved:?}"
+    );
 }
 
 #[test]
@@ -487,26 +512,38 @@ fn reference_add_vault_searches_vault() {
 
 #[test]
 fn reference_implicit_relative_bare_filename() {
-    // Bare filename (no `./` prefix) is ImplicitRelative and must resolve
-    // against the CLI crate's CWD end-to-end through the binary.
-    bf().arg("reference")
-        .arg("Cargo.toml")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("biscuit-file/cli/Cargo.toml"))
-        .stdout(predicate::str::starts_with("/"));
+    // Bare filename (no `./` prefix) is ImplicitRelative. Phase 4 resolves it
+    // repository-root first: `Cargo.toml` exists both in the CLI crate and at
+    // the workspace root, so the workspace-root copy wins over the source-local
+    // one, end-to-end through the binary.
+    let resolved = stdout_line(&["reference", "Cargo.toml"]);
+    assert!(
+        !resolved.ends_with("biscuit-file/cli/Cargo.toml"),
+        "the workspace-root copy should win, got {resolved:?}"
+    );
+    assert!(
+        resolved.ends_with("/Cargo.toml"),
+        "expected a portable spelling, got {resolved:?}"
+    );
+    assert!(
+        std::path::Path::new(&resolved).is_absolute(),
+        "expected an absolute path, got {resolved:?}"
+    );
 }
 
 #[test]
 fn reference_implicit_relative_falls_back_to_git_root() {
     // `CLAUDE.md` lives at the repo root, not inside `biscuit-file/cli`.
     // Implicit relative resolution should fall back to the git root.
-    bf().arg("reference")
-        .arg("CLAUDE.md")
-        .assert()
-        .success()
-        .stdout(predicate::str::contains("CLAUDE.md"))
-        .stdout(predicate::str::starts_with("/"));
+    let resolved = stdout_line(&["reference", "CLAUDE.md"]);
+    assert!(
+        resolved.ends_with("/CLAUDE.md"),
+        "expected the repo-root copy in a portable spelling, got {resolved:?}"
+    );
+    assert!(
+        std::path::Path::new(&resolved).is_absolute(),
+        "expected an absolute path, got {resolved:?}"
+    );
 }
 
 #[test]

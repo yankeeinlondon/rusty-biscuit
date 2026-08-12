@@ -20,24 +20,21 @@
 //!   and an optional explicit `exit_code`. `commands.rs` is responsible for
 //!   honoring that exit code after `attach_performance` + `println!`.
 
-use std::collections::BTreeSet;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 use sniff::SniffResult;
-use sniff::filesystem::blast_radius::{
-    ChangeScope, ChangedPathKind, ChangedPathQuery, collect_changed_paths,
-};
-use sniff::filesystem::git::{BranchInfo, FileChange, GitConfig, list_worktrees};
-use sniff::filesystem::repo::{ExternalDependencyFilter, Package, RepoIdentity};
+use sniff::filesystem::blast_radius::{ChangeScope, ChangedPathKind};
+use sniff::filesystem::git::{BranchInfo, FileChange, GitConfig};
 use sniff::filesystem::repo::types::RepoInfo;
+use sniff::filesystem::repo::{
+    ExternalDependencyFilter, Package, PathAttribution, RepoAggregate, attribute_paths, scope_paths,
+};
 
 use crate::args::RepoAction;
 use crate::output::filesystem;
-use crate::output::recent_commits::{
-    RecentCommitsMode, commit_family_value, default_commit_family_set,
-};
+use crate::output::recent_commits::{RecentCommitsMode, commit_family_value};
 
 /// Result returned by [`build_with_outcome`] for repo-action JSON.
 ///
@@ -690,40 +687,26 @@ struct ScopeBucket {
 
 /// Assemble the consolidated aggregate for bare `sniff repo --json`.
 ///
-/// Returns the Phase 6 `SniffRepo` projection with snake_case keys, compact
-/// git status, top-level branches/worktrees, grouped change scopes, and
-/// deduplicated package/package-area catalogs. Focused subcommands keep their
-/// richer JSON shapes.
+/// Returns the `SniffRepo` projection with snake_case keys, compact git status,
+/// top-level branches/worktrees, grouped change scopes, and deduplicated
+/// package/package-area catalogs. Focused subcommands keep their richer JSON
+/// shapes.
 ///
-/// ## Errors
+/// ## Notes
 ///
-/// Propagates any local detection failure so the parent command fails
-/// rather than emitting a partial aggregate. In `--json` mode the caller
-/// must ensure diagnostics go to stderr and stdout contains either the
-/// valid aggregate or nothing.
-pub(crate) fn build_aggregate_value(
-    result: &SniffResult,
-    base_dir: Option<&Path>,
-    identity: &RepoIdentity,
-) -> Result<Value, Box<dyn std::error::Error>> {
-    let dir = base_dir.unwrap_or_else(|| Path::new("."));
-    // Single-package repos (a bare `Cargo.toml` / `package.json` / etc. with no
-    // workspace) yield no `RepoInfo` from the full detection pass, leaving the
-    // repo-wide facts empty. Recover the root package's facts through the
-    // library fallback so `package_manager`, `dependencies`,
-    // `package_dependencies`, and `structure` are populated for them too.
-    let repo_fallback = match result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref()) {
-        Some(_) => None,
-        None => {
-            let root = sniff::filesystem::repo_root(dir)?.unwrap_or_else(|| dir.to_path_buf());
-            sniff::filesystem::repo::detect_repo_structure_or_root_package(&root)?
-        }
-    };
-    let repo = result
-        .filesystem
-        .as_ref()
-        .and_then(|fs| fs.repo.as_ref())
-        .or(repo_fallback.as_ref());
+/// A **pure projection** over facts already observed by the detection pass and
+/// by [`detect_repo_aggregate`]: it performs no filesystem read, repository
+/// open, subprocess spawn, or network request (umbrella spec R2.7). The four
+/// scope buckets are derived from the one `GitInfo.file_changes` collection via
+/// [`scope_paths`], which is what removed this builder's eight post-detection
+/// status walks, and the cwd-relative `context` block is resolved during
+/// observation over a single package ownership index. Keep it that way — an
+/// observation added here is paid on every bare `sniff repo --json`.
+///
+/// [`detect_repo_aggregate`]: sniff::filesystem::repo::detect_repo_aggregate
+pub(crate) fn build_aggregate_value(result: &SniffResult, aggregate: &RepoAggregate) -> Value {
+    let identity = &aggregate.identity;
+    let repo = aggregate.repo.as_ref();
     let packages = repo
         .map(|repo| {
             filesystem::collect_repo_package_names(repo, &[], None, None)
@@ -741,37 +724,22 @@ pub(crate) fn build_aggregate_value(
         })
         .unwrap_or_default();
     let structure = aggregate_structure(repo);
-    let worktrees = match list_worktrees(dir)? {
-        Some(entries) => entries
-            .into_iter()
-            .map(|entry| AggregateWorktree {
-                name: entry.name,
-                branch: entry.branch,
-                path: entry.path,
-                current: entry.is_current,
-                detached: entry.is_detached,
-            })
-            .collect(),
-        None => Vec::new(),
-    };
-    let branches = sniff::filesystem::git::branches_at(dir, false)?.unwrap_or_default();
-    let dirty = filesystem::current_package_area_is_dirty(result, base_dir).unwrap_or(false);
-    let has_source_changes = filesystem::package_area_source_code_change_count(result, base_dir)
-        .map(|(has, _, _)| has)
-        .unwrap_or(false);
-    let has_conflict = if let Some(repo_root) = sniff::filesystem::repo_root(dir)? {
-        let conflicted = sniff::filesystem::merge_conflicts_at(&repo_root)?;
-        !conflicted.is_empty()
-    } else {
-        false
-    };
-    let worktree_name = sniff::filesystem::git::get_current_worktree_name(dir)
-        .ok()
-        .flatten();
-    let commit_set = default_commit_family_set(dir)?;
-    let aggregate = SniffRepo {
+    let worktrees = aggregate
+        .worktrees
+        .iter()
+        .map(|entry| AggregateWorktree {
+            name: entry.name.clone(),
+            branch: entry.branch.clone(),
+            path: entry.path.clone(),
+            current: entry.is_current,
+            detached: entry.is_detached,
+        })
+        .collect();
+    let context = &aggregate.context;
+    let commit_set = &aggregate.commits;
+    let value = SniffRepo {
         name: identity.name.clone(),
-        version: aggregate_repo_version(repo),
+        version: aggregate.version.clone(),
         language: filesystem::primary_language_name(result),
         is_monorepo: identity.is_monorepo,
         // Count the canonical catalog, not `identity.package_count` (which is
@@ -790,38 +758,35 @@ pub(crate) fn build_aggregate_value(
         },
         dependencies: aggregate_external_dependencies(repo),
         git_status: aggregate_git_status(result),
-        branches,
+        branches: aggregate.branches.clone(),
         worktrees,
         context: AggregateContext {
-            package: filesystem::render_repo_package(result, base_dir, 0),
-            package_area: filesystem::render_repo_package_area(result, base_dir),
-            area: filesystem::render_repo_area(result, base_dir),
-            package_root: filesystem::render_repo_package_root(result, base_dir),
-            package_area_root: filesystem::render_repo_package_area_root(result, base_dir),
-            worktree: worktree_name,
-            is_current_package_area_dirty: dirty,
-            package_area_has_source_code_changes: has_source_changes,
+            package: context.package.clone(),
+            package_area: context.package_area.clone(),
+            area: context.area.clone(),
+            package_root: context.package_root.clone(),
+            package_area_root: context.package_area_root.clone(),
+            worktree: aggregate.current_worktree.clone(),
+            is_current_package_area_dirty: context.is_current_package_area_dirty,
+            package_area_has_source_code_changes: context.package_area_has_source_code_changes,
         },
-        dirty: scope_bucket(result, dir, ChangeScope::Dirty)?,
-        staged: scope_bucket(result, dir, ChangeScope::Staged)?,
-        unstaged: scope_bucket(result, dir, ChangeScope::Unstaged)?,
-        untracked: scope_bucket(result, dir, ChangeScope::Untracked)?,
-        has_merge_conflict: has_conflict,
-        recent_commits: aggregate_commit_family_value(
-            &commit_set,
-            RecentCommitsMode::RecentCommits,
-        ),
+        dirty: scope_bucket(result, ChangeScope::Dirty),
+        staged: scope_bucket(result, ChangeScope::Staged),
+        unstaged: scope_bucket(result, ChangeScope::Unstaged),
+        untracked: scope_bucket(result, ChangeScope::Untracked),
+        has_merge_conflict: aggregate.has_merge_conflict,
+        recent_commits: aggregate_commit_family_value(commit_set, RecentCommitsMode::RecentCommits),
         source_code_changes: aggregate_commit_family_value(
-            &commit_set,
+            commit_set,
             RecentCommitsMode::SourceCodeChanges,
         ),
         documentation_changes: aggregate_commit_family_value(
-            &commit_set,
+            commit_set,
             RecentCommitsMode::DocumentationChanges,
         ),
     };
 
-    Ok(serde_json::to_value(aggregate)?)
+    serde_json::to_value(value).unwrap_or(Value::Null)
 }
 
 fn aggregate_structure(repo: Option<&RepoInfo>) -> AggregateStructure {
@@ -901,28 +866,6 @@ fn aggregate_result_to_value<T>(
     }
 }
 
-/// Collapse the bare-aggregate top-level `version` via the library helper.
-///
-/// Returns `Some(version)` when `aggregate_versions` at repo scope finds
-/// exactly one distinct version across every package in `repo`; returns
-/// `None` for zero or more-than-one distinct versions. The serialized type
-/// stays `string | null` so consumers of `sniff repo --json` keep their
-/// existing contract; only the value improves (e.g. a pure-virtual Cargo
-/// workspace with uniform member versions now reports the version string
-/// instead of `null`).
-///
-/// Resolution is rooted at `repo.root`, not the invocation directory: Cargo
-/// `version.workspace = true` inheritance is read from the repository root's
-/// `Cargo.toml`, so invoking bare `sniff repo --json` from inside a member
-/// package must still find the workspace's `[workspace.package].version`.
-fn aggregate_repo_version(repo: Option<&RepoInfo>) -> Option<String> {
-    use sniff::filesystem::repo::bare_aggregate_version;
-
-    let repo = repo?;
-    let packages = repo.packages.as_deref()?;
-    bare_aggregate_version(packages, &repo.root)
-}
-
 /// Build the aggregate's repo-wide `dependencies` projection.
 ///
 /// External dependencies are a group-A repo-wide fact: the aggregate must
@@ -974,42 +917,41 @@ fn aggregate_file_change(change: &FileChange) -> AggregateFileChange {
     }
 }
 
-fn scope_bucket(
-    result: &SniffResult,
-    dir: &Path,
-    scope: ChangeScope,
-) -> Result<ScopeBucket, Box<dyn std::error::Error>> {
-    let files = changed_paths(dir, scope, ChangedPathKind::AllFiles)?;
-    let source_code = changed_paths(dir, scope, ChangedPathKind::SourceCode)?;
+/// Project one scope bucket from the detected `file_changes`.
+///
+/// `collect_changed_paths` sorts and dedups its result; [`scope_paths`]
+/// preserves `file_changes` order, so this sorts to match the previous output
+/// byte-for-byte.
+fn scope_bucket(result: &SniffResult, scope: ChangeScope) -> ScopeBucket {
+    let file_changes = result
+        .filesystem
+        .as_ref()
+        .and_then(|fs| fs.git.as_ref())
+        .map(|git| git.file_changes.as_slice())
+        .unwrap_or(&[]);
+
+    let mut files = scope_paths(file_changes, scope);
+    files.sort();
+
+    let source_code: Vec<PathBuf> = files
+        .iter()
+        .filter(|path| sniff::filesystem::blast_radius::is_source_code_path(path))
+        .cloned()
+        .collect();
     let documentation: Vec<PathBuf> = files
         .iter()
         .filter(|path| sniff::filesystem::blast_radius::is_documentation_path(path))
         .cloned()
         .collect();
-    let (packages, package_areas) = changed_path_package_context(result, &files);
+    let attribution = changed_path_attribution(result, &files);
 
-    Ok(ScopeBucket {
+    ScopeBucket {
         files: paths_to_strings(&files),
         source_code: paths_to_strings(&source_code),
         documentation: paths_to_strings(&documentation),
-        packages,
-        package_areas,
-    })
-}
-
-fn changed_paths(
-    dir: &Path,
-    scope: ChangeScope,
-    kind: ChangedPathKind,
-) -> Result<Vec<PathBuf>, Box<dyn std::error::Error>> {
-    let query = ChangedPathQuery {
-        scope,
-        kind,
-        package: None,
-        package_area: None,
-        filters: Vec::new(),
-    };
-    Ok(collect_changed_paths(dir, &query)?.paths)
+        packages: attribution.packages,
+        package_areas: attribution.package_areas,
+    }
 }
 
 fn paths_to_strings(paths: &[PathBuf]) -> Vec<String> {
@@ -1019,47 +961,21 @@ fn paths_to_strings(paths: &[PathBuf]) -> Vec<String> {
         .collect()
 }
 
-fn changed_path_package_context(
-    result: &SniffResult,
-    paths: &[PathBuf],
-) -> (Vec<String>, Vec<String>) {
+/// Attribute changed paths to packages, for monorepos only.
+///
+/// A non-monorepo reports empty catalogs: its single package would otherwise
+/// claim every changed path, which says nothing.
+fn changed_path_attribution(result: &SniffResult, paths: &[PathBuf]) -> PathAttribution {
     let Some(repo) = result.filesystem.as_ref().and_then(|fs| fs.repo.as_ref()) else {
-        return (Vec::new(), Vec::new());
+        return PathAttribution::default();
     };
     if !repo.is_monorepo {
-        return (Vec::new(), Vec::new());
+        return PathAttribution::default();
     }
     let Some(packages) = repo.packages.as_deref() else {
-        return (Vec::new(), Vec::new());
+        return PathAttribution::default();
     };
-
-    let mut package_names = BTreeSet::new();
-    let mut package_areas = BTreeSet::new();
-    for path in paths {
-        let path = path.to_string_lossy();
-        for pkg in packages {
-            if package_contains_path(pkg, &path, packages) {
-                package_names.insert(pkg.name.clone());
-                package_areas.insert(pkg.package_area.clone());
-            }
-        }
-    }
-
-    (
-        package_names.into_iter().collect(),
-        package_areas.into_iter().collect(),
-    )
-}
-
-fn package_contains_path(pkg: &Package, path: &str, packages: &[Package]) -> bool {
-    let prefix = pkg.relative.trim_start_matches("./");
-    if prefix.is_empty() {
-        return !packages.iter().any(|other| {
-            let other_prefix = other.relative.trim_start_matches("./");
-            !other_prefix.is_empty() && path.starts_with(other_prefix)
-        });
-    }
-    path == prefix || path.starts_with(&format!("{prefix}/"))
+    attribute_paths(packages, paths)
 }
 
 fn aggregate_commit_family_value(
@@ -1096,7 +1012,7 @@ mod tests {
     use sniff::filesystem::repo::types::RepoInfo;
     use sniff::filesystem::repo::{MonorepoLayer, MonorepoStandard};
     use std::collections::HashMap;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
 
     fn fixture_git_info() -> GitInfo {
         GitInfo {
@@ -1180,6 +1096,18 @@ mod tests {
             filesystem: Some(filesystem),
             performance: None,
         }
+    }
+
+    /// This literal compiles from the downstream CLI crate without any
+    /// aggregate-only field, pinning the preserved public Rust construction
+    /// contract as well as the wire shape.
+    #[test]
+    fn git_info_preserved_contract_has_no_aggregate_evidence() {
+        let value = serde_json::to_value(fixture_git_info()).unwrap();
+        assert!(
+            value.get("aggregate").is_none(),
+            "aggregate projection evidence must not appear on GitInfo"
+        );
     }
 
     #[test]
@@ -2399,12 +2327,11 @@ mod tests {
         //! Phase 2 — scope-complete aggregate for bare `sniff repo --json`.
 
         use super::*;
-        use sniff::filesystem::repo::RepoIdentity;
         use sniff::programs::enums::TestRunner;
         use std::collections::HashSet;
         use std::path::PathBuf;
 
-        fn temp_git_repo() -> (tempfile::TempDir, PathBuf) {
+        pub(super) fn temp_git_repo() -> (tempfile::TempDir, PathBuf) {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().to_path_buf();
             let repo = git2::Repository::init(&path).unwrap();
@@ -2421,13 +2348,41 @@ mod tests {
             (dir, path)
         }
 
-        fn identity_fixture() -> RepoIdentity {
-            RepoIdentity {
-                name: "fixture-repo".into(),
-                version: Some("1.0.0".into()),
-                language: None,
-                is_monorepo: false,
-                package_count: Some(0),
+        /// Observe the aggregate exactly as `commands.rs` does, so these tests
+        /// exercise the real library entry point rather than a hand-built
+        /// `RepoAggregate` that could drift from what it produces.
+        fn aggregate_fixture(path: &Path, result: &SniffResult) -> RepoAggregate {
+            let (_, mut aggregate) = sniff::filesystem::repo::detect_repo_aggregate(path)
+                .expect("aggregate observation succeeds for the fixture repo")
+                .into_parts();
+            aggregate.repo = result.filesystem.as_ref().and_then(|fs| fs.repo.clone());
+            aggregate
+        }
+
+        /// A `RepoAggregate` carrying only `repo`, for projection tests that
+        /// assert repo-derived children and need no git observation at all.
+        pub(super) fn synthetic_aggregate(repo: RepoInfo) -> RepoAggregate {
+            RepoAggregate {
+                identity: sniff::filesystem::repo::RepoIdentity {
+                    name: "fixture-repo".to_string(),
+                    version: Some("1.0.0".to_string()),
+                    language: None,
+                    is_monorepo: repo.is_monorepo,
+                    package_count: repo.packages.as_ref().map(Vec::len),
+                },
+                repo: Some(repo),
+                version: None,
+                branches: Vec::new(),
+                worktrees: Vec::new(),
+                current_worktree: None,
+                has_merge_conflict: false,
+                commits: sniff::filesystem::git::recent_commits::CommitDescSet {
+                    commits: Vec::new(),
+                    period_label: "last 3d".to_string(),
+                    repo_root: PathBuf::from("/tmp/repo"),
+                    packages: None,
+                },
+                context: sniff::filesystem::repo::AggregateCwdContext::default(),
             }
         }
 
@@ -2443,14 +2398,22 @@ mod tests {
                 monorepo_layers: Vec::new(),
                 packages: None,
             };
-            let mut git = fixture_git_info();
-            git.repo_root = repo_root.to_path_buf();
-            git.status = Some(sniff::filesystem::git::RepoStatus::default());
-            let filesystem = FilesystemInfo {
-                repo: Some(repo),
-                git: Some(git),
-                ..Default::default()
-            };
+            let request = sniff::request::FilesystemRequest::new()
+                .git(sniff::request::GitRequest::full().metadata(
+                    sniff::request::GitMetadataRequest::none()
+                        .remotes(true)
+                        .config(true),
+                ))
+                .without_repo()
+                .without_file_inventory()
+                .without_formatting()
+                .without_docs();
+            let mut filesystem = sniff::filesystem::detect_filesystem_with_request(
+                repo_root,
+                &request,
+            )
+            .expect("aggregate fixture detection succeeds");
+            filesystem.repo = Some(repo);
             SniffResult {
                 os: None,
                 hardware: None,
@@ -2535,23 +2498,22 @@ mod tests {
             assert_eq!(value["paths"], json!(["src/main.rs"]));
         }
 
+        /// The aggregate's one shared history observation, which all three
+        /// commit-family projections read, is loaded by the library entry point.
         #[test]
-        fn default_commit_family_set_loads_without_error() {
+        fn aggregate_carries_the_default_commit_family_set() {
             let (_temp, path) = temp_git_repo();
-            let set = default_commit_family_set(&path).expect("load default commit set");
-            assert!(
-                set.commits.is_empty() || !set.commits.is_empty(),
-                "commit set must be well-formed"
-            );
+            let result = result_fixture(&path);
+            let aggregate = aggregate_fixture(&path, &result);
+            assert_eq!(aggregate.commits.period_label, "last 3d");
         }
 
         #[test]
         fn aggregate_includes_consolidated_keys() {
             let (_temp, path) = temp_git_repo();
             let result = result_fixture(&path);
-            let identity = identity_fixture();
-            let value = build_aggregate_value(&result, Some(&path), &identity)
-                .expect("aggregate should build");
+            let aggregate = aggregate_fixture(&path, &result);
+            let value = build_aggregate_value(&result, &aggregate);
 
             let obj = value.as_object().expect("aggregate must be object");
             let keys: HashSet<_> = obj.keys().map(String::as_str).collect();
@@ -2598,9 +2560,8 @@ mod tests {
         fn aggregate_excludes_network_parameterized_and_old_kebab_keys() {
             let (_temp, path) = temp_git_repo();
             let result = result_fixture(&path);
-            let identity = identity_fixture();
-            let value = build_aggregate_value(&result, Some(&path), &identity)
-                .expect("aggregate should build");
+            let aggregate = aggregate_fixture(&path, &result);
+            let value = build_aggregate_value(&result, &aggregate);
 
             let obj = value.as_object().expect("aggregate must be object");
             for forbidden in [
@@ -2633,11 +2594,13 @@ mod tests {
         fn aggregate_context_groups_cwd_relative_facts() {
             let (_temp, path) = temp_git_repo();
             let result = result_fixture(&path);
-            let identity = identity_fixture();
-            let value = build_aggregate_value(&result, Some(&path), &identity)
-                .expect("aggregate should build");
+            let aggregate = aggregate_fixture(&path, &result);
+            let value = build_aggregate_value(&result, &aggregate);
 
-            assert_eq!(value["name"], "fixture-repo");
+            // The observed identity is projected verbatim. The fixture repo has
+            // no manifest and no remote, so its name resolves to the temp
+            // directory's basename rather than a fixed string.
+            assert_eq!(value["name"], json!(aggregate.identity.name));
             // No packages in the fixture → the `AggregateScope::Repo`
             // collapse finds zero distinct versions and emits `null`. The
             // `RepoIdentity.version` is not consulted here.
@@ -2666,9 +2629,8 @@ mod tests {
         fn aggregate_scope_buckets_have_stable_empty_shape() {
             let (_temp, path) = temp_git_repo();
             let result = result_fixture(&path);
-            let identity = identity_fixture();
-            let value = build_aggregate_value(&result, Some(&path), &identity)
-                .expect("aggregate should build");
+            let aggregate = aggregate_fixture(&path, &result);
+            let value = build_aggregate_value(&result, &aggregate);
 
             for key in ["dirty", "staged", "unstaged", "untracked"] {
                 let leaf = &value[key];
@@ -2688,9 +2650,8 @@ mod tests {
         fn aggregate_commit_family_leaves_are_objects() {
             let (_temp, path) = temp_git_repo();
             let result = result_fixture(&path);
-            let identity = identity_fixture();
-            let value = build_aggregate_value(&result, Some(&path), &identity)
-                .expect("aggregate should build");
+            let aggregate = aggregate_fixture(&path, &result);
+            let value = build_aggregate_value(&result, &aggregate);
 
             for key in [
                 "recent_commits",
@@ -2712,9 +2673,8 @@ mod tests {
         fn aggregate_worktrees_and_branches_are_top_level_arrays() {
             let (_temp, path) = temp_git_repo();
             let result = result_fixture(&path);
-            let identity = identity_fixture();
-            let value = build_aggregate_value(&result, Some(&path), &identity)
-                .expect("aggregate should build");
+            let aggregate = aggregate_fixture(&path, &result);
+            let value = build_aggregate_value(&result, &aggregate);
 
             let worktrees = value["worktrees"].as_array().expect("worktrees array");
             assert!(
@@ -2736,9 +2696,8 @@ mod tests {
         fn aggregate_does_not_duplicate_full_package_catalogs() {
             let (_temp, path) = temp_git_repo();
             let result = result_fixture(&path);
-            let identity = identity_fixture();
-            let value = build_aggregate_value(&result, Some(&path), &identity)
-                .expect("aggregate should build");
+            let aggregate = aggregate_fixture(&path, &result);
+            let value = build_aggregate_value(&result, &aggregate);
 
             assert!(value["packages"].is_array(), "top-level package names: {value}");
             assert!(
@@ -2755,14 +2714,14 @@ mod tests {
             );
         }
 
+        /// The aggregate must fail before anything reaches stdout rather than
+        /// emit partial JSON. The failure now lives on the library observation:
+        /// `build_aggregate_value` is infallible precisely because every fact it
+        /// could fail to obtain is obtained before it runs.
         #[test]
-        fn aggregate_propagates_detection_errors_instead_of_partial_json() {
-            // Point base_dir at a path that is not a git repository so local
-            // detection required by the aggregate fails.
+        fn aggregate_observation_errors_instead_of_yielding_partial_json() {
             let bad_path = PathBuf::from("/tmp/not-a-git-repo-for-aggregate-test-42");
-            let result = result_fixture(&bad_path);
-            let identity = identity_fixture();
-            let outcome = build_aggregate_value(&result, Some(&bad_path), &identity);
+            let outcome = sniff::filesystem::repo::detect_repo_aggregate(&bad_path);
             assert!(
                 outcome.is_err(),
                 "aggregate must fail rather than emit partial JSON"
@@ -2770,111 +2729,19 @@ mod tests {
         }
 
         #[test]
-        fn aggregate_repo_version_uniform_returns_the_shared_string() {
-            let tmp = tempfile::tempdir().unwrap();
-            let root = tmp.path();
-            let a = root.join("a");
-            let b = root.join("b");
-            std::fs::create_dir_all(&a).unwrap();
-            std::fs::create_dir_all(&b).unwrap();
-            std::fs::write(
-                a.join("Cargo.toml"),
-                "[package]\nname = \"a\"\nversion = \"0.1.0\"\n",
-            )
-            .unwrap();
-            std::fs::write(
-                b.join("Cargo.toml"),
-                "[package]\nname = \"b\"\nversion = \"0.1.0\"\n",
-            )
-            .unwrap();
+        fn aggregate_projects_the_observed_repo_version() {
+            let result = fixture_with_git_and_repo();
+            let repo = repo_with_packages(vec![Package {
+                name: "a".to_string(),
+                version: Some("0.1.0".to_string()),
+                ..Package::default()
+            }]);
+            let mut aggregate = synthetic_aggregate(repo);
+            aggregate.version = Some("0.1.0".to_string());
 
-            let packages = vec![
-                Package {
-                    path: a.clone(),
-                    relative: "a".to_string(),
-                    package_area: "root".to_string(),
-                    name: "a".to_string(),
-                    ..Package::default()
-                },
-                Package {
-                    path: b.clone(),
-                    relative: "b".to_string(),
-                    package_area: "root".to_string(),
-                    name: "b".to_string(),
-                    ..Package::default()
-                },
-            ];
-            let repo = RepoInfo {
-                is_monorepo: true,
-                root: root.to_path_buf(),
-                dependencies: None,
-                dev_dependencies: None,
-                peer_dependencies: None,
-                optional_dependencies: None,
-                monorepo_standards: Vec::new(),
-                monorepo_layers: Vec::new(),
-                packages: Some(packages),
-            };
+            let value = build_aggregate_value(&result, &aggregate);
 
-            assert_eq!(
-                aggregate_repo_version(Some(&repo)),
-                Some("0.1.0".to_string())
-            );
-        }
-
-        #[test]
-        fn aggregate_repo_version_zero_packages_returns_none() {
-            let empty = repo_with_packages(Vec::new());
-            assert_eq!(aggregate_repo_version(Some(&empty)), None);
-        }
-
-        #[test]
-        fn aggregate_repo_version_two_distinct_returns_none() {
-            let tmp = tempfile::tempdir().unwrap();
-            let root = tmp.path();
-            let a = root.join("a");
-            let b = root.join("b");
-            std::fs::create_dir_all(&a).unwrap();
-            std::fs::create_dir_all(&b).unwrap();
-            std::fs::write(
-                a.join("Cargo.toml"),
-                "[package]\nname = \"a\"\nversion = \"1.0.0\"\n",
-            )
-            .unwrap();
-            std::fs::write(
-                b.join("Cargo.toml"),
-                "[package]\nname = \"b\"\nversion = \"2.0.0\"\n",
-            )
-            .unwrap();
-
-            let packages = vec![
-                Package {
-                    path: a,
-                    relative: "a".to_string(),
-                    package_area: "root".to_string(),
-                    name: "a".to_string(),
-                    ..Package::default()
-                },
-                Package {
-                    path: b,
-                    relative: "b".to_string(),
-                    package_area: "root".to_string(),
-                    name: "b".to_string(),
-                    ..Package::default()
-                },
-            ];
-            let repo = RepoInfo {
-                is_monorepo: true,
-                root: root.to_path_buf(),
-                dependencies: None,
-                dev_dependencies: None,
-                peer_dependencies: None,
-                optional_dependencies: None,
-                monorepo_standards: Vec::new(),
-                monorepo_layers: Vec::new(),
-                packages: Some(packages),
-            };
-            assert_eq!(aggregate_repo_version(Some(&repo)), None);
+            assert_eq!(value["version"], "0.1.0");
         }
     }
 
@@ -3018,18 +2885,12 @@ mod tests {
 
         #[test]
         fn aggregate_structure_child_includes_monorepo_topology() {
+            let (_temp, _path) = super::aggregate::temp_git_repo();
             let repo = repo_with_layers();
-            let result = result_with_repo(repo);
-            let identity = RepoIdentity {
-                name: "fixture-repo".to_string(),
-                version: Some("1.0.0".to_string()),
-                language: None,
-                is_monorepo: true,
-                package_count: Some(2),
-            };
+            let result = result_with_repo(repo.clone());
+            let aggregate = super::aggregate::synthetic_aggregate(repo);
 
-            let value =
-                build_aggregate_value(&result, None, &identity).expect("aggregate should build");
+            let value = build_aggregate_value(&result, &aggregate);
 
             assert!(
                 value["structure"]["monorepo_standards"].is_array(),
@@ -3079,6 +2940,146 @@ mod tests {
             let layers = value["monorepo_layers"].as_array().unwrap();
             let layer_packages = layers[0]["packages"].as_array().unwrap();
             assert!(layer_packages.iter().all(|p| p.is_string()));
+        }
+    }
+
+    mod aggregate_projection {
+        //! `build_aggregate_value` is a pure projection (umbrella spec R2.7).
+        //! These tests pin that property so a future edit cannot quietly
+        //! reintroduce an observation that every bare `sniff repo --json` pays.
+
+        use super::*;
+        use sniff::filesystem::git::recent_commits::CommitDescSet;
+        use sniff::filesystem::repo::{AggregateCwdContext, RepoIdentity};
+        use sniff::performance::{PerformanceCollector, with_current_collector};
+
+        fn fixture_aggregate() -> (tempfile::TempDir, RepoAggregate) {
+            let temp = tempfile::tempdir().unwrap();
+            let root = temp.path();
+            let packages = ["a", "b"]
+                .into_iter()
+                .map(|name| {
+                    let path = root.join(name);
+                    std::fs::create_dir_all(&path).unwrap();
+                    std::fs::write(
+                        path.join("Cargo.toml"),
+                        format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n"),
+                    )
+                    .unwrap();
+                    Package {
+                        path,
+                        relative: name.to_string(),
+                        package_area: "root".to_string(),
+                        name: name.to_string(),
+                        version: Some("0.1.0".to_string()),
+                        ..Package::default()
+                    }
+                })
+                .collect();
+            let repo = RepoInfo {
+                is_monorepo: true,
+                root: root.to_path_buf(),
+                packages: Some(packages),
+                ..RepoInfo::default()
+            };
+            let aggregate = RepoAggregate {
+                identity: RepoIdentity {
+                    name: "fixture".to_string(),
+                    version: None,
+                    language: None,
+                    is_monorepo: true,
+                    package_count: Some(2),
+                },
+                repo: Some(repo),
+                version: Some("0.1.0".to_string()),
+                branches: Vec::new(),
+                worktrees: Vec::new(),
+                current_worktree: None,
+                has_merge_conflict: false,
+                commits: CommitDescSet {
+                    commits: Vec::new(),
+                    period_label: "last 3d".to_string(),
+                    repo_root: PathBuf::from("/tmp/repo"),
+                    packages: None,
+                },
+                context: AggregateCwdContext::default(),
+            };
+            (temp, aggregate)
+        }
+
+        /// The headline R2.7 assertion: the builder opens no repository, walks
+        /// no status, reads no file, normalizes no path, spawns nothing, and
+        /// makes no request. The cwd-relative `context` facts are resolved
+        /// during `detect_repo_aggregate` over a single package ownership
+        /// index, so the projection records no counters at all.
+        #[test]
+        fn build_aggregate_value_performs_no_observation() {
+            let result = fixture_with_git_and_repo();
+            let (_temp, aggregate) = fixture_aggregate();
+
+            let collector = PerformanceCollector::new_shared();
+            let value = with_current_collector(Some(collector.clone()), || {
+                build_aggregate_value(&result, &aggregate)
+            });
+            let report = collector.snapshot(std::time::Duration::ZERO);
+
+            assert!(value.is_object(), "aggregate must still be built: {value}");
+            assert_eq!(value["version"], "0.1.0");
+            assert_eq!(value["packages"].as_array().map(Vec::len), Some(2));
+            assert!(
+                report.counters.is_empty(),
+                "build_aggregate_value must perform no repository open, status walk, \
+                 file read, path normalization, subprocess spawn, or network request; \
+                 it recorded: {:?}",
+                report.counters
+            );
+        }
+
+        /// The aggregate must project the facts it is handed rather than
+        /// re-observing them, so what goes in is what comes out.
+        #[test]
+        fn aggregate_projects_supplied_facts_verbatim() {
+            use sniff::filesystem::git::WorktreeEntry;
+
+            let result = fixture_with_git_and_repo();
+            let (_temp, mut aggregate) = fixture_aggregate();
+            aggregate.has_merge_conflict = true;
+            aggregate.current_worktree = Some("wt-1".to_string());
+            aggregate.worktrees = vec![WorktreeEntry {
+                name: "wt-1".to_string(),
+                branch: Some("feature".to_string()),
+                path: PathBuf::from("/tmp/repo/wt-1"),
+                is_current: true,
+                is_detached: false,
+            }];
+            aggregate.context = AggregateCwdContext {
+                package: "sniff-lib".to_string(),
+                package_area: "sniff".to_string(),
+                area: "sniff-lib".to_string(),
+                package_root: "/tmp/repo/sniff/lib".to_string(),
+                package_area_root: "/tmp/repo/sniff".to_string(),
+                is_current_package_area_dirty: true,
+                package_area_has_source_code_changes: true,
+            };
+
+            let value = build_aggregate_value(&result, &aggregate);
+
+            assert_eq!(value["name"], "fixture");
+            assert_eq!(value["has_merge_conflict"], true);
+            assert_eq!(value["context"]["package"], "sniff-lib");
+            assert_eq!(value["context"]["package_area"], "sniff");
+            assert_eq!(value["context"]["area"], "sniff-lib");
+            assert_eq!(value["context"]["package_root"], "/tmp/repo/sniff/lib");
+            assert_eq!(value["context"]["package_area_root"], "/tmp/repo/sniff");
+            assert_eq!(value["context"]["worktree"], "wt-1");
+            assert_eq!(value["context"]["is_current_package_area_dirty"], true);
+            assert_eq!(
+                value["context"]["package_area_has_source_code_changes"],
+                true
+            );
+            assert_eq!(value["worktrees"][0]["name"], "wt-1");
+            assert_eq!(value["worktrees"][0]["current"], true);
+            assert_eq!(value["recent_commits"]["period"]["label"], "last 3d");
         }
     }
 }

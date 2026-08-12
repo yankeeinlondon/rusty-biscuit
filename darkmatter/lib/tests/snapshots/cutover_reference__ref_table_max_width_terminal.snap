@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/cutover_reference.rs
+assertion_line: 133
 expression: "render_terminal(&md, 80)"
 ---
 ┌───┬───┐

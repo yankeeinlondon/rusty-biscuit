@@ -8,6 +8,7 @@ use renderable::tree::render::{
     BrowserRenderOptions, MarkdownDialect, MarkdownRenderOptions, render_browser_node,
     render_markdown_node,
 };
+use renderable::style::Style;
 use renderable::tree::{RenderNode, RenderStrictness, SequenceJoin, TreeRenderable};
 
 use crate::components::{
@@ -27,6 +28,26 @@ use crate::utils::layout::Layout;
 /// This struct allows combining text, styled prose, tables, lists, and other
 /// renderable components into one cohesive output for terminal display.
 /// Parts are rendered sequentially with no automatic spacing between them.
+///
+/// ## Layout & Style Contract
+///
+/// `Compose` is a sequence container with a dual-mode contract (spec C1/C7):
+///
+/// - **Block-container mode** (the public component API, i.e. calling
+///   `render()` / `render_tree()` directly): the `Compose` root routes through
+///   the shared render-tree fold, so `Layout` box properties (`margin`,
+///   `padding`, `width`, `max_width`, `alignment`) and `Style` (`color`,
+///   `background`, `emphasis`, `border`) are honored via the fold (C1).
+/// - **Inline mode** (when `Compose` content is nested inside another
+///   component): the sequence itself carries no block box; the containing
+///   block owns the box. The concatenated parts are inline content, so
+///   inherited `color` / `emphasis` and inline `background` flow through
+///   (C7). `Compose::is_block_level` remains `false` because its public
+///   contract is inline concatenation, even though its own `Layout` is
+///   applied when it is the top-level rendered node.
+///
+/// `word_wrap` is seeded onto the root node and honored by nested
+/// prose-bearing parts.
 ///
 /// ## Examples
 ///
@@ -74,6 +95,7 @@ use crate::utils::layout::Layout;
 pub struct Compose {
     parts: Vec<RenderableTerminalContent>,
     layout: Layout,
+    style: Style,
 }
 
 impl Default for Compose {
@@ -87,6 +109,7 @@ impl From<String> for Compose {
         Compose {
             parts: vec![RenderableTerminalContent::String(value)],
             layout: Layout::default(),
+            style: Style::default(),
         }
     }
 }
@@ -96,6 +119,7 @@ impl From<&str> for Compose {
         Compose {
             parts: vec![RenderableTerminalContent::String(value.into())],
             layout: Layout::default(),
+            style: Style::default(),
         }
     }
 }
@@ -105,6 +129,7 @@ impl From<RenderableTerminalContent> for Compose {
         Compose {
             parts: vec![value],
             layout: Layout::default(),
+            style: Style::default(),
         }
     }
 }
@@ -114,6 +139,7 @@ impl From<Vec<RenderableTerminalContent>> for Compose {
         Compose {
             parts: items,
             layout: Layout::default(),
+            style: Style::default(),
         }
     }
 }
@@ -138,6 +164,14 @@ impl TerminalRenderable for Compose {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> Style {
+        self.style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.style)
     }
 
     fn as_any(&self) -> &dyn Any {
@@ -165,6 +199,7 @@ impl Compose {
         Compose {
             parts: items,
             layout: Layout::default(),
+            style: Style::default(),
         }
     }
 
@@ -336,6 +371,7 @@ impl Compose {
         if self.layout != Layout::default() {
             root.attrs.set_layout(&self.layout);
         }
+        crate::components::renderable::overlay_style_onto_node(&mut root, &self.style);
         root
     }
 }
@@ -1690,7 +1726,7 @@ mod tests {
     fn test_browser_render_html_page_includes_fragment() {
         let compose: Compose = "hello".into();
         let page = renderable::browser::BrowserRenderable::render_html_page(&compose, None);
-        let html = page.render();
+        let html = page.render().expect("render");
         assert!(html.contains("<html"));
         assert!(html.contains("<body>"));
         assert!(html.contains("hello"));

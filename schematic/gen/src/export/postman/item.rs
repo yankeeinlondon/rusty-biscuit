@@ -4,6 +4,7 @@ use schematic_define::{Endpoint, RestApi};
 
 use crate::export::auth::ExportAuth;
 use crate::export::body::map_body;
+use crate::export::path_params::strip_reserved_markers;
 use crate::parser::extract_path_params;
 
 use super::auth::build_collection_auth;
@@ -32,9 +33,12 @@ pub(crate) fn build_request_item(
     base_url_var: &str,
 ) -> PostmanItem {
     let path_params = extract_path_params(&endpoint.path);
+    // Reserved-expansion markers (`{+name}`) are a runtime encoding hint; the
+    // exported collection must render valid `{name}` / `:name` templates.
+    let export_path = strip_reserved_markers(&endpoint.path);
     let url = build_url(
         &api.base_url,
-        &endpoint.path,
+        &export_path,
         &path_params,
         endpoint,
         base_url_var,

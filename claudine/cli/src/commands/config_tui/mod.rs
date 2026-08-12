@@ -96,7 +96,7 @@ async fn run_set_favorite_agent(value: &str) -> color_eyre::Result<()> {
             Some(provider) => Some(provider),
             None => {
                 return Err(color_eyre::eyre::eyre!(
-                    "unknown provider '{value}' — try one of: claude, codex, gemini, goose, kimi, opencode, qwen, roo (or pass `none` to clear)"
+                    "unknown provider '{value}' — try one of: claude, codex, gemini, goose, kimi, opencode, qwen (or pass `none` to clear)"
                 ));
             }
         },
@@ -116,7 +116,10 @@ async fn run_set_favorite_agent(value: &str) -> color_eyre::Result<()> {
         Some(provider) => format!("Set favorite agent to {provider}."),
         None => "Cleared favorite agent.".to_string(),
     });
-    log::message(&format!("Updated {}.", config_path.display()));
+    log::message(&format!(
+        "Updated {}.",
+        biscuit_file::to_portable_string(&config_path)
+    ));
     Ok(())
 }
 
@@ -144,7 +147,10 @@ async fn run_set_prompt_for_missing(value: &str) -> color_eyre::Result<()> {
     config.prompt_for_missing = new_value;
     claudine::dispatch::loader::save_claudine_config(&config, &config_path)?;
     log::message(&format!("Set prompt_for_missing to {new_value}."));
-    log::message(&format!("Updated {}.", config_path.display()));
+    log::message(&format!(
+        "Updated {}.",
+        biscuit_file::to_portable_string(&config_path)
+    ));
     Ok(())
 }
 
@@ -293,7 +299,10 @@ async fn run_tui() -> color_eyre::Result<()> {
             std::fs::create_dir_all(parent)?;
         }
         claudine::dispatch::loader::save_repo_override_config(repo_cfg, path)?;
-        eprintln!("Repo configuration saved to {}", path.display());
+        eprintln!(
+            "Repo configuration saved to {}",
+            biscuit_file::to_portable_string(path)
+        );
     }
 
     Ok(())

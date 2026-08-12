@@ -1,0 +1,11 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: block
+---
+VIA_RENDER
+
+ Loading [███████████████·····]  75%
+---
+VIA_TREE_DIRECT
+
+ Loading [███████████████·····]  75%

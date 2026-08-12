@@ -11,12 +11,34 @@ use std::time::Duration;
 use serde::Serialize;
 use tracing::{debug, info, instrument, trace};
 
-use super::errors::ReferenceError;
+use std::collections::HashMap;
+use std::path::PathBuf;
+
+use super::errors::{ReferenceError, ReferenceGraphMismatchError};
+use super::provenance::{
+    DependencyMismatchKind, ReferenceDocumentIdentity, ReferenceGraphMismatch, ReferenceGraphMode,
+};
+use super::snapshot::heading_slug_key;
 use super::types::{
-    ReferenceGraphOptions, ReferenceKind, ReferenceOrigin, ReferenceRecord, ReferenceTarget,
+    ReferenceGraph, ReferenceGraphOptions, ReferenceKind, ReferenceOrigin, ReferenceRecord,
+    ReferenceTarget,
 };
 use crate::markdown::Markdown;
-use crate::markdown::compose::ComposeSource;
+use crate::markdown::compose::{ComposeSource, ReferenceGraphOptionsIdentity};
+
+/// Per-run memoization of prepared heading slugs, keyed by canonical target
+/// path (Finding 18).
+///
+/// Fragment validation prepares (InlinePre-composes) and extracts headings from
+/// the same document once per `path#fragment` reference and once per graph node.
+/// Graph descendants are seeded from the graph's build-time heading snapshot;
+/// every other entry is produced from a fresh on-disk `Markdown::try_from`, so
+/// for those, keying by canonical path is byte-identical to recomputing. The
+/// document root is deliberately never inserted here — it is composed from the
+/// in-memory `Markdown` (which may carry `--set`/`--state` overrides a fresh
+/// disk load would not), so a self-referential `path#fragment` still recomputes
+/// from disk exactly as before.
+type HeadingSlugCache = HashMap<PathBuf, Vec<String>>;
 
 /// Options for reference validation.
 #[derive(Clone)]
@@ -306,17 +328,86 @@ pub enum ReferenceSeverity {
 }
 
 /// Run validation on a markdown document's references.
+///
+/// Builds the reference graph once and validates that fresh snapshot directly:
+/// the graph is constructed from this `Markdown` and these options in this
+/// same operation, so no compatibility check runs before validation.
 #[instrument(skip_all)]
 pub(crate) fn validate(
     md: &Markdown,
     options: &ReferenceValidationOptions,
 ) -> Result<ReferenceValidationReport, ReferenceError> {
+    // Keep the build and the fresh-seam call visibly adjacent: any
+    // caller-controlled handoff inserted between them would break the
+    // freshness invariant `validate_fresh_graph` relies on.
+    let graph = super::graph::build_reference_graph(md, &options.graph).map_err(|error| {
+        match error {
+            crate::markdown::MarkdownError::Reference(source) => *source,
+            other => ReferenceError::Validation(other.to_string()),
+        }
+    })?;
+    validate_fresh_graph(md, options, &graph)
+}
+
+/// Run validation against a caller-supplied, already-built reference graph
+/// (Finding 18).
+///
+/// Checked prebuilt seam: callers that already hold a `ReferenceGraph` (e.g.
+/// `md graph --validate`, which builds one to render the tree) pass it
+/// straight through instead of paying a second `build_reference_graph`. The
+/// graph's provenance is verified against this call's inputs before
+/// flattening, so a stale or mispaired prebuilt graph is rejected rather than
+/// producing a misleading report. Graphs built by the current operation
+/// itself skip that check via [`validate_fresh_graph`].
+#[instrument(skip_all)]
+pub(crate) fn validate_with_graph(
+    md: &Markdown,
+    options: &ReferenceValidationOptions,
+    graph: &ReferenceGraph,
+) -> Result<ReferenceValidationReport, ReferenceError> {
     info!("validate: starting reference validation");
-    let ref_set = {
-        let graph = super::graph::build_reference_graph(md, &options.graph)
-            .map_err(|e| ReferenceError::Validation(e.to_string()))?;
-        super::graph::flatten_graph(&graph)
-    };
+
+    // A caller-supplied graph must still match the document, graph options,
+    // and every local descendant before any report data is produced.
+    verify_graph_compatibility(md, options, graph)?;
+
+    validate_graph_contents(md, options, graph)
+}
+
+/// Validate a graph the current operation just built, skipping the
+/// compatibility check.
+///
+/// Fresh seam for internally built graphs. The freshness precondition is that
+/// all of the following hold:
+///
+/// - `graph` was returned by [`super::graph::build_reference_graph`] (or
+///   `Markdown::reference_graph`) in this operation;
+/// - the same `Markdown` value is passed here;
+/// - `options.graph` is the same [`ReferenceGraphOptions`] used for the build,
+///   or a clone-stable clone of it; and
+/// - no caller-controlled work occurred between building and validating.
+///
+/// Any path that accepts a graph from its caller, stores it for later, or
+/// otherwise cannot prove every condition MUST use [`validate_with_graph`]
+/// and pay the full compatibility check.
+#[instrument(skip_all)]
+pub(super) fn validate_fresh_graph(
+    md: &Markdown,
+    options: &ReferenceValidationOptions,
+    graph: &ReferenceGraph,
+) -> Result<ReferenceValidationReport, ReferenceError> {
+    info!("validate: starting reference validation");
+    validate_graph_contents(md, options, graph)
+}
+
+/// Shared validation engine after the caller has established graph freshness.
+fn validate_graph_contents(
+    md: &Markdown,
+    options: &ReferenceValidationOptions,
+    graph: &ReferenceGraph,
+) -> Result<ReferenceValidationReport, ReferenceError> {
+    let root_source = graph.root().source.clone();
+    let ref_set = super::graph::flatten_graph(graph);
 
     let mut report = ReferenceValidationReport {
         references_scanned: ref_set.len(),
@@ -328,10 +419,20 @@ pub(crate) fn validate(
         "validate: references collected"
     );
 
+    // Prepared-heading slugs are memoized per canonical target path for the
+    // whole run so fragment validation composes each referenced document once.
+    let mut heading_cache: HeadingSlugCache = HashMap::new();
+
     // Collect headings for fragment validation from the composed document.
-    // Uses the graph's prepared content which includes transcluded headings.
+    // Reuses the already-built graph (no second build) and shares the slug
+    // cache with per-reference cross-doc fragment validation below.
     let headings = if options.validate_fragments {
-        Some(collect_composed_heading_slugs(md, &options.graph))
+        Some(collect_composed_heading_slugs(
+            md,
+            &options.graph,
+            graph,
+            &mut heading_cache,
+        ))
     } else {
         None
     };
@@ -355,25 +456,28 @@ pub(crate) fn validate(
                 // Check for fragment in local path (e.g., "./other.md#section")
                 let raw_str = raw.to_string_lossy();
                 let (path_part, fragment) = split_path_fragment(&raw_str);
-                validate_local_path(
+                let resolved_path = validate_local_path(
                     &path_part,
                     ref_source,
                     record,
                     &mut report,
-                    &options.graph.compose.magic_paths,
-                );
+                    &options.graph,
+                    &root_source,
+                )?;
 
                 // Validate fragment if enabled and path exists
                 if options.validate_fragments
                     && let Some(ref frag) = fragment
                 {
                     validate_cross_doc_fragment(
+                        resolved_path.as_deref(),
                         &path_part,
                         frag,
                         ref_source,
                         record,
                         &mut report,
                         &options.graph,
+                        &mut heading_cache,
                     );
                 }
 
@@ -492,6 +596,110 @@ pub(crate) fn validate(
     Ok(report)
 }
 
+/// Verifies a prebuilt graph is compatible with a validation request.
+///
+/// Runs before flattening. First compares the four build dimensions
+/// (document → source → mode → options) recorded in the graph's provenance
+/// against the live request, then re-reads every visited local descendant from
+/// the authoritative filesystem to confirm none changed, went missing, or
+/// became unreadable since the graph was built.
+///
+/// ## Errors
+///
+/// Returns [`ReferenceError::ReferenceGraphMismatch`] on the first differing
+/// dimension or descendant.
+fn verify_graph_compatibility(
+    md: &Markdown,
+    options: &ReferenceValidationOptions,
+    graph: &ReferenceGraph,
+) -> Result<(), ReferenceError> {
+    // Request-side identity comes entirely from this call's own inputs: `md`
+    // supplies live document + source identity, and the compared options are the
+    // `ReferenceGraphOptions` nested in the validation request — the other
+    // `ReferenceValidationOptions` fields do not participate in graph identity.
+    let request_document = ReferenceDocumentIdentity::capture(md);
+    let request_source = md.source().clone();
+    let effective_source = request_source.clone().unwrap_or(ComposeSource::Unknown);
+    let request_compose = super::options_with_reference_resolution_context(
+        &effective_source,
+        &options.graph.compose,
+    );
+    let request_compose = match &effective_source {
+        ComposeSource::File(path) => request_compose.with_source_file(path),
+        ComposeSource::Url(url) => request_compose.with_source_url(url.clone()),
+        ComposeSource::Unknown => request_compose,
+    };
+    let request_options = ReferenceGraphOptionsIdentity::capture(&request_compose);
+
+    graph
+        .provenance()
+        .check(
+            &request_document,
+            &request_source,
+            ReferenceGraphMode::Full,
+            &request_options,
+        )
+        .map_err(|reason| {
+            ReferenceError::ReferenceGraphMismatch(ReferenceGraphMismatchError::new(reason))
+        })?;
+
+    verify_descendants(graph)
+}
+
+/// Re-verifies every recorded local descendant against the filesystem.
+///
+/// The dependency manifest already holds one entry per unique visited local
+/// child, so each child is read and hashed at most once. Each read goes
+/// straight to disk via [`Markdown::try_from`], bypassing the graph-building
+/// runtime and both the run-local and persistent caches, so stale cached
+/// content cannot mask an on-disk edit. Content identity (not mtime/size/inode)
+/// is authoritative.
+///
+/// ## Errors
+///
+/// Returns [`ReferenceError::ReferenceGraphMismatch`] for the first descendant
+/// that changed, is missing, or is unreadable.
+fn verify_descendants(graph: &ReferenceGraph) -> Result<(), ReferenceError> {
+    for entry in graph.provenance().dependencies().documents() {
+        // Only local file children enter the manifest; skip anything else
+        // defensively rather than treating it as a mismatch.
+        let ComposeSource::File(path) = &entry.source else {
+            continue;
+        };
+
+        match Markdown::try_from(path.as_path()) {
+            Ok(current_md) => {
+                let current = ReferenceDocumentIdentity::capture(&current_md);
+                if current != entry.document {
+                    return Err(dependency_mismatch(
+                        entry.source.clone(),
+                        DependencyMismatchKind::Changed,
+                    ));
+                }
+            }
+            Err(_) => {
+                // Distinguish a vanished child from one that exists but cannot
+                // be read (e.g. replaced by a directory, or permission-denied),
+                // using only cross-platform-deterministic signals.
+                let kind = if path.exists() {
+                    DependencyMismatchKind::Unreadable
+                } else {
+                    DependencyMismatchKind::Missing
+                };
+                return Err(dependency_mismatch(entry.source.clone(), kind));
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Builds a dependency-mismatch reference error for a descendant.
+fn dependency_mismatch(source: ComposeSource, kind: DependencyMismatchKind) -> ReferenceError {
+    ReferenceError::ReferenceGraphMismatch(ReferenceGraphMismatchError::new(
+        ReferenceGraphMismatch::Dependency { source, kind },
+    ))
+}
+
 /// Validate a local file path reference.
 ///
 /// Uses `biscuit_file::FileReference` for path resolution (rec #6),
@@ -501,47 +709,38 @@ fn validate_local_path(
     source: &ComposeSource,
     record: &ReferenceRecord,
     report: &mut ReferenceValidationReport,
-    magic_paths: &[(std::path::PathBuf, biscuit_file::PathPosition)],
-) {
+    graph_options: &ReferenceGraphOptions,
+    root_source: &ComposeSource,
+) -> Result<Option<std::path::PathBuf>, ReferenceError> {
     trace!(raw = %raw, "validate: checking local path");
     match source {
-        ComposeSource::File(base_path) => {
-            let base_dir = base_path.parent();
-
-            // Try biscuit_file::FileReference first for @repo-root support
-            if let Ok(file_ref) = biscuit_file::FileReference::new(raw) {
-                let mut file_ref = file_ref;
-                for (path, position) in magic_paths {
-                    file_ref = file_ref.add_magic_path(path, *position);
-                }
-                if let Ok(Some(_resolved)) = file_ref.resolve_relative(base_dir) {
-                    // resolve_relative() internally calls resolve(), which only returns
-                    // Some after confirming the candidate is_file(). No need to re-check
-                    // with .exists() — that would resolve against CWD, not base_dir.
-                    report.references_valid += 1;
-                    return;
-                }
-            }
-
-            // Fallback to simple path join
-            if let Some(base_dir) = base_dir {
-                let resolved = base_dir.join(raw);
-                if resolved.exists() {
-                    report.references_valid += 1;
-                } else {
-                    report.issues.push(ReferenceIssue {
-                        code: ReferenceIssueCode::MissingLocalTarget,
-                        message: format!("Missing local target: {raw}"),
-                        severity: ReferenceSeverity::Error,
-                        kind: record.kind,
-                        reference_display: raw.to_string(),
-                        reference_id: record.id.clone(),
-                        origin: record.origin.clone(),
-                    });
-                }
-            } else {
+        ComposeSource::File(_) => {
+            let compose_options = match source {
+                ComposeSource::File(path) if source != root_source => graph_options
+                    .compose
+                    .clone()
+                    .with_accepted_source_file(path),
+                ComposeSource::File(path) => graph_options.compose.clone().with_source_file(path),
+                _ => unreachable!("file source matched above"),
+            };
+            if let Some(resolved) = super::resolve_transclusion_target(
+                raw,
+                source,
+                &compose_options,
+            )? {
                 report.references_valid += 1;
+                return Ok(Some(resolved));
             }
+            report.issues.push(ReferenceIssue {
+                code: ReferenceIssueCode::MissingLocalTarget,
+                message: format!("Missing local target: {raw}"),
+                severity: ReferenceSeverity::Error,
+                kind: record.kind,
+                reference_display: raw.to_string(),
+                reference_id: record.id.clone(),
+                origin: record.origin.clone(),
+            });
+            Ok(None)
         }
         ComposeSource::Unknown => {
             report.issues.push(ReferenceIssue {
@@ -553,12 +752,14 @@ fn validate_local_path(
                 reference_id: record.id.clone(),
                 origin: record.origin.clone(),
             });
+            Ok(None)
         }
         ComposeSource::Url(_) => {
             report
                 .warnings
                 .push(format!("Local path in URL-sourced document: {raw}"));
             report.references_valid += 1;
+            Ok(None)
         }
     }
 }
@@ -594,32 +795,50 @@ fn collect_prepared_heading_slugs(
 ///
 /// This provides the effective heading set after transclusion, so fragment
 /// validation checks against the actual composed heading list. Each node's
-/// headings are extracted from prepared content (after InlinePre).
+/// headings come from prepared content (after InlinePre): the root from the
+/// in-memory document, descendants from the graph's private build-time
+/// heading snapshot rather than a disk reread — so a post-build heading edit
+/// cannot leak into a fresh one-step report.
+///
+/// Takes the already-built `graph` (Finding 18 — no second
+/// `build_reference_graph`) and shares `cache` with per-reference cross-doc
+/// fragment validation so any document referenced both as a graph node and as
+/// a `path#fragment` target composes only once per run.
 fn collect_composed_heading_slugs(
     md: &Markdown,
     graph_options: &super::types::ReferenceGraphOptions,
+    graph: &ReferenceGraph,
+    cache: &mut HeadingSlugCache,
 ) -> Vec<String> {
     let source = md.source().clone().unwrap_or(ComposeSource::Unknown);
 
-    // Build the reference graph to discover all nodes
-    let graph = match super::graph::build_reference_graph(md, graph_options) {
-        Ok(g) => g,
-        Err(_) => return collect_prepared_heading_slugs(md, &source, graph_options),
-    };
-
     let mut all_slugs = Vec::new();
 
-    // Collect headings from the root document (prepared)
+    // Collect headings from the root document (prepared). The root composes
+    // from the in-memory `md`, which may carry overrides, so it is never
+    // cached under its path key (see `HeadingSlugCache`).
     all_slugs.extend(collect_prepared_heading_slugs(md, &source, graph_options));
 
-    // Collect headings from all child nodes (prepared)
-    for node in &graph.nodes {
-        if let ComposeSource::File(path) = &node.source
-            && let Ok(child_md) = Markdown::try_from(path.as_path())
-        {
-            all_slugs.extend(collect_prepared_heading_slugs(
+    // Collect headings from all child nodes from the build-time snapshot and
+    // seed the run cache with them, so a `path#fragment` target naming a
+    // graph descendant resolves to the same snapshot entry. The checked path
+    // reaches this only after descendant verification has proven disk
+    // content identical to the snapshot, so seeding is coherent for both
+    // seams. Synthetic graphs built without a snapshot keep the disk-loading
+    // fallback.
+    for node in graph.nodes() {
+        let ComposeSource::File(path) = &node.source else {
+            continue;
+        };
+        if let Some(slugs) = graph.prepared_headings().slugs_for(path) {
+            cache.insert(heading_slug_key(path), slugs.to_vec());
+            all_slugs.extend(slugs.iter().cloned());
+        } else if let Ok(child_md) = Markdown::try_from(path.as_path()) {
+            all_slugs.extend(cached_prepared_heading_slugs(
+                cache,
                 &child_md,
                 &node.source,
+                path,
                 graph_options,
             ));
         }
@@ -628,52 +847,47 @@ fn collect_composed_heading_slugs(
     all_slugs
 }
 
+/// Returns prepared heading slugs for a disk-loaded document, memoized by
+/// canonical path for the run (Finding 18). Shares its keying with the
+/// graph-owned heading snapshot via [`heading_slug_key`].
+fn cached_prepared_heading_slugs(
+    cache: &mut HeadingSlugCache,
+    md: &Markdown,
+    source: &ComposeSource,
+    path: &std::path::Path,
+    graph_options: &super::types::ReferenceGraphOptions,
+) -> Vec<String> {
+    let key = heading_slug_key(path);
+    if let Some(hit) = cache.get(&key) {
+        return hit.clone();
+    }
+    let slugs = collect_prepared_heading_slugs(md, source, graph_options);
+    cache.insert(key, slugs.clone());
+    slugs
+}
+
 /// Validates a fragment reference against a cross-document target.
 ///
 /// Resolves the target path using `biscuit_file::FileReference` (rec #6)
 /// relative to the reference's own origin source (rec #5). Validates
 /// against prepared headings (after InlinePre) rather than raw headings.
+#[allow(clippy::too_many_arguments)]
 fn validate_cross_doc_fragment(
+    target_path: Option<&std::path::Path>,
     path: &str,
     fragment: &str,
     source: &ComposeSource,
     record: &ReferenceRecord,
     report: &mut ReferenceValidationReport,
     graph_options: &super::types::ReferenceGraphOptions,
+    cache: &mut HeadingSlugCache,
 ) {
-    let ComposeSource::File(base_path) = source else {
+    let ComposeSource::File(_) = source else {
         return;
     };
-    let base_dir = base_path.parent();
-
-    // Resolve via FileReference for @repo-root support, fallback to simple join.
-    // resolve_relative() returns a path relative to base_dir, so join it back
-    // with base_dir to get a CWD-independent absolute path for existence checks.
-    let target_path = if let Ok(file_ref) = biscuit_file::FileReference::new(path) {
-        let mut file_ref = file_ref;
-        for (mp, position) in &graph_options.compose.magic_paths {
-            file_ref = file_ref.add_magic_path(mp, *position);
-        }
-        file_ref
-            .resolve_relative(base_dir)
-            .ok()
-            .flatten()
-            .map(|rel| match base_dir {
-                Some(bd) => bd.join(&rel),
-                None => rel,
-            })
-    } else {
-        None
-    }
-    .unwrap_or_else(|| {
-        base_dir
-            .map(|d| d.join(path))
-            .unwrap_or_else(|| std::path::PathBuf::from(path))
-    });
-
-    if !target_path.exists() {
+    let Some(target_path) = target_path else {
         return; // Missing file is already reported by validate_local_path
-    }
+    };
 
     // Only validate fragments in markdown files
     let ext = target_path
@@ -684,9 +898,15 @@ fn validate_cross_doc_fragment(
         return;
     }
 
-    if let Ok(target_md) = Markdown::try_from(target_path.as_path()) {
-        let target_source = ComposeSource::File(target_path);
-        let headings = collect_prepared_heading_slugs(&target_md, &target_source, graph_options);
+    if let Ok(target_md) = Markdown::try_from(target_path) {
+        let target_source = ComposeSource::File(target_path.to_path_buf());
+        let headings = cached_prepared_heading_slugs(
+            cache,
+            &target_md,
+            &target_source,
+            target_path,
+            graph_options,
+        );
         let frag_lower = fragment.to_lowercase();
         if !headings.contains(&frag_lower) {
             report.issues.push(ReferenceIssue {
@@ -1089,9 +1309,8 @@ mod tests {
     }
 
     /// Regression test: magic-path (`@`) references must validate correctly
-    /// regardless of CWD. Previously, `validate_local_path` called `.exists()`
-    /// on a relative path returned by `resolve_relative()`, which resolved
-    /// against CWD instead of the document's base directory.
+    /// regardless of CWD. The request-scoped context must anchor resolution to
+    /// the document instead of ambient process state.
     #[test]
     #[serial]
     fn validate_magic_path_independent_of_cwd() {
@@ -1226,5 +1445,182 @@ mod tests {
             .render(&biscuit_terminal::terminal::Terminal::new_forced());
 
         assert!(rendered.is_empty());
+    }
+
+    /// Finding 18: validating against a pre-built graph must be byte-identical
+    /// to the graph-building entry point, including cross-doc fragment checks
+    /// (which route through the per-run heading-slug cache).
+    #[test]
+    fn validate_with_graph_matches_validate_with_fragments() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let target = dir.path().join("other.md");
+        std::fs::write(&target, "# Getting Started\n\nContent.").unwrap();
+
+        let source_path = dir.path().join("source.md");
+        std::fs::write(&source_path, "").unwrap();
+
+        // One present fragment, one missing fragment, and a repeated reference
+        // to the same target so the heading-slug cache is exercised.
+        let md = Markdown::new(
+            "[a](./other.md#getting-started)\n\
+             [b](./other.md#missing)\n\
+             [c](./other.md#getting-started)",
+        )
+        .with_source(ComposeSource::File(source_path));
+
+        let options = ReferenceValidationOptions {
+            validate_fragments: true,
+            ..Default::default()
+        };
+
+        let via_build = validate(&md, &options).unwrap();
+
+        let graph = super::super::graph::build_reference_graph(&md, &options.graph).unwrap();
+        let via_graph = validate_with_graph(&md, &options, &graph).unwrap();
+
+        assert_eq!(via_build.references_scanned, via_graph.references_scanned);
+        assert_eq!(via_build.references_valid, via_graph.references_valid);
+        assert_eq!(via_build.error_count(), via_graph.error_count());
+        assert_eq!(via_build.issues.len(), via_graph.issues.len());
+        // The single missing fragment is reported once by both entry points.
+        assert_eq!(via_graph.error_count(), 1);
+        assert!(
+            via_graph
+                .issues
+                .iter()
+                .any(|i| i.code == ReferenceIssueCode::MissingFragmentTarget)
+        );
+    }
+
+    /// The fresh seam validates the build-time snapshot of a just-built graph,
+    /// while the checked seam rejects that same graph once a visited child
+    /// changes on disk — the two trust paths differ only at the freshness gate.
+    #[test]
+    fn fresh_seam_uses_snapshot_while_checked_path_rejects_stale_graph() {
+        use crate::markdown::reference::errors::{
+            DependencyMismatchKind, ReferenceGraphMismatchKind,
+        };
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("root.md"), "# Root\n\n::file child.md\n").unwrap();
+        std::fs::write(dir.path().join("child.md"), "# Child\n").unwrap();
+        let md = Markdown::try_from(dir.path().join("root.md").as_path()).unwrap();
+
+        // One options value feeds the build and both seams, so the checked
+        // path can only reject for the edited child — never for an options
+        // mismatch. Remote validation stays off: no network I/O.
+        let opts = ReferenceValidationOptions::default();
+        let graph = super::super::graph::build_reference_graph(&md, &opts.graph).unwrap();
+
+        // Edit the visited child after construction, adding a broken local
+        // reference that the build-time snapshot does not contain.
+        std::fs::write(
+            dir.path().join("child.md"),
+            "# Child\n\n[broken](./nope.md)\n",
+        )
+        .unwrap();
+
+        let fresh_result = validate_fresh_graph(&md, &opts, &graph);
+        assert!(
+            !matches!(fresh_result, Err(ReferenceError::ReferenceGraphMismatch(_))),
+            "fresh seam must not run the compatibility check"
+        );
+        let fresh_report = fresh_result.unwrap();
+        assert!(
+            !fresh_report
+                .issues
+                .iter()
+                .any(|i| i.code == ReferenceIssueCode::MissingLocalTarget),
+            "post-edit broken reference must be absent from the snapshot report: {:?}",
+            fresh_report.issues
+        );
+        assert!(fresh_report.is_valid());
+
+        let err = validate_with_graph(&md, &opts, &graph).unwrap_err();
+        match err {
+            ReferenceError::ReferenceGraphMismatch(mismatch) => match mismatch.kind() {
+                ReferenceGraphMismatchKind::Dependency { source, kind } => {
+                    assert_eq!(kind, DependencyMismatchKind::Changed);
+                    match source {
+                        ComposeSource::File(path) => assert!(
+                            path.ends_with("child.md"),
+                            "mismatch should name the edited child, got: {path:?}"
+                        ),
+                        other => panic!("expected a file child source, got: {other:?}"),
+                    }
+                }
+                other => panic!("expected a dependency-dimension mismatch, got: {other:?}"),
+            },
+            other => panic!("expected ReferenceGraphMismatch, got: {other}"),
+        }
+    }
+
+    /// Fragment-validation variant of the snapshot/checked pair above: with
+    /// `validate_fragments` enabled, the fresh seam checks same-document
+    /// fragment targets against the transcluded child's build-time headings,
+    /// while the checked seam rejects the same graph once the child's
+    /// heading changes on disk.
+    #[test]
+    fn fresh_seam_uses_heading_snapshot_while_checked_path_rejects_stale_headings() {
+        use crate::markdown::reference::errors::{
+            DependencyMismatchKind, ReferenceGraphMismatchKind,
+        };
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(
+            dir.path().join("root.md"),
+            "# Root\n\n::file child.md\n\n[link](#child-heading)\n",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("child.md"), "# Child Heading\n").unwrap();
+        let md = Markdown::try_from(dir.path().join("root.md").as_path()).unwrap();
+
+        // One options value feeds the build and both seams, so the checked
+        // path can only reject for the edited child — never for an options
+        // mismatch. Remote validation stays off: no network I/O.
+        let opts = ReferenceValidationOptions {
+            validate_fragments: true,
+            ..Default::default()
+        };
+        let graph = super::super::graph::build_reference_graph(&md, &opts.graph).unwrap();
+
+        // Rename the child's heading after construction. The build-time
+        // snapshot still holds `#child-heading`; disk now has
+        // `#renamed-heading`.
+        std::fs::write(dir.path().join("child.md"), "# Renamed Heading\n").unwrap();
+
+        let fresh_result = validate_fresh_graph(&md, &opts, &graph);
+        assert!(
+            !matches!(fresh_result, Err(ReferenceError::ReferenceGraphMismatch(_))),
+            "fresh seam must not run the compatibility check"
+        );
+        let fresh_report = fresh_result.unwrap();
+        assert!(
+            !fresh_report
+                .issues
+                .iter()
+                .any(|i| i.code == ReferenceIssueCode::MissingFragmentTarget),
+            "fragment link to the child's build-time heading must stay valid under the snapshot: {:?}",
+            fresh_report.issues
+        );
+        assert!(fresh_report.is_valid());
+
+        let err = validate_with_graph(&md, &opts, &graph).unwrap_err();
+        match err {
+            ReferenceError::ReferenceGraphMismatch(mismatch) => match mismatch.kind() {
+                ReferenceGraphMismatchKind::Dependency { source, kind } => {
+                    assert_eq!(kind, DependencyMismatchKind::Changed);
+                    match source {
+                        ComposeSource::File(path) => assert!(
+                            path.ends_with("child.md"),
+                            "mismatch should name the edited child, got: {path:?}"
+                        ),
+                        other => panic!("expected a file child source, got: {other:?}"),
+                    }
+                }
+                other => panic!("expected a dependency-dimension mismatch, got: {other:?}"),
+            },
+            other => panic!("expected ReferenceGraphMismatch, got: {other}"),
+        }
     }
 }

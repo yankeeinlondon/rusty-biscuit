@@ -2897,6 +2897,15 @@ pub(crate) static QWEN_CLI_INSTALL: &[InstallationMethod] = &[
     InstallationMethod::Npm("@qwen-code/qwen-code"),
     InstallationMethod::Brew("qwen-code"),
 ];
+pub(crate) static KILO_INSTALL: &[InstallationMethod] = &[
+    InstallationMethod::Npm("@kilocode/cli"),
+    InstallationMethod::Brew("Kilo-Org/tap/kilo"),
+];
+pub(crate) static PI_INSTALL: &[InstallationMethod] =
+    &[InstallationMethod::Npm("@earendil-works/pi-coding-agent")];
+pub(crate) static ANTIGRAVITY_INSTALL: &[InstallationMethod] = &[InstallationMethod::RemoteBash(
+    "https://antigravity.google/cli/install.sh",
+)];
 
 /// Metadata lookup table for AI CLI tools.
 pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
@@ -3035,6 +3044,51 @@ pub(crate) static AI_CLI_INFO: &[ProgramInfo] = &[
         installation_methods: QWEN_CLI_INSTALL,
         system_prerequisites: &[],
     },
+    ProgramInfo {
+        binary_name: "kilo",
+        display_name: "Kilo Code",
+        description: "Open-source agentic coding CLI (OpenCode fork)",
+        website: "https://kilo.ai/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &["kilocode"],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/Kilo-Org/kilocode"),
+        installation_methods: KILO_INSTALL,
+        system_prerequisites: &[],
+    },
+    ProgramInfo {
+        binary_name: "pi",
+        display_name: "Pi",
+        description: "Multi-provider agentic coding CLI (earendil-works)",
+        website: "https://pi.dev/",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/earendil-works/pi"),
+        installation_methods: PI_INSTALL,
+        system_prerequisites: &[],
+    },
+    ProgramInfo {
+        binary_name: "agy",
+        display_name: "Antigravity",
+        description: "Google's Antigravity headless coding CLI",
+        website: "https://antigravity.google/product/antigravity-cli",
+        version_flag: VersionFlag::Long,
+        parse_strategy: VersionParseStrategy::FirstLine,
+        version_regex: None,
+        version_prefix: None,
+        alternate_binary_names: &[],
+        os_availability: ALL_OS,
+        repo: Some("https://github.com/google-antigravity/antigravity-cli"),
+        installation_methods: ANTIGRAVITY_INSTALL,
+        system_prerequisites: &[],
+    },
 ];
 
 impl ProgramMetadata for AiCli {
@@ -3063,6 +3117,9 @@ impl CategoryEnum for AiCli {
             AiCli::Goose => "goose",
             AiCli::KimiCli => "kimi_cli",
             AiCli::QwenCli => "qwen_cli",
+            AiCli::Kilo => "kilo",
+            AiCli::Pi => "pi",
+            AiCli::Antigravity => "antigravity",
         }
     }
 }
@@ -3238,18 +3295,77 @@ static BURNTTOAST_AVAILABLE: std::sync::OnceLock<bool> = std::sync::OnceLock::ne
 /// Probe whether the BurntToast PowerShell module is installed.
 fn is_burnttoast_available() -> bool {
     *BURNTTOAST_AVAILABLE.get_or_init(|| {
-        let output = std::process::Command::new("pwsh")
-            .args([
+        burnttoast_available_with(
+            "pwsh",
+            &[
                 "-NoProfile",
                 "-Command",
                 "if (Get-Module -ListAvailable BurntToast) { 'yes' } else { 'no' }",
-            ])
-            .output();
-        match output {
-            Ok(out) => String::from_utf8_lossy(&out.stdout).trim() == "yes",
-            Err(_) => false,
-        }
+            ],
+            crate::process::timeouts::WINDOWS_BURNTTOAST,
+        )
     })
+}
+
+fn burnttoast_available_with<S, A>(program: S, args: &[A], timeout: std::time::Duration) -> bool
+where
+    S: AsRef<std::ffi::OsStr>,
+    A: AsRef<std::ffi::OsStr>,
+{
+    crate::process::run_for_stdout(program, args, timeout)
+        .is_some_and(|stdout| burnttoast_output_is_available(&stdout))
+}
+
+fn burnttoast_output_is_available(stdout: &str) -> bool {
+    stdout.trim() == "yes"
+}
+
+#[cfg(test)]
+mod burnttoast_tests {
+    use super::*;
+
+    const SLEEPING_CHILD: &str =
+        "programs::enums::metadata::burnttoast_tests::child_sleeps";
+
+    fn test_child_args(name: &str) -> Vec<std::ffi::OsString> {
+        [name, "--exact", "--ignored", "--nocapture"]
+            .into_iter()
+            .map(Into::into)
+            .collect()
+    }
+
+    #[test]
+    #[ignore = "subprocess fixture invoked by the BurntToast probe tests"]
+    fn child_sleeps() {
+        std::thread::sleep(std::time::Duration::from_secs(30));
+    }
+
+    #[test]
+    fn burnttoast_probe_uses_the_shared_bounded_runner() {
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let start = std::time::Instant::now();
+        assert!(!burnttoast_available_with(
+            executable,
+            &test_child_args(SLEEPING_CHILD),
+            std::time::Duration::from_millis(100),
+        ));
+        assert!(start.elapsed() < std::time::Duration::from_secs(5));
+    }
+
+    #[test]
+    fn burnttoast_probe_accepts_only_the_available_marker() {
+        assert!(burnttoast_output_is_available("yes\r\n"));
+        assert!(!burnttoast_output_is_available("no\r\n"));
+        assert!(!burnttoast_output_is_available("yes\nwarning"));
+    }
+
+    #[test]
+    fn burnttoast_timeout_is_named_policy() {
+        assert_eq!(
+            crate::process::timeouts::WINDOWS_BURNTTOAST,
+            std::time::Duration::from_secs(3),
+        );
+    }
 }
 
 // Test runner installation methods

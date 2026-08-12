@@ -3,7 +3,9 @@ set positional-arguments
 
 # set allow-duplicate-recipes
 
-set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+# `env CYG_SYS_BASHRC=1` guards against Cygwin's /etc/bash.bashrc tripping `-u`;
+# see the root justfile for the full explanation.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
 
 import "../just/lifecycle.just"
 import "../just/plan.just"
@@ -47,13 +49,28 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity sniff
-    @just _sanity sniff-cli
+    @just _sanity_all "sniff --features remote; sniff-cli --features test-fixtures"
+
+# run cargo check to do a quick validation that code can be built
+#
+# Scoped to this package area: `sniff/` holds no crate of its own, so a bare
+# `cargo check` falls back to the whole workspace (libduckdb-sys et al).
+# `remote` is required for the same reason as `lint`: without it the provider
+# and remote-observation modules are never handed to rustc at all.
+check *args="":
+    @cargo check -p sniff --features remote -p sniff-cli {{ args }}
 
 # test library and CLI
+#
+# `remote` transitively enables `network`. Selecting `network` alone would
+# cfg-out the whole `sniff::remote` module and silently reduce its Wiremock
+# suites to empty binaries instead of failing.
+#
+# `test-fixtures` on the CLI for the same reason `test-l2` passes it: it gates
+# the `render_*_fixture` helper bins and 2 L1 tests, so a default-feature L1 run
+# reported 788 of 790 as the whole suite.
 test *args="":
-    @just _test sniff {{ args }}
-    @just _test sniff-cli {{ args }}
+    @just _test_all "sniff --features remote; sniff-cli --features test-fixtures" {{ args }}
 
 # Real-terminal (Level-2) tests: CI/CD status-cell styling in sniff-cli.
 # `--features test-fixtures` builds the `render_cicd_fixture` helper the test spawns.
@@ -74,18 +91,21 @@ test-real *args="":
     @just _test_real sniff-cli {{ args }}
 
 # lint with clippy
+#
+# `remote` is required for the same reason as `test`: without it the provider
+# and remote-observation modules are never handed to clippy at all.
 lint *args="":
-    @cargo clippy -p sniff -p sniff-cli -- {{ args }}
+    @cargo clippy -p sniff --features remote -p sniff-cli -- {{ args }}
 
 # Per-package LCOV coverage.
 coverage *args="":
-    @just _coverage sniff {{ args }}
-    @just _coverage sniff-cli {{ args }}
+    @just _coverage sniff --features remote {{ args }}
+    @just _coverage sniff-cli --features test-fixtures {{ args }}
 
 # Doctests.
 doctest *args="":
-    @just _doctest sniff {{ args }}
-    @just _doctest sniff-cli {{ args }}
+    @just _doctest sniff --features remote {{ args }}
+    @just _doctest sniff-cli --features test-fixtures {{ args }}
 
 # not applicable: sniff has no cargo-fuzz targets
 fuzz:
@@ -138,34 +158,34 @@ outdated:
 # run the full Criterion bench suite for sniff-lib
 bench *args="":
     @echo -e "Running Criterion benches for {{ BOLD }}sniff{{ RESET }}"
-    @cargo bench -p sniff --features network --bench perf -- {{ args }}
+    @cargo bench -p sniff --features network,bench-internals --bench perf -- {{ args }}
 
 # run only the system-level benches
 bench-system *args="":
-    @cargo bench -p sniff --features network --bench perf -- ^system {{ args }}
+    @cargo bench -p sniff --features network,bench-internals --bench perf -- ^system {{ args }}
 
 # run only the hardware benches
 bench-hardware *args="":
-    @cargo bench -p sniff --features network --bench perf -- ^hardware {{ args }}
+    @cargo bench -p sniff --features network,bench-internals --bench perf -- ^hardware {{ args }}
 
 # run only the filesystem benches
 bench-filesystem *args="":
-    @cargo bench -p sniff --features network --bench perf -- ^filesystem {{ args }}
+    @cargo bench -p sniff --features network,bench-internals --bench perf -- ^filesystem {{ args }}
 
 # run only the programs + services inventory benches
 bench-inventory *args="":
-    @cargo bench -p sniff --features network --bench perf -- ^inventory {{ args }}
+    @cargo bench -p sniff --features network,bench-internals --bench perf -- '^(inventory|workloads_service_listing)' {{ args }}
 
 # run only the network benches (wiremock-backed)
 bench-network *args="":
-    @cargo bench -p sniff --features network --bench perf -- ^network {{ args }}
+    @cargo bench -p sniff --features network,bench-internals --bench perf -- ^network {{ args }}
 
 # run the narrow CI subset of benches (matches sniff-performance.yml)
 bench-ci *args="":
     #!/usr/bin/env bash
     set -euo pipefail
     filter="$(paste -sd'|' lib/benches/ci-bench-ids.txt | sed 's/\./\\./g')"
-    cargo bench -p sniff --features network --bench perf -- "^(${filter})$" {{ args }}
+    cargo bench -p sniff --features network,bench-internals --bench perf -- "^(${filter})$" {{ args }}
 
 # end-to-end CLI benchmarks via hyperfine (requires hyperfine on PATH)
 bench-cli:

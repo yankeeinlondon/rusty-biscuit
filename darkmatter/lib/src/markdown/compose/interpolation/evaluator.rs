@@ -71,12 +71,18 @@
 //! }
 //! ```
 
-use crate::markdown::compose::expression::{EvaluationLookup, Expr, evaluate, scalar_string};
+use crate::catalog::{describe_for_error, suggest};
+use crate::markdown::compose::ComposeWarning;
+use crate::markdown::compose::context::catalog::CONTEXT_VARIABLE_DESCRIPTORS;
+use crate::markdown::compose::expression::{
+    EvaluationLookup, Expr, ExpressionError, evaluate, interpolation_output_string,
+};
 use serde_json::Value;
+use std::collections::HashMap;
 use tracing::{debug, trace};
 
 /// Result of evaluating an expression.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum EvalResult {
     /// Successful evaluation producing a string.
     Value(String),
@@ -86,8 +92,8 @@ pub enum EvalResult {
     /// The `original` field contains the expression string representation
     /// for error recovery (e.g., preserving unprocessed expressions).
     Error {
-        /// Human-readable error message.
-        message: String,
+        /// Typed expression error.
+        error: ExpressionError,
         /// Original expression for error recovery.
         original: String,
     },
@@ -204,12 +210,23 @@ impl EvalValue {
 /// an [`EvaluationLookup`] implementation to produce string output.
 pub struct Evaluator<'a, L: EvaluationLookup> {
     state: &'a L,
+    presentation_values: Option<&'a HashMap<String, Value>>,
 }
 
 impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
     /// Creates a new evaluator with the given lookup state.
     pub fn new(state: &'a L) -> Self {
-        Self { state }
+        Self {
+            state,
+            presentation_values: None,
+        }
+    }
+
+    /// Supplies alternate values for side-effect-free path string rendering.
+    /// All other expression evaluation continues to use the native lookup values.
+    pub(crate) fn with_presentation_values(mut self, values: &'a HashMap<String, Value>) -> Self {
+        self.presentation_values = Some(values);
+        self
     }
 
     /// Evaluates an expression to a string result.
@@ -230,9 +247,24 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
     pub fn eval(&self, expr: &Expr) -> EvalResult {
         trace!(expr = ?expr, "interpolation: evaluating expression");
 
+        if let Some(value) = self.presentation_value(expr) {
+            return EvalResult::Value(interpolation_output_string(&value));
+        }
+
         // Preserve debug/trace logging for variable resolution
         if let Expr::Variable(name) = expr {
-            let value = self.state.get_string(name);
+            // Bare array interpolation renders line-separated (spec D4).
+            // Objects must pass through the lookup's string hook because some
+            // production lookups apply configured name coercion there. Scalars
+            // stay on the single-lookup fast path.
+            let value = match self.state.get(name) {
+                Some(array @ Value::Array(_)) => interpolation_output_string(&array),
+                Some(Value::Object(_)) => self.state.get_string(name),
+                None | Some(Value::Null) => String::new(),
+                Some(Value::String(s)) => s,
+                Some(Value::Number(n)) => n.to_string(),
+                Some(Value::Bool(b)) => b.to_string(),
+            };
             if value.is_empty() {
                 debug!(variable = %name, "interpolation: unresolved variable");
             } else {
@@ -242,12 +274,54 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
         }
 
         match evaluate(expr, self.state) {
-            Ok(value) => EvalResult::Value(scalar_string(&value)),
-            Err(message) => EvalResult::Error {
-                message,
+            Ok(value) => EvalResult::Value(interpolation_output_string(&value)),
+            Err(error) => EvalResult::Error {
+                error,
                 original: expr.to_string(),
             },
         }
+    }
+
+    fn presentation_value(&self, expr: &Expr) -> Option<Value> {
+        match expr {
+            Expr::Variable(path) => self.presentation_path_value(path),
+            Expr::Paren(inner) => self.presentation_value(inner),
+            Expr::MemberAccess { base, name } => {
+                let mut value = self.presentation_value(base)?;
+                for segment in name.split('.') {
+                    value = value.as_object()?.get(segment)?.clone();
+                }
+                Some(value)
+            }
+            Expr::Index { base, index } => {
+                let value = self.presentation_value(base)?;
+                match (value, static_selector(index)?) {
+                    (Value::Array(values), StaticSelector::Array(index)) => {
+                        select_array_value(&values, index)
+                    }
+                    (Value::Object(values), StaticSelector::Object(key)) => {
+                        values.get(key).cloned()
+                    }
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn presentation_path_value(&self, path: &str) -> Option<Value> {
+        let path = match path.strip_prefix("doc.") {
+            Some(path) => path,
+            None if path == "doc" => return None,
+            None => path,
+        };
+        let mut segments = path.split('.');
+        let first = segments.next()?;
+        let mut value = self.presentation_values?.get(first)?;
+        for segment in segments {
+            value = value.as_object()?.get(segment)?;
+        }
+        Some(value.clone())
     }
 
     /// Evaluates an expression to a value (for truthiness checks).
@@ -279,9 +353,117 @@ impl<'a, L: EvaluationLookup> Evaluator<'a, L> {
     /// interpolation uses it to keep a single `{{ expr }}` value typed instead
     /// of collapsing it to a string. The `Err` is the evaluator's message, so
     /// callers can fall back to the string path on failure.
-    pub fn eval_json(&self, expr: &Expr) -> Result<Value, String> {
+    pub fn eval_json(&self, expr: &Expr) -> Result<Value, ExpressionError> {
         evaluate(expr, self.state)
     }
+
+    /// Collects warnings for `ctx.*` references that don't resolve to a known
+    /// runtime context variable.
+    ///
+    /// The check is parser-aware: it walks the AST so typo detection works even
+    /// when the surrounding expression would otherwise evaluate to an empty
+    /// string (the default for unresolved variables).
+    pub fn collect_context_warnings(&self,
+        expr: &Expr,
+        warning_stage: &'static str,
+    ) -> Vec<ComposeWarning> {
+        let mut warnings = Vec::new();
+        self.walk_context_variables(expr, &mut |name, raw| {
+            if self.state.is_valid_context_variable(name) {
+                return;
+            }
+            let mut message = format!("unknown context variable '{}'", raw);
+            if let Some(descriptor) = suggest(&CONTEXT_VARIABLE_DESCRIPTORS, name, 1).first() {
+                message.push_str("\n  did you mean: ");
+                message.push_str(&describe_for_error(*descriptor));
+            }
+            warnings.push(ComposeWarning::new(warning_stage, message));
+        });
+        warnings
+    }
+
+    fn walk_context_variables(&self,
+        expr: &Expr,
+        visitor: &mut dyn FnMut(&str, &str),
+    ) {
+        match expr {
+            Expr::Variable(path) => {
+                if let Some(name) = path.strip_prefix("ctx.") {
+                    let first = name.split('.').next().unwrap_or(name);
+                    if !first.is_empty() {
+                        visitor(first, path);
+                    }
+                }
+            }
+            Expr::Paren(inner)
+            | Expr::UnaryNot(inner)
+            | Expr::UnaryMinus(inner) => self.walk_context_variables(inner, visitor),
+            Expr::Binary { left, right, .. }
+            | Expr::Comparison { left, right, .. }
+            | Expr::Fallback { primary: left, fallback: right } => {
+                self.walk_context_variables(left, visitor);
+                self.walk_context_variables(right, visitor);
+            }
+            Expr::Ternary {
+                condition,
+                then_branch,
+                else_branch,
+            } => {
+                self.walk_context_variables(condition, visitor);
+                self.walk_context_variables(then_branch, visitor);
+                self.walk_context_variables(else_branch, visitor);
+            }
+            Expr::Index { base, index } => {
+                self.walk_context_variables(base, visitor);
+                self.walk_context_variables(index, visitor);
+            }
+            Expr::MemberAccess { base, .. } => self.walk_context_variables(base, visitor),
+            Expr::FunctionCall { args, .. } => {
+                for arg in args {
+                    self.walk_context_variables(arg, visitor);
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+enum StaticSelector<'a> {
+    Array(i64),
+    Object(&'a str),
+}
+
+fn static_selector(expr: &Expr) -> Option<StaticSelector<'_>> {
+    match expr {
+        Expr::NumberLiteral(value) => integer_literal(*value).map(StaticSelector::Array),
+        Expr::UnaryMinus(inner) => match inner.as_ref() {
+            Expr::NumberLiteral(value) => integer_literal(-*value).map(StaticSelector::Array),
+            _ => None,
+        },
+        Expr::StringLiteral(value) => Some(StaticSelector::Object(value)),
+        _ => None,
+    }
+}
+
+fn integer_literal(value: f64) -> Option<i64> {
+    (value.is_finite()
+        && value.fract() == 0.0
+        && value >= i64::MIN as f64
+        && value <= i64::MAX as f64)
+        .then_some(value as i64)
+}
+
+fn select_array_value(values: &[Value], index: i64) -> Option<Value> {
+    let len = i64::try_from(values.len()).ok()?;
+    let index = if index < 0 {
+        len.checked_add(index)?
+    } else {
+        index
+    };
+    usize::try_from(index)
+        .ok()
+        .and_then(|index| values.get(index))
+        .cloned()
 }
 
 #[cfg(test)]
@@ -323,7 +505,7 @@ mod tests {
         #[test]
         fn unwrap_or_original_error() {
             let result = EvalResult::Error {
-                message: "test error".to_string(),
+                error: ExpressionError::Parse("test error".to_string()),
                 original: "foo || bar".to_string(),
             };
             assert_eq!(result.unwrap_or_original(), "{{ foo || bar }}");
@@ -333,7 +515,7 @@ mod tests {
         fn is_value() {
             let value = EvalResult::Value("x".to_string());
             let error = EvalResult::Error {
-                message: "e".to_string(),
+                error: ExpressionError::Parse("e".to_string()),
                 original: "o".to_string(),
             };
 
@@ -446,6 +628,68 @@ mod tests {
         use super::*;
 
         #[test]
+        fn presentation_values_apply_only_to_string_rendering() {
+            let state = create_test_state(json!({
+                "path": r"C:\work\spec.md",
+                "unrelated": r"C:\work\spec.md",
+                "files": [r"C:\work\first.md", r"C:\work\second.md"],
+                "unrelated_files": [r"C:\work\first.md", r"C:\work\second.md"],
+                "records": [{"path": r"C:\work\first.md"}],
+                "mapping": {"primary": r"C:\work\first.md"},
+                "index": 0,
+            }));
+            let presentation = HashMap::from([
+                ("path".to_string(), json!("C:/work/spec.md")),
+                (
+                    "files".to_string(),
+                    json!(["C:/work/first.md", "C:/work/second.md"]),
+                ),
+                (
+                    "records".to_string(),
+                    json!([{"path": "C:/work/first.md"}]),
+                ),
+                (
+                    "mapping".to_string(),
+                    json!({"primary": "C:/work/first.md"}),
+                ),
+            ]);
+            let evaluator = Evaluator::new(&state).with_presentation_values(&presentation);
+            let direct = parse("path").unwrap();
+            let fallback = parse(r#"path || "missing""#).unwrap();
+            let unrelated = parse("unrelated").unwrap();
+            let unrelated_fallback = parse(r#"unrelated || "missing""#).unwrap();
+            let first_file = parse("files[0]").unwrap();
+            let last_file = parse("files[-1]").unwrap();
+            let unrelated_file = parse("unrelated_files[0]").unwrap();
+            let dynamic_index = parse("files[index]").unwrap();
+            let member_path = parse("records[0].path").unwrap();
+            let string_index = parse(r#"mapping["primary"]"#).unwrap();
+            let render = |expr| match evaluator.eval(expr) {
+                EvalResult::Value(value) => value,
+                EvalResult::Error { error, .. } => panic!("unexpected evaluation error: {error}"),
+            };
+
+            assert_eq!(
+                evaluator.eval_json(&direct).unwrap(),
+                json!(r"C:\work\spec.md")
+            );
+            assert_eq!(render(&direct), "C:/work/spec.md");
+            assert_eq!(render(&fallback), r"C:\work\spec.md");
+            assert_eq!(render(&unrelated), r"C:\work\spec.md");
+            assert_eq!(render(&unrelated_fallback), r"C:\work\spec.md");
+            assert_eq!(render(&first_file), "C:/work/first.md");
+            assert_eq!(render(&last_file), "C:/work/second.md");
+            assert_eq!(
+                evaluator.eval_json(&first_file).unwrap(),
+                json!(r"C:\work\first.md")
+            );
+            assert_eq!(render(&unrelated_file), r"C:\work\first.md");
+            assert_eq!(render(&dynamic_index), r"C:\work\first.md");
+            assert_eq!(render(&member_path), "C:/work/first.md");
+            assert_eq!(render(&string_index), "C:/work/first.md");
+        }
+
+        #[test]
         fn resolves_string_variable() {
             let state = create_test_state(json!({"name": "Alice"}));
             let evaluator = Evaluator::new(&state);
@@ -453,7 +697,7 @@ mod tests {
 
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => assert_eq!(s, "Alice"),
-                EvalResult::Error { message, .. } => panic!("Expected Value, got error: {message}"),
+                EvalResult::Error { error, .. } => panic!("Expected Value, got error: {error}"),
             }
         }
 
@@ -633,6 +877,95 @@ mod tests {
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => assert_eq!(s, ""),
                 _ => panic!("Expected empty Value"),
+            }
+        }
+    }
+
+    mod eval_array_interpolation {
+        use super::*;
+
+        /// Bare array interpolation renders line-separated (spec D4 default),
+        /// so `{{ items }}` ≡ `{{ as_line_separated(items) }}`.
+        #[test]
+        fn bare_array_renders_line_separated() {
+            let state = create_test_state(json!({"items": ["a", "b", "c"]}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse("items").unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, "a\nb\nc"),
+                EvalResult::Error { error, .. } => panic!("Expected Value, got error: {error}"),
+            }
+        }
+
+        #[test]
+        fn empty_array_renders_empty() {
+            let state = create_test_state(json!({"items": []}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse("items").unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, ""),
+                _ => panic!("Expected Value"),
+            }
+        }
+
+        /// `as_csv` reproduces the historical comma-joined bare-name output of
+        /// the collapsed `ctx.*` list variables (spec criterion 7).
+        #[test]
+        fn as_csv_reproduces_comma_output() {
+            let state = create_test_state(json!({"items": ["a", "b", "c"]}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse("as_csv(items)").unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, "a, b, c"),
+                _ => panic!("Expected Value"),
+            }
+        }
+
+        /// `as_unordered_list` reproduces the old `_list` twin's bullet output.
+        #[test]
+        fn as_unordered_list_reproduces_bullets() {
+            let state = create_test_state(json!({"items": ["a", "b"]}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse("as_unordered_list(items)").unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, "- a\n- b"),
+                _ => panic!("Expected Value"),
+            }
+        }
+
+        /// The `depends_on` / `used_by` object-array shape renders as nested
+        /// bullets (spec criterion 9).
+        #[test]
+        fn as_unordered_list_renders_object_array_nested() {
+            let state = create_test_state(json!({
+                "depends_on": [
+                    { "package": "alpha", "dependencies": ["beta", "gamma"] }
+                ]
+            }));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse("as_unordered_list(depends_on)").unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, "- alpha\n  - beta\n  - gamma"),
+                _ => panic!("Expected Value"),
+            }
+        }
+
+        /// Equality comparison keeps `scalar_string`'s JSON-array form, so the
+        /// interpolation output change does not leak into `==` (spec criterion 8).
+        #[test]
+        fn equality_comparison_unaffected_by_line_separated_output() {
+            let state = create_test_state(json!({"items": ["a", "b"]}));
+            let evaluator = Evaluator::new(&state);
+            let expr = parse(r#"items == '["a","b"]' ? "yes" : "no""#).unwrap();
+
+            match evaluator.eval(&expr) {
+                EvalResult::Value(s) => assert_eq!(s, "yes"),
+                _ => panic!("Expected Value"),
             }
         }
     }
@@ -1689,8 +2022,8 @@ mod tests {
             let expr = parse("unknown(x)").unwrap();
 
             match evaluator.eval(&expr) {
-                EvalResult::Error { message, original } => {
-                    assert!(message.contains("Unknown function"));
+                EvalResult::Error { error, original } => {
+                    assert!(error.to_string().contains("Unknown function"));
                     assert!(original.contains("unknown"));
                 }
                 _ => panic!("Expected Error"),
@@ -1830,8 +2163,8 @@ mod tests {
             let expr = parse(source).unwrap_or_else(|e| panic!("parse {source:?}: {e}"));
             match evaluator.eval(&expr) {
                 EvalResult::Value(s) => s,
-                EvalResult::Error { message, .. } => {
-                    panic!("eval {source:?} returned error: {message}")
+                EvalResult::Error { error, .. } => {
+                    panic!("eval {source:?} returned error: {error}")
                 }
             }
         }

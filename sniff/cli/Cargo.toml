@@ -29,6 +29,7 @@ test-fixtures = []
 chrono = "0.4"
 clap = { version = "4", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4", features = ["unstable-dynamic"] }
+dirs = "6"
 futures = "0.3"
 inquire = "0.9"
 rayon = "1.11.0"
@@ -49,9 +50,18 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 expectrl = "0.8"
 # Only to snapshot worktrees into commits when building CLI test repos —
 # gix has no worktree-staging write API. See sniff-lib's dev-dep note.
-git2 = "0.20"
+git2 = { version = "0.20", default-features = false }
+# PCRE2 symbol clash with pcre2-sys breaks the MSVC link. See sniff-lib's dev-dep note.
+libgit2-sys = ">=0.18.3, <0.18.6"
 insta = { version = "1", features = ["json"] }
 predicates = "3"
 serial_test = "3"
 tempfile = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
+
+# CI policy: the L1 suite runs with the `test-fixtures` feature, and sniff-cli
+# owns the area's tmux-driven L2 tests (CI/CD status-cell styling).
+[package.metadata.ci.tests]
+tiers = ["L1", "L2"]
+l2-backends = ["tmux"]
+features = ["test-fixtures"]

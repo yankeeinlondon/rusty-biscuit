@@ -1,7 +1,9 @@
 set dotenv-load
 set positional-arguments
 # set allow-duplicate-recipes
-set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+# `env CYG_SYS_BASHRC=1` guards against Cygwin's /etc/bash.bashrc tripping `-u`;
+# see the root justfile for the full explanation.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
 
 BOLD := '\033[1m'
 DIM := '\033[2m'
@@ -59,13 +61,11 @@ install *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity playa
-    @just _sanity playa-cli
+    @just _sanity_all "playa playa-cli"
 
 # Test both library and CLI.
 test *args="":
-    @just _test playa {{args}}
-    @just _test playa-cli {{args}}
+    @just _test_all "playa playa-cli" {{args}}
 
 # not applicable: playa has no real-terminal (Level-2) tests
 test-l2:
@@ -123,7 +123,8 @@ lint-fix:
     @just _lint playa || just _fix_lint playa
     @just _lint playa-cli || just _fix_lint playa-cli
 
-# Install the CLI with Linux-native event-audio support.
+# Install the CLI with OS-native event-audio support stated explicitly.
+# `sfx-native-audio` is already a default feature, so this matches `just install`.
 install-linux-native *args="":
     #!/usr/bin/env bash
     set -euo pipefail
@@ -134,7 +135,7 @@ install-linux-native *args="":
     echo
     echo -e "{{ BOLD }}{{ YELLOW }}Installing {{ CLI_NAME }} with Linux native audio{{ RESET }}"
     echo
-    cargo install --path {{ CLI_PATH }} --features sfx-native-linux {{ args }} || ( playa effect error-2 2>/dev/null; exit 1 )
+    cargo install --path {{ CLI_PATH }} --features sfx-native-audio {{ args }} || ( playa effect error-2 2>/dev/null; exit 1 )
     echo -e "{{ BOLD }}{{ BLUE }}{{ CLI_NAME }} installed{{ RESET }}"
     echo
     playa effect drop-4 2>/dev/null || true

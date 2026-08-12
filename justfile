@@ -3,7 +3,16 @@ set positional-arguments
 
 # set allow-duplicate-recipes
 
-set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+# The `env CYG_SYS_BASHRC=1` prefix is load-bearing. Cygwin's /etc/bash.bashrc
+# opens with `[[ -z ${CYG_SYS_BASHRC} ]]`, an unguarded expansion that the `-u`
+# below turns into a fatal "unbound variable" wherever bash sources that file
+# non-interactively (a shell exporting BASH_ENV is the usual cause). Pre-setting
+# the variable sends that guard down its already-initialized early-return path.
+#
+# It must reach bash through the environment rather than just's `export`, which
+# covers recipe shells but NOT the shells just spawns to evaluate backtick
+# assignments — `KACHE_VERSION` below is one.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
 
 import "./just/lifecycle.just"
 import "./just/plan.just"
@@ -13,15 +22,33 @@ import "./just/ai.just"
 import "./just/devops.just"
 import "./just/spec.just"
 
-# List of areas in this monorepo
+# Every package area in this monorepo that owns tests.
+#
+# This list is what `check-canonical` validates and what `_orchestrate`,
+# `changed-areas`, and `install` iterate. An area is listed here because it has
+# tests worth gating, NOT because it is already promoted to CI; promotion is a
+# separate, deliberate decision in the package's own manifest
+# (`[package.metadata.ci] gates`).
+#
+# Deliberately absent: `visualizer`, `reaper`, `agent-sandbox`, and `tabby`.
+# Those four carry zero or one test, so a canonical recipe set would gate
+# nothing (`agent-sandbox` and `tabby` have no justfile at all). Add each one
+# here at the same time it gains a suite worth running.
+areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab biscuit-contract biscuit-icon renderable worktree tools biscuit-test-harness biscuit-browser-harness messenger biscuit-visualized biscuit-clipboard"
 
-areas := "biscuit-hash biscuit-location biscuit-speaks biscuit-terminal biscuit-tui schematic biscuit-file unchained-ai playa tree-hugger darkmatter sniff model-citizen claudine research queue homelab biscuit-contract"
+# The `areas :=` list above is a LOCAL convenience (canonical-recipe validation
+# and `changed-areas` iteration). CI does not read it: CI selects and records
+# work by package, with package policy in each manifest's `[package.metadata.ci]`.
 BOLD := '\033[1m'
 DIM := '\033[2m'
 ITALIC := '\033[3m'
 RESET := '\033[0m'
 RED := '\033[31m'
 GREEN := '\033[32m'
+# Single kache version authority, shared with GitHub Actions via
+# `.github/kache-version` (D2). Both sides read the same file, so they cannot
+# drift to different versions.
+KACHE_VERSION := trim(`cat .github/kache-version`)
 
 default:
     #!/usr/bin/env bash
@@ -48,6 +75,14 @@ test *args="":
 # Verify that every package-area test recipe preserves Ctrl+C as exit 130.
 check-test-interrupts:
     @just _check_test_interrupts
+
+# Verify no tier filter strands tests behind a stub `test-<tier>` recipe.
+#
+# Not part of any lifecycle recipe or hook: it has to build each stubbing area's
+# test binaries to answer the question. Run it when tier markers or tier recipes
+# change. Optional args restrict it to named area directories.
+check-tier-coverage *args="":
+    @just _check_tier_coverage {{ args }}
 
 # run the test suite, then sweep for child processes that outlived it
 #
@@ -99,7 +134,7 @@ test-changed-areas:
 test-githooks: test-pre-push-hook test-changed-areas
 
 # run doctests (all workspace crates, or specific areas: just doctest claudine playa)
-doctest *args="":
+doctest *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
     if [[ -z "{{ args }}" ]]; then
@@ -227,34 +262,15 @@ repo-deps:
     @cargo run --manifest-path scripts/Cargo.toml --bin repo-deps
 
 lint:
-    #!/usr/bin/env bash
-      set -euo pipefail
-      echo ""
-      echo "Linting all packages..."
-      echo "----------------------------"
-      echo ""
-      for area in {{ areas }}; do
-          if [ -f "$area/justfile" ]; then
-              if (cd "$area" && just --summary 2>/dev/null) | grep -qw "lint"; then
-                  echo "Linting $area..."
-                  (cd "$area" && just lint) || ( so-you-say "The ${area} package has lint errors." )
-              else
-                  if (cd "$area" && just --summary 2>/dev/null) | grep -qw "lint"; then
-                      echo "No lint command for $area"
-                      so-you-say "The ${area} package does not define a lint command" 2>/dev/null || exit 0
-                  else
-                      echo "- no lint command for the area **$area**" >&2
-                  fi
-              fi
-          else
-              echo -e "- no {{ ITALIC }}justfile{{ RESET }} for the package {{ BOLD }}$area{{ RESET }}" >&2
-
-          fi
-      done
+    @just _orchestrate lint
 
 # run sanity checks (all areas, or specific areas: just sanity claudine darkmatter)
 sanity *args="":
     @just _orchestrate sanity {{ args }}
+
+# build all areas, or specific areas: just build claudine darkmatter
+build *args="":
+    @just _orchestrate build {{ args }}
 
 # run benchmarks (all areas, or specific areas: just bench claudine darkmatter)
 bench *args="":
@@ -314,6 +330,23 @@ check-canonical *args="":
                 missing+=("$r")
             fi
         done
+        # A top-level ``VAR := `cmd` `` is evaluated whenever just LOADS the
+        # justfile, for every recipe. If `cmd` is a repo-built CLI, `just lint`
+        # in CI dies at parse time on a tool CI never installs -- which is how
+        # homelab's `sniff`-backed INTEGRATIONS broke its lint job. Only tools
+        # present on a bare runner may appear there; anything else belongs
+        # inside the recipe that needs it. (`--dry-run` does NOT evaluate these,
+        # so it cannot be used to test this.)
+        portable='^(cat|date|echo|printf|pwd|uname|basename|dirname|git)([ `]|$)'
+        while IFS= read -r assignment; do
+            command_word="${assignment#*\`}"
+            if ! grep -Eq "$portable" <<< "$command_word"; then
+                echo -e "  {{ RED }}❌ Load-time backtick runs a non-portable tool:{{ RESET }} ${assignment}"
+                echo    "     Move it into the recipe that needs it; every recipe pays this cost."
+                missing+=("<load-time-backtick>")
+            fi
+        done < <(grep -E '^[A-Za-z_]+ *:?=.*`' "$area/justfile" || true)
+
         if (( ${#missing[@]} > 0 )); then
             echo -e "  {{ RED }}❌ Missing canonical recipes:{{ RESET }} ${missing[*]}"
             failed_areas+=("$area")
@@ -340,18 +373,41 @@ check-canonical *args="":
         exit 1
     fi
 
-# commits all the staged changes using model from MODEL or COMMIT_MODEL in OpenCode
+# commits all the staged changes using model from COMMIT_MODEL or MODEL in OpenCode
+# (under CI: a plain `git commit` with the message passed as the argument)
 commit *args="":
-    @echo ""
-    @echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
-    @echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${MODEL:-${COMMIT_MODEL:-minimax/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
-    @echo ""
-    @echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
-    @sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
-    @claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M3}}" -y {{ args }}
-    @just _speak "git commits completed in rusty-biscuit monorepo"
-    @sniff repo git-status 2>/dev/null || exit 0
-    @echo
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # A runner has no TTY, no model credentials, and no audio device, and CI must
+    # not depend on a network round-trip to write a commit message. Under CI this
+    # is therefore a plain, deterministic commit whose message the caller supplies
+    # — no LLM, no `_speak`, no network. Local behavior is unchanged.
+    if [[ -n "${CI:-}" ]]; then
+        message={{ quote(args) }}
+        if [[ -z "$message" ]]; then
+            echo "just commit: under CI the commit message must be passed as the argument" >&2
+            echo "  e.g. just commit \"chore(ci): regenerate catalog\"" >&2
+            exit 1
+        fi
+        if git diff --cached --quiet; then
+            echo "No Staged Files! Nothing to do ..."
+            exit 1
+        fi
+        git commit -m "$message"
+        exit 0
+    fi
+
+    echo ""
+    echo -e "Committing staged changes in the {{ BOLD }}Rusty Biscuit{{ RESET }} monorepo to git"
+    echo -e "{{ DIM }}{{ ITALIC }}- using the {{ RESET }}{{ ITALIC }}${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M3}} {{ DIM }}model{{ RESET }}"
+    echo ""
+    echo -e "{{ BOLD }}{{ BLUE }}Staged Files:{{ RESET }}"
+    sniff repo staged-files || ( echo "No Staged Files! Nothing to do ..." && exit 1 )
+    claudine compose "@prompts/commit.md" --opencode --op "commit" --quiet --model "${COMMIT_MODEL:-${MODEL:-minimax/MiniMax-M3}}" -y {{ args }}
+    just _speak "git commits completed in rusty-biscuit monorepo"
+    sniff repo git-status 2>/dev/null || exit 0
+    echo
 
 # stages all files in package area and then commits and pushes
 cp:
@@ -370,27 +426,169 @@ cp:
     @echo "All committed files from {{ BOLD }}rusty-biscuit{{ RESET }} monorepo have now been pushed to remote."
     @echo
 
-# install rusty-biscuit CLI's which are used in devops
-init: _ensure-build-deps
+# install host, CI/CD, and rusty-biscuit tools used by repository recipes
+#
+# On native Windows, run scripts\init.ps1 instead of invoking this recipe
+# directly: just needs bash AND cygpath on PATH before it can run any recipe,
+# so the "no shell environment" check has to happen outside just.
+init: _ensure-native-bash
     #!/usr/bin/env bash
     set -euo pipefail
-    # Source cargo env in case _ensure-build-deps just installed Rust
-    [[ -f "$HOME/.cargo/env" ]] && source "$HOME/.cargo/env"
     echo -e "Initializing the {{ RED }}rusty-biscuit{{ RESET }} monorepo"
     echo
-    echo -e "First step is to ensure CLI's used for devops are installed"
+
+    echo -e "{{ BOLD }}Host prerequisites{{ RESET }}"
+    just _ensure-build-deps
+    source scripts/cargo-path.sh
+    just _ensure-native-libs
+    just _ensure-host-tools
     echo
+
+    echo -e "{{ BOLD }}CI/CD tools{{ RESET }}"
+    just _ensure-ci-tools
+    echo
+
+    echo -e "{{ BOLD }}Repository and developer tools{{ RESET }}"
+    just _ensure-cargo-sweep
+    just _ensure-gitnexus
+    echo
+    (cd sniff && just install)
+    sniff runtime
+    (cd biscuit-hash && just install)
     (cd biscuit-terminal && just install)
     (cd darkmatter && just install)
-    (cd sniff && just install)
     (cd playa && just install)
     (cd biscuit-speaks && just install)
+    (cd claudine && just install)
+
+# "Accidental WSL" guard. Must be a LINEWISE recipe: just runs shebang recipes
+# through the cygpath-translated interpreter (Cygwin/Git Bash), but linewise
+# recipes through `set shell`'s bare `bash` — which on Windows can resolve to
+# the WSL launcher (WindowsApps sorts before a real bash on PATH). Recipes then
+# run in Linux against a /mnt/c checkout and fail confusingly ("cargo: command
+# not found" even though Rust is installed on the Windows side). Intentional
+# WSL development keeps the checkout in the Linux filesystem, so only /mnt/*
+# is rejected.
+_ensure-native-bash:
+    @if grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null && [ "${PWD#/mnt/}" != "$PWD" ]; then \
+        echo "just is running recipes inside WSL against a Windows-mounted checkout ($PWD)." >&2; \
+        echo "This happens when 'bash' on the Windows PATH resolves to the WSL launcher" >&2; \
+        echo "(WindowsApps\bash.exe) instead of Cygwin or Git Bash." >&2; \
+        echo "" >&2; \
+        echo "If you intended to run this in native Windows (most likely), then:" >&2; \
+        echo "  - run scripts\init.ps1 instead of 'just init', or" >&2; \
+        echo "  - reorder your PATH so C:\cygwin64\bin (or Git's bin) sorts BEFORE" >&2; \
+        echo "    %LOCALAPPDATA%\Microsoft\WindowsApps, then open a new terminal." >&2; \
+        echo "If you meant to work in WSL: clone the repo inside the WSL filesystem" >&2; \
+        echo "  (e.g. ~/rusty-biscuit) and run 'just init' from there." >&2; \
+        exit 1; \
+    fi
+
+# ensure repository shell and interactive utility dependencies are available
+_ensure-host-tools:
+    @bash scripts/ensure-host-tools.sh
+
+# ensure CLIs invoked directly by CI/CD and local reproduction recipes exist
+_ensure-ci-tools: _ensure-nextest
+    @bash scripts/ensure-ci-tools.sh
 
 # ensure Rust, cargo, and C build tools are available
 _ensure-build-deps:
     #!/usr/bin/env bash
     set -euo pipefail
+    source scripts/cargo-path.sh
 
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*)
+            # --- native Windows -------------------------------------------
+            if ! command -v rustc &> /dev/null || ! command -v cargo &> /dev/null; then
+                echo -e "{{ RED }}Missing Rust toolchain{{ RESET }} (rustc/cargo not found)"
+                # sh.rustup.rs misdetects under Cygwin/MSYS (it picks the GNU
+                # triple and downloads with Cygwin paths a native curl cannot
+                # write), so on Windows we fetch rustup-init.exe directly for
+                # the host's MSVC triple instead.
+                case "$(uname -m)" in
+                    x86_64)        host_triple="x86_64-pc-windows-msvc" ;;
+                    aarch64|arm64) host_triple="aarch64-pc-windows-msvc" ;;
+                    i686)          host_triple="i686-pc-windows-msvc" ;;
+                    *)
+                        echo "Unsupported CPU architecture for automatic Rust install: $(uname -m)" >&2
+                        echo "Download rustup manually from https://rustup.rs and re-run just init." >&2
+                        exit 1
+                        ;;
+                esac
+                # TEMP is a native Windows path, writable by both Cygwin's
+                # curl and the System32 curl (which cannot write /tmp paths).
+                win_tmp="${TEMP:-${TMP:-/tmp}}"
+                installer="$win_tmp/rustup-init.exe"
+                echo "Downloading rustup for $host_triple..."
+                curl --proto '=https' --tlsv1.2 -sSfL -o "$installer" \
+                    "https://static.rust-lang.org/rustup/dist/$host_triple/rustup-init.exe"
+                echo "Installing Rust (stable toolchain, MSVC host)..."
+                "$installer" -y --default-toolchain stable
+                rm -f "$installer"
+                source scripts/cargo-path.sh
+                cargo --version
+            fi
+
+            if rustc -vV 2>/dev/null | grep -q 'host: .*windows-gnu'; then
+                echo -e "{{ RED }}Warning{{ RESET }}: the active toolchain targets windows-gnu."
+                echo "This repo's Windows builds expect the MSVC toolchain; switch with:"
+                echo "  rustup default stable-x86_64-pc-windows-msvc"
+            fi
+
+            # The Windows linker is link.exe from the Visual Studio C++
+            # workload, not `cc`; vswhere is the supported detector. Detect
+            # the compiler COMPONENT (present in every SKU from Build Tools
+            # to Community) rather than the Build-Tools-only workload ID.
+            case "$(uname -m)" in
+                aarch64|arm64) vc_component="Microsoft.VisualStudio.Component.VC.Tools.arm64" ;;
+                *)             vc_component="Microsoft.VisualStudio.Component.VC.Tools.x86.x64" ;;
+            esac
+            pf86="$(printenv 'ProgramFiles(x86)' 2>/dev/null || echo 'C:\Program Files (x86)')"
+            vswhere="$(cygpath -u "$pf86")/Microsoft Visual Studio/Installer/vswhere.exe"
+
+            have_vc_tools() {
+                [[ -x "$vswhere" ]] && [[ -n "$("$vswhere" -latest -products '*' \
+                    -requires "$vc_component" \
+                    -property installationPath 2>/dev/null | tr -d '\r' | head -n1)" ]]
+            }
+
+            if ! have_vc_tools; then
+                echo -e "{{ RED }}Missing C++ linker{{ RESET }} (no Visual Studio with the 'Desktop development with C++' workload)"
+                echo "Installing Visual Studio 2022 Build Tools (C++ workload)..."
+                echo "This is a multi-GB download and will prompt for administrator approval."
+                if command -v winget &> /dev/null; then
+                    winget install --id Microsoft.VisualStudio.2022.BuildTools \
+                        --accept-source-agreements --accept-package-agreements \
+                        --override "--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
+                else
+                    win_tmp="${TEMP:-${TMP:-/tmp}}"
+                    vs_installer="$win_tmp/vs_BuildTools.exe"
+                    curl --proto '=https' --tlsv1.2 -sSfL -o "$vs_installer" \
+                        "https://aka.ms/vs/17/release/vs_BuildTools.exe"
+                    "$vs_installer" --quiet --wait --norestart \
+                        --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended
+                    rm -f "$vs_installer"
+                fi
+            fi
+
+            if ! have_vc_tools; then
+                echo -e "{{ RED }}C++ build tools are still not detected.{{ RESET }}" >&2
+                echo "Install 'Visual Studio 2022 Build Tools' with the 'Desktop development" >&2
+                echo "with C++' workload from an ELEVATED terminal, then re-run just init:" >&2
+                echo "  winget install --id Microsoft.VisualStudio.2022.BuildTools --interactive" >&2
+                echo "or download https://aka.ms/vs/17/release/vs_BuildTools.exe" >&2
+                exit 1
+            fi
+            echo "C++ build tools found: $("$vswhere" -latest -products '*' \
+                -requires "$vc_component" \
+                -property installationPath | tr -d '\r' | head -n1)"
+            exit 0
+            ;;
+    esac
+
+    # --- Linux / macOS ------------------------------------------------------
     # Check for Rust and cargo
     if ! command -v rustc &> /dev/null || ! command -v cargo &> /dev/null; then
         echo -e "{{ RED }}Missing Rust toolchain{{ RESET }} (rustc/cargo not found)"
@@ -419,6 +617,539 @@ _ensure-build-deps:
         exit 1
     fi
     echo "Build dependencies installed."
+
+# ensure the system libraries packages declare in their own manifests
+# (`[package.metadata.ci.native]`) are present. No argument = every workspace
+# package's libraries (for `just init` and the workspace-wide coverage job);
+# arguments = an explicit list of CI-key package names, which is what CI passes
+# after the scope job computes a package's dependency-closure union.
+_ensure-native-libs *packages="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    case "$(uname -s)" in
+        Linux)  runner_key="ubuntu-latest" ;;
+        Darwin) runner_key="macos-latest" ;;
+        *)      runner_key="windows-latest" ;;
+    esac
+
+    sudo_cmd=""
+    if [[ "$(id -u)" -ne 0 ]]; then
+        sudo_cmd="sudo"
+    fi
+
+    pm=""
+    for candidate in apt-get dnf pacman apk brew; do
+        if command -v "$candidate" &> /dev/null; then
+            pm="$candidate"
+            break
+        fi
+    done
+
+    install_packages() {
+        case "$pm" in
+            apt-get) $sudo_cmd apt-get update -qq && $sudo_cmd apt-get install -y -qq "$@" ;;
+            dnf)     $sudo_cmd dnf install -y "$@" ;;
+            pacman)  $sudo_cmd pacman -S --noconfirm "$@" ;;
+            apk)     $sudo_cmd apk add "$@" ;;
+            brew)    brew install "$@" ;;
+        esac
+    }
+
+    declared="{{ packages }}"
+
+    if [[ -z "$declared" ]]; then
+        # The whole-workspace form. Declarations live in each package's own
+        # manifest, which `cargo metadata` reports; a package's system
+        # libraries are a property of the package, so there is one lookup for
+        # developer hosts and CI alike. The WSL2 guest has no cargo, but CI
+        # never uses this form there — it passes the explicit list the scope
+        # job computed.
+        if ! command -v cargo &> /dev/null; then
+            echo "cargo is required to read package native declarations; pass an" >&2
+            echo "explicit package list instead (CI does)." >&2
+            exit 1
+        fi
+        if ! command -v jq &> /dev/null; then
+            if [[ "$runner_key" == "windows-latest" ]]; then
+                # No apt/brew here; winget is the only system package manager.
+                if command -v winget &> /dev/null; then
+                    echo "Installing jq (needed to read package native declarations)..."
+                    winget install --id jqlang.jq -e --silent \
+                        --accept-source-agreements --accept-package-agreements || true
+                    hash -r
+                fi
+                if ! command -v jq &> /dev/null; then
+                    echo "Cannot verify Windows native prerequisites: jq is not installed." >&2
+                    echo "Install jq with: winget install jqlang.jq — then re-run just init." >&2
+                    exit 1
+                fi
+            elif [[ -z "$pm" ]]; then
+                echo "Could not detect a package manager; install jq, then run just init again." >&2
+                exit 1
+            else
+                echo "Installing jq (needed to read package native declarations)..."
+                install_packages jq
+            fi
+        fi
+        declared=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r --arg k "$runner_key" \
+                '[.packages[].metadata.ci.native[$k] // []] | add // [] | unique | .[]')
+    fi
+
+    if [[ -z "$declared" ]]; then
+        echo "no native prerequisites declared for $runner_key"
+        exit 0
+    fi
+
+    # Manifests name packages the way the CI runner does (apt on Linux, brew on
+    # macOS). Each row adds the pkg-config module that proves the library is
+    # installed — the same check the failing `-sys` build scripts perform — plus
+    # the equivalent package name on the other Linux package managers.
+    # A row may leave the pkg-config module empty. That is the runtime-binary
+    # case: espeak-ng is not linked against, it is executed, so no `.pc` file
+    # proves what matters and `is_installed` falls through to the package
+    # database and finally to `command -v`.
+    #   ci-name|pkg-config module|dnf|pacman|apk
+    native_map="
+    libasound2-dev|alsa|alsa-lib-devel|alsa-lib|alsa-lib-dev
+    libpulse-dev|libpulse|pulseaudio-libs-devel|libpulse|pulseaudio-dev
+    libgtk-3-dev|gtk+-3.0|gtk3-devel|gtk3|gtk+3.0-dev
+    libwebkit2gtk-4.1-dev|webkit2gtk-4.1|webkit2gtk4.1-devel|webkit2gtk-4.1|webkit2gtk-4.1-dev
+    libdbus-1-dev|dbus-1|dbus-devel|dbus|dbus-dev
+    espeak-ng||espeak-ng|espeak-ng|espeak-ng
+    "
+
+    row_for() {
+        awk -F'|' -v n="$1" '{ gsub(/[ \t]/, "") } $1 == n { print; exit }' <<< "$native_map"
+    }
+
+    is_installed() {
+        local pkg="$1" module="$2"
+        if [[ -n "$module" ]] && command -v pkg-config &> /dev/null; then
+            pkg-config --exists "$module"
+            return
+        fi
+        if command -v dpkg &> /dev/null; then
+            dpkg -s "$pkg" &> /dev/null
+            return
+        fi
+        if command -v brew &> /dev/null; then
+            brew list --versions "$pkg" &> /dev/null
+            return
+        fi
+        # Last resort for a package that ships an executable of the same name.
+        # Without this a dnf/pacman/apk host reinstalls it on every `just init`,
+        # because nothing above can see it.
+        command -v "$pkg" &> /dev/null
+    }
+
+    missing=()
+    for pkg in $declared; do
+        if ! is_installed "$pkg" "$(row_for "$pkg" | cut -d'|' -f2)"; then
+            missing+=("$pkg")
+        fi
+    done
+
+    if [[ ${#missing[@]} -eq 0 ]]; then
+        exit 0
+    fi
+
+    echo -e "{{ RED }}Missing native libraries{{ RESET }}: ${missing[*]}"
+
+    case "$pm" in
+        apt-get|brew) field=1 ;;
+        dnf)          field=3 ;;
+        pacman)       field=4 ;;
+        apk)          field=5 ;;
+        *)            field=0 ;;
+    esac
+
+    packages=()
+    unresolved=()
+    for pkg in "${missing[@]}"; do
+        name="$pkg"
+        if [[ "$field" -gt 1 ]]; then
+            name="$(row_for "$pkg" | cut -d'|' -f"$field")"
+        fi
+        if [[ "$field" -eq 0 || -z "$name" ]]; then
+            unresolved+=("$pkg")
+        else
+            packages+=("$name")
+        fi
+    done
+
+    if [[ ${#unresolved[@]} -gt 0 ]]; then
+        echo "No package name is known for this host: ${unresolved[*]}" >&2
+        echo "Install the equivalent development headers, then run just init again." >&2
+        echo "Add the mapping to _ensure-native-libs so the next host is handled." >&2
+        exit 1
+    fi
+
+    # The `-sys` build scripts locate these libraries through pkg-config, so a
+    # host that has the headers but not pkg-config still fails to build.
+    if ! command -v pkg-config &> /dev/null; then
+        case "$pm" in
+            pacman|apk) packages+=("pkgconf") ;;
+            *)          packages+=("pkg-config") ;;
+        esac
+    fi
+
+    echo "Installing native prerequisites: ${packages[*]}"
+    install_packages "${packages[@]}"
+    echo "Native libraries installed."
+
+# Deliberately not a dependency of `init`. kache's economics are decided by the
+# filesystem, not the OS: APFS/btrfs/XFS-reflink and ReFS clone blocks, while
+# ext4 and NTFS fall back to hardlink or copy, so the store becomes a second
+# copy of every artifact. Installing for everyone and activating for everyone
+# are different decisions; this recipe only does the first. See
+# `docs/initialization.md` for how to activate, and `docs/kache-strategy.md`
+# for the measured evidence.
+
+# install the repository-pinned Rust compiler cache (does NOT activate it)
+install-kache:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/cargo-path.sh
+
+    installed_version=""
+    if command -v kache &> /dev/null; then
+        installed_version=$(kache --version | cut -d' ' -f2)
+    fi
+
+    if [[ "$installed_version" != "{{ KACHE_VERSION }}" ]]; then
+        # cargo-binstall is the install path on every OS: it fetches a prebuilt
+        # kache binary instead of compiling from source. Install it first when
+        # absent (that one install is from source).
+        if ! command -v cargo-binstall &> /dev/null; then
+            echo "Installing cargo-binstall (used to fetch prebuilt kache binaries)..."
+            RUSTC_WRAPPER="" cargo install --locked cargo-binstall
+        fi
+
+        RUSTC_WRAPPER="" cargo binstall \
+            --no-confirm \
+            --force \
+            --version "{{ KACHE_VERSION }}" \
+            kache
+    fi
+
+    # Seed a default store config when the host has none. An uncapped store
+    # thrashes: LRU can evict fresh entries before they score a hit. 100 GiB is
+    # the agreed starting point (docs/kache-strategy.md); never overwrite an
+    # existing config — hosts size against their own volume.
+    case "$(uname -s)" in
+        MINGW*|MSYS*|CYGWIN*) kache_config_dir="$(cygpath "${APPDATA:?}")/kache" ;;
+        *)                    kache_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/kache" ;;
+    esac
+    if [[ ! -f "$kache_config_dir/config.toml" ]]; then
+        mkdir -p "$kache_config_dir"
+        printf '[cache]\nlocal_max_size = "100GiB"\n' > "$kache_config_dir/config.toml"
+        echo "Wrote default kache store cap (100GiB) to $kache_config_dir/config.toml"
+    fi
+
+    kache --version
+    echo
+    echo "Installed, NOT activated. Nothing uses kache until you set RUSTC_WRAPPER."
+    echo "  probe first : kache doctor   (confirm the store filesystem clones blocks)"
+    echo "  this shell  : export RUSTC_WRAPPER=kache"
+    echo "  host-wide   : kache init     (writes \$CARGO_HOME/config.toml — affects every repo)"
+    echo "  undo        : unset RUSTC_WRAPPER, or remove the wrapper from Cargo home"
+    echo
+    echo "  Windows/NTFS: repository policy says leave it OFF (just kache-status)."
+
+# Exists because activation is HOST policy and the repository therefore cannot
+# see it: `kache init` writes `$CARGO_HOME/config.toml` and affects every Rust
+# repo on the machine. Nothing here can prevent that — this recipe makes it
+# visible, and answers the question the tool's own advisory does not: whether
+# this repo wants the cache on THIS filesystem at all.
+
+# report whether kache is active here, and whether this filesystem earns it
+kache-status:
+    #!/usr/bin/env bash
+    set -uo pipefail
+
+    say() { printf '  %-12s %s\n' "$1" "$2"; }
+    echo "=== kache status — policy: docs/kache-strategy.md ==="
+
+    if command -v kache &> /dev/null; then
+        say "installed" "$(kache --version 2>/dev/null | cut -d' ' -f2) (pinned {{ KACHE_VERSION }})"
+    else
+        say "installed" "no — 'just install-kache' installs it (does not activate it)"
+    fi
+
+    # Cargo's own precedence order, highest first. Reporting only the winner
+    # would hide a second activation that survives undoing the first.
+    active=""
+    if [[ -n "${RUSTC_WRAPPER:-}" ]]; then
+        active="RUSTC_WRAPPER=${RUSTC_WRAPPER}"
+        say "active" "YES — environment: $active"
+    fi
+    if [[ -f .cargo/config.toml ]] && grep -q 'rustc-wrapper' .cargo/config.toml; then
+        active="${active:+$active; }repo .cargo/config.toml"
+        say "active" "YES — repo .cargo/config.toml (tracked wrapper is forbidden here)"
+    fi
+    cargo_home="${CARGO_HOME:-$HOME/.cargo}"
+    for candidate in "$cargo_home/config.toml" "$cargo_home/config"; do
+        if [[ -f "$candidate" ]] && grep -q 'rustc-wrapper' "$candidate"; then
+            active="${active:+$active; }$candidate"
+            say "active" "YES — $candidate (host-wide: every repo on this machine)"
+        fi
+    done
+    [[ -z "$active" ]] && say "active" "no — nothing sets a rustc wrapper"
+
+    # Never inferred from the OS: the restore mode is a property of the
+    # FILESYSTEM, and one host can have several. Probe where target/ actually is.
+    probe_dir="target"; [[ -d "$probe_dir" ]] || probe_dir="."
+    cow="unknown"
+    case "$(uname -s)" in
+        Darwin)
+            src="$(mktemp "$probe_dir/.kache-probe.XXXXXX")"
+            cp -c "$src" "$src.clone" &> /dev/null && cow="yes" || cow="no"
+            rm -f "$src" "$src.clone"
+            say "target/ fs" "clone-on-write: $cow (cp -c probe)"
+            ;;
+        Linux)
+            src="$(mktemp "$probe_dir/.kache-probe.XXXXXX")"
+            cp --reflink=always "$src" "$src.clone" &> /dev/null && cow="yes" || cow="no"
+            rm -f "$src" "$src.clone"
+            say "target/ fs" "$(df -PT "$probe_dir" | awk 'NR==2{print $2}') — reflink: $cow"
+            ;;
+        MINGW*|MSYS*|CYGWIN*)
+            # No userspace reflink probe exists on Windows, so the filesystem
+            # type IS the answer: ReFS clones blocks, NTFS restores by copy.
+            drive="$(pwd -W 2>/dev/null | cut -c1)"
+            fstype="$(powershell.exe -NoProfile -NonInteractive -Command \
+                "(Get-Volume -DriveLetter $drive).FileSystemType" 2>/dev/null | tr -d '\r\n')"
+            [[ "$fstype" == "ReFS" ]] && cow="yes" || cow="no"
+            say "target/ fs" "${drive}: ${fstype:-unknown} — block cloning: $cow"
+            ;;
+    esac
+
+    if command -v kache &> /dev/null; then
+        say "store" "$(kache doctor 2>&1 | head -3 | tr '\n' ' ' | tr -s ' ')"
+    fi
+
+    echo
+    if [[ -z "$active" ]]; then
+        echo "  VERDICT: not in use. Cargo builds normally; nothing to undo."
+    elif [[ "$cow" == "yes" ]]; then
+        echo "  VERDICT: active on a filesystem that clones blocks — this is the case kache is for."
+    else
+        echo "  VERDICT: active WITHOUT copy-on-write. The store is a real second copy of every"
+        echo "           cached artifact, so disk roughly doubles for cached content."
+        echo "           Repository policy (docs/kache-strategy.md): on NTFS/ext4 leave it OFF"
+        echo "           unless a ReFS Dev Drive or reflink volume holds the store AND target/."
+        echo
+        echo "           Do NOT take kache's own first two suggestions here:"
+        echo "             windows_hardlink = true        unsafe — Cargo DOES rewrite object outputs"
+        echo "             storage_layout_advice = false  silences the signal rather than the cause"
+        echo
+        echo "           Undo — this shell : export RUSTC_WRAPPER=\"\""
+        echo "                  host-wide  : remove the rustc-wrapper line from $cargo_home/config.toml"
+    fi
+
+# ensure cargo-sweep is available for target/ hygiene (just sweep)
+_ensure-cargo-sweep:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/cargo-path.sh
+
+    if cargo sweep --version &> /dev/null; then
+        exit 0
+    fi
+
+    if command -v cargo-binstall &> /dev/null; then
+        RUSTC_WRAPPER="" cargo binstall --no-confirm cargo-sweep \
+            || RUSTC_WRAPPER="" cargo install --locked cargo-sweep
+    else
+        RUSTC_WRAPPER="" cargo install --locked cargo-sweep
+    fi
+
+# prune Cargo target/ dirs, which cargo never garbage-collects. Passes:
+# uninstalled toolchains, untouched >14d, then a 120GB default backstop cap per
+# root, then out-of-tree target dirs under ~/.cache left behind by --target-dir
+# builds (docs/kache-strategy.md). Constrained Windows hosts use the native 80GB
+# policy below. Roots default to this repo; override with paths.
+sweep *args="": _ensure-cargo-sweep
+    @scripts/sweep.sh {{ args }}
+
+# restore the native Cargo target cap if needed, then verify Windows headroom
+storage-check: _storage_preflight
+
+# run the native Windows 80 GB sweep policy now
+windows-sweep:
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-cargo-sweep.ps1 -Operation run
+
+# install the daily native Windows sweep policy in Task Scheduler
+install-windows-sweep:
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-cargo-sweep.ps1 -Operation install
+
+# show the native Windows sweep task's state and next run
+windows-sweep-status:
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/windows-cargo-sweep.ps1 -Operation status
+
+# A WSL2 ext4.vhdx grows to its high-water mark and never shrinks, so it can
+# starve the target volume of space that sweeping Cargo cannot return — the
+# usual cause of a storage-preflight failure that `just sweep` does not fix.
+# WSL's own `--set-sparse` remedy is disabled upstream for corruption risk
+# (docs/kache-strategy.md), which is why this reclaim is scheduled, not automatic.
+#
+# reclaim WSL2 vhdx slack now (elevated; ends any running WSL session)
+wsl-compact *args="":
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation run {{ args }}
+
+# install the weekly WSL2 vhdx compaction task in Task Scheduler
+install-wsl-compact:
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation install
+
+# show the WSL2 vhdx task's state plus per-distro reclaimable space
+wsl-compact-status:
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation status
+
+# remove the weekly WSL2 vhdx compaction task
+uninstall-wsl-compact:
+    @powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/wsl-vhdx-compact.ps1 -Operation uninstall
+
+# Separate from the Windows task above even on WSL2: that one sweeps C:\ and
+# cannot see the guest's ext4 filesystem, where target/ actually lives.
+#
+# install the daily 04:00 Linux sweep schedule (systemd user timer, else cron)
+install-linux-sweep *roots="":
+    @scripts/linux-cargo-sweep.sh install {{ roots }}
+
+# show the Linux sweep schedule's next run and last log lines
+linux-sweep-status:
+    @scripts/linux-cargo-sweep.sh status
+
+# remove the Linux sweep schedule
+uninstall-linux-sweep:
+    @scripts/linux-cargo-sweep.sh uninstall
+
+# ensure the test runner every tier above L1 depends on is available
+#
+# Only `_test` (L1) degrades to `cargo test` when nextest is absent. `_test_l2`,
+# `_test_l3`, `_test_browser`, `_test_real`, and `_sanity` invoke `cargo nextest
+# run` unconditionally — they need its `-E` filtersets to select a tier — and
+# `.config/nextest.toml` carries the retry, slow-timeout, and leak-timeout policy
+# that `cargo test` has no equivalent for. A host missing nextest therefore fails
+# every tier above L1 outright rather than running them unprotected.
+_ensure-nextest:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    source scripts/cargo-path.sh
+
+    if cargo nextest --version &> /dev/null; then
+        exit 0
+    fi
+
+    if command -v cargo-binstall &> /dev/null; then
+        RUSTC_WRAPPER="" cargo binstall --no-confirm cargo-nextest
+    else
+        RUSTC_WRAPPER="" cargo install --locked cargo-nextest
+    fi
+
+    cargo nextest --version
+
+# ensure GitNexus and its native parser are available for this host
+_ensure-gitnexus:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if ! command -v node &> /dev/null || ! command -v npm &> /dev/null; then
+        echo "GitNexus requires Node.js 22 or newer and npm." >&2
+        case "$(uname -s)" in
+            MINGW*|MSYS*|CYGWIN*)
+                echo "Install it with: winget install OpenJS.NodeJS.LTS" >&2
+                echo "Then open a NEW terminal (so PATH updates apply) and re-run just init." >&2
+                ;;
+        esac
+        exit 1
+    fi
+
+    node_major=$(node -p 'Number(process.versions.node.split(".")[0])')
+    if (( node_major < 22 )); then
+        echo "GitNexus requires Node.js 22 or newer; found $(node --version)." >&2
+        exit 1
+    fi
+
+    npm_global_root_native=$(npm root --global)
+    npm_global_root="$npm_global_root_native"
+    if command -v cygpath &> /dev/null; then
+        npm_global_root=$(cygpath --unix "$npm_global_root_native")
+    fi
+    gitnexus_root="$npm_global_root/gitnexus"
+    gitnexus_root_for_node="$gitnexus_root"
+    if command -v cygpath &> /dev/null; then
+        gitnexus_root_for_node=$(cygpath --windows "$gitnexus_root")
+    fi
+
+    run_global_npm() {
+        # `-w` on the full path fails for a FRESH npm prefix (node_modules does
+        # not exist yet), which used to drop hosts with a writable prefix into
+        # the sudo branch. Test the nearest ancestor that actually exists.
+        local probe="$npm_global_root"
+        while [[ ! -e "$probe" && "$probe" != "/" && "$probe" != "." ]]; do
+            probe="$(dirname "$probe")"
+        done
+        if [[ -w "$probe" || (-d "$gitnexus_root" && -w "$gitnexus_root") ]]; then
+            npm "$@"
+        elif command -v sudo &> /dev/null; then
+            sudo npm "$@"
+        else
+            echo "The npm global package directory is not writable: $npm_global_root" >&2
+            echo "Configure a user-writable npm prefix, then run just init again." >&2
+            return 1
+        fi
+    }
+
+    if ! command -v gitnexus &> /dev/null || [[ ! -f "$gitnexus_root/package.json" ]]; then
+        # The native toolchain goes in FIRST: node-gyp/node-addon-api are what
+        # a source build of tree-sitter needs, and npm's script-approval flags
+        # (--allow-scripts) guarantee their install scripts actually run —
+        # without them a blocked script leaves a tree-sitter binding that
+        # installs cleanly but cannot be require()'d.
+        echo "Installing GitNexus build toolchain (node-gyp, node-addon-api, tree-sitter)..."
+        run_global_npm install --global \
+            node-addon-api node-gyp tree-sitter \
+            --allow-scripts node-addon-api \
+            --allow-scripts node-gyp \
+            --allow-scripts tree-sitter
+        echo "Installing GitNexus..."
+        run_global_npm install --global gitnexus@latest \
+            --allow-scripts gitnexus \
+            --allow-scripts tree-sitter
+    fi
+
+    if [[ ! -d "$gitnexus_root/node_modules/tree-sitter" ]]; then
+        echo "GitNexus installation is missing its tree-sitter dependency." >&2
+        exit 1
+    fi
+
+    if ! GITNEXUS_TREE_SITTER="$gitnexus_root_for_node/node_modules/tree-sitter" \
+        node -e 'require(process.env.GITNEXUS_TREE_SITTER)' &> /dev/null; then
+        echo "Building GitNexus tree-sitter support for $(node -p '`${process.platform}-${process.arch}, Node ${process.versions.node}`')..."
+        run_global_npm rebuild tree-sitter \
+            --prefix "$gitnexus_root" \
+            --build-from-source
+    fi
+
+    GITNEXUS_TREE_SITTER="$gitnexus_root_for_node/node_modules/tree-sitter" \
+        node -e 'require(process.env.GITNEXUS_TREE_SITTER)'
+    gitnexus --version
+    echo "GitNexus is ready."
+
+# report the active compiler-cache configuration and health
+cache-status:
+    @sniff runtime
+    @kache doctor
+    @kache stats
+    @kache daemon
+
+# install kache's optional login service for remote caching
+cache-daemon-install:
+    @kache daemon install
+    @kache daemon
 
 # sync a just recipe from one justfile to all others that have it
 sync-recipe recipe source:

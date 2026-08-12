@@ -1,0 +1,108 @@
+set dotenv-load
+set positional-arguments
+
+# set allow-duplicate-recipes
+
+# `env CYG_SYS_BASHRC=1` guards against Cygwin's /etc/bash.bashrc tripping `-u`;
+# see the root justfile for the full explanation.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
+
+import "../../just/lifecycle.just"
+import "../../just/plan.just"
+import "../../just/review.just"
+import "../../just/notify.just"
+import "../../just/ai.just"
+import "../../just/devops.just"
+
+BOLD := '\033[1m'
+DIM := '\033[2m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+RED := '\033[31m'
+GREEN := '\033[32m'
+YELLOW := '\033[33m'
+BLUE := '\033[34m'
+MAGENTA := '\033[35m'
+CYAN := '\033[36m'
+LIBRARY := "claudine-gen"
+
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo
+    echo -e "{{ BOLD }}Claudine Catalog Generator{{ RESET }}"
+    echo "=============================="
+    echo
+
+    just --list | grep -v 'default'
+
+# build the generator (lib + `claudine-gen` binary)
+build *args="":
+    @just _build {{LIBRARY}} "Claudine Catalog Generator" {{args}}
+
+# regenerate the committed data fragments from roster/research/facts/overrides
+generate:
+    @cargo run -q -p {{ LIBRARY }} -- generate
+
+# report-only drift check (same code path as the nextest drift test)
+check:
+    @cargo run -q -p {{ LIBRARY }} -- check
+
+# --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
+
+# Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
+sanity:
+    @just _sanity {{ LIBRARY }}
+
+# run L1 tests for the generator (includes the catalog drift test)
+test *args="":
+    @just _test {{ LIBRARY }} {{args}}
+
+# run real-terminal (Level-2) tests for the generator reports
+test-l2 *args="":
+    @just _test_l2 {{ LIBRARY }} {{args}}
+
+# not applicable: claudine-gen has no OS-keyboard-injection (Level-3) tests
+test-l3:
+    @echo "test-l3: not applicable for claudine-gen"
+
+# not applicable: claudine-gen emits no HTML
+test-browser:
+    @echo "test-browser: not applicable for claudine-gen"
+
+# run clippy on the generator
+lint *args="":
+    @just _lint {{ LIBRARY }} {{args}}
+
+# not applicable: claudine-gen has no benchmarks
+bench:
+    @echo "bench: not applicable for claudine-gen"
+
+# Per-package LCOV coverage for the generator.
+coverage *args="":
+    @just _coverage {{ LIBRARY }} {{args}}
+
+# run doctests for the generator
+doctest *args="":
+    @just _doctest {{ LIBRARY }} {{args}}
+
+# not applicable: claudine-gen has no cargo-fuzz targets
+fuzz:
+    @echo "fuzz: not applicable for claudine-gen"
+
+# Canonical PR-gate runner: sanity → lint → doctest → test → test-l2 → test-browser.
+all:
+    @just sanity
+    @just lint
+    @just doctest
+    @just test
+    @just test-l2
+    @just test-browser
+
+# ----------------------------------------------------------------------------
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ RED }} {{ DIM }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ GREEN }} >/dev/null || true

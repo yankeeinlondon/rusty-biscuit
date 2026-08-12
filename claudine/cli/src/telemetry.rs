@@ -136,6 +136,7 @@ fn command_name(command: &Commands) -> &'static str {
         Commands::Agents(_) => "agents",
         Commands::SlashCommands(_) => "commands",
         Commands::Providers(_) => "providers",
+        Commands::Signals(_) => "signals",
         Commands::Logs(_) => "logs",
         Commands::Uninstall(_) => "uninstall",
         Commands::Mcp(_) => "mcp",
@@ -145,11 +146,16 @@ fn command_name(command: &Commands) -> &'static str {
         | Commands::Kimi(_)
         | Commands::Qwen(_)
         | Commands::Opencode(_)
-        | Commands::Goose(_) => "wrap",
+        | Commands::Goose(_)
+        | Commands::Kilo(_)
+        | Commands::Pi(_)
+        | Commands::Antigravity(_) => "wrap",
         Commands::Compose(_) => "compose",
         Commands::InlineCompose(_) => "inline-compose",
         Commands::Sequence(_) => "sequence",
+        Commands::Dashboard(_) => "dashboard",
         Commands::Context(_) => "context",
+        Commands::Errors(_) => "errors",
     }
 }
 
@@ -162,6 +168,9 @@ fn provider_subcommand_name(command: Option<&Commands>) -> Option<&'static str> 
         Commands::Qwen(_) => Some("qwen"),
         Commands::Opencode(_) => Some("opencode"),
         Commands::Goose(_) => Some("goose"),
+        Commands::Kilo(_) => Some("kilo"),
+        Commands::Pi(_) => Some("pi"),
+        Commands::Antigravity(_) => Some("antigravity"),
         _ => None,
     }
 }
@@ -540,6 +549,7 @@ mod tests {
             replace_system_prompt: None,
             timeout: None,
             step_timeout: None,
+            stall_timeout: None,
             dry_run: false,
             quiet: false,
             silent: false,
@@ -561,6 +571,7 @@ mod tests {
                 crate::commands::providers::ProvidersArgs {
                     describe: false,
                     format: crate::commands::providers::ProvidersFormat::Text,
+                    command: None,
                 }
             ))),
             None
@@ -573,11 +584,12 @@ mod tests {
 
     #[test]
     fn shorten_source_path_strips_repo_root_prefix() {
-        let shortened = shorten_source_path(
-            "/repo/claudine/cli/src/telemetry.rs",
-            Some(Path::new("/repo")),
-        );
-        assert_eq!(shortened, "claudine/cli/src/telemetry.rs");
+        let repo = tempfile::tempdir().unwrap();
+        let relative = Path::new("claudine").join("cli/src/telemetry.rs");
+        let source = repo.path().join(&relative);
+        let source_text = source.to_string_lossy();
+        let shortened = shorten_source_path(source_text.as_ref(), Some(repo.path()));
+        assert_eq!(Path::new(shortened.as_ref()), relative);
     }
 
     #[test]

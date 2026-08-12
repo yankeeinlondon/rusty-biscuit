@@ -57,9 +57,12 @@
 //! ```
 
 use super::{
-    Lexer, LexerError, ParseMode, Token,
-    ast::{BinaryOp, Expr},
+    LexerError, ParseMode, Token,
+    ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind},
+    lexer::lex_spanned,
 };
+use crate::markdown::span::Spanned;
+use std::collections::HashSet;
 use std::fmt;
 
 #[cfg(test)]
@@ -71,7 +74,8 @@ pub struct ParseError {
     /// Human-readable error message.
     pub message: String,
 
-    /// Approximate byte position in the input where the error occurred.
+    /// Byte offset in the input where the error occurred (the start of the
+    /// offending token, or the input length at end-of-input).
     pub position: usize,
 }
 
@@ -112,12 +116,17 @@ impl From<LexerError> for ParseError {
 
 /// Parser for interpolation expressions.
 ///
-/// Converts a stream of tokens into an AST using recursive descent parsing.
+/// Converts a byte-spanned token stream into a [`SpannedExpr`] AST via recursive
+/// descent. The span-erased [`Expr`] the compose evaluator consumes is derived
+/// from that spanned tree ([`SpannedExpr::erase`]), so there is a single grammar
+/// and the two forms can never disagree.
 pub struct Parser<'a> {
-    lexer: Lexer<'a>,
-    current: Token,
-    /// Approximate position for error reporting.
-    position: usize,
+    /// Retained so the parser type stays lifetime-parameterized over the source.
+    _input: &'a str,
+    /// Pre-lexed, byte-spanned token stream (always ends with `Token::Eof`).
+    tokens: Vec<Spanned<Token>>,
+    /// Index of the current token within `tokens`.
+    idx: usize,
     mode: ParseMode,
 }
 
@@ -126,7 +135,7 @@ impl<'a> Parser<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns an error if the lexer fails on the first token.
+    /// Returns an error if the lexer fails to tokenize the input.
     pub fn new(input: &'a str) -> Result<Self, ParseError> {
         Self::with_mode(input, ParseMode::Interpolation)
     }
@@ -139,66 +148,92 @@ impl<'a> Parser<'a> {
     ///
     /// ## Errors
     ///
-    /// Returns an error if the lexer fails on the first token.
+    /// Returns an error if the lexer fails to tokenize the input.
     pub fn with_mode(input: &'a str, mode: ParseMode) -> Result<Self, ParseError> {
-        let mut lexer = Lexer::with_mode(input, mode);
-        let current = lexer.next_token()?;
+        let tokens = lex_spanned(input, mode)?;
         Ok(Self {
-            lexer,
-            current,
-            position: 0,
+            _input: input,
+            tokens,
+            idx: 0,
             mode,
         })
     }
 
-    /// Parses the expression and returns the AST.
+    /// Parses the expression and returns the span-erased AST.
+    ///
+    /// Equivalent to `self.parse_spanned()?.erase()`; retained as the
+    /// compose-facing entry point.
     ///
     /// ## Errors
     ///
     /// Returns an error for invalid syntax.
     pub fn parse(&mut self) -> Result<Expr, ParseError> {
+        Ok(self.parse_spanned()?.erase())
+    }
+
+    /// Parses the expression and returns the span-carrying AST.
+    ///
+    /// ## Errors
+    ///
+    /// Returns an error for invalid syntax.
+    pub fn parse_spanned(&mut self) -> Result<SpannedExpr, ParseError> {
         let expr = self.parse_expression()?;
 
         // Ensure we consumed all input
-        if !matches!(self.current, Token::Eof) {
+        if !matches!(self.current(), Token::Eof) {
             return Err(ParseError::unexpected(
                 "end of expression",
-                &self.current,
-                self.position,
+                self.current(),
+                self.position(),
             ));
         }
 
         Ok(expr)
     }
 
-    /// Advances to the next token.
-    fn advance(&mut self) -> Result<Token, ParseError> {
-        let prev = std::mem::replace(&mut self.current, Token::Eof);
-        self.current = self.lexer.next_token()?;
-        self.position += 1;
-        Ok(prev)
+    /// Returns the current token.
+    fn current(&self) -> &Token {
+        &self.tokens[self.idx].value
     }
 
-    /// Checks if the current token matches the expected token.
+    /// Returns the byte offset of the current token (its span start), used for
+    /// error reporting.
+    fn position(&self) -> usize {
+        self.tokens[self.idx].span.start
+    }
+
+    /// Advances past the current token, returning the consumed spanned token.
+    ///
+    /// The index saturates at the trailing `Token::Eof`, so repeated calls at
+    /// end-of-input keep returning `Eof`.
+    fn advance(&mut self) -> Spanned<Token> {
+        let consumed = self.tokens[self.idx].clone();
+        if self.idx + 1 < self.tokens.len() {
+            self.idx += 1;
+        }
+        consumed
+    }
+
+    /// Checks if the current token matches the expected token (by discriminant).
     fn check(&self, expected: &Token) -> bool {
-        std::mem::discriminant(&self.current) == std::mem::discriminant(expected)
+        std::mem::discriminant(self.current()) == std::mem::discriminant(expected)
     }
 
     /// Consumes the current token if it matches, otherwise returns an error.
-    fn expect(&mut self, expected: &Token, description: &str) -> Result<Token, ParseError> {
+    fn expect(&mut self, expected: &Token, description: &str) -> Result<Spanned<Token>, ParseError> {
         if self.check(expected) {
-            self.advance()
+            Ok(self.advance())
         } else {
             Err(ParseError::unexpected(
                 description,
-                &self.current,
-                self.position,
+                self.current(),
+                self.position(),
             ))
         }
     }
 
     /// Parses the top-level expression (ternary has lowest precedence).
-    fn parse_expression(&mut self) -> Result<Expr, ParseError> {
+    fn parse_expression(&mut self) -> Result<SpannedExpr, ParseError> {
         self.parse_ternary()
     }
 
@@ -210,21 +245,25 @@ impl<'a> Parser<'a> {
     ///
     /// Branches are parsed recursively so nested ternaries are supported
     /// without extra parentheses: `a ? b ? c : d : e`.
-    fn parse_ternary(&mut self) -> Result<Expr, ParseError> {
-        let mut expr = self.parse_ternary_branch()?;
+    fn parse_ternary(&mut self) -> Result<SpannedExpr, ParseError> {
+        let expr = self.parse_ternary_branch()?;
 
-        if matches!(self.current, Token::Question) {
-            self.advance()?; // consume ?
+        if matches!(self.current(), Token::Question) {
+            self.advance(); // consume ?
             let then_branch = self.parse_ternary()?;
 
             self.expect(&Token::Colon, "':'")?;
             let else_branch = self.parse_ternary()?;
 
-            expr = Expr::Ternary {
-                condition: Box::new(expr),
-                then_branch: Box::new(then_branch),
-                else_branch: Box::new(else_branch),
-            };
+            let span = expr.span.start..else_branch.span.end;
+            return Ok(SpannedExpr::new(
+                SpannedExprKind::Ternary {
+                    condition: Box::new(expr),
+                    then_branch: Box::new(then_branch),
+                    else_branch: Box::new(else_branch),
+                },
+                span,
+            ));
         }
 
         Ok(expr)
@@ -233,7 +272,7 @@ impl<'a> Parser<'a> {
     /// Parses a ternary branch — the level immediately below ternary.
     ///
     /// This is `logical_or` in condition mode and `fallback` in interpolation mode.
-    fn parse_ternary_branch(&mut self) -> Result<Expr, ParseError> {
+    fn parse_ternary_branch(&mut self) -> Result<SpannedExpr, ParseError> {
         match self.mode {
             ParseMode::Condition => self.parse_logical_or(),
             ParseMode::Interpolation => self.parse_fallback(),
@@ -246,16 +285,20 @@ impl<'a> Parser<'a> {
     /// Infix `a || b` is lowered into the existing function-call AST as
     /// `or(a, b)` so downstream evaluation and AST consumers do not need to
     /// learn a new variant.
-    fn parse_logical_or(&mut self) -> Result<Expr, ParseError> {
+    fn parse_logical_or(&mut self) -> Result<SpannedExpr, ParseError> {
         let mut expr = self.parse_logical_and()?;
 
-        while matches!(self.current, Token::OrOr) {
-            self.advance()?; // consume ||
+        while matches!(self.current(), Token::OrOr) {
+            self.advance(); // consume ||
             let rhs = self.parse_logical_and()?;
-            expr = Expr::FunctionCall {
-                name: "or".to_string(),
-                args: vec![expr, rhs],
-            };
+            let span = expr.span.start..rhs.span.end;
+            expr = SpannedExpr::new(
+                SpannedExprKind::FunctionCall {
+                    name: "or".to_string(),
+                    args: vec![expr, rhs],
+                },
+                span,
+            );
         }
 
         Ok(expr)
@@ -267,16 +310,20 @@ impl<'a> Parser<'a> {
     /// interpolation mode via the `fallback` ladder — so `&&` is available
     /// wherever expressions are parsed. Infix `a && b` is lowered into the
     /// existing function-call AST as `and(a, b)`.
-    fn parse_logical_and(&mut self) -> Result<Expr, ParseError> {
+    fn parse_logical_and(&mut self) -> Result<SpannedExpr, ParseError> {
         let mut expr = self.parse_comparison()?;
 
-        while matches!(self.current, Token::AndAnd) {
-            self.advance()?; // consume &&
+        while matches!(self.current(), Token::AndAnd) {
+            self.advance(); // consume &&
             let rhs = self.parse_comparison()?;
-            expr = Expr::FunctionCall {
-                name: "and".to_string(),
-                args: vec![expr, rhs],
-            };
+            let span = expr.span.start..rhs.span.end;
+            expr = SpannedExpr::new(
+                SpannedExprKind::FunctionCall {
+                    name: "and".to_string(),
+                    args: vec![expr, rhs],
+                },
+                span,
+            );
         }
 
         Ok(expr)
@@ -286,33 +333,41 @@ impl<'a> Parser<'a> {
     ///
     /// `logical_and` is shared with condition mode so the comparison ladder
     /// behaves identically across both parse modes.
-    fn parse_fallback(&mut self) -> Result<Expr, ParseError> {
+    fn parse_fallback(&mut self) -> Result<SpannedExpr, ParseError> {
         let mut expr = self.parse_logical_and()?;
 
-        while matches!(self.current, Token::Pipe) {
-            self.advance()?; // consume ||
+        while matches!(self.current(), Token::Pipe) {
+            self.advance(); // consume ||
             let fallback = self.parse_logical_and()?;
-            expr = Expr::Fallback {
-                primary: Box::new(expr),
-                fallback: Box::new(fallback),
-            };
+            let span = expr.span.start..fallback.span.end;
+            expr = SpannedExpr::new(
+                SpannedExprKind::Fallback {
+                    primary: Box::new(expr),
+                    fallback: Box::new(fallback),
+                },
+                span,
+            );
         }
 
         Ok(expr)
     }
 
     /// Parses a comparison expression: `additive (comp_op additive)?`.
-    fn parse_comparison(&mut self) -> Result<Expr, ParseError> {
+    fn parse_comparison(&mut self) -> Result<SpannedExpr, ParseError> {
         let left = self.parse_additive()?;
 
-        if let Token::CompOp(op) = self.current {
-            self.advance()?; // consume operator
+        if let &Token::CompOp(op) = self.current() {
+            self.advance(); // consume operator
             let right = self.parse_additive()?;
-            return Ok(Expr::Comparison {
-                left: Box::new(left),
-                op,
-                right: Box::new(right),
-            });
+            let span = left.span.start..right.span.end;
+            return Ok(SpannedExpr::new(
+                SpannedExprKind::Comparison {
+                    left: Box::new(left),
+                    op,
+                    right: Box::new(right),
+                },
+                span,
+            ));
         }
 
         Ok(left)
@@ -321,22 +376,26 @@ impl<'a> Parser<'a> {
     /// Parses an additive expression: `multiplicative (("+" | "-") multiplicative)*`.
     ///
     /// Left-associative — `a - b - c` parses as `(a - b) - c`.
-    fn parse_additive(&mut self) -> Result<Expr, ParseError> {
+    fn parse_additive(&mut self) -> Result<SpannedExpr, ParseError> {
         let mut expr = self.parse_multiplicative()?;
 
         loop {
-            let op = match self.current {
+            let op = match self.current() {
                 Token::Plus => BinaryOp::Add,
                 Token::Minus => BinaryOp::Sub,
                 _ => break,
             };
-            self.advance()?; // consume operator
+            self.advance(); // consume operator
             let rhs = self.parse_multiplicative()?;
-            expr = Expr::Binary {
-                op,
-                left: Box::new(expr),
-                right: Box::new(rhs),
-            };
+            let span = expr.span.start..rhs.span.end;
+            expr = SpannedExpr::new(
+                SpannedExprKind::Binary {
+                    op,
+                    left: Box::new(expr),
+                    right: Box::new(rhs),
+                },
+                span,
+            );
         }
 
         Ok(expr)
@@ -345,39 +404,48 @@ impl<'a> Parser<'a> {
     /// Parses a multiplicative expression: `unary (("*" | "/" | "%") unary)*`.
     ///
     /// Left-associative — `a / b / c` parses as `(a / b) / c`.
-    fn parse_multiplicative(&mut self) -> Result<Expr, ParseError> {
+    fn parse_multiplicative(&mut self) -> Result<SpannedExpr, ParseError> {
         let mut expr = self.parse_unary()?;
 
         loop {
-            let op = match self.current {
+            let op = match self.current() {
                 Token::Star => BinaryOp::Mul,
                 Token::Slash => BinaryOp::Div,
                 Token::Percent => BinaryOp::Mod,
                 _ => break,
             };
-            self.advance()?; // consume operator
+            self.advance(); // consume operator
             let rhs = self.parse_unary()?;
-            expr = Expr::Binary {
-                op,
-                left: Box::new(expr),
-                right: Box::new(rhs),
-            };
+            let span = expr.span.start..rhs.span.end;
+            expr = SpannedExpr::new(
+                SpannedExprKind::Binary {
+                    op,
+                    left: Box::new(expr),
+                    right: Box::new(rhs),
+                },
+                span,
+            );
         }
 
         Ok(expr)
     }
 
     /// Parses unary expressions: `"!" unary | "-" unary | postfix`.
-    fn parse_unary(&mut self) -> Result<Expr, ParseError> {
-        if matches!(self.current, Token::Bang) {
-            self.advance()?;
+    fn parse_unary(&mut self) -> Result<SpannedExpr, ParseError> {
+        if matches!(self.current(), Token::Bang) {
+            let op = self.advance();
             let expr = self.parse_unary()?;
-            return Ok(Expr::UnaryNot(Box::new(expr)));
+            let span = op.span.start..expr.span.end;
+            return Ok(SpannedExpr::new(SpannedExprKind::UnaryNot(Box::new(expr)), span));
         }
-        if matches!(self.current, Token::Minus) {
-            self.advance()?;
+        if matches!(self.current(), Token::Minus) {
+            let op = self.advance();
             let expr = self.parse_unary()?;
-            return Ok(Expr::UnaryMinus(Box::new(expr)));
+            let span = op.span.start..expr.span.end;
+            return Ok(SpannedExpr::new(
+                SpannedExprKind::UnaryMinus(Box::new(expr)),
+                span,
+            ));
         }
         self.parse_postfix()
     }
@@ -388,41 +456,49 @@ impl<'a> Parser<'a> {
     /// numbers via unary minus, string literals, or computed indexes). Postfix
     /// dot is only emitted by the lexer when the dot cannot be folded into a
     /// `Variable` token, so it appears after `]`, `)`, or function-call return.
-    fn parse_postfix(&mut self) -> Result<Expr, ParseError> {
+    fn parse_postfix(&mut self) -> Result<SpannedExpr, ParseError> {
         let mut expr = self.parse_primary()?;
 
         loop {
-            match &self.current {
+            match self.current() {
                 Token::LBracket => {
-                    self.advance()?; // consume [
+                    self.advance(); // consume [
                     let index = self.parse_expression()?;
-                    self.expect(&Token::RBracket, "']'")?;
-                    expr = Expr::Index {
-                        base: Box::new(expr),
-                        index: Box::new(index),
-                    };
+                    let close = self.expect(&Token::RBracket, "']'")?;
+                    let span = expr.span.start..close.span.end;
+                    expr = SpannedExpr::new(
+                        SpannedExprKind::Index {
+                            base: Box::new(expr),
+                            index: Box::new(index),
+                        },
+                        span,
+                    );
                 }
                 Token::Dot => {
-                    self.advance()?; // consume .
-                    match self.current.clone() {
+                    self.advance(); // consume .
+                    match self.current().clone() {
                         Token::Variable(name) => {
-                            self.advance()?;
-                            expr = Expr::MemberAccess {
-                                base: Box::new(expr),
-                                name,
-                            };
+                            let name_tok = self.advance();
+                            let span = expr.span.start..name_tok.span.end;
+                            expr = SpannedExpr::new(
+                                SpannedExprKind::MemberAccess {
+                                    base: Box::new(expr),
+                                    name,
+                                },
+                                span,
+                            );
                         }
                         Token::NumberLiteral(_) => {
                             return Err(ParseError::new(
                                 "Numeric dot access is not supported (use bracket indexing for arrays)",
-                                self.position,
+                                self.position(),
                             ));
                         }
                         other => {
                             return Err(ParseError::unexpected(
                                 "identifier after '.'",
                                 &other,
-                                self.position,
+                                self.position(),
                             ));
                         }
                     }
@@ -435,72 +511,162 @@ impl<'a> Parser<'a> {
     }
 
     /// Parses a primary expression: literal, variable, function call, or parenthesized expression.
-    fn parse_primary(&mut self) -> Result<Expr, ParseError> {
-        match &self.current {
+    fn parse_primary(&mut self) -> Result<SpannedExpr, ParseError> {
+        // Clone the current token so ownership of its payload/span is released
+        // from `self` before the arms advance the cursor.
+        let current = self.tokens[self.idx].clone();
+        match current.value {
             Token::StringLiteral(s) => {
-                let value = s.clone();
-                self.advance()?;
-                Ok(Expr::StringLiteral(value))
+                self.advance();
+                Ok(SpannedExpr::new(SpannedExprKind::StringLiteral(s), current.span))
             }
             Token::NumberLiteral(n) => {
-                let value = *n;
-                self.advance()?;
-                Ok(Expr::NumberLiteral(value))
+                self.advance();
+                Ok(SpannedExpr::new(SpannedExprKind::NumberLiteral(n), current.span))
             }
             Token::BoolLiteral(b) => {
-                let value = *b;
-                self.advance()?;
-                Ok(Expr::BoolLiteral(value))
+                self.advance();
+                Ok(SpannedExpr::new(SpannedExprKind::BoolLiteral(b), current.span))
             }
             Token::Variable(name) => {
-                let name = name.clone();
-                self.advance()?;
+                self.advance();
 
                 // Check for function call
-                if matches!(self.current, Token::LParen) {
-                    self.parse_function_call(name)
+                if matches!(self.current(), Token::LParen) {
+                    self.parse_function_call(name, current.span.start)
                 } else {
-                    Ok(Expr::Variable(name))
+                    Ok(SpannedExpr::new(SpannedExprKind::Variable(name), current.span))
                 }
             }
             Token::LParen => {
-                self.advance()?; // consume (
+                self.advance(); // consume (
                 let expr = self.parse_expression()?;
-                self.expect(&Token::RParen, "')'")?;
-                Ok(Expr::Paren(Box::new(expr)))
+                let close = self.expect(&Token::RParen, "')'")?;
+                let span = current.span.start..close.span.end;
+                Ok(SpannedExpr::new(SpannedExprKind::Paren(Box::new(expr)), span))
             }
+            Token::LBracket => self.parse_array_literal(current.span.start),
+            Token::LBrace => self.parse_object_literal(current.span.start),
             _ => Err(ParseError::unexpected(
                 "expression",
-                &self.current,
-                self.position,
+                self.current(),
+                self.position(),
             )),
         }
     }
 
+    fn parse_array_literal(&mut self, start: usize) -> Result<SpannedExpr, ParseError> {
+        self.advance();
+        let mut items = Vec::new();
+        if !matches!(self.current(), Token::RBracket) {
+            loop {
+                items.push(self.parse_expression()?);
+                if !matches!(self.current(), Token::Comma) {
+                    break;
+                }
+                self.advance();
+                if matches!(self.current(), Token::RBracket) {
+                    return Err(ParseError::new(
+                        "trailing commas are not supported",
+                        self.position(),
+                    ));
+                }
+            }
+        }
+        let close = self.expect(&Token::RBracket, "']'")?;
+        Ok(SpannedExpr::new(
+            SpannedExprKind::ArrayLiteral(items),
+            start..close.span.end,
+        ))
+    }
+
+    fn parse_object_literal(&mut self, start: usize) -> Result<SpannedExpr, ParseError> {
+        self.advance();
+        let mut entries = Vec::new();
+        let mut keys = HashSet::new();
+        if !matches!(self.current(), Token::RBrace) {
+            loop {
+                let key_token = self.advance();
+                let (key, key_span) = match key_token.value {
+                    Token::Variable(key)
+                        if !key.contains('.')
+                            && key
+                                .chars()
+                                .next()
+                                .is_some_and(|first| first.is_ascii_alphabetic() || first == '_') =>
+                    {
+                        (key, key_token.span)
+                    }
+                    Token::StringLiteral(key) => (key, key_token.span),
+                    found => {
+                        return Err(ParseError::unexpected(
+                            "object key",
+                            &found,
+                            key_token.span.start,
+                        ));
+                    }
+                };
+                if !keys.insert(key.clone()) {
+                    return Err(ParseError::new(
+                        format!("duplicate object key {key:?}"),
+                        key_span.start,
+                    ));
+                }
+                self.expect(&Token::Colon, "':'")?;
+                let value = self.parse_expression()?;
+                entries.push((Spanned::new(key, key_span), value));
+                if !matches!(self.current(), Token::Comma) {
+                    break;
+                }
+                self.advance();
+                if matches!(self.current(), Token::RBrace) {
+                    return Err(ParseError::new(
+                        "trailing commas are not supported",
+                        self.position(),
+                    ));
+                }
+            }
+        }
+        let close = self.expect(&Token::RBrace, "'}'")?;
+        Ok(SpannedExpr::new(
+            SpannedExprKind::ObjectLiteral(entries),
+            start..close.span.end,
+        ))
+    }
+
     /// Parses a function call: `name "(" args? ")"`
     ///
-    /// The function name has already been consumed.
-    fn parse_function_call(&mut self, name: String) -> Result<Expr, ParseError> {
-        self.advance()?; // consume (
+    /// The function name has already been consumed; `name_start` is the byte
+    /// offset of the name token so the call's span covers `name(...)`.
+    fn parse_function_call(
+        &mut self,
+        name: String,
+        name_start: usize,
+    ) -> Result<SpannedExpr, ParseError> {
+        self.advance(); // consume (
 
         let mut args = Vec::new();
 
         // Handle empty args
-        if !matches!(self.current, Token::RParen) {
+        if !matches!(self.current(), Token::RParen) {
             args.push(self.parse_expression()?);
 
-            while matches!(self.current, Token::Comma) {
-                self.advance()?; // consume ,
+            while matches!(self.current(), Token::Comma) {
+                self.advance(); // consume ,
                 args.push(self.parse_expression()?);
             }
         }
 
-        self.expect(&Token::RParen, "')'")?;
-        Ok(Expr::FunctionCall { name, args })
+        let close = self.expect(&Token::RParen, "')'")?;
+        let span = name_start..close.span.end;
+        Ok(SpannedExpr::new(
+            SpannedExprKind::FunctionCall { name, args },
+            span,
+        ))
     }
 }
 
-/// Convenience function to parse an expression string.
+/// Convenience function to parse an expression string into the span-erased AST.
 ///
 /// ## Examples
 ///
@@ -516,6 +682,30 @@ impl<'a> Parser<'a> {
 /// Returns an error for invalid syntax.
 pub fn parse(input: &str) -> Result<Expr, ParseError> {
     Parser::new(input)?.parse()
+}
+
+/// Parses an expression string into the span-carrying [`SpannedExpr`] AST.
+///
+/// This is the primary parse: [`parse`] is exactly `parse_spanned(input)?.erase()`.
+/// Use it when byte spans are needed (e.g. a language server mapping a cursor
+/// or sub-expression back to source); every span is a byte-offset range into
+/// `input`.
+///
+/// ## Examples
+///
+/// ```
+/// use darkmatter::markdown::compose::expression::{parse_spanned, SpannedExprKind};
+///
+/// let expr = parse_spanned("foo || \"bar\"").unwrap();
+/// assert_eq!(expr.span, 0..12);
+/// assert!(matches!(expr.kind, SpannedExprKind::Fallback { .. }));
+/// ```
+///
+/// ## Errors
+///
+/// Returns an error for invalid syntax.
+pub fn parse_spanned(input: &str) -> Result<SpannedExpr, ParseError> {
+    Parser::new(input)?.parse_spanned()
 }
 
 /// Parses an expression string using condition-mode grammar.
@@ -546,6 +736,39 @@ pub fn parse(input: &str) -> Result<Expr, ParseError> {
 pub fn parse_condition(input: &str) -> Result<Expr, ParseError> {
     Parser::with_mode(input, ParseMode::Condition)?.parse()
 }
+
+/// Parses an expression string using condition-mode grammar, returning the
+/// span-carrying [`SpannedExpr`] AST.
+///
+/// The condition-mode analogue of [`parse_spanned`]: `parse_condition(input)`
+/// equals `parse_condition_spanned(input)?.erase()`. Infix `&&` / `||` lower
+/// into `and(...)` / `or(...)` [`SpannedExprKind::FunctionCall`] nodes exactly
+/// as in [`parse_condition`].
+///
+/// ## Errors
+///
+/// Returns an error for invalid syntax.
+pub fn parse_condition_spanned(input: &str) -> Result<SpannedExpr, ParseError> {
+    Parser::with_mode(input, ParseMode::Condition)?.parse_spanned()
+}
+
+/// Precedence table shared with the semantics catalog.
+///
+/// Each entry is `(name, operators)` ordered from highest precedence to
+/// lowest. The `semantics` module mirrors this table so the parser remains
+/// the single source of truth for precedence while the report surface can
+/// iterate it.
+#[allow(dead_code)]
+pub(crate) const PRECEDENCE_TABLE: &[(&str, &str)] = &[
+    ("Primary / member access", "literals, variables, function calls, `foo.bar`, `foo[0]`, `(expr)`"),
+    ("Unary", "`!`, `-`"),
+    ("Multiplicative", "`*`, `/`, `%`"),
+    ("Additive", "`+`, `-`"),
+    ("Comparison", "`==`, `!=`, `>`, `>=`, `<`, `<=`"),
+    ("Logical AND", "`&&` (condition mode)"),
+    ("Logical OR / Fallback", "`||` (mode-dependent)"),
+    ("Ternary", "`? :`"),
+];
 
 #[cfg(test)]
 mod tests {
@@ -1866,6 +2089,160 @@ mod tests {
             assert_eq!(args.len(), 2);
             let (inner, _) = extract_call(&args[0]);
             assert_eq!(inner, "or");
+        }
+    }
+
+    /// Span-erasure equivalence + span-correctness for the spanned parser.
+    ///
+    /// The single-grammar contract is that `parse` is exactly
+    /// `parse_spanned(_).erase()`; these are the goldens that pin it. Every
+    /// expression fixture in this module already exercises the erased path via
+    /// [`parse`]/[`parse_condition`] (which now lower from the spanned parser),
+    /// so this module adds the erasure-equivalence corpus plus concrete byte
+    /// spans.
+    mod spanned {
+        use super::*;
+
+        /// Corpus spanning every grammar production, both parse modes.
+        const CORPUS: &[&str] = &[
+            "foo",
+            "user.name",
+            "ctx.today",
+            "env.HOME",
+            "42",
+            "-42",
+            "3.15",
+            "true",
+            "false",
+            "!enabled",
+            r#""hello world""#,
+            r#"foo || "default""#,
+            "foo || bar || baz",
+            r#"x ? "yes" : "no""#,
+            "a ? b ? c : d : e",
+            "a ? b : c ? d : e",
+            "count > 0",
+            r#"count > 0 ? "has items" : "empty""#,
+            "a + b * c",
+            "a + b <= c",
+            "a - b - c",
+            "items[0]",
+            "items[-1]",
+            r#"config["key"]"#,
+            "items[-1].name",
+            "(foo).bar",
+            "length(items)",
+            "number(value, 0)",
+            "upper(lower(text))",
+            "(a || b)",
+            "a && b",
+            "x && y ? a : b",
+        ];
+
+        /// Condition-mode-only corpus (infix `&&` / `||`).
+        const CONDITION_CORPUS: &[&str] =
+            &["a && b", "a || b", "a && b || c", "(a || b) && c", "a || (b || c)"];
+
+        #[test]
+        fn interpolation_erasure_matches_parse() {
+            for src in CORPUS {
+                let erased = parse_spanned(src).unwrap().erase();
+                let direct = parse(src).unwrap();
+                assert_eq!(erased, direct, "erasure mismatch for {src:?}");
+            }
+        }
+
+        #[test]
+        fn condition_erasure_matches_parse_condition() {
+            for src in CONDITION_CORPUS {
+                let erased = parse_condition_spanned(src).unwrap().erase();
+                let direct = parse_condition(src).unwrap();
+                assert_eq!(erased, direct, "condition erasure mismatch for {src:?}");
+            }
+        }
+
+        #[test]
+        fn parse_errors_agree_between_spanned_and_erased() {
+            for src in ["", "foo bar", "(foo", "x ? y", "@bad", "foo ||"] {
+                assert_eq!(
+                    parse(src).is_err(),
+                    parse_spanned(src).is_err(),
+                    "error-parity mismatch for {src:?}"
+                );
+            }
+        }
+
+        #[test]
+        fn whole_expression_span_covers_source() {
+            let expr = parse_spanned(r#"foo || "bar""#).unwrap();
+            assert_eq!(expr.span, 0..12);
+        }
+
+        #[test]
+        fn variable_span_is_the_identifier() {
+            let expr = parse_spanned("  foo  ").unwrap();
+            // Leading/trailing whitespace is not part of the token span.
+            assert_eq!(expr.span, 2..5);
+            assert!(matches!(expr.kind, SpannedExprKind::Variable(ref n) if n == "foo"));
+        }
+
+        #[test]
+        fn binary_operand_spans_are_precise() {
+            // "a + b" — the whole node spans 0..5, left operand 0..1, right 4..5.
+            let expr = parse_spanned("a + b").unwrap();
+            assert_eq!(expr.span, 0..5);
+            let SpannedExprKind::Binary { left, right, .. } = &expr.kind else {
+                panic!("expected Binary, got {:?}", expr.kind);
+            };
+            assert_eq!(left.span, 0..1);
+            assert_eq!(right.span, 4..5);
+        }
+
+        #[test]
+        fn ternary_child_spans_are_precise() {
+            let src = r#"c ? "y" : "n""#;
+            let expr = parse_spanned(src).unwrap();
+            let SpannedExprKind::Ternary {
+                condition,
+                then_branch,
+                else_branch,
+            } = &expr.kind
+            else {
+                panic!("expected Ternary, got {:?}", expr.kind);
+            };
+            assert_eq!(&src[condition.span.clone()], "c");
+            assert_eq!(&src[then_branch.span.clone()], "\"y\"");
+            assert_eq!(&src[else_branch.span.clone()], "\"n\"");
+        }
+
+        #[test]
+        fn function_call_span_covers_name_through_close_paren() {
+            let src = "length(items)";
+            let expr = parse_spanned(src).unwrap();
+            assert_eq!(expr.span, 0..src.len());
+            let SpannedExprKind::FunctionCall { args, .. } = &expr.kind else {
+                panic!("expected FunctionCall, got {:?}", expr.kind);
+            };
+            assert_eq!(&src[args[0].span.clone()], "items");
+        }
+
+        #[test]
+        fn condition_and_lowering_span_covers_both_operands() {
+            let src = "a && b";
+            let expr = parse_condition_spanned(src).unwrap();
+            assert_eq!(expr.span, 0..src.len());
+            assert!(matches!(
+                expr.kind,
+                SpannedExprKind::FunctionCall { ref name, .. } if name == "and"
+            ));
+        }
+
+        #[test]
+        fn parse_error_position_is_a_byte_offset() {
+            // "foo bar" — the parser consumes `foo` (0..3) then errors on the
+            // stray `bar` token, whose byte offset is 4 (not a token index).
+            let err = parse_spanned("foo bar").unwrap_err();
+            assert_eq!(err.position, 4);
         }
     }
 }

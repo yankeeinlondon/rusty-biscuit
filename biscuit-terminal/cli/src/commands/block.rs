@@ -1,5 +1,5 @@
 use crate::commands::color_parse::parse_color;
-use crate::commands::shared::{detect_terminal_honoring_force_color, print_example_command};
+use crate::commands::shared::{print_example_command, terminal_for_render};
 use crate::commands::{CliContext, Run};
 use biscuit_terminal::render_tree::{TerminalRenderOptions, render_terminal_node};
 use clap::Args as ClapArgs;
@@ -239,7 +239,7 @@ impl BlockArgs {
 }
 
 impl Run for BlockArgs {
-    fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
+    fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         let text = if self.example {
             BLOCK_EXAMPLE.to_string()
         } else {
@@ -268,7 +268,7 @@ impl Run for BlockArgs {
         }
         let root = RenderNode::root(vec![node]);
 
-        let term = detect_terminal_honoring_force_color();
+        let term = terminal_for_render(ctx.plain);
         let opts = TerminalRenderOptions::new(&term, RenderStrictness::Warn);
         let rendered = render_terminal_node(&root, &opts)
             .map_err(|e| color_eyre::eyre::eyre!("render failed: {e}"))?;

@@ -44,7 +44,6 @@ Current shadow-home exclusions:
 | Kimi | `skills`, `agents` |
 | OpenCode | `skills` |
 | Qwen | `skills`, `commands` |
-| Roo | No wrapper command, so no `--repo` wrapper mode |
 
 Two consequences follow from that table:
 
@@ -70,6 +69,19 @@ Codex custom prompts are user-scoped rather than repo-scoped in the same way as 
 - if `<repo>/.codex/prompts` is absent, Claudine also accepts `<repo>/.claude/commands`
 
 When `--repo` is active, user prompt files are excluded and only the repo-side prompt source is materialized into the shadow home.
+
+Codex SQLite state is not part of that overlay. Claudine sets
+`CODEX_SQLITE_HOME` to the directory Codex would have used before `HOME` was
+changed, preserving an explicit `CODEX_SQLITE_HOME` or `CODEX_HOME` when
+present. Codex's configured `sqlite_home` retains its native higher precedence.
+This keeps plain and wrapped Codex sessions in one state database and ensures
+the database, WAL, and shared-memory files are opened through one directory.
+Claudine never copies or links those live files into the shadow home.
+
+Regular databases left under the shadow home by older Claudine versions are
+preserved as recoverable legacy state but are no longer opened. Legacy database
+symbolic links are removed with their sidecars because they can split SQLite's
+locking paths.
 
 ## What We Intentionally Preserve
 
@@ -148,7 +160,6 @@ Some provider-specific nuances are worth calling out explicitly:
 - Codex is also strong, but prompt isolation is handled through a dedicated overlay path rather than through repo-scoped command directories.
 - Gemini, OpenCode, and Qwen are only partially isolated today because some user resource directories are still preserved in the shadow home.
 - Goose and Kimi do not have user command masking because their command story differs from markdown slash-command directories.
-- Roo Code has no standalone wrapper command, so this document does not apply to Roo sessions.
 
 ## Non-Goals
 

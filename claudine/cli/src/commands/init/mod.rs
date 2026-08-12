@@ -190,6 +190,9 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
         models: HashMap::new(),
         default_sounds: DefaultSounds::default(),
         prompt_for_missing: true,
+        harvest_unmatched: false,
+        exit_expressions: None,
+        guard_settings: Default::default(),
     };
 
     // Phase 5: Write and Register
@@ -207,7 +210,10 @@ async fn run_interactive(repo_scope: bool) -> Result<()> {
     };
 
     save_claudine_config(&config, &config_path)?;
-    log::message(&format!("Wrote config to {}", config_path.display()));
+    log::message(&format!(
+        "Wrote config to {}",
+        biscuit_file::to_portable_string(&config_path)
+    ));
 
     // Handle .gitignore in repo mode
     if repo_scope {
@@ -385,7 +391,10 @@ async fn run_quick(repo_scope: bool) -> Result<()> {
     };
 
     save_claudine_config(&config, &config_path)?;
-    log::message(&format!("  Wrote config to {}", config_path.display()));
+    log::message(&format!(
+        "  Wrote config to {}",
+        biscuit_file::to_portable_string(&config_path)
+    ));
 
     // Register with providers
     log::message("");
@@ -504,6 +513,9 @@ fn default_config(repo_scope: bool) -> Result<ClaudineConfig> {
         models: HashMap::new(),
         default_sounds: DefaultSounds::default(),
         prompt_for_missing: true,
+        harvest_unmatched: false,
+        exit_expressions: None,
+        guard_settings: Default::default(),
     })
 }
 
@@ -613,6 +625,9 @@ mod tests {
             models: HashMap::new(),
             default_sounds: DefaultSounds::default(),
             prompt_for_missing: true,
+            harvest_unmatched: false,
+            exit_expressions: None,
+            guard_settings: Default::default(),
         }
     }
 
@@ -633,7 +648,6 @@ mod tests {
             Provider::KimiCode,
             Provider::OpenCode,
             Provider::QwenCode,
-            Provider::RooCode,
         ] {
             let events = provider_hook_events(provider);
             for event in events {

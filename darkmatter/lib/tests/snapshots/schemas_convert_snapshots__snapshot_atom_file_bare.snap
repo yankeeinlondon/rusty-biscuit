@@ -10,10 +10,13 @@ expression: "convert_atom(\"file\")"
     "field": {
       "anyOf": [
         {
+          "type": "null"
+        },
+        {
           "const": ""
         },
         {
-          "format": "darkmatter-file",
+          "format": "darkmatter-file-reference",
           "type": "string"
         }
       ]

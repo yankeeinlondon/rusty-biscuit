@@ -3,7 +3,7 @@
 use oauth2::Scope;
 
 use crate::error::OAuthError;
-use crate::manager::{build_http_client, extract_tokens, OAuth2Manager};
+use crate::manager::{extract_tokens, OAuth2Manager};
 use crate::types::StoredTokens;
 
 impl OAuth2Manager {
@@ -21,18 +21,14 @@ impl OAuth2Manager {
             request = request.add_scope(Scope::new(scope.clone()));
         }
 
-        let http_client = build_http_client()?;
         let token_response = request
-            .request_async(&http_client)
+            .request_async(&self.http_client)
             .await
             .map_err(|e| OAuthError::TokenExchange(e.to_string()))?;
 
         let tokens = extract_tokens(&token_response, &self.config.scopes);
 
-        let store = self.store.write().await;
-        store
-            .save(&tokens)
-            .map_err(|e| OAuthError::TokenStore(e.to_string()))?;
+        self.store.save(&tokens)?;
 
         Ok(tokens)
     }

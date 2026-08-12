@@ -8,7 +8,7 @@ review_dir: "@{{ctx.area}}/reviews/{{today}-summary-and-suggest"
 
 ## Context
 
-You are working in the {{ctx.area}} of the **rusty-biscuit** monorepo and have been asked to perform both a summary and a review focused on the '{{area}}' area.
+You are working in the {{ctx.area}} of the **rusty-biscuit** monorepo and have been asked to perform both a summary and a review focused on the '{{ctx.area}}' area.
 
 The review document you will produce will consist of the following sections:
 
@@ -16,7 +16,7 @@ The review document you will produce will consist of the following sections:
     - `## Achievements`
     - `## Suggestions`
 
-- The activity and achievements in '{{area}}' during the past {{timeframe}} timeframe go into the `## Achievements` section:
+- The activity and achievements in '{{ctx.area}}' during the past {{timeframe}} timeframe go into the `## Achievements` section:
     - report on new functionality that has been delivered
     - report on functionality that was fixed
     - report on any new package that was added to the package area
@@ -31,12 +31,12 @@ The review document you will produce will consist of the following sections:
 
     - reference the git commit(s) associated
     - reference the related `spec.md` specification file(s)
-        - found in `@{{area}}/features` or `@{{area}}/fixes`
+        - found in `@{{ctx.area}}/features` or `@{{ctx.area}}/fixes`
 
 - at the same time that you're evaluating the activity/achievements, you should be evaluating what **more** could or should be done:
     - this content will go in the `## Suggestions` section
     - what aspects of the code do NOT follow the DRY standard? How could better reuse and less code paths be achieved to ensure we don't end up with duplicative code or even worse, slightly variant implementations of the same functionality.
-        - you are allowed to consider design patterns which include not only packages in the '{{area}}' but also other packages in the monorepo which are a direct dependency of the packages in '{{area}}'
+        - you are allowed to consider design patterns which include not only packages in the '{{ctx.area}}' but also other packages in the monorepo which are a direct dependency of the packages in '{{ctx.area}}'
     - are there ways to make the code more ergonomic?
     - how can we make the code more performant?
         - segment these opportunities into opportunities which have only upside versus those which have some sort of complexity such as:
@@ -49,9 +49,9 @@ The review document you will produce will consist of the following sections:
 
 ## Commits
 
-The commits in the "{{area}}" package area over the past _{{timeframe}}_ are:
+The commits in the "{{ctx.area}}" package area over the past _{{timeframe}}_ are:
 
-::shell sniff repo recent-commits --package-area "{{area}}" --plain || "no commits during this timeframe"
+::shell sniff repo recent-commits --package-area "{{ctx.area}}" --plain || "no commits during this timeframe"
 
 ## Tools
 
@@ -67,7 +67,7 @@ If you wanted to see all of the recent commits with all of the underlying detail
 by running
 
 ```sh
-sniff repo recent-commits "{{timeframe}}" --package-area "{{area}}" --plain -vv
+sniff repo recent-commits "{{timeframe}}" --package-area "{{ctx.area}}" --plain -vv
 ```
 
 ## Task
@@ -83,9 +83,9 @@ sniff repo recent-commits "{{timeframe}}" --package-area "{{area}}" --plain -vv
         - `interactive` set to '{{env.INTERACTIVE}}'
         - `model` set to '{{env.MODEL || "default"}}'
         - `suggestions` set to a numeric value based on the number of suggestions you have provided
-        - `features` list all "features" that contributed to the "{{area}}" package areas changes
+        - `features` list all "features" that contributed to the "{{ctx.area}}" package areas changes
         - `fixes` list all the "fixes" that contributed to the 
-        - `commits` list all the commits (hashes only) which contributed to the changes in the "{{area}}" package area over the past {{timeframe}}
+        - `commits` list all the commits (hashes only) which contributed to the changes in the "{{ctx.area}}" package area over the past {{timeframe}}
 - Once the document is complete, provide a summary description of your findings to the caller
     - save this same summary which you report to STDOUT to the `summary` frontmatter property
 

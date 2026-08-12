@@ -19,6 +19,7 @@ just -f biscuit-terminal/justfile install
 | Command | Description |
 |---------|-------------|
 | `bt` | Terminal inspection (default) |
+| `bt about [APP]` | Report on a specific terminal app |
 | `bt image` | Render inline images |
 | `bt prose` | Render styled text with tokens |
 | `bt flowchart` | Flowchart diagrams |
@@ -65,6 +66,23 @@ Output includes:
 - **Connection**: Local, SSH, or Mosh
 - **Locale**: Raw locale, BCP47 tag, character encoding
 - **Config**: Path to terminal configuration file
+
+### About a Specific Terminal App
+
+Report detailed config and environment metadata for a supported terminal app:
+
+```bash
+bt about                # Currently detected terminal
+bt about kitty          # Exact match
+bt about iterm          # Prefix/contains match
+bt about VSCode         # Alias match
+bt about kitty --json   # JSON output
+bt about kitty --plain  # No ANSI escapes
+```
+
+Output includes install status, OS target, resolved config file, config
+candidates, environment overrides, extracted settings, and live environment
+facts (only when the queried app is the current terminal).
 
 ### Image Rendering
 

@@ -99,8 +99,8 @@ fn inline_compose_magic_resolves_relative() {
 
     let got = run_complete(ws.path(), &["inline-compose", "@writ"]);
     assert!(
-        got.iter().any(|c| c == "prompts/writer.md"),
-        "@ magic must resolve to relative path: {got:?}"
+        got.iter().any(|c| c == "@writer.md"),
+        "@ magic must keep `@` and render the filename only: {got:?}"
     );
 }
 
@@ -129,10 +129,9 @@ fn inline_compose_long_prefix_surfaces_directories() {
 // ---------------------------------------------------------------------
 
 #[test]
-fn inline_compose_magic_first_hit_wins_shadows_user_global() {
-    // First-hit-wins: once a higher-priority scope produces candidate(s),
-    // lower-priority scopes are not consulted. repo `docs/` outranks
-    // `user_claudine`, so the user-global match must not appear.
+fn inline_compose_magic_dedups_duplicate_basename() {
+    // The same filename in repo `docs/` and `~/.claudine/prompts/` collapses
+    // to a single `@plan.md`; runtime resolves the closest.
     let ws = TestWorkspace::named("complete-inline-magic-priority");
     seed_cargo_workspace(ws.path());
 
@@ -152,13 +151,14 @@ fn inline_compose_magic_first_hit_wins_shadows_user_global() {
 
     let got = run_complete_with_home(ws.path(), &home, &["inline-compose", "@plan"]);
 
-    assert!(
-        got.iter().any(|c| c.ends_with("docs/plan.md")),
-        "repo-local docs/plan.md must appear: {got:?}"
+    assert_eq!(
+        got.iter().filter(|c| *c == "@plan.md").count(),
+        1,
+        "duplicate basename across tiers must collapse to one `@plan.md`: {got:?}"
     );
     assert!(
-        !got.iter().any(|c| c.contains(".claudine/prompts/plan.md")),
-        "user-global plan.md must NOT appear due to first-hit-wins: {got:?}"
+        got.iter().all(|c| c.starts_with('@') && !c.contains('/')),
+        "every magic candidate must be `@<basename>`: {got:?}"
     );
 }
 
@@ -183,17 +183,16 @@ fn inline_compose_one_char_prefix_surfaces_repo_dirs() {
 }
 
 #[test]
-fn inline_compose_magic_short_prefix_surfaces_repo_dirs() {
-    // Review-3 finding 4: `@<short><TAB>` mirrors Word-mode dir behavior
-    // for `inline-compose` mode. The repo-wide directory walk runs at
-    // Short prefix length regardless of the magic file-tier outcome.
+fn inline_compose_magic_surfaces_no_dirs() {
+    // Filename-magic contract: `inline-compose @<short><TAB>` never surfaces
+    // a directory — magic mode is a filename search.
     let ws = TestWorkspace::named("complete-inline-magic-short-dirs");
     seed_cargo_workspace(ws.path());
     fs::create_dir_all(ws.path().join("claudine")).unwrap();
 
     let got = run_complete(ws.path(), &["inline-compose", "@cl"]);
     assert!(
-        got.iter().any(|c| c == "claudine/"),
-        "inline-compose magic short prefix must surface `claudine/`: {got:?}"
+        !got.iter().any(|c| c.ends_with('/')),
+        "inline-compose magic must not surface directories: {got:?}"
     );
 }

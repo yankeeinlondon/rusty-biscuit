@@ -5,12 +5,12 @@
 Rusty Biscuit's CI/CD runs on **GitHub Actions** and is layered to match the [testing tier
 taxonomy](./testing-in-rusty-biscuit.md): fast feedback first, then full coverage, then
 nightly/advisory work. Releases are automated through [release-plz](https://release-plz.dev) but
-**no crate is published to crates.io** — GitHub releases and signed tags are the only
+**no crate is published to crates.io** — GitHub releases and version tags are the only
 distribution channel today.
 
-The local entry point for everything CI does is `just`. Every CI job ultimately shells out to a
-`just` recipe defined in `justfile` or `just/*.just`, so a green local `just all <area>` is a strong
-predictor of a green PR.
+Package-area gates use the same `just` recipes developers run locally. Scope selection is handled
+by `scripts/ci/affected_scope.py`, which uses Cargo metadata to expand changed workspace packages
+through reverse dependencies before platform jobs start.
 
 ## Pipeline Layers
 
@@ -19,8 +19,8 @@ The pipeline has four conceptual layers. Each layer answers a different question
 | Layer                     | Question it answers                                               | Blocking?                      |
 |---------------------------|-------------------------------------------------------------------|--------------------------------|
 | **Local pre-push hook**   | Did I obviously break the areas I touched?                        | Opt-in (`warn`/`strict`/`off`) |
-| **PR gates**              | Does the canonical suite pass on a clean Linux runner?            | Yes                            |
-| **Area-scoped workflows** | Does the package area I changed still pass its own deeper checks? | Yes when triggered             |
+| **Dependency-scoped CI**  | Do changed packages and their consumers pass on native runners?   | Yes                            |
+| **Affected coverage**     | Did the changed package closure lose exercised behavior?          | Report-only                    |
 | **Nightly / advisory**    | Did anything drift since yesterday?                               | No                             |
 
 ### Layer 1 — Local pre-push hook
@@ -42,54 +42,77 @@ ln -s ../../.githooks/pre-push .git/hooks/pre-push
 The hook itself is regression-tested in CI by `hooks-tests.yml`, so changes to `.githooks/**`,
 `justfile`, or `just/**` re-validate the contract.
 
-### Layer 2 — PR gates (always required)
+### Layer 2 — Dependency-scoped CI
 
-Two workflows run on every pull request to `main`. Both use `Swatinem/rust-cache@v2` with a
-workflow-specific `shared-key` and pin the **stable** toolchain via `dtolnay/rust-toolchain`.
+`ci.yml` runs on pull requests and pushes to `main`. Its first job validates the canonical recipe
+surface, obtains the changed file set from the event's exact base and head SHAs, and calculates:
 
-#### `sanity.yml` — fast confidence (~5 min budget, 10 min hard timeout)
+- workspace packages containing those files,
+- all transitive reverse Cargo dependencies,
+- curated package areas owning those packages.
 
-Runs `just sanity` across the curated area list. `sanity` is the L1 subset that excludes slow tests,
-L2 (terminal/PTY), L3 (OS injection), browser, and real-resource tiers. This is the first signal a
-PR author sees and is intended to surface obvious breakage within a coffee break.
+The selected package matrix calls `_package-ci.yml`, which compile-checks
+Windows, runs L1 on Linux, Windows, and macOS (plus WSL2), and runs each
+package's lint/documentation guards. Per-package policy — L2/browser tier
+ownership, native libraries, Cargo features, runner tools, and companion
+suites — lives in each package's `[package.metadata.ci]`; environment
+capabilities live in `.github/ci/environments.json`.
+Changes to global build/test configuration conservatively select every package.
 
-#### `test.yml` — canonical suite (30 min timeout)
+### Layer 3 — Affected coverage and specialized workflows
 
-Runs `just check-canonical` followed by `just all`, where `all` is the composite
-`sanity &rarr; lint &rarr; doctest &rarr; test &rarr; test-l2 &rarr; test-browser`. `check-canonical`
-asserts every curated area defines the full 12-recipe canonical surface; this is how the monorepo
-keeps area `justfile`s uniform. Missing tiers in individual areas degrade gracefully — an area
-with no L2 tests simply contributes a no-op.
+On pull requests, `ci.yml` passes the affected package closure to one `cargo llvm-cov` invocation
+and uploads one LCOV artifact (`lcov-affected`). It does not perform a package-by-package pass and
+then repeat the workspace.
 
-### Layer 3 — Area-scoped workflows (path-filtered)
+Specialized runtime contracts are **reusable workflows called by `ci.yml`**, not independently
+path-triggered ones, so a commit produces one CI run rather than a wall of overlapping ones. Each
+is selected from affected scope and gated on preflight:
 
-These workflows only trigger when their package area changes, so they add depth without taxing
-unrelated PRs. Each owns its own cache key and 30 min timeout.
+| Workflow | Selected when | Unique evidence |
+|---|---|---|
+| `biscuit-tui-windows-captured-stdout.yml` | `biscuit-tui` in scope | attached-console captured-stdout boundary |
 
-| Workflow                      | Scope                                 | What it adds beyond the PR gate                                                                                                                                                                                                             |
-|-------------------------------|---------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `claudine-tests.yml`          | `claudine/**`                         | Drops stub provider CLIs (`claude`, `opencode`, `roo`, `gemini`, `aider`, `codex`, `goose`, `kimi`, `qwen`) into `$RUNNER_TEMP` so sniff detection succeeds in dry-run integration tests; pins `COLORTERM=truecolor` for snapshot fidelity. |
-| `darkmatter-tests.yml`        | `darkmatter/**`                       | Pins `COLORTERM=truecolor`; additionally re-runs color-depth tests under `NO_COLOR=1` to catch snapshot regressions.                                                                                                                        |
-| `hooks-tests.yml`             | `.githooks/**`, `justfile`, `just/**` | Runs `test-pre-push.sh` and `test-changed-areas.sh` with `fetch-depth: 0` so `git diff upstream..HEAD` works.                                                                                                                               |
-| `messenger-desktop-tests.yml` | `messenger/**`                        | OS matrix across `ubuntu-latest`, `windows-latest`, `macos-latest`, **plus** a WSL2 (Ubuntu 24.04) submatrix via `Vampire/setup-wsl`. Installs `pkg-config`, `libssl-dev`, `libdbus-1-dev` on Linux.                                        |
-| `sniff-performance.yml`       | `sniff/**`                            | Runs a narrow Criterion subset (`ci-bench-ids.txt`) with `--save-baseline ci`. Artifact-only Phase A — no regression gate yet.                                                                                                              |
-
-Path filters always include the workflow file itself and root `Cargo.toml`, so workflow edits and
-dependency bumps still re-run the relevant suite.
+Messenger and all three Rendezvous crates are owned by their ordinary
+package-keyed L1 cells on Ubuntu, Windows, macOS, and WSL2. Messenger declares
+all-feature coverage and the closed `messenger-desktop-stubs` runner tool. The
+native workflow builds and verifies all six helpers once before L1 and exports
+`MESSENGER_STUB_BIN_DIR`; the WSL2 archive workflow ships Linux helpers as a
+sidecar to its toolchain-free guest. JUnit and producer-status artifacts retain
+the package/environment/tier identity consumed by `ci-verdict`.
+`sniff-performance.yml`
+stays independent because its PR leg is artifact-only and its scheduled leg measures work counts,
+not correctness. `build-integrations.yml` stays release-triggered.
 
 ### Layer 4 — Nightly and advisory
 
-#### `coverage.yml` — on every PR and push to `main`, report-only
+Each scheduled workflow owns its own name, schedule slot, artifacts, and summary so none can be
+mistaken for required validation: bench 00:00, fuzz 02:00, sniff-performance 04:00, coverage 05:00
+UTC, maintenance audit Mondays 07:00.
 
-Runs `just coverage` across all areas with `cargo-llvm-cov` and uploads per-package and aggregated
-LCOV files as artifacts. Coverage **does not gate merges**; it's a delta-watching tool.
+#### `coverage.yml` — 05:00 UTC daily and manual, report-only
 
-#### `bench-nightly.yml` — 00:00 UTC daily + `darkmatter/**` pushes to `main`
+Runs one `cargo llvm-cov --workspace` command and uploads the aggregated LCOV artifact
+(`lcov-workspace`). Coverage **does not gate merges**; PRs already receive an affected-scope report
+from `ci.yml`.
+
+#### `bench-nightly.yml` — 00:00 UTC daily and manual
 
 Runs darkmatter's Criterion suite and uploads results to
-[Bencher.dev](https://bencher.dev) (`BENCHER_PROJECT` repo variable). Uses `--err` so the run fails
-on regression, but the failure is informational — it does not retroactively gate the commit
-that introduced it.
+[Bencher.dev](https://bencher.dev) (`BENCHER_PROJECT` repo variable). There is deliberately **no
+push trigger**: a benchmark that runs long is a measurement, not a test regression, and it must not
+appear beside required validation.
+
+Execution and upload are separate steps. The benchmark run gates the job — a bench that fails to
+compile or panics is a real failure — while the Bencher upload is best-effort and reads the captured
+Criterion output, so an unprovisioned project or a regression alert can never erase a successful
+measurement. The run records its measured duration, runner image, and toolchain in the run summary
+so later comparisons stay valid.
+
+The 90-minute budget is provisional: warm scheduled runs measured 14–18 minutes, but every
+cold-cache run was truncated by the previous 30-minute ceiling, so the cold duration has never
+actually been observed. Tighten the budget — or split the 16 bench targets across parallel jobs —
+once a cold run has been recorded.
 
 #### `fuzz-nightly.yml` — 02:00 UTC daily
 
@@ -106,6 +129,13 @@ and 300 s per target. The interesting policy bits:
 
 - **Advisory.** Fuzz nightly never gates merges; it produces actionable issues instead.
 
+#### `maintenance-audit.yml` — Mondays 07:00 UTC and manual
+
+Reports what has moved upstream for every value the repository pins on purpose — the required Rust
+version, the kache pin, `cargo-nextest`, third-party GitHub Action versions, and the runner image —
+and changes nothing. The job always succeeds; a finding is information. Pins advance only through a
+reviewed change (see [Advancing a pinned value](#advancing-a-pinned-value)).
+
 #### `build-integrations.yml` — on `release: published`
 
 Cross-compiles the three Unfolded Circle integrations (`arcam-amp-integration`,
@@ -115,18 +145,20 @@ target's failure doesn't strand the others.
 
 ## Release Strategy
 
-Releases are automated end-to-end by `release-plz.yml`, which runs only on pushes to `main` in the
-public repository.
+Releases are automated end-to-end by `release-plz.yml` in the public repository.
 
 ### Two-job flow
 
-1. **`release-pr`** runs `release-plz release-pr`. It opens (or updates) a single **draft**
+1. After the `ci` workflow **succeeds** on `main` (a `workflow_run` trigger, not a bare push — release
+   automation follows the validation it depends on rather than racing it), **`release-pr`** runs
+   `release-plz release-pr`. It opens (or updates) a single **draft**
    release PR labeled `release`, `automated`. The PR contains version bumps and changelog updates
    for every package with relevant commits since the last tag. Concurrency is configured to be
    **non-cancelling** so two concurrent runs cannot race the PR head.
 
-2. **`release-plz-release`** runs `release-plz release` after that PR merges. It creates git tags
-   shaped `{{ package }}-v{{ version }}` and publishes GitHub releases with the rendered changelog.
+2. When a merged PR labeled `release` closes, **`release-plz-release`** runs `release-plz
+   release`. It creates git tags shaped `{{ package }}-v{{ version }}` and publishes GitHub
+   releases with the rendered changelog. Ordinary pushes do not start the publishing job.
 
 ### What we do *not* do
 
@@ -142,8 +174,9 @@ public repository.
 
 ### Versioning policy
 
-- **SemVer with `semver_check = true`.** release-plz fails the release PR if a package's public API
-    changed incompatibly relative to its proposed bump.
+- **SemVer checks are disabled.** `semver_check = false` avoids release-plz regenerating
+    intentionally untracked nested-workspace lockfiles; with `publish = false`, there is no
+    crates.io consumer requiring that publication gate.
 
 - **Per-package changelogs** at `<area>/CHANGELOG.md` for nine packages (the rest aggregate into the
     workspace root changelog).
@@ -154,14 +187,14 @@ public repository.
 ## Caching and Performance
 
 Every Rust workflow uses `Swatinem/rust-cache@v2` with `workspaces: ". -> target"` and a workflow-
-or matrix-scoped `shared-key`. Examples: `sanity`, `test`, `coverage`, `bench-nightly-darkmatter`,
-`claudine-tests`, `darkmatter-tests`, `sniff-bench`, `messenger-desktop-<os>`. Cache keys are
+or matrix-scoped `shared-key`. Examples: `area-ci-<area>-<job>-<os>`, `coverage-affected`,
+`coverage`, `bench-nightly-darkmatter`, and `sniff-bench`. Cache keys are
 intentionally per-workflow rather than global — this trades hit rate for protection against
 a poisoned target directory taking down the entire pipeline.
 
 Concurrency is configured per-workflow:
 
-- PR gates and area workflows: `cancel-in-progress: true` per ref, so force-pushing a fix cancels
+- Dependency-scoped CI: `cancel-in-progress: true` per ref, so force-pushing a fix cancels
     the prior run.
 
 - `release-plz` and the fuzz/bench nightlies: **never cancel** — partial state from these is
@@ -169,31 +202,62 @@ Concurrency is configured per-workflow:
 
 ## Required Toolchain on Runners
 
-Every workflow pins one toolchain explicitly — no implicit `rustup default`.
+`rust-toolchain.toml` pins one **exact** Rust version for the whole repository, and required CI
+honors that file with `rustup show` rather than overriding it with a floating channel. Local and CI
+therefore resolve the same compiler — which also stabilizes rustfmt and Clippy, curing the
+`main`↔branch formatting drift documented in `CLAUDE.md`.
 
-- **Stable** for sanity, test, coverage, area-scoped, build-integrations, and release-plz.
-- **Stable + `llvm-tools-preview`** for coverage.
-- **Nightly** only for `fuzz-nightly`.
+Two deliberate overrides exist, both outside required CI:
+
+- **`rust-latest-stable.yml`** sets `RUSTUP_TOOLCHAIN=stable` to test the newest compiler in
+  advance. Advisory; it cannot change required-CI behavior.
+- **`fuzz-nightly.yml`** uses nightly because `cargo-fuzz` requires it.
+
+Coverage adds `llvm-tools-preview` on top of the pinned toolchain.
+
+### Advancing a pinned value
+
+The maintenance audit reports drift; advancing a pin is a reviewed change:
+
+1. Check the most recent `rust-latest-stable` run (for a toolchain bump) or the upstream release
+   notes (for an action, kache, or nextest bump).
+2. Update the single authority — `rust-toolchain.toml`, `.github/kache-version`, or the `uses:`
+   pin — never a second copy.
+3. Run `cargo fmt --all --check` (read-only; never write-mode), plus the affected areas' `just
+   build`, `just test`, and `just lint`.
+4. Review newly enabled compiler and Clippy diagnostics rather than silencing them.
+5. Keep action-version upgrades in their own commit, separate from behavior changes.
+
+Roll back by reverting that one authority value; nothing else encodes it.
 
 Shared CLI tools used in CI:
 
+- `python3`, `jq`, and `gh` — scope calculation and GitHub orchestration.
+- Node.js, npm, and pnpm — frontend legs declared with the `node` capability.
 - `cargo-nextest` — the canonical test runner for L1 tiers.
 - `just` — orchestration entry point for every job.
 - `cargo-llvm-cov` — coverage.
 - `cargo-fuzz` — fuzz targets.
 - `cross` — integration cross-compilation.
 - `bencher` — nightly benchmark upload.
+- `release-plz` — release planning and publication.
+
+The root `just init` recipe has a CI/CD stage that ensures the applicable
+local equivalents. Binaries encapsulated entirely inside a third-party action
+remain owned by that action.
 
 ## Policy Summary
 
 What a reviewer can rely on when approving a PR:
 
-1. **Sanity and test passed on `ubuntu-latest` against stable Rust.** Both are required.
+1. **Every affected gating package passed its configured environment matrix** against the exact
+   pinned Rust version in `rust-toolchain.toml`. Native L1 runs on Linux,
+   Windows, and macOS; `wsl2-ubuntu` is a distinct archive-based L1 cell.
 2. **`just check-canonical` confirms the area structure is well-formed** — no `justfile`
    recipe drift snuck in.
 
-3. **If the PR touched a path-filtered area (`claudine`, `darkmatter`, `messenger`, `sniff`,
-   `.githooks`),** the corresponding area-scoped workflow also passed.
+3. **Downstream workspace consumers are included automatically** from Cargo's dependency graph;
+   the two specialized runtime contracts are selected from that same scope by `ci.yml`.
 
 4. **Coverage is reported but not gated.** Treat coverage as a delta to inspect, not a number to
    defend.
@@ -206,8 +270,9 @@ What a reviewer can rely on when approving a PR:
 
 What CI explicitly does **not** guarantee:
 
-- **Cross-platform coverage for arbitrary areas.** Only `messenger` runs the full Linux/macOS/
-    Windows/WSL matrix today; other areas are validated on Linux only.
+- **All-target compile coverage on every environment.** The dedicated Windows
+    check compiles examples and benches; L1 on Linux, macOS, and WSL2 compiles
+    and runs test targets but does not promise every non-test target.
 
 - **Performance regressions blocking merge.** Bench results are tracked in Bencher but not gated.
 - **External-resource (L4 `test-real`) tests passing.** Those tiers are explicitly excluded from
@@ -217,19 +282,27 @@ What CI explicitly does **not** guarantee:
 
 Before adding a new workflow, check:
 
-1. **Does an existing canonical recipe cover this?** If yes, prefer adding the area to the
-   curated list in the root `justfile` over inventing a new workflow.
+1. **Does an existing canonical recipe cover this?** If yes, register the area in the root
+   `justfile` and declare the package's CI policy in its `[package.metadata.ci]`
+   instead of inventing a new workflow.
 
-2. **Is this area-scoped or repo-wide?** Repo-wide work goes in `sanity.yml` / `test.yml`; area
-   work gets a `<area>-tests.yml` with path filters that include the workflow file itself and
-   root `Cargo.toml`.
+2. **Is this a canonical area contract or a specialized contract?** Canonical work belongs in
+   `_package-ci.yml` and the package policy; specialized hardware, IPC, or console behavior may justify
+   its own file. If it does, make it a **reusable** workflow (`workflow_call` +
+   `workflow_dispatch`, no `push`/`pull_request` triggers, no own `concurrency` group) and add a
+   scope-gated job to `ci.yml` that calls it. A self-triggering workflow reintroduces the wall of
+   parallel runs per commit that the orchestrator exists to prevent.
 
 3. **Should this gate merges or just report?** Mirror the existing pattern — coverage,
-   bench, fuzz, and sniff-performance are non-gating; everything else is.
+   bench, fuzz, sniff-performance, and the maintenance audit are non-gating; everything else is.
+   A non-gating workflow needs its own name, schedule slot, artifact names, and summary.
 
 4. **Pick a unique `shared-key`** for the cache so you don't share state with an unrelated job.
-5. **Pin the toolchain explicitly** with `dtolnay/rust-toolchain`; never rely on the runner's
-   default.
+5. **Honor `rust-toolchain.toml`** with `rustup show`; never override it with a floating
+   `dtolnay/rust-toolchain@stable`, and never rely on the runner's default. Nightly and
+   latest-stable overrides are deliberate exceptions, documented where they occur.
+6. **Install native prerequisites before building** with `just _ensure-native-libs <area>`, so a
+   `-sys` crate cannot fail to compile for a missing system library.
 
 ## Pointers
 

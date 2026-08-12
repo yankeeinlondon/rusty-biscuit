@@ -171,7 +171,9 @@ appended; it is never counted as a content change.
 **Directory input**
 
 - Recursively collects `.md` and `.dm` files.
-- Skips hidden directories.
+- Skips hidden (dot-prefixed) directories. All other directories — including
+  `node_modules`, `target`, and `vendor` — are traversed, so their Markdown
+  contributes to the aggregate fingerprint.
 - Ignores non-markdown files.
 - Sorts paths before aggregation for deterministic output.
 

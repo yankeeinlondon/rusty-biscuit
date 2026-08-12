@@ -6,19 +6,30 @@
 //! (skipping code regions) and plain-text scanning.
 
 use super::{EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, parse};
-use crate::markdown::compose::expression::{EvaluationLookup, UNKNOWN_FUNCTION_PREFIX};
+use crate::markdown::compose::expression::{EvaluationLookup, ExpressionError};
 use crate::markdown::compose::ComposeWarning;
-use crate::markdown::types::MarkdownError;
+use crate::markdown::types::{MarkdownError, SourceRef};
 use serde_json::Value;
 
-/// Whether an evaluation error is fatal even in non-fail-fast mode.
+/// Wraps a typed evaluation `cause` in [`MarkdownError::Interpolation`], the
+/// single construction point for the live compose interpolation path.
 ///
-/// An unknown function is an authoring mistake, not a data-dependent miss
-/// (unlike an undefined variable, which resolves to an empty string by design).
-/// Tolerating it would leave the literal `{{ … }}` text in place to poison a
-/// later consumer with an unrelated error, so it is always surfaced here.
-fn is_fatal_eval_error(message: &str) -> bool {
-    message.starts_with(UNKNOWN_FUNCTION_PREFIX)
+/// The `key` is left `None` here (body interpolation has none); frontmatter
+/// whole-value callers attach it afterward via `key_scoped_error`. The `source`
+/// starts as [`SourceRef::Effective`] — the on-disk excerpt is layered on at the
+/// pipeline boundary where the document's [`SourceContext`] is in scope.
+///
+/// [`SourceContext`]: biscuit_terminal::errors::SourceContext
+fn interpolation_error(expression: &str, cause: ExpressionError) -> MarkdownError {
+    MarkdownError::Interpolation {
+        key: None,
+        expression: expression.to_string(),
+        source: Box::new(SourceRef::Effective {
+            rendered: expression.to_string(),
+            origin_key: None,
+        }),
+        cause: Box::new(cause),
+    }
 }
 
 /// Controls how `interpolate_text` scans for `{{ }}` expressions.
@@ -48,6 +59,26 @@ pub(crate) struct InterpolationRewrite {
 /// Maximum number of rescan iterations to prevent infinite loops.
 const MAX_INTERPOLATION_DEPTH: usize = 10;
 
+/// Converts `{{{ ... }}}` interpolation literals in `input` to the literal
+/// text `{{ ... }}`.
+///
+/// Literals are recognized using the shared scanner and are converted
+/// from end to start so byte offsets remain stable. This runs **after**
+/// the final interpolation pass so replacement values that introduce new
+/// literals are also converted.
+pub(crate) fn convert_literals(input: &str, scan_mode: ScanMode) -> String {
+    let scan = match scan_mode {
+        ScanMode::MarkdownAware => ExpressionFinder::new(input).scan(),
+        ScanMode::Plain => ExpressionFinder::scan_plain(input),
+    };
+    let mut output = input.to_string();
+    for lit in scan.literals.iter().rev() {
+        let replacement = format!("{}{}{}", "{{", lit.content, "}}");
+        output.replace_range(lit.start..lit.end, &replacement);
+    }
+    output
+}
+
 /// Scans `input` for `{{ }}` expressions, evaluates them, and returns
 /// the rewritten string.
 ///
@@ -70,6 +101,21 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
     fail_fast: bool,
     warning_stage: &'static str,
 ) -> Result<InterpolationRewrite, MarkdownError> {
+    // Fast path (F14): a `{{ … }}` expression and a `{{{ … }}}` literal both
+    // require the `{{` sequence. When the input contains none, no expression or
+    // literal can be present, so the whole scan pipeline — the MarkdownAware
+    // pulldown-cmark code-region parse in `ExpressionFinder::new`, every rescan
+    // pass, and `convert_literals` — is provably a no-op. Skip it and return the
+    // input verbatim. Byte-identical: the scan would find zero locations and
+    // `convert_literals` zero literals either way.
+    if !input.contains("{{") {
+        return Ok(InterpolationRewrite {
+            output: input.to_string(),
+            replacements: 0,
+            warnings: Vec::new(),
+        });
+    }
+
     let mut output = input.to_string();
     let mut total_count = 0;
     let mut all_warnings = Vec::new();
@@ -89,7 +135,13 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
 
         for loc in locations.into_iter().rev() {
             match parse(&loc.expression) {
-                Ok(expr) => match evaluator.eval(&expr) {
+                Ok(expr) => {
+                    let mut ctx_warnings = evaluator.collect_context_warnings(
+                        &expr,
+                        warning_stage,
+                    );
+                    warnings.append(&mut ctx_warnings);
+                    match evaluator.eval(&expr) {
                     EvalResult::Value(replacement) => {
                         // Inherit line indentation for multiline replacements
                         let replacement = if replacement.contains('\n') {
@@ -110,26 +162,24 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
                         output.replace_range(loc.start..loc.end, &replacement);
                         count += 1;
                     }
-                    EvalResult::Error { message, .. }
-                        if fail_fast || is_fatal_eval_error(&message) =>
+                    EvalResult::Error { error, .. }
+                        if fail_fast || error.is_authoring_fatal() =>
                     {
-                        return Err(MarkdownError::Transform(format!(
-                            "Interpolation evaluation failed for '{}': {}",
-                            loc.expression, message
-                        )));
+                        return Err(interpolation_error(&loc.expression, error));
                     }
-                    EvalResult::Error { message, original } => {
+                    EvalResult::Error { error, original } => {
                         warnings.push(ComposeWarning::new(
                             warning_stage,
-                            format!("failed to evaluate '{}': {}", original, message),
+                            format!("failed to evaluate '{}': {}", original, error),
                         ));
                     }
-                },
+                }
+                }
                 Err(e) if fail_fast => {
-                    return Err(MarkdownError::Transform(format!(
-                        "Interpolation parse failed for '{}': {}",
-                        loc.expression, e
-                    )));
+                    return Err(interpolation_error(
+                        &loc.expression,
+                        ExpressionError::Parse(e.to_string()),
+                    ));
                 }
                 Err(e) => {
                     warnings.push(ComposeWarning::new(
@@ -159,6 +209,16 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
         }
     }
 
+    // `convert_literals` runs a full expression scan (a pulldown-cmark parse in
+    // MarkdownAware mode) plus a copy. A `{{{ … }}}` literal is impossible
+    // without the `{{{` sequence, so skip that work entirely when it's absent
+    // (F14) — byte-identical: the scan would find no literals either way.
+    let output = if output.contains("{{{") {
+        convert_literals(&output, scan_mode)
+    } else {
+        output
+    };
+
     Ok(InterpolationRewrite {
         output,
         replacements: total_count,
@@ -166,56 +226,91 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
     })
 }
 
-/// Interpolates a single frontmatter value, preserving scalar type when the
-/// whole value is one `{{ expr }}`.
+/// Interpolates a single frontmatter value.
 ///
-/// When `input` is exactly one interpolation expression (ignoring surrounding
-/// whitespace) that evaluates to a boolean, number, or null, the typed
-/// `serde_json::Value` is returned so `{{ false }}` stays the boolean `false`
-/// (falsy) rather than the string `"false"` (truthy), and `{{ file_index(x) }}`
-/// stays a number for downstream predicates like `is_number`. Strings, arrays,
-/// objects, mixed text (`"a {{ x }}"`), parse/eval failures, and unresolved
-/// (e.g. shell-pending) templates fall through to [`interpolate_text`], keeping
-/// the established string-rewrite behavior — including leaving an unresolved
-/// `{{ … }}` in place for a later pass.
+/// When `input`'s trimmed content is exactly one `{{ expr }}` (a *whole-value*
+/// interpolation), the value is executable state, not text: it is parsed and
+/// evaluated directly, and the typed `serde_json::Value` result is returned —
+/// so `{{ false }}` stays the boolean `false` (falsy) rather than the string
+/// `"false"` (truthy), `{{ file_index(x) }}` stays a number, and a whole-value
+/// expression that yields an array or object is preserved as that typed value.
+/// A whole-value parse or evaluation failure is **fatal regardless of
+/// `fail_fast`**, so malformed expansion syntax (e.g. a mismatched paren) can
+/// never leak downstream as a raw `{{ … }}` string.
+///
+/// Mixed text (`"a {{ x }}"`), strings holding more than one expression, and
+/// plain strings fall through to [`interpolate_text`], keeping the established
+/// lenient string-rewrite behavior — including leaving an unresolved `{{ … }}`
+/// in place for a later pass and demoting parse/eval failures to warnings when
+/// `fail_fast` is off.
 ///
 /// ## Errors
 ///
-/// Propagates the same `MarkdownError` as [`interpolate_text`] when `fail_fast`
-/// is set or a fatal evaluation error occurs on the string path.
+/// Returns `MarkdownError::Transform` when a whole-value expression fails to
+/// parse or evaluate, and propagates the same error as [`interpolate_text`]
+/// when `fail_fast` is set or a fatal evaluation error occurs on the string
+/// path. Whole-value undefined variables resolve to `null` (not an error), so
+/// `{{ missing }}` stays lenient.
 pub(crate) fn interpolate_value<L: EvaluationLookup>(
     input: &str,
     evaluator: &Evaluator<L>,
     fail_fast: bool,
     warning_stage: &'static str,
 ) -> Result<(Value, usize, Vec<ComposeWarning>), MarkdownError> {
-    if let Some(typed) = whole_value_scalar(input, evaluator) {
-        return Ok((typed, 1, Vec::new()));
+    if is_whole_value_literal(input) {
+        let result = interpolate_text(input, evaluator, ScanMode::Plain, fail_fast, warning_stage)?;
+        return Ok((Value::String(result.output), result.replacements, result.warnings));
+    }
+    if let Some(loc) = whole_value_span(input) {
+        let expr = parse(&loc.expression).map_err(|e| {
+            interpolation_error(&loc.expression, ExpressionError::Parse(e.to_string()))
+        })?;
+        // The whole-value path bypasses `interpolate_text`, so it must still run
+        // the context-typo check on its single parsed expression — otherwise
+        // `phase: "{{ ctx.toady }}"` (resolving to null) would warn in body text
+        // but stay silent in frontmatter.
+        let warnings = evaluator.collect_context_warnings(&expr, warning_stage);
+        let value = evaluator
+            .eval_json(&expr)
+            .map_err(|cause| interpolation_error(&loc.expression, cause))?;
+        return Ok((value, 1, warnings));
     }
     let result = interpolate_text(input, evaluator, ScanMode::Plain, fail_fast, warning_stage)?;
     Ok((Value::String(result.output), result.replacements, result.warnings))
 }
 
-/// Returns the typed scalar value when `input` is a single whole-value
-/// `{{ expr }}` that evaluates to a boolean, number, or null.
+/// Returns the single interpolation span when `input`'s trimmed content is
+/// exactly one `{{ expr }}` (only whitespace before and after the span).
 ///
-/// Returns `None` (string path) when the value is mixed text, holds more than
-/// one expression, evaluates to a string/array/object, or fails to parse or
-/// evaluate. Restricting to `Bool`/`Number`/`Null` keeps the change to the
-/// value kinds literal frontmatter already produces (`yolo: true`, `phase: 1`),
-/// and leaves string/array/object results on the proven string path.
-fn whole_value_scalar<L: EvaluationLookup>(input: &str, evaluator: &Evaluator<L>) -> Option<Value> {
-    let locations = ExpressionFinder::find_all_plain(input);
-    let [loc] = locations.as_slice() else {
+/// Returns `None` for plain strings, mixed text (`"a {{ x }}"`), and strings
+/// holding more than one expression — those route to the lenient
+/// [`interpolate_text`] string path. Detection is independent of parse/eval
+/// outcome, so a malformed whole-value `{{ … }}` is still recognized as
+/// whole-value and held to the strict parse-and-evaluate contract.
+fn whole_value_span(input: &str) -> Option<ExpressionLocation> {
+    let mut locations = ExpressionFinder::find_all_plain(input);
+    if locations.len() != 1 {
         return None;
-    };
+    }
+    let loc = locations.remove(0);
     if !input[..loc.start].trim().is_empty() || !input[loc.end..].trim().is_empty() {
         return None;
     }
-    let expr = parse(&loc.expression).ok()?;
-    match evaluator.eval_json(&expr) {
-        Ok(value @ (Value::Bool(_) | Value::Number(_) | Value::Null)) => Some(value),
-        _ => None,
+    Some(loc)
+}
+
+/// Returns `true` when `input`'s trimmed content is exactly one interpolation
+/// literal (`{{{ ... }}}`).
+///
+/// Such values take the string-rewrite path rather than the typed whole-value
+/// expression path, so they resolve to the literal text `{{ ... }}`.
+fn is_whole_value_literal(input: &str) -> bool {
+    let scan = ExpressionFinder::scan_plain(input);
+    if scan.expressions.is_empty() && scan.literals.len() == 1 {
+        let lit = &scan.literals[0];
+        input[..lit.start].trim().is_empty() && input[lit.end..].trim().is_empty()
+    } else {
+        false
     }
 }
 
@@ -359,6 +454,36 @@ mod tests {
         assert!(result.warnings.is_empty());
     }
 
+    /// F14 fast-path: input with single braces but no `{{` skips the scan
+    /// pipeline entirely and returns verbatim (byte-identical to the scanning
+    /// path, which would find zero expressions and zero literals).
+    #[test]
+    fn single_brace_input_takes_fast_path_verbatim() {
+        let state = make_state(json!({"name": "Alice"}));
+        let evaluator = Evaluator::new(&state);
+        // Contains `{` and `}` but never `{{` — the JSON-ish body must survive
+        // untouched under both scan modes.
+        let input = "config { key: value } and a lone } brace";
+        for mode in [ScanMode::Plain, ScanMode::MarkdownAware] {
+            let result = interpolate_text(input, &evaluator, mode, false, "test").unwrap();
+            assert_eq!(result.output, input);
+            assert_eq!(result.replacements, 0);
+            assert!(result.warnings.is_empty());
+        }
+    }
+
+    /// F14 fast-path must NOT swallow `{{{ … }}}` literals: `{{{` contains `{{`,
+    /// so the guard falls through to the normal literal-conversion path.
+    #[test]
+    fn triple_brace_literal_still_converted_despite_fast_path() {
+        let state = make_state(json!({}));
+        let evaluator = Evaluator::new(&state);
+        let result = interpolate_text("{{{ x }}}", &evaluator, ScanMode::Plain, false, "test")
+            .unwrap();
+        assert_eq!(result.output, "{{ x }}");
+        assert_eq!(result.replacements, 0);
+    }
+
     #[test]
     fn nested_ternary_in_true_branch_via_interpolate_text() {
         let state = make_state(json!({"a": true, "b": true}));
@@ -459,16 +584,237 @@ mod tests {
     }
 
     #[test]
-    fn loop_depth_protection() {
-        // A self-referencing expression would loop forever without depth protection.
-        // We simulate this by having a frontmatter value that resolves to itself.
-        let state = make_state(json!({"self_ref": "{{self_ref}}"}));
+    fn context_typo_emits_warning_with_suggestion() {
+        let state = make_state(json!({}));
         let evaluator = Evaluator::new(&state);
-        let result =
-            interpolate_text("{{ self_ref }}", &evaluator, ScanMode::Plain, false, "test").unwrap();
-        // After 10 iterations the depth limit is hit and a warning is emitted.
-        assert_eq!(result.replacements, 10);
-        assert_eq!(result.warnings.len(), 1);
-        assert!(result.warnings[0].message.contains("depth limit"));
+        let result = interpolate_text(
+            "{{ ctx.tody }}",
+            &evaluator,
+            ScanMode::Plain,
+            false,
+            "test",
+        )
+        .unwrap();
+        assert_eq!(result.output, "");
+        assert!(result.warnings.iter().any(|w| {
+            w.message.contains("unknown context variable")
+                && w.message.contains("today")
+        }));
+    }
+
+    #[test]
+    fn valid_context_variable_emits_no_typo_warning() {
+        let state = make_state(json!({}));
+        let evaluator = Evaluator::new(&state);
+        let result = interpolate_text(
+            "{{ ctx.today }}",
+            &evaluator,
+            ScanMode::Plain,
+            false,
+            "test",
+        )
+        .unwrap();
+        assert!(!result.output.is_empty());
+        assert!(!result.warnings.iter().any(|w| w.message.contains("unknown context variable")));
+    }
+
+    // ── Whole-value frontmatter context-typo coverage ─────────────────────
+    //
+    // `interpolate_value`'s whole-value path bypasses `interpolate_text`, so
+    // the same ctx-typo diagnostic must still fire when the whole value is a
+    // single `{{ expr }}`.
+
+    #[test]
+    fn whole_value_scalar_typo_emits_warning_with_suggestion() {
+        // `ctx.toady` is unknown and resolves to null, taking the whole-value
+        // path — it must still warn.
+        let state = make_state(json!({}));
+        let evaluator = Evaluator::new(&state);
+        let (value, replacements, warnings) =
+            interpolate_value("{{ ctx.toady }}", &evaluator, false, "frontmatter-interpolation")
+                .unwrap();
+        // Silent-null evaluation is unchanged: still null, still one replacement.
+        assert_eq!(value, Value::Null);
+        assert_eq!(replacements, 1);
+        assert!(warnings.iter().any(|w| {
+            w.message.contains("unknown context variable") && w.message.contains("today")
+        }));
+    }
+
+    #[test]
+    fn whole_value_scalar_string_literal_does_not_warn() {
+        // A string literal that merely *spells* `ctx.toady` must not warn:
+        // the check is AST-based, and a string literal evaluates to a String
+        // (so it falls through to the string path, never the scalar one) — but
+        // either way no ctx reference exists in the AST.
+        let state = make_state(json!({}));
+        let evaluator = Evaluator::new(&state);
+        let (_value, _replacements, warnings) = interpolate_value(
+            r#"{{ "ctx.toady" }}"#,
+            &evaluator,
+            false,
+            "frontmatter-interpolation",
+        )
+        .unwrap();
+        assert!(!warnings.iter().any(|w| w.message.contains("unknown context variable")));
+    }
+
+    #[test]
+    fn whole_value_scalar_valid_ctx_does_not_warn() {
+        // A valid `ctx.*` reference that resolves to a scalar (a numeric ctx
+        // value) takes the fast-path but must not warn.
+        let state = make_state(json!({}));
+        let evaluator = Evaluator::new(&state);
+        // ctx.year resolves to a number in the fixed test context.
+        let (value, replacements, warnings) =
+            interpolate_value("{{ number(ctx.year) }}", &evaluator, false, "frontmatter-interpolation")
+                .unwrap();
+        assert!(matches!(value, Value::Number(_)));
+        assert_eq!(replacements, 1);
+        assert!(!warnings.iter().any(|w| w.message.contains("unknown context variable")));
+    }
+
+    mod interpolation_literal_tests {
+        use super::*;
+
+        #[test]
+        fn body_literal_converts_to_literal_text() {
+            let state = make_state(json!({}));
+            let evaluator = Evaluator::new(&state);
+            let result = interpolate_text(
+                "{{{ name }}}",
+                &evaluator,
+                ScanMode::MarkdownAware,
+                false,
+                "test",
+            )
+            .unwrap();
+            assert_eq!(result.output, "{{ name }}");
+            assert_eq!(result.replacements, 0);
+            assert!(result.warnings.is_empty());
+        }
+
+        #[test]
+        fn inline_code_literal_converts() {
+            let state = make_state(json!({}));
+            let evaluator = Evaluator::new(&state);
+            let result = interpolate_text(
+                "`{{{ name }}}`",
+                &evaluator,
+                ScanMode::MarkdownAware,
+                false,
+                "test",
+            )
+            .unwrap();
+            assert_eq!(result.output, "`{{ name }}`");
+            assert_eq!(result.replacements, 0);
+        }
+
+        #[test]
+        fn fenced_code_block_literal_is_untouched() {
+            let state = make_state(json!({}));
+            let evaluator = Evaluator::new(&state);
+            let input = "```\n{{{ name }}}\n```";
+            let result = interpolate_text(input, &evaluator, ScanMode::MarkdownAware, false, "test").unwrap();
+            assert_eq!(result.output, input);
+            assert_eq!(result.replacements, 0);
+        }
+
+        #[test]
+        fn tight_and_empty_literal_forms() {
+            let state = make_state(json!({}));
+            let evaluator = Evaluator::new(&state);
+            for (input, expected) in [
+                ("{{{x}}}", "{{x}}"),
+                ("{{{}}}", "{{}}"),
+                ("{{{ }}}", "{{ }}"),
+            ] {
+                let result = interpolate_text(input, &evaluator, ScanMode::Plain, false, "test").unwrap();
+                assert_eq!(result.output, expected, "input: {input:?}");
+                assert_eq!(result.replacements, 0, "input: {input:?}");
+            }
+        }
+
+        #[test]
+        fn adjacent_expression_and_literal() {
+            let state = make_state(json!({"a": "evaluated"}));
+            let evaluator = Evaluator::new(&state);
+            let result = interpolate_text(
+                "{{ a }}{{{ b }}}",
+                &evaluator,
+                ScanMode::Plain,
+                false,
+                "test",
+            )
+            .unwrap();
+            assert_eq!(result.output, "evaluated{{ b }}");
+            assert_eq!(result.replacements, 1);
+        }
+
+        #[test]
+        fn rescan_loop_converts_introduced_literal() {
+            let state = make_state(json!({"tmpl": "{{{ y }}}"}));
+            let evaluator = Evaluator::new(&state);
+            let result = interpolate_text(
+                "{{ tmpl }}",
+                &evaluator,
+                ScanMode::Plain,
+                false,
+                "test",
+            )
+            .unwrap();
+            assert_eq!(result.output, "{{ y }}");
+            assert_eq!(result.replacements, 1);
+        }
+
+        #[test]
+        fn fail_fast_over_only_literals_succeeds() {
+            let state = make_state(json!({}));
+            let evaluator = Evaluator::new(&state);
+            let result = interpolate_text(
+                "{{{ name }}} {{{ other }}}",
+                &evaluator,
+                ScanMode::Plain,
+                true,
+                "test",
+            )
+            .unwrap();
+            assert_eq!(result.output, "{{ name }} {{ other }}");
+            assert_eq!(result.replacements, 0);
+            assert!(result.warnings.is_empty());
+        }
+
+        #[test]
+        fn whole_value_literal_takes_string_path() {
+            let state = make_state(json!({}));
+            let evaluator = Evaluator::new(&state);
+            let (value, replacements, warnings) =
+                interpolate_value("{{{ x }}}", &evaluator, false, "frontmatter-interpolation").unwrap();
+            assert_eq!(value, Value::String("{{ x }}".to_string()));
+            assert_eq!(replacements, 0);
+            assert!(warnings.is_empty());
+        }
+
+        #[test]
+        fn literal_containing_expression_is_not_evaluated() {
+            let state = make_state(json!({"x": "replaced"}));
+            let evaluator = Evaluator::new(&state);
+            let result = interpolate_text(
+                "{{{ {{ x }} }}}",
+                &evaluator,
+                ScanMode::Plain,
+                false,
+                "test",
+            )
+            .unwrap();
+            assert_eq!(result.output, "{{ {{ x }} }}");
+            assert_eq!(result.replacements, 0);
+        }
+
+        #[test]
+        fn convert_literals_plain_leaves_expressions_intact() {
+            let output = convert_literals("{{ a }}{{{ b }}}", ScanMode::Plain);
+            assert_eq!(output, "{{ a }}{{ b }}");
+        }
     }
 }

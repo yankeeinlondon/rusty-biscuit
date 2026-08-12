@@ -14,4 +14,4 @@ pub use auth::ExportAuth;
 pub use body::{ExportBody, FormField, FormFieldExportKind};
 pub use http::{ExportEndpoint, ExportParam};
 pub use naming::resolve_module_name;
-pub use path_params::extract_folder_key;
+pub use path_params::{extract_folder_key, strip_reserved_markers};

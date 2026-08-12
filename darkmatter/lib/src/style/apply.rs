@@ -21,6 +21,8 @@ use thiserror::Error;
 
 use crate::layout::{DarkmatterPage, PageComponent};
 use crate::style::schema::{CommonStyle, StyleFrontmatter};
+#[cfg(test)]
+use crate::style::schema::WidthOrMode;
 use crate::style::schema::hr::{HrAlignment, HrKind, HrWeight};
 
 /// Field-level CLI overrides for page-level style.
@@ -61,7 +63,7 @@ pub struct PageStyleOverrides {
     pub align_code_blocks: bool,
 }
 
-/// Field-level CLI overrides for the three non-list component buckets wired by
+/// Field-level CLI overrides for the non-list component buckets wired by
 /// sub-spec #3 (`style.table.*`, `style.images.*`, `style.block-quote.*`).
 ///
 /// Each `true` value means the corresponding frontmatter field must be ignored
@@ -79,6 +81,8 @@ pub struct ComponentStyleOverrides {
     pub images_fill: bool,
     pub block_quotes_alignment: bool,
     pub block_quotes_fill: bool,
+    pub code_blocks_alignment: bool,
+    pub code_blocks_fill: bool,
 }
 
 impl PageStyleOverrides {
@@ -421,6 +425,17 @@ pub fn apply_component_style(
         )?;
     }
 
+    if let Some(code_block) = style.code_block.as_ref() {
+        page = apply_common_style(
+            page,
+            "code-block",
+            PageComponent::CodeBlocks,
+            &code_block.common,
+            overrides.code_blocks_alignment,
+            overrides.code_blocks_fill,
+        )?;
+    }
+
     Ok(page)
 }
 
@@ -543,6 +558,9 @@ pub fn apply_color_style(
     }
     if let Some(li) = style.li.as_ref() {
         page = apply_common_color(page, PageComponent::Li, &li.common);
+    }
+    if let Some(code_block) = style.code_block.as_ref() {
+        page = apply_common_color(page, PageComponent::CodeBlocks, &code_block.common);
     }
 
     Ok(page)
@@ -746,8 +764,20 @@ fn apply_list_bucket(
             return Err(StyleApplyError::WidthMaxWidthConflict { bucket });
         }
         (Some(width), None) if !fill_claimed => {
-            let len = length_to_layout_length(width, bucket, "width")?;
-            policy.layout.width = Width::Fixed(TargetValue::universal(len));
+            let width = width.as_width().clone();
+            policy.layout.width = match width {
+                Width::Fixed(tv) => {
+                    let len = match tv {
+                        renderable::layout::TargetValue::Universal(len) => len,
+                        renderable::layout::TargetValue::PerTarget(_) => {
+                            unreachable!("component width is always universal")
+                        }
+                    };
+                    let len = length_to_layout_length(&len, bucket, "width")?;
+                    Width::Fixed(TargetValue::universal(len))
+                }
+                mode => mode,
+            };
             changed = true;
         }
         (None, Some(max_width)) if !fill_claimed => {
@@ -762,6 +792,31 @@ fn apply_list_bucket(
         && let Some(alignment) = style.alignment
     {
         policy.layout.alignment = alignment;
+        changed = true;
+    }
+
+    if let Some(margin) = style.margin.as_ref() {
+        policy.layout.margin = margin.as_edges().clone();
+        changed = true;
+    }
+
+    if let Some(padding) = style.padding.as_ref() {
+        policy.layout.padding = padding.as_edges().clone();
+        changed = true;
+    }
+
+    if let Some(word_wrap) = style.word_wrap {
+        policy.layout.word_wrap = word_wrap.to_word_wrap();
+        changed = true;
+    }
+
+    if let Some(border) = style.border.as_ref() {
+        policy.border = Some(border.as_border().clone());
+        changed = true;
+    }
+
+    if let Some(emphasis) = style.emphasis.as_ref() {
+        policy.emphasis = Some(emphasis.to_text_emphasis());
         changed = true;
     }
 
@@ -799,8 +854,20 @@ fn apply_common_style(
             return Err(StyleApplyError::ComponentWidthConflict { bucket });
         }
         (Some(width), None) if !fill_claimed => {
-            let len = length_to_layout_length(width, bucket, "width")?;
-            policy.layout.width = Width::Fixed(TargetValue::universal(len));
+            let width = width.as_width().clone();
+            policy.layout.width = match width {
+                Width::Fixed(tv) => {
+                    let len = match tv {
+                        renderable::layout::TargetValue::Universal(len) => len,
+                        renderable::layout::TargetValue::PerTarget(_) => {
+                            unreachable!("component width is always universal")
+                        }
+                    };
+                    let len = length_to_layout_length(&len, bucket, "width")?;
+                    Width::Fixed(TargetValue::universal(len))
+                }
+                mode => mode,
+            };
             changed = true;
         }
         (None, Some(max_width)) if !fill_claimed => {
@@ -815,6 +882,31 @@ fn apply_common_style(
         && let Some(alignment) = style.alignment
     {
         policy.layout.alignment = alignment;
+        changed = true;
+    }
+
+    if let Some(margin) = style.margin.as_ref() {
+        policy.layout.margin = margin.as_edges().clone();
+        changed = true;
+    }
+
+    if let Some(padding) = style.padding.as_ref() {
+        policy.layout.padding = padding.as_edges().clone();
+        changed = true;
+    }
+
+    if let Some(word_wrap) = style.word_wrap {
+        policy.layout.word_wrap = word_wrap.to_word_wrap();
+        changed = true;
+    }
+
+    if let Some(border) = style.border.as_ref() {
+        policy.border = Some(border.as_border().clone());
+        changed = true;
+    }
+
+    if let Some(emphasis) = style.emphasis.as_ref() {
+        policy.emphasis = Some(emphasis.to_text_emphasis());
         changed = true;
     }
 
@@ -1401,7 +1493,7 @@ mod tests {
     #[test]
     fn table_width_applied() {
         let style = style_with_table(CommonStyle {
-            width: Some(Length::Ch(40)),
+            width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
             ..CommonStyle::default()
         });
         let out =
@@ -1448,7 +1540,7 @@ mod tests {
     #[test]
     fn width_and_max_width_together_rejected() {
         let style = style_with_table(CommonStyle {
-            width: Some(Length::Ch(40)),
+            width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
             max_width: Some(Length::Percent(50.0)),
             ..CommonStyle::default()
         });
@@ -1463,7 +1555,7 @@ mod tests {
     #[test]
     fn block_quote_width_conflict_uses_kebab_case_bucket() {
         let style = style_with_block_quote(CommonStyle {
-            width: Some(Length::Ch(40)),
+            width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
             max_width: Some(Length::Ch(60)),
             ..CommonStyle::default()
         });
@@ -1483,7 +1575,7 @@ mod tests {
     #[test]
     fn disclosure_width_and_max_width_together_rejected() {
         let style = style_with_disclosure(CommonStyle {
-            width: Some(Length::Ch(40)),
+            width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
             max_width: Some(Length::Percent(50.0)),
             ..CommonStyle::default()
         });
@@ -1542,7 +1634,7 @@ mod tests {
         // fill flag that would otherwise claim the bucket. The CLI overrides
         // the rendered value but does not paper over ambiguous frontmatter.
         let style = style_with_table(CommonStyle {
-            width: Some(Length::Ch(40)),
+            width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
             max_width: Some(Length::Percent(50.0)),
             ..CommonStyle::default()
         });
@@ -1562,7 +1654,7 @@ mod tests {
         // Same regression as `cli_fill_override_does_not_mask_frontmatter_width_conflict`
         // but for the component-specific `--fill-images` claim path.
         let style = style_with_images(CommonStyle {
-            width: Some(Length::Ch(30)),
+            width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(30))))),
             max_width: Some(Length::Ch(40)),
             ..CommonStyle::default()
         });
@@ -1683,7 +1775,7 @@ mod tests {
         style.images = Some(ImageStyle {
             common: CommonStyle {
                 alignment: Some(Alignment::Center),
-                width: Some(Length::Ch(40)),
+                width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
                 ..CommonStyle::default()
             },
             local_style: None,
@@ -1775,7 +1867,7 @@ mod tests {
     #[test]
     fn li_width_applied() {
         let style = style_with_li(CommonStyle {
-            width: Some(Length::Ch(30)),
+            width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(30))))),
             ..CommonStyle::default()
         });
         let out = apply_list_style(page(80), &style, ListStyleOverrides::default()).unwrap();
@@ -1789,7 +1881,7 @@ mod tests {
     fn ul_width_max_width_conflict() {
         let style = style_with_ul(
             CommonStyle {
-                width: Some(Length::Ch(40)),
+                width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
                 max_width: Some(Length::Ch(60)),
                 ..CommonStyle::default()
             },
@@ -1805,7 +1897,7 @@ mod tests {
     #[test]
     fn ol_width_max_width_conflict() {
         let style = style_with_ol(CommonStyle {
-            width: Some(Length::Ch(40)),
+            width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
             max_width: Some(Length::Ch(60)),
             ..CommonStyle::default()
         });
@@ -1819,7 +1911,7 @@ mod tests {
     #[test]
     fn li_width_max_width_conflict() {
         let style = style_with_li(CommonStyle {
-            width: Some(Length::Ch(40)),
+            width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
             max_width: Some(Length::Ch(60)),
             ..CommonStyle::default()
         });
@@ -1852,7 +1944,7 @@ mod tests {
         let style = style_with_ul(
             CommonStyle {
                 alignment: Some(Alignment::Right),
-                width: Some(Length::Ch(40)),
+                width: Some(WidthOrMode::Width(Width::Fixed(TargetValue::universal(Length::Ch(40))))),
                 ..CommonStyle::default()
             },
             Some(Length::Ch(4)),

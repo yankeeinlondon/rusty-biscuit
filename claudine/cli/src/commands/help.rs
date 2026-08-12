@@ -96,10 +96,18 @@ fn groups() -> Vec<CommandGroup> {
                 cmd("uninstall", "Remove Claudine hooks from all agents"),
                 cmd("providers", "Show provider capability matrix"),
                 cmd("logs", "Query and sync Claudine JSONL logs"),
+                cmd(
+                    "dashboard",
+                    "Show the mesh NOW view: live sessions across rendezvous hosts",
+                ),
                 cmd("completions", "Generate shell completions"),
                 cmd(
                     "context",
                     "Show Darkmatter runtime context, expression engine, and side effects",
+                ),
+                cmd(
+                    "errors",
+                    "Show the diagnostic error-code contract (codes, dispositions, details)",
                 ),
             ],
         },

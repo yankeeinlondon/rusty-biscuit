@@ -1,3 +1,5 @@
+#![cfg(unix)]
+
 //! Level 1 integration tests for the `compose` / `inline-compose`
 //! execution header as the first user-facing signal.
 //!
@@ -8,7 +10,6 @@
 //! feedback. These tests pin that the banner is gone and the header is the
 //! first line, and that `--silent` / `--quiet` behave as before.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use std::fs;
 use tempfile::tempdir;
 
@@ -68,10 +69,12 @@ exit 0
 fn compose_execution_header_is_the_first_signal() {
     let (workspace, path_dir, md_file) = make_workspace_with_goose();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -113,10 +116,12 @@ fn compose_execution_header_is_the_first_signal() {
 fn compose_silent_suppresses_the_execution_header() {
     let (workspace, path_dir, md_file) = make_workspace_with_goose();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args(["compose", "--goose", "--silent", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -141,10 +146,12 @@ fn compose_quiet_keeps_the_execution_header() {
     // execution header so the user still gets immediate feedback.
     let (workspace, path_dir, md_file) = make_workspace_with_goose();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args(["compose", "--goose", "--quiet", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -167,10 +174,12 @@ fn compose_quiet_keeps_the_execution_header() {
 fn inline_compose_execution_header_is_the_first_signal() {
     let (workspace, path_dir, md_file) = make_workspace_with_goose_inline();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -194,10 +203,12 @@ fn inline_compose_execution_header_is_the_first_signal() {
 fn inline_compose_silent_suppresses_the_execution_header() {
     let (workspace, path_dir, md_file) = make_workspace_with_goose_inline();
 
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
+        .current_dir(workspace.path())
         .args([
             "inline-compose",
             "--goose",

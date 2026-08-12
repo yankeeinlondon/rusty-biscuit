@@ -14,6 +14,7 @@ Darkmatter reserves the Frontmatter property `style` for defining stylistic pref
 1. `li` - List Item
 1. `block-quote` (canonical) / `block_quote` (snake-case alias, emits `Deprecated`)
 1. `disclosure` - Disclosure blocks
+1. `code-block` (canonical) / `code_block` (snake-case alias, emits `Deprecated`) — **wired (sub-spec #9)**
 
 When performing a composition argument the caller can send in a style object to modify the default style of the full page graph (`style` property is passed down to child properties).
 
@@ -29,8 +30,9 @@ When performing a composition argument the caller can send in a style object to 
 | #6       | `style.hr.*` HR migration          | **Live**        |
 | #7       | Bespoke knobs (stylesheet, meta, code-theme, hyperlinks, local-style) | **Live** |
 | #8       | `style.disclosure.*` disclosure blocks | **Live**    |
+| #9       | Style Everywhere: per-component `margin`, `padding`, `border`, `emphasis`, `word-wrap`, and `width` mode (`auto`/`fit-content`/length) | **Live** |
 
-The library exposes `ACTIVE_STYLE_WIRING_SUB_SPEC` (currently `8`) so `KnownButInactive` warnings only fire for keys whose wiring sub-spec has not yet landed. After sub-spec #8, every valid v1 schema key is either visually honored or rejected with a documented `StyleApplyError`. No valid v1 key emits `KnownButInactive`.
+The library exposes `ACTIVE_STYLE_WIRING_SUB_SPEC` (currently `8`) so `KnownButInactive` warnings only fire for keys whose wiring sub-spec has not yet landed. Sub-spec #9 keys are schema-valid and lowered by the applicator; they follow the same `KnownButInactive` discipline if the active constant has not yet advanced to `9`. After sub-spec #9, every valid v1 schema key is either visually honored or rejected with a documented `StyleApplyError`. No valid v1 key emits `KnownButInactive` from a fully wired phase.
 
 ## Schema & Parser Architecture (Sub-Spec #1)
 
@@ -116,15 +118,22 @@ struct StyleFrontmatter {
 
 #### Common Mutations: `CommonStyle`
 
-Most component buckets embed a flattened `CommonStyle` providing the five shared mutations:
+Most component buckets embed a flattened `CommonStyle` providing the shared mutations:
 
 | Field | Type | Wire key | Alias |
 |---|---|---|---|
-| `width` | `Option<renderable::layout::Length>` | `width` | — |
+| `width` | `Option<WidthOrMode>` | `width` | — |
 | `max_width` | `Option<renderable::layout::Length>` | `max-width` | `max_width` |
 | `alignment` | `Option<renderable::layout::Alignment>` | `alignment` | — |
+| `margin` | `Option<ComponentEdges>` | `margin` | — |
+| `padding` | `Option<ComponentEdges>` | `padding` | — |
 | `color` | `Option<StyleColor>` | `color` | — |
 | `bg_color` | `Option<StyleColor>` | `bg-color` | `bg_color` |
+| `border` | `Option<ComponentBorder>` | `border` | — |
+| `emphasis` | `Option<ComponentEmphasis>` | `emphasis` | — |
+| `word_wrap` | `Option<ComponentWordWrap>` | `word-wrap` | `word_wrap` |
+
+`width` accepts either a length (`40`, `50%`) or a keyword (`auto`, `fit-content`) and lowers to `renderable::layout::Width` with the correct mode (Decision D3). `margin` and `padding` accept the same length forms as `width` and apply to all four sides. `border`, `emphasis`, and `word-wrap` are compound values validated during typed deserialization; see [Sub-Spec #9](#sub-spec-9-style-everywhere) for details.
 
 #### Per-Component Buckets
 
@@ -139,6 +148,8 @@ Most component buckets embed a flattened `CommonStyle` providing the five shared
 | `hyperlinks` | `HyperlinkStyle` | `#[serde(flatten)]` | `local_style: Option<Box<CommonStyle>>` (local-link overrides; wired sub-spec #7) |
 | `images` | `ImageStyle` | `#[serde(flatten)]` | `local_style: Option<Box<CommonStyle>>` (local-image overrides; wired sub-spec #7) |
 | `hr` | `HrStyle` | specialized (see Sub-Spec #6) | `kind` (HrKind), `weight` (HrWeight), `alignment` (HrAlignment) |
+| `disclosure` | `DisclosureStyle` | `#[serde(flatten)]` | — |
+| `code-block` | `CodeBlockStyle` | `#[serde(flatten)]` | — |
 
 `PageStyle` is special: it does not flatten `CommonStyle` because its margins and paddings use a mix of horizontal `Length` and vertical `u16` fields, while `CommonStyle` is purely horizontal. It inlines `alignment`, `color`, `bg_color`, and `max_width` directly.
 
@@ -349,7 +360,7 @@ pub fn apply_page_style(
 - `Deprecated` → error
 - `KnownButInactive` → **still informational** (never fails strict mode)
 
-Use it in CI to catch typos, snake-case aliases, and deprecated HR syntax (top-level `hr:` block, inline `style:` on `---` rules).
+Use it in CI to catch typos, snake-case aliases, and deprecated HR syntax such as inline `style:` on `---` rules.
 
 ### Errors
 
@@ -823,19 +834,18 @@ In this example, tables render with red foreground and semi-transparent red back
 
 ## HR Style (Sub-Spec #6)
 
-Sub-spec #6 migrates horizontal rule styling from the legacy top-level `hr:` frontmatter block and inline `--- { style: waves }` attribute syntax into the canonical `style.hr.*` schema. `HrStyle` uses a **specialized schema** rather than flattening `CommonStyle` because HR `alignment` supports an extra `full` value that `renderable::layout::Alignment` cannot represent.
+Sub-spec #6 makes `style.hr.*` the canonical and only supported page-frontmatter surface for horizontal rule styling. `HrStyle` uses a **specialized schema** rather than flattening `CommonStyle` because HR `alignment` supports an extra `full` value that `renderable::layout::Alignment` cannot represent.
 
 ### Migration: Deprecated Aliases
 
-Two legacy paths are retained for one release cycle as deprecated aliases:
+Two legacy spellings are retained for one release cycle as deprecated aliases:
 
 | Legacy path | Canonical replacement | Warning |
 |---|---|---|
-| Top-level `hr:` block (e.g. `hr: { style: waves }`) | `style.hr.*` | `Deprecated { replacement: "style.hr" }` |
 | Inline `--- { style: waves }` attribute | `--- { kind: waves }` | `Deprecated { replacement: "kind" }` |
 | `style.hr.alignment: centered` | `style.hr.alignment: center` | `Deprecated { replacement: "center" }` |
 
-If both `style.hr` and top-level `hr` are present, `style.hr` wins **field-by-field**; the legacy `hr:` block only fills values not set in `style.hr`. If both inline `kind` and `style` are present, `kind` wins and `style` still emits a deprecation warning because the document contains deprecated syntax.
+Top-level `hr:` frontmatter is not merged into `style.hr` and does not provide horizontal-rule defaults. If both inline `kind` and `style` are present, `kind` wins and `style` still emits a deprecation warning because the document contains deprecated syntax.
 
 ### Precedence
 
@@ -843,8 +853,7 @@ From most specific to least:
 
 1. **Inline attribute** (`--- { kind: waves }`) — per-rule override.
 2. **`style.hr.*`** — canonical page-wide default.
-3. **Top-level `hr:` alias** — legacy compatibility, fills only values not set by `style.hr`.
-4. **Component default** — `HorizontalRule::new()` defaults.
+3. **Component default** — `HorizontalRule::new()` defaults.
 
 ### Typed Enums
 
@@ -951,7 +960,6 @@ The integration order in `darkmatter-cli` extends sub-spec #5's pipeline:
 
 `md --strict-style` rejects deprecated HR syntax by promoting `Deprecated` warnings to errors:
 
-- Top-level `hr:` block → error
 - Inline `--- { style: waves }` → error
 - `style.hr.alignment: centered` → error
 
@@ -1308,25 +1316,120 @@ Disclosure style resolves from most specific to least specific:
 
 ### Common Mutations
 
-Each of the component buckets embeds a `CommonStyle` providing five shared mutations:
+Each of the component buckets embeds a `CommonStyle` providing the shared layout and appearance mutations:
 
 | Mutation | Wire key | Value shape | Notes |
 |---|---|---|---|
-| `width` | `width` | `Nch` or `N%` | Fixed width; mutually exclusive with `max-width` within the same bucket |
+| `width` | `width` | `Nch`, `N%`, `auto`, or `fit-content` | Width mode; `auto`/`fit-content` are keywords (sub-spec #9); mutually exclusive with `max-width` within the same bucket |
 | `max-width` | `max-width` | `Nch` or `N%` | Upper bound; mutually exclusive with `width` within the same bucket |
 | `alignment` | `alignment` | `left` \| `center` \| `right` | Overrides page-level broadcast for this component |
+| `margin` | `margin` | `Nch` or `N%` | Sub-spec #9; applies to all four sides |
+| `padding` | `padding` | `Nch` or `N%` | Sub-spec #9; applies to all four sides |
 | `color` | `color` | Tailwind, hex, or web named | Sub-spec #5 wired; inheritance from page-level, component override |
 | `bg-color` | `bg-color` | Tailwind, hex, or web named | Sub-spec #5 wired; inheritance from page-level, component override |
+| `border` | `border` | bool, string, or object | Sub-spec #9; see [Sub-Spec #9](#sub-spec-9-style-everywhere) |
+| `emphasis` | `emphasis` | object | Sub-spec #9; see [Sub-Spec #9](#sub-spec-9-style-everywhere) |
+| `word-wrap` | `word-wrap` | `none` \| `wrap` \| `truncate` \| `wrap-prose` | Sub-spec #9; see [Sub-Spec #9](#sub-spec-9-style-everywhere) |
 
 ### Bespoke Style
 
-While every component provides the common mutations, several components offer additional bespoke properties. All bespoke knobs are now fully wired (sub-spec #7):
+While every component provides the common mutations, several components offer additional bespoke properties:
 
-- **`page`** — `stylesheet` (CSS file path or URL for HTML output), `meta` (HTML `<meta>` tags), `code.theme` (code-block theme override), `background` (`transparent` | `subtle` | `pronounced`)
-- **`hr`** — `kind` (HrKind), `weight` (HrWeight), `alignment` (HrAlignment, includes `full`). Wired in Sub-Spec #6. Inline `kind` replaces the legacy per-block `style:` attribute; top-level `hr:` is a deprecated alias for `style.hr`.
-- **`hyperlinks`** — `local-style` provides a `CommonStyle` override for local hyperlinks (non-HTTP(S) links including anchors, relative paths, and file paths). Wired in Sub-Spec #7.
-- **`images`** — `local-style` provides a `CommonStyle` override for local image references (non-HTTP(S), non-`data:` URLs). Wired in Sub-Spec #7.
-- **`ul`** — `left-margin` controls list indent (e.g. `style.ul.left-margin: 4ch`)
+- **`page`** — `stylesheet` (CSS file path or URL for HTML output), `meta` (HTML `<meta>` tags), `code.theme` (code-block theme override), `background` (`transparent` \| `subtle` \| `pronounced`). Wired in sub-spec #7.
+- **`hr`** — `kind` (HrKind), `weight` (HrWeight), `alignment` (HrAlignment, includes `full`). Wired in sub-spec #6. Inline `kind` replaces the legacy per-block `style:` attribute; page-wide defaults are only read from `style.hr`.
+- **`hyperlinks`** — `local-style` provides a `CommonStyle` override for local hyperlinks. Wired in sub-spec #7.
+- **`images`** — `local-style` provides a `CommonStyle` override for local image references. Wired in sub-spec #7.
+- **`ul`** — `left-margin` controls list indent (e.g. `style.ul.left-margin: 4ch`). Wired in sub-spec #4.
+
+## Sub-Spec #9 — Style Everywhere
+
+Sub-spec #9 exposes the full applicable `Layout`/`Style` surface for every
+`PageComponent` bucket. It adds `margin`, `padding`, `border`, `emphasis`, and
+`word-wrap` to the existing `width`/`max-width`/`alignment`/`color`/`bg-color`
+knobs, and it teaches `width` to accept the keywords `auto` and `fit-content`
+so the correct `renderable::layout::Width` mode is set (Decision D3).
+
+### Width Mode
+
+`width` now accepts either a length or a keyword:
+
+| Input | Lowered `Width` |
+|---|---|
+| `40` / `40ch` / `50%` | `Width::Fixed(TargetValue::universal(length))` |
+| `auto` | `Width::Auto` |
+| `fit-content` | `Width::FitContent` |
+
+Omitting `width` preserves the component's existing default (Decision D3).
+
+### Expanded Surface Per Bucket
+
+The following keys are recognized in every component bucket that flattens
+`CommonStyle` (`table`, `block-quote`, `ul`, `ol`, `li`, `hyperlinks`,
+`images`, `hr`, `disclosure`, `code-block`) and in the `local-style` override
+blocks for hyperlinks and images:
+
+| Key | Value shape | Lowered to |
+|---|---|---|
+| `margin` | `Nch` or `N%` | `Layout.margin` (all four sides) |
+| `padding` | `Nch` or `N%` | `Layout.padding` (all four sides) |
+| `border` | `true`/`false`, `"thin"`/`"medium"`/`"thick"`/"none", or object | `Style.border` |
+| `emphasis` | object (`{ bold, dim, italic, strikethrough, blink, inverse, underline }`) | `Style.emphasis` |
+| `word-wrap` | `none`/`wrap`/`truncate`/`wrap-prose` | `Layout.word_wrap` |
+
+### Border Object
+
+A `border` value can be:
+
+- a boolean (`true` enables a thin solid border on all sides);
+- a string weight (`"thin"`, `"medium"`, `"thick"`, `"none"`);
+- an object specifying sides, weight, style, and color:
+
+```yaml
+style:
+  table:
+    border:
+      left: true
+      weight: thin
+      color: slate-500
+```
+
+### Emphasis Object
+
+An `emphasis` value is an object of boolean flags:
+
+```yaml
+style:
+  block-quote:
+    emphasis:
+      italic: true
+```
+
+### Hyperlinks and Images
+
+`hyperlinks` and `images` still receive their `width`/`max-width`/`alignment`
+as `TextLayoutHints` or lone-image block layout rather than generic block
+`Layout` on every inline node. The expanded surface is available on the bucket
+itself and on the `local-style` override block.
+
+### Code Blocks
+
+`style.code-block.*` (snake-case alias `code_block`) is a new bucket for fenced
+code-block layout/appearance. Code-block theme selection remains under
+`page.code.theme` for compatibility.
+
+### Errors
+
+Sub-spec #9 reuses the same error variants as earlier component buckets:
+
+- `ComponentWidthConflict { bucket }` — `width` and `max-width` set together.
+- `ComponentInvalidCssLength { bucket, field }` — a length field is `Length::Css(_)`.
+
+### Per-Component Support Contract
+
+The terminal/browser/markdown behavior for each property is governed by the
+component's render-tree contract. The authoritative per-component,
+per-target matrix is the
+[Style Everywhere matrix](../../../renderable/features/2026-06-30-style-everywhere/matrix.md).
 
 ## Tailwind Colors
 

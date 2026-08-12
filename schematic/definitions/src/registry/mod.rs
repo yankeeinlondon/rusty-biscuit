@@ -214,17 +214,12 @@ impl SchemaRegistry {
     ///
     /// ```
     /// use schematic_definitions::registry::SchemaRegistry;
-    /// use schematic_definitions::openai::{define_openai_api, Model, ListModelsResponse, DeleteModelResponse};
+    /// use schematic_definitions::openai::{define_openai_api, openapi_registry, Model};
     ///
     /// let api = define_openai_api();
     ///
-    /// // Complete registry passes validation
-    /// let complete_registry = SchemaRegistry::new()
-    ///     .register::<Model>("Model")
-    ///     .register::<ListModelsResponse>("ListModelsResponse")
-    ///     .register::<DeleteModelResponse>("DeleteModelResponse");
-    ///
-    /// assert!(complete_registry.validate_completeness(&api).is_ok());
+    /// // The generated registry covers every type the endpoints name
+    /// assert!(openapi_registry().validate_completeness(&api).is_ok());
     ///
     /// // Incomplete registry fails validation
     /// let incomplete_registry = SchemaRegistry::new()
@@ -241,16 +236,22 @@ impl SchemaRegistry {
     ) -> Result<(), Vec<String>> {
         let mut missing = Vec::new();
 
+        // A path-shaped name (`serde_json::Value`) is a foreign type, not a
+        // registrable local one: an imported spec uses it wherever a body had no
+        // named schema to reference. Requiring registration for it would make
+        // every such API permanently incomplete.
+        let is_registrable = |name: &String| !name.contains("::");
+
         for endpoint in &api.endpoints {
             if let schematic_define::ApiResponse::Json(schema) = &endpoint.response {
                 let type_name = &schema.type_name;
-                if !self.types.contains_key(type_name) {
+                if is_registrable(type_name) && !self.types.contains_key(type_name) {
                     missing.push(type_name.clone());
                 }
             }
             if let Some(schematic_define::ApiRequest::Json(schema)) = &endpoint.request {
                 let type_name = &schema.type_name;
-                if !self.types.contains_key(type_name) {
+                if is_registrable(type_name) && !self.types.contains_key(type_name) {
                     missing.push(type_name.clone());
                 }
             }
@@ -277,7 +278,10 @@ impl schematic_define::openapi::SchemaRegistryLike for SchemaRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::openai::{DeleteModelResponse, ListModelsResponse, Model, define_openai_api};
+    use crate::openai::{
+        DeleteModelResponse, ListModelsResponse, Model, define_openai_api,
+        openapi_registry as openai_registry,
+    };
     use crate::samsung_smart_tv::define_samsung_smart_tv_api;
 
     // =============================================
@@ -400,29 +404,25 @@ mod tests {
     #[test]
     fn validate_completeness_passes_for_complete_registry() {
         let api = define_openai_api();
-
-        let registry = SchemaRegistry::new()
-            .register::<Model>("Model")
-            .register::<ListModelsResponse>("ListModelsResponse")
-            .register::<DeleteModelResponse>("DeleteModelResponse");
+        let registry = openai_registry();
 
         let result = registry.validate_completeness(&api);
-        assert!(result.is_ok());
+        assert!(result.is_ok(), "missing: {:?}", result.err());
     }
 
     #[test]
     fn validate_completeness_fails_for_missing_types() {
         let api = define_openai_api();
 
+        // One registered type against the full endpoint surface.
         let registry = SchemaRegistry::new().register::<Model>("Model");
-        // Missing: ListModelsResponse, DeleteModelResponse
 
         let result = registry.validate_completeness(&api);
         assert!(result.is_err());
 
         let missing = result.unwrap_err();
-        assert!(missing.contains(&"ListModelsResponse".to_string()));
-        assert!(missing.contains(&"DeleteModelResponse".to_string()));
+        assert!(!missing.is_empty());
+        assert!(!missing.contains(&"Model".to_string()));
     }
 
     #[test]

@@ -1,0 +1,242 @@
+# Topic-less catalog facts for the goose provider.
+#
+# Field-source matrix (design/catalog-generation.md): this file owns values
+# whose research topic has not landed yet. Keys are catalog field names.
+# Seeded once from the hand-written provider constants (the one-time
+# `scrape-facts` bootstrap, retired after seeding).
+# When a field's research topic lands, the mapping registry re-points the
+# field and generation ERRORS while this file still carries the key
+# (delete-on-graduate).
+stream_protocol: null
+event_mapping:
+  mappings:
+  - event: session_start
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: session_end
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: before_prompt
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: before_tool
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: after_tool
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: tool_error
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: permission_request
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: human_in_the_loop
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      acp:
+        event: request_permission
+        native_name: request_permission
+  - event: turn_complete
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wrapper:
+        native_name: complete
+  - event: turn_error
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wrapper:
+        native_name: error
+  - event: subagent_start
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wrapper:
+        native_name: subagent_tool_request
+  - event: subagent_stop
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wrapper:
+        native_name: tasks_complete
+  - event: before_model
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: after_model
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wrapper:
+        native_name: message
+  - event: before_compact
+    parse_aliases: []
+    registration_target: false
+    support_level: not_supported
+  - event: notification
+    parse_aliases: []
+    registration_target: false
+    support_level:
+      wrapper:
+        native_name: notification
+resource_support:
+  agents:
+    also_reads_from: []
+    format: Yaml
+    level: CustomFormat
+    notes: Recipe YAML files with specific schema
+    properties:
+      optional:
+      - instructions
+      - prompt
+      - extensions
+      - parameters
+      - sub_recipes
+      required:
+      - title
+      - description
+      source_doc: claudine/docs/cross-referencing/goose.md
+    repo_path: .goose/recipes
+    user_path: .config/goose/recipes
+  commands:
+    also_reads_from: []
+    format: Mcp
+    level: CustomFormat
+    notes: MCP-based commands, not file-based
+    properties: null
+    repo_path: ''
+    user_path: ''
+  provider: goose
+  scripts:
+    also_reads_from: []
+    format: Executable
+    level: Full
+    notes: null
+    properties: null
+    repo_path: .goose/scripts
+    user_path: .config/goose/scripts
+  skill_frontmatter:
+    allowed_tools: true
+    compatibility: true
+    description: true
+    disable_model_invocation: false
+    license: true
+    metadata: true
+    name: true
+    user_invocable: false
+  skills:
+    also_reads_from:
+    - .claude/skills
+    - .agents/skills
+    format: Markdown
+    level: Full
+    notes: null
+    properties:
+      optional:
+      - license
+      - compatibility
+      - metadata
+      - allowed-tools
+      required:
+      - name
+      - description
+      source_doc: claudine/docs/cross-referencing/goose.md
+    repo_path: .goose/skills
+    user_path: .config/goose/skills
+memory_files:
+- raw: .goosehints
+  segments: []
+output_formats:
+- cli_flag: null
+  companion_flags: []
+  format: text
+  native_name: text
+  selector:
+    kind: default
+  stdin_supported: true
+- cli_flag: null
+  companion_flags: []
+  format: json
+  native_name: json
+  selector:
+    kind: default
+  stdin_supported: true
+- cli_flag: null
+  companion_flags: []
+  format: stream
+  native_name: stream-json
+  selector:
+    kind: default
+  stdin_supported: true
+entrypoints:
+- mode: non_interactive
+  required_flags: []
+  subcommand: run
+system_prompt:
+  append:
+    interactive:
+      custom: goose_recipe
+    non_interactive:
+      inline_flag:
+        flag: --system
+  memory_files:
+  - raw: .goosehints
+    segments: []
+  replace:
+    interactive: unsupported
+    non_interactive: unsupported
+yolo:
+  env_var:
+    env_var: GOOSE_MODE
+    value: auto
+reasoning:
+  provider_specific: goose_delegated
+known_gaps: []
+acp:
+  client_supported: true
+  events_via_acp:
+  - request_permission
+prompt_arg_conventions:
+  entrypoint: run
+  prompt_flags:
+  - -t
+  - --text
+cli_sensitive_axes:
+  access_domain: false
+  execute_command: false
+  modify_provider_config: false
+  read_path: false
+  spawn_subagent: false
+  switch_mode: false
+  traverse_path: false
+  use_mcp_server: false
+  use_mcp_tool: false
+  write_path: false
+repo_home_root_files: []
+billing_models:
+- provider_only
+cap_policies: []
+allowed_env_keys: []
+display_policy:
+  tool_result_summary: show
+  info_event_suppression: []
+  collapse_task_progress: false
+  suppress_subscription_rate_limit: false
+  silent_extension_kinds: []
+  stdout_noise_prefixes: []
+  stderr_noise_prefixes: []
+suppress_structured_stderr_on_success: false
+supports_interactive_inline_closure: false
+model_required_in_non_tty: false
+platform_kind: agent_aggregator
+unmapped_native_events: []

@@ -1,8 +1,8 @@
 ---
 name: rust
 description: Expert knowledge for Rust systems programming — ownership, borrowing, type safety, error handling, async patterns, performance optimization, and 2024-edition improvements. Use when writing or reviewing idiomatic Rust, resolving borrow-checker or lifetime issues, structuring error handling, or optimizing performance.
-last_updated: 2026-06-02T00:00:00Z
-hash: 352b2caf7cdd68a6-fa9b36d77c452cdc
+last_updated: 2026-07-15
+hash: 352b2caf7cdd68a6-c28f14dd5d9ef962
 ---
 
 # Rust
@@ -98,6 +98,38 @@ See [Best Practices → Borrowing for Performance](./best-practices.md#borrowing
 
 - [Best Practices](./best-practices.md) - Type system usage, ownership patterns, error handling, performance, tooling, project structure
 
+### Async Traits
+
+- [async-trait](./async-traits/async-trait.md) - The `#[async_trait]` macro for object-safe async traits (`dyn Trait`), Send/`?Send` bounds, boxing overhead, and when to prefer native `async fn` in traits (Rust 1.75+). Links onward to Send bounds, performance, and trait-object patterns.
+
+### CLIs
+
+- [clap](./clap/SKILL.md) - Building command-line interfaces with clap v4 — Derive vs Builder APIs, subcommands, custom validation, env-var fallbacks, `ValueEnum`, shell completions via `clap_complete`, and the surrounding ecosystem crates.
+
+### Error Handling
+
+- [thiserror](./thiserror/SKILL.md) - Library error types: `#[derive(Error)]`, `#[error("…")]` formatting, `#[from]` conversions, and `#[source]` chaining. Links onward to error chaining, error patterns, and a library-vs-app decision guide.
+- [color-eyre](./color-eyre/SKILL.md) - Application/CLI error reporting with `eyre::Report` — `color_eyre::install()`, `.wrap_err()` context chains, help/note text, and backtrace env vars. Links onward to setup, context-and-help, and a color-eyre vs anyhow vs thiserror comparison.
+
+The rule of thumb in this repo: `thiserror` in libraries, `color-eyre` in binaries/CLIs (see [Error handling](#error-handling) below).
+
+### TypeScript Interop
+
+- [ts_rs](./ts_rs/SKILL.md) - Generate TypeScript declarations from Rust types with ts-rs — `#[derive(TS)]`, export workflows, serde compatibility, enum tagging, and generics. For sharing API/DTO types with a TypeScript frontend.
+
+### Syntax Highlighting
+
+- [syntect](./syntect/SKILL.md) - Sublime Text grammars and TextMate themes producing ANSI-terminal and HTML output — loading syntaxes/themes, binary dumps, and large-file performance.
+- [two-face](./two-face/SKILL.md) - bat-curated syntax definitions and themes bundled for syntect, adding coverage for modern languages (TOML, TypeScript, Dockerfile, …). Sits on top of `syntect`.
+
+### Terminal Images
+
+- [viuer](./viuer/SKILL.md) - Render images in the terminal with viuer — protocol auto-detection (Kitty/iTerm2/Sixel) with half-block fallback, sizing/positioning via `Config`, and terminal-compatibility troubleshooting. For CLI/TUI image previews and thumbnails.
+
+### Progress Indicators
+
+- [indicatif](./indicatif/SKILL.md) - Progress bars, spinners, and multi-progress for CLIs — styling, download/throughput tracking, and async/Tokio integration, plus redraw troubleshooting.
+
 ## Common Patterns
 
 ### State Machine with Zero-Sized Types
@@ -134,7 +166,15 @@ The generic advice above is overridden here by rusty-biscuit conventions.
 ### Build, test, format
 
 - Prefer `just` recipes: `just test | lint | build | doctest`. The root `justfile` covers a curated area list (not every workspace member).
-- Never run a bare `cargo build` / `cargo test` at the repo root — scope to a package: `cargo build -p <pkg>`. There are 48 workspace members and the target dir is large.
+- Determine the affected packages and downstream consumers before verification,
+  then run build, test, and lint for that scope. Prefer package-area `just`
+  recipes or exact `-p <pkg>` selectors.
+- Never run `cargo build --workspace`, `cargo check --workspace`, a bare root
+  `cargo build`/`cargo check`/`cargo test`, or unscoped root `just` lifecycle
+  recipes as a routine final gate. There are 72 workspace members (point-in-time;
+  run `cargo metadata --no-deps --format-version 1` for the current count) and the
+  target directory is large. Workspace-wide runs require an explicitly
+  requested release/CI aggregation task and a documented reason.
 - Tests run under **nextest** with an L1/L2/L3 level taxonomy — see the `rust-testing` skill for `require_level!` and the canonical recipes.
 - **`cargo fmt` is a periodic standalone pass — never run it during implementation or testing.** It produces large, noisy diffs that bury behavior changes.
 
@@ -158,10 +198,13 @@ Use **biscuit-hash** (xxHash) for general content. For Markdown documents use th
 When working in a specific domain, reach for the specialized skill:
 
 - **Testing**: `rust-testing`, `nextest`
-- **Errors**: `thiserror`, `color-eyre`
-- **CLIs**: `clap`
-- **Serialization**: `serde`
-- **Async**: `tokio`
+- **Errors**: [thiserror](./thiserror/SKILL.md) (libraries), [color-eyre](./color-eyre/SKILL.md) (applications) — both bundled above
+- **CLIs**: [clap](./clap/SKILL.md) (bundled above)
+- **Serialization**: `serde`; [ts_rs](./ts_rs/SKILL.md) for Rust→TypeScript type export (bundled above)
+- **Async**: `tokio`, [async-trait](./async-traits/async-trait.md) (bundled above)
+- **Syntax highlighting**: [syntect](./syntect/SKILL.md), [two-face](./two-face/SKILL.md) (bundled above)
+- **Terminal images**: [viuer](./viuer/SKILL.md) (bundled above)
+- **Progress indicators**: [indicatif](./indicatif/SKILL.md) (bundled above)
 
 ## Resources
 

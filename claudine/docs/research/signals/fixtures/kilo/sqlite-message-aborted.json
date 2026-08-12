@@ -1,0 +1,20 @@
+{
+  "table": "message",
+  "row": {
+    "id": "msg_scrubbed",
+    "session_id": "ses_scrubbed",
+    "time_created": 1783262400000,
+    "data": {
+      "role": "assistant",
+      "time": {
+        "created": 1783262400000
+      },
+      "error": {
+        "name": "MessageAbortedError",
+        "data": {
+          "message": "Aborted"
+        }
+      }
+    }
+  }
+}

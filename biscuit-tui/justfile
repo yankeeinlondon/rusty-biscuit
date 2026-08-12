@@ -1,6 +1,8 @@
 set dotenv-load
 set positional-arguments
-set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+# `env CYG_SYS_BASHRC=1` guards against Cygwin's /etc/bash.bashrc tripping `-u`;
+# see the root justfile for the full explanation.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
 
 import "../just/notify.just"
 import "../just/ai.just"
@@ -41,13 +43,11 @@ build *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity {{LIBRARY}}
-    @just _sanity {{CLI}}
+    @just _sanity_all "{{LIBRARY}} {{CLI}}"
 
 # Full L1 suite for library and CLI.
 test *args="":
-    @just _test {{LIBRARY}} {{args}}
-    @just _test {{CLI}} {{args}}
+    @just _test_all "{{LIBRARY}} {{CLI}}" {{args}}
 
 # Level-2 (real-terminal) tests for the CLI. Library has no L2 tests.
 #
@@ -61,12 +61,31 @@ test-l2 *args="":
     @echo
     @just _test_l2 {{CLI}} {{args}}
 
-# Level-3 (OS keyboard injection) tests for the CLI. macOS only; requires
-# cliclick on PATH and a non-WezTerm parent terminal for focus reliability.
-# Sets `RUN_LEVEL3=1` so the `level3_enabled()` gate trips; individual
-# tests still skip cleanly when cliclick / WezTerm are unavailable.
+# Level-3 OS-keyboard-injection tests for the CLI. Library has no L3 tests.
+#
+# The shared `_test_l3` recipe exports RUN_LEVEL3=1 so the `require_level!` gate
+# trips; each test also skips cleanly when its backend (WezTerm + cliclick,
+# macOS only) is absent. Covers physical Ctrl+Shift / Alt+Shift chord selection
+# for choose-one and choose-many (`level3_chord_select.rs`) — the always-on L2
+# byte-injection tests in `real_terminal_render.rs` remain the headless
+# contract; L3 is the opt-in physical-keypress proof. These steal desktop focus,
+# so they are intentionally NOT part of `test`/`all`.
 test-l3 *args="":
     @just _test_l3 {{CLI}} {{args}}
+
+# Windows-host runtime gate for F2 captured-stdout parity. Runs the ignored,
+# deterministic console-boundary integration test by exact name; it must execute
+# on a Windows host with an attached console (the test injects Enter via
+# `WriteConsoleInputW`). The CI counterpart is
+# `.github/workflows/biscuit-tui-windows-captured-stdout.yml`.
+test-windows-captured-stdout:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ "${OS:-}" != "Windows_NT" ]; then
+        echo "test-windows-captured-stdout must run on a Windows host with an attached console" >&2
+        exit 1
+    fi
+    cargo test -p {{CLI}} --test windows_captured_stdout -- --ignored captured_stdout_receives_only_value_no_tui_bytes
 
 # Not applicable: biscuit-tui has no browser-target tests.
 test-browser:

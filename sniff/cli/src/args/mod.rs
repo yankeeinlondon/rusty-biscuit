@@ -246,8 +246,9 @@ fn all_program_candidates() -> Vec<clap_complete::engine::CompletionCandidate> {
 /// Subcommands under `sniff software`.
 ///
 /// The bare command (`sniff software`) shows every installed-program category.
-/// Each category can also be invoked directly for a focused view and supports
-/// `install` / `install-plan` like the aggregate.
+/// Each category can also be invoked directly for a focused view. Eight categories
+/// support `install` / `install-plan`; notification helpers and test runners are
+/// report-only.
 #[derive(Subcommand, Debug, Clone)]
 pub enum SoftwareSubcommand {
     /// Install a program (interactive picker if no name given)
@@ -332,6 +333,9 @@ pub enum SoftwareSubcommand {
 pub enum Commands {
     /// Show only OS information (name, kernel, locale, timezone)
     Os,
+
+    /// Show whether the runtime is native, WSL 1, or WSL 2
+    Runtime,
 
     /// Show only hardware information (CPU, GPU, memory, storage)
     Hardware,
@@ -485,6 +489,7 @@ impl Commands {
     pub fn to_output_filter(&self) -> OutputFilter {
         match self {
             Commands::Os => OutputFilter::Os,
+            Commands::Runtime => OutputFilter::Os,
             Commands::Hardware => OutputFilter::Hardware,
             Commands::Network => OutputFilter::Network,
             Commands::Filesystem { .. } => OutputFilter::Filesystem,
@@ -1177,6 +1182,7 @@ pub const AFTER_HELP: &str = "\
 Commands:
   System:
     sniff os              Show OS information
+    sniff runtime         Show native, WSL 1, or WSL 2 runtime
     sniff hardware        Show hardware information
     sniff network         Show network information
     sniff cpu             Show CPU information
@@ -1252,7 +1258,7 @@ Git:
   sniff repo git-status               Show git status and recent commits
   sniff repo git-status --history 20  Show more commits
   sniff repo git-status --compact     Show only the Status section
-  sniff repo hash HEAD                Show latest commit details
+  sniff repo hash HEAD                Show latest commit details (alias: commit)
   sniff repo staged-files             List staged files
   sniff repo unstaged-files           List unstaged files
   sniff repo untracked-files          List untracked files
@@ -1376,6 +1382,14 @@ mod tests {
             assert!(matches!(
                 parse_args(&["topics"]).unwrap().command,
                 Some(Commands::Topics)
+            ));
+        }
+
+        #[test]
+        fn runtime_subcommand_parses() {
+            assert!(matches!(
+                parse_args(&["runtime"]).unwrap().command,
+                Some(Commands::Runtime)
             ));
         }
 
@@ -2199,6 +2213,20 @@ mod tests {
                 assert_eq!(sha, "HEAD");
             } else {
                 panic!("Expected repo hash");
+            }
+        }
+
+        #[test]
+        fn repo_hash_commit_alias_parses() {
+            let cli = parse_args(&["repo", "commit", "HEAD"]).unwrap();
+            if let Some(Commands::Repo {
+                repo_subcommand: Some(RepoSubcommand::Hash { sha }),
+                ..
+            }) = cli.command
+            {
+                assert_eq!(sha, "HEAD");
+            } else {
+                panic!("Expected repo hash via commit alias");
             }
         }
 

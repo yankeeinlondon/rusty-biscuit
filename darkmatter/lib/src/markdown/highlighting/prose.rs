@@ -106,7 +106,7 @@ mod tests {
     use pulldown_cmark::HeadingLevel;
 
     fn load_test_theme() -> SyntectTheme {
-        crate::markdown::highlighting::themes::load_theme(ThemePair::Github, ColorMode::Dark)
+        crate::markdown::highlighting::themes::load_theme(ThemePair::Github, ColorMode::Dark).clone()
     }
 
     #[test]
@@ -265,7 +265,7 @@ mod tests {
         // Github theme has a distinct link color
         let github_theme =
             crate::markdown::highlighting::themes::load_theme(ThemePair::Github, ColorMode::Dark);
-        let github_highlighter = ProseHighlighter::new(&github_theme);
+        let github_highlighter = ProseHighlighter::new(github_theme);
         let github_base = github_highlighter.base_style();
         let link_tag = Tag::Link {
             link_type: pulldown_cmark::LinkType::Inline,
@@ -285,7 +285,7 @@ mod tests {
         // OneHalf theme does NOT have a distinct link color
         let onehalf_theme =
             crate::markdown::highlighting::themes::load_theme(ThemePair::OneHalf, ColorMode::Dark);
-        let onehalf_highlighter = ProseHighlighter::new(&onehalf_theme);
+        let onehalf_highlighter = ProseHighlighter::new(onehalf_theme);
         let onehalf_base = onehalf_highlighter.base_style();
         let onehalf_link =
             onehalf_highlighter.style_for_tag(&link_tag, &[onehalf_highlighter.base_scope()]);

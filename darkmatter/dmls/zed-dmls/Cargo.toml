@@ -1,0 +1,19 @@
+[package]
+name = "zed-dmls"
+version = "0.0.1"
+edition = "2021"
+publish = false
+description = "Zed extension launching the native Darkmatter Language Server"
+
+[lib]
+crate-type = ["cdylib"]
+path = "src/lib.rs"
+
+[dependencies]
+zed_extension_api = "0.7"
+
+# Excluded from the rusty-biscuit workspace (it targets wasm32). Declaring an
+# empty workspace here makes the crate its own root so it can be checked/built
+# standalone via `cargo … --manifest-path zed-dmls/Cargo.toml` (see `just
+# check-zed`) without Cargo resolving the enclosing workspace.
+[workspace]

@@ -17,10 +17,15 @@ use biscuit_file::YamlParseError;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::status::StatusState;
 use biscuit_terminal::components::status_block::StatusBlock;
-use biscuit_terminal::errors::{ErrorHeader, SourceContext, StatusBlockExt};
+use biscuit_terminal::errors::{ErrorHeader, SourceContext, StatusBlockExt, YamlKeyPath};
 
+use crate::markdown::compose::expression::file_suggestions::DEFAULT_MAX_SUGGESTIONS;
+use crate::markdown::compose::expression::{
+    Expr, ExpressionError, FileRefFailure, parse, suggest_sibling_files,
+};
 use crate::markdown::highlighting::highlight_yaml_lines;
 use crate::markdown::schemas::{ValidationProblem, ValidationProblemKind};
+use crate::markdown::types::SourceRef;
 
 /// Build the [`StatusBlock`] for [`MarkdownError::FileLoad`].
 pub(crate) fn file_load_block(source: &std::io::Error) -> StatusBlock {
@@ -53,6 +58,39 @@ pub(crate) fn url_fetch_block(source: &reqwest::Error) -> StatusBlock {
         .error_header(ErrorHeader::new("MarkdownError", "URL fetch failed"))
         .body(body)
         .hint("Verify the URL is reachable and that any required auth headers are set.")
+}
+
+/// Build the [`StatusBlock`] for [`MarkdownError::FrontmatterFenceMismatch`].
+///
+/// Highlights the offending delimiter line in the source document so the user
+/// sees exactly which fence is malformed and where to apply the fix.
+pub(crate) fn frontmatter_fence_mismatch_block(
+    ctx: SourceContext,
+    found: &str,
+    line: usize,
+) -> StatusBlock {
+    let mut body = Vec::new();
+
+    if ctx.display != std::path::Path::new("unknown") {
+        body.push(ctx.linked_path_prose());
+    }
+
+    body.push(Prose::new(format!(
+        "<dim>Fence:</dim> <b>{}</b> on line {}",
+        Prose::escape_text(found),
+        line
+    )));
+
+    body.push(Prose::new("Frontmatter fence mismatch here:"));
+    body.push(frontmatter_excerpt_prose(&ctx, line, 1));
+
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new(
+            "MarkdownError",
+            "frontmatter fence mismatch",
+        ))
+        .body(body)
+        .hint("Use exactly three dashes (---) for Markdown frontmatter fences.")
 }
 
 /// Build the [`StatusBlock`] for [`MarkdownError::FrontmatterParse`].
@@ -210,6 +248,203 @@ pub(crate) fn transform_block(message: &str) -> StatusBlock {
         .hint("Review the transform pipeline inputs and any configured rules.")
 }
 
+/// Build the [`StatusBlock`] for [`MarkdownError::Interpolation`].
+///
+/// The headline and hint are derived from the typed `cause` (never the mechanism
+/// word "interpolation"), so the author sees the real problem — an invalid file
+/// path, an unknown function — rather than the layer that surfaced it. The scope
+/// (`key`, `expression`) names where the failing expression lives, and `source`
+/// supplies the on-disk locus: an OSC8 link to the prompt file plus a focused
+/// `$schema`/key excerpt when the failure maps to a real frontmatter region
+/// ([`SourceRef::OnDisk`]), or the resolved text plus origin key for the
+/// late-binding path ([`SourceRef::Effective`]).
+///
+/// [`MarkdownError::Interpolation`]: crate::markdown::MarkdownError::Interpolation
+pub(crate) fn interpolation_block(
+    key: Option<&str>,
+    expression: &str,
+    source: &SourceRef,
+    cause: &ExpressionError,
+) -> StatusBlock {
+    let scope = match key {
+        Some(k) => format!(
+            "The <inverse>{}</inverse> frontmatter property",
+            Prose::escape_text(k)
+        ),
+        None => "A document expression".to_string(),
+    };
+
+    match cause {
+        ExpressionError::FileReference(diagnostic) => {
+            let headline = match diagnostic.kind {
+                FileRefFailure::RemoteNotEnabled => "remote reference not enabled",
+                _ => "invalid file path",
+            };
+
+            let mut body: Vec<Prose> = Vec::new();
+            body.push(Prose::new(format!(
+                "{scope} references the file <orange>{}</orange>, which could not be resolved.",
+                Prose::escape_text(&diagnostic.reference)
+            )));
+
+            // Source locus: an OSC8-linked prompt file and a focused excerpt for
+            // the on-disk path, or the resolved text + origin key for late
+            // binding (DM2 event-time resolution has no stable file region).
+            match source {
+                SourceRef::OnDisk(ctx) => {
+                    if ctx.display != std::path::Path::new("unknown") {
+                        body.push(Prose::new("Defined in:"));
+                        body.push(ctx.linked_path_prose());
+                    }
+                    let excerpt = ctx.focused_yaml_excerpt(&involved_keys(key, expression));
+                    if !excerpt.content().is_empty() {
+                        body.push(excerpt);
+                    }
+                }
+                SourceRef::Effective {
+                    rendered,
+                    origin_key,
+                } => {
+                    if let Some(origin) = origin_key {
+                        body.push(Prose::new(format!(
+                            "<dim>Resolved from:</dim> <inverse>{}</inverse>",
+                            Prose::escape_text(origin)
+                        )));
+                    }
+                    body.push(Prose::new(format!(
+                        "<dim>Expression:</dim> `{}`",
+                        Prose::escape_text(rendered)
+                    )));
+                }
+            }
+
+            // Did-you-mean: for a *missing* (not malformed/remote) reference, rank
+            // the siblings of the expected path against its leaf name. Computed
+            // here at render time only — the hot eval loop never touches disk.
+            if matches!(diagnostic.kind, FileRefFailure::NotFound) {
+                let expected = diagnostic.base_dir.join(&diagnostic.reference);
+                let suggestions = suggest_sibling_files(&expected, DEFAULT_MAX_SUGGESTIONS);
+                if !suggestions.is_empty() {
+                    let mut hint = String::from("<b>Did you mean?</b>");
+                    for suggestion in suggestions {
+                        hint.push_str(&format!(
+                            "\n- <green>{}</green>",
+                            Prose::escape_text(&suggestion)
+                        ));
+                    }
+                    body.push(Prose::new(hint));
+                }
+            }
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("MarkdownError", headline))
+                .body(body)
+                .hint(
+                    "Confirm the path is correct, or guard an optional reference with \
+                     `file_exists(...)` so a missing file is not treated as an error.",
+                )
+        }
+        other => {
+            let body = format!(
+                "{scope} failed to evaluate <dim>`{}`</dim>:\n\n{}",
+                Prose::escape_text(expression),
+                Prose::escape_text(&other.to_string())
+            );
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("MarkdownError", "interpolation failed"))
+                .body(body)
+                .hint("Review the expression and the values it references.")
+        }
+    }
+}
+
+/// The frontmatter keys the focused excerpt should surface for an interpolation
+/// failure: the receiving key plus every frontmatter variable root the failing
+/// expression references (e.g. the `spec` argument of `frontmatter(spec, …)`).
+///
+/// Each involved key is offered both bare (a top-level property) and nested
+/// under a `$schema` parent (the spec's reference shape, where `spec` and
+/// `iteration` live under `$schema:`). [`SourceContext::focused_yaml_excerpt`]
+/// unions whichever paths resolve and falls back to the whole block when none
+/// do, so offering both candidate shapes is safe — an unresolved path simply
+/// contributes nothing.
+fn involved_keys(key: Option<&str>, expression: &str) -> Vec<YamlKeyPath> {
+    let mut names: Vec<String> = Vec::new();
+    if let Some(k) = key {
+        names.push(k.to_string());
+    }
+    if let Ok(expr) = parse(expression) {
+        collect_frontmatter_roots(&expr, &mut names);
+    }
+    names.sort();
+    names.dedup();
+
+    let mut paths = Vec::with_capacity(names.len() * 2);
+    for name in names {
+        paths.push(YamlKeyPath::new([name.clone()]));
+        paths.push(YamlKeyPath::new(["$schema".to_string(), name]));
+    }
+    paths
+}
+
+/// Pushes the root segment of every frontmatter `Expr::Variable` onto `names`,
+/// skipping `ctx.*`/`env.*`/`doc` (which resolve from the runtime context, not
+/// the frontmatter block the excerpt slices).
+fn collect_frontmatter_roots(expr: &Expr, names: &mut Vec<String>) {
+    match expr {
+        Expr::Variable(path) => {
+            if path.starts_with("ctx.") || path.starts_with("env.") || path == "doc" {
+                return;
+            }
+            let effective = path.strip_prefix("doc.").unwrap_or(path);
+            let root = effective.split('.').next().unwrap_or(effective);
+            if !root.is_empty() {
+                names.push(root.to_string());
+            }
+        }
+        Expr::StringLiteral(_) | Expr::NumberLiteral(_) | Expr::BoolLiteral(_) => {}
+        Expr::UnaryNot(inner)
+        | Expr::UnaryMinus(inner)
+        | Expr::Paren(inner)
+        | Expr::MemberAccess { base: inner, .. } => collect_frontmatter_roots(inner, names),
+        Expr::Fallback { primary, fallback } => {
+            collect_frontmatter_roots(primary, names);
+            collect_frontmatter_roots(fallback, names);
+        }
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => {
+            collect_frontmatter_roots(condition, names);
+            collect_frontmatter_roots(then_branch, names);
+            collect_frontmatter_roots(else_branch, names);
+        }
+        Expr::Comparison { left, right, .. } | Expr::Binary { left, right, .. } => {
+            collect_frontmatter_roots(left, names);
+            collect_frontmatter_roots(right, names);
+        }
+        Expr::Index { base, index } => {
+            collect_frontmatter_roots(base, names);
+            collect_frontmatter_roots(index, names);
+        }
+        Expr::FunctionCall { args, .. } => {
+            for arg in args {
+                collect_frontmatter_roots(arg, names);
+            }
+        }
+        Expr::ArrayLiteral(items) => {
+            for item in items {
+                collect_frontmatter_roots(item, names);
+            }
+        }
+        Expr::ObjectLiteral(entries) => {
+            for (_, value) in entries {
+                collect_frontmatter_roots(value, names);
+            }
+        }
+    }
+}
+
 /// Build the [`StatusBlock`] for [`MarkdownError::RenderTree`].
 pub(crate) fn render_tree_block(message: &str) -> StatusBlock {
     StatusBlock::new(StatusState::Error)
@@ -346,6 +581,13 @@ pub(crate) fn schema_validation_failed_block(
         };
 
         body_lines.push(bullet);
+
+        // Per-problem declared description, reusing the dimmed-italic treatment
+        // the document-level `description:` line above already uses. Enrichment
+        // suppressed empty / message-equal descriptions, so a `Some` renders.
+        if let Some(desc) = &problem.description {
+            body_lines.push(format!("<i><dim>{}</dim></i>", Prose::escape_text(desc)));
+        }
     }
 
     StatusBlock::new(StatusState::Error)
@@ -375,6 +617,145 @@ mod tests {
         assert!(out.contains("file load failed"), "missing summary: {out}");
         assert!(out.contains("NotFound"), "missing I/O kind: {out}");
         assert!(out.contains("no such file"), "missing error message: {out}");
+    }
+
+    fn effective_source(key: &str) -> SourceRef {
+        SourceRef::Effective {
+            rendered: String::new(),
+            origin_key: Some(key.to_string()),
+        }
+    }
+
+    #[test]
+    fn interpolation_block_file_reference_offers_did_you_mean() {
+        use crate::markdown::compose::expression::FileReferenceDiagnostic;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::write(dir.path().join("spec.md"), b"x").unwrap();
+        // A near-miss leaf (`specs.md` vs the real `spec.md`) must rank as a
+        // suggestion alongside the cause-driven headline and receiving-key scope.
+        let cause = ExpressionError::FileReference(FileReferenceDiagnostic {
+            function: "frontmatter",
+            reference: "specs.md".to_string(),
+            kind: FileRefFailure::NotFound,
+            base_dir: dir.path().to_path_buf(),
+            fallback_dir: None,
+            source: None,
+        });
+        let out = render_block(&interpolation_block(
+            Some("result"),
+            "frontmatter('specs.md')",
+            &effective_source("result"),
+            &cause,
+        ));
+        assert!(out.contains("invalid file path"), "cause-driven headline: {out}");
+        assert!(out.contains("result"), "must name the receiving key: {out}");
+        assert!(out.contains("Did you mean"), "must offer suggestions: {out}");
+        assert!(out.contains("spec.md"), "must suggest the sibling: {out}");
+    }
+
+    /// The `Effective` (late-binding) branch renders the origin key and the
+    /// resolved text instead of a file link, since DM2 event-time resolution
+    /// has no stable on-disk region to slice (design §6).
+    #[test]
+    fn interpolation_block_effective_source_renders_origin_and_text() {
+        use crate::markdown::compose::expression::FileReferenceDiagnostic;
+
+        let cause = ExpressionError::FileReference(FileReferenceDiagnostic {
+            function: "frontmatter",
+            reference: "missing.md".to_string(),
+            kind: FileRefFailure::Malformed,
+            base_dir: PathBuf::from("/repo"),
+            fallback_dir: None,
+            source: None,
+        });
+        let source = SourceRef::Effective {
+            rendered: "frontmatter('missing.md')".to_string(),
+            origin_key: Some("iteration".to_string()),
+        };
+        let out = render_block(&interpolation_block(
+            Some("iteration"),
+            "frontmatter('missing.md')",
+            &source,
+            &cause,
+        ));
+        assert!(out.contains("invalid file path"), "cause headline: {out}");
+        assert!(out.contains("iteration"), "must name the origin key: {out}");
+        assert!(
+            out.contains("frontmatter('missing.md')"),
+            "must show the resolved expression text: {out}"
+        );
+        // No file link / excerpt for the late-binding branch.
+        assert!(!out.contains("Defined in:"), "no file link for Effective: {out}");
+    }
+
+    /// The spec's reference report: an `OnDisk` source renders the root-cause
+    /// headline, names the receiving key, links the prompt file (OSC8 when the
+    /// terminal supports it), and shows a focused excerpt containing `$schema`
+    /// plus the involved keys and NOT unrelated keys.
+    #[test]
+    fn interpolation_block_on_disk_renders_link_and_focused_excerpt() {
+        use crate::markdown::compose::expression::FileReferenceDiagnostic;
+
+        let doc = "---\nagent: \"codex\"\n$schema:\n    spec: \"features/x/spec.md\"\n    iteration: \"frontmatter(spec, 'n')\"\nyolo: false\n---\n# Body\n";
+        let ctx = SourceContext::new(
+            PathBuf::from("/repo/prompt.md"),
+            PathBuf::from("prompt.md"),
+            doc,
+        );
+        let cause = ExpressionError::FileReference(FileReferenceDiagnostic {
+            function: "frontmatter",
+            reference: "features/x/spec.md".to_string(),
+            kind: FileRefFailure::NotFound,
+            base_dir: PathBuf::from("/repo"),
+            fallback_dir: None,
+            source: None,
+        });
+        let block = interpolation_block(
+            Some("iteration"),
+            "frontmatter(spec, 'n')",
+            &SourceRef::OnDisk(ctx),
+            &cause,
+        );
+
+        // OSC8 link survives to the optimistic (capable) terminal raw output.
+        let raw = block.render_optimistic(Some(80));
+        assert!(
+            raw.contains("\x1b]8;;file:///repo/prompt.md"),
+            "expected OSC8 hyperlink to the prompt file. raw:\n{raw}"
+        );
+
+        let out = strip_escape_codes(&raw);
+        assert!(out.contains("invalid file path"), "root-cause headline: {out}");
+        assert!(out.contains("iteration"), "must name the receiving key: {out}");
+        assert!(out.contains("prompt.md"), "must link the prompt file: {out}");
+        // Focused excerpt: `$schema` parent + the involved `spec`/`iteration`
+        // keys (the expression references `spec`; the receiving key is
+        // `iteration`).
+        assert!(out.contains("$schema:"), "excerpt missing $schema parent: {out}");
+        assert!(out.contains("spec:"), "excerpt missing involved spec key: {out}");
+        assert!(out.contains("iteration:"), "excerpt missing receiving key: {out}");
+        // Unrelated keys must be excluded from the focused excerpt.
+        assert!(!out.contains("agent:"), "leaked unrelated key agent: {out}");
+        assert!(!out.contains("yolo:"), "leaked unrelated key yolo: {out}");
+    }
+
+    /// `involved_keys` collects the receiving key and the frontmatter variable
+    /// roots the expression references, offering each both bare and
+    /// `$schema`-nested. `ctx.*` references are excluded.
+    #[test]
+    fn involved_keys_unions_receiving_key_and_expression_refs() {
+        let keys = involved_keys(Some("iteration"), "frontmatter(spec, 'n') ? ctx.today : 1");
+        let segments: Vec<Vec<String>> =
+            keys.iter().map(|k| k.segments().to_vec()).collect();
+        assert!(segments.contains(&vec!["iteration".to_string()]));
+        assert!(segments.contains(&vec!["$schema".to_string(), "iteration".to_string()]));
+        assert!(segments.contains(&vec!["spec".to_string()]));
+        assert!(segments.contains(&vec!["$schema".to_string(), "spec".to_string()]));
+        // `ctx.today` resolves from the runtime context, not the frontmatter
+        // block, so it must not become an excerpt key.
+        assert!(!segments.iter().any(|s| s.last() == Some(&"ctx".to_string())));
+        assert!(!segments.iter().any(|s| s.last() == Some(&"today".to_string())));
     }
 
     #[test]
@@ -441,6 +822,49 @@ mod tests {
         );
         // The opening delimiter shows as the preceding context line.
         assert!(out.contains("1 │ ---"), "expected preceding line shown: {out}");
+    }
+
+    #[test]
+    fn frontmatter_fence_mismatch_block_names_fence_and_suggests_fix() {
+        let doc = "----\ntitle: Test\n----\n# Hello\n";
+        let ctx = SourceContext::new(PathBuf::from("/test.md"), PathBuf::from("test.md"), doc);
+        let out = render_block(&frontmatter_fence_mismatch_block(ctx, "----", 1));
+
+        assert!(out.contains("MarkdownError"), "missing header type: {out}");
+        assert!(
+            out.contains("frontmatter fence mismatch"),
+            "missing summary: {out}"
+        );
+        assert!(out.contains("----"), "missing offending fence: {out}");
+        assert!(
+            out.contains("Use exactly three dashes"),
+            "missing fix hint: {out}"
+        );
+    }
+
+    #[test]
+    fn frontmatter_fence_mismatch_block_includes_source_path() {
+        let doc = "----\ntitle: Test\n----\n# Hello\n";
+        let ctx = SourceContext::new(
+            PathBuf::from("/tmp/test.md"),
+            PathBuf::from("test.md"),
+            doc,
+        );
+        let out = render_block(&frontmatter_fence_mismatch_block(ctx, "----", 1));
+
+        assert!(out.contains("test.md"), "missing source path: {out}");
+    }
+
+    #[test]
+    fn frontmatter_fence_mismatch_block_highlights_document_line_one() {
+        let doc = "----\ntitle: Test\n----\n# Hello\n";
+        let ctx = SourceContext::new(PathBuf::from("/t.md"), PathBuf::from("t.md"), doc);
+        let out = render_block(&frontmatter_fence_mismatch_block(ctx, "----", 1));
+
+        assert!(
+            out.contains("> 1 │ ----"),
+            "expected marker on document line 1: {out}"
+        );
     }
 
     /// The excerpt body carries syntax-highlight SGR (best-effort, tolerant of
@@ -574,6 +998,79 @@ mod tests {
         let block = schema_validation_failed_block(&path, &[], "", &None);
         let out = render_block(&block);
         assert!(out.contains("schema could not be prepared"), "missing fallback summary: {out}");
+    }
+
+    fn problem_with_description(description: Option<&str>) -> ValidationProblem {
+        ValidationProblem {
+            path: "/title".to_string(),
+            message: "expected string".to_string(),
+            kind: ValidationProblemKind::Type,
+            property: Some("title".to_string()),
+            line: Some(2),
+            column: Some(1),
+            arm_index: None,
+            description: description.map(String::from),
+            code: crate::markdown::schemas::ValidationProblemCode::TypeMismatch,
+            instance_path: crate::markdown::schemas::JsonPointer::parse("/title"),
+            schema_path: None,
+            offending_property: None,
+            file_reference: None,
+        }
+    }
+
+    /// Track C: the per-problem declared description renders as its own sub-line
+    /// after the problem bullet, surfacing what the failing property is *for*.
+    #[test]
+    fn schema_validation_failed_block_renders_problem_description() {
+        let path = std::path::PathBuf::from("/tmp/test/post.md");
+        let problem = problem_with_description(Some("The headline shown in listing pages"));
+        let block = schema_validation_failed_block(&path, std::slice::from_ref(&problem), "", &None);
+        let out = render_block(&block);
+        assert!(out.contains("type"), "missing problem bullet: {out}");
+        assert!(
+            out.contains("The headline shown in listing pages"),
+            "missing per-problem description sub-line: {out}",
+        );
+    }
+
+    /// Track C: the document-level `description:` line and the per-problem
+    /// description coexist without one clobbering the other.
+    #[test]
+    fn schema_validation_failed_block_coexists_doc_and_problem_descriptions() {
+        let path = std::path::PathBuf::from("/tmp/test/post.md");
+        let problem = problem_with_description(Some("The headline shown in listing pages"));
+        let doc_description = Some("A blog post about anything".to_string());
+        let block = schema_validation_failed_block(
+            &path,
+            std::slice::from_ref(&problem),
+            "",
+            &doc_description,
+        );
+        let out = render_block(&block);
+        assert!(
+            out.contains("A blog post about anything"),
+            "missing document-level description: {out}",
+        );
+        assert!(
+            out.contains("The headline shown in listing pages"),
+            "missing per-problem description: {out}",
+        );
+    }
+
+    /// Track C: a problem without a description emits only its bullet — no
+    /// stray description sub-line (Decision #8).
+    #[test]
+    fn schema_validation_failed_block_omits_absent_problem_description() {
+        let path = std::path::PathBuf::from("/tmp/test/post.md");
+        let problem = problem_with_description(None);
+        let block = schema_validation_failed_block(&path, std::slice::from_ref(&problem), "", &None);
+        let out = render_block(&block);
+        // The bullet is present, but no extra description text rides beneath it.
+        assert!(out.contains("type"), "missing problem bullet: {out}");
+        assert!(
+            out.contains("expected string"),
+            "missing problem message: {out}",
+        );
     }
 
     /// `reqwest::Error` cannot be constructed without firing a real HTTP

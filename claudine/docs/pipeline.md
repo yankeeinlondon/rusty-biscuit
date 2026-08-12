@@ -7,7 +7,7 @@ description: |-
     named so they can be discussed, reordered, parallelized, deferred, or
     eliminated in pursuit of an order-of-magnitude speedup of both real and
     perceived latency.
-last_updated: 2026-05-09
+last_updated: 2026-07-23
 ---
 
 # Compose / Inline-Compose Pipeline
@@ -82,7 +82,7 @@ output is emitted before B-end.
 | B2.3.a | **Shared `sniff::detect_with_plan` scan** [M] | `compose_prep.shared_sniff`. Single rooted scan at launch CWD covering git summary + repo structure (no os/hw/net). Replaces what used to be two redundant scans (`LaunchContext::from_cwd` and `detect_environment_fast`). Yields a cached `LaunchContext` and a cached `EnvironmentContext`. |
 | B2.3.b | **Resolve source repo root** [M] | `compose_prep.source_repo_root`. Fast path when source's parent dir is inside the launch repo (reuse launch root). Slow path: `detect_git` probe on the source's parent dir. |
 | B2.3.c | **Load selection config** [M] | `compose_prep.selection_config`. Reads `~/.claudine/config.json` and (when present) `<repo>/.claudine/config.json` for `favorite_agent` and `model_overrides`. |
-| B2.3.d | **Build installed-provider snapshot** [M] | `compose_prep.installed_clients`. PATH scan via `sniff::programs::InstalledAiClients` for the eight supported provider CLIs, filtered by `--exclude`. Also populates `binary_paths` used by C1.4 (W2). |
+| B2.3.d | **Build installed-provider snapshot** [M] | `compose_prep.installed_clients`. PATH scan via `sniff::programs::InstalledAiClients` for the supported provider CLIs, filtered by `--exclude`. Supports automatic selection and the dry-run resolution breakdown; a dry-run never treats the selected executable's absence as an error. Also populates `binary_paths` used by live execution at C1.4 (W2). |
 
 ### B3. Eager target resolution
 
@@ -128,7 +128,7 @@ This is where Darkmatter actually runs. **Per iteration** when looping.
 
 | # | Step | Notes |
 |---|------|-------|
-| B6.1 | **Compose: `prepare_direct`** [O-mode, compose] | `compose_prep.prepare_direct`. Runs the full Darkmatter compose pass on the document body: Handlebars template variables, `${VAR}` / `${VAR:-default}` shell-env expansion, `$(cmd)` shell expansion (against the cache), TOC linking, `@file` includes, expression evaluation, frontmatter merging. Produces `PreparedComposition.prompt`. |
+| B6.1 | **Compose: `prepare_direct`** [O-mode, compose] | `compose_prep.prepare_direct`. Runs the full Darkmatter compose pass on the document body: `{{ }}` expression-engine interpolation (including `env.*` access), `$(cmd)` shell expansion (against the cache), TOC linking, `@file` includes, expression evaluation, frontmatter merging. Produces `PreparedComposition.prompt`. |
 | B6.2 | **Inline-compose: `prepare_inline`** [O-mode, inline] | `compose_prep.prepare_inline`. Same Darkmatter pass, but composes the `prompt` frontmatter property as the body, then appends inline guardrails (closure markers). Body is unread; only frontmatter `prompt` matters. |
 | B6.3 | **Build `CompositionExecutionRequest`** [M] | Carries every flag, `prepared`, `resolved_target`, the cached prep context. |
 
@@ -139,6 +139,12 @@ This is where Darkmatter actually runs. **Per iteration** when looping.
 Everything below runs inside `execute_composition_request_inner` under
 the `composition_prepare` span.
 
+### C0. Dry-run short-circuit
+
+| # | Step | Notes |
+|---|------|-------|
+| C0.1 | **`--dry-run`** [O-flag] | Emit the composed body/frontmatter and return before every launch-wiring step below. Provider/model identity was resolved in B3; selected-executable availability/path resolution, MCP, argv, system-prompt delivery, lifecycle runtime, and spawn do not run. The selected provider need not be installed. |
+
 ### C1. Provider/target re-use or re-resolve
 
 | # | Step | Notes |
@@ -146,7 +152,7 @@ the `composition_prepare` span.
 | C1.1 | **Reuse eager target** [M] | When `request.resolved_target` is `Some` (compose's normal path), reuse it and skip the entire C1 fallback below. Saves a duplicate `InstalledAiClients` PATH scan + `load_selection_config` + catalog build. |
 | C1.2 | **Fallback re-resolution** [O] | Only triggered by callers that don't pre-resolve (legacy library callers). Mirrors B2.3 + B3 inline. |
 | C1.3 | **Look up `WrapperProfile`** [M] | `profile_for_provider(provider)`. |
-| C1.4 | **Resolve binary path** [M] | `resolve_binary_path_direct(profile)` — consults the `InstalledProviderSnapshot.binary_paths` map built during B2.3.d; falls back to `which::which` only for legacy callers. **Optimized by W2.** |
+| C1.4 | **Resolve binary path** [M, live only] | `resolve_binary_path_direct(profile)` — consults the `InstalledProviderSnapshot.binary_paths` map built during B2.3.d; falls back to `which::which` only for legacy callers. Dry-run returned at C0. **Optimized by W2.** |
 | C1.5 | **Inline+interactive support check** [O-mode] | Hard-fail when inline closure is requested with an interactive provider that doesn't support it. |
 | C1.6 | **Compute `effective_non_interactive`** [M] | `!session_interactive`. Drives every downstream branching decision. |
 
@@ -215,12 +221,6 @@ the `composition_prepare` span.
 | C7.4 | **Validate prompt presence** [M] | `require_prompt_present`. |
 | C7.5 | **Validate argv flags before separator** [O, debug-only] | Warn-level lint. |
 | C7.6 | **Mark env setup complete (perf)** [O-flag] | |
-
-### C8. Dry-run short-circuit
-
-| # | Step | Notes |
-|---|------|-------|
-| C8.1 | **`--dry-run`** [O-flag] | `log_dry_run` + early return. No spawn. Emits perf report if `--perf`. |
 
 ### C9. Switch process CWD
 
@@ -339,9 +339,9 @@ Spans `composition_postprocess`.
 |---|------|-------|
 | F3.1 | **Validate closure plan** [M] | Closure markers present in agent response. |
 | F3.2 | **`split_frontmatter_and_body`** [M] | Pull the new body out of the response. |
-| F3.3 | **Update `last_updated` frontmatter** [M] | |
-| F3.4 | **Atomic write of target file** [M] | |
-| F3.5 | **`cleanup_inline_output`** [M] | Strips closure markers, normalizes whitespace. |
+| F3.3 | **Markdown cleanup of new body** [M] | `cleanup_content` runs inside `apply_inline_closure` so the cleaned body is hashed and written. |
+| F3.4 | **Update `last_updated` frontmatter** [M] | |
+| F3.5 | **Atomic write of target file** [M] | Single write; the stamped `hash:` describes the cleaned body. |
 | F3.6 | **Deferred `emit_composition_summary`** [M] | Emitted *after* closure validation messages so the section separator does not split the block. |
 
 ### F4. Lifecycle terminal signal
@@ -419,7 +419,7 @@ all.
 For quick scanning, the steps that are **never run** under common flag
 combos:
 
-- `--dry-run`: skips C9, all of D-after-D7, E, F1-F3, F4 (with success), G1.
+- `--dry-run`: returns at C0 and skips C1 onward, including selected-executable validation/path resolution, MCP/argv/CWD setup, lifecycle, spawn, and closure.
 - `--silent`: skips B2.2, all status banners (C2.2, D1, D7, D9-D11), warnings.
 - `--quiet`: skips C2.2's verbose details, D9, optional warnings.
 - No `loop:` frontmatter: skips F5 entirely; B6 runs once.

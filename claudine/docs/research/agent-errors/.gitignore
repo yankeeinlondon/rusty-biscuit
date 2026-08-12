@@ -1,0 +1,4 @@
+# Transient deterministic-gate findings (spec D10). Written by
+# `claudine-gen agent-errors check`, removed on a clean run, consumed by the
+# fleet `resume` step — never committed.
+.findings/

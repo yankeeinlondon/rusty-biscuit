@@ -1,6 +1,6 @@
 ---
 title: Rendezvous — Current State
-date: 2026-06-17
+date: 2026-07-16
 status: orientation / state-of-the-world
 parent_feature: 2026-05-24-remote-signal
 blast_radius: ""
@@ -10,9 +10,14 @@ blast_radius: ""
 
 > **Naming note.** This package was originally specced as **`remote-signal`**
 > (see `claudine/features/_completed/2026-05-24-remote-signal/spec.md`). It has
-> since been renamed to **`rendezvous`**. The crates, binaries, socket env vars,
-> and mDNS service labels all use the new name; some research docs under
+> since been renamed to **`rendezvous`**. The crates, binaries, endpoint env
+> vars, and mDNS service labels all use the new name; some research docs under
 > `claudine/docs/research/rendezvous/` still carry the old phrasing in prose.
+
+> **Local IPC.** The local control plane described below is documented
+> authoritatively in [`local-ipc.md`](./local-ipc.md) — transport selection,
+> per-user ownership, overrides, permissions, and the threat boundary. This
+> document summarizes; that one governs.
 
 This document is an orientation for anyone picking the package back up after a
 gap. It answers four questions: what Rendezvous is *for*, what is *actually
@@ -58,7 +63,7 @@ phases (the phase numbers appear throughout the module doc-comments):
 
 | Phase | Capability | Where |
 |-------|-----------|-------|
-| 1 | gRPC control plane over a Unix Domain Socket (`Ping`, `Status`) | `core/proto`, `daemon/src/{server,service}.rs`, `client/` |
+| 1 | gRPC control plane over the platform's local endpoint (`Ping`, `Status`) | `core/proto`, `daemon/src/{server,service}.rs`, `daemon/src/local_transport/`, `client/` |
 | 2 | Session-log persistence: Loro per-chunk docs → redb (source of truth) → DuckDB projection via a flume micro-batcher | `daemon/src/{session_log,storage,projection,batcher}.rs` |
 | 3 | Persistent node identity (Ed25519 seed on disk, owner-only perms) | `core/src/identity.rs` |
 | 4 | QUIC transport (quinn + rustls/rcgen self-signed cert) | `daemon/src/quic.rs` |
@@ -69,19 +74,34 @@ phases (the phase numbers appear throughout the module doc-comments):
 
 - **Crate split** (three crates):
   - `rendezvous-core` — protobuf schema + generated tonic stubs, node identity,
-    signed envelopes, invitations, the session-log document model, and the
-    sync wire format. Persistence-agnostic.
+    signed envelopes, invitations, the session-log document model, the sync wire
+    format, and the typed `LocalEndpoint` contract. Persistence-agnostic, and
+    performs no filesystem mutation.
   - `rendezvous-daemon` — the service: gRPC server, Loro/redb/DuckDB stack,
-    QUIC endpoint, mDNS discovery, peer registry, and the sync engine.
+    QUIC endpoint, mDNS discovery, peer registry, and the sync engine. Owns
+    endpoint and data-root authorization, listener setup, and cleanup.
   - `rendezvous-client` — a thin gRPC test client (binary
-    `rendezvous-test-client`) plus a reusable `connect_uds` helper. Explicitly
-    *not* throwaway: it is the integration-test and CI smoke-check driver.
+    `rendezvous-test-client`) plus one portable `connect(&LocalEndpoint)`
+    helper. Explicitly *not* throwaway: it is the integration-test and CI
+    smoke-check driver and the connection path used by the claudine lifecycle
+    `requeue(...)` control action.
 
-- **IPC control plane** (`Rendezvous` gRPC service over UDS). Implemented RPCs:
+- **IPC control plane** (`Rendezvous` gRPC service over the platform's local
+  IPC transport — a Unix-domain stream socket on macOS/Linux/WSL, a named pipe
+  on native Windows; both implemented and runtime-tested). Implemented RPCs:
   `Ping`, `Status`, `AppendEntry`, `ListChunkEntries`, `ListSessionChunks`,
   `QueryProjection`, `CreateInvitation`, `ConnectToPeer`, `ListPeers`,
-  `ApprovePeer`, `RevokePeer`, `ListPairings`, `SyncWithPeer`. Socket path
-  resolution follows `RENDEZVOUS_SOCKET` → `$XDG_RUNTIME_DIR` → `$TMPDIR`/`tmp`.
+  `ApprovePeer`, `RevokePeer`, `ListPairings`, `SyncWithPeer`.
+
+  The endpoint is **per stable OS user** — the effective UID on Unix, the
+  process token's account SID on Windows, never a username. Resolution is
+  `RENDEZVOUS_ENDPOINT` → the per-user default:
+  `$XDG_RUNTIME_DIR/claudine/rendezvous/daemon.sock` where the runtime
+  directory is usable, otherwise
+  `<tempdir>/claudine-rendezvous-uid-<uid>/daemon.sock` on Unix, and
+  `\\.\pipe\claudine-rendezvous-sid-<sid>` on Windows. There is no username,
+  `default`, or random fallback: failure is typed. Full contract in
+  [`local-ipc.md`](./local-ipc.md).
 
 - **Session-log document model** (`core/src/session_log.rs`):
   - Deterministic chunk identity:
@@ -164,20 +184,38 @@ The integration suite (`daemon/tests/`) and `scripts/poc-demo.sh` demonstrate:
   `two_daemons_connect_via_manual_invitation`).
 - Namespace ownership enforcement (`paired_peer_cannot_write_foreign_namespace`).
 
-The daemon binary (`rendezvous-daemon`) accepts `--socket`, `--data-dir`,
+The daemon binary (`rendezvous-daemon`) accepts `--endpoint`
+(`RENDEZVOUS_ENDPOINT`), `--data-dir` (`RENDEZVOUS_DATA_DIR`), `--repo-root`,
 `--in-memory-projection`, `--quic-bind`, `--no-mdns`, and `--no-networking`.
+
+### Per-user ownership (2026-07 local-IPC fix)
+
+Endpoint, node identity, and durable data now resolve to the same stable OS
+user. The default data root is the platform-local data directory
+(`<local-data-dir>/claudine/rendezvous`), holding `node.key`, `session.redb`,
+and `projection.duckdb`; the legacy `<tempdir>/rendezvous-data` root is neither
+selected nor read, because a shared temp directory is not an ownership boundary
+and a node identity found there could have been planted by any local user.
+
+Both the Unix runtime directory and the data root go through one
+private-directory contract: owner-only (`0700`, applied by `mkdir(2)` itself) on
+Unix, a protected current-user DACL applied at `CreateDirectoryW` time on
+Windows. An override changes the location, not the policy. See
+[`local-ipc.md`](./local-ipc.md).
 
 ## 3. High-Level Architecture
 
 ### Local interaction (single host)
 
-A local client (today the test client; tomorrow the Claudine CLI) drives the
-daemon over a Unix Domain Socket using gRPC. The daemon owns all heavy storage
-and network I/O so the client stays lightweight and responsive.
+A local client (the test client, and the Claudine CLI's dashboard/requeue/hook
+and session-reporting call sites) drives the daemon over the platform's local
+endpoint using gRPC — a Unix-domain socket on macOS/Linux/WSL, a named pipe on
+Windows. The daemon owns all heavy storage and network I/O so the client stays
+lightweight and responsive.
 
 ```mermaid
 flowchart LR
-    CLIENT["Local client<br/>(test client / future Claudine CLI)"]
+    CLIENT["Local client<br/>(test client / Claudine CLI)"]
     subgraph daemon["rendezvous-daemon"]
         SVC["RendezvousService<br/>(tonic gRPC)"]
         SLM["SessionLogManager<br/>(one LoroDoc per chunk)"]
@@ -185,7 +223,7 @@ flowchart LR
         BATCH["Batcher<br/>(flume + blocking thread)"]
         PROJ[("DuckDB<br/>OLAP projection")]
     end
-    CLIENT -->|"UDS · gRPC"| SVC
+    CLIENT -->|"gRPC over the local endpoint<br/>(UDS · Unix / named pipe · Windows)"| SVC
     SVC --> SLM
     SVC -->|"queries"| PROJ
     SLM -->|"1. export snapshot · persist"| STORE
@@ -266,11 +304,12 @@ yet. `rendezvous/docs/logging.md` already sketches the contract:
   path instead of (or alongside) today's local JSONL→SQLite index.
 
 This requires turning the generic POC entry schema into a real
-agentic-session log model and giving Claudine a daemon client (the test client's
-`connect_uds` helper is the seed). Note the related repo-wide
-`feature-fix-lifecycle` spec explicitly **defers** its "closure event into the
-claudine daemon's database" until this logging refactor lands — so this unblocks
-work beyond Rendezvous itself.
+agentic-session log model and giving Claudine a daemon client (the client's
+portable `connect(&LocalEndpoint)` is the seed, and already carries the
+dashboard, requeue, hook-forwarding, and session-reporting call sites). Note the
+related repo-wide `feature-fix-lifecycle` spec explicitly **defers** its
+"closure event into the claudine daemon's database" until this logging
+refactor lands — so this unblocks work beyond Rendezvous itself.
 
 ### B. Harden the mesh foundation
 

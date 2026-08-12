@@ -5,7 +5,7 @@ use biscuit_terminal::components::table::table::{Table, TableColumn};
 use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::block_constraint::visible_width;
-use biscuit_terminal::utils::layout::{Alignment, Edges, Length, TargetValue, WordWrap};
+use biscuit_terminal::utils::layout::{Alignment, Edges, Length, TargetValue, Width, WordWrap};
 
 /// Maximum visible width for context reports, including margins, borders, and
 /// separators.
@@ -26,6 +26,17 @@ pub const MAX_REPORT_WIDTH: u32 = 140;
 /// width referenced by the spec.
 #[allow(dead_code)]
 pub const MIN_SUPPORTED_REPORT_WIDTH: u32 = 53;
+
+/// Minimum terminal width, in visible cells, at which the metadata reports keep
+/// their optional `Example` column.
+///
+/// The `Example` column is the widest optional content in the expression and
+/// side-effect reports. At narrow widths the four-column layout cannot satisfy
+/// the table planner without overflow, so the reports drop `Example` (the
+/// documented "where layout permits" contract) and render the remaining columns
+/// only. At or above this width the column is shown.
+#[allow(dead_code)]
+pub const EXAMPLE_COLUMN_MIN_WIDTH: u32 = 70;
 
 /// Break characters for report table cells.
 ///
@@ -51,6 +62,35 @@ fn report_wrap() -> WordWrap {
 #[allow(dead_code)]
 pub fn report_column(header: impl Into<String>) -> TableColumn {
     TableColumn::new(header.into()).with_word_wrap(report_wrap())
+}
+
+/// Middle-elide a single-token value (e.g. a filesystem path) to fit `budget`
+/// visible columns, inserting `…` so both the head and the meaningful tail
+/// survive: `/Users/ken/.claudine/worktrees/rusty-biscuit/claudine` →
+/// `/Users/ken/…/rusty-biscuit/claudine`.
+///
+/// This is the values-report defense against a wrapped path reading as a
+/// complete (parent) path: the report-content column *must* keep path-separator
+/// break characters so tables still render at the minimum supported width, but
+/// breaking a path at `/` produces a line ending in `/` that looks like a real
+/// directory. Pre-eliding a path that would otherwise wrap keeps it on one line
+/// and unambiguous. `budget` should be the resolved content-column width; values
+/// at or under it are returned unchanged.
+#[allow(dead_code)]
+pub fn middle_elide(value: &str, budget: usize) -> String {
+    let width = visible_width(value) as usize;
+    if budget < 3 || width <= budget {
+        return value.to_string();
+    }
+    let chars: Vec<char> = value.chars().collect();
+    // Reserve one column for the ellipsis; split the remainder head/tail,
+    // biasing the tail (the distinctive leaf) one char larger on odd budgets.
+    let keep = budget - 1;
+    let head_len = keep / 2;
+    let tail_len = keep - head_len;
+    let head: String = chars[..head_len].iter().collect();
+    let tail: String = chars[chars.len() - tail_len..].iter().collect();
+    format!("{head}…{tail}")
 }
 
 /// Inline-code helper: convert backtick-delimited spans in `input` to
@@ -144,12 +184,16 @@ pub fn render_unordered_list(items: &[String], term: &Terminal) -> String {
 /// [`Table`].
 ///
 /// - 1ch left margin and 1ch right margin
+/// - `width: 100%` so every report table fills the available width to the right
+///   margin (the last column absorbs any slack), rather than hugging content —
+///   tables with and without wrapped cells then share one right edge
 /// - Total rendered width never exceeds `min(terminal width, 140)` visible
 ///   cells, counting margins, borders, separators, and content
 /// - Below 140ch the table uses the available width without overflow
 #[allow(dead_code)]
 pub fn configure_shared_table(table: &mut Table) {
     table.layout_mut().margin = Edges::x(Length::ch(1));
+    table.layout_mut().width = Width::Fixed(TargetValue::universal(Length::Percent(100.0)));
 }
 
 /// Renders `table` under the shared width contract.
@@ -173,7 +217,7 @@ pub enum TableLayout {
 }
 
 /// The sentinel the table planner emits inline when no layout fits the width.
-const TABLE_WIDTH_ERROR_SENTINEL: &str = "could not be rendered";
+pub const TABLE_WIDTH_ERROR_SENTINEL: &str = "could not be rendered";
 
 /// Renders a table under the width contract, relaxing the shared width pins only
 /// as far as the terminal forces.
@@ -276,350 +320,27 @@ pub fn function_first_column_width<'a>(
         .min(40)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
-    use biscuit_terminal::utils::layout::Alignment;
-
-    fn styled_term(width: u32) -> Terminal {
-        Terminal::new_optimistic(width)
-    }
-
-    fn plain_term(width: u32) -> Terminal {
-        let mut term = Terminal::new_optimistic(width);
-        term.color_depth = ColorDepth::None;
-        term.is_tty = false;
-        term
-    }
-
-    fn max_line_visible_width(output: &str) -> usize {
-        output
-            .lines()
-            .map(|line| visible_width(line) as usize)
-            .max()
-            .unwrap_or(0)
-    }
-
-    // =====================================================================
-    // Inline code
-    // =====================================================================
-
-    #[test]
-    fn inline_code_styled_wraps_single_span_in_inverse() {
-        let term = styled_term(80);
-        let out = Prose::new(render_inline_code("use `ctx.today` here", &term)).render(&term);
-        assert!(
-            out.contains("\x1b[7m"),
-            "styled output must contain inverse SGR; got {out:?}"
-        );
-        assert!(
-            !out.contains("`"),
-            "styled output must not contain literal backticks; got {out:?}"
-        );
-    }
-
-    #[test]
-    fn inline_code_plain_keeps_visible_backticks() {
-        let term = plain_term(80);
-        let out = Prose::new(render_inline_code("use `ctx.today` here", &term)).render(&term);
-        assert!(
-            out.contains("`ctx.today`"),
-            "plain output must keep visible backticks; got {out:?}"
-        );
-        assert!(
-            !out.contains("\x1b[7m"),
-            "plain output must not emit inverse SGR; got {out:?}"
-        );
-    }
-
-    #[test]
-    fn inline_code_styled_handles_multiple_spans_independently() {
-        let term = styled_term(80);
-        let input = "refer to `ctx.today` and `ctx.now` for timing";
-        let rendered = render_inline_code(input, &term);
-        let out = Prose::new(rendered).render(&term);
-
-        let inverse_count = out.matches("\x1b[7m").count();
-        assert_eq!(
-            inverse_count, 2,
-            "expected two inverse regions for two code spans; got {out:?}"
-        );
-    }
-
-    #[test]
-    fn inline_code_unmatched_backtick_does_not_panic() {
-        let term = styled_term(80);
-        let input = "unmatched `backtick";
-        let rendered = render_inline_code(input, &term);
-        // Should fall back to literal text (opening backtick preserved).
-        assert!(rendered.contains("`backtick"));
-        let _ = Prose::new(rendered).render(&term);
-    }
-
-    #[test]
-    fn inline_code_text_renders_inverse_styled_and_backticks_plain() {
-        // Headers and cells share this one path; it must emit inverse SGR in
-        // styled output and visible backticks (never raw markup) in plain.
-        let styled = inline_code_text("`||` meaning", &styled_term(80));
-        assert!(
-            styled.contains("\x1b[7m") && !styled.contains('`') && !styled.contains("<inverse>"),
-            "styled header text must be inverse SGR with no backticks/markup; got {styled:?}"
-        );
-
-        let plain = inline_code_text("`||` meaning", &plain_term(80));
-        assert!(
-            plain.contains("`||`") && !plain.contains("\x1b[7m") && !plain.contains("<inverse>"),
-            "plain header text must keep visible backticks and no SGR/markup; got {plain:?}"
-        );
-    }
-
-    #[test]
-    fn inline_code_routes_through_prose_list_and_table_cells() {
-        let term = styled_term(80);
-        let items = vec!["call `min(a, b)` to compare".to_string()];
-        let list_out = render_unordered_list(&items, &term);
-        assert!(
-            list_out.contains("\x1b[7m"),
-            "list items must carry inverse styling; got {list_out:?}"
-        );
-
-        let cell: TableCellContent =
-            Prose::new(render_inline_code("use `ctx.foo`", &term)).render(&term).into();
-        let mut table = Table::new().with_columns(vec![TableColumn::new("Hint")]);
-        table.add_row(vec![cell]);
-        let table_out = table.render(&term);
-        assert!(
-            table_out.contains("\x1b[7m"),
-            "table cells must carry inverse styling; got {table_out:?}"
-        );
-    }
-
-    // =====================================================================
-    // Unordered list
-    // =====================================================================
-
-    #[test]
-    fn unordered_list_uses_dash_bullet_and_hanging_indent() {
-        let term = styled_term(80);
-        let items = vec![
-            "First item".to_string(),
-            "Second item that is intentionally long and should wrap within the available width so we can verify hanging indent".to_string(),
-        ];
-        let out = render_unordered_list(&items, &term);
-
-        assert!(
-            out.starts_with('\n'),
-            "list must start with a blank line; got {out:?}"
-        );
-        assert!(
-            out.ends_with('\n'),
-            "list must end with a blank line; got {out:?}"
-        );
-
-        let lines: Vec<&str> = out.lines().collect();
-        let first_line = lines.iter().find(|l| l.trim_start().starts_with("- First"))
-            .expect("first item must render with '- ' bullet");
-        assert!(first_line.contains("- First item"));
-
-        let first_indent = first_line.len() - first_line.trim_start().len();
-        let continuation = lines
-            .iter()
-            .find(|l| l.starts_with("  width so we can verify"))
-            .expect("wrapped continuation line must be present");
-        let continuation_indent = continuation.len() - continuation.trim_start().len();
-        assert!(
-            continuation_indent > first_indent,
-            "hanging indent must align continuation past the bullet; first={first_indent}, continuation={continuation_indent}"
-        );
-    }
-
-    #[test]
-    fn unordered_list_empty_yields_empty_string() {
-        let term = styled_term(80);
-        assert!(render_unordered_list(&[], &term).is_empty());
-    }
-
-    // =====================================================================
-    // Table layout contract
-    // =====================================================================
-
-    fn build_sample_table() -> Table {
-        let columns = vec![
-            TableColumn::new("Property"),
-            TableColumn::new("Type").with_alignment(Alignment::Center),
-            TableColumn::new("Description"),
-        ];
-        let mut table = Table::new().with_columns(columns);
-        configure_shared_table(&mut table);
-        table.add_row(vec![
-            "ctx.today".into(),
-            "String".into(),
-            "Local date in ISO-8601 format.".into(),
-        ]);
-        table
-    }
-
-    #[test]
-    fn table_contract_respects_below_140_width() {
-        for width in [80_u32, 100, 120] {
-            let term = styled_term(width);
-            let table = build_sample_table();
-            let out = render_table_within_contract(&table, &term);
-            let max = max_line_visible_width(&out);
-            assert!(
-                max <= width as usize,
-                "at width {width} output must fit; max={max}; output:\n{out}"
-            );
-        }
-    }
-
-    #[test]
-    fn table_contract_respects_140_width_cap() {
-        let term = styled_term(140);
-        let table = build_sample_table();
-        let out = render_table_within_contract(&table, &term);
-        let max = max_line_visible_width(&out);
-        assert!(
-            max <= 140,
-            "at width 140 output must fit within 140; max={max}; output:\n{out}"
-        );
-    }
-
-    #[test]
-    fn table_contract_caps_above_140_width() {
-        let term = styled_term(200);
-        let table = build_sample_table();
-        let out = render_table_within_contract(&table, &term);
-        let max = max_line_visible_width(&out);
-        assert!(
-            max <= 140,
-            "at width 200 output must be capped to 140; max={max}; output:\n{out}"
-        );
-    }
-
-    #[test]
-    fn table_contract_margins_counted_within_cap() {
-        let term = styled_term(200);
-        let table = build_sample_table();
-        let out = render_table_within_contract(&table, &term);
-        // With 1ch margins, the leftmost character on every line should be a
-        // leading space and the table should still fit inside 140.
-        for line in out.lines() {
-            let w = visible_width(line) as usize;
-            assert!(
-                w <= 140,
-                "line exceeded 140 visible cells: {w}; line={line:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn table_contract_narrow_terminal_wraps_without_panic() {
-        let term = styled_term(30);
-        let mut table = Table::new().with_columns(vec![TableColumn::new("Note")]);
-        configure_shared_table(&mut table);
-        table.add_row(vec![
-            "This is a long note made of short words so it can wrap to fit a very narrow terminal width".into(),
-        ]);
-        let out = render_table_within_contract(&table, &term);
-        // The table should wrap the single column rather than error out.
-        let max = max_line_visible_width(&out);
-        assert!(
-            max <= 30,
-            "narrow output must fit within 30; max={max}; output:\n{out}"
-        );
-        assert!(!out.is_empty());
-        assert!(
-            out.lines().count() > 3,
-            "content should wrap to multiple lines; output:\n{out}"
-        );
-    }
-
-    // =====================================================================
-    // Context column widths
-    // =====================================================================
-
-    #[test]
-    fn context_column_widths_are_independent() {
-        // Construct a fixture where property and type widths should differ.
-        let properties = vec!["ctx.a", "ctx.very_long_property_name"];
-        let types = vec!["String", "Csv"];
-        let (prop_w, type_w) = context_column_widths(&properties, &types);
-
-        assert!(
-            prop_w > type_w,
-            "property width should exceed type width in this fixture; prop={prop_w}, type={type_w}"
-        );
-        assert_eq!(prop_w, visible_width("ctx.very_long_property_name") as usize);
-    }
-
-    #[test]
-    fn context_column_widths_include_headers() {
-        let properties = vec!["ctx.x"];
-        let types = vec!["x"];
-        let (prop_w, type_w) = context_column_widths(&properties, &types);
-        assert!(
-            prop_w >= visible_width("Property") as usize,
-            "property width must cover the header"
-        );
-        assert!(
-            type_w >= visible_width("Type") as usize,
-            "type width must cover the header"
-        );
-    }
-
-    // =====================================================================
-    // Function/capability first-column width
-    // =====================================================================
-
-    #[test]
-    fn function_first_column_width_caps_at_40() {
-        let sigs = vec![
-            "short(x)",
-            "this_is_an_extremely_long_function_name_with_many_arguments(a, b, c, d, e)",
-        ];
-        let w = function_first_column_width("Function", sigs.into_iter());
-        assert_eq!(w, 40, "first-column width must be capped at 40ch");
-    }
-
-    #[test]
-    fn function_first_column_width_uses_intrinsic_when_below_cap() {
-        let sigs = vec!["min(a, b)", "max(a, b)"];
-        let w = function_first_column_width("Function", sigs.into_iter());
-        let expected = visible_width("min(a, b)") as usize;
-        assert_eq!(w, expected.max(visible_width("Function") as usize).min(40));
-    }
-
-    #[test]
-    fn function_first_column_long_signature_wraps_within_table_contract() {
-        let long_sig = "this_is_a_very_long_function_name_that_exceeds_forty_characters(x, y, z)";
-        let w = function_first_column_width("Capability", std::iter::once(long_sig));
-        assert_eq!(w, 40);
-
-        let mut table = Table::new().with_columns(vec![
-            TableColumn::new("Capability")
-                .with_min_width(w)
-                .with_max_width(w),
-            TableColumn::new("Description"),
-        ]);
-        configure_shared_table(&mut table);
-        table.add_row(vec![
-            long_sig.into(),
-            "Does something useful".into(),
-        ]);
-
-        let term = styled_term(200);
-        let out = render_table_within_contract(&table, &term);
-        let max = max_line_visible_width(&out);
-        assert!(
-            max <= 140,
-            "table with capped first column must fit contract; max={max}; output:\n{out}"
-        );
-        // Wrapping produces a multi-line cell.
-        assert!(
-            out.lines().count() > 3,
-            "long signature must wrap to multiple lines; output:\n{out}"
-        );
-    }
+/// `Example`-column floor: the intrinsic width of the rendered example cells
+/// (and the `Example` header), capped at 40ch.
+///
+/// Used as a `min_width` on the trailing `Example` column so a long
+/// `Description` line cannot starve it. The shared `Table` planner grants its
+/// surplus width to shrinkable columns greedily in column order (see
+/// `resolve_width_plan`), so without a floor a group whose widest description
+/// happens to consume the surplus leaves `Example` at its break-minimum — a
+/// one-token-wide sliver that wraps almost vertically. Reserving the floor
+/// before the surplus pass keeps the two flexible columns balanced. At widths
+/// too narrow to honor the floor, [`render_table_resilient`] drops the pins and
+/// falls back to the break-aware [`TableLayout::Wrap`] layout.
+#[allow(dead_code)]
+pub fn example_column_floor<'a>(examples: impl Iterator<Item = &'a str>) -> usize {
+    examples
+        .map(|s| visible_width(s) as usize)
+        .max()
+        .unwrap_or(0)
+        .max(visible_width("Example") as usize)
+        .min(40)
 }
+
+#[cfg(test)]
+mod tests;

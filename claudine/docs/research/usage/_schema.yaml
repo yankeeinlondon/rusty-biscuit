@@ -1,0 +1,35 @@
+# SimplifiedSchema for the usage research topic.
+#
+# Captures whether Claudine can discover subscription/usage/quota state through
+# APIs, CLI flags, structured output, or interactive PTY scraping.
+$schema:
+    created: date
+    last_updated: date(required)
+    agent: string(required)
+    model: string(required)
+
+    # High-level availability by mechanism.
+    api: boolean(required)
+    cli_switch: boolean(required)
+    structured_output: boolean
+    pty_scrape: boolean(required)
+
+    # API opportunities, including auth and user eligibility.
+    api_methods: "{ available: boolean(required), endpoint: string, auth: enum(api_key,oauth,session_cookie,subscription,enterprise_only,unknown,none), users: string, fields: string[], reset_window: string, notes: string }[]"
+
+    # CLI or slash-command opportunities.
+    cli_methods: "{ available: boolean(required), invocation: string, interactive_only: boolean, output_format: string, fields: string[], notes: string }[]"
+
+    # PTY scrape design if no direct API/CLI exists.
+    pty_design: "{ command: string, first_pass_markers: string[], fuzzy_markers: string[], fields: string[], risks: string }"
+
+    # Metrics available: short window, weekly/monthly, tokens, dollars, percent, reset time.
+    metrics: "{ name: string(required), unit: enum(tokens,credits,currency,percent,requests,time,unknown,other; required), window: enum(session,hourly,daily,five_hour,weekly,monthly,billing_cycle,unknown,other), source: string, notes: string }[]"
+
+    # Provider-specific cap/funds/auth states and how to distinguish them.
+    limit_states: "{ state: enum(cap_approaching,capped,no_funds,auth_required,unknown,other; required), detectable: boolean(required), source: string, markers: string[], notes: string }[]"
+
+    docs: url
+    changes: string[]
+    requires_claudine_update: boolean(required)
+    reason: string

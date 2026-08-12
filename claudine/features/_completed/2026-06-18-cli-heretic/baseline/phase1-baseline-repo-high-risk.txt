@@ -1,0 +1,1974 @@
+- There are 145 files with high risk of being considered god files
+
+High risk
+- the unchained-ai/lib/src/rigging/providers/models/metadata_generated.rs file is 13703 lines of code
+  - top-level symbols: 1 · max depth: 0 · imports: 7 · TODO/FIXME: 0 · comments: 0%
+- the sniff/cli/tests/cli.rs file is 7180 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function test_repo_version_verbose_named_workspace_inheritance  [2756–2851]  88 sloc — Verbose mode shows the manifest source for each entry; the single-source
+    - function test_git_status_from_linked_worktree_renders_case_a  [7357–7429]  65 sloc — Case A: from inside a linked worktree, the report shows the main worktree
+    - function test_repo_subcommand_json_shapes_are_distinct  [6890–6962]  61 sloc — Distinctness matrix for `sniff repo <subcommand> --json`.
+    - function test_repo_structure_filter_json_filters_packages  [7047–7106]  56 sloc — Phase 3 — `repo structure --json --filter` must scope the `packages`
+    - function create_cli_monorepo_with_nested_areas  [8143–8201]  54 sloc — Build a monorepo with three areas where two share a common prefix
+    - function test_repo_branches_json_shape  [3196–3254]  52 sloc
+    - function test_repo_recent_commits_action_filter_or_semantics  [5272–5326]  52 sloc
+    - function test_repo_aggregate_dependencies_are_cwd_invariant  [3438–3498]  51 sloc
+    - …and 211 more
+  - top-level symbols: 376 · max depth: 4 · imports: 5 · TODO/FIXME: 0 · comments: 7%
+  - likely refactor: 376 unrelated top-level symbols — split by responsibility
+- the claudine/cli/tests/wrap_commands.rs file is 5986 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function opencode_structured_e2e_stdout_and_section_spacing  [5835–5938]  77 sloc — End-to-end regression test for the OpenCode structured wrap pipeline.
+    - function watchdog_subagent_hang_terminates_and_names_stuck_ids  [6603–6690]  77 sloc — Replay the reference hang shape: 9 task_started, 7 task_completed, then
+    - function inline_compose_final_response_converges_across_harness_and_non_harness_paths  [3151–3251]  71 sloc
+    - function slow_compose_sigint_during_prep_exits_130_with_notice  [7267–7373]  71 sloc
+    - function watchdog_opencode_post_fanout_silence_does_not_kill_prematurely  [6858–6951]  68 sloc — Phase 1 reproduction for the 2026-05-10 OpenCode timeout regression.
+    - function inline_compose_non_harness_respects_cli_step_timeout  [7379–7450]  65 sloc — Non-harness inline-compose respects --step-timeout CLI flag.
+    - function structured_verbosity_controls_stream_stderr_lines  [1744–1814]  65 sloc
+    - function watchdog_wall_clock_timeout_terminates_active_stream  [6751–6827]  62 sloc — Wall-clock watchdog fires when the run exceeds the configured `timeout`
+    - …and 135 more
+  - top-level symbols: 166 · max depth: 2 · imports: 24 · TODO/FIXME: 0 · comments: 9%
+  - likely refactor: 166 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (24 imports) — expect wide refactor blast radius
+- the biscuit-terminal/lib/src/components/filesystem/mod.rs file is 5936 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method build_tree_recursive  [1371–1536]  124 sloc — Builds the tree by walking the filesystem.
+    - method format_single_metric  [1643–1742]  99 sloc — Formats a single metric value with its label.
+    - method render_nodes  [2092–2204]  94 sloc — Renders tree nodes recursively to the output string.
+    - method get_extension_icon  [1186–1281]  89 sloc — Returns icons based on file extension (case-insensitive).
+    - method fs_project_root_header  [3067–3148]  71 sloc — Builds the root header `Paragraph` projected onto the canonical tree
+    - method render_root_line  [1995–2075]  69 sloc — Renders the root directory name as a header line.
+    - function test_get_icon_special_dirs  [4001–4070]  62 sloc
+    - method fs_project_metrics  [2992–3058]  61 sloc — Projects the metrics suffix for a node as a structured inline span.
+    - …and 129 more
+  - top-level symbols: 36 · max depth: 4 · imports: 113 · TODO/FIXME: 4 · comments: 18%
+  - likely refactor: 36 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (113 imports) — expect wide refactor blast radius
+- the renderable/src/tree/render/browser.rs file is 4317 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function parity_corpus  [3942–4065]  119 sloc — A diverse single-document corpus exercising prose, headings, emphasis,
+    - method write_kind  [1353–1443]  91 sloc — Streams a single node by its [`NodeKind`] — the streaming analogue of
+    - method render_kind  [347–423]  73 sloc — Renders a single node by its [`NodeKind`], without applying the
+    - function layout_to_css  [2750–2814]  63 sloc
+    - method write_columns  [1572–1634]  59 sloc — Streaming analogue of [`Writer::render_columns`].
+    - function node_attributes  [2336–2415]  58 sloc — Translates a node's [`NodeAttrs`] into HTML attributes: `id` to the `id`
+    - method render_list  [738–806]  58 sloc — Renders a list as `<ol>` (respecting `start`) or `<ul>`.
+    - method write_list  [1637–1696]  58 sloc — Streaming analogue of [`Writer::render_list`].
+    - …and 103 more
+  - top-level symbols: 32 · max depth: 4 · imports: 163 · TODO/FIXME: 1 · comments: 14%
+  - likely refactor: 32 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (163 imports) — expect wide refactor blast radius
+- the biscuit-terminal/lib/src/components/table/table.rs file is 4141 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method render_with_cursor_positioning  [1159–1407]  202 sloc — Render with cursor positioning, supporting all Layout attributes.
+    - method render_content  [914–1153]  197 sloc — Render the table content with multi-line cell support.
+    - function render_row_with_cursor_positioning  [2244–2392]  105 sloc — Render a row with cursor positioning, supporting cell alignment.
+    - method resolve_width_plan  [480–593]  101 sloc
+    - method to_render_tree_node  [1440–1551]  82 sloc — Builds the canonical [`NodeKind::Table`] tree node for this table.
+    - method build_width_error  [698–764]  66 sloc
+    - method measure_column  [615–688]  66 sloc
+    - method plan_widths_for_render_width  [363–428]  60 sloc
+    - …and 81 more
+  - top-level symbols: 35 · max depth: 6 · imports: 65 · TODO/FIXME: 0 · comments: 13%
+  - likely refactor: 35 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 6) — extract / flatten
+  - likely refactor: high coupling (65 imports) — expect wide refactor blast radius
+- the biscuit-terminal/lib/src/render_tree/render.rs file is 4027 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method render_inline_node  [1015–1228]  169 sloc — Projects a single inline node into terminal SGR output.
+    - function emit_table  [2557–2744]  168 sloc — Emits the table body from a resolved [`TableWidthPlan`] (pass 2).
+    - method render_kind  [501–682]  139 sloc — Renders a single block-level node by its [`NodeKind`], without applying
+    - method render_list_item  [1487–1589]  79 sloc — Renders a single list item with its `prefix`.
+    - method render_table  [1854–1952]  78 sloc — Renders a [`NodeKind::Table`] node with a native two-pass renderer.
+    - method render_tree_connector_list  [1380–1472]  75 sloc — Renders a list with terminal box-drawing connectors
+    - method render_with_layout  [361–467]  68 sloc — Renders a node's content within the constraints of a [`Layout`].
+    - function render_tree_code_renderer_receives_color_context_for_both_modes  [2813–2876]  59 sloc
+    - …and 98 more
+  - top-level symbols: 29 · max depth: 6 · imports: 289 · TODO/FIXME: 3 · comments: 18%
+  - likely refactor: 29 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 6) — extract / flatten
+  - likely refactor: high coupling (289 imports) — expect wide refactor blast radius
+- the research/lib/src/lib.rs file is 3957 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function research  [3509–4279]  627 sloc — Research a library topic and generate comprehensive documentation.
+    - function run_incremental_research  [2275–2877]  508 sloc — Run incremental research by regenerating missing prompts and/or adding new questions.
+    - function run_agent_prompt_task  [1448–1669]  188 sloc — Run a prompt task using an agent with tools, printing progress as it completes.
+    - function regenerate_skill_from_existing_research  [3184–3382]  165 sloc — Regenerate skill files from existing underlying research documents
+    - function run_changelog_completion_task  [1988–2132]  125 sloc — Run changelog task with version history aggregation (non-agent version without tools).
+    - function run_changelog_agent_task  [1825–1968]  121 sloc — Run changelog task with version history aggregation (agent version with tools).
+    - function list_with_migrate  [2963–3115]  119 sloc — List research topics with optional metadata migration.
+    - function run_question_task  [1695–1805]  97 sloc — Run a dynamic question task and save result
+    - …and 38 more
+  - top-level symbols: 66 · max depth: 11 · imports: 62 · TODO/FIXME: 2 · comments: 14%
+  - likely refactor: 66 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 11) — extract / flatten
+  - likely refactor: high coupling (62 imports) — expect wide refactor blast radius
+- the sniff/lib/src/programs/enums/metadata.rs file is 3789 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method serde_key  [3839–3876]  38 sloc
+    - method serde_key  [1257–1290]  34 sloc
+    - method serde_key  [555–584]  30 sloc
+    - method serde_key  [1674–1695]  22 sloc
+    - method serde_key  [2540–2560]  21 sloc
+    - method platform_override  [2172–2191]  20 sloc
+    - method platform_override  [3213–3232]  20 sloc
+    - method serde_key  [2152–2170]  19 sloc
+    - …and 2 more
+  - top-level symbols: 1 · max depth: 2 · imports: 21 · TODO/FIXME: 0 · comments: 1%
+  - likely refactor: high coupling (21 imports) — expect wide refactor blast radius
+- the biscuit-terminal/cli/tests/integration_test.rs file is 3697 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function test_table_title_renders_caption_on_every_target  [3690–3753]  62 sloc
+    - function public_docs_do_not_advertise_removed_atomic_tokens  [2153–2192]  36 sloc — Public docs and examples must not advertise the removed Prose
+    - function test_every_subcommand_help_exposes_example_flag  [47–83]  36 sloc
+    - function test_compose_md_with_table_emits_gfm_table  [2447–2481]  32 sloc
+    - function test_table_md_plus_matches_md_for_pure_gfm_table  [3631–3662]  32 sloc
+    - function test_status_block_help_exposes_target_and_layout_flags  [3504–3536]  31 sloc
+    - function test_list_ordered_html_with_layout_emits_margin_on_ol_only  [2821–2854]  30 sloc
+    - function test_json_output_is_valid_json  [139–172]  29 sloc
+    - …and 105 more
+  - top-level symbols: 228 · max depth: 4 · imports: 8 · TODO/FIXME: 0 · comments: 5%
+  - likely refactor: 228 unrelated top-level symbols — split by responsibility
+- the darkmatter/lib/src/markdown/compose/tests.rs file is 3412 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function baseline_cache_does_not_reuse_across_distinct_baselines  [2867–2963]  83 sloc — Different baseline schemas must not share cache entries for the same
+    - function preflight_graph_reuse_recurses_to_remote_grandchild  [3442–3528]  74 sloc — Recursive preflight graph reuse for **remote** children (review-6
+    - function cached_local_child_revalidates_nested_remote_under_refresh  [3591–3667]  65 sloc
+    - function test_stage2_mutual_exclusion_conditions  [1550–1622]  61 sloc
+    - function embedded_subtree_round_trips_through_compose_then_terminal_render  [3785–3850]  59 sloc — End-to-end: composing a `::file-links` directive through the full
+    - function rich_fixture_renders_full_presentation_contract  [3859–3917]  50 sloc — In-process companion to the Level 2 presentation test: the full
+    - function implement_md_three_arm_union_ternaries_coerce_and_defer_shell  [2721–2786]  45 sloc
+    - function frontmatter_shell_ternary_remote_url_condition_fails_loudly  [3232–3275]  40 sloc — Decision B covers the `$()` shell-ternary condition surface too: a
+    - …and 88 more
+  - top-level symbols: 116 · max depth: 2 · imports: 49 · TODO/FIXME: 0 · comments: 6%
+  - likely refactor: 116 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (49 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/layout/page.rs file is 3195 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function wrap_browser_html  [1515–1655]  109 sloc — Wrap HTML markdown body in a page-level container with layout CSS.
+    - function apply_row_decoration  [1270–1372]  82 sloc — Wrap rendered markdown body with margin/padding rows and background fill.
+    - method render  [818–944]  67 sloc — Render the given markdown document through the page layout.
+    - function cross_surface_contrast_guardrail_terminal_and_browser  [4384–4453]  61 sloc — A single test that captures all the cross-surface contrast invariants
+    - method render_to_browser  [980–1045]  54 sloc — Render the given markdown document to browser-compatible HTML through
+    - function end_to_end_example_from_spec  [3070–3137]  50 sloc
+    - function render_li_body_alignment_right  [3247–3299]  47 sloc
+    - function render_ul_left_margin_and_max_width  [3178–3222]  39 sloc
+    - …and 63 more
+  - top-level symbols: 12 · max depth: 4 · imports: 66 · TODO/FIXME: 1 · comments: 21%
+  - likely refactor: 12 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (66 imports) — expect wide refactor blast radius
+- the homelab/cli/src/main.rs file is 3153 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function handle_sony_native  [3212–3548]  333 sloc
+    - function handle_sony_input  [2718–3003]  286 sloc
+    - function run_arcam_action  [939–1182]  219 sloc
+    - function handle_sony_playback  [3005–3210]  206 sloc
+    - function handle_sony_system  [2387–2555]  169 sloc
+    - function handle_eversolo_display  [1551–1688]  138 sloc
+    - function handle_sony_audio  [2586–2716]  131 sloc
+    - function handle_samsung_app  [1880–2007]  128 sloc
+    - …and 30 more
+  - top-level symbols: 70 · max depth: 5 · imports: 31 · TODO/FIXME: 0 · comments: 8%
+  - likely refactor: 70 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (31 imports) — expect wide refactor blast radius
+- the claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs file is 3070 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method render_event  [368–549]  127 sloc
+    - method on_semantic_event  [661–819]  116 sloc
+    - function summarize_provider_payload  [888–977]  79 sloc — Produce a terse one-line human summary of a [`SemanticEvent::ProviderExtension`]
+    - function with_default_wiring  [219–293]  71 sloc — Convenience constructor for the wrapped-provider call sites
+    - function replay_to_combined  [3189–3266]  63 sloc — Replay fixture lines through the parser + [`LiveSemanticSink`]
+    - function opencode_acceptance_replay_satisfies_phase4_contract  [3609–3685]  54 sloc — Phase 4 acceptance gate for the 2026-04-18 OpenCode reporting
+    - function combined_sections_have_no_consecutive_blanks  [1524–1583]  49 sloc — Combined section golden test: feed every section transition through
+    - function opencode_firecrawl_tool_use_does_not_render_via_info_glyph  [2434–2486]  49 sloc
+    - …and 74 more
+  - top-level symbols: 12 · max depth: 4 · imports: 39 · TODO/FIXME: 0 · comments: 15%
+  - likely refactor: 12 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (39 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/markdown/compose/expression/functions.rs file is 2969 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function link_fn  [1386–1422]  37 sloc — `link(file)` / `link(target, desc)` — emits a Markdown inline link.
+    - function resolve_path_shape  [1046–1085]  36 sloc — Resolves a raw path string to an absolute path shape.
+    - function skill_roots_all_recognized_agents_search_all_four_local_roots  [3540–3579]  36 sloc
+    - function date_fn  [727–762]  33 sloc — Reformats an ISO date/datetime string into a named human format.
+    - function split_words  [437–476]  33 sloc — Splits a string into "words" suitable for case-conversion. Words are
+    - function has_skill_finds_cross_agent_local_roots  [3202–3235]  28 sloc
+    - function path_components_split_display_path  [2888–2915]  27 sloc
+    - function decrement_file_index_fn  [1193–1218]  26 sloc — `decrement_file_index(file) -> string` — decrements the numeric suffix,
+    - …and 45 more
+  - top-level symbols: 125 · max depth: 3 · imports: 30 · TODO/FIXME: 0 · comments: 9%
+  - likely refactor: 125 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (30 imports) — expect wide refactor blast radius
+- the tree-hugger/cli/src/main.rs file is 2808 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function main  [845–1253]  363 sloc
+    - function summarize_file  [1377–1521]  141 sloc
+    - function binding_token_for_symbol  [640–748]  107 sloc
+    - function extract_class_summaries  [2829–2924]  84 sloc — Extracts class summaries from a file.
+    - function render_god_analysis  [3214–3293]  70 sloc — Render a single god-file analysis.
+    - function render_summary  [1836–1897]  58 sloc — Renders one file's results, returning whether anything was printed.
+    - function apply_lint_policy  [2612–2678]  56 sloc — Applies CLI policy to lint diagnostics.
+    - function render_symbol_line  [2220–2277]  54 sloc
+    - …and 47 more
+  - top-level symbols: 94 · max depth: 6 · imports: 74 · TODO/FIXME: 0 · comments: 8%
+  - likely refactor: 94 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 6) — extract / flatten
+  - likely refactor: high coupling (74 imports) — expect wide refactor blast radius
+- the sniff/lib/tests/integration.rs file is 2782 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function test_performance_collector_thread_local_aggregation  [3317–3420]  74 sloc
+    - function create_monorepo_repo  [2927–3010]  73 sloc — Create a monorepo-style temp repo with Cargo workspace and multiple packages.
+    - function test_rusty_biscuit_repo_topology_parity  [887–971]  72 sloc
+    - function debug_skewed_git2_order  [3510–3577]  63 sloc
+    - function test_network_ip_addresses_json_structure  [1841–1910]  60 sloc — Tests that ip_addresses JSON serialization produces expected structure.
+    - function test_network_ip_addresses_roundtrip  [1914–1975]  57 sloc — Tests that ip_addresses roundtrip through JSON correctly.
+    - function create_merge_conflict_repo  [2041–2102]  51 sloc
+    - function test_per_root_confidence_in_same_standard_forest  [544–598]  44 sloc
+    - …and 67 more
+  - top-level symbols: 126 · max depth: 4 · imports: 122 · TODO/FIXME: 0 · comments: 9%
+  - likely refactor: 126 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (122 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/markdown/compose/frontmatter_shell_expansion.rs file is 2627 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function parse_shell_value  [195–378]  131 sloc — Parses a single frontmatter string value for shell expression.
+    - function execute_frontmatter_shell_expansion  [992–1149]  123 sloc — Executes all frontmatter shell expansion directives and rewrites
+    - function validate_pipeline_shape_preserved  [794–853]  57 sloc — Asserts that interpolation has not changed the static shape of a
+    - function evaluate_value_branch  [1415–1466]  49 sloc — Evaluates a §2 value branch (a literal, `name(...)` function, `doc.*`, or a
+    - function evaluate_ternary_condition  [1238–1289]  48 sloc — Evaluates a ternary's condition and returns `true` when the then-branch
+    - function prepare_optional_branch  [1351–1404]  48 sloc — Prepares one side of a ternary.
+    - function split_at_chain_operators  [903–951]  46 sloc — Splits an inner `$(...)` body at top-level `&&` and `||` operators,
+    - function directive_reachable_pipelines  [1168–1219]  45 sloc — Returns every shell pipeline that this directive could execute at runtime.
+    - …and 58 more
+  - top-level symbols: 39 · max depth: 4 · imports: 49 · TODO/FIXME: 0 · comments: 16%
+  - likely refactor: 39 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (49 imports) — expect wide refactor blast radius
+- the sniff/cli/src/output/repo_json.rs file is 2593 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function build_with_outcome  [99–305]  165 sloc — Build the JSON value plus an optional explicit exit code.
+    - function build_aggregate_value  [704–825]  113 sloc — Assemble the consolidated aggregate for bare `sniff repo --json`.
+    - function fixture  [1345–1394]  50 sloc
+    - function aggregate_repo_version_uniform_returns_the_shared_string  [2773–2823]  49 sloc
+    - function aggregate_repo_version_two_distinct_returns_none  [2832–2878]  46 sloc
+    - function aggregate_includes_consolidated_keys  [2549–2595]  44 sloc
+    - function build_deps_package_entry  [504–547]  39 sloc — Build a single `package-dependencies --json` package entry from a `Package`.
+    - function fixture_with_packages  [1577–1615]  39 sloc
+    - …and 49 more
+  - top-level symbols: 40 · max depth: 3 · imports: 82 · TODO/FIXME: 0 · comments: 10%
+  - likely refactor: 40 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (82 imports) — expect wide refactor blast radius
+- the claudine/rendezvous/daemon/src/session_log.rs file is 2576 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function envelope_before_snapshot_ordering_prevents_duplicate_on_restart  [2294–2433]  127 sloc
+    - function accepted_envelope_only_replay_recovers_missing_snapshot  [1698–1834]  126 sloc
+    - method append_entry  [378–516]  116 sloc — Append a new entry to the session, rotating chunks if required.
+    - function envelope_before_snapshot_crash_window_recovers_on_restart  [1837–1949]  103 sloc
+    - function failed_persist_on_remote_update_does_not_leave_data_in_memory  [2138–2220]  72 sloc
+    - function validate_and_extract_metadata  [1004–1077]  69 sloc
+    - function existing_entry_reordering_rejected_as_append_only_violation  [2593–2664]  67 sloc
+    - method stage_remote_update  [642–713]  66 sloc — Stage a remote update by importing the payload into a temporary
+    - …and 46 more
+  - top-level symbols: 22 · max depth: 3 · imports: 52 · TODO/FIXME: 0 · comments: 4%
+  - likely refactor: 22 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (52 imports) — expect wide refactor blast radius
+- the sniff/cli/src/output/filesystem/mod.rs file is 2493 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function render_git_section  [720–1128]  327 sloc
+    - function build_git_status_items  [413–530]  96 sloc — Print git information with rich terminal formatting.
+    - function git_status_sections_have_single_blank_line_separator  [1522–1618]  85 sloc
+    - function git_status_case_a_linked_worktree_shows_main_and_current  [1621–1687]  64 sloc
+    - function format_commit_line  [291–345]  53 sloc — Format a single commit as a styled one-liner.
+    - function conflicted_files_render_last_and_untracked_is_dimmed  [1441–1490]  46 sloc
+    - function make_git_info  [1389–1435]  46 sloc
+    - function render_hash_section  [350–405]  46 sloc — Render detailed information for a single commit looked up by `hash` subcommand.
+    - …and 38 more
+  - top-level symbols: 29 · max depth: 5 · imports: 86 · TODO/FIXME: 0 · comments: 10%
+  - likely refactor: 29 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (86 imports) — expect wide refactor blast radius
+- the biscuit-clipboard/service/src/api.rs file is 2460 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function test_format_priority_picks_text_over_others  [1271–1377]  92 sloc — Multi-format entries — insert directly via the state to verify
+    - function test_set_backend_failure_returns_500_internal  [1579–1653]  71 sloc
+    - function test_internal_error_envelope_from_clear_failure  [1505–1576]  69 sloc — Phase 6 / Test Coverage #2: every documented `ErrorCode` must have
+    - function test_events_endpoint_fans_out_to_multiple_subscribers  [1790–1859]  63 sloc
+    - function test_full_set_text_check_history_flow  [2213–2282]  62 sloc
+    - function test_events_endpoint_streams_set_inserts  [1717–1787]  61 sloc
+    - function test_clear_history_flow  [2410–2471]  57 sloc
+    - function test_image_disk_spill_round_trip_via_api  [1662–1714]  46 sloc — Phase 6 / Test Coverage #9: end-to-end image spill — POST a large
+    - …and 62 more
+  - top-level symbols: 35 · max depth: 3 · imports: 58 · TODO/FIXME: 0 · comments: 5%
+  - likely refactor: 35 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (58 imports) — expect wide refactor blast radius
+- the sniff/cli/src/args/mod.rs file is 2410 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method to_repo_action  [750–1065]  316 sloc — Normalize a Repo command into a RepoAction for dispatch.
+    - method install_command_args  [556–663]  108 sloc — Returns the kind (install vs install-plan) and the shared args for
+    - function repo_subcommands_parse  [1475–1583]  98 sloc
+    - enum Commands  [332–481]  77 sloc — Subcommands for filtering output to specific sections.
+    - function repo_accessors_work  [1932–1995]  60 sloc
+    - enum SoftwareSubcommand  [252–321]  46 sloc — Subcommands under `sniff software`.
+    - function common_subcommands_parse  [1335–1380]  46 sloc
+    - method to_output_filter  [485–524]  40 sloc — Convert command to the corresponding output filter.
+    - …and 28 more
+  - top-level symbols: 20 · max depth: 4 · imports: 10 · TODO/FIXME: 0 · comments: 5%
+  - likely refactor: 20 unrelated top-level symbols — split by responsibility
+- the tree-hugger/lib/tests/tree_file.rs file is 2375 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function extracts_csharp_type_metadata  [1577–1651]  65 sloc
+    - function extracts_java_type_metadata  [1406–1474]  61 sloc
+    - function extracts_typescript_generic_types  [489–544]  48 sloc
+    - function extracts_cpp_type_metadata  [1522–1574]  45 sloc
+    - function extracts_php_type_metadata  [1750–1802]  45 sloc
+    - function extracts_swift_type_metadata  [1654–1706]  45 sloc
+    - function extracts_typescript_visibility_modifiers  [2116–2170]  44 sloc
+    - function extracts_python_aliased_import  [2602–2653]  43 sloc
+    - …and 67 more
+  - top-level symbols: 91 · max depth: 2 · imports: 6 · TODO/FIXME: 0 · comments: 8%
+  - likely refactor: 91 unrelated top-level symbols — split by responsibility
+- the schematic/schema/src/emqx/requests.rs file is 2363 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method endpoint_id  [4121–4228]  108 sloc — Returns the endpoint identifier for this request.
+    - method endpoint_id  [3700–3803]  104 sloc — Returns the endpoint identifier for this request.
+    - method into_parts  [4075–4116]  42 sloc — Converts the request into (method, path, body, headers) parts.
+    - enum EmqxBearerRequest  [3988–4065]  40 sloc — Request enum for EmqxBearer API.
+    - method into_parts  [3656–3695]  40 sloc — Converts the request into (method, path, body, headers) parts.
+    - enum EmqxBasicRequest  [3573–3646]  38 sloc — Request enum for EmqxBasic API.
+  - top-level symbols: 76 · max depth: 1 · imports: 4 · TODO/FIXME: 0 · comments: 47%
+  - likely refactor: 76 unrelated top-level symbols — split by responsibility
+  - likely refactor: low code density (47% comments) — mostly comments/docs
+- the biscuit-terminal/lib/src/components/horizontal_rule/mod.rs file is 2319 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method generate_terminal_content  [510–606]  86 sloc — Generates terminal content for the horizontal rule based on style and width.
+    - method render_image_svg  [419–496]  76 sloc
+    - function test_render_curtain_rod_thick_right_has_brackets_and_heavy_line  [1202–1262]  49 sloc — C4 (Unicode path): CurtainRod + Thick + Right produces the expected
+    - method render_image_tier_from_svg  [368–417]  44 sloc — SVG-injection seam used by [`render_image_tier`] and the test suite.
+    - method resolve_width  [247–296]  40 sloc — Resolves the width of the rule in characters based on the terminal
+    - function test_snapshot_render_all_styles  [1760–1803]  39 sloc
+    - function test_all_styles_all_alignments_all_weights_ascii  [1719–1756]  37 sloc
+    - function test_all_styles_all_alignments_all_weights_unicode  [1679–1716]  37 sloc
+    - …and 42 more
+  - top-level symbols: 4 · max depth: 5 · imports: 34 · TODO/FIXME: 0 · comments: 13%
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (34 imports) — expect wide refactor blast radius
+- the claudine/cli/src/commands/wrap/composition/mod.rs file is 2274 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function execute_composition_request_inner  [828–2007]  908 sloc — Inner implementation that returns the full [`SingleCompositionOutcome`].
+    - function eagerly_resolve_target  [388–461]  58 sloc — Resolve the execution target *before* composition templates are
+    - function resolve_live_target_with_tty  [492–550]  56 sloc
+    - function composition_dispatch_context  [332–376]  45 sloc
+    - function load_selection_config_returns_both_favorite_and_overrides  [2133–2182]  43 sloc
+    - function emit_execution_header  [732–773]  42 sloc — Render the one-line execution header for a composition run.
+    - function live_list_one_installed_auto_selects_regardless_of_tty  [2580–2613]  34 sloc
+    - function resolve_single_timeout  [231–264]  30 sloc — Resolve a single timeout following the documented precedence chain:
+    - …and 25 more
+  - top-level symbols: 32 · max depth: 5 · imports: 73 · TODO/FIXME: 0 · comments: 16%
+  - likely refactor: 32 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (73 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/markdown/cleanup.rs file is 2162 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function process_single_table  [1087–1211]  116 sloc — Processes a single table's events to align columns.
+    - function normalize_list_spacing  [1222–1324]  80 sloc — Normalizes blank lines between list items according to the spacing mode.
+    - function unescape_brackets  [846–926]  62 sloc — Unescapes unnecessarily escaped brackets in the output.
+    - function preserve_original_emphasis  [97–165]  59 sloc — Transforms emphasis/strong events into literal text events to preserve original markers.
+    - function fix_list_indentation  [748–822]  58 sloc — Fixes list indentation in the output to match the original style.
+    - function fix_blockquote_formatting  [566–637]  51 sloc — Fixes blockquote formatting issues introduced by pulldown-cmark-to-cmark v18.
+    - function cleanup_content_internal  [341–441]  49 sloc
+    - function restore_list_markers  [502–556]  44 sloc — Restores original list markers in the output.
+    - …and 24 more
+  - top-level symbols: 36 · max depth: 7 · imports: 10 · TODO/FIXME: 1 · comments: 16%
+  - likely refactor: 36 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 7) — extract / flatten
+- the sniff/lib/tests/remote_providers.rs file is 2109 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function list_pull_requests_draft_filter  [970–1025]  53 sloc
+    - function list_pull_requests_draft_filter  [445–496]  49 sloc
+    - function list_pull_requests_merged_filter  [392–442]  48 sloc
+    - function list_pull_requests_merged_filter  [1846–1895]  47 sloc
+    - function list_pull_requests_merged_filter  [1403–1451]  46 sloc
+    - function list_documents_success  [221–273]  44 sloc
+    - function bitbucket_list_pull_requests_falls_back_to_unauthenticated_when_token_missing  [2494–2533]  37 sloc
+    - function gitlab_list_pull_requests_falls_back_to_unauthenticated_when_token_missing  [2405–2444]  37 sloc
+    - …and 70 more
+  - top-level symbols: 7 · max depth: 1 · imports: 18 · TODO/FIXME: 0 · comments: 5%
+- the renderable/src/tree/attrs.rs file is 2098 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function styled_corpus_document  [3327–3503]  151 sloc — Builds a styled corpus exercising every first-class hint branch the
+    - function corpus_coverage  [3560–3601]  42 sloc — Collects, for the whole tree, whether each typed group is populated on
+    - function progress_hints_round_trip_set_and_read  [2932–2970]  38 sloc
+    - function fold_does_zero_renderable_owned_hint_roundtrips  [3513–3554]  36 sloc — Structural perf gate: folding the styled corpus must not round-trip any
+    - function browser_round_trip_and_sparsity  [3673–3709]  32 sloc
+    - function walk  [3561–3589]  29 sloc
+    - function table_column_hints_round_trip  [3041–3069]  28 sloc
+    - function data_attr_name_validation  [3778–3804]  26 sloc
+    - …and 19 more
+  - top-level symbols: 40 · max depth: 1 · imports: 32 · TODO/FIXME: 2 · comments: 39%
+  - likely refactor: 40 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (32 imports) — expect wide refactor blast radius
+- the tree-hugger/lib/src/god_files/analysis.rs file is 2041 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function is_control_flow_nesting  [831–983]  151 sloc — Returns true for syntax-tree node kinds that introduce a control-flow
+    - function analyze_single_file  [127–260]  118 sloc — Analyze a single candidate file, returning `None` if it drops below the
+    - function attach_many_members  [620–695]  64 sloc — Attach `ContainerCallout` to any block that represents a container with
+    - function many_members_excludes_variables_fields_parameters  [1525–1582]  53 sloc
+    - function dominated_share_uses_file_sloc_not_overlapping_blocks  [1841–1894]  50 sloc
+    - function flat_record  [2267–2310]  44 sloc — Synthetic flat record with a disjoint declaration span; nothing nests.
+    - function compute_symbol_blocks  [524–571]  39 sloc — Compute symbol blocks from the parsed symbol records.
+    - function effective_sloc_for_range  [349–390]  39 sloc — Effective SLOC over a byte range, using the file-level comment coverage.
+    - …and 36 more
+  - top-level symbols: 29 · max depth: 3 · imports: 41 · TODO/FIXME: 15 · comments: 12%
+  - likely refactor: 29 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (41 imports) — expect wide refactor blast radius
+- the claudine/cli/src/perf.rs file is 2035 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function render_perf_report_snapshot_locks_tree_layout  [1770–1889]  95 sloc — Snapshot-style coverage for the rendered tree report.
+    - function build_perf_tree  [275–412]  89 sloc — Assemble the [`PerfNode`] tree for a built [`CommandPerfReport`] (TM-2).
+    - method into_report_with_elapsed  [800–895]  86 sloc — Build the report against a caller-supplied wall-clock total.
+    - function sequence_perf_accumulator_merges_composition  [1501–1589]  83 sloc
+    - function render_perf_report_includes_all_sections  [1328–1397]  67 sloc
+    - function perf_tree_sequence_builds_per_step_subtrees  [2346–2414]  58 sloc — TM-3: a sequence renders a `steps` Structural node whose per-step
+    - function perf_tree_assembles_with_roles  [1964–2038]  57 sloc
+    - function sequence_perf_accumulator_aggregates_agent_perf  [1592–1649]  55 sloc
+    - …and 36 more
+  - top-level symbols: 37 · max depth: 5 · imports: 25 · TODO/FIXME: 0 · comments: 17%
+  - likely refactor: 37 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (25 imports) — expect wide refactor blast radius
+- the claudine/cli/src/commands/wrap/profile/mod.rs file is 2019 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - trait WrapperProfile  [308–789]  258 sloc  (27 members) — Each wrapped provider implements this trait to define its CLI mapping.
+      - method apply_yolo  42 sloc
+      - method apply_output_format  36 sloc
+      - method reject_direct_yolo  25 sloc
+      - method apply_entrypoint  24 sloc
+      - method apply_yolo_for_mode  24 sloc
+      - method apply_system_prompt  21 sloc
+      - method apply_model  11 sloc
+      - method supports_resume  7 sloc
+      - …and 19 more
+    - function apply_opencode_model_resolution  [1092–1137]  43 sloc
+    - function claudine_yolo_env_binds_to_compose_shared_yolo_flag  [1936–1990]  43 sloc — Regression: the `--yolo` CLI flag and the `CLAUDINE_YOLO` env var
+    - method apply_yolo  [349–394]  42 sloc — Apply YOLO/auto-approve mode to `args` and `env_overrides`.
+    - function explicit_native_output_detection_matches_provider_catalog  [2610–2648]  39 sloc
+    - method apply_output_format  [555–591]  36 sloc — Map the universal `--output <format>` to provider-specific flags.
+    - function find_positional_prompt_index  [1005–1046]  34 sloc — Find the index of the first positional prompt candidate in `args`,
+    - function run_direct_wrap_pipeline_simulation  [2381–2426]  33 sloc
+    - …and 30 more
+  - top-level symbols: 25 · max depth: 4 · imports: 28 · TODO/FIXME: 0 · comments: 15%
+  - likely refactor: 25 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (28 imports) — expect wide refactor blast radius
+- the scripts/drift.rs file is 2017 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function run  [297–499]  188 sloc
+    - function run_agent  [854–990]  122 sloc
+    - function parse_claude_stream_json_value  [1258–1343]  82 sloc
+    - function capture_claude_stream_json_stdout  [1138–1216]  71 sloc
+    - function parse_cli_args  [501–552]  44 sloc
+    - function extract_content_block  [1358–1400]  42 sloc
+    - function collect_readmes  [667–709]  37 sloc
+    - function workspace_dependency_lines  [622–665]  37 sloc
+    - …and 31 more
+  - top-level symbols: 85 · max depth: 4 · imports: 37 · TODO/FIXME: 0 · comments: 0%
+  - likely refactor: 85 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (37 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/markdown/render_tree/fold.rs file is 1979 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method end  [1046–1160]  92 sloc — Handles an `Event::End`, popping the innermost frame into a finished
+    - function fold_markdown_spanned_with_context  [871–968]  87 sloc — Context-aware span fold: identical to [`fold_markdown_spanned_with_frontmatter`]
+    - function fold_markdown_spanned_with_frontmatter  [742–858]  87 sloc — Folds Markdown through the source-rewrite inline-extension pipeline,
+    - method start  [972–1042]  71 sloc — Handles an `Event::Start`, pushing a container frame.
+    - function split_disclosure_directives  [476–555]  65 sloc — Splits `Event::Text` events at disclosure directive line boundaries.
+    - method run_sub_fold  [339–398]  55 sloc — Runs a temporary sub-fold over `events` through a nested
+    - enum ContainerKind  [87–145]  46 sloc — The container kinds the fold pushes onto its stack.
+    - function embedded_render_tree_marker_splices_decoded_subtree_and_drops_fallback  [1689–1737]  42 sloc
+    - …and 42 more
+  - top-level symbols: 27 · max depth: 3 · imports: 48 · TODO/FIXME: 0 · comments: 19%
+  - likely refactor: 27 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (48 imports) — expect wide refactor blast radius
+- the renderable/src/tree/render/markdown.rs file is 1974 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method render  [185–341]  137 sloc — Renders a single node and its subtree.
+    - method render_span  [607–657]  47 sloc — Renders an inline span.
+    - function browser_only_attrs_are_dropped_in_both_markdown_dialects  [1095–1144]  43 sloc
+    - function render_markdown_node  [88–135]  43 sloc — Renders a render tree node to a Markdown string.
+    - method render_list  [520–561]  40 sloc — Renders a list, numbering ordered items from `start`.
+    - function markdown_plus_lowers_underline_variants_to_inline_html  [2258–2297]  39 sloc
+    - function columns_markdown_plus_image_column_renders_without_malformed_html  [1997–2036]  35 sloc
+    - function unordered_and_ordered_lists  [1147–1179]  32 sloc
+    - …and 42 more
+  - top-level symbols: 17 · max depth: 3 · imports: 63 · TODO/FIXME: 1 · comments: 12%
+  - likely refactor: 17 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (63 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/render/image_ref.rs file is 1961 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function parse_html_image  [1288–1399]  96 sloc
+    - method status_block  [99–206]  94 sloc
+    - function parse_structured_image_props  [1682–1745]  59 sloc — Parses a structured `key='value'` image title into typed [`ImageRef`] attrs.
+    - function parse_html_attributes  [1454–1519]  57 sloc
+    - method to_html  [876–937]  48 sloc — Renders as HTML `<img ... />`.
+    - function find_closing_paren  [1553–1601]  45 sloc
+    - function markdown_default_policy_roundtrips_all_defined_metadata_fields  [2310–2356]  44 sloc
+    - function parse_markdown_image  [1401–1452]  44 sloc
+    - …and 24 more
+  - top-level symbols: 43 · max depth: 5 · imports: 19 · TODO/FIXME: 0 · comments: 6%
+  - likely refactor: 43 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+- the darkmatter/lib/src/markdown/compose/shell_expansion/mod.rs file is 1958 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function prepare_directive  [153–384]  194 sloc — Resolves aliases, applies policy checks, and records approval decisions
+    - function resolve_or_passthrough  [604–693]  79 sloc — Resolves a directive's executable, returning the effective directive and
+    - function execute_and_handle_errors  [537–596]  54 sloc — Executes a command and applies error handling rules to `ExecutionFailed` errors.
+    - function redirection_stdout_null_then_merge_suppresses_both_streams  [2386–2417]  30 sloc — `> /dev/null 2>&1` suppresses BOTH stdout and stderr.
+    - function run_prepared_fresh  [499–530]  30 sloc — Executes a prepared directive without consulting the cache and converts
+    - function execute_prepared_directive  [461–495]  29 sloc — Executes a previously prepared directive, applying the per-compose command
+    - function redirection_merge_then_stdout_null_only_suppresses_stdout  [2423–2452]  28 sloc — `2>&1 > /dev/null` differs from `> /dev/null 2>&1`: stderr keeps a
+    - function allow_once_persists_across_sibling_transclusions  [1347–1377]  27 sloc
+    - …and 56 more
+  - top-level symbols: 18 · max depth: 4 · imports: 34 · TODO/FIXME: 0 · comments: 12%
+  - likely refactor: 18 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (34 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/markdown/transform/mod.rs file is 1879 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method run_transform_pipeline_internal  [145–316]  142 sloc — Internal recursive pipeline runner shared by root and child documents.
+    - method run_block_transclusion_stage  [482–606]  117 sloc — Runs Stage 2 block transclusion directives.
+    - method run_frontmatter_transclusion_stage  [609–682]  69 sloc — Runs Stage 2 frontmatter transclusion (`prologue`, `epilogue`).
+    - method render_frontmatter_reference  [684–750]  63 sloc
+    - function test_stage2_mutual_exclusion_conditions  [2272–2342]  59 sloc
+    - method render_markdown_transclusion  [753–825]  58 sloc
+    - method run_interpolation_stage  [349–399]  43 sloc — Runs the interpolation stage.
+    - method render_code_transclusion  [827–865]  36 sloc
+    - …and 34 more
+  - top-level symbols: 1 · max depth: 3 · imports: 31 · TODO/FIXME: 0 · comments: 8%
+  - likely refactor: high coupling (31 imports) — expect wide refactor blast radius
+- the claudine/lib/src/stream/logs/opencode/reasoning.rs file is 1877 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method on_provider_limit  [325–413]  85 sloc
+    - method handle_structured  [217–315]  81 sloc
+    - method on_session_created  [581–653]  61 sloc
+    - function new_format_bridge_consumes_lifecycle_lines  [1480–1539]  56 sloc
+    - function new_format_bridge_consumes_serviceless_lifecycle_lines  [1542–1601]  56 sloc
+    - method on_api_failure  [449–503]  51 sloc
+    - function merge_stderr_state_merges_rate_limit_and_yields_rate_limit_badge  [1379–1421]  40 sloc
+    - method on_llm_call  [655–700]  40 sloc
+    - …and 45 more
+  - top-level symbols: 15 · max depth: 3 · imports: 48 · TODO/FIXME: 0 · comments: 10%
+  - likely refactor: 15 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (48 imports) — expect wide refactor blast radius
+- the sniff/cli/src/commands/mod.rs file is 1875 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function run  [47–1726]  1505 sloc — Main CLI entrypoint.
+    - function enrich_result_dependencies  [1800–1907]  92 sloc — Enriches all dependencies in a SniffResult with latest versions from package registries.
+    - function detect_programs_for_filter  [2053–2092]  38 sloc — Detect only the program category needed for the given output filter.
+    - function resolve_package_and_area  [1997–2024]  28 sloc — Resolve and intersect optional `--package` and `--package-area` inputs.
+    - function resolve_package_area_path  [1954–1981]  24 sloc — Resolve a package-area name to its path prefix for git filtering.
+    - function resolve_package_path  [1918–1942]  21 sloc — Resolve a package name to its path prefix for git filtering.
+    - function print_completions  [1732–1750]  18 sloc — Prints shell completions setup instructions.
+    - function exit_with_parse_error  [1777–1794]  16 sloc — Print a clap parse error and exit.
+    - …and 2 more
+  - top-level symbols: 15 · max depth: 8 · imports: 54 · TODO/FIXME: 0 · comments: 8%
+  - likely refactor: `run` holds 80% of the code — split by responsibility
+  - likely refactor: 15 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 8) — extract / flatten
+  - likely refactor: high coupling (54 imports) — expect wide refactor blast radius
+- the sniff/lib/tests/git_parity.rs file is 1862 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function config_all_twelve_keys_from_global_source  [2329–2388]  54 sloc
+    - function config_system_global_local_precedence  [2217–2275]  50 sloc
+    - function phase3_counts_only_matches_full_request_totals  [1783–1835]  46 sloc
+    - function config_system_fallback_when_no_local_or_global_value  [2278–2326]  41 sloc
+    - function config_local_overrides_global  [2127–2174]  37 sloc
+    - function phase3_detailed_counts_match_full_request_totals  [1838–1884]  37 sloc
+    - function phase3_merge_conflict_detected_and_reported  [1634–1678]  36 sloc
+    - function golden_config_all_twelve_keys  [252–285]  33 sloc
+    - …and 43 more
+  - top-level symbols: 97 · max depth: 2 · imports: 22 · TODO/FIXME: 0 · comments: 9%
+  - likely refactor: 97 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (22 imports) — expect wide refactor blast radius
+- the messenger/cli/src/main.rs file is 1854 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function send_message  [516–651]  125 sloc
+    - function main  [262–387]  123 sloc
+    - function register_provider  [1024–1134]  111 sloc
+    - enum Commands  [53–253]  102 sloc
+    - function replace_notification  [771–856]  75 sloc
+    - function build_desktop_config_from_route  [904–962]  59 sloc — Convert a CLI `RouteConfig::Desktop` into the library's `DesktopConfig`.
+    - function resolve_route  [964–1022]  56 sloc
+    - function desktop_route_parses_spec_example_config  [1804–1854]  50 sloc
+    - …and 30 more
+  - top-level symbols: 28 · max depth: 4 · imports: 31 · TODO/FIXME: 1 · comments: 6%
+  - likely refactor: 28 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (31 imports) — expect wide refactor blast radius
+- the biscuit-icon/cli/tests/cli.rs file is 1833 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function show_paginates_past_first_page  [449–516]  59 sloc
+    - function v52_cache_list_seeded_shows_table  [1800–1858]  58 sloc
+    - function v53_cache_clear_filtered_removes_only_matching  [1982–2041]  58 sloc
+    - function show_from_with_multiple_prefixes_uses_prefixes_param  [393–446]  50 sloc
+    - function show_concurrent_fetch_caches_all_successful_bodies  [519–578]  49 sloc
+    - function v53_cache_clear_full_wipe  [1931–1979]  47 sloc
+    - function show_online_caches_search_results  [339–390]  46 sloc
+    - function sets_shows_cached_counts  [889–937]  43 sloc
+    - …and 40 more
+  - top-level symbols: 69 · max depth: 1 · imports: 7 · TODO/FIXME: 0 · comments: 3%
+  - likely refactor: 69 unrelated top-level symbols — split by responsibility
+- the sniff/lib/src/os/package_manager.rs file is 1826 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function get_commands_for_manager  [566–810]  222 sloc — Returns the command database entry for a package manager.
+    - function determine_linux_primary  [959–1076]  101 sloc — Determines the primary package manager based on Linux family and detected managers.
+    - function detect_windows_package_managers  [1233–1329]  81 sloc — Detects package managers available on Windows.
+    - function detect_bsd_package_managers  [1377–1463]  73 sloc — Detects package managers available on BSD operating systems.
+    - function detect_macos_package_managers  [1126–1192]  53 sloc — Detects package managers available on macOS.
+    - function test_get_commands_for_all_managers  [1616–1667]  49 sloc
+    - method fmt  [144–197]  42 sloc
+    - method executable_name  [213–264]  40 sloc — Returns the command-line executable name for this package manager.
+    - …and 37 more
+  - top-level symbols: 22 · max depth: 4 · imports: 20 · TODO/FIXME: 0 · comments: 22%
+  - likely refactor: 22 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (20 imports) — expect wide refactor blast radius
+- the claudine/cli/src/commands/wrap/exec/watchdog.rs file is 1771 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function evaluate_timeout_tick  [433–593]  119 sloc — Evaluate the unified `timeout` and `step_timeout` rules for one tick.
+    - function opencode_step_in_flight_resets_per_step  [1825–1937]  98 sloc
+    - function format_step_timeout_breach_message  [621–715]  83 sloc — Format the human-readable breach message for a `step_timeout` event.
+    - function spawn_prompt_timing_monitor  [183–274]  80 sloc — Spawn the prompt-scoped timing monitor.
+    - function spawn_flush_if_idle_ticker  [47–108]  55 sloc — Spawn a dedicated ticker that runs [`StreamTextRenderer::flush_if_idle`]
+    - function opencode_breach_diagnostic_lists_recent_subagent_descriptions  [2119–2179]  54 sloc
+    - function maybe_emit_step_timeout_warn  [336–389]  52 sloc
+    - function opencode_breach_diagnostic_names_subagent_count  [2066–2116]  46 sloc
+    - …and 38 more
+  - top-level symbols: 14 · max depth: 5 · imports: 34 · TODO/FIXME: 0 · comments: 12%
+  - likely refactor: 14 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (34 imports) — expect wide refactor blast radius
+- the tree-hugger/lib/tests/lint_diagnostics.rs file is 1736 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function test_import_used_only_in_type_position_not_flagged  [546–578]  29 sloc
+    - function test_syntax_diagnostics_fast_path_many_languages  [1394–1422]  28 sloc
+    - function test_pub_use_reexport_not_flagged_as_unused_import  [512–543]  27 sloc
+    - function test_rust_struct_field_not_undefined  [1631–1659]  26 sloc
+    - function test_swift_enum_case_not_undefined  [1484–1511]  26 sloc — Regression test: Swift enum cases must not be flagged as undefined.
+    - function test_undefined_module_rust_reports_warning  [610–637]  26 sloc
+    - function test_unified_diagnostics_lint_kind  [1116–1144]  26 sloc
+    - function test_unified_diagnostics_semantic_kind  [1085–1113]  26 sloc
+    - …and 67 more
+  - top-level symbols: 78 · max depth: 1 · imports: 6 · TODO/FIXME: 0 · comments: 4%
+  - likely refactor: 78 unrelated top-level symbols — split by responsibility
+- the renderable/build.rs file is 1717 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function main  [1577–1810]  202 sloc
+    - method to_srgb  [33–75]  29 sloc — Convert OKLCH to sRGB with gamut mapping.
+  - top-level symbols: 4 · max depth: 1 · imports: 5 · TODO/FIXME: 0 · comments: 3%
+- the homelab/lib/src/sony_receiver.rs file is 1715 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method get_native_inputs  [914–1046]  125 sloc — Queries input configuration from the native web API.
+    - method get_hdmi_config  [1369–1458]  81 sloc — Queries HDMI configuration from the native web API.
+    - method get_imax_config  [1219–1300]  75 sloc — Queries IMAX Enhanced audio configuration from the native web API.
+    - method get_system_settings  [1052–1113]  57 sloc — Queries system settings from the native web API.
+    - method get_network_config  [1305–1362]  54 sloc — Queries network configuration from the native web API.
+    - method get_audio_settings  [1175–1214]  36 sloc — Queries audio settings from the native web API.
+    - method check_power_native  [774–808]  33 sloc — Check if the receiver is powered on using the native web API.
+    - method native_get_grouped  [830–864]  33 sloc — Query grouped features from the receiver's native web API.
+    - …and 28 more
+  - top-level symbols: 43 · max depth: 6 · imports: 7 · TODO/FIXME: 0 · comments: 13%
+  - likely refactor: 43 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 6) — extract / flatten
+- the claudine/lib/src/stream/providers/claude.rs file is 1708 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method feed_line  [828–918]  86 sloc
+    - method handle_user  [541–617]  72 sloc
+    - method handle_result  [374–456]  71 sloc
+    - method handle_assistant_message  [178–254]  67 sloc
+    - method handle_content_block_delta  [256–318]  61 sloc
+    - method try_complete_pending_tool_use  [735–796]  58 sloc
+    - function billing_error_on_assistant_surfaces_terminal_error_not_rate_limit  [1681–1726]  46 sloc
+    - function classify_error  [961–1005]  45 sloc — Map a Claude error envelope onto a typed [`SemanticErrorKind`].
+    - …and 33 more
+  - top-level symbols: 8 · max depth: 4 · imports: 30 · TODO/FIXME: 0 · comments: 5%
+  - likely refactor: high coupling (30 imports) — expect wide refactor blast radius
+- the tree-hugger/cli/tests/cli.rs file is 1705 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function test_god_files_json_reports_nesting_non_python_forms  [1662–1771]  100 sloc
+    - function test_lint_policy_selectors_affect_severity_and_exit_code  [1175–1243]  63 sloc
+    - function test_functions_prelude_from_package_area_root_discovers_child_package_prelude  [956–1022]  48 sloc
+    - function test_lint_invokes_oxlint_for_javascript  [1438–1487]  47 sloc
+    - function test_god_files_json_top_level_excludes_locals  [1570–1618]  43 sloc
+    - function test_language_aliases_parse_successfully  [227–271]  42 sloc
+    - function test_lint_experimental_semantics_enables_semantic_diagnostics  [1134–1172]  36 sloc
+    - function test_god_files_unparseable_note  [1931–1971]  35 sloc
+    - …and 29 more
+  - top-level symbols: 96 · max depth: 2 · imports: 4 · TODO/FIXME: 0 · comments: 7%
+  - likely refactor: 96 unrelated top-level symbols — split by responsibility
+- the darkmatter/lib/src/markdown/compose/context/capture.rs file is 1692 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function new  [261–562]  273 sloc — Build the capture from a base directory for the requested groups.
+    - function populate_datetime  [630–823]  156 sloc
+    - function populate_package_changes  [1135–1269]  119 sloc
+    - function populate_languages  [1273–1394]  109 sloc
+    - function for_key  [71–179]  91 sloc — Map a ctx variable name to its owning group.
+    - function populate_repo  [849–947]  88 sloc
+    - function populate_docs  [1398–1493]  84 sloc
+    - function populate_monorepo_area  [955–1039]  72 sloc — Populate the monorepo-scoped `area*`, `current_packages`, `depends_on`, and
+    - …and 19 more
+  - top-level symbols: 22 · max depth: 5 · imports: 24 · TODO/FIXME: 0 · comments: 8%
+  - likely refactor: 22 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (24 imports) — expect wide refactor blast radius
+- the sniff/lib/src/filesystem/repo/standard.rs file is 1677 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function polyglot_leaf_marker_descriptors_match_decision_log  [1516–1569]  48 sloc
+    - function resolve_acting_binary_never_spawns_wrapper_or_path_binary  [1960–2021]  47 sloc — Regression test for the no-subprocess detection boundary (spec §8).
+    - function cargo_workspace_descriptor_matches_decision_log  [1600–1636]  37 sloc
+    - function resolve_acting_binary_with_version  [561–598]  36 sloc — Test-only variant of [`resolve_acting_binary`] that injects a raw version
+    - function resolve_acting_binary  [517–555]  32 sloc — Resolve the acting binary for `standard` at `root` using the repo-local
+    - function every_variant_id_is_kebab_case  [1487–1513]  25 sloc
+    - function gradle_descriptor_uses_explicit_paths_and_a_wrapper  [1760–1785]  25 sloc
+    - function resolve_acting_binary_checks_min_version  [1922–1950]  25 sloc
+    - …and 13 more
+  - top-level symbols: 44 · max depth: 3 · imports: 12 · TODO/FIXME: 1 · comments: 16%
+  - likely refactor: 44 unrelated top-level symbols — split by responsibility
+- the claudine/lib/src/composition/schema_validation.rs file is 1653 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function build_schema_status_report  [791–937]  117 sloc — Build a [`SchemaStatusReport`] for `source` under the supplied
+    - function drop_invalid_optionals  [1140–1256]  97 sloc — Pre-scrub helper that drops invalid optional values from raw
+    - function post_shell_validate  [314–422]  91 sloc — Validate `prepared.effective_frontmatter` after Darkmatter composition
+    - function pre_validate_schema  [1002–1103]  83 sloc — Pre-prepare schema validation. Detects missing required properties in
+    - function categorize_problems  [558–617]  57 sloc
+    - function interactive_shape_for_atom  [658–712]  55 sloc — Map a [`PropertyAtom`] to an [`InteractiveShape`] for CLI prompting.
+    - function translate_schema_failure  [192–255]  47 sloc
+    - function interactive_options_allowed_only_when_all_flags_true  [1296–1333]  37 sloc
+    - …and 31 more
+  - top-level symbols: 31 · max depth: 3 · imports: 27 · TODO/FIXME: 0 · comments: 18%
+  - likely refactor: 31 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (27 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/style/apply.rs file is 1637 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function apply_page_style  [260–364]  81 sloc — Apply parsed page-level style onto a [`DarkmatterPage`] builder.
+    - function apply_list_style  [443–495]  48 sloc — Apply parsed list-level style (`style.ul.*`, `style.ol.*`, `style.li.*`)
+    - function hr_overrides_suppress_frontmatter  [2026–2070]  45 sloc
+    - function apply_hr_style  [585–637]  44 sloc — Apply parsed HR style (`style.hr.*`) onto a [`DarkmatterPage`] builder.
+    - function all_three_buckets_applied_independently  [1677–1721]  43 sloc
+    - function apply_color_style  [506–549]  39 sloc — Apply parsed color and background-color style onto a [`DarkmatterPage`]
+    - function apply_common_style  [783–826]  38 sloc — Apply one bucket's [`CommonStyle`] onto `page`.
+    - function apply_component_style  [384–425]  38 sloc — Apply parsed component-level style (`style.table.*`, `style.images.*`,
+    - …and 24 more
+  - top-level symbols: 24 · max depth: 3 · imports: 54 · TODO/FIXME: 0 · comments: 14%
+  - likely refactor: 24 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (54 imports) — expect wide refactor blast radius
+- the sniff/lib/src/filesystem/repo/detection.rs file is 1607 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function refresh_package_boundaries  [1145–1305]  145 sloc — Re-compute language/file stats for every package using a shared repo
+    - function detect_repo_inner_with_shared  [202–390]  138 sloc
+    - function create_package  [1319–1464]  133 sloc — Creates a Package with all metadata and parsed dependencies.
+    - function merge_package_into  [1051–1119]  56 sloc
+    - function refresh_boundaries_assigns_files_to_deepest_package  [1863–1915]  46 sloc
+    - function refresh_boundaries_excludes_nested_package_files_from_parent  [1918–1969]  45 sloc
+    - function resolve_package_version  [733–782]  43 sloc — Determines the package version based on manifests present in the package.
+    - function resolve_internal_deps  [793–838]  41 sloc — Resolves internal dependencies between packages in a workspace.
+    - …and 25 more
+  - top-level symbols: 36 · max depth: 5 · imports: 92 · TODO/FIXME: 0 · comments: 11%
+  - likely refactor: 36 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (92 imports) — expect wide refactor blast radius
+- the sniff/lib/src/filesystem/git/remote_refresh.rs file is 1601 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function get_worktrees  [708–834]  91 sloc — Retrieves all linked worktrees for the repository.
+    - function extra_system_config_fallback_reads_all_12_keys  [1374–1445]  60 sloc
+    - function populate_commit_remotes_distinguishes_multiple_remotes  [947–1014]  57 sloc
+    - function corrupt_object_ancestry_propagates_error  [1547–1607]  56 sloc
+    - function corrupt_object_revwalk_propagates_error  [1482–1544]  56 sloc
+    - function setup_repo_with_worktrees  [1795–1853]  51 sloc — Creates a repo with one commit on master and two linked worktrees
+    - function get_branch_info_fallible  [32–88]  49 sloc
+    - function populate_recent_commit_remotes  [535–597]  49 sloc — Populate commit containment data from locally available remote-tracking refs.
+    - …and 34 more
+  - top-level symbols: 26 · max depth: 3 · imports: 16 · TODO/FIXME: 0 · comments: 11%
+  - likely refactor: 26 unrelated top-level symbols — split by responsibility
+- the claudine/lib/src/stream/logs/opencode/errors.rs file is 1596 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function classify_llm_failure  [279–450]  146 sloc
+    - function extract_provider_message  [186–246]  55 sloc
+    - function summarize_error_json  [123–184]  52 sloc
+    - function classify_default_service  [550–590]  36 sloc
+    - function api_failure_message_strips_request_body  [881–914]  34 sloc
+    - function classify_malformed_asset  [73–106]  31 sloc
+    - function fixture_mixed_handles_all_shapes  [1486–1515]  28 sloc
+    - function infer_service_from_message  [485–512]  27 sloc — Infer the `service` tag value from the `message` tag and required sibling
+    - …and 33 more
+  - top-level symbols: 28 · max depth: 4 · imports: 14 · TODO/FIXME: 0 · comments: 4%
+  - likely refactor: 28 unrelated top-level symbols — split by responsibility
+- the darkmatter/lib/src/markdown/schemas/simplified/grammar.rs file is 1591 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method parse_one_constraint  [1007–1139]  129 sloc
+    - method next_token  [291–400]  108 sloc
+    - method parse_enum_members  [864–968]  94 sloc — Parses members until we either hit the end of the list or a `;`
+    - method parse_inline_object_body  [510–580]  66 sloc — Parses the body of an inline object literal — the comma-separated
+    - method parse_arglist  [1141–1199]  59 sloc
+    - method parse_type_expr  [719–783]  56 sloc
+    - method parse_constraint_list  [801–859]  47 sloc
+    - method try_read_number  [199–244]  44 sloc — Attempt to lex a number starting at `self.pos`. Recognises
+    - …and 17 more
+  - top-level symbols: 14 · max depth: 3 · imports: 9 · TODO/FIXME: 0 · comments: 9%
+  - likely refactor: 14 unrelated top-level symbols — split by responsibility
+- the tree-hugger/lib/src/builtins.rs file is 1588 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function all_languages_have_builtins  [1696–1739]  41 sloc
+    - function is_builtin  [17–36]  20 sloc — Checks if a symbol name is a builtin for the given language.
+  - top-level symbols: 17 · max depth: 2 · imports: 1 · TODO/FIXME: 0 · comments: 7%
+  - likely refactor: 17 unrelated top-level symbols — split by responsibility
+- the darkmatter/lib/src/markdown/compose/cache/runtime.rs file is 1569 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method get_or_compute_compose  [249–371]  111 sloc — Single-flight get-or-compute for child compose results.
+    - method get_or_compute_operation  [378–494]  111 sloc — Single-flight get-or-compute for individual operation results.
+    - function optimistic_mode_accepts_stale_compose_without_recompute  [1802–1885]  75 sloc
+    - function fallback_mode_serves_stale_compose_when_recompute_fails  [1724–1799]  67 sloc
+    - function compose_dependency_invalidation_detects_child_source_changes  [1477–1551]  66 sloc
+    - method try_persistent_write_compose  [730–802]  65 sloc — Attempts to write a compose result to the persistent store (best-effort).
+    - method wait_for_compose_slot  [501–557]  55 sloc
+    - method wait_for_operation_slot  [559–615]  55 sloc
+    - …and 23 more
+  - top-level symbols: 9 · max depth: 3 · imports: 43 · TODO/FIXME: 0 · comments: 6%
+  - likely refactor: high coupling (43 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/render/link.rs file is 1564 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function parse_html_link  [873–966]  78 sloc
+    - method status_block  [80–152]  62 sloc
+    - function parse_structured_props  [1264–1331]  59 sloc
+    - function parse_html_attributes  [1051–1113]  54 sloc
+    - function find_closing_paren  [1145–1193]  45 sloc
+    - method to_html_with_popover  [603–651]  41 sloc — Renders HTML with Popover companion element when prompt is present.
+    - function base64_decode  [1589–1635]  40 sloc
+    - function is_structured_mode  [1220–1262]  40 sloc
+    - …and 20 more
+  - top-level symbols: 42 · max depth: 5 · imports: 23 · TODO/FIXME: 0 · comments: 4%
+  - likely refactor: 42 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (23 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/markdown/compose/interpolation/evaluator.rs file is 1558 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method walk_context_variables  [314–357]  44 sloc
+    - function resolves_nested_path  [586–608]  21 sloc
+    - method eval  [233–254]  19 sloc — Evaluates an expression to a string result.
+    - method collect_context_warnings  [295–312]  18 sloc — Collects warnings for `ctx.*` references that don't resolve to a known
+    - function resolves_env_variable  [679–698]  17 sloc
+  - top-level symbols: 3 · max depth: 3 · imports: 17 · TODO/FIXME: 0 · comments: 9%
+- the biscuit-speaks/cli/src/main.rs file is 1552 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function main  [1149–1412]  219 sloc
+    - function print_voices  [732–817]  74 sloc
+    - function run_install  [984–1067]  73 sloc
+    - function run_init  [900–978]  70 sloc
+    - function install_client_via_interview  [1073–1126]  51 sloc — Drive sniff's install-plan + interview flow for the given `TtsClient`.
+    - function list_voices_for_provider  [319–363]  42 sloc — List voices for a provider, using the cache if available.
+    - function print_speak_result  [203–245]  38 sloc
+    - type Cli  [66–123]  36 sloc
+    - …and 15 more
+  - top-level symbols: 45 · max depth: 6 · imports: 54 · TODO/FIXME: 0 · comments: 13%
+  - likely refactor: 45 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 6) — extract / flatten
+  - likely refactor: high coupling (54 imports) — expect wide refactor blast radius
+- the claudine/lib/src/stream/providers/kimi.rs file is 1546 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method handle_event  [290–585]  292 sloc
+    - method feed_line  [880–962]  78 sloc
+    - method handle_request  [587–662]  76 sloc
+    - function finish  [964–1016]  48 sloc
+    - function known_wire_events_do_not_leak_as_provider_extension  [1573–1624]  46 sloc
+    - method handle_status_update  [664–704]  40 sloc
+    - method handle_initialize_response  [183–221]  39 sloc
+    - function tool_call_with_streamed_arguments_decodes  [1266–1304]  39 sloc
+    - …and 29 more
+  - top-level symbols: 4 · max depth: 4 · imports: 26 · TODO/FIXME: 0 · comments: 5%
+  - likely refactor: high coupling (26 imports) — expect wide refactor blast radius
+- the sniff/lib/src/network/mod.rs file is 1544 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function detect_local_interfaces  [231–330]  88 sloc
+    - function detect_network_with_request  [157–210]  49 sloc — Detect network information according to the given request.
+    - function test_filtered_ip_addresses_match_retained_interfaces  [1403–1456]  44 sloc
+    - function test_ip_addresses_have_prefix_length_on_real_system  [1315–1365]  44 sloc
+    - function detect_bsd_default_route_interface_native  [739–784]  42 sloc
+    - function detect_default_route_interface  [652–691]  37 sloc
+    - function test_interface_priority_scoring  [1987–2023]  37 sloc
+    - function test_ip_addresses_per_interface_prefix_matches_aggregate  [1368–1400]  32 sloc
+    - …and 23 more
+  - top-level symbols: 39 · max depth: 3 · imports: 34 · TODO/FIXME: 0 · comments: 14%
+  - likely refactor: 39 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (34 imports) — expect wide refactor blast radius
+- the darkmatter/lib/tests/level2_render_tree_terminal.rs file is 1525 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function level2_file_links_directive_renders_styled_tree_in_real_terminal  [2104–2262]  114 sloc — Review-2 finding: composing `::file-links` and rendering the result in a
+    - function level2_percent_page_frame_offset_and_width_in_real_terminal  [1821–1903]  70 sloc — Review-2 finding (High): percentage **page-frame** margin and max-width must
+    - function level2_matched_layout_policy_matches_no_policy_capabilities_in_real_terminal  [1701–1785]  67 sloc — Review-5 finding 1 (High): a *matched* layout-only component policy must not
+    - function level2_page_code_panel_is_contiguous_inverted_rectangle  [1085–1157]  62 sloc — Review-1 finding 1: under the repro layout (`--ml 4 --mr 4`, github theme,
+    - function level2_tree_rich_image_node_paints_distinctive_pixels  [1392–1465]  62 sloc — Review-5 finding 3: the previous Level-2 image test proves only that the
+    - function level2_tree_rich_code_block_title_gutter_and_highlight_survive_real_terminal  [539–625]  61 sloc — Review-13: rich fenced code blocks are a user-observable terminal feature
+    - function run_file_links_in_pane  [1923–1992]  52 sloc — Builds a temp repo fixture, composes a `::file-links` directive through the
+    - function level2_tree_rich_image_node_emits_protocol_and_renders_in_real_terminal  [1247–1312]  50 sloc — Review-3 finding 3: a `Rich` image node through the render-tree path is
+    - …and 29 more
+  - top-level symbols: 60 · max depth: 5 · imports: 43 · TODO/FIXME: 0 · comments: 25%
+  - likely refactor: 60 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (43 imports) — expect wide refactor blast radius
+- the schematic/schema/src/elevenlabs/requests.rs file is 1517 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method endpoint_id  [2408–2527]  120 sloc — Returns the endpoint identifier for this request.
+    - method into_parts  [2358–2403]  46 sloc — Converts the request into (method, path, body, headers) parts.
+    - enum ElevenLabsRequest  [2263–2348]  44 sloc — Request enum for ElevenLabs API.
+    - method into_parts  [229–243]  15 sloc — Converts the request into (method, path, body, headers) parts.
+    - method into_parts  [1745–1759]  15 sloc — Converts the request into (method, path, body, headers) parts.
+    - method into_parts  [1906–1920]  15 sloc — Converts the request into (method, path, body, headers) parts.
+    - method into_parts  [1976–1990]  15 sloc — Converts the request into (method, path, body, headers) parts.
+  - top-level symbols: 43 · max depth: 1 · imports: 4 · TODO/FIXME: 0 · comments: 45%
+  - likely refactor: 43 unrelated top-level symbols — split by responsibility
+  - likely refactor: low code density (45% comments) — mostly comments/docs
+- the claudine/rendezvous/daemon/src/sync.rs file is 1505 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method run_session  [316–543]  206 sloc
+    - method receive_delta  [219–314]  86 sloc — Validate, apply, and persist a single incoming delta envelope.
+    - function duplicate_message_id_rejected_without_storage_mutation  [945–990]  41 sloc
+    - function invalid_created_at_in_metadata_rejected_without_persistence  [1480–1521]  39 sloc
+    - function wrong_chunk_index_in_metadata_rejected_without_persistence  [1436–1477]  39 sloc
+    - function wrong_owner_in_metadata_rejected_without_persistence  [1348–1389]  39 sloc
+    - function wrong_previous_chunk_id_in_metadata_rejected_without_persistence  [1524–1565]  39 sloc
+    - function wrong_session_in_metadata_rejected_without_persistence  [1392–1433]  39 sloc
+    - …and 24 more
+  - top-level symbols: 10 · max depth: 2 · imports: 49 · TODO/FIXME: 0 · comments: 5%
+  - likely refactor: 10 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (49 imports) — expect wide refactor blast radius
+- the playa/cli/src/main.rs file is 1496 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function print_duck_info  [779–916]  127 sloc
+    - function install_players  [918–1014]  83 sloc
+    - function list_sound_effects  [689–760]  57 sloc
+    - function render_output_channels  [1321–1376]  48 sloc
+    - function run_cli  [476–524]  45 sloc
+    - function output_channels_render_distinct_audio_and_sfx_devices  [1686–1731]  44 sloc
+    - function play_effect  [593–642]  43 sloc
+    - function run_cli_sync  [527–572]  42 sloc
+    - …and 27 more
+  - top-level symbols: 55 · max depth: 5 · imports: 41 · TODO/FIXME: 0 · comments: 4%
+  - likely refactor: 55 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (41 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/markdown/compose/expression/parser.rs file is 1474 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method parse_postfix  [391–435]  43 sloc — Parses postfix access chains: `primary ( "[" expression "]" | "." IDENT )*`.
+    - function parses_deeply_nested_ternary  [905–948]  43 sloc
+    - method parse_primary  [438–478]  39 sloc — Parses a primary expression: literal, variable, function call, or parenthesized expression.
+    - function parses_parenthesized_nested_ternary  [873–902]  29 sloc
+    - function parses_nested_ternary_in_false_branch  [843–870]  26 sloc
+    - function parses_nested_ternary_in_true_branch  [813–840]  26 sloc
+    - function parses_count_ternary  [1048–1069]  22 sloc
+    - method parse_multiplicative  [348–368]  19 sloc — Parses a multiplicative expression: `unary (("*" | "/" | "%") unary)*`.
+    - …and 14 more
+  - top-level symbols: 5 · max depth: 3 · imports: 9 · TODO/FIXME: 0 · comments: 13%
+- the claudine/cli/src/commands/compose.rs file is 1473 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function run_inline_compose_inner  [799–1290]  374 sloc
+    - function run_compose_inner  [393–797]  304 sloc
+    - type SharedComposeArgs  [49–208]  78 sloc — Shared flags for composition commands.
+    - function run_loop_with_overrides  [1368–1469]  72 sloc — Run a composition loop seeded from resolved control variables.
+    - function build_loop_iteration_output  [1317–1356]  35 sloc — Translate a [`SingleCompositionOutcome`] into a
+    - function parse_composition_positionals  [1641–1676]  34 sloc — Classify positional tokens into an optional file reference and setter map.
+    - function install_user_interrupt_guard  [1499–1532]  29 sloc — Install a process-scoped SIGINT handler that covers the **entire**
+    - method resolve_session_interactivity  [276–301]  26 sloc — Resolve the session interactivity from CLI flags and frontmatter.
+    - …and 8 more
+  - top-level symbols: 24 · max depth: 3 · imports: 27 · TODO/FIXME: 0 · comments: 20%
+  - likely refactor: 24 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (27 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/style/bespoke.rs file is 1417 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function apply_bespoke_style  [90–173]  65 sloc — Apply parsed bespoke style onto a [`DarkmatterPage`] builder.
+    - function hyperlink_per_link_inline_css_wins_over_frontmatter  [1120–1172]  47 sloc
+    - function resolve_stylesheet  [184–239]  47 sloc — Resolve a stylesheet string into a [`PageStylesheet`].
+    - function local_hyperlink_color_overrides_global_in_html  [1073–1117]  43 sloc
+    - function local_image_alignment_pads_terminal_fallback  [1634–1682]  43 sloc
+    - function apply_inline_text_layout  [431–476]  40 sloc — Lay out an inline text fragment (a hyperlink display text or an image
+    - function local_hyperlink_color_overrides_global_in_terminal  [1212–1252]  38 sloc
+    - function meta_entry  [266–303]  36 sloc — Convert a single meta key-value pair into a [`MetaTag`].
+    - …and 25 more
+  - top-level symbols: 18 · max depth: 3 · imports: 178 · TODO/FIXME: 0 · comments: 9%
+  - likely refactor: 18 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (178 imports) — expect wide refactor blast radius
+- the tree-hugger/lib/src/file/extract/type_metadata.rs file is 1395 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function extract_python_class_fields  [615–673]  50 sloc — Extracts fields from Python class body.
+    - function extract_cpp_class_fields  [1032–1088]  43 sloc — Extracts fields from C++ field_declaration_list.
+    - function extract_rust_type_parameters  [110–156]  42 sloc — Extracts generic type parameters from Rust type_parameters node.
+    - function extract_typescript_type_metadata  [295–339]  40 sloc — Extracts type metadata from TypeScript interface or type_alias_declaration.
+    - function extract_csharp_type_metadata  [1095–1137]  38 sloc — Extracts type metadata from C# class, struct, enum, interface, or record declarations.
+    - function extract_java_type_metadata  [680–722]  38 sloc — Extracts type metadata from Java class, enum, record, or interface declarations.
+    - function extract_scala_type_metadata  [1471–1515]  38 sloc — Extracts type metadata from Scala class, trait, object, or enum definitions.
+    - function extract_swift_type_metadata  [1304–1347]  36 sloc — Extracts type metadata from Swift class, struct, enum, or protocol declarations.
+    - …and 37 more
+  - top-level symbols: 58 · max depth: 5 · imports: 0 · TODO/FIXME: 0 · comments: 9%
+  - likely refactor: 58 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+- the claudine/lib/src/composition/lifecycle.rs file is 1393 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function parse_lifecycle_config  [527–596]  54 sloc — Parses lifecycle configuration from composition frontmatter.
+    - function emit_lifecycle_signal  [763–814]  41 sloc — Emit a lifecycle signal with deterministic audio ordering.
+    - method emit_signal  [295–341]  41 sloc — Emit a single lifecycle signal through the injected emitter.
+    - function emit_signal_runs_all_side_effects_when_not_interrupted  [1557–1601]  41 sloc
+    - function lifecycle_invalid_error_renders_as_block_error  [1772–1815]  40 sloc
+    - function emit_signal_skips_blocking_side_effects_when_interrupted  [1509–1553]  39 sloc
+    - function guard_non_audio_before_audio  [1437–1473]  34 sloc
+    - function collect_backtick_values  [655–684]  30 sloc — Collect all backtick-delimited values from `s`.
+    - …and 21 more
+  - top-level symbols: 20 · max depth: 4 · imports: 20 · TODO/FIXME: 0 · comments: 14%
+  - likely refactor: 20 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (20 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/markdown/compose/transclusion/engine.rs file is 1388 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method resolve_prepared_transclusion  [803–1165]  332 sloc
+    - method prepare_block_transclusions  [352–615]  248 sloc — Prepares `::file` / `::url` / `::code` transclusions from directives
+    - method render_markdown_transclusion  [1297–1448]  112 sloc
+    - method prepare_frontmatter_reference  [653–764]  102 sloc
+    - method resolve_file_links_transclusion  [1176–1286]  99 sloc — Resolves a single `::file-links` directive in the concurrent stage.
+    - function relevel_with_overflow  [76–179]  96 sloc — Re-levels markdown content and gracefully degrades H6 overflow to bold text.
+    - method render_code_transclusion  [1450–1532]  75 sloc
+    - enum PreparedTransclusion  [226–281]  52 sloc
+    - …and 6 more
+  - top-level symbols: 12 · max depth: 4 · imports: 33 · TODO/FIXME: 0 · comments: 8%
+  - likely refactor: 12 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (33 imports) — expect wide refactor blast radius
+- the claudine/cli/src/commands/config_tui/tabs/messenger/mod.rs file is 1374 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function render  [17–285]  243 sloc
+    - function handle_messenger_input_modal  [514–758]  215 sloc
+    - function handle_messenger_select_modal  [335–428]  90 sloc
+    - function messenger_render_does_not_expose_raw_webhook_url  [1265–1330]  61 sloc
+    - function test_connection_key_sets_testing_status_immediately  [1333–1396]  55 sloc
+    - function modal_back_navigation_returns_to_previous_field  [1399–1454]  47 sloc
+    - function handle_key  [287–333]  46 sloc
+    - function modal_back_navigation_from_second_provider_field  [1457–1508]  45 sloc
+    - …and 20 more
+  - top-level symbols: 9 · max depth: 5 · imports: 22 · TODO/FIXME: 0 · comments: 5%
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (22 imports) — expect wide refactor blast radius
+- the sniff/lib/src/filesystem/git/recent_commits.rs file is 1374 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function make_packages  [1406–1537]  132 sloc
+    - function collect_commits_in_range  [360–462]  80 sloc
+    - function collect_commits_by_count  [563–654]  79 sloc — Walk HEAD newest-first and emit at most `count` commits.
+    - function collect_commits_from_hash_to_head  [467–560]  79 sloc — Walk from HEAD down to (and including) `target_oid`, returning commits in
+    - method filter_by_package_area  [924–991]  58 sloc
+    - function filter_by_actions_keeps_matching_conventional_commits  [1348–1404]  55 sloc
+    - function render_commit_block  [745–794]  47 sloc — Append one commit's block to `out` in the commit-centric layout:
+    - method filter_by_package  [871–922]  43 sloc
+    - …and 15 more
+  - top-level symbols: 22 · max depth: 6 · imports: 21 · TODO/FIXME: 0 · comments: 5%
+  - likely refactor: 22 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 6) — extract / flatten
+  - likely refactor: high coupling (21 imports) — expect wide refactor blast radius
+- the claudine/cli/src/commands/wrap/exec/wiring.rs file is 1356 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function run_kimi_wire_session  [615–842]  187 sloc — Run the full Kimi wire-mode lifecycle: spawn child, send initialize,
+    - function handle_request_dispatch  [855–915]  61 sloc — Classify `line` as a Kimi request and, if so, write the auto-response.
+    - function dispatch_hook_request  [451–504]  51 sloc — Dispatch a Kimi `HookRequest` through Claudine's canonical pipeline
+    - function wait_for_child_exit  [997–1061]  51 sloc — Poll the child for exit, sending `cancel` when the cancel flag is set
+    - function handle_request_dispatch_writes_approval_for_approval_request  [1509–1552]  42 sloc
+    - function handle_request_dispatch_writes_method_not_found_for_tool_call_request  [1592–1633]  42 sloc
+    - function build_hook_event_meta  [395–435]  40 sloc — Build the [`EventMeta`] for a Kimi `HookRequest` dispatch.
+    - function handle_request_dispatch_ignores_notifications  [1555–1589]  34 sloc
+    - …and 19 more
+  - top-level symbols: 34 · max depth: 3 · imports: 55 · TODO/FIXME: 0 · comments: 14%
+  - likely refactor: 34 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (55 imports) — expect wide refactor blast radius
+- the playa/lib/src/effects.rs file is 1351 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function from_name  [925–1129]  189 sloc — Parse a CLI effect name into a `SoundEffect`.
+    - method as_bytes  [1136–1326]  180 sloc — Returns the embedded audio bytes for this sound effect.
+    - method description  [1524–1714]  180 sloc — Returns a short description for this sound effect.
+    - method name  [568–758]  180 sloc — Return the stable CLI name for this effect (kebab-case).
+    - enum SoundEffect  [74–350]  178 sloc — A categorized sound effect with embedded audio data.
+    - function all  [784–900]  110 sloc — Return all available effects compiled into this build.
+    - method category  [1419–1521]  98 sloc — Returns the category name for this sound effect.
+    - method play_with_options  [1373–1395]  21 sloc — Play this sound effect with specific playback options.
+  - top-level symbols: 91 · max depth: 1 · imports: 1 · TODO/FIXME: 0 · comments: 20%
+  - likely refactor: 91 unrelated top-level symbols — split by responsibility
+- the claudine/lib/src/composition/loop_engine.rs file is 1341 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function execute_loop_with_config  [300–490]  166 sloc — Execute a loop with an already parsed configuration and initial state.
+    - function seeded_loop_repro_runs_to_completion_with_live_derived_variable  [1541–1609]  66 sloc
+    - function decide_rate_limit_action  [506–557]  48 sloc
+    - function compute_is_last  [596–646]  45 sloc
+    - function rate_limit_pause_is_interrupt_aware  [1487–1536]  40 sloc
+    - function rate_limit_abort_policy_halts_with_structured_error  [1295–1335]  39 sloc
+    - function rate_limit_pause_sleeps_until_reset_then_continues  [1437–1484]  39 sloc
+    - function seeded_loop_reports_honest_error_for_non_numeric_control_variable  [1612–1652]  39 sloc
+    - …and 27 more
+  - top-level symbols: 17 · max depth: 3 · imports: 27 · TODO/FIXME: 0 · comments: 11%
+  - likely refactor: 17 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (27 imports) — expect wide refactor blast radius
+- the sniff/lib/src/filesystem/docs.rs file is 1338 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function detect_packages_in_dirs  [191–242]  52 sloc — Lightweight package discovery within specific directories.
+    - function collect_markdown_files_from_dirs  [517–566]  48 sloc — Walk one or more root directories, parse matching markdown files, and
+    - function collect_markdown_files_filtered  [342–384]  40 sloc
+    - function extract_title  [898–942]  39 sloc — Extract the document title using priority:
+    - function parse_markdown_meta_full  [627–668]  38 sloc
+    - function read_frontmatter_only  [740–777]  34 sloc — Stream-read just the YAML frontmatter from `path` and parse it.
+    - function parse_markdown_meta_frontmatter_only  [697–732]  33 sloc
+    - function extract_frontmatter  [783–824]  31 sloc — Extract YAML frontmatter from markdown content.
+    - …and 19 more
+  - top-level symbols: 35 · max depth: 3 · imports: 25 · TODO/FIXME: 0 · comments: 12%
+  - likely refactor: 35 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (25 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/markdown/compose/expression/mod.rs file is 1307 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function evaluate  [342–430]  84 sloc — Evaluates an expression against a lookup to produce a JSON value.
+    - function evaluate_function  [564–630]  59 sloc
+    - function arithmetic_with_boolean_operands_returns_error  [1101–1148]  38 sloc
+    - function object_bracket_with_non_string_index_returns_null  [1348–1399]  38 sloc
+    - function evaluate_binary  [432–470]  36 sloc
+    - function bracket_index_with_non_numeric_returns_null  [1302–1345]  33 sloc
+    - function all_date_helper_names_are_dispatchable  [1694–1723]  29 sloc
+    - function arithmetic_errors_for_non_numeric_operands  [1068–1098]  26 sloc
+    - …and 15 more
+  - top-level symbols: 18 · max depth: 3 · imports: 26 · TODO/FIXME: 0 · comments: 16%
+  - likely refactor: 18 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (26 imports) — expect wide refactor blast radius
+- the claudine/lib/src/composition/error.rs file is 1306 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - enum CompositionError  [30–574]  268 sloc — Errors that can occur during composition workflows.
+    - method status_block  [783–1005]  214 sloc
+    - function render_sequence_missing_properties_block  [1166–1219]  52 sloc
+    - function sequence_missing_properties_status_block_lists_each_step  [1503–1547]  45 sloc
+    - function render_missing_properties_block  [1221–1264]  40 sloc
+    - function render_inline_sequence_mismatch_block  [1084–1121]  33 sloc — Render the diagnostic block for
+    - function missing_properties_hint_appears_inside_block_quote_border  [1793–1825]  31 sloc
+    - function missing_properties_display_lists_names_in_order  [1415–1444]  30 sloc
+    - …and 15 more
+  - top-level symbols: 17 · max depth: 4 · imports: 33 · TODO/FIXME: 0 · comments: 22%
+  - likely refactor: 17 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (33 imports) — expect wide refactor blast radius
+- the tree-hugger/lib/src/file/tree_file.rs file is 1285 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method symbol_nodes  [1755–1874]  103 sloc
+    - method detect_qualified_reference  [332–426]  85 sloc — Detects if a node is part of a qualified reference.
+    - method referenced_symbols  [246–326]  60 sloc — Provides the list of symbol references in this file.
+    - method extract_python_import_metadata  [622–686]  50 sloc — Extracts import metadata for Python.
+    - method imported_symbols  [170–234]  49 sloc — Provides the list of symbols imported by this file.
+    - method symbol_records  [1669–1721]  49 sloc — Provides v2 schema symbol records for this file from the parse pass.
+    - method should_skip_import  [434–494]  48 sloc — Determines if an import capture should be skipped.
+    - method check_qualified_references  [1425–1492]  47 sloc — Checks for qualified references with undefined qualifiers.
+    - …and 21 more
+  - top-level symbols: 1 · max depth: 6 · imports: 41 · TODO/FIXME: 0 · comments: 20%
+  - likely refactor: deeply nested (depth 6) — extract / flatten
+  - likely refactor: high coupling (41 imports) — expect wide refactor blast radius
+- the claudine/lib/src/permissions/providers/codex.rs file is 1272 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method canonicalize  [277–557]  268 sloc
+    - method plan_change  [559–686]  123 sloc
+    - function parse_codex_config  [689–757]  66 sloc
+    - method parse_cli_overrides  [164–227]  64 sloc
+    - function choose_config_target  [836–890]  55 sloc
+    - method compose_native_policy  [229–275]  47 sloc
+    - function codex_mcp_round_trip_mutation_changes_query_result  [1290–1336]  44 sloc
+    - function codex_backend_queries_mcp_controls  [1206–1252]  43 sloc
+    - …and 15 more
+  - top-level symbols: 24 · max depth: 4 · imports: 48 · TODO/FIXME: 0 · comments: 0%
+  - likely refactor: 24 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (48 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/markdown/output/terminal.rs file is 1270 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method render_image  [526–613]  64 sloc — Renders an image from the given path.
+    - function format_header_row  [794–857]  46 sloc — Formats a code block header row with title (left) and language (right-aligned).
+    - function test_line_numbers_have_background_color  [1467–1523]  43 sloc
+    - function test_code_block_highlight_mixed  [1338–1380]  36 sloc
+    - function test_code_block_highlight_single_line  [1255–1296]  35 sloc
+    - function test_highlight_ignores_zero  [1526–1569]  35 sloc
+    - function test_highlight_out_of_range  [1572–1615]  35 sloc
+    - function test_highlight_with_line_numbers  [1383–1426]  35 sloc
+    - …and 15 more
+  - top-level symbols: 13 · max depth: 3 · imports: 29 · TODO/FIXME: 0 · comments: 29%
+  - likely refactor: 13 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (29 imports) — expect wide refactor blast radius
+- the sniff/lib/src/programs/install/plan.rs file is 1265 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function build_install_plan  [380–463]  70 sloc — Build an install plan for a program against the given host capabilities.
+    - function derive_method_fact  [152–229]  64 sloc — Derives a [`MethodFact`] for a single installation method against the
+    - function retryable_alternatives_excludes_blocked_and_attempted  [625–658]  34 sloc
+    - function explain_blocking_reason  [499–527]  29 sloc
+    - function retryable_alternatives_excludes_already_attempted_cargo  [679–706]  28 sloc
+    - method execute  [101–129]  27 sloc — Execute the chosen installation option.
+    - function chosen_returns_option_where_choose_is_true  [709–734]  26 sloc
+    - function unverified_pnpm_gets_unverified_reason_and_falls_through_to_npm  [1053–1079]  26 sloc
+    - …and 21 more
+  - top-level symbols: 16 · max depth: 4 · imports: 33 · TODO/FIXME: 0 · comments: 6%
+  - likely refactor: 16 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (33 imports) — expect wide refactor blast radius
+- the claudine/lib/src/stream/protocol/kimi.rs file is 1262 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - enum KimiWireEvent  [222–275]  48 sloc — Tagged enum over Kimi wire event variants observed in captured fixtures
+    - function wire_greet_fixture_produces_typed_events  [1412–1446]  35 sloc
+    - function wire_tool_shell_fixture_covers_tool_lifecycle  [1467–1500]  34 sloc
+    - function wire_tool_shell_fixture_arguments_decode  [1503–1535]  33 sloc
+    - type KimiApprovalRequest  [747–772]  24 sloc — `ApprovalRequest` request payload — server prompts the client to approve a
+    - function status_update_computes_percent_from_fraction  [1136–1159]  24 sloc
+    - function subagent_event_decodes_nested_event  [1311–1334]  24 sloc
+    - function tool_result_returns_status_and_output  [1230–1252]  23 sloc
+    - …and 17 more
+  - top-level symbols: 41 · max depth: 5 · imports: 3 · TODO/FIXME: 0 · comments: 13%
+  - likely refactor: 41 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+- the darkmatter/lib/src/markdown/render_tree/entrypoints.rs file is 1261 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function terminal_options_from_terminal_options  [654–751]  53 sloc — Maps [`TerminalOptions`] to [`TerminalRenderOptions`].
+    - function hr_defaults_from_frontmatter  [132–174]  40 sloc — Resolves the deprecated top-level `hr:` frontmatter block into a
+    - function terminal_options_mapping_preserves_code_pipeline_inputs_for_both_modes  [1910–1953]  33 sloc
+    - function assert_yaml_colors  [845–874]  29 sloc
+    - function render_tree_html_mermaid_off_preserves_code_block_metadata  [1750–1778]  27 sloc — Review-3 finding 1: a `lang="mermaid"` fence carrying code-block DSL
+    - function render_tree_terminal_color_depth_none_emits_no_color_sgrs  [1170–1200]  27 sloc — Review-5 finding 1: `TerminalOptions::color_depth = None` must
+    - function browser_options_from_html_options  [560–593]  26 sloc — Maps [`HtmlOptions`] to [`BrowserRenderOptions`].
+    - function one_half_yaml_color  [810–835]  26 sloc
+    - …and 31 more
+  - top-level symbols: 20 · max depth: 3 · imports: 62 · TODO/FIXME: 0 · comments: 31%
+  - likely refactor: 20 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (62 imports) — expect wide refactor blast radius
+- the claudine/cli/src/commands/wrap/mod.rs file is 1257 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function run_provider_wrapper_inner  [339–1359]  862 sloc
+    - function detect_wrap_startup  [109–154]  37 sloc — Run one sniff-based filesystem scan and build every startup context
+    - function bootstrap_mcp_state  [260–299]  36 sloc
+    - function run_provider_wrapper  [302–337]  29 sloc — Run a wrapped provider command.
+    - function resolve_binary_path_direct_falls_back_when_snapshot_lacks_provider  [1460–1493]  27 sloc — Companion: when the snapshot has no entry for the requested
+    - function switch_process_cwd_syncs_pwd_env_var  [1374–1410]  27 sloc — Regression: `switch_process_cwd` must update both the OS cwd
+    - function package_name_display_shows_resolved_package_and_area  [1496–1517]  21 sloc
+    - function fallback_wrap_startup  [156–174]  19 sloc
+    - …and 2 more
+  - top-level symbols: 14 · max depth: 5 · imports: 90 · TODO/FIXME: 0 · comments: 9%
+  - likely refactor: `run_provider_wrapper_inner` holds 69% of the code — split by responsibility
+  - likely refactor: 14 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (90 imports) — expect wide refactor blast radius
+- the claudine/cli/tests/sequence_cli.rs file is 1250 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function sequence_with_prompt_property_runs_each_step_inline  [1341–1451]  88 sloc
+    - function sequence_per_step_step_timeout_override  [1164–1263]  81 sloc — Verifies that a step-level `step_timeout` (declared in a sequence step's
+    - function sequence_magic_reference_uses_source_doc_location_not_cwd  [640–734]  76 sloc
+    - function sequence_aggregates_missing_required_properties_across_steps  [930–1013]  69 sloc
+    - function sequence_propagates_fail_fast_to_child_env_and_prompt  [333–404]  62 sloc
+    - function sequence_unsupported_shape_surfaces_typed_error_under_tty_pref  [1061–1141]  61 sloc
+    - function sequence_resolves_external_file_via_magic_reference  [569–636]  60 sloc
+    - function sequence_fail_fast_true_stops_on_first_failure  [76–140]  58 sloc
+    - …and 15 more
+  - top-level symbols: 26 · max depth: 1 · imports: 7 · TODO/FIXME: 0 · comments: 12%
+  - likely refactor: 26 unrelated top-level symbols — split by responsibility
+- the sniff/lib/src/filesystem/repo/test_runner_usage.rs file is 1247 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function detect_test_runners  [97–213]  94 sloc — Detect the test runner(s) a package actually uses, rooted at `pkg_dir`.
+    - function collect_python_deps  [560–622]  60 sloc — Insert every declared PyPI distribution name (lowercased) from
+    - function ecosystems_present  [424–460]  37 sloc — Returns the ecosystems that have a manifest present in `pkg_dir`.
+    - function collect_declared_deps  [491–522]  32 sloc — Collect the package's declared dependencies from every manifest of every
+    - function collect_jvm_coordinates  [694–720]  27 sloc — Insert every Maven/Gradle `groupId:artifactId` coordinate into `out`.
+    - function glob_walk  [356–382]  27 sloc — Depth-bounded search for a file whose `base`-relative path matches
+    - function locate_glob_file  [322–351]  26 sloc — Returns the absolute path of the first file under `pkg_dir` matching the glob
+    - function rust_nextest_config_at_workspace_root_is_detected_for_member_crate  [980–1012]  26 sloc
+    - …and 20 more
+  - top-level symbols: 42 · max depth: 5 · imports: 14 · TODO/FIXME: 0 · comments: 15%
+  - likely refactor: 42 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+- the research/lib/src/validation/frontmatter.rs file is 1246 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function repair_skill_frontmatter  [278–406]  86 sloc — Repair common LLM-generated YAML issues in SKILL.md content.
+    - function try_reconstruct_frontmatter  [454–547]  71 sloc — Try to reconstruct frontmatter when delimiters are completely missing.
+    - function extract_frontmatter  [102–181]  55 sloc — Extract frontmatter and body from SKILL.md content
+    - function parse_and_validate_changelog_frontmatter  [570–632]  46 sloc — Parse and validate changelog.md frontmatter
+    - function test_repair_combined_issues  [1604–1642]  31 sloc
+    - function test_valid_frontmatter_all_fields  [647–676]  27 sloc
+    - function test_valid_changelog_frontmatter_all_fields  [990–1019]  26 sloc
+    - function test_repair_escaped_brackets  [1520–1549]  25 sloc
+    - …and 36 more
+  - top-level symbols: 10 · max depth: 5 · imports: 10 · TODO/FIXME: 0 · comments: 15%
+  - likely refactor: 10 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+- the biscuit-terminal/lib/src/components/compose.rs file is 1242 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function test_render_terminal_node_strict_rejects_unsupported_child  [1471–1491]  18 sloc — Strictness regression: render_terminal_node should surface an error
+    - function test_render_tree_nested_compose_inlines_inner_children  [1423–1440]  16 sloc
+    - function test_terminal_prose_bold_styling_survives_through_tree  [1733–1748]  16 sloc — Regression: a Prose part inside Compose must keep its inline `<b>`
+    - method render_via_tree  [259–278]  15 sloc — Renders the Compose component through the canonical render tree.
+    - function test_add_table  [728–742]  15 sloc
+    - function test_add_table_chaining  [745–764]  15 sloc
+    - function test_browser_two_strings_appear_in_order_no_textual_separator  [1646–1664]  15 sloc
+    - function test_chained_layout_builders  [1048–1062]  15 sloc
+  - top-level symbols: 1 · max depth: 1 · imports: 37 · TODO/FIXME: 0 · comments: 19%
+  - likely refactor: high coupling (37 imports) — expect wide refactor blast radius
+- the biscuit-tui/lib/src/components/choose_one/tests.rs file is 1241 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function render_disabled_row_with_dim_style  [669–705]  33 sloc
+    - function render_overflow_indicators_when_scrolled  [623–666]  33 sloc
+    - function choose_one_horizontal_badges_short_viewport_does_not_draw_past_area  [1000–1025]  24 sloc
+    - function shuffle_randomises_order_choose_one  [722–744]  23 sloc
+    - function choose_one_render_uses_nerd_font_terminal_style  [429–450]  21 sloc
+    - function sticky_toggle_release_clears  [1433–1456]  20 sloc
+    - function explicit_alt_hotkey_overrides_default_ctrl_hotkey  [354–373]  19 sloc
+    - function sticky_toggle_legacy_nul_release_clears  [1459–1480]  19 sloc
+    - …and 7 more
+  - top-level symbols: 112 · max depth: 2 · imports: 17 · TODO/FIXME: 0 · comments: 9%
+  - likely refactor: 112 unrelated top-level symbols — split by responsibility
+- the claudine/lib/src/provider/tests.rs file is 1241 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function agent_capabilities_system_prompt_permissions_and_reasoning_match_typed_catalog  [492–581]  86 sloc
+    - function detect_from_payload_has_no_provider_specific_branches  [1440–1526]  72 sloc — Source guard: `Provider::detect_from_payload` in
+    - function no_unauthorized_match_provider_in_lib  [683–784]  66 sloc
+    - function agent_capabilities_runtime_matches_typed_catalog  [433–489]  54 sloc
+    - function provider_info_serializes_round_trip  [123–182]  52 sloc
+    - function codex_system_prompt_uses_config_key_variants  [1214–1256]  43 sloc
+    - function gemini_system_prompt_uses_env_var_file  [1132–1170]  39 sloc — The affected providers (Gemini, Codex, Qwen) must use the new
+    - function qwen_system_prompt_uses_inline_flags  [1173–1211]  39 sloc
+    - …and 26 more
+  - top-level symbols: 52 · max depth: 4 · imports: 32 · TODO/FIXME: 0 · comments: 12%
+  - likely refactor: 52 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (32 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/markdown/compose/expression/lexer.rs file is 1238 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method next_token  [456–598]  135 sloc — Returns the next token from the input.
+    - method read_string  [653–711]  56 sloc — Reads a string literal (single or double quoted).
+    - method find_all  [94–157]  53 sloc — Finds all interpolation expressions in the content.
+    - method read_variable  [755–799]  36 sloc — Reads a variable (identifier with optional dot-separated path).
+    - method read_number  [718–752]  29 sloc — Reads a numeric literal.
+    - method fmt  [308–334]  27 sloc
+    - enum Token  [209–285]  25 sloc — Token types for interpolation expressions.
+    - function find_code_regions  [180–204]  20 sloc — Finds fenced and indented code-block regions in content.
+    - …and 1 more
+  - top-level symbols: 9 · max depth: 8 · imports: 7 · TODO/FIXME: 0 · comments: 13%
+  - likely refactor: deeply nested (depth 8) — extract / flatten
+- the homelab/server/src/lib.rs file is 1233 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function probe_sony  [123–241]  113 sloc — Probe the Sony receiver and return its status.
+    - function probe_arcam  [1187–1310]  109 sloc — Probe the Arcam amplifier and return its status.
+    - function probe_eversolo  [248–365]  108 sloc — Probe the first configured Eversolo device and return its status.
+    - function probe_samsung_tv  [371–456]  80 sloc — Probe the first configured Samsung TV and return its status.
+    - function uri_to_category_known_uri_fallback  [867–943]  72 sloc
+    - function build_category_uri_map_with_empty_native_fields  [999–1048]  41 sloc
+    - function build_category_uri_map_with_populated_hdmi_assign  [1051–1096]  40 sloc
+    - function match_uri_to_category  [598–644]  38 sloc — Matches a Sony input URI to a native input category.
+    - …and 14 more
+  - top-level symbols: 26 · max depth: 5 · imports: 32 · TODO/FIXME: 0 · comments: 13%
+  - likely refactor: 26 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (32 imports) — expect wide refactor blast radius
+- the homelab/eversolo-integration/src/dispatch.rs file is 1229 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function fetch_snapshot  [44–226]  169 sloc — Fetch a full device snapshot for UC entity state.
+    - function execute_operation  [229–382]  154 sloc — Execute an Eversolo operation and return updated entity state attributes.
+    - function destructive_real_device_source_switch_roundtrips  [1233–1312]  76 sloc
+    - function set_brightness  [941–994]  52 sloc
+    - function destructive_real_device_volume_command_roundtrips  [1185–1229]  43 sloc
+    - function select_display_mode  [903–939]  36 sloc
+    - function player_attrs  [530–570]  35 sloc
+    - function identity_updates  [666–698]  33 sloc
+    - …and 12 more
+  - top-level symbols: 49 · max depth: 3 · imports: 33 · TODO/FIXME: 0 · comments: 0%
+  - likely refactor: 49 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (33 imports) — expect wide refactor blast radius
+- the claudine/lib/src/stream/providers/codex.rs file is 1228 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method feed_line  [524–592]  63 sloc
+    - function codex_command_execution_populates_tool_call_and_result_fields  [964–1018]  49 sloc
+    - method handle_item_started  [359–409]  48 sloc
+    - function finish  [594–638]  45 sloc
+    - method handle_item_completed  [411–459]  45 sloc
+    - function classify_error  [647–689]  43 sloc — Map a Codex error envelope onto a typed [`SemanticErrorKind`].
+    - method handle_turn_completed  [134–179]  42 sloc
+    - function codex_fixture_command_execution_routes_to_tool_pair  [1275–1316]  40 sloc
+    - …and 25 more
+  - top-level symbols: 2 · max depth: 2 · imports: 27 · TODO/FIXME: 2 · comments: 7%
+  - likely refactor: high coupling (27 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/markdown/compose/preflight/collect.rs file is 1220 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function collect_recursive  [173–459]  226 sloc — Collects every command from one document and recurses into its referenced
+    - function scan_one_frontmatter  [494–597]  81 sloc — Collects the frontmatter `$(...)` commands for a single document.
+    - function preflight_graph_attributes_entries_to_their_source_document  [1514–1592]  63 sloc — The graph metadata captures the resolved child sources, per-child shell
+    - function detect_dynamic_command_shape  [623–671]  44 sloc — Fails with [`ShellExpansionError::DynamicCommandShape`] when a pending
+    - function remote_url_transclusion_child_participates_in_preflight  [1372–1416]  40 sloc — T1 (remote): a `::url` remote transclusion child contributes its commands
+    - function transclusion_provenance_attributes_to_child_file  [898–941]  37 sloc
+    - function discovers_shell_block_commands_in_transcluded_files  [1325–1366]  36 sloc
+    - function remote_url_transclusion_false_when_still_collected  [1423–1463]  36 sloc — T1 (remote, false-`when`): the collector must ignore `when=` even on a
+    - …and 19 more
+  - top-level symbols: 11 · max depth: 4 · imports: 48 · TODO/FIXME: 0 · comments: 11%
+  - likely refactor: 11 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (48 imports) — expect wide refactor blast radius
+- the claudine/lib/src/permissions/providers/qwen.rs file is 1204 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method canonicalize  [277–515]  224 sloc
+    - function push_qwen_pattern  [716–803]  82 sloc
+    - method parse_cli_overrides  [160–228]  69 sloc
+    - function apply_qwen_operation  [930–995]  66 sloc
+    - function build_one_shot_plan  [997–1058]  59 sloc
+    - function parse_qwen_config  [575–634]  59 sloc
+    - function choose_target  [871–928]  57 sloc
+    - function qwen_backend_answers_workspace_command_and_mcp_queries  [1130–1185]  54 sloc
+    - …and 11 more
+  - top-level symbols: 25 · max depth: 4 · imports: 46 · TODO/FIXME: 0 · comments: 0%
+  - likely refactor: 25 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (46 imports) — expect wide refactor blast radius
+- the biscuit-file/lib/src/yaml/types.rs file is 1190 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function yaml_to_toml  [471–595]  116 sloc — Convert YAML value to TOML value.
+    - function yaml_to_json  [361–467]  105 sloc — Convert YAML value to JSON value.
+    - function test_hetero_array_policy_stringify  [1139–1166]  25 sloc
+    - function test_complex_nested_structure  [1343–1367]  24 sloc
+    - function test_null_policy_drop  [1040–1065]  24 sloc
+    - enum YamlError  [20–61]  23 sloc — Error type for YAML operations.
+    - function test_multiple_null_warnings  [1500–1523]  22 sloc
+    - function test_multiple_warnings_collected  [1472–1496]  22 sloc
+    - …and 20 more
+  - top-level symbols: 14 · max depth: 6 · imports: 6 · TODO/FIXME: 0 · comments: 10%
+  - likely refactor: 14 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 6) — extract / flatten
+- the queue/cli/src/tui/input_modal.rs file is 1184 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function render_compact_multiline_text_field  [689–795]  79 sloc — Renders a compact text field that can span multiple rows for longer content.
+    - method render_compact  [447–525]  69 sloc
+    - method render_full  [368–445]  66 sloc
+    - function render_compact_text_field  [628–683]  46 sloc
+    - function render_text_field_does_not_include_pipe  [1120–1165]  35 sloc
+    - function render_text_field_with_placeholder  [563–604]  35 sloc
+    - function placeholder_hidden_when_active_and_empty  [1302–1336]  29 sloc
+    - function placeholder_shown_when_empty_and_inactive  [1264–1299]  29 sloc
+    - …and 16 more
+  - top-level symbols: 14 · max depth: 4 · imports: 44 · TODO/FIXME: 0 · comments: 12%
+  - likely refactor: 14 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (44 imports) — expect wide refactor blast radius
+- the claudine/lib/src/harness/report.rs file is 1176 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function failure_state_full_block_contains_all_four_sections  [1084–1143]  51 sloc
+    - function render_failure_block_yaml_section_indents_each_line_by_four_spaces  [931–988]  51 sloc
+    - function render_failure_block_to_string_emits_four_sections_for_full_source  [796–855]  50 sloc
+    - function render_failure_block_yaml_section_has_no_yaml_label_or_box  [868–928]  48 sloc
+    - function render_failure_block_yaml_region_contains_sgr_styling  [1255–1310]  42 sloc
+    - function render_failure_block_to  [231–287]  41 sloc — Render a four-section failure block for an outcome that has
+    - function osc8_hyperlink_target_includes_line_anchor_when_range_present  [1354–1393]  33 sloc
+    - function legacy_failure_path_without_source_emits_status_then_reason  [991–1023]  32 sloc
+    - …and 23 more
+  - top-level symbols: 22 · max depth: 4 · imports: 21 · TODO/FIXME: 0 · comments: 13%
+  - likely refactor: 22 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (21 imports) — expect wide refactor blast radius
+- the sniff/lib/src/filesystem/git/status.rs file is 1176 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function get_repo_status_with_changes  [107–353]  207 sloc — Gathers repository status including staged, unstaged, and untracked changes.
+    - function staged_diff_patch  [451–518]  67 sloc — Build a unified patch for a staged change.
+    - function git_patch  [688–751]  60 sloc — Build a full git-format patch (file header + hunks) byte-compatible with
+    - function text_hunks  [766–828]  57 sloc — Render only the unified hunks (`@@` headers + content lines) of a diff
+    - function staged_diff_stats  [362–409]  47 sloc — Compute line stats for a staged change (HEAD tree vs index).
+    - function unstaged_diff_patch  [521–566]  45 sloc — Build a unified patch for an unstaged change.
+    - function get_repo_status_counts_detailed  [956–1001]  42 sloc — Lightweight status check returning individual category counts.
+    - function batched_diff_mixed_binary_and_text_deltas  [1258–1305]  41 sloc
+    - …and 12 more
+  - top-level symbols: 31 · max depth: 4 · imports: 17 · TODO/FIXME: 0 · comments: 10%
+  - likely refactor: 31 unrelated top-level symbols — split by responsibility
+- the claudine/lib/src/dispatch/mod.rs file is 1174 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function dispatch_canonical_with_runtime  [222–391]  151 sloc — Core canonical dispatch logic using the flat event→actions config.
+    - function cached_runtime_context_reuses_loaded_config_after_file_removal  [926–1023]  90 sloc
+    - function dispatch_loads_repo_scoped_config_from_environment_context  [847–923]  71 sloc
+    - function canonical_dispatch_when_gated_action_executes_or_skips_via_runtime_binding  [1353–1421]  56 sloc — Integration smoke test for the full
+    - function dispatch_canonical  [169–217]  44 sloc — High-level canonical dispatch entry point.
+    - function finalize_response  [632–673]  38 sloc
+    - function tool_detail_for_log  [515–550]  34 sloc
+    - function dispatch_protect_before_tool_produces_deny_response  [1078–1114]  33 sloc
+    - …and 16 more
+  - top-level symbols: 22 · max depth: 4 · imports: 49 · TODO/FIXME: 0 · comments: 7%
+  - likely refactor: 22 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (49 imports) — expect wide refactor blast radius
+- the sniff/lib/src/filesystem/repo/aggregate.rs file is 1174 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function resolve_directory_version  [455–540]  79 sloc — Resolve the version declared in a single directory's manifests, used as the
+    - function collect_external_dependencies  [659–729]  70 sloc — Collect external dependencies declared by packages in `scope`.
+    - function resolve_version_source  [377–442]  63 sloc — Resolve a single package's version + manifest source by re-reading the
+    - function aggregate_versions  [308–370]  56 sloc — Collapse per-package versions across `scope` into distinct entries.
+    - function aggregate_versions_multiple_manifest_sources_for_same_version  [1086–1141]  46 sloc
+    - function aggregate_versions_workspace_inheritance_resolves_to_root_with_inherited_flag  [1144–1186]  38 sloc
+    - function aggregate_versions_uniform_collapses_to_one_entry_naming_all_packages  [986–1022]  34 sloc
+    - function resolve_named_package  [613–641]  29 sloc
+    - …and 17 more
+  - top-level symbols: 22 · max depth: 4 · imports: 21 · TODO/FIXME: 0 · comments: 14%
+  - likely refactor: 22 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (21 imports) — expect wide refactor blast radius
+- the claudine/cli/src/commands/wrap/harness_orch.rs file is 1164 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function run_harness_loop  [759–1351]  509 sloc
+    - function execute_harness_attempt  [437–755]  298 sloc
+    - function materialize_harness_prompt  [284–376]  88 sloc
+    - function build_harness_launch  [379–433]  51 sloc
+    - function build_harness_shell_options_with_cache  [124–147]  24 sloc — Build shell approval options, optionally reusing a shared approval
+    - function find_wrapper_harness_source  [263–282]  19 sloc
+  - top-level symbols: 19 · max depth: 5 · imports: 21 · TODO/FIXME: 0 · comments: 8%
+  - likely refactor: 19 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (21 imports) — expect wide refactor blast radius
+- the schematic/schema/src/gitlab/requests.rs file is 1153 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method endpoint_id  [1625–1670]  46 sloc — Returns the endpoint identifier for this request.
+    - method into_parts  [360–397]  38 sloc — Converts the request into (method, path, body, headers) parts.
+    - method into_parts  [1474–1508]  35 sloc — Converts the request into (method, path, body, headers) parts.
+    - method into_parts  [87–118]  32 sloc — Converts the request into (method, path, body, headers) parts.
+    - method into_parts  [494–519]  26 sloc — Converts the request into (method, path, body, headers) parts.
+    - method into_parts  [653–678]  26 sloc — Converts the request into (method, path, body, headers) parts.
+    - method into_parts  [798–823]  26 sloc — Converts the request into (method, path, body, headers) parts.
+    - method into_parts  [954–976]  23 sloc — Converts the request into (method, path, body, headers) parts.
+    - …and 4 more
+  - top-level symbols: 19 · max depth: 2 · imports: 5 · TODO/FIXME: 0 · comments: 34%
+  - likely refactor: 19 unrelated top-level symbols — split by responsibility
+- the claudine/cli/tests/level2_schema_prompt_pty.rs file is 1134 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function level2_pty_sequence_step_overlay_satisfies_required_property  [954–1065]  81 sloc
+    - function level2_pty_sequence_prompt_dedupes_and_launches_all_steps  [848–950]  71 sloc
+    - function level2_pty_schema_prompt_appears_even_when_no_interactive_overrides_frontmatter  [710–793]  65 sloc
+    - function level2_pty_sequence_status_report_honors_setter_supplied_required  [1069–1156]  61 sloc
+    - function level2_pty_sequence_stderr_tty_with_stdout_redirected_prompts  [1334–1411]  60 sloc
+    - function level2_pty_schema_status_does_not_report_templated_enum_as_invalid  [487–561]  52 sloc
+    - function level2_pty_schema_prompt_precedes_provider_launch_with_interactive_flag  [573–640]  50 sloc
+    - function level2_pty_schema_silent_suppresses_prompt_under_tty  [423–483]  48 sloc
+    - …and 16 more
+  - top-level symbols: 31 · max depth: 3 · imports: 14 · TODO/FIXME: 0 · comments: 20%
+  - likely refactor: 31 unrelated top-level symbols — split by responsibility
+- the claudine/lib/src/dispatch/runner/mod.rs file is 1124 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function execute_actions  [131–376]  231 sloc — Execute hook actions in declaration order.
+    - function meta_with_full_env  [505–550]  46 sloc
+    - function when_skipped_call_does_not_replace_prior_selected_response  [819–856]  33 sloc
+    - function evaluate_when_with_lookup  [94–126]  31 sloc — Evaluate an action's `when` expression using a pre-built [`EventMetaConditionLookup`].
+    - function when_env_var_resolves_via_env_namespace  [859–896]  31 sloc
+    - function when_missing_env_var_is_falsy_and_skips_action  [899–931]  29 sloc
+    - function when_git_is_dirty_resolves_as_boolean  [1028–1058]  28 sloc
+    - function when_missing_git_block_is_falsy  [1275–1307]  28 sloc
+    - …and 24 more
+  - top-level symbols: 10 · max depth: 7 · imports: 46 · TODO/FIXME: 0 · comments: 5%
+  - likely refactor: 10 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 7) — extract / flatten
+  - likely refactor: high coupling (46 imports) — expect wide refactor blast radius
+- the claudine/cli/src/commands/wrap/env.rs file is 1123 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function build_child_env_with_launch  [81–247]  130 sloc — Same as `build_child_env`, but takes a pre-computed
+    - function package_area_selection_supports_area_root_without_package_match  [859–936]  77 sloc
+    - function package_selection_prefers_longest_matching_prefix  [784–856]  72 sloc
+    - function launch_workspace_context_keeps_repo_root_when_package_resolution_fails  [1316–1373]  54 sloc
+    - function build_child_env_codex_shadow_home_uses_child_cwd_not_source_repo_root  [1163–1222]  51 sloc — Regression for the source-repo vs launch-repo split through the real
+    - function resolve_monorepo_package_context  [566–620]  50 sloc
+    - function sanitize_process_env  [312–359]  42 sloc
+    - function redact_sensitive_args  [377–424]  41 sloc — Redact values in CLI args that look like they contain secrets.
+    - …and 18 more
+  - top-level symbols: 20 · max depth: 4 · imports: 22 · TODO/FIXME: 0 · comments: 10%
+  - likely refactor: 20 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (22 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/markdown/compose/shell_expansion/types.rs file is 1117 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method status_block  [586–768]  170 sloc
+    - enum ShellExpansionError  [490–583]  79 sloc
+    - method resolve  [332–379]  34 sloc — Resolves error handling for a failed command.
+    - method reserve_allow_once  [972–1002]  25 sloc — Reserves a command for allow-once approval.
+    - function truncate_output  [772–798]  25 sloc — Truncate output to a maximum number of lines/bytes for block rendering.
+    - function is_empty_checks_all_fields  [1378–1401]  24 sloc
+    - function new  [1115–1138]  24 sloc — Test-only constructor with a default (deny-all) remote-fetch runtime.
+    - method display_string  [143–163]  21 sloc — Returns a display string for the whole pipeline including chain
+    - …and 4 more
+  - top-level symbols: 31 · max depth: 3 · imports: 16 · TODO/FIXME: 0 · comments: 15%
+  - likely refactor: 31 unrelated top-level symbols — split by responsibility
+- the schematic/schema/src/unfolded_circle_core_ws.rs file is 1109 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function connect  [218–347]  130 sloc — Connect to the endpoint.
+    - function connect  [468–597]  130 sloc — Connect to the endpoint.
+    - function connect  [718–847]  130 sloc — Connect to the endpoint.
+    - function connect  [968–1097]  130 sloc — Connect to the endpoint.
+    - method request  [390–425]  36 sloc — Send a correlated request and wait for the response.
+    - method request  [640–675]  36 sloc — Send a correlated request and wait for the response.
+    - method request  [890–925]  36 sloc — Send a correlated request and wait for the response.
+    - method request  [1140–1175]  36 sloc — Send a correlated request and wait for the response.
+    - …and 10 more
+  - top-level symbols: 6 · max depth: 3 · imports: 20 · TODO/FIXME: 0 · comments: 6%
+  - likely refactor: high coupling (20 imports) — expect wide refactor blast radius
+- the claudine/lib/src/permissions/query.rs file is 1108 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function resolve_domain_query  [624–687]  62 sloc
+    - function resolve_query  [500–557]  54 sloc — Resolves a policy query against a canonical policy.
+    - function resolve_config_modify_query  [836–875]  38 sloc
+    - function build_single_match_result  [878–913]  36 sloc — Builds a `QueryResult` for a single matched rule.
+    - function resolve_mcp_tool_query  [716–760]  36 sloc
+    - function resolve_mode_switch_query  [799–834]  36 sloc
+    - function resolve_subagent_query  [762–797]  36 sloc
+    - function resolve_path_query  [559–595]  35 sloc
+    - …and 17 more
+  - top-level symbols: 30 · max depth: 3 · imports: 24 · TODO/FIXME: 0 · comments: 10%
+  - likely refactor: 30 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (24 imports) — expect wide refactor blast radius
+- the sniff/cli/src/output/mod.rs file is 1093 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function render_text  [253–672]  399 sloc — Render all text output for a given filter mode into a single String.
+    - function apply_filter_to_json  [687–823]  121 sloc — Apply output filter to create a custom JSON value with only the requested fields.
+    - function filter_docs  [155–221]  64 sloc — Apply docs filter flags to a list of markdown documents.
+    - enum OutputFilter  [79–137]  30 sloc — Filter mode for output - determines which subsection to display.
+    - function blast_radius_flag_filters_to_blast_radius_docs  [1087–1117]  27 sloc
+    - function attach_performance_to_object_filter_output  [1237–1262]  25 sloc
+    - function print_json  [876–895]  20 sloc — Print a filtered JSON view of `result` to stdout.
+    - function make_doc  [908–924]  17 sloc
+    - …and 4 more
+  - top-level symbols: 11 · max depth: 5 · imports: 77 · TODO/FIXME: 0 · comments: 10%
+  - likely refactor: 11 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (77 imports) — expect wide refactor blast radius
+- the claudine/cli/src/commands/wrap/sequence.rs file is 1092 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function execute_sequence  [48–771]  550 sloc — Execute a full sequence: iterate steps, compose each, and report results.
+    - function run_phase_1c_attempt  [1023–1212]  164 sloc
+    - function run_phase_1c_with_schema  [888–983]  71 sloc — Run Phase 1c (per-step compose) with schema validation and aggregated
+    - function collect_sequence_missing_values  [1226–1275]  41 sloc — Dedupe missing properties across all failed steps and prompt for each
+    - function auto_selectable_states_are_classified  [1359–1399]  37 sloc
+    - function dry_run_sequence_target  [835–872]  36 sloc — Resolve the per-step execution target for a `--dry-run` sequence.
+    - function apply_user_set_to_hints  [779–803]  23 sloc — Apply user `--set` overrides to raw selection hints.
+    - function find_first_unsupported  [1284–1301]  18 sloc — Locate the first missing property across all sequence step failures
+    - …and 1 more
+  - top-level symbols: 15 · max depth: 4 · imports: 54 · TODO/FIXME: 0 · comments: 18%
+  - likely refactor: `execute_sequence` holds 50% of the code — split by responsibility
+  - likely refactor: 15 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (54 imports) — expect wide refactor blast radius
+- the sniff/lib/src/filesystem/git/types.rs file is 1089 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method detect_with_request  [867–1022]  126 sloc
+    - method metadata  [293–366]  74 sloc — Returns static metadata for the hosting provider.
+    - function from_url  [419–456]  37 sloc — Detects the hosting provider from a Git remote URL.
+    - function deserialize  [1135–1174]  34 sloc
+    - function existing_presets_still_compute_status  [1707–1738]  28 sloc
+    - function parse_org_repo  [1368–1398]  28 sloc — Extracts the organization (owner) and repository name from a remote URL.
+    - function parse  [91–118]  26 sloc — Parse a commit message into a conventional commit structure.
+    - type GitConfig  [19–54]  24 sloc — Git user configuration.
+    - …and 9 more
+  - top-level symbols: 25 · max depth: 3 · imports: 22 · TODO/FIXME: 0 · comments: 29%
+  - likely refactor: 25 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (22 imports) — expect wide refactor blast radius
+- the claudine/lib/src/permissions/providers/claude.rs file is 1084 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method canonicalize  [286–417]  121 sloc
+    - function push_claude_rules  [514–629]  114 sloc
+    - function push_permission_rule  [631–719]  83 sloc
+    - method parse_cli_overrides  [157–232]  76 sloc
+    - function choose_target_path  [729–791]  63 sloc
+    - function claude_backend_queries_paths_and_commands  [1000–1061]  59 sloc
+    - function apply_persistent_operation  [793–847]  55 sloc
+    - method discover_sources  [72–127]  51 sloc
+    - …and 10 more
+  - top-level symbols: 19 · max depth: 5 · imports: 46 · TODO/FIXME: 0 · comments: 0%
+  - likely refactor: 19 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (46 imports) — expect wide refactor blast radius
+- the claudine/lib/src/harness/validate/mod.rs file is 1079 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function evaluate_single  [203–300]  89 sloc — Evaluate a single validation rule.
+    - function init_committed_repo  [376–430]  52 sloc
+    - function run_checks  [141–189]  43 sloc — Run a set of checks and return a structured phase report.
+    - function all_failures_collected_not_short_circuited  [982–1020]  38 sloc
+    - function capture_pre_run_snapshot  [60–102]  36 sloc — Capture a pre-run snapshot for subjects referenced by post-checks.
+    - function outcome_carries_rule_source_clone  [923–957]  32 sloc
+    - function evaluate_post_checks  [109–138]  30 sloc — Evaluate all post-checks in declaration order.
+    - function snapshot_only_captures_referenced_files  [1052–1080]  27 sloc
+    - …and 25 more
+  - top-level symbols: 6 · max depth: 5 · imports: 30 · TODO/FIXME: 0 · comments: 4%
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (30 imports) — expect wide refactor blast radius
+- the tree-hugger/lib/src/file/extract/signatures.rs file is 1073 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function extract_python_parameter  [153–210]  49 sloc
+    - function extract_parameters  [30–94]  46 sloc — Extracts parameters from a function node.
+    - function extract_js_parameter  [270–319]  42 sloc
+    - function extract_rust_return_type  [731–776]  39 sloc — Extracts return type from Rust function_item.
+    - function extract_scala_return_type  [1485–1525]  33 sloc — Extracts return type from Scala function_definition.
+    - function extract_go_return_type  [819–853]  32 sloc — Extracts return type from Go function_declaration.
+    - function extract_swift_return_type  [1428–1466]  32 sloc — Extracts return type from Swift function_declaration.
+    - function extract_php_return_type  [977–1011]  30 sloc — Extracts return type from PHP function_definition or method_declaration.
+    - …and 31 more
+  - top-level symbols: 49 · max depth: 5 · imports: 0 · TODO/FIXME: 0 · comments: 23%
+  - likely refactor: 49 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+- the claudine/lib/src/dispatch/loader.rs file is 1071 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function compile_canonical_runtime  [97–168]  59 sloc — Compile a [`ClaudineConfig`] into a [`CanonicalRuntimeConfig`].
+    - function bridge_provider_config  [279–334]  56 sloc — Convert a single [`MessengerProviderConfig`] to [`MessagingRouteConfig`].
+    - function invalid_matcher_in_config_compiles_to_unconditional_binding  [751–812]  46 sloc
+    - function load_claudine_config  [376–431]  46 sloc — Load and validate a [`ClaudineConfig`].
+    - function load_claudine_config_old_format_creates_backup_and_returns_error  [1217–1263]  43 sloc
+    - function repo_old_format_config_backed_up_and_ignored  [1050–1089]  36 sloc
+    - function bridge_tts_settings  [209–240]  31 sloc — Bridge [`ClaudineConfig`] TTS settings to legacy [`GlobalSettings`].
+    - function compile_canonical_runtime_bridges_messenger_config  [856–888]  31 sloc
+    - …and 24 more
+  - top-level symbols: 17 · max depth: 3 · imports: 17 · TODO/FIXME: 0 · comments: 9%
+  - likely refactor: 17 unrelated top-level symbols — split by responsibility
+- the claudine/lib/src/stream/providers/opencode.rs file is 1065 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method feed_line  [428–509]  78 sloc
+    - function finish  [511–563]  53 sloc
+    - function classify_error  [567–613]  47 sloc — Map an OpenCode error envelope onto a typed [`SemanticErrorKind`].
+    - function opencode_task_error_completion_no_longer_synthesizes_subagent_lifecycle  [1139–1184]  38 sloc
+    - function opencode_task_completion_no_longer_synthesizes_subagent_lifecycle  [1090–1136]  36 sloc
+    - method handle_step_finish  [128–161]  34 sloc
+    - method handle_step_complete  [163–195]  33 sloc
+    - method handle_tool_use_completed  [326–360]  33 sloc — Handle OpenCode's `tool_use` event, which per the run.ts contract is
+    - …and 21 more
+  - top-level symbols: 2 · max depth: 2 · imports: 32 · TODO/FIXME: 0 · comments: 6%
+  - likely refactor: high coupling (32 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/markdown/compose/context/catalog.rs file is 1065 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function parse_example_result  [1372–1394]  23 sloc
+    - function descriptor_name_set_equals_captured_runtime_key_set  [1267–1290]  21 sloc — The catalog must describe exactly the variables the runtime produces.
+    - function value_shape_matches  [1353–1370]  18 sloc
+    - function capture_value_shape_matches_display_type  [1397–1412]  16 sloc
+    - function every_context_example_is_type_shape_only  [1329–1344]  16 sloc — Context-variable examples illustrate shape only: live values are
+    - enum ContextValueType  [12–39]  15 sloc — Display type for a context variable's runtime value.
+    - function context_example_results_are_type_consistent  [1415–1429]  15 sloc
+  - top-level symbols: 4 · max depth: 3 · imports: 8 · TODO/FIXME: 0 · comments: 4%
+- the claudine/lib/src/composition/select.rs file is 1062 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function resolve_target_non_tty_with_env  [188–275]  75 sloc
+    - function build_picker_plan_with_hints  [294–370]  63 sloc — Build a picker plan from raw selection hints, without requiring a
+    - function classify_agent_resolution  [52–115]  56 sloc — Classify a frontmatter `agent` value against the installed-provider
+    - function resolve_model_with_env  [434–491]  49 sloc
+    - function select_provider  [528–557]  27 sloc — Legacy compatibility: select a provider using the old API.
+    - function make_prepared_composition  [581–606]  26 sloc
+    - function build_installed_snapshot  [20–44]  23 sloc — Build a snapshot of installed providers from a pre-computed list.
+    - function resolve_agent_hint_non_tty  [500–521]  22 sloc — Resolve an agent hint in non-TTY mode.
+    - …and 18 more
+  - top-level symbols: 16 · max depth: 4 · imports: 28 · TODO/FIXME: 0 · comments: 8%
+  - likely refactor: 16 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (28 imports) — expect wide refactor blast radius
+- the renderable/src/tree/validate.rs file is 1061 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function check_node  [250–482]  193 sloc — Records findings for a single node given its position and parent.
+    - function browser_attrs_match_their_node_kind  [1216–1250]  33 sloc
+    - function walk  [208–247]  33 sloc — Recursively validates `node`.
+    - function kind_name  [154–185]  32 sloc — A short name for a node kind, used in finding messages.
+    - function is_block  [100–118]  19 sloc — Returns `true` if `kind` is a block-level node.
+    - function table_column_hints_on_non_table_is_an_error  [983–1001]  19 sloc
+    - function empty_per_target_map_rejected_by_tree_validation  [1253–1271]  18 sloc
+    - function image_browser_attrs_on_non_image_is_an_error  [1196–1213]  18 sloc
+    - …and 13 more
+  - top-level symbols: 14 · max depth: 3 · imports: 64 · TODO/FIXME: 0 · comments: 8%
+  - likely refactor: 14 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (64 imports) — expect wide refactor blast radius
+- the biscuit-tui/lib/src/components/choose_many/tests.rs file is 1058 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function render_disabled_row_with_dim_style  [543–579]  33 sloc
+    - function render_overflow_indicators_when_scrolled  [497–540]  33 sloc
+    - function typed_value_enum_flow  [468–494]  25 sloc
+    - function choose_many_horizontal_badges_short_viewport_does_not_draw_past_area  [911–936]  24 sloc
+    - function shuffle_randomises_order_choose_many  [687–709]  23 sloc
+    - function choose_many_render_uses_nerd_font_terminal_style  [258–279]  21 sloc
+    - function typed_value_u32_flow  [442–465]  20 sloc
+    - function ctrl_a_selects_all_enabled_options  [582–600]  18 sloc
+    - …and 8 more
+  - top-level symbols: 94 · max depth: 2 · imports: 12 · TODO/FIXME: 0 · comments: 6%
+  - likely refactor: 94 unrelated top-level symbols — split by responsibility
+- the claudine/lib/src/composition/loop_actions.rs file is 1051 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function render_string_with_lookup  [183–235]  43 sloc
+    - function apply_merge  [397–432]  35 sloc
+    - function append_handles_scalars_and_json_values  [794–825]  31 sloc
+    - function prepend_handles_scalars_and_json_values  [1126–1157]  31 sloc
+    - function apply_action_with_context  [112–138]  27 sloc
+    - function staging_discards_partial_mutations_on_error  [910–936]  25 sloc
+    - function decrement_error_includes_unresolved_template_excerpt  [1054–1077]  24 sloc
+    - function increment_error_includes_unresolved_template_excerpt  [1010–1033]  24 sloc
+    - …and 22 more
+  - top-level symbols: 30 · max depth: 2 · imports: 12 · TODO/FIXME: 0 · comments: 4%
+  - likely refactor: 30 unrelated top-level symbols — split by responsibility
+- the messenger/cli/src/config.rs file is 1048 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function from  [511–608]  98 sloc
+    - function from  [612–709]  98 sloc
+    - enum RouteConfigRepr  [288–372]  85 sloc
+    - enum RouteConfig  [140–192]  53 sloc — A named route pointing to a provider and target plus secrets.
+    - function from  [713–763]  47 sloc
+    - function from_provider_and_target  [425–467]  43 sloc
+    - function desktop_route_round_trips_prefer_helpers_for_each_os  [1098–1126]  29 sloc
+    - function load_from_path  [810–831]  22 sloc — Load config from a specific path, returning default if not found.
+    - …and 9 more
+  - top-level symbols: 29 · max depth: 2 · imports: 13 · TODO/FIXME: 0 · comments: 5%
+  - likely refactor: 29 unrelated top-level symbols — split by responsibility
+- the sniff/cli/src/output/remote.rs file is 1047 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function render_remote_text  [28–137]  84 sloc — Render remote report as formatted text using biscuit-terminal components.
+    - function render_cicd  [196–264]  53 sloc — Render CI/CD information.
+    - function render_pull_requests_verbose  [554–622]  53 sloc — Render a list of pull requests as verbose blocks for `sniff repo pr -v`.
+    - function render_key_urls  [397–448]  49 sloc — Render key URLs as a styled list.
+    - function make_test_report  [646–690]  45 sloc
+    - function render_documents  [140–188]  45 sloc — Render document references as a categorized list.
+    - function relative_time  [454–494]  33 sloc — Convert an ISO 8601 timestamp to a compact relative time string.
+    - function render_pull_requests  [296–333]  32 sloc — Render recent pull requests as a table.
+    - …and 11 more
+  - top-level symbols: 14 · max depth: 3 · imports: 17 · TODO/FIXME: 0 · comments: 7%
+  - likely refactor: 14 unrelated top-level symbols — split by responsibility
+- the claudine/lib/src/permissions/providers/gemini.rs file is 1044 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method canonicalize  [329–524]  188 sloc
+    - method discover_sources  [86–186]  97 sloc
+    - method plan_change  [526–624]  95 sloc
+    - function choose_targets  [717–807]  90 sloc
+    - method parse_cli_overrides  [230–282]  53 sloc
+    - function gemini_backend_queries_policy_rules  [907–960]  51 sloc
+    - method compose_native_policy  [284–327]  43 sloc
+    - function gemini_round_trip_mutation_changes_query_result  [1041–1088]  43 sloc
+    - …and 9 more
+  - top-level symbols: 15 · max depth: 4 · imports: 48 · TODO/FIXME: 0 · comments: 0%
+  - likely refactor: 15 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (48 imports) — expect wide refactor blast radius
+- the darkmatter/lib/src/markdown/reference/graph.rs file is 1035 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function build_node  [235–740]  430 sloc — Build a single graph node for a document.
+    - function multiple_insertions_same_line  [1180–1258]  73 sloc
+    - function flatten_node  [134–197]  48 sloc — Recursively flatten a node's references in composed order.
+    - function extract_all_references  [746–785]  32 sloc — Extract all reference types from prepared content in a single pass.
+    - function generate_toc_link_references  [913–946]  32 sloc
+    - function recursive_file_traversal  [1034–1074]  28 sloc
+    - function prologue_and_epilogue_traversal  [1077–1111]  27 sloc
+    - function resolve_local_target  [840–870]  24 sloc — Resolve a local path target relative to a source.
+    - …and 7 more
+  - top-level symbols: 20 · max depth: 6 · imports: 31 · TODO/FIXME: 0 · comments: 12%
+  - likely refactor: 20 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 6) — extract / flatten
+  - likely refactor: high coupling (31 imports) — expect wide refactor blast radius
+- the claudine/lib/src/linking/compatibility/mod.rs file is 1033 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function classify_canonical_candidate  [30–79]  45 sloc — Parse a canonical markdown candidate, apply deterministic compatibility upgrades,
+    - function frontmatter_bounds  [270–316]  43 sloc
+    - function classify_target_reference  [85–127]  40 sloc — Classify whether a target provider can consume a canonical source as a direct link.
+    - function target_links_become_incomplete_when_provider_requirements_unmet  [787–822]  33 sloc
+    - function canonical_file_path  [138–169]  32 sloc
+    - function classify_target_reference_captures_missing_property_names  [1050–1085]  32 sloc
+    - function normalize_yaml_indentation_tabs  [328–364]  32 sloc
+    - function alias_duplication_adds_equivalent_keys  [720–753]  31 sloc
+    - …and 17 more
+  - top-level symbols: 31 · max depth: 4 · imports: 18 · TODO/FIXME: 0 · comments: 2%
+  - likely refactor: 31 unrelated top-level symbols — split by responsibility
+- the darkmatter/lib/src/markdown/schemas/coerce.rs file is 1031 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function per_arm_coercion_handles_inline_object_arm_with_opaque_sibling  [1282–1318]  37 sloc
+    - function coerce_object  [285–326]  35 sloc — Non-union object pass: coerce each instance property that the schema
+    - function array_of_inline_objects_coerces_mixed_recognized_and_opaque_properties  [1214–1245]  32 sloc
+    - function array_of_inline_objects_coerces_per_item  [1179–1211]  30 sloc
+    - function implement_like_union  [838–868]  29 sloc
+    - function inline_object_value_coerces_mixed_recognized_and_opaque_properties  [1099–1126]  28 sloc
+    - function root_union_commits_arm_when_only_pending_keys_block_it  [887–917]  28 sloc
+    - function inline_object_value_coerces_declared_properties  [1069–1096]  27 sloc
+    - …and 21 more
+  - top-level symbols: 19 · max depth: 3 · imports: 9 · TODO/FIXME: 0 · comments: 19%
+  - likely refactor: 19 unrelated top-level symbols — split by responsibility
+- the biscuit-terminal/lib/src/components/block_quote.rs file is 1030 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method render_content  [274–327]  38 sloc — Render the block quote content with a left border.
+    - method project_block_children  [552–585]  25 sloc — Builds the top-level children for the quote's projected
+    - method render_tree  [637–664]  18 sloc — Projects the block quote into the canonical render tree as a
+    - function test_embedded_newlines_preserved_with_wrapping  [1107–1126]  18 sloc
+    - function default  [140–155]  16 sloc
+    - function is_inline_node_kind  [594–609]  16 sloc — Returns `true` if a [`NodeKind`] is phrasing-level (inline).
+    - function strip_ansi  [672–687]  16 sloc — Strip ANSI escape sequences for test assertions.
+    - method render_via_tree  [370–390]  15 sloc — Renders the block quote through the canonical render tree.
+  - top-level symbols: 6 · max depth: 3 · imports: 45 · TODO/FIXME: 0 · comments: 25%
+  - likely refactor: high coupling (45 imports) — expect wide refactor blast radius
+- the biscuit-icon/lib/src/cache/store.rs file is 1025 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function open_at  [56–219]  140 sloc — Opens (creating if needed) a cache at an explicit path (used in tests).
+    - function migration_from_old_schema_preserves_view_box_origin  [564–664]  88 sloc
+    - function v1_migration_rolls_back_on_failure  [919–985]  56 sloc
+    - function v0_db_migrates_to_v2_preserving_data  [710–767]  53 sloc
+    - function v2_db_migrates_to_v3_preserving_data  [1064–1120]  53 sloc
+    - function v1_db_migrates_to_v3  [770–822]  49 sloc
+    - function idempotent_migration_when_v3_columns_already_exist  [870–916]  43 sloc
+    - function set_info_total_round_trips  [988–1031]  40 sloc
+    - …and 12 more
+  - top-level symbols: 4 · max depth: 3 · imports: 8 · TODO/FIXME: 0 · comments: 7%
+- the biscuit-test-harness/src/apple_terminal.rs file is 1023 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method spawn_shell  [950–1113]  94 sloc — Opens a fresh Terminal.app window running a login shell and
+    - method close_window  [493–542]  45 sloc — Closes the spawned window without saving its session.
+    - function spawn_script_is_focus_free  [1623–1668]  42 sloc — Phase-5 static verification: the spawn AppleScript must never call
+    - function reap_titled_windows  [744–778]  35 sloc — Title pass: close windows whose `custom title` still carries a
+    - function concurrent_appends_preserve_every_row  [1420–1449]  30 sloc — Concurrent appends from many threads must each land as a whole,
+    - function looks_like_harness_window  [824–856]  27 sloc — Whether the window with `window_id` still presents as an idle harness
+    - function applescript_escape  [1203–1225]  23 sloc — Escapes a string so it can be embedded inside an AppleScript
+    - function quit_terminal  [661–680]  20 sloc — Quits Terminal.app and waits for the process to actually exit so the next
+    - …and 9 more
+  - top-level symbols: 37 · max depth: 5 · imports: 22 · TODO/FIXME: 0 · comments: 33%
+  - likely refactor: 37 unrelated top-level symbols — split by responsibility
+  - likely refactor: deeply nested (depth 5) — extract / flatten
+  - likely refactor: high coupling (22 imports) — expect wide refactor blast radius
+- the schematic/schema/src/github/requests.rs file is 1022 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method endpoint_id  [1463–1506]  44 sloc — Returns the endpoint identifier for this request.
+    - method into_parts  [338–369]  32 sloc — Converts the request into (method, path, body, headers) parts.
+    - method into_parts  [554–585]  32 sloc — Converts the request into (method, path, body, headers) parts.
+    - method into_parts  [1205–1236]  32 sloc — Converts the request into (method, path, body, headers) parts.
+    - method into_parts  [1323–1354]  32 sloc — Converts the request into (method, path, body, headers) parts.
+    - method into_parts  [439–464]  26 sloc — Converts the request into (method, path, body, headers) parts.
+    - method into_parts  [713–738]  26 sloc — Converts the request into (method, path, body, headers) parts.
+    - method into_parts  [808–833]  26 sloc — Converts the request into (method, path, body, headers) parts.
+    - …and 5 more
+  - top-level symbols: 17 · max depth: 2 · imports: 5 · TODO/FIXME: 0 · comments: 36%
+  - likely refactor: 17 unrelated top-level symbols — split by responsibility
+- the unchained-ai/lib/src/rigging/tools/screen_scrape.rs file is 1017 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method scrape  [571–720]  123 sloc — Perform the scrape operation.
+    - method definition  [744–802]  59 sloc
+    - function test_successful_scrape_with_mock  [1196–1243]  41 sloc
+    - function html_to_markdown  [455–502]  37 sloc — Convert HTML to Markdown.
+    - type ScrapeArgs  [190–249]  31 sloc — Input arguments for the screen scrape tool.
+    - function test_scrape_with_main_content_extraction  [1246–1281]  30 sloc
+    - function test_scrape_metadata  [1284–1320]  28 sloc
+    - function test_scrape_emits_tracing_events  [1367–1396]  24 sloc
+    - …and 11 more
+  - top-level symbols: 12 · max depth: 4 · imports: 36 · TODO/FIXME: 0 · comments: 14%
+  - likely refactor: 12 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (36 imports) — expect wide refactor blast radius
+- the schematic/gen/src/output/mod.rs file is 1013 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function generate_and_write_all  [125–264]  124 sloc — Generates and writes all API code to the output directory.
+    - function large_api_produces_split_directory  [1101–1168]  61 sloc
+    - function make_shared_module_apis  [873–929]  55 sloc
+    - function full_pipeline_with_all_http_methods  [779–836]  54 sloc
+    - function full_pipeline_with_all_auth_strategies  [722–776]  53 sloc
+    - function make_complex_api  [453–504]  52 sloc
+    - function make_large_api  [1055–1098]  43 sloc
+    - function assemble_combined_module_includes_both_apis  [946–984]  39 sloc
+    - …and 12 more
+  - top-level symbols: 7 · max depth: 3 · imports: 33 · TODO/FIXME: 0 · comments: 9%
+  - likely refactor: high coupling (33 imports) — expect wide refactor blast radius
+- the schematic/schema/src/unfolded_circle_core_rest.rs file is 1013 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method build_and_send_request  [1411–1463]  53 sloc — Builds and sends an HTTP request, returning the raw response plus context.
+    - method apply_env_fallback  [1328–1377]  50 sloc
+    - method build  [1196–1240]  45 sloc — Builds the variant API client with the configured options.
+    - method endpoint_id  [608–644]  37 sloc — Returns the endpoint identifier for this request.
+    - function new  [725–759]  35 sloc — Creates a new API client with the default base URL.
+    - function with_base_url  [767–801]  35 sloc — Creates a new API client with a custom base URL.
+    - function with_client  [815–849]  35 sloc — Creates a new API client with a pre-configured reqwest client.
+    - function with_client_and_base_url  [861–895]  35 sloc — Creates a new API client with a pre-configured reqwest client and custom base URL.
+    - …and 9 more
+  - top-level symbols: 14 · max depth: 2 · imports: 4 · TODO/FIXME: 0 · comments: 38%
+  - likely refactor: 14 unrelated top-level symbols — split by responsibility
+- the claudine/lib/src/permissions/providers/roo.rs file is 1010 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - method canonicalize  [317–416]  92 sloc
+    - function roo_backend_models_mode_ignore_and_mcp_rules  [965–1052]  86 sloc
+    - method discover_sources  [119–204]  83 sloc
+    - function push_mcp_rules  [830–909]  75 sloc
+    - function parse_roo_layer  [485–556]  72 sloc
+    - function push_workspace_rules  [722–785]  62 sloc
+    - method plan_change  [418–482]  61 sloc
+    - method parse_cli_overrides  [226–271]  46 sloc
+    - …and 11 more
+  - top-level symbols: 30 · max depth: 4 · imports: 46 · TODO/FIXME: 0 · comments: 0%
+  - likely refactor: 30 unrelated top-level symbols — split by responsibility
+  - likely refactor: high coupling (46 imports) — expect wide refactor blast radius
+- the playa/lib/src/sfx_player.rs file is 1004 lines of code
+  - the largest blocks in this file are composed by these symbols:
+    - function play_sfx_as_event_inner  [946–1096]  128 sloc
+    - function play_sfx_with_category  [648–780]  94 sloc — Play sound effect bytes through WASAPI with `AudioCategory_SoundEffects`.
+    - function can_create_event_stream  [1290–1343]  47 sloc
+    - function find_system_sound_device  [309–368]  45 sloc — Find the macOS system sound output device as a rodio `Device`.
+    - function play_sfx  [181–230]  41 sloc — Play sound effect bytes using native audio (rodio).
+    - function get_all_device_ids  [403–445]  38 sloc — Get all CoreAudio device IDs.
+    - function wait_for_pulse_condition  [870–900]  28 sloc
+    - function get_audio_device  [371–400]  26 sloc — Query a hardware-level audio device property that returns an AudioObjectID.
+    - …and 9 more
+  - top-level symbols: 9 · max depth: 3 · imports: 60 · TODO/FIXME: 0 · comments: 15%
+  - likely refactor: high coupling (60 imports) — expect wide refactor blast radius

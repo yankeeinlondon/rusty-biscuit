@@ -17,6 +17,7 @@ pub enum TerminalApp {
     Ghostty,
     Wast,
     VsCode,
+    WindowsTerminal,
     Other(String),
 }
 
@@ -70,7 +71,7 @@ pub fn get_terminal_app() -> TerminalApp {
 
     // 2. Check terminal-specific environment variables
     if env::var("WT_SESSION").is_ok() {
-        return TerminalApp::Other("Windows Terminal".to_string());
+        return TerminalApp::WindowsTerminal;
     }
     if env::var("KITTY_WINDOW_ID").is_ok() || env::var("KITTY_PID").is_ok() {
         return TerminalApp::Kitty;
@@ -110,6 +111,56 @@ pub fn get_terminal_app() -> TerminalApp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
+
+    /// Set an env var for the duration of a test, restoring the prior value on drop.
+    struct ScopedEnv {
+        vars: Vec<(String, Option<String>)>,
+    }
+
+    impl ScopedEnv {
+        fn new() -> Self {
+            Self { vars: Vec::new() }
+        }
+
+        fn set(&mut self, key: &str, value: &str) {
+            self.vars.push((key.to_string(), env::var(key).ok()));
+            // SAFETY: guarded by #[serial] so no other test mutates env concurrently.
+            unsafe { env::set_var(key, value) };
+        }
+
+        fn remove(&mut self, key: &str) {
+            self.vars.push((key.to_string(), env::var(key).ok()));
+            // SAFETY: guarded by #[serial] so no other test mutates env concurrently.
+            unsafe { env::remove_var(key) };
+        }
+    }
+
+    impl Drop for ScopedEnv {
+        fn drop(&mut self) {
+            for (key, old) in self.vars.drain(..).rev() {
+                // SAFETY: guarded by #[serial] so no other test mutates env concurrently.
+                unsafe {
+                    match old {
+                        Some(v) => env::set_var(&key, v),
+                        None => env::remove_var(&key),
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    #[serial]
+    fn test_wt_session_detects_windows_terminal() {
+        let mut env = ScopedEnv::new();
+        // WT_SESSION must win over any inherited TERM_PROGRAM and yield the
+        // first-class variant, not the legacy Other("Windows Terminal").
+        env.remove("TERM_PROGRAM");
+        env.set("WT_SESSION", "0a1b2c3d-0000-0000-0000-000000000000");
+
+        assert!(matches!(get_terminal_app(), TerminalApp::WindowsTerminal));
+    }
 
     #[test]
     fn test_terminal_app_display() {

@@ -31,7 +31,7 @@ pub struct PadLeftArgs {
 }
 
 impl Run for PadLeftArgs {
-    fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
+    fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         let width = self.width.unwrap_or(PADLEFT_EXAMPLE_WIDTH);
         let content = if self.example {
             PADLEFT_EXAMPLE_TEXT.to_string()
@@ -50,7 +50,7 @@ impl Run for PadLeftArgs {
             pad = pad.truncate();
         }
 
-        let term = detect_terminal_honoring_force_color();
+        let term = terminal_for_render(ctx.plain);
         println!("{}", pad.render(&term));
         if self.example {
             print_example_command(PADLEFT_EXAMPLE_CMD);
@@ -77,7 +77,7 @@ pub struct PadRightArgs {
 }
 
 impl Run for PadRightArgs {
-    fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
+    fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         use biscuit_terminal::components::pad::PadRight;
 
         let width = self.width.unwrap_or(PADRIGHT_EXAMPLE_WIDTH);
@@ -98,7 +98,7 @@ impl Run for PadRightArgs {
             pad = pad.truncate();
         }
 
-        let term = detect_terminal_honoring_force_color();
+        let term = terminal_for_render(ctx.plain);
         println!("{}", pad.render(&term));
         if self.example {
             print_example_command(PADRIGHT_EXAMPLE_CMD);

@@ -1,931 +1,925 @@
 ---
+$schema: ./_schema.yaml
+created: "2026-07-03"
+last_updated: "2026-07-03"
+agent: open_code
+model: kimi-for-coding/k2p7
 homepage: https://opencode.ai
 docs: https://opencode.ai/docs
-hooks: https://opencode.ai/docs/plugins
+hooks_docs: https://opencode.ai/docs/plugins/
+hooks:
+  - native_event: config
+    claudine_event: initialize
+    timing: post
+    blocking: false
+    payload_schema: "merged_opencode_config_object"
+    return_contract: "Return value ignored; observation/validation only."
+    notes: "Fires once after all plugins are loaded with the fully merged config."
+  - native_event: dispose
+    claudine_event: finalize
+    timing: post
+    blocking: false
+    payload_schema: "none"
+    return_contract: "Return value ignored; cleanup only."
+    notes: "Fires on shutdown."
+  - native_event: event
+    claudine_event: notification
+    timing: async
+    blocking: false
+    payload_schema: "{ event: { id, type, properties } }"
+    return_contract: "Fire-and-forget; return value/throw has no effect."
+    notes: "Catch-all event bus listener. Filtered to the plugin's directory."
+  - native_event: session.created
+    claudine_event: initialize
+    timing: post
+    blocking: false
+    payload_schema: "sessionID, info { id, slug, projectID, directory, title, agent, model, time.created }"
+    return_contract: "Observation only."
+    notes: "Fires after a session is created."
+  - native_event: session.updated
+    claudine_event: notification
+    timing: post
+    blocking: false
+    payload_schema: "sessionID, info { ...SessionInfo }"
+    return_contract: "Observation only."
+    notes: "Fires when session metadata changes."
+  - native_event: session.deleted
+    claudine_event: finalize
+    timing: post
+    blocking: false
+    payload_schema: "sessionID, info { ...SessionInfo }"
+    return_contract: "Observation only."
+    notes: "Fires when a session is deleted."
+  - native_event: session.error
+    claudine_event: failure
+    timing: post
+    blocking: false
+    payload_schema: "sessionID?, error { name, data }"
+    return_contract: "Observation only."
+    notes: "Fires on session-level errors."
+  - native_event: session.idle
+    claudine_event: finalize
+    timing: post
+    blocking: false
+    payload_schema: "sessionID"
+    return_contract: "Observation only; deprecated in favor of session.status."
+    notes: "Fires when a session becomes idle."
+  - native_event: session.status
+    claudine_event: notification
+    timing: async
+    blocking: false
+    payload_schema: "sessionID, status { type: idle|busy|retry, attempt?, message?, action?, next? }"
+    return_contract: "Observation only."
+    notes: "Status change notifications."
+  - native_event: session.compacted
+    claudine_event: notification
+    timing: post
+    blocking: false
+    payload_schema: "sessionID"
+    return_contract: "Observation only."
+    notes: "Fires after context compaction completes."
+  - native_event: message.updated
+    claudine_event: notification
+    timing: post
+    blocking: false
+    payload_schema: "sessionID, info { role, id, time, ... }"
+    return_contract: "Observation only."
+    notes: "Fires when a message is created or updated."
+  - native_event: message.removed
+    claudine_event: notification
+    timing: post
+    blocking: false
+    payload_schema: "sessionID, messageID"
+    return_contract: "Observation only."
+    notes: "Fires when a message is removed."
+  - native_event: message.part.updated
+    claudine_event: notification
+    timing: async
+    blocking: false
+    payload_schema: "sessionID, part { id, type, text|... }, time"
+    return_contract: "Observation only."
+    notes: "Fires when a message part is updated."
+  - native_event: message.part.removed
+    claudine_event: notification
+    timing: async
+    blocking: false
+    payload_schema: "sessionID, messageID, partID"
+    return_contract: "Observation only."
+    notes: "Fires when a message part is removed."
+  - native_event: permission.asked
+    claudine_event: permission
+    timing: pre
+    blocking: false
+    payload_schema: "id, sessionID, permission, patterns[], metadata, always[], tool { messageID, callID }"
+    return_contract: "Observation only on event bus; use dedicated permission.ask hook to influence."
+    notes: "Fires when a permission prompt is shown to the user."
+  - native_event: permission.replied
+    claudine_event: permission
+    timing: post
+    blocking: false
+    payload_schema: "sessionID, requestID, reply, message?"
+    return_contract: "Observation only."
+    notes: "Fires after the user replies to a permission prompt."
+  - native_event: command.executed
+    claudine_event: notification
+    timing: post
+    blocking: false
+    payload_schema: "(schema in legacy-event.ts)"
+    return_contract: "Observation only."
+    notes: "Fires after a TUI command is executed."
+  - native_event: file.edited
+    claudine_event: notification
+    timing: post
+    blocking: false
+    payload_schema: "file: string"
+    return_contract: "Observation only."
+    notes: "Fires after a file is edited."
+  - native_event: file.watcher.updated
+    claudine_event: notification
+    timing: async
+    blocking: false
+    payload_schema: "(filesystem-watcher schema)"
+    return_contract: "Observation only."
+    notes: "Fires on filesystem watcher updates."
+  - native_event: tui.prompt.append
+    claudine_event: prompt
+    timing: pre
+    blocking: false
+    payload_schema: "text: string"
+    return_contract: "Observation only."
+    notes: "Fires when text is appended to the TUI prompt."
+  - native_event: tui.command.execute
+    claudine_event: notification
+    timing: pre
+    blocking: false
+    payload_schema: "command: string|enum"
+    return_contract: "Observation only."
+    notes: "Fires when a TUI command is invoked."
+  - native_event: tui.toast.show
+    claudine_event: notification
+    timing: async
+    blocking: false
+    payload_schema: "title?, message, variant, duration"
+    return_contract: "Observation only."
+    notes: "Fires when a toast notification is shown."
+  - native_event: chat.message
+    claudine_event: prompt
+    timing: pre
+    blocking: true
+    payload_schema: "sessionID, agent?, model?, messageID?, variant?"
+    return_contract: "Throwing aborts processing; mutating output.message/parts changes the user message."
+    notes: "Typed in Hooks interface; runtime call site not confirmed in current source."
+  - native_event: chat.params
+    claudine_event: start
+    timing: pre
+    blocking: false
+    payload_schema: "sessionID, agent, model, provider, message"
+    return_contract: "Mutate output.temperature, topP, topK, maxOutputTokens, options."
+    notes: "Fires before each LLM request."
+  - native_event: chat.headers
+    claudine_event: start
+    timing: pre
+    blocking: false
+    payload_schema: "sessionID, agent, model, provider, message"
+    return_contract: "Mutate output.headers."
+    notes: "Fires before each LLM request; headers merged into provider request."
+  - native_event: experimental.chat.system.transform
+    claudine_event: prompt
+    timing: pre
+    blocking: false
+    payload_schema: "sessionID?, model"
+    return_contract: "Mutate output.system string array."
+    notes: "Fires before system prompts are finalized."
+  - native_event: experimental.chat.messages.transform
+    claudine_event: notification
+    timing: pre
+    blocking: false
+    payload_schema: "{}"
+    return_contract: "Mutate output.messages array before compaction model call."
+    notes: "Fires during compaction."
+  - native_event: experimental.session.compacting
+    claudine_event: notification
+    timing: pre
+    blocking: false
+    payload_schema: "sessionID"
+    return_contract: "Mutate output.context (append) or output.prompt (replace)."
+    notes: "Fires before the compaction LLM call."
+  - native_event: experimental.compaction.autocontinue
+    claudine_event: notification
+    timing: pre
+    blocking: false
+    payload_schema: "sessionID, agent, model, provider, message, overflow"
+    return_contract: "Set output.enabled to false to skip synthetic continue turn."
+    notes: "Fires after compaction, before auto-continue."
+  - native_event: experimental.text.complete
+    claudine_event: notification
+    timing: post
+    blocking: false
+    payload_schema: "sessionID, messageID, partID"
+    return_contract: "Mutate output.text."
+    notes: "Fires after assistant text stream ends."
+  - native_event: tool.execute.before
+    claudine_event: tool_call
+    timing: pre
+    blocking: true
+    payload_schema: "tool, sessionID, callID"
+    return_contract: "Throwing aborts the tool call; mutating output.args changes tool input."
+    notes: "Fires before every tool execution, including MCP tools."
+  - native_event: tool.execute.after
+    claudine_event: tool_result
+    timing: post
+    blocking: true
+    payload_schema: "tool, sessionID, callID, args"
+    return_contract: "Throwing aborts/turns into error; mutating output.title/output/metadata changes result."
+    notes: "Fires after every tool execution."
+  - native_event: shell.env
+    claudine_event: tool_call
+    timing: pre
+    blocking: false
+    payload_schema: "cwd, sessionID?, callID?"
+    return_contract: "Mutate output.env to inject environment variables into shell subprocess."
+    notes: "Fires before each bash/shell tool invocation."
+  - native_event: tool.definition
+    claudine_event: tool_call
+    timing: pre
+    blocking: false
+    payload_schema: "toolID"
+    return_contract: "Mutate output.description and output.parameters (JSON schema)."
+    notes: "Fires per tool when building the tool list sent to the LLM."
+  - native_event: permission.ask
+    claudine_event: permission
+    timing: pre
+    blocking: true
+    payload_schema: "Permission request object"
+    return_contract: "Set output.status to allow|deny|ask; throwing aborts."
+    notes: "Typed in Hooks interface; runtime call site not confirmed in current source."
+  - native_event: command.execute.before
+    claudine_event: notification
+    timing: pre
+    blocking: true
+    payload_schema: "command, sessionID, arguments"
+    return_contract: "Mutate output.parts; throwing aborts."
+    notes: "Typed in Hooks interface; runtime call site not confirmed in current source."
+  - native_event: provider
+    claudine_event: none
+    timing: unknown
+    blocking: false
+    payload_schema: "none (returns models() catalog function at init)"
+    return_contract: "Return model catalog extensions."
+    notes: "Not a lifecycle event; extends provider model catalogs."
+  - native_event: auth
+    claudine_event: none
+    timing: unknown
+    blocking: false
+    payload_schema: "none (returns auth method definitions at init)"
+    return_contract: "Return auth method definitions."
+    notes: "Not a lifecycle event; registers authentication methods."
+  - native_event: tool
+    claudine_event: tool_call
+    timing: pre
+    blocking: false
+    payload_schema: "none (returns custom tool definitions at init)"
+    return_contract: "Return custom tool definitions keyed by tool ID."
+    notes: "Not a per-call event; registers tools when plugin loads."
+config_files:
+  - os: macos
+    scope: user
+    path: "~/.config/opencode/plugins/*.{ts,js}"
+    format: other
+    notes: "Global local plugins. Singular plugin/ also scanned."
+  - os: linux
+    scope: user
+    path: "~/.config/opencode/plugins/*.{ts,js}"
+    format: other
+    notes: "Global local plugins. Singular plugin/ also scanned."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.config\\opencode\\plugins\\*.{ts,js}"
+    format: other
+    notes: "Global local plugins. Singular plugin/ also scanned."
+  - os: macos
+    scope: repo
+    path: ".opencode/plugins/*.{ts,js}"
+    format: other
+    notes: "Project local plugins. Singular plugin/ also scanned."
+  - os: linux
+    scope: repo
+    path: ".opencode/plugins/*.{ts,js}"
+    format: other
+    notes: "Project local plugins. Singular plugin/ also scanned."
+  - os: windows
+    scope: repo
+    path: ".opencode\\plugins\\*.{ts,js}"
+    format: other
+    notes: "Project local plugins. Singular plugin/ also scanned."
+  - os: macos
+    scope: user
+    path: "~/.config/opencode/opencode.json{c}"
+    format: jsonc
+    notes: "User config; plugin array loads npm plugins."
+  - os: linux
+    scope: user
+    path: "~/.config/opencode/opencode.json{c}"
+    format: jsonc
+    notes: "User config; plugin array loads npm plugins."
+  - os: windows
+    scope: user
+    path: "%USERPROFILE%\\.config\\opencode\\opencode.json{c}"
+    format: jsonc
+    notes: "User config; plugin array loads npm plugins."
+  - os: macos
+    scope: repo
+    path: "opencode.json{c}"
+    format: jsonc
+    notes: "Project config; plugin array loads npm plugins."
+  - os: linux
+    scope: repo
+    path: "opencode.json{c}"
+    format: jsonc
+    notes: "Project config; plugin array loads npm plugins."
+  - os: windows
+    scope: repo
+    path: "opencode.json{c}"
+    format: jsonc
+    notes: "Project config; plugin array loads npm plugins."
+  - os: macos
+    scope: repo
+    path: ".opencode/package.json"
+    format: json
+    notes: "Optional plugin dependencies for local plugins."
+  - os: linux
+    scope: repo
+    path: ".opencode/package.json"
+    format: json
+    notes: "Optional plugin dependencies for local plugins."
+  - os: windows
+    scope: repo
+    path: ".opencode\\package.json"
+    format: json
+    notes: "Optional plugin dependencies for local plugins."
+  - os: macos
+    scope: managed
+    path: "/Library/Application Support/opencode/opencode.json{c}"
+    format: jsonc
+    notes: "Managed admin config; overrides user/project."
+  - os: linux
+    scope: managed
+    path: "/etc/opencode/opencode.json{c}"
+    format: jsonc
+    notes: "Managed admin config; overrides user/project."
+  - os: windows
+    scope: managed
+    path: "%ProgramData%\\opencode\\opencode.json{c}"
+    format: jsonc
+    notes: "Managed admin config; overrides user/project."
+  - os: macos
+    scope: managed
+    path: "/Library/Managed Preferences/<user>/ai.opencode.managed.plist"
+    format: other
+    notes: "MDM-delivered managed preferences; highest priority."
+  - os: macos
+    scope: managed
+    path: "/Library/Managed Preferences/ai.opencode.managed.plist"
+    format: other
+    notes: "MDM-delivered managed preferences; highest priority."
+cli_params:
+  - flag: "opencode run [message..]"
+    description: "Run OpenCode non-interactively; plugin hooks still fire for the executed session."
+    example: "opencode run 'explain this code'"
+  - flag: "opencode debug config"
+    description: "Show resolved config including plugin origins and managed settings."
+    example: "opencode debug config"
+  - flag: "OPENCODE_PURE=true"
+    description: "Environment variable that disables loading of all external plugins."
+    example: "OPENCODE_PURE=1 opencode"
+  - flag: "OPENCODE_DISABLE_DEFAULT_PLUGINS=true"
+    description: "Environment variable that skips the built-in auth/provider plugins."
+    example: "OPENCODE_DISABLE_DEFAULT_PLUGINS=1 opencode"
+  - flag: "OPENCODE_CONFIG=<file>"
+    description: "Load an alternate config file between global and project configs."
+    example: "OPENCODE_CONFIG=./ci-opencode.json opencode run 'test'"
+  - flag: "OPENCODE_CONFIG_DIR=<dir>"
+    description: "Use a custom config directory scanned for agents, commands, modes, and plugins."
+    example: "OPENCODE_CONFIG_DIR=./custom opencode"
+  - flag: "OPENCODE_CONFIG_CONTENT=<json>"
+    description: "Inline JSON config override loaded after project config and before managed config."
+    example: "OPENCODE_CONFIG_CONTENT='{\"plugin\":[]}' opencode"
+  - flag: "OPENCODE_EXPERIMENTAL=true"
+    description: "Enables many experimental flags at once, which may change which plugin hooks are active."
+    example: "OPENCODE_EXPERIMENTAL=1 opencode"
+payload_fields:
+  - native_event: event
+    field: "event.id"
+    type: string
+    meaning: "Unique event identifier."
+  - native_event: event
+    field: "event.type"
+    type: string
+    meaning: "Event type string (e.g. session.created)."
+  - native_event: event
+    field: "event.properties"
+    type: object
+    meaning: "Event-specific schema data (same as event.data internally)."
+  - native_event: session.created
+    field: "sessionID"
+    type: string
+    meaning: "Session identifier."
+  - native_event: session.created
+    field: "info.id"
+    type: string
+    meaning: "Session ID (same as sessionID)."
+  - native_event: session.created
+    field: "info.title"
+    type: string
+    meaning: "Session title."
+  - native_event: session.created
+    field: "info.directory"
+    type: string
+    meaning: "Project directory associated with the session."
+  - native_event: session.created
+    field: "info.agent"
+    type: string
+    meaning: "Agent name for the session."
+  - native_event: session.created
+    field: "info.model.id"
+    type: string
+    meaning: "Model ID."
+  - native_event: session.created
+    field: "info.model.providerID"
+    type: string
+    meaning: "Provider ID."
+  - native_event: session.error
+    field: "error.name"
+    type: string
+    meaning: "Error discriminator (e.g. ProviderAuthError, APIError)."
+  - native_event: session.error
+    field: "error.data"
+    type: object
+    meaning: "Error-specific payload."
+  - native_event: session.status
+    field: "status.type"
+    type: string
+    meaning: "idle | busy | retry"
+  - native_event: session.status
+    field: "status.attempt"
+    type: number
+    meaning: "Retry attempt number when status.type=retry."
+  - native_event: message.updated
+    field: "info.role"
+    type: string
+    meaning: "user | assistant"
+  - native_event: message.updated
+    field: "info.id"
+    type: string
+    meaning: "Message ID."
+  - native_event: message.updated
+    field: "info.time.completed"
+    type: number
+    meaning: "Completion timestamp for assistant messages."
+  - native_event: permission.asked
+    field: "permission"
+    type: string
+    meaning: "Permission key being requested (e.g. bash, edit)."
+  - native_event: permission.asked
+    field: "patterns"
+    type: array
+    meaning: "Patterns the permission applies to."
+  - native_event: permission.asked
+    field: "tool.messageID"
+    type: string
+    meaning: "Message ID when triggered by a tool call."
+  - native_event: permission.asked
+    field: "tool.callID"
+    type: string
+    meaning: "Tool call ID when triggered by a tool call."
+  - native_event: permission.replied
+    field: "reply"
+    type: string
+    meaning: "once | always | reject"
+  - native_event: file.edited
+    field: "file"
+    type: string
+    meaning: "Path of the edited file."
+  - native_event: tui.prompt.append
+    field: "text"
+    type: string
+    meaning: "Text appended to the prompt."
+  - native_event: tui.toast.show
+    field: "message"
+    type: string
+    meaning: "Toast message body."
+  - native_event: tui.toast.show
+    field: "variant"
+    type: string
+    meaning: "info | success | warning | error"
+  - native_event: chat.params
+    field: "sessionID"
+    type: string
+    meaning: "Current session ID."
+  - native_event: chat.params
+    field: "agent"
+    type: string
+    meaning: "Agent name."
+  - native_event: chat.params
+    field: "model"
+    type: object
+    meaning: "Provider model object."
+  - native_event: chat.params
+    field: "provider"
+    type: object
+    meaning: "Provider context with source, info, options."
+  - native_event: chat.params
+    field: "message"
+    type: object
+    meaning: "User message object."
+  - native_event: tool.execute.before
+    field: "tool"
+    type: string
+    meaning: "Tool ID being executed."
+  - native_event: tool.execute.before
+    field: "sessionID"
+    type: string
+    meaning: "Current session ID."
+  - native_event: tool.execute.before
+    field: "callID"
+    type: string
+    meaning: "Tool call ID."
+  - native_event: tool.execute.before
+    field: "output.args"
+    type: object
+    meaning: "Mutable tool arguments."
+  - native_event: tool.execute.after
+    field: "output.title"
+    type: string
+    meaning: "Mutable tool result title."
+  - native_event: tool.execute.after
+    field: "output.output"
+    type: string
+    meaning: "Mutable tool result output."
+  - native_event: tool.execute.after
+    field: "output.metadata"
+    type: object
+    meaning: "Mutable tool result metadata."
+  - native_event: shell.env
+    field: "cwd"
+    type: string
+    meaning: "Working directory for the shell invocation."
+  - native_event: shell.env
+    field: "output.env"
+    type: object
+    meaning: "Mutable environment variables to inject."
+  - native_event: experimental.session.compacting
+    field: "output.context"
+    type: array
+    meaning: "Additional context strings appended to default compaction prompt."
+  - native_event: experimental.session.compacting
+    field: "output.prompt"
+    type: string
+    meaning: "If set, replaces the entire compaction prompt."
+response_actions:
+  - action: block
+    native_value: "throw new Error(...) in a dedicated hook"
+    effect: "Aborts the current action (tool call, LLM request, etc.). Event bus event handler cannot block."
+  - action: modify
+    native_value: "mutate output.args (tool.execute.before)"
+    effect: "Changes the arguments passed to the tool before execution."
+  - action: modify
+    native_value: "mutate output.title/output.output/output.metadata (tool.execute.after)"
+    effect: "Changes the tool result displayed to the model and user."
+  - action: modify
+    native_value: "mutate output.env (shell.env)"
+    effect: "Injects environment variables into the shell subprocess."
+  - action: modify
+    native_value: "mutate output.context or output.prompt (experimental.session.compacting)"
+    effect: "Appends context to or replaces the compaction prompt."
+  - action: modify
+    native_value: "mutate output.temperature/topP/topK/maxOutputTokens/options (chat.params)"
+    effect: "Changes LLM request parameters."
+  - action: modify
+    native_value: "mutate output.headers (chat.headers)"
+    effect: "Adds headers to the provider HTTP request."
+  - action: modify
+    native_value: "mutate output.system (experimental.chat.system.transform)"
+    effect: "Changes system prompts sent to the model."
+  - action: modify
+    native_value: "mutate output.description/output.parameters (tool.definition)"
+    effect: "Changes tool definition sent to the model."
+  - action: modify
+    native_value: "mutate output.enabled (experimental.compaction.autocontinue)"
+    effect: "Set to false to skip the synthetic continue turn after compaction."
+  - action: modify
+    native_value: "mutate output.text (experimental.text.complete)"
+    effect: "Overrides the final assistant text part."
+  - action: modify
+    native_value: "mutate output.messages (experimental.chat.messages.transform)"
+    effect: "Alters the message list used as compaction input."
+  - action: modify
+    native_value: "mutate output.parts (chat.message, command.execute.before)"
+    effect: "Changes message parts; runtime call sites unconfirmed."
+  - action: allow
+    native_value: "output.status = 'allow' (permission.ask)"
+    effect: "Grants the permission; runtime call site unconfirmed."
+  - action: deny
+    native_value: "output.status = 'deny' (permission.ask)"
+    effect: "Denies the permission; runtime call site unconfirmed."
+  - action: other
+    native_value: "return custom tools from tool hook"
+    effect: "Registers custom tools available to the model."
+  - action: other
+    native_value: "return provider/models function from provider hook"
+    effect: "Extends the provider model catalog."
+  - action: other
+    native_value: "return auth methods from auth hook"
+    effect: "Registers authentication methods."
+execution:
+  shell: "Bun runtime (plugins are JS/TS modules imported by Bun)."
+  cwd: "Plugin runs inside the OpenCode process; PluginInput.directory is the project directory and PluginInput.worktree is the git worktree root."
+  env: "process.env of the OpenCode process. shell.env hook can inject additional environment variables into bash tool subprocesses."
+  timeout: "No documented per-hook timeout. Plugin code runs within the timeout of the action it hooks (e.g. shell tool timeout, LLM request timeout)."
+  stdin: "No stdin channel for plugin hooks. Tool arguments and payloads arrive as function arguments."
+  stdout: "Use client.app.log() for structured logging; console.log also works but is less structured."
+  stderr: "Plugin errors are captured in the OpenCode debug log and may surface as session.error events."
+  notes: "Dedicated hooks run sequentially in plugin load order, all receiving the same mutable output object. The catch-all event hook is fire-and-forget and filtered to the plugin's project directory. NPM plugins are installed automatically into ~/.cache/opencode/node_modules/."
+gaps:
+  - "No dedicated 'Hooks' documentation page exists; event and hook documentation lives under /docs/plugins/."
+  - "Some entries in the Hooks TypeScript interface (chat.message, permission.ask, command.execute.before) have no confirmed runtime call site in the current source tree."
+  - "Exact payload shapes for every event bus event (especially session.next.* granular events, MCP events, and LSP events) are defined in schema files but not all are documented for plugin authors."
+  - "Plugin error handling policy (whether a throwing plugin aborts the whole action or is caught) is determined by surrounding Effect code and varies by hook site."
+  - "No documented timeout, retry, or sandbox policy for plugin hook execution."
+  - "Permission decisions cannot be made from the permission.asked event bus event; the dedicated permission.ask hook is typed but its invocation status is unclear."
+  - "The observed local bridge plugin at ~/.config/opencode/plugin/claudine-bridge.ts only observes events and does not mutate outputs or block actions, so it cannot exercise the full hook contract."
+changes: []
+requires_claudine_update: true
+reason: "OpenCode's plugin hook model is structurally different from settings-file hook systems. Claudine's existing OpenCode bridge is observation-only, maps only a subset of events, and the disabled legacy bridge used an API that no longer matches OpenCode's V1 plugin contract. Supporting OpenCode's full hook semantics requires Claudine to emit lifecycle events from both the event bus and dedicated plugin hooks, wire plugin output mutations back into the action pipeline, handle blocking via thrown errors for dedicated hooks, and regenerate the bridge plugin to use the current V1 API."
 ---
 
-# OpenCode Agentic CLI Hooks & Events
+# OpenCode CLI hooks and events
 
-This document provides a comprehensive reference for the hooks and events available in OpenCode (the open-source AI coding agent by Anomaly). OpenCode uses a JavaScript/TypeScript plugin system where plugins export hook functions that intercept, modify, and respond to various agentic operations. The current release is v1.2.x.
+## Overview
 
-## Home Page
+OpenCode CLI implements hooks as a **plugin system** rather than a settings-file hook registry. A hook is a JavaScript or TypeScript module that exports a plugin function. The function receives a context object and returns a `Hooks` object whose keys are hook names. OpenCode supports two hook mechanisms:
 
-https://opencode.ai
+1. **Dedicated named hooks** — functions with an `(input, output)` signature where `output` is a mutable object. These hooks can observe, mutate, and in many cases block the action they wrap by throwing an error.
+2. **Catch-all event bus hook** — an `event` handler that receives `{ event: { id, type, properties } }`. It is fire-and-forget and cannot block.
 
-## Documentation
+Plugins can also register **custom tools**, **authentication methods**, and **provider model catalog extensions** by returning `tool`, `auth`, and `provider` objects at initialization.
 
-https://opencode.ai/docs
+Capability summary:
+
+| Capability | Supported? | Mechanism |
+|---|---|---|
+| Observe lifecycle | Yes | `event` hook and dedicated hooks |
+| Mutate pending action | Yes | Mutate `output` object in dedicated hooks |
+| Block pending action | Yes | Throw in dedicated hooks |
+| Replace result | Yes | Mutate `output.output`, `output.text`, etc. |
+| Inject env vars | Yes | `shell.env` hook |
+| Custom tools | Yes | `tool` registration |
+| Async/background | Partial | `event` hook is fire-and-forget |
+
+## Native Hooks
+
+### Dedicated named hooks
+
+These hooks are called synchronously/sequentially in plugin load order. Each matching hook receives the same mutable `output` object.
+
+| Hook | Timing | Can block? | Input | Mutable output | Notes |
+|---|---|---|---|---|---|
+| `config` | post | no | merged config | none | Runs once after all plugins load. |
+| `dispose` | post | no | none | none | Runs on shutdown. |
+| `event` | async | no | `{ event: { id, type, properties } }` | none | Fire-and-forget; filtered to plugin directory. |
+| `tool` | pre | no | none | `{ [toolID]: ToolDefinition }` | Registers custom tools at load time. |
+| `auth` | pre | no | none | `AuthHook` | Registers auth methods at load time. |
+| `provider` | pre | no | none | `ProviderHook` | Extends provider model catalogs. |
+| `chat.message` | pre | yes | `sessionID`, `agent?`, `model?`, `messageID?`, `variant?` | `{ message, parts }` | Runtime call site unconfirmed. |
+| `chat.params` | pre | no | `sessionID`, `agent`, `model`, `provider`, `message` | `{ temperature, topP, topK, maxOutputTokens, options }` | Before each LLM request. |
+| `chat.headers` | pre | no | `sessionID`, `agent`, `model`, `provider`, `message` | `{ headers }` | Added to provider HTTP request. |
+| `permission.ask` | pre | yes | `Permission` request | `{ status: ask|deny|allow }` | Runtime call site unconfirmed. |
+| `command.execute.before` | pre | yes | `command`, `sessionID`, `arguments` | `{ parts }` | Runtime call site unconfirmed. |
+| `tool.execute.before` | pre | yes | `tool`, `sessionID`, `callID` | `{ args }` | Before every tool call, including MCP. |
+| `shell.env` | pre | no | `cwd`, `sessionID?`, `callID?` | `{ env }` | Injects env vars into shell tool subprocess. |
+| `tool.execute.after` | post | yes | `tool`, `sessionID`, `callID`, `args` | `{ title, output, metadata }` | After every tool call. |
+| `experimental.chat.system.transform` | pre | no | `sessionID?`, `model` | `{ system: string[] }` | Mutate system prompts. |
+| `experimental.chat.messages.transform` | pre | no | `{}` | `{ messages }` | During compaction. |
+| `experimental.provider.small_model` | pre | no | `{ provider }` | `{ model? }` | Override small model selection. |
+| `experimental.session.compacting` | pre | no | `{ sessionID }` | `{ context: string[], prompt?: string }` | Inject or replace compaction prompt. |
+| `experimental.compaction.autocontinue` | pre | no | `sessionID`, `agent`, `model`, `provider`, `message`, `overflow` | `{ enabled }` | Defaults to `true`; set `false` to skip auto-continue. |
+| `experimental.text.complete` | post | no | `sessionID`, `messageID`, `partID` | `{ text }` | Override final assistant text. |
+| `tool.definition` | pre | no | `{ toolID }` | `{ description, parameters }` | Modify tool definition sent to LLM. |
+
+### Event bus events
+
+These are observed through the `event` hook. They are fire-and-forget and cannot block.
+
+| Category | Events |
+|---|---|
+| Command | `command.executed` |
+| File | `file.edited`, `file.watcher.updated` |
+| Installation | `installation.updated`, `installation.update-available` |
+| LSP | `lsp.updated` |
+| Message | `message.updated`, `message.removed`, `message.part.updated`, `message.part.removed`, `message.part.delta` |
+| Permission | `permission.asked`, `permission.replied` (and v2 variants `permission.v2.asked`, `permission.v2.replied`) |
+| Server | `server.connected`, `global.disposed` |
+| Session | `session.created`, `session.updated`, `session.deleted`, `session.diff`, `session.error`, `session.status`, `session.idle`, `session.compacted` |
+| Session next | `session.next.agent.switched`, `session.next.model.switched`, `session.next.moved`, `session.next.prompted`, `session.next.context.updated`, `session.next.synthetic`, `session.next.shell.started/ended`, `session.next.step.started/ended/failed`, `session.next.text.started/delta/ended`, `session.next.reasoning.started/delta/ended`, `session.next.tool.input.started/delta/ended`, `session.next.tool.called`, `session.next.tool.progress`, `session.next.tool.success/failed`, `session.next.retried`, `session.next.compaction.started/delta/ended`, `session.next.revert.staged/cleared/committed` |
+| Todo | `todo.updated` |
+| TUI | `tui.prompt.append`, `tui.command.execute`, `tui.toast.show`, `tui.session.select` |
+| MCP | `mcp.tools.changed`, `mcp.browser.open.failed` |
+
+The schema manifest at `packages/schema/src/event-manifest.ts` is the authoritative inventory. The public docs list a stable subset.
 
 ## Configuration
 
-OpenCode plugins are configured through the `plugin` key in OpenCode's JSON/JSONC configuration files and by placing plugin files in designated directories.
+### Plugin sources and load order
 
-### Config file locations (lowest to highest precedence)
+Plugins are loaded from:
 
-| # | Location | Scope | Description |
-|---|----------|-------|-------------|
-| 1 | Remote `.well-known/opencode` | Organization | Organizational defaults fetched at startup |
-| 2 | `~/.config/opencode/opencode.json` | Global (user) | User-wide preferences |
-| 3 | `OPENCODE_CONFIG` env var path | Custom | Explicit override via environment variable |
-| 4 | `opencode.json` (project root) | Project | Per-project configuration |
-| 5 | `.opencode/opencode.json` | Project | Alternate project-level config (also agents, commands, plugins) |
-| 6 | `OPENCODE_CONFIG_CONTENT` env var | Inline | Raw JSON content override |
-| 7 | Managed config directory | Enterprise | Admin-controlled, highest priority override |
+1. **Built-in plugins** — hard-coded auth/provider plugins (Codex, Copilot, GitLab, Poe, Cloudflare, Azure, DigitalOcean, Snowflake, xAI).
+2. **NPM plugins** — declared in the `plugin` array of `opencode.json` / `opencode.jsonc`.
+3. **Local file plugins** — `*.{ts,js}` files in `.opencode/plugins/` (project) or `~/.config/opencode/plugins/` (global). Singular `plugin/` is also scanned.
 
-Managed config directories by OS:
-- macOS: `/Library/Application Support/opencode`
-- Linux: `/etc/opencode`
-- Windows: `%ProgramData%\opencode`
+Config precedence:
 
-Configuration files are **merged**, not replaced. Later sources override only conflicting keys. The `plugin` and `instructions` arrays are **concatenated** across sources (deduplicated).
+1. Remote config from `.well-known/opencode`
+2. Global config `~/.config/opencode/opencode.json{c}`
+3. `OPENCODE_CONFIG` custom config file
+4. Project config `opencode.json{c}` (looked up from cwd to nearest git root)
+5. Global and project plugin directories
+6. `OPENCODE_CONFIG_CONTENT` inline JSON
+7. Managed config (`/Library/Application Support/opencode/`, `/etc/opencode/`, `%ProgramData%\opencode\`)
+8. macOS MDM managed preferences (`ai.opencode.managed`)
 
-### Plugin loading locations
+NPM plugins are installed automatically by Bun into `~/.cache/opencode/node_modules/`. Local plugin dependencies can be declared in `.opencode/package.json`.
 
-Plugins load from two sources:
+### Hook-affecting environment variables
 
-1. **Local files**: TypeScript/JavaScript files in plugin directories
-   - Project: `.opencode/plugins/*.{ts,js}` (also `plugin/*.{ts,js}`)
-   - Global: `~/.config/opencode/plugins/*.{ts,js}` (also `~/.opencode/plugins/`)
-2. **npm packages**: Specified in the `plugin` array in config, installed automatically via Bun at startup
+| Variable | Effect |
+|---|---|
+| `OPENCODE_PURE=true` | Do not load any external plugins. |
+| `OPENCODE_DISABLE_DEFAULT_PLUGINS=true` | Skip built-in auth/provider plugins. |
+| `OPENCODE_CONFIG=<file>` | Use an alternate config file. |
+| `OPENCODE_CONFIG_DIR=<dir>` | Use a custom config directory. |
+| `OPENCODE_CONFIG_CONTENT=<json>` | Inline config JSON. |
+| `OPENCODE_EXPERIMENTAL=true` | Enables many experimental flags at once. |
+| `OPENCODE_DISABLE_PROJECT_CONFIG=true` | Skip project-level `opencode.json{c}`. |
 
-Packages are cached in `~/.cache/opencode/node_modules/`.
+### Local plugin entrypoint
 
-**Load order**: Global config plugins, project config plugins, global directory plugins, project directory plugins.
+A local plugin file is a JS/TS module that default-exports (or named-exports) a function:
 
-### Example: npm plugin in config
-
-```jsonc
-// opencode.json
-{
-  "plugin": [
-    "my-opencode-plugin@1.0.0",
-    "file:///absolute/path/to/local-plugin.ts"
-  ]
-}
-```
-
-### Example: local plugin file
-
-```typescript
-// .opencode/plugins/my-hooks.ts
+```ts
 import type { Plugin } from "@opencode-ai/plugin"
 
-export const MyPlugin: Plugin = async ({ client, project, $, directory, worktree }) => {
+const MyPlugin: Plugin = async ({ client, project, directory, worktree, $ }) => {
   return {
     "tool.execute.before": async (input, output) => {
-      if (input.tool === "bash" && output.args.command?.includes("rm -rf")) {
-        throw new Error("Blocked dangerous command")
-      }
+      // inspect or mutate output.args
     },
     event: async ({ event }) => {
-      if (event.type === "session.idle") {
-        await $`osascript -e 'display notification "Done!" with title "opencode"'`
-      }
+      // observe event bus
     },
   }
 }
+
+export default MyPlugin
 ```
 
-### Example: custom tool plugin
-
-```typescript
-// .opencode/plugins/my-tools.ts
-import type { Plugin } from "@opencode-ai/plugin"
-import { tool } from "@opencode-ai/plugin"
-
-export const MyToolPlugin: Plugin = async () => {
-  return {
-    tool: {
-      query_db: tool({
-        description: "Query the project database",
-        args: {
-          query: tool.schema.string().describe("SQL query to execute"),
-        },
-        async execute(args, context) {
-          // context provides: sessionID, messageID, agent, directory, worktree, abort, metadata(), ask()
-          return `Result: ${args.query}`
-        },
-      }),
-    },
-  }
-}
-```
-
-Custom tools can also be defined as standalone files in `.opencode/tools/` or `~/.config/opencode/tools/`. The filename becomes the tool name. For files with multiple exports, naming follows `<filename>_<exportname>`.
-
-### Plugin dependencies
-
-Add a `package.json` to `.opencode/` with npm dependencies. OpenCode runs `bun install` at startup and caches packages. The `@opencode-ai/plugin` package version is validated and upgraded automatically if outdated.
-
-### Plugin function context
-
-The plugin function receives a context object:
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `client` | `ReturnType<typeof createOpencodeClient>` | OpenCode SDK client for API interactions |
-| `project` | `Project` | Current project information |
-| `directory` | `string` | Current working directory |
-| `worktree` | `string` | Git worktree path |
-| `serverUrl` | `URL` | Local OpenCode server URL |
-| `$` | `BunShell` | Bun's shell API for executing commands |
-
----
-
-## Hook Events
-
-OpenCode hooks follow an input/output pattern. Most hooks receive an `input` object (read-only context) and an `output` object (mutable). The plugin mutates the output object in place; the final mutated output is what OpenCode uses. Hooks return `Promise<void>`.
-
-When multiple plugins define the same hook, they execute sequentially in plugin load order. Each plugin sees mutations from previous plugins.
-
-### `event`
-
-Subscribes to all system bus events. Unlike other hooks, this is a single catch-all handler that receives every event; the plugin must filter by `event.type`.
-
-**Signature:**
-
-```typescript
-event?: (input: { event: Event }) => Promise<void>
-```
-
-**Data received:**
-
-- `event` - A discriminated union object. The `type` field identifies the event; `properties` contains event-specific data.
-
-**Return:** `Promise<void>` (fire-and-forget; cannot affect flow)
-
-**Available event types:**
-
-| Event Type | Properties | Description |
-|------------|------------|-------------|
-| `command.executed` | `{ name: string, sessionID: string, arguments: string, messageID: string }` | Custom command executed |
-| `file.edited` | `{ file: string }` | File was edited by the agent |
-| `file.watcher.updated` | `{ file: string, event: "add" \| "change" \| "unlink" }` | File system watcher event |
-| `ide.installed` | `{ ide: string }` | IDE extension installed |
-| `installation.updated` | `{ version: string }` | OpenCode installation updated to new version |
-| `installation.update-available` | `{ version: string }` | New version available for update |
-| `lsp.client.diagnostics` | `{ serverID: string, path: string }` | LSP diagnostics received for a file |
-| `lsp.updated` | `{}` | LSP server configuration updated |
-| `mcp.tools.changed` | `{ server: string }` | MCP server tools changed |
-| `mcp.browser.open.failed` | `{ mcpName: string, url: string }` | MCP browser failed to open |
-| `message.updated` | `{ info: Message }` | Message added or changed |
-| `message.removed` | `{ sessionID: string, messageID: string }` | Message deleted |
-| `message.part.updated` | `{ part: Part }` | Message part updated |
-| `message.part.delta` | `{ sessionID: string, messageID: string, partID: string, field: string, delta: string }` | Incremental text delta for a message part |
-| `message.part.removed` | `{ sessionID: string, messageID: string, partID: string }` | Message part deleted |
-| `permission.asked` | `PermissionRequest` | Permission requested from user |
-| `permission.replied` | `{ sessionID: string, requestID: string, reply: "once" \| "always" \| "reject" }` | User responded to permission request |
-| `project.updated` | `Project` | Project configuration changed |
-| `pty.created` | `{ info: Pty }` | PTY session created |
-| `pty.updated` | `{ info: Pty }` | PTY session updated |
-| `pty.exited` | `{ id: string, exitCode: number }` | PTY process exited |
-| `pty.deleted` | `{ id: string }` | PTY session deleted |
-| `question.asked` | `QuestionRequest` | Question asked to user |
-| `question.replied` | `{ sessionID: string, requestID: string, answers: Array<QuestionAnswer> }` | User answered question |
-| `question.rejected` | `{ sessionID: string, requestID: string }` | Question was rejected |
-| `server.connected` | `{}` | Connected to OpenCode server |
-| `server.instance.disposed` | `{ directory: string }` | Server instance shut down |
-| `global.disposed` | `{}` | Global state disposed |
-| `session.created` | `{ info: Session }` | New session created |
-| `session.updated` | `{ info: Session }` | Session updated |
-| `session.deleted` | `{ info: Session }` | Session deleted |
-| `session.status` | `{ sessionID: string, status: SessionStatus }` | Session status changed |
-| `session.idle` | `{ sessionID: string }` | Session became idle (deprecated; prefer `session.status`) |
-| `session.compacted` | `{ sessionID: string }` | Session context compacted |
-| `session.diff` | `{ sessionID: string, diff: Array<FileDiff> }` | Session diff generated |
-| `session.error` | `{ sessionID?: string, error?: ProviderAuthError \| UnknownError \| ... }` | Session error occurred |
-| `todo.updated` | `{ sessionID: string, todos: Array<Todo> }` | Todo list updated |
-| `tui.prompt.append` | `{ text: string }` | Text appended to TUI prompt |
-| `tui.command.execute` | `{ command: string }` | TUI command executed (values: `session.list`, `session.new`, `session.share`, `session.interrupt`, `session.compact`, `session.page.up`, `session.page.down`, `session.line.up`, `session.line.down`, `session.half.page.up`, `session.half.page.down`, `session.first`, `session.last`, `prompt.clear`, `prompt.submit`, `agent.cycle`, or any string) |
-| `tui.toast.show` | `{ title?: string, message: string, variant: "info" \| "success" \| "warning" \| "error", duration?: number }` | Toast notification shown |
-| `tui.session.select` | `{ sessionID: string }` | Session selected in TUI |
-| `vcs.branch.updated` | `{ branch?: string }` | Git branch changed |
-| `worktree.ready` | `{ name: string, branch: string }` | Worktree ready |
-| `worktree.failed` | `{ message: string }` | Worktree operation failed |
-
-**Example:**
-
-```typescript
-event: async ({ event }) => {
-  if (event.type === "session.idle") {
-    console.log("Session idle:", event.properties.sessionID)
-  }
-}
-```
-
-**Gotchas:**
-
-- The event hook receives **every** system event. Always filter by `event.type` using early returns or switch statements to avoid performance issues.
-- Event properties vary by type. Use TypeScript discriminated unions or cast to specific event types for type safety.
-- Events are fire-and-forget notifications. Returning void does not affect agent flow.
-
----
-
-### `tool.execute.before`
-
-Fires before a tool call executes. Can modify arguments or block execution.
-
-**Signature:**
-
-```typescript
-"tool.execute.before"?: (
-  input: { tool: string; sessionID: string; callID: string },
-  output: { args: any }
-) => Promise<void>
-```
-
-**Data received:**
-
-- `input.tool` - Tool name (e.g., `"bash"`, `"edit"`, `"write"`, `"read"`, `"glob"`, `"grep"`, `"task"`, or custom tool IDs)
-- `input.sessionID` - Current session ID
-- `input.callID` - Unique tool call ID
-- `output.args` - Mutable arguments object for the tool
-
-**Return:** `Promise<void>`
-
-**Flow impact:**
-
-- Mutate `output.args` to change tool arguments before execution
-- **Throw an error** to block the tool call entirely; the error message is returned to the agent
-
-**Example:**
-
-```typescript
-"tool.execute.before": async (input, output) => {
-  if (input.tool === "read" && output.args.filePath?.includes(".env")) {
-    throw new Error("Reading .env files is not allowed")
-  }
-  if (input.tool === "bash") {
-    output.args.command = sanitize(output.args.command)
-  }
-}
-```
-
-**Gotchas:**
-
-- This hook fires for **all** tool calls including the `task` tool (subagent spawning). Filter by `input.tool` to target specific tools.
-- The `args` object shape varies by tool. There is no compile-time type narrowing based on tool name.
-
----
-
-### `tool.execute.after`
-
-Fires after a tool call completes successfully. Can modify the output shown to the agent.
-
-**Signature:**
-
-```typescript
-"tool.execute.after"?: (
-  input: { tool: string; sessionID: string; callID: string; args: any },
-  output: { title: string; output: string; metadata: any }
-) => Promise<void>
-```
-
-**Data received:**
-
-- `input.tool` - Tool name
-- `input.sessionID` - Current session ID
-- `input.callID` - Tool call ID
-- `input.args` - The arguments that were passed to the tool (read-only at this point)
-- `output.title` - Mutable display title for the tool result
-- `output.output` - Mutable output string shown to the agent
-- `output.metadata` - Mutable metadata object
-
-**Return:** `Promise<void>`
-
-**Flow impact:**
-
-- Modify the tool's displayed output, title, or metadata
-- Cannot block or retry after execution
-- Useful for logging, formatting, or post-processing results
-
-**Example:**
-
-```typescript
-"tool.execute.after": async (input, output) => {
-  if (input.tool === "bash") {
-    // Redact sensitive output
-    output.output = output.output.replace(/API_KEY=\S+/g, "API_KEY=***")
-  }
-}
-```
-
-**Gotchas:**
-
-- There is no `tool.execute.error` hook. This hook only fires on successful completion. Use the `event` hook to listen for `session.error` events if you need error handling.
-
----
-
-### `tool.definition`
-
-Fires when tool definitions are being assembled to send to the LLM. Allows modifying a tool's description and parameter schema.
-
-**Signature:**
-
-```typescript
-"tool.definition"?: (
-  input: { toolID: string },
-  output: { description: string; parameters: any }
-) => Promise<void>
-```
-
-**Data received:**
-
-- `input.toolID` - The tool identifier
-- `output.description` - Mutable tool description sent to the LLM
-- `output.parameters` - Mutable JSON Schema parameters object sent to the LLM
-
-**Return:** `Promise<void>`
-
-**Flow impact:**
-
-- Modify how tools are presented to the LLM
-- Can change descriptions to guide model behavior or restrict parameter schemas
-
-**Example:**
-
-```typescript
-"tool.definition": async (input, output) => {
-  if (input.toolID === "bash") {
-    output.description += "\nIMPORTANT: Never use sudo."
-  }
-}
-```
-
----
-
-### `shell.env`
-
-Injects environment variables into all shell executions (bash tool, PTY sessions, and spawned processes).
-
-**Signature:**
-
-```typescript
-"shell.env"?: (
-  input: { cwd: string },
-  output: { env: Record<string, string> }
-) => Promise<void>
-```
-
-**Data received:**
-
-- `input.cwd` - Current working directory
-- `output.env` - Mutable environment variables object (starts empty)
-
-**Return:** `Promise<void>`
-
-**Flow impact:**
-
-- Variables added to `output.env` are merged with `process.env` for all shell executions
-- Affects the bash tool, PTY processes, and spawned subprocesses
-
-**Example:**
-
-```typescript
-"shell.env": async (input, output) => {
-  output.env.MY_API_KEY = "secret"
-  output.env.PROJECT_ROOT = input.cwd
-}
-```
-
-**Gotchas:**
-
-- This hook fires on every shell invocation (bash tool, PTY creation, subprocesses). Keep it fast.
-- Environment variables are merged in order: `process.env` -> caller-provided env -> `shell.env` hook output. Hook values win.
-
----
-
-### `chat.message`
-
-Fires when a new user message is being prepared for the LLM. Allows modifying the message content and parts.
-
-**Signature:**
-
-```typescript
-"chat.message"?: (
-  input: {
-    sessionID: string
-    agent?: string
-    model?: { providerID: string; modelID: string }
-    messageID?: string
-    variant?: string
-  },
-  output: { message: UserMessage; parts: Part[] }
-) => Promise<void>
-```
-
-**Data received:**
-
-- `input.sessionID` - Current session ID
-- `input.agent` - Agent name (if applicable)
-- `input.model` - Model provider and ID (if known)
-- `input.messageID` - Message ID (if applicable)
-- `input.variant` - Message variant (if applicable)
-- `output.message` - Mutable user message object
-- `output.parts` - Mutable message parts array
-
-**Return:** `Promise<void>`
-
-**Flow impact:**
-
-- Modify the user message before it is sent to the LLM
-- Add, modify, or remove message parts
-- Cannot block the message
-
----
-
-### `chat.params`
-
-Modifies LLM request parameters dynamically before sending.
-
-**Signature:**
-
-```typescript
-"chat.params"?: (
-  input: {
-    sessionID: string
-    agent: string
-    model: Model
-    provider: ProviderContext
-    message: UserMessage
-  },
-  output: { temperature: number; topP: number; topK: number; options: Record<string, any> }
-) => Promise<void>
-```
-
-**Data received:**
-
-- `input` - Session, agent, model, provider, and message context
-- `output.temperature` - Mutable temperature setting
-- `output.topP` - Mutable top-p setting
-- `output.topK` - Mutable top-k setting
-- `output.options` - Mutable additional provider-specific options
-
-**Return:** `Promise<void>`
-
-**Flow impact:**
-
-- Adjust LLM sampling parameters per-request
-- Changes affect only the current request
-
----
-
-### `chat.headers`
-
-Adds custom HTTP headers to LLM API requests.
-
-**Signature:**
-
-```typescript
-"chat.headers"?: (
-  input: {
-    sessionID: string
-    agent: string
-    model: Model
-    provider: ProviderContext
-    message: UserMessage
-  },
-  output: { headers: Record<string, string> }
-) => Promise<void>
-```
-
-**Data received:**
-
-- `input` - Session, agent, model, provider, and message context
-- `output.headers` - Mutable HTTP headers object
-
-**Return:** `Promise<void>`
-
-**Flow impact:**
-
-- Inject custom headers into outgoing LLM API requests
-- Useful for routing, tracking, audit trails, or custom authentication
-
----
-
-### `permission.ask`
-
-Fires when the permission system evaluates a tool call to "ask" (prompt the user). Allows programmatic auto-approval or denial.
-
-**Signature:**
-
-```typescript
-"permission.ask"?: (
-  input: Permission,
-  output: { status: "ask" | "deny" | "allow" }
-) => Promise<void>
-```
-
-**Data received:**
-
-- `input` - Permission request details (tool name, patterns, metadata)
-- `output.status` - Mutable status, defaults to `"ask"`
-
-**Return:** `Promise<void>`
-
-**Flow impact:**
-
-- Set `output.status = "allow"` to auto-approve the permission
-- Set `output.status = "deny"` to auto-reject (throws `RejectedError`)
-- Keep `"ask"` to prompt the user as normal
-
-**Example:**
-
-```typescript
-"permission.ask": async (input, output) => {
-  if (input.permission === "bash") {
-    const cmd = input.metadata?.command ?? ""
-    if (cmd.startsWith("git ")) {
-      output.status = "allow"
-    }
-  }
-}
-```
-
-**Gotchas:**
-
-- This hook **only fires** when the permission system evaluates a rule to `"ask"`. If the permission config already sets a tool to `"deny"` or `"allow"`, this hook never fires for that tool.
-- To use this hook effectively, set permissions to `"ask"` in config, then use the hook for programmatic decisions.
-
----
-
-### `command.execute.before`
-
-Fires before a custom slash command executes.
-
-**Signature:**
-
-```typescript
-"command.execute.before"?: (
-  input: { command: string; sessionID: string; arguments: string },
-  output: { parts: Part[] }
-) => Promise<void>
-```
-
-**Data received:**
-
-- `input.command` - Command name
-- `input.sessionID` - Session ID
-- `input.arguments` - Command arguments as string
-- `output.parts` - Mutable parts array for command output
-
-**Return:** `Promise<void>`
-
-**Flow impact:**
-
-- Modify command arguments or inject output parts before the command runs
-- Can be used to augment commands with additional context
-
----
-
-### `config`
-
-Fires once at startup after configuration is loaded. Receives the full merged config object.
-
-**Signature:**
-
-```typescript
-config?: (input: Config) => Promise<void>
-```
-
-**Data received:**
-
-- `input` - The full merged OpenCode configuration object
-
-**Return:** `Promise<void>`
-
-**Flow impact:**
-
-- Read-only access to configuration at startup
-- Useful for plugin initialization based on config values
-
----
-
-### `auth`
-
-Provides custom authentication flows for LLM providers. This is a structured hook (not a simple function) used by built-in plugins like Codex auth, Copilot auth, and GitLab auth.
-
-**Signature:**
-
-```typescript
-auth?: AuthHook
-```
-
-**AuthHook structure:**
-
-```typescript
+V1 plugins default-export `{ server: async (input, options) => Hooks }`.
+
+## Payloads and Responses
+
+### Dedicated hooks
+
+Dedicated hooks receive two positional arguments: `input` and `output`. `input` carries event-specific data; `output` is a mutable object whose shape depends on the hook.
+
+Common input fields:
+
+| Field | Type | Meaning |
+|---|---|---|
+| `sessionID` | string | Current session identifier. |
+| `agent` | string | Agent name. |
+| `model` | object | Provider model object. |
+| `tool` | string | Tool ID. |
+| `callID` | string | Tool call ID. |
+| `args` | object | Tool arguments. |
+
+Mutable output objects:
+
+| Hook | Output fields | Effect of mutation |
+|---|---|---|
+| `tool.execute.before` | `args` | Changes tool input. |
+| `tool.execute.after` | `title`, `output`, `metadata` | Changes tool result. |
+| `shell.env` | `env` | Injects env vars into shell subprocess. |
+| `chat.params` | `temperature`, `topP`, `topK`, `maxOutputTokens`, `options` | Changes LLM request params. |
+| `chat.headers` | `headers` | Adds HTTP headers. |
+| `experimental.chat.system.transform` | `system` | Changes system prompts. |
+| `experimental.chat.messages.transform` | `messages` | Changes compaction input messages. |
+| `experimental.session.compacting` | `context`, `prompt` | Appends to or replaces compaction prompt. |
+| `experimental.compaction.autocontinue` | `enabled` | Controls synthetic continue turn. |
+| `experimental.text.complete` | `text` | Overrides final assistant text. |
+| `tool.definition` | `description`, `parameters` | Changes tool definition. |
+| `permission.ask` | `status` | Grants/denies permission. |
+
+Blocking contract:
+
+- Throwing an error inside a dedicated hook aborts the action being wrapped.
+- `tool.execute.before` aborts the tool call.
+- `tool.execute.after` turns the tool result into an error.
+- `chat.message` aborts message processing.
+- `permission.ask` denies the permission.
+- `command.execute.before` aborts command execution.
+- Event bus `event` handlers cannot block.
+
+### Event bus payload
+
+The `event` hook receives:
+
+```ts
 {
-  provider: string            // Provider name this auth handles
-  loader?: (auth, provider) => Promise<Record<string, any>>  // Custom auth loading
-  methods: Array<OAuthMethod | ApiKeyMethod>  // Authentication methods
-}
-```
-
-**Flow impact:**
-
-- Registers custom authentication providers in the OpenCode auth system
-- Supports OAuth flows (with auto-callback or code-based) and API key flows
-- Methods can include interactive prompts (text inputs, select dropdowns) for gathering user credentials
-
----
-
-### `experimental.chat.system.transform`
-
-Modifies the system prompt before sending to the LLM. Experimental; may change.
-
-**Signature:**
-
-```typescript
-"experimental.chat.system.transform"?: (
-  input: { sessionID?: string; model: Model },
-  output: { system: string[] }
-) => Promise<void>
-```
-
-**Data received:**
-
-- `input.sessionID` - Optional session ID
-- `input.model` - Model information
-- `output.system` - Mutable array of system prompt strings
-
-**Return:** `Promise<void>`
-
-**Flow impact:**
-
-- Push strings to `output.system` to inject custom context into the system prompt
-- If the array is emptied, OpenCode restores the original system prompt (safety mechanism)
-- Useful for project-specific rules or persistent context
-
-**Example:**
-
-```typescript
-"experimental.chat.system.transform": async (input, output) => {
-  output.system.push(`<project-rules>
-    Always run tests before committing.
-    Never modify files in the vendor/ directory.
-  </project-rules>`)
-}
-```
-
-**Gotchas:**
-
-- If you clear the `system` array entirely, OpenCode restores the original system prompt. This prevents accidental removal of essential system instructions.
-- This hook is marked experimental and may change in future versions.
-
----
-
-### `experimental.chat.messages.transform`
-
-Modifies the entire message history before sending to the LLM.
-
-**Signature:**
-
-```typescript
-"experimental.chat.messages.transform"?: (
-  input: {},
-  output: {
-    messages: {
-      info: Message
-      parts: Part[]
-    }[]
-  }
-) => Promise<void>
-```
-
-**Data received:**
-
-- `output.messages` - Mutable array of message objects (each with `info` and `parts`)
-
-**Return:** `Promise<void>`
-
-**Flow impact:**
-
-- Add, remove, or modify messages in the conversation history
-- Use with extreme caution; can break conversation flow
-
-**Gotchas:**
-
-- Modifying message history can confuse the model or break tool call chains. Only use for well-understood transformations.
-
----
-
-### `experimental.session.compacting`
-
-Fires before session compaction starts. Allows customizing the compaction prompt.
-
-**Signature:**
-
-```typescript
-"experimental.session.compacting"?: (
-  input: { sessionID: string },
-  output: { context: string[]; prompt?: string }
-) => Promise<void>
-```
-
-**Data received:**
-
-- `input.sessionID` - Session being compacted
-- `output.context` - Mutable array of context strings appended to the default compaction prompt
-- `output.prompt` - Optional; if set, **replaces** the default compaction prompt entirely (ignores `output.context`)
-
-**Return:** `Promise<void>`
-
-**Flow impact:**
-
-- Push strings to `output.context` to add domain-specific context to the compaction summary
-- Set `output.prompt` to completely replace the compaction prompt
-- Critical for preserving important state across context compaction
-
-**Example:**
-
-```typescript
-"experimental.session.compacting": async (input, output) => {
-  output.context.push(`
-## Important State
-- Current deployment target: staging
-- Database migration pending for users table
-- Files being actively worked on: src/auth.ts, src/middleware.ts
-`)
-}
-```
-
----
-
-### `experimental.text.complete`
-
-Fires when a text generation part completes. Allows post-processing of generated text.
-
-**Signature:**
-
-```typescript
-"experimental.text.complete"?: (
-  input: { sessionID: string; messageID: string; partID: string },
-  output: { text: string }
-) => Promise<void>
-```
-
-**Data received:**
-
-- `input.sessionID`, `input.messageID`, `input.partID` - Identify the specific text part
-- `output.text` - Mutable completed text (already trimmed)
-
-**Return:** `Promise<void>`
-
-**Flow impact:**
-
-- Modify or post-process the LLM's generated text before it is finalized
-- Can transform, filter, or enhance output
-
----
-
-## Matcher System
-
-OpenCode does **not** have a matcher/pattern system for hooks like Claude Code does. Instead, all hook filtering is done programmatically within the hook function itself:
-
-- **Tool hooks** (`tool.execute.before`, `tool.execute.after`, `tool.definition`): Receive the tool name in `input.tool` or `input.toolID`. Filter with conditionals (e.g., `if (input.tool === "bash")`).
-- **Event hook**: Receives all events. Filter by `event.type` (e.g., `if (event.type === "session.idle")`).
-- **Permission hook**: Receives the full `Permission` object. Filter by `input.permission` (tool name) and `input.metadata`.
-
-This means every hook function must implement its own filtering logic. There is no declarative way to scope a hook to specific tools or events in configuration.
-
----
-
-## Known Gotchas and Workarounds
-
-### 1. Event hook receives all events -- must filter
-
-**Problem:** The `event` hook receives **every** system event. You must manually filter by `event.type`.
-
-**Impact:** Easy to accidentally process the wrong events or create performance issues.
-
-**Workaround:** Always use early returns:
-
-```typescript
-event: async ({ event }) => {
-  if (event.type !== "session.idle") return
-  // Process idle event
-}
-```
-
-### 2. Permission hook only fires for "ask" decisions
-
-**Problem:** The `permission.ask` hook only fires when the permission system evaluates a rule to `"ask"`. It cannot override `"deny"` or `"allow"` rules set in configuration.
-
-**Impact:** Cannot use plugins to create exceptions to deny rules.
-
-**Workaround:** Set permissions to `"ask"` in config, then use the hook for programmatic decisions:
-
-```jsonc
-// opencode.json
-{
-  "permission": {
-    "bash": "ask"
+  event: {
+    id: string,
+    type: string,
+    properties: object
   }
 }
 ```
 
-```typescript
-"permission.ask": async (input, output) => {
-  if (input.permission === "bash" && isSafe(input.metadata?.command)) {
-    output.status = "allow"
-  }
-}
-```
+`properties` is the event-specific schema data. The hook is filtered by project directory; plugins only receive events whose `event.location.directory` matches the plugin's directory.
 
-### 3. Hooks run sequentially -- mutation order matters
+## Execution Semantics
 
-**Problem:** When multiple plugins define the same hook, they run in sequence. Each plugin sees the mutations from previous ones. This can lead to confusing interactions between plugins.
+- **Runtime**: Plugins execute inside the Bun runtime alongside OpenCode.
+- **Load order**: Plugins load in config-precedence order; hooks run sequentially in that order.
+- **Shared output**: The same `output` object is passed to every plugin for a given hook invocation, so later plugins can overwrite earlier mutations.
+- **Directory filtering**: The `event` hook only receives events for its own project directory.
+- **No explicit timeout**: Plugin hook code runs within the timeout of the action it intercepts.
+- **Stderr/errors**: Errors are logged to the OpenCode debug log and may surface as `session.error` events.
+- **NPM install**: NPM plugins are installed with Bun on startup into `~/.cache/opencode/node_modules/`.
 
-**Impact:** One plugin's modifications may conflict with another's expectations.
+## Claudine Mapping
 
-**Workaround:**
-- Keep plugins focused and composable
-- Use unique namespaces for custom data in metadata objects
-- Document hook interactions in plugin READMEs
+| OpenCode native hook/event | Claudine event | Notes |
+|---|---|---|
+| `config` | `initialize` | Post-load config notification. |
+| `session.created` | `initialize` | New session started. |
+| `session.updated` | `notification` | Session metadata changed. |
+| `session.deleted` | `finalize` | Session ended/deleted. |
+| `session.error` | `failure` | Session-level error. |
+| `session.idle` | `finalize` | Session became idle. |
+| `session.compacted` | `notification` | Context compaction completed. |
+| `session.status` | `notification` | Status change event. |
+| `message.updated` | `notification` | Message created/updated. |
+| `message.part.updated` | `notification` | Streaming part update. |
+| `permission.asked` | `permission` | Permission prompt shown. |
+| `permission.replied` | `permission` | User replied to permission prompt. |
+| `permission.ask` | `permission` | Dedicated permission gate (runtime unconfirmed). |
+| `chat.message` | `prompt` | User message received. |
+| `chat.params` / `chat.headers` | `start` | LLM request preparation. |
+| `experimental.chat.system.transform` | `prompt` | System prompt mutation. |
+| `tui.prompt.append` | `prompt` | Prompt input. |
+| `tool.execute.before` | `tool_call` | Before tool execution. |
+| `tool.execute.after` | `tool_result` | After tool execution. |
+| `tool.definition` | `tool_call` | Tool definition sent to LLM. |
+| `shell.env` | `tool_call` | Shell env injection. |
+| `experimental.session.compacting` | `notification` | Compaction prompt hook. |
+| `experimental.compaction.autocontinue` | `notification` | Post-compaction continue decision. |
+| `experimental.text.complete` | `notification` | Assistant text completion. |
+| `command.executed` / `tui.command.execute` | `notification` | TUI command lifecycle. |
+| `file.edited` / `file.watcher.updated` | `notification` | File system events. |
+| `tui.toast.show` | `notification` | Notification toast. |
+| `event` catch-all | `notification` | Generic observation channel. |
+| `provider` / `auth` / `tool` registrations | `none` | Capability extensions, not lifecycle events. |
+| `dispose` | `finalize` | Shutdown cleanup. |
 
-### 4. Context destructuring gotcha
+Provider-specific payload fields Claudine should preserve on the unified payload include `sessionID`, `callID`, `tool`, `agent`, `model`, `provider`, `overflow`, `variant`, and event-type discriminators.
 
-**Problem:** The plugin function receives a **context object**, not individual parameters. A common mistake is treating the context as the client directly.
+## Gaps
 
-**Incorrect:**
-
-```typescript
-export const MyPlugin: Plugin = async (client) => {
-  await client.session.prompt({ ... })  // FAILS: client is the context object
-}
-```
-
-**Correct:**
-
-```typescript
-export const MyPlugin: Plugin = async ({ client }) => {
-  await client.session.prompt({ ... })  // Works: destructured from context
-}
-```
-
-### 5. State persistence across hooks
-
-**Problem:** Plugin functions are initialized once at startup. Closure variables persist across all hook invocations within a session but are **not persisted across OpenCode restarts**.
-
-**Impact:** Cannot rely on in-memory state surviving application restart.
-
-**Workaround:** Use session-keyed Maps for per-session state and files or external storage for persistent state:
-
-```typescript
-const sessions = new Map<string, SessionState>()
-
-export const MyPlugin: Plugin = async () => {
-  return {
-    event: async ({ event }) => {
-      if (event.type === "session.created") {
-        sessions.set(event.properties.info.id, { filesModified: [] })
-      }
-      if (event.type === "session.deleted") {
-        sessions.delete(event.properties.info.id)
-      }
-    },
-  }
-}
-```
-
-### 6. No hook for tool execution errors
-
-**Problem:** There is no `tool.execute.error` hook. The `tool.execute.after` hook only fires on successful completion.
-
-**Impact:** Cannot implement centralized error handling for tool failures in plugins.
-
-**Workaround:**
-- Use the `event` hook to listen for `session.error` events
-- Check for error conditions in `tool.execute.after` by examining output content
-
-### 7. Experimental hooks may change
-
-**Problem:** Hooks prefixed with `experimental.` (system transform, messages transform, session compacting, text complete) are not considered stable API.
-
-**Impact:** Plugin code using these hooks may break on upgrades.
-
-**Workaround:** Pin your OpenCode version in CI/CD and test upgrades before deploying. Keep experimental hook usage isolated and easy to update.
-
-### 8. System prompt safety mechanism
-
-**Problem:** If an `experimental.chat.system.transform` hook empties the `output.system` array, OpenCode silently restores the original system prompt.
-
-**Impact:** You cannot use this hook to remove the system prompt entirely.
-
-**Workaround:** This is intentional. If you need to modify the system prompt, push additional strings rather than replacing the existing ones.
-
----
+1. OpenCode has no dedicated "Hooks" documentation page; event/hook docs are under `/docs/plugins/`.
+2. The Hooks TypeScript interface declares `chat.message`, `permission.ask`, and `command.execute.before`, but no runtime `plugin.trigger(...)` call site for these was found in the current source.
+3. Exact payload shapes for every event bus event, especially the granular `session.next.*` events, MCP events, and LSP events, are only fully available in the schema source.
+4. Plugin hook error handling and timeout policies are implicit in the surrounding Effect code rather than documented.
+5. Permission decisions cannot be made from the `permission.asked` event bus event; the dedicated `permission.ask` hook's invocation status is unclear.
+6. The observed local Claudine bridge plugin (`~/.config/opencode/plugin/claudine-bridge.ts`) is observation-only and does not exercise mutation or blocking contracts.
+7. Plugin execution order when multiple plugins mutate the same `output` field is sequential by load order, but precedence/conflict rules are not documented.
 
 ## Sources
 
-- OpenCode GitHub repository: https://github.com/anomalyco/opencode
-- OpenCode documentation: https://opencode.ai/docs
-- Plugin documentation: https://opencode.ai/docs/plugins
-- Custom tools documentation: https://opencode.ai/docs/custom-tools
-- Configuration documentation: https://opencode.ai/docs/config
-- Permissions documentation: https://opencode.ai/docs/permissions
-- Plugin type definitions (source): https://github.com/anomalyco/opencode/tree/dev/packages/plugin/src/index.ts
-- Tool helper (source): https://github.com/anomalyco/opencode/tree/dev/packages/plugin/src/tool.ts
-- Plugin loader (source): https://github.com/anomalyco/opencode/tree/dev/packages/opencode/src/plugin/index.ts
-- Bus event system (source): https://github.com/anomalyco/opencode/tree/dev/packages/opencode/src/bus
-- npm package: https://www.npmjs.com/package/@opencode-ai/plugin
+- OpenCode homepage: <https://opencode.ai>
+- OpenCode docs: <https://opencode.ai/docs>
+- Plugins and events docs: <https://opencode.ai/docs/plugins/>
+- Config docs: <https://opencode.ai/docs/config/>
+- Agents docs: <https://opencode.ai/docs/agents/>
+- Config JSON schema: <https://opencode.ai/config.json>
+- GitHub repository: <https://github.com/anomalyco/opencode>
+- Plugin types: `packages/plugin/src/index.ts` — <https://github.com/anomalyco/opencode/blob/dev/packages/plugin/src/index.ts>
+- Plugin manager: `packages/opencode/src/plugin/index.ts` — <https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/plugin/index.ts>
+- Plugin loader: `packages/opencode/src/plugin/loader.ts` — <https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/plugin/loader.ts>
+- Plugin shared/entrypoint: `packages/opencode/src/plugin/shared.ts` — <https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/plugin/shared.ts>
+- Local plugin scanning: `packages/opencode/src/config/plugin.ts` — <https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/config/plugin.ts>
+- Event manifest: `packages/schema/src/event-manifest.ts` — <https://github.com/anomalyco/opencode/blob/dev/packages/schema/src/event-manifest.ts>
+- Tool execution hooks: `packages/opencode/src/session/tools.ts` — <https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/tools.ts>
+- Shell env hook: `packages/opencode/src/tool/shell.ts` — <https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/tool/shell.ts>
+- LLM request hooks: `packages/opencode/src/session/llm/request.ts` — <https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/llm/request.ts>
+- Compaction hooks: `packages/opencode/src/session/compaction.ts` — <https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/session/compaction.ts>
+- Runtime flags/env vars: `packages/opencode/src/effect/runtime-flags.ts` — <https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/effect/runtime-flags.ts>
+- Observed local plugin: `~/.config/opencode/plugin/claudine-bridge.ts`

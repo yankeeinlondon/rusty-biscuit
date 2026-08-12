@@ -13,7 +13,7 @@ fn components_compose_into_an_html_page() {
     let rule = HorizontalRule::new();
     let fragment = rule.render_html_fragment();
     let page = HtmlPage::from(fragment);
-    let html = page.render();
+    let html = page.render().expect("render");
     assert!(
         html.contains("<html"),
         "rendered page must have an <html> root"
@@ -31,7 +31,7 @@ fn components_compose_into_an_html_page() {
 fn render_html_page_promotes_a_single_component() {
     let rule = HorizontalRule::new();
     let page = rule.render_html_page(None);
-    let html = page.render();
+    let html = page.render().expect("render");
     assert!(
         html.contains("<html"),
         "promoted page must have an <html> root"

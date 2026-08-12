@@ -9,8 +9,8 @@ pub use crate::config::claudine_config::{ClaudineConfig, RepoOverrideConfig};
 pub(crate) use crate::config::merge::merge_repo_override;
 pub use crate::config::messaging_block::{ClaudineMessengerConfig, MessengerProviderConfig};
 pub use crate::config::migration;
-pub use crate::dispatch::matcher::RuntimeMatcher;
-pub use crate::error::{ClaudineError, Result};
+pub use crate::dispatch::matcher::{compile_many, RuntimeMatcher};
+pub use crate::error::{ClaudineError, ConfigCause, Result};
 pub use crate::events::{AgenticEvent, GlobalSettings};
 pub use crate::messaging::{
     MessagingRouteConfig, RuntimeMessagingSettings, ScopedMessagingSettings,

@@ -3,10 +3,7 @@ use claudine::system_prompt::{PreparedSystemPrompt, SystemPromptMode};
 use color_eyre::eyre::{Result, bail};
 use std::path::Path;
 
-use super::{
-    PromptDelivery, WrapperProfile, has_flag, option_value, prompt_delivery_append_flags,
-    push_stream_json_flags,
-};
+use super::{PromptDelivery, WrapperProfile, has_flag, option_value, prompt_delivery_append_flags};
 
 pub(crate) struct QwenWrapper;
 
@@ -57,10 +54,6 @@ impl WrapperProfile for QwenWrapper {
         Ok(())
     }
 
-    fn allowed_env_keys(&self) -> &'static [&'static str] {
-        &["DASHSCOPE_API_KEY", "QWEN_API_KEY"]
-    }
-
     fn apply_system_prompt(
         &self,
         prompt: &PreparedSystemPrompt,
@@ -105,12 +98,5 @@ impl WrapperProfile for QwenWrapper {
             "--resume".to_string(),
             session_id.to_string(),
         ])
-    }
-
-    fn apply_structured_stream(&self, args: &mut Vec<String>) {
-        // Qwen uses the catalog-default --output-format stream-json via
-        // push_stream_json_flags, with no extra flags. Structured-stream
-        // setup is not modeled in the output-format catalog.
-        push_stream_json_flags(args, &[]);
     }
 }

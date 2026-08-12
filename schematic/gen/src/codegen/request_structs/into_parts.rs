@@ -14,17 +14,22 @@ pub(super) fn generate_into_parts(
     method_str: &str,
 ) -> TokenStream {
     let path_format = generate_path_format(&endpoint.path, path_params, query_params);
-    // Only JSON requests have a typed body field
-    let has_json_body = matches!(&endpoint.request, Some(ApiRequest::Json(_)));
 
-    let body_expr = if has_json_body {
-        quote! {
-            Some(serde_json::to_string(&self.body).map_err(|e| {
-                SchematicError::SerializationError(e.to_string())
-            })?)
-        }
-    } else {
-        quote! { None }
+    let body_expr = match &endpoint.request {
+        Some(ApiRequest::Json(_)) => quote! {
+            crate::shared::RequestBody::Json(
+                serde_json::to_string(&self.body).map_err(|e| {
+                    SchematicError::SerializationError(e.to_string())
+                })?
+            )
+        },
+        Some(ApiRequest::FormData { .. }) => quote! {
+            crate::shared::RequestBody::Multipart(self.body.into_form_parts())
+        },
+        Some(ApiRequest::UrlEncoded { .. }) => quote! {
+            crate::shared::RequestBody::UrlEncoded(self.body.into_form_pairs())
+        },
+        _ => quote! { crate::shared::RequestBody::Empty },
     };
 
     // Generate headers initialization
@@ -38,13 +43,13 @@ pub(super) fn generate_into_parts(
         /// A tuple of:
         /// - HTTP method as a static string (e.g., "GET", "POST")
         /// - Fully substituted path string with query parameters
-        /// - Optional JSON body string
+        /// - The request body as a `RequestBody`
         /// - Endpoint-specific headers as key-value pairs
         ///
         /// ## Errors
         ///
-        /// Returns `SchematicError::SerializationError` if the request body
-        /// fails to serialize to JSON.
+        /// Returns `SchematicError::SerializationError` if a JSON request body
+        /// fails to serialize.
         pub fn into_parts(self) -> Result<RequestParts, SchematicError> {
             #path_format
             Ok((#method_str, path, #body_expr, #headers_init))

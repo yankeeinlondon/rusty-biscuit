@@ -1,4 +1,5 @@
 use std::env;
+use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 use termini::{NumberCapability, TermInfo};
@@ -169,6 +170,16 @@ pub fn color_depth() -> ColorDepth {
 /// }
 /// ```
 pub fn color_mode() -> ColorMode {
+    // Cache per process: the underlying `bg_color()` OSC probe is already
+    // cached, and the macOS `AppleInterfaceStyle` fallback forks a subprocess.
+    // The attached terminal's light/dark mode does not change within a process,
+    // so repeated `Terminal` constructions must not re-pay either cost.
+    static COLOR_MODE_CACHE: OnceLock<ColorMode> = OnceLock::new();
+    *COLOR_MODE_CACHE.get_or_init(detect_color_mode)
+}
+
+/// Uncached color-mode detection backing [`color_mode`].
+fn detect_color_mode() -> ColorMode {
     // Try to get background color and determine from luminance
     if let Some(bg) = crate::discovery::osc_queries::bg_color() {
         let luminance = bg.luminance();
@@ -189,23 +200,25 @@ pub fn color_mode() -> ColorMode {
         }
     }
 
-    // macOS: Check AppleInterfaceStyle
+    // macOS: Check AppleInterfaceStyle. Only worth the subprocess spawn when a
+    // terminal is actually attached — in a fully-redirected context (`bg_color`
+    // is `None` exactly there) the mode is unobservable, so fall through to the
+    // default instead of forking `defaults`.
     #[cfg(target_os = "macos")]
-    {
-        if let Ok(output) = std::process::Command::new("defaults")
+    if super::dimensions::is_tty()
+        && let Ok(output) = std::process::Command::new("defaults")
             .args(["read", "-g", "AppleInterfaceStyle"])
             .output()
-        {
-            if output.status.success() {
-                let stdout = String::from_utf8_lossy(&output.stdout);
-                if stdout.trim().to_lowercase() == "dark" {
-                    return ColorMode::Dark;
-                }
+    {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if stdout.trim().to_lowercase() == "dark" {
+                return ColorMode::Dark;
             }
-            // If command succeeds but no "Dark" value, it's Light mode
-            // (AppleInterfaceStyle is only set when Dark mode is active)
-            return ColorMode::Light;
         }
+        // If command succeeds but no "Dark" value, it's Light mode
+        // (AppleInterfaceStyle is only set when Dark mode is active)
+        return ColorMode::Light;
     }
 
     // Default to Dark (most common for terminal users)
@@ -331,9 +344,17 @@ mod tests {
     #[test]
     fn color_mode_conversion_round_trip() {
         for mode in [ColorMode::Light, ColorMode::Dark, ColorMode::Unknown] {
-            let render: RenderColorMode = mode.clone().into();
+            let render: RenderColorMode = mode.into();
             let render_ref: RenderColorMode = (&mode).into();
             assert_eq!(render, render_ref);
         }
+    }
+
+    /// `color_mode()` is cached per process (finding 21) so repeated `Terminal`
+    /// constructions do not re-probe the background color or re-fork the macOS
+    /// `defaults read` subprocess. The value must be stable across calls.
+    #[test]
+    fn color_mode_is_stable_across_calls() {
+        assert_eq!(color_mode(), color_mode(), "cached color_mode must be stable");
     }
 }

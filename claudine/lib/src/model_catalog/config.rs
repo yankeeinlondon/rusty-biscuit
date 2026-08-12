@@ -26,11 +26,13 @@ pub fn merge_overrides(
                     set.insert(m.clone());
                 }
                 for m in entry.values() {
-                    set.insert(m.clone());
+                    set.insert(m.to_string());
                 }
                 set.into_iter().collect()
             }
-            ModelOverrideMode::Replace => entry.values().to_vec(),
+            ModelOverrideMode::Replace => {
+                entry.values().into_iter().map(str::to_string).collect()
+            }
         },
     }
 }
@@ -77,6 +79,31 @@ mod tests {
         let base = vec!["gpt-4o".into()];
         let merged = merge_overrides(Provider::Codex, &base, None);
         assert_eq!(merged, base);
+    }
+
+    /// Object-form values (with or without a `catalog_id`) merge by their
+    /// `id` exactly like bare strings — the catalog identity never leaks
+    /// into the merged id list.
+    #[test]
+    fn object_values_merge_by_id_like_strings() {
+        use crate::config::claudine_config::{ModelOverrideEntry, ModelOverrideValue};
+
+        let base = vec!["gpt-4o".into()];
+        let override_entry = ProviderModelOverride::Detailed(DetailedModelOverride {
+            mode: ModelOverrideMode::Add,
+            values: vec![
+                "gpt-5".into(),
+                ModelOverrideValue::Entry(ModelOverrideEntry {
+                    id: "gpt-4o".into(),
+                    catalog_id: Some("openai/gpt-4o@1".into()),
+                }),
+            ],
+        });
+
+        let merged = merge_overrides(Provider::Codex, &base, Some(&override_entry));
+        let mut sorted = merged.clone();
+        sorted.sort();
+        assert_eq!(sorted, vec!["gpt-4o", "gpt-5"]);
     }
 
     #[test]

@@ -34,3 +34,10 @@ tempfile = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 unicode-width = "0.2"
 wiremock = "0.6"
+
+# CI policy: L1 runs with the `image` feature, and biscuit-icon-cli owns the
+# area's L2 (real-terminal) tier tests.
+[package.metadata.ci.tests]
+tiers = ["L1", "L2"]
+l2-backends = ["tmux", "wezterm"]
+features = ["image"]

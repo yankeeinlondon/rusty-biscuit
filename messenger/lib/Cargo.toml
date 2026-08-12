@@ -38,6 +38,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 tempfile = "3.15"
 wiremock = "0.6"
 serial_test = "3"
+test-toolkit = { path = "../../tools/test-toolkit" }
 
 [features]
 default = ["discord", "slack"]
@@ -109,3 +110,10 @@ required-features = ["desktop"]
 test = false
 doctest = false
 bench = false
+
+[package.metadata.ci.tests]
+all-features = true
+runner-tools = ["messenger-desktop-stubs"]
+
+[package.metadata.ci.native]
+ubuntu-latest = ["libdbus-1-dev"]

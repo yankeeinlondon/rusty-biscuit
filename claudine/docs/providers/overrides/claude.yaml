@@ -1,0 +1,12 @@
+# Human-owned overrides for the claude provider. Each entry WINS over the
+# field's declared source during generation (whole-key replacement) and MUST
+# carry a `reason:`. Keys are catalog field names; an override for a field
+# with no mapping-registry entry is a generation error.
+model_env_vars:
+    value: ["CLAUDE_MODEL", "ANTHROPIC_MODEL"]
+    reason: >-
+        agent-models research enumerates the current Anthropic selection env
+        vars (ANTHROPIC_MODEL, CLAUDE_CODE_SUBAGENT_MODEL, ...) but the
+        wrapper contract still honors Claudine's legacy CLAUDE_MODEL alias
+        and deliberately excludes the subagent/gateway toggles. Pin today's
+        pair until the wrapper env contract is redesigned (Phase D).

@@ -9,10 +9,9 @@
 
 use std::fs;
 
-use assert_cmd::cargo::cargo_bin_cmd;
 
 mod common;
-use common::{TestWorkspace, write};
+use common::TestWorkspace;
 
 /// Atomic style tokens that must no longer appear in any hooks output.
 const ATOMIC_STYLE_TOKENS: &[&str] = &[
@@ -34,7 +33,7 @@ const ATOMIC_STYLE_TOKENS: &[&str] = &[
 /// Run `claudine` with `NO_COLOR` set and an isolated `HOME`, returning
 /// stdout as a string. Asserts the command exited successfully.
 fn run_hooks(home: &std::path::Path, args: &[&str]) -> String {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", home)
         .env("NO_COLOR", "1")
         .args(args)
@@ -53,24 +52,61 @@ fn assert_no_atomic_tokens(output: &str) {
     }
 }
 
-/// Regression test for finding F1: the support legend must interpolate
-/// the `NO_SUPPORT` constant via `format!` and render the `❌` glyph,
-/// never the literal placeholder text `{{NO_SUPPORT}}` (or `{NO_SUPPORT}`).
+/// The support matrix uses a single glyph vocabulary; every glyph a cell
+/// can show must also appear in the legend, and the retired glyphs
+/// (⛔️ non-hook, ❌ none) must not resurface.
 #[test]
-fn hooks_support_legend_renders_no_support_glyph() {
+fn hooks_support_legend_documents_glyph_vocabulary() {
     let workspace = TestWorkspace::named("claudine-hooks-it");
     let home = workspace.path().join("home");
     fs::create_dir_all(&home).unwrap();
 
     let output = run_hooks(&home, &["hooks", "--support"]);
 
+    for glyph in ["✅", "🔶", "🅐", "–"] {
+        assert!(
+            output.contains(glyph),
+            "support view should render the {glyph} glyph:\n{output}"
+        );
+    }
+    for retired in ["⛔", "❌"] {
+        assert!(
+            !output.contains(retired),
+            "support view resurrected retired glyph {retired}:\n{output}"
+        );
+    }
     assert!(
-        output.contains('❌'),
-        "support legend should render the ❌ glyph:\n{output}"
+        !output.contains("Table could not be rendered"),
+        "support view refused to render instead of chunking:\n{output}"
     );
     assert!(
-        !output.contains("{{NO_SUPPORT}}") && !output.contains("{NO_SUPPORT}"),
-        "support legend leaked the literal NO_SUPPORT placeholder:\n{output}"
+        output.contains("Not mappable — configure natively"),
+        "support view is missing the unmapped native events note:\n{output}"
+    );
+    assert!(
+        output.contains("BeforeToolSelection"),
+        "unmapped note is missing Gemini BeforeToolSelection:\n{output}"
+    );
+    assert_no_atomic_tokens(&output);
+}
+
+/// `--mapping` closes with the same unmapped-events list: these phases
+/// exist natively but have no canonical row in the tables above.
+#[test]
+fn hooks_mapping_lists_unmapped_native_events() {
+    let workspace = TestWorkspace::named("claudine-hooks-it");
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    let output = run_hooks(&home, &["hooks", "--mapping"]);
+
+    assert!(
+        output.contains("Not mappable — configure natively"),
+        "mapping view is missing the unmapped native events note:\n{output}"
+    );
+    assert!(
+        output.contains("tool.definition"),
+        "unmapped note is missing OpenCode tool.definition:\n{output}"
     );
     assert_no_atomic_tokens(&output);
 }
@@ -94,41 +130,15 @@ fn hooks_variables_preserves_literal_template_placeholders() {
     assert_no_atomic_tokens(&output);
 }
 
-/// An invalid sound effect whose name contains Prose-significant
-/// characters (`<`, `>`) must be escaped so the characters render as
-/// literal text and are not swallowed as a bracketed tag.
+/// Command routing remains testable without redirecting the native user home.
 #[test]
-fn hooks_invalid_sound_effect_escapes_prose_characters() {
-    let workspace = TestWorkspace::named("claudine-hooks-it");
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
-
-    write(
-        &home.join(".claudine/config.json"),
-        r#"{
-  "actions": {
-    "human_in_the_loop": [
-      { "type": "sound_effect", "effect": "bell<x>" }
-    ]
-  }
-}"#,
-    );
-
-    let output = run_hooks(&home, &["hooks"]);
-
-    assert!(
-        output.contains("Invalid sound effects:"),
-        "expected the invalid sound effects warning section:\n{output}"
-    );
-    assert!(
-        output.contains("bell<x>"),
-        "invalid effect name with `<x>` was not rendered literally:\n{output}"
-    );
-    assert!(
-        !output.contains(r"bell\<x\>"),
-        "escape backslashes leaked into rendered output:\n{output}"
-    );
-    assert_no_atomic_tokens(&output);
+fn hooks_command_help_routes_without_user_config() {
+    assert_cmd::Command::cargo_bin("claudine")
+        .unwrap()
+        .env("NO_COLOR", "1")
+        .args(["hooks", "--help"])
+        .assert()
+        .success();
 }
 
 /// None of the static `hooks` views may emit atomic style tokens.
@@ -159,7 +169,7 @@ fn hooks_views_emit_no_atomic_style_tokens() {
 
 /// Run `claudine` with color forced on, returning stdout.
 fn run_hooks_colored(home: &std::path::Path, args: &[&str]) -> String {
-    let assert = cargo_bin_cmd!("claudine")
+    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("HOME", home)
         .env("FORCE_COLOR", "1")
         .env_remove("NO_COLOR")
@@ -215,11 +225,13 @@ fn hooks_support_view_emits_ansi_styling() {
     let output = run_hooks_colored(&home, &["hooks", "--support"]);
     assert_styled(&output);
     assert!(
-        output.contains('❌'),
+        output.contains('✅'),
         "support legend missing glyph:\n{output:?}"
     );
 }
 
+/// `--capture-method` is a hidden alias of `--support`; it must keep
+/// rendering the styled support matrix so existing invocations don't break.
 #[test]
 fn hooks_capture_method_view_emits_ansi_styling() {
     let workspace = TestWorkspace::named("claudine-hooks-it");
@@ -228,6 +240,10 @@ fn hooks_capture_method_view_emits_ansi_styling() {
 
     let output = run_hooks_colored(&home, &["hooks", "--capture-method"]);
     assert_styled(&output);
+    assert!(
+        output.contains("✅"),
+        "alias output should be the support matrix:\n{output:?}"
+    );
 }
 
 #[test]

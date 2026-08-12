@@ -128,10 +128,11 @@ async fn show_offline_list(
     client: &IconifyClient,
 ) -> Result<()> {
     let offline = catalog::offline_icons(cache, "", allowed)?;
+    let fmt = Format { svg: false, code_block: false, css: false, nerd };
     let mut errors = Vec::new();
     for id in &offline {
         match lookup_icon(id, cache, client).await {
-            Ok(icon) => println!("{}  {id}", icon.clone().nerd_font(nerd).render(term)),
+            Ok(icon) => println!("{}", fmt.render_list_line(&icon, id, term)),
             Err(err) => {
                 eprintln!("{id}: {err}");
                 errors.push(id.clone());
@@ -167,6 +168,21 @@ impl Format {
             return render_code_block(icon);
         }
         icon.clone().nerd_font(self.nerd).render(term)
+    }
+
+    /// Renders `icon` for a one-per-line list and appends the icon's id,
+    /// unless the rendered output is just the id itself (the text fallback
+    /// used when the icon has no glyph and the terminal cannot inline an
+    /// image). In that fallback case the line is the id alone — printing
+    /// `<id>  <id>` is a tell that the visual is missing.
+    fn render_list_line(&self, icon: &Icon, id: &str, term: &Terminal) -> String {
+        let rendered = self.render(icon, term);
+        let visible = biscuit_terminal::utils::escape_codes::strip_escape_codes(&rendered);
+        if visible.trim() == id {
+            id.to_string()
+        } else {
+            format!("{rendered}  {id}")
+        }
     }
 }
 
@@ -421,7 +437,7 @@ async fn list_matches(
             match result {
                 Ok(icon) => {
                     if !meta {
-                        println!("{}  {id}", fmt.render(&icon, term));
+                        println!("{}", fmt.render_list_line(&icon, &id, term));
                     }
                     resolved.push((id, icon));
                 }
@@ -462,7 +478,7 @@ async fn launch_picker(
     let state = ChooseManyState::from_options(options);
     let component = ChooseMany::new();
 
-    match biscuit_tui::core::standalone::run_standalone(component, state, None) {
+    match biscuit_tui::core::run_standalone(component, state, None) {
         Ok(picked) => {
             if picked.is_empty() {
                 return Ok(());
@@ -470,7 +486,7 @@ async fn launch_picker(
             let mut resolved = Vec::with_capacity(picked.len());
             for id in &picked {
                 let icon = lookup_icon(id, cache, client).await?;
-                resolved.push((id.clone(), icon));
+                resolved.push((id.to_string(), icon));
             }
             if meta {
                 return emit_meta_table(&resolved, cache, term, fmt);
@@ -517,6 +533,10 @@ async fn domain(arg: Option<String>, show: ShowFlags, verbose: u8, nerd: bool) -
                     }
                     None => Err(eyre!("not a curated enum")),
                 }
+            } else if fmt.svg || fmt.code_block || fmt.css {
+                Err(eyre!(
+                    "--svg, --code-block, and --css only apply to the single-icon form `icon domain <set>:<variant>`; got `icon domain <set>` (variants table)"
+                ))
             } else {
                 match biscuit_icon::domain::domain_variants(&a) {
                     Some(variants) => {
@@ -570,20 +590,23 @@ fn domain_variants_table(
     verbose: bool,
 ) -> Result<()> {
     use biscuit_icon::Icon;
+    use biscuit_terminal::components::prose::Prose;
 
     let data: Vec<Vec<TableCellContent>> = variants
         .iter()
         .map(|v| {
             let mut row: Vec<TableCellContent> = vec![v.name.clone().into()];
-            // The `Icon` column renders the variant through the same ladder
-            // used by `icon show` (Nerd Font → Unicode → inline image → SVG
-            // code block → plain SVG text). The `Format` struct captures any
-            // `--svg` / `--code-block` / `--css` override; the default uses
-            // the ladder.
-            let icon_cell = biscuit_icon::domain::icon_for_id(&v.iconify_id)
-                .map(|icon: Icon| fmt.render(&icon, term))
-                .unwrap_or_default();
-            row.push(icon_cell.into());
+            // The `Icon` cell renders the variant through a small-cell
+            // ladder: Unicode/Nerd Font glyph when available, otherwise a
+            // 1-cell-wide inline image, otherwise the iconify id in dim
+            // style. Inline images are constrained to 1 cell so the
+            // surrounding table grid is not destroyed.
+            let icon_cell = biscuit_icon::domain::icon_for_id(v.iconify_id)
+                .map(|icon: Icon| render_table_icon_cell(&icon, term, fmt))
+                .unwrap_or_else(|| {
+                    TableCellContent::StyledProse(Box::new(Prose::new("<dim>—</dim>")))
+                });
+            row.push(icon_cell);
             if verbose {
                 row.push(v.iconify_id.to_string().into());
             }
@@ -606,6 +629,40 @@ fn domain_variants_table(
 
     println!("{}", table.render(term));
     Ok(())
+}
+
+/// Renders one icon into a single table cell. The ladder is:
+/// 1. Unicode glyph (always preferred — single character, fits any cell)
+/// 2. Nerd Font glyph (when `fmt.nerd` is set and the icon has one)
+/// 3. 1-cell-wide inline image (when the terminal supports it; uses
+///    [`Icon::render_in_cell`] so the image does not overflow the cell)
+/// 4. Dimmed iconify id (so the user still sees *something* identifying
+///    the icon, even in a plain xterm without an image protocol)
+fn render_table_icon_cell(icon: &Icon, term: &Terminal, fmt: &Format) -> TableCellContent {
+    use biscuit_terminal::components::prose::Prose;
+
+    if icon.unicode_char().is_some()
+        || (fmt.nerd && icon.nerd_font_char().is_some())
+    {
+        return TableCellContent::Text(fmt.render(icon, term));
+    }
+
+    #[cfg(feature = "image")]
+    {
+        if let Ok(rendered) = icon.render_in_cell(term, 1) {
+            return TableCellContent::Text(rendered);
+        }
+    }
+    let _ = term;
+
+    // Fall back to the iconify id in dim style so the cell is still
+    // informative. The id is also available as a dedicated column with
+    // `--verbose`, but losing the visual reference is worse than a hint
+    // at the identifier.
+    TableCellContent::StyledProse(Box::new(Prose::new(format!(
+        "<dim>{}</dim>",
+        Prose::escape_text(icon.id())
+    ))))
 }
 
 fn cache_list(cache: &IconCache, term: &Terminal, nerd: bool) -> Result<()> {

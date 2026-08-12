@@ -1,6 +1,5 @@
 use std::fs;
 
-use assert_cmd::cargo::cargo_bin_cmd;
 mod common;
 use common::{TestWorkspace, init_git_repo, write};
 
@@ -48,7 +47,7 @@ fn handle_reads_repo_scoped_config_from_cwd_repo_root() {
         &serde_json::to_string_pretty(&repo_config).unwrap(),
     );
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&repo_root)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
@@ -110,7 +109,7 @@ fn handle_logs_wrapper_package_context_from_env() {
         &serde_json::to_string_pretty(&repo_config).unwrap(),
     );
 
-    let output = cargo_bin_cmd!("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(&repo_root)
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")

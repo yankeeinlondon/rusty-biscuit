@@ -1,6 +1,6 @@
 //! Level 2 real-terminal capture tests for prompt reporting.
 //!
-//! The L1 unit tests in `prompt_reporting/*` and the `prompt_reporting.rs`
+//! The L1 unit tests in `render/prompt/*` and the `prompt_reporting.rs`
 //! CLI integration tests assert the report's *semantics* after stripping ANSI
 //! (and they force `NO_COLOR=1`), so they cannot catch broken SGR styling,
 //! OSC8 hyperlink emission, block-quote chrome, or width/truncation geometry in
@@ -25,7 +25,7 @@
 //! hardcodes `is_nerd_font: None` — it never consults `detect_nerd_font()`, so
 //! the `NERD_FONT` env declaration cannot reach the glyph branch. The no-space
 //! label is therefore guarded at L1 by
-//! `prompt_reporting::system_prompt::display_label_nerd_font_in_base_uses_glyph_with_path`,
+//! `render::prompt::system::display_label_nerd_font_in_base_uses_glyph_with_path`,
 //! which asserts the exact `<glyph>/.claude/system-prompt.md` string.
 //!
 //! ## Backend split
@@ -34,7 +34,7 @@
 //! through `capture-pane -e`, so it carries the color, wrapping, and truncation
 //! contracts on every host that has `tmux`. OSC8 hyperlink fidelity is verified
 //! on WezTerm per the review; the link-emission *logic* is already covered at
-//! L1 (`prompt_reporting::system_prompt::summary_emits_osc8_for_file_link`).
+//! L1 (`render::prompt::system::summary_emits_osc8_for_file_link`).
 //!
 //! `FORCE_COLOR=1` routes claudine through an optimistic terminal so the styling
 //! is the emulator's capture, not claudine's raw stream; `COLUMNS` fixes the
@@ -63,10 +63,10 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 mod common;
-use common::{TestWorkspace, augmented_path, write_executable};
+use common::{TestWorkspace, augmented_path, clear_no_color, write_executable};
 
 /// Tailwind Orange500 foreground (truecolor): the `System Prompt` header and
 /// block-quote border. Mirrors the generated palette in `renderable`.
@@ -77,7 +77,7 @@ const ORANGE_500_FG: &str = "38;2;255;105;0";
 const GREEN_500_FG: &str = "38;2;0;201;80";
 
 /// Visible cells consumed by the block-quote chrome (`┃ ` border + space).
-/// Mirrors `prompt_reporting::formatting::PROMPT_CHROME_WIDTH`.
+/// Mirrors `render::prompt::formatting::PROMPT_CHROME_WIDTH`.
 const PROMPT_CHROME_WIDTH: usize = 2;
 
 const SYSTEM_PROMPT_SHORT: &str =
@@ -144,11 +144,13 @@ fn system_prompt_long_paragraph() -> String {
     format!("# Wrap Test\n\n{words}\n")
 }
 
-/// `n` newline-separated `LineNNN` rows — a deterministic, contiguous-token
-/// body for exercising front/back truncation.
+/// `n` `LineNNN` list items — a deterministic body for exercising front/back
+/// truncation. List items (not a bare paragraph) each render on their own row;
+/// consecutive non-blank paragraph lines would reflow into a single row and
+/// never exceed the front/back row budget.
 fn numbered_lines(n: usize) -> String {
     (1..=n)
-        .map(|i| format!("Line{i:03}"))
+        .map(|i| format!("- Line{i:03}"))
         .collect::<Vec<_>>()
         .join("\n")
 }
@@ -161,7 +163,10 @@ fn spawn_tmux_session(cols: u32, rows: u32) -> String {
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     );
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    // POSIX shell (bash/sh), not the developer's `$SHELL`: a custom login
+    // prompt (e.g. Starship's `❯`) never ends in `$`/`#`/`%`, so
+    // `wait_for_prompt` would never match and burn its full timeout.
+    let shell = biscuit_test_harness::detect_shell();
     let spawned = std::process::Command::new("tmux")
         .args([
             "new-session",
@@ -194,7 +199,7 @@ fn send_compose<H: TerminalHarness>(
     cols: u32,
     extra_args: &[&str],
 ) -> CapturedFrame {
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     let path = augmented_path(&fx.bin_dir);
     let path = path.to_string_lossy().into_owned();
     let home = fx.workspace.path().to_string_lossy().into_owned();
@@ -237,6 +242,9 @@ fn capture_compose_tmux(fx: &Fixture, cols: u32, rows: u32, extra_args: &[&str])
     let session = spawn_tmux_session(cols, rows);
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+    // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
+    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
+    clear_no_color(&mut harness);
     let frame = send_compose(&mut harness, fx, cols, extra_args);
     kill_session_by_name(&session);
     frame
@@ -260,7 +268,7 @@ fn raw_line<'a>(frame: &'a CapturedFrame, needle: &str) -> Option<&'a str> {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prompt_reporting_block_quote_colors_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let fx = Fixture::new(Some(SYSTEM_PROMPT_SHORT), USER_PROMPT_SHORT);
     let frame = capture_compose_tmux(&fx, 100, 40, &[]);
@@ -311,7 +319,7 @@ fn level2_prompt_reporting_block_quote_colors_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prompt_reporting_body_wraps_and_reserves_chrome_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let sp = system_prompt_long_paragraph();
     let fx = Fixture::new(Some(&sp), USER_PROMPT_SHORT);
@@ -352,7 +360,7 @@ fn level2_prompt_reporting_body_wraps_and_reserves_chrome_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prompt_reporting_front_back_truncation_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let body = numbered_lines(50);
     let fx = Fixture::new(None, &body);
@@ -383,15 +391,31 @@ fn level2_prompt_reporting_front_back_truncation_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_prompt_reporting_system_link_osc8_in_wezterm() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let fx = Fixture::new(Some(SYSTEM_PROMPT_SHORT), USER_PROMPT_SHORT);
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
-    let frame = send_compose(&mut harness, &fx, 100, &[]);
+    // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
+    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
+    clear_no_color(&mut harness);
+
+    // Clear the shared pane's screen *and* scrollback (`ESC[3J`) so the
+    // scrollback capture below sees only this run's output — the pane is
+    // reused across serial tests.
+    harness
+        .send_text(b"clear; printf '\\033[3J'\n")
+        .expect("clear shared pane");
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+
+    // Drive the compose, then read the scrollback rather than the returned
+    // viewport frame. claudine prepends its built-in system prompt, so the
+    // rendered System Prompt report is taller than the short shared pane and
+    // its OSC8 hyperlink (near the report's top) scrolls into history — the
+    // viewport-only capture never sees it.
+    let _ = send_compose(&mut harness, &fx, 100, &[]);
+    let frame = harness
+        .capture_scrollback(400)
+        .expect("scrollback capture failed");
 
     assert!(
         frame.raw.contains("\x1b]8;;file://"),

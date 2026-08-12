@@ -26,8 +26,8 @@
 //!    `foo.bar`, `foo[0]`, `(expr)`)
 //! 2. Unary `!`, `-`
 //! 3. Multiplicative `*`, `/`, `%`
-//! 4. Additive `+`, `-` (`+` doubles as string concatenation when either
-//!    operand is a string)
+//! 4. Additive `+`, `-` (`+` coerces a numeric string paired with a number,
+//!    and otherwise doubles as string concatenation)
 //! 5. Comparison `==`, `!=`, `>`, `>=`, `<`, `<=`
 //! 6. Logical AND `&&`
 //! 7. Logical OR / Fallback `||`
@@ -57,8 +57,8 @@
 //! ## Arithmetic Errors
 //!
 //! Division by zero (`x / 0`) and remainder by zero (`x % 0`) raise
-//! evaluator errors. Non-numeric operands for `-`, `*`, `/`, `%` (and `+`
-//! when neither side is a string) also raise errors.
+//! evaluator errors. Non-numeric operands for `-`, `*`, `/`, `%` also raise
+//! errors; `+` concatenates operands that do not form a mixed numeric pair.
 //!
 //! For full grammar, helper catalog, and timezone behavior see the
 //! [Darkmatter Expressions](../../../../docs/topics/darkmatter-expressions.md)
@@ -68,24 +68,40 @@ pub mod ast;
 pub mod catalog;
 pub mod ctx;
 pub(crate) mod doc_namespace;
+pub mod error;
+pub mod file_suggestions;
 pub mod functions;
 pub mod lexer;
+pub(crate) mod path_projection;
 pub mod parser;
 pub mod resolve_ctx;
+pub mod semantics;
 
-pub use ast::{BinaryOp, Expr};
+pub use ast::{BinaryOp, Expr, SpannedExpr, SpannedExprKind};
 pub use catalog::{
-    expression_function_descriptors, ExpressionFunctionDescriptor,
-    EXPRESSION_FUNCTION_DESCRIPTORS,
+    expression_function_descriptors, generate_expression_function_table,
+    DataType, ExpressionFunctionDescriptor, ParamType, ReturnType, ReturnValueType,
 };
 pub use ctx::CtxLookup;
+pub use error::{
+    ArityBound, ExpressionError, FileRefFailure, FileReferenceDiagnostic, ProviderFailureKind,
+};
+pub use file_suggestions::{collect_sibling_candidates, suggest_sibling_files};
+pub(crate) use path_projection::{
+    make_portable_relative_in_context,
+};
 pub use resolve_ctx::ResolutionContext;
 pub use lexer::{
-    ComparisonOp, ExpressionFinder, ExpressionLocation, Lexer, LexerError, ParseMode, Token,
+    ComparisonOp, ExpressionFinder, ExpressionLocation, ExpressionScanResult, InterpolationLiteral,
+    Lexer, LexerError, ParseMode, Token, lex_spanned,
 };
-pub use parser::{ParseError, Parser, parse, parse_condition};
+pub use parser::{
+    ParseError, Parser, parse, parse_condition, parse_condition_spanned, parse_spanned,
+};
 
 use serde_json::Value;
+
+use crate::catalog::{describe, describe_for_error, suggest, Described};
 
 /// Converts a value to a number for arithmetic operations.
 ///
@@ -102,8 +118,8 @@ fn to_number_arithmetic(value: &Value) -> Option<f64> {
 /// Converts an expression value into a number for arithmetic operations,
 /// returning an error message tagged with the originating operator when the
 /// value cannot be represented as a number.
-fn require_number(value: &Value, op_label: &str) -> Result<f64, String> {
-    to_number_arithmetic(value).ok_or_else(|| format!("{op_label} requires numeric operands"))
+fn require_number(value: &Value, op_label: &'static str) -> Result<f64, ExpressionError> {
+    to_number_arithmetic(value).ok_or(ExpressionError::Arithmetic { op: op_label })
 }
 
 /// Converts a value to a number for array indexing.
@@ -190,10 +206,8 @@ pub trait EvaluationLookup {
         }
     }
 
-    /// Returns the document-relative resolution context that the seven
-    /// read-side functions (`file_exists`, `frontmatter`, `markdown_title`,
-    /// `markdown_body_empty`, `validate_schema`, `absolute`, `relative`)
-    /// resolve their path arguments against.
+    /// Returns the resolution context for read-side filesystem, document, and
+    /// repository functions.
     ///
     /// The default `None` is the **opt-out / test** case: a lookup that has no
     /// document anchor (or a unit test that does not exercise read-side
@@ -206,6 +220,59 @@ pub trait EvaluationLookup {
     /// return the recoverable "requires a document resolution context" error.
     fn resolution_context(&self) -> Option<ResolutionContext> {
         None
+    }
+
+    /// Borrowed companion to [`resolution_context`](Self::resolution_context).
+    ///
+    /// The owned method above is the public, compatibility-preserving accessor.
+    /// This borrowed variant lets the evaluator dispatch a read-side function
+    /// against a lookup's context **without cloning** it (Finding 12): a
+    /// document with many `frontmatter()` / `file_exists()` calls would
+    /// otherwise deep-clone the context — its `PathBuf`s, magic-path vector, and
+    /// captured `ctx` map — once per call. Implementors that own or borrow a
+    /// context override this to return `Some(&ctx)`; the evaluator prefers it
+    /// and only falls back to the owned clone when it yields `None`.
+    ///
+    /// The default returns `None`, so a lookup that overrides only the owned
+    /// method keeps working unchanged (the evaluator's owned fallback covers
+    /// it).
+    fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
+        None
+    }
+
+    /// Returns true when `name` is a known runtime context variable.
+    ///
+    /// The default implementation always returns `false`, which disables
+    /// parser-aware typo detection for lookups that don't expose a context
+    /// catalog.
+    fn is_valid_context_variable(&self, _name: &str) -> bool {
+        false
+    }
+
+    /// Returns the list of known runtime context variable names.
+    ///
+    /// The default implementation returns an empty slice. Implementors that
+    /// expose a context catalog should override this so typo diagnostics can
+    /// offer did-you-mean suggestions.
+    fn context_variable_names(&self) -> &[&'static str] {
+        &[]
+    }
+
+    /// Returns `true` when `root` is a known variable root for this lookup.
+    ///
+    /// `root` is the first dotted segment of a variable path (so `err.msg`
+    /// contributes `err`, `ctx.today` contributes `ctx`). Strict-mode subtree
+    /// compose ([`compose_subtree`](crate::markdown::compose::subtree::compose_subtree)
+    /// with [`SubtreeStrictness::Strict`]) rejects a reference whose root is
+    /// *not* known; a known root that resolves to `null`/empty still renders
+    /// empty.
+    ///
+    /// The default `true` preserves existing lenient behavior for lookups that
+    /// do not participate in strict-mode subtree compose.
+    ///
+    /// [`SubtreeStrictness::Strict`]: crate::markdown::compose::subtree::SubtreeStrictness::Strict
+    fn is_known_variable_root(&self, _root: &str) -> bool {
+        true
     }
 }
 
@@ -284,6 +351,24 @@ pub fn scalar_string(value: &Value) -> String {
     }
 }
 
+/// Renders a value for the interpolation output boundary.
+///
+/// Identical to [`scalar_string`] except a top-level array renders
+/// line-separated (spec D4 default), so `{{ ctx.some_list }}` ≡
+/// `{{ as_line_separated(ctx.some_list) }}`. Equality comparison and
+/// frontmatter shell expansion keep calling [`scalar_string`] directly (the
+/// byte-identical JSON-array form), so only interpolation output changes.
+pub fn interpolation_output_string(value: &Value) -> String {
+    match value {
+        Value::Array(items) => items
+            .iter()
+            .map(scalar_string)
+            .collect::<Vec<_>>()
+            .join("\n"),
+        other => scalar_string(other),
+    }
+}
+
 /// Evaluates an expression against a lookup to produce a JSON value.
 ///
 /// This is the core expression evaluator shared by both condition and
@@ -318,7 +403,7 @@ pub fn scalar_string(value: &Value) -> String {
 /// let expr = Expr::Variable("name".to_string());
 /// assert_eq!(evaluate(&expr, &lookup).unwrap(), json!("Alice"));
 /// ```
-pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, String> {
+pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, ExpressionError> {
     match expr {
         Expr::Variable(path) => Ok(lookup.get(path).unwrap_or(Value::Null)),
         Expr::StringLiteral(s) => Ok(Value::String(s.clone())),
@@ -326,12 +411,23 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, S
             let num = if n.fract() == 0.0 {
                 serde_json::Number::from(*n as i64)
             } else {
-                serde_json::Number::from_f64(*n)
-                    .ok_or_else(|| format!("Invalid numeric literal: {n}"))?
+                serde_json::Number::from_f64(*n).ok_or_else(|| {
+                    ExpressionError::Parse(format!("Invalid numeric literal: {n}"))
+                })?
             };
             Ok(Value::Number(num))
         }
         Expr::BoolLiteral(b) => Ok(Value::Bool(*b)),
+        Expr::ArrayLiteral(items) => items
+            .iter()
+            .map(|item| evaluate(item, lookup))
+            .collect::<Result<Vec<_>, _>>()
+            .map(Value::Array),
+        Expr::ObjectLiteral(entries) => entries
+            .iter()
+            .map(|(key, value)| Ok((key.clone(), evaluate(value, lookup)?)))
+            .collect::<Result<serde_json::Map<_, _>, ExpressionError>>()
+            .map(Value::Object),
         Expr::Paren(inner) => evaluate(inner, lookup),
         Expr::UnaryNot(inner) => {
             let value = evaluate(inner, lookup)?;
@@ -343,7 +439,10 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, S
                 return Ok(Value::Null);
             }
             let num = require_number(&value, "Unary '-'")?;
-            json_number(-num)
+            json_number(-num).map_err(|message| ExpressionError::Other {
+                function: "Unary '-'".to_string(),
+                message,
+            })
         }
         Expr::Binary { op, left, right } => {
             let left = evaluate(left, lookup)?;
@@ -408,8 +507,18 @@ pub fn evaluate<L: EvaluationLookup>(expr: &Expr, lookup: &L) -> Result<Value, S
     }
 }
 
-fn evaluate_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value, String> {
-    if op == BinaryOp::Add && (left.is_string() || right.is_string()) {
+fn evaluate_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value, ExpressionError> {
+    let mixed_number_and_numeric_string = op == BinaryOp::Add
+        && matches!(
+            (left, right),
+            (Value::Number(_), Value::String(_)) | (Value::String(_), Value::Number(_))
+        )
+        && to_number_arithmetic(left).is_some()
+        && to_number_arithmetic(right).is_some();
+    if op == BinaryOp::Add
+        && (left.is_string() || right.is_string())
+        && !mixed_number_and_numeric_string
+    {
         return Ok(Value::String(format!(
             "{}{}",
             scalar_string(left),
@@ -433,19 +542,28 @@ fn evaluate_binary(op: BinaryOp, left: &Value, right: &Value) -> Result<Value, S
         BinaryOp::Mul => lhs * rhs,
         BinaryOp::Div => {
             if rhs == 0.0 {
-                return Err("Division by zero".to_string());
+                return Err(ExpressionError::Other {
+                    function: "division".to_string(),
+                    message: "Division by zero".to_string(),
+                });
             }
             lhs / rhs
         }
         BinaryOp::Mod => {
             if rhs == 0.0 {
-                return Err("Remainder by zero".to_string());
+                return Err(ExpressionError::Other {
+                    function: "remainder".to_string(),
+                    message: "Remainder by zero".to_string(),
+                });
             }
             // C-style remainder: sign follows dividend (Rust's `%` already does this for f64).
             lhs % rhs
         }
     };
-    json_number(result)
+    json_number(result).map_err(|message| ExpressionError::Other {
+        function: label.to_string(),
+        message,
+    })
 }
 
 fn evaluate_index(base: &Value, index: &Value) -> Value {
@@ -488,6 +606,7 @@ fn evaluate_member(base: &Value, name: &str) -> Value {
             _ => return Value::Null,
         }
     }
+
     current
 }
 
@@ -498,16 +617,82 @@ fn evaluate_member(base: &Value, name: &str) -> Value {
 /// never resolve and would otherwise leak its literal `{{ … }}` text downstream.
 pub(crate) const UNKNOWN_FUNCTION_PREFIX: &str = "Unknown function:";
 
+/// Whether an evaluator error message is an arity (wrong-argument-count) error.
+///
+/// Arity errors read "… requires N argument(s)" / "… requires 1 or 2 arguments"
+/// / "… requires at least 1 argument". Type errors also contain "requires …
+/// argument" but name the rejected domain ("numeric"/"string"/"array"), so
+/// those are excluded.
+fn is_arity_error(message: &str) -> bool {
+    let m = message.to_lowercase();
+    m.contains("requires")
+        && m.contains("argument")
+        && !m.contains("numeric")
+        && !m.contains("string argument")
+        && !m.contains("array argument")
+}
+
+/// Returns a plain-text error for an unrecognized function name, with a fuzzy
+/// did-you-mean suggestion when one exists.
+fn unknown_function_error(name: &str) -> ExpressionError {
+    let mut text = format!("{UNKNOWN_FUNCTION_PREFIX} {name}");
+    if let Some(suggestion) = suggest(expression_function_descriptors(), name, 1).first() {
+        text.push_str("\n\nDid you mean:\n  ");
+        text.push_str(&describe_for_error(*suggestion));
+    }
+    ExpressionError::UnknownFunction {
+        name: text
+            .strip_prefix(UNKNOWN_FUNCTION_PREFIX)
+            .map(str::trim)
+            .unwrap_or(name)
+            .to_string(),
+    }
+}
+
+/// Appends the matched function descriptor's signature, description, and example
+/// to an arity error message.
+fn enrich_arity_error(name: &str, message: &str) -> String {
+    let signature = expression_function_descriptors()
+        .iter()
+        .find(|d| d.key().starts_with(&format!("{name}(")) || d.key() == name)
+        .map(|d| d.key());
+    match signature {
+        Some(sig) if let Some(descriptor) = describe(expression_function_descriptors(), sig) => {
+            format!("{message}\n\nExpected:\n  {}", describe_for_error(descriptor))
+        }
+        _ => message.to_string(),
+    }
+}
+
+fn classify_function_error(function: &str, message: String) -> ExpressionError {
+    let message = if is_arity_error(&message) {
+        enrich_arity_error(function, &message)
+    } else {
+        message
+    };
+    ExpressionError::Other {
+        function: function.to_string(),
+        message,
+    }
+}
+
 fn evaluate_function<L: EvaluationLookup>(
     name: &str,
     args: &[Expr],
     lookup: &L,
-) -> Result<Value, String> {
+) -> Result<Value, ExpressionError> {
     let name = name.to_ascii_lowercase();
     match name.as_str() {
         // `and`/`or` short-circuit, so they must evaluate their arguments
         // lazily and stay here rather than in the eagerly-evaluated registries.
         "and" => {
+            match functions::lazy_arity_eligibility("and", args.len()) {
+                Some(functions::LazyArityEligibility::Eligible) => {}
+                Some(functions::LazyArityEligibility::Ineligible(message)) => {
+                    return Err(classify_function_error("and", message));
+                }
+                None => return Err(unknown_function_error("and")),
+            }
             for arg in args {
                 let value = evaluate(arg, lookup)?;
                 if !is_truthy(&value) {
@@ -517,6 +702,13 @@ fn evaluate_function<L: EvaluationLookup>(
             Ok(Value::Bool(true))
         }
         "or" => {
+            match functions::lazy_arity_eligibility("or", args.len()) {
+                Some(functions::LazyArityEligibility::Eligible) => {}
+                Some(functions::LazyArityEligibility::Ineligible(message)) => {
+                    return Err(classify_function_error("or", message));
+                }
+                None => return Err(unknown_function_error("or")),
+            }
             for arg in args {
                 let value = evaluate(arg, lookup)?;
                 if is_truthy(&value) {
@@ -532,24 +724,43 @@ fn evaluate_function<L: EvaluationLookup>(
                 .iter()
                 .map(|arg| evaluate(arg, lookup))
                 .collect::<Result<_, _>>()?;
-            if let Some(ctx) = lookup.resolution_context()
+            // Prefer the borrowed context (Finding 12) so a read-side function
+            // dispatched here does not deep-clone the lookup's context; only
+            // fall back to the owned clone for lookups that expose only the
+            // owned accessor.
+            let ctx = lookup
+                .resolution_context_ref()
+                .map(std::borrow::Cow::Borrowed)
+                .or_else(|| lookup.resolution_context().map(std::borrow::Cow::Owned));
+            if let Some(ctx) = ctx
                 && let Some(result) = functions::dispatch_fs(other, &evaluated, &ctx)
             {
-                return result;
+                return result.map_err(|error| match error {
+                    ExpressionError::Other { function, message } if is_arity_error(&message) => {
+                        ExpressionError::Other {
+                            function,
+                            message: enrich_arity_error(other, &message),
+                        }
+                    }
+                    other => other,
+                });
             }
             if let Some(result) = functions::dispatch(other, &evaluated) {
-                return result;
+                return result.map_err(|message| classify_function_error(other, message));
             }
             // A known filesystem function reaches here only because the lookup
             // returned no resolution context — an opt-out or test lookup, not a
             // real document surface (all of which now supply one). Keep it
             // recoverable so it doesn't read as an unknown symbol.
             if functions::is_fs_function(other) {
-                return Err(format!(
-                    "Filesystem function '{name}' requires a document resolution context, which is unavailable here"
-                ));
+                return Err(ExpressionError::Other {
+                    function: other.to_string(),
+                    message: format!(
+                        "Filesystem function '{name}' requires a document resolution context, which is unavailable here"
+                    ),
+                });
             }
-            Err(format!("{UNKNOWN_FUNCTION_PREFIX} {name}"))
+            Err(unknown_function_error(other))
         }
     }
 }
@@ -576,6 +787,97 @@ mod tests {
             _ => HashMap::new(),
         };
         TestLookup { data: map }
+    }
+
+    mod output_rendering {
+        use super::*;
+
+        #[test]
+        fn scalar_string_keeps_json_array_form() {
+            // Equality comparison and frontmatter shell expansion rely on this
+            // byte-identical JSON form (spec criterion 8); it must not change.
+            assert_eq!(scalar_string(&json!(["a", "b", "c"])), r#"["a","b","c"]"#);
+            assert_eq!(scalar_string(&json!([])), "[]");
+        }
+
+        #[test]
+        fn interpolation_output_string_renders_arrays_line_separated() {
+            assert_eq!(
+                interpolation_output_string(&json!(["a", "b", "c"])),
+                "a\nb\nc"
+            );
+            assert_eq!(interpolation_output_string(&json!([])), "");
+        }
+
+        #[test]
+        fn interpolation_output_string_matches_scalar_string_for_non_arrays() {
+            for value in [json!("hi"), json!(42), json!(true), json!(null), json!({"a": 1})] {
+                assert_eq!(
+                    interpolation_output_string(&value),
+                    scalar_string(&value),
+                    "non-array rendering must match scalar_string for {value:?}"
+                );
+            }
+        }
+    }
+
+    mod error_enrichment {
+        use super::*;
+
+        #[test]
+        fn unknown_function_includes_did_you_mean() {
+            let err = evaluate(
+                &parse("lenght(\"abc\")").unwrap(),
+                &lookup(json!({})),
+            )
+            .unwrap_err();
+            assert!(
+                err.contains("Unknown function:"),
+                "error should identify unknown function: {err}"
+            );
+            assert!(
+                err.contains("Did you mean"),
+                "error should offer a did-you-mean hint: {err}"
+            );
+            assert!(
+                err.contains("length"),
+                "error should suggest 'length': {err}"
+            );
+        }
+
+        #[test]
+        fn unknown_function_without_close_match_omits_suggestion() {
+            // "xyzxyzxyz" is unrelated to every catalog function; the suggestion
+            // quality gate (threshold max(2, 9/3) = 3) rejects every candidate,
+            // so the error must carry the bare prefix and NO did-you-mean hint.
+            let err = evaluate(
+                &parse("xyzxyzxyz()").unwrap(),
+                &lookup(json!({})),
+            )
+            .unwrap_err();
+            assert!(err.starts_with("Unknown function:"), "{err}");
+            assert!(
+                !err.contains("Did you mean"),
+                "unrelated typo must not emit a close-match suggestion: {err}"
+            );
+        }
+
+        #[test]
+        fn arity_error_includes_signature_and_example() {
+            let err = evaluate(&parse("length()").unwrap(), &lookup(json!({}))).unwrap_err();
+            assert!(
+                err.contains("requires 1 argument"),
+                "error should preserve arity message: {err}"
+            );
+            assert!(
+                err.contains("length("),
+                "error should include function signature: {err}"
+            );
+            assert!(
+                err.contains("example:"),
+                "error should include an example: {err}"
+            );
+        }
     }
 
     mod parity {
@@ -646,6 +948,26 @@ mod tests {
             };
 
             assert_eq!(evaluate(&expr, &state).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn lazy_operators_accept_authored_minimum_arity() {
+            let state = lookup(json!({}));
+            assert_eq!(evaluate(&parse("and()").unwrap(), &state).unwrap(), json!(true));
+            assert_eq!(evaluate(&parse("or()").unwrap(), &state).unwrap(), json!(false));
+        }
+
+        #[test]
+        fn lazy_operators_accept_representative_variadic_arity() {
+            let state = lookup(json!({}));
+            assert_eq!(
+                evaluate(&parse("and(true, 1, \"yes\")").unwrap(), &state).unwrap(),
+                json!(true)
+            );
+            assert_eq!(
+                evaluate(&parse("or(false, null, \"yes\")").unwrap(), &state).unwrap(),
+                json!(true)
+            );
         }
 
         #[test]
@@ -747,7 +1069,7 @@ mod tests {
                 op,
                 right: Box::new(literal(right)),
             };
-            evaluate(&expr, &state)
+            evaluate(&expr, &state).map_err(|error| error.to_string())
         }
 
         fn literal(value: Value) -> Expr {
@@ -843,7 +1165,7 @@ mod tests {
                 left: Box::new(literal(left)),
                 right: Box::new(literal(right)),
             };
-            evaluate(&expr, &state)
+            evaluate(&expr, &state).map_err(|error| error.to_string())
         }
 
         fn literal(value: Value) -> Expr {
@@ -915,6 +1237,30 @@ mod tests {
             assert_eq!(
                 binary(BinaryOp::Add, json!(5), json!(" items")).unwrap(),
                 json!("5 items")
+            );
+        }
+
+        #[test]
+        fn mixed_numeric_string_and_number_addition_is_arithmetic() {
+            assert_eq!(
+                binary(BinaryOp::Add, json!("2"), json!(1)).unwrap(),
+                json!(3)
+            );
+            assert_eq!(
+                binary(BinaryOp::Add, json!(1), json!("2")).unwrap(),
+                json!(3)
+            );
+            assert_eq!(
+                binary(BinaryOp::Add, json!("2.5"), json!(1)).unwrap(),
+                json!(3.5)
+            );
+        }
+
+        #[test]
+        fn two_numeric_strings_still_concatenate() {
+            assert_eq!(
+                binary(BinaryOp::Add, json!("2"), json!("1")).unwrap(),
+                json!("21")
             );
         }
 
@@ -1373,12 +1719,12 @@ mod tests {
 
         fn eval_expr(expr_str: &str) -> Result<Value, String> {
             let expr = parse(expr_str).map_err(|e| e.message)?;
-            evaluate(&expr, &lookup(json!({})))
+            evaluate(&expr, &lookup(json!({}))).map_err(|error| error.to_string())
         }
 
         fn eval_expr_with_data(expr_str: &str, data: Value) -> Result<Value, String> {
             let expr = parse(expr_str).map_err(|e| e.message)?;
-            evaluate(&expr, &lookup(data))
+            evaluate(&expr, &lookup(data)).map_err(|error| error.to_string())
         }
 
         // ── Strict date validators ─────────────────────────────────────

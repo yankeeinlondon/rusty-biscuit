@@ -1,7 +1,9 @@
 set dotenv-load
 set positional-arguments
 # set allow-duplicate-recipes
-set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+# `env CYG_SYS_BASHRC=1` guards against Cygwin's /etc/bash.bashrc tripping `-u`;
+# see the root justfile for the full explanation.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
 
 import "../just/lifecycle.just"
 import "../just/plan.just"
@@ -45,25 +47,44 @@ default:
     just --list | grep -v 'default'
     echo
 
-# build schematic packages (define, definitions, gen)
+# build schematic packages (define, definitions, gen, oauth)
 build *args="":
     @just _build schematic-define "Schematic Define" {{ args }}
     @just _build schematic-gen "Schematic Generation" {{ args }}
     @just _build schematic-definitions "Schematic Definitions" {{ args }}
+    @just _build schematic-oauth "Schematic OAuth" {{ args }}
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
 
+# `--all-features` on schematic-define throughout: `default = []`, and the
+# `openapi` feature gates 233 of its 535 tests. Both in-area consumers
+# (schematic-gen, schematic-definitions) enable it, so the default set is a
+# configuration nobody builds — running it reports 302 tests as the whole suite.
+# Same reasoning as biscuit-visualized's `--all-features`.
+
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity schematic-define
-    @just _sanity schematic-definitions
-    @just _sanity schematic-gen
+    @just _sanity_all "schematic-define --all-features; schematic-definitions; schematic-gen; schematic-oauth"
 
 # run tests for schematic packages
 test *args="":
-    @just _test schematic-define {{ args }}
-    @just _test schematic-gen {{ args }}
-    @just _test schematic-definitions {{ args }}
+    @just _test_all "schematic-define --all-features; schematic-gen; schematic-definitions; schematic-oauth" {{ args }}
+
+# test the generated schematic-schema crate (excluded from the workspace; uses its generated manifest)
+test-schema *args="":
+    @echo ""
+    @echo "Testing schematic-schema (generated)"
+    @echo "------------------------------------"
+    @echo ""
+    @cargo nextest run --manifest-path schema/Cargo.toml {{ args }}
+
+# clippy the generated schematic-schema crate (excluded from the workspace)
+lint-schema:
+    @echo ""
+    @echo "Linting schematic-schema (generated)"
+    @echo "------------------------------------"
+    @echo ""
+    @cargo clippy --manifest-path schema/Cargo.toml --all-targets -- -D warnings
 
 # not applicable: schematic has no real-terminal (Level-2) tests
 test-l2:
@@ -82,6 +103,7 @@ test-real *args="":
     @just _test_real schematic-define {{ args }}
     @just _test_real schematic-definitions {{ args }}
     @just _test_real schematic-gen {{ args }}
+    @just _test_real schematic-oauth {{ args }}
 
 # Criterion benches: schematic crates are code-generation focused with no algorithmic hot paths.
 bench:
@@ -89,15 +111,17 @@ bench:
 
 # Per-package LCOV coverage for schematic crates.
 coverage *args="":
-    @just _coverage schematic-define {{ args }}
+    @just _coverage schematic-define --all-features {{ args }}
     @just _coverage schematic-definitions {{ args }}
     @just _coverage schematic-gen {{ args }}
+    @just _coverage schematic-oauth {{ args }}
 
 # Doctests for schematic crates.
 doctest *args="":
-    @just _doctest schematic-define {{ args }}
+    @just _doctest schematic-define --all-features {{ args }}
     @just _doctest schematic-definitions {{ args }}
     @just _doctest schematic-gen {{ args }}
+    @just _doctest schematic-oauth {{ args }}
 
 # not applicable: schematic has no cargo-fuzz targets
 fuzz:
@@ -107,8 +131,10 @@ fuzz:
 all:
     @just sanity
     @just lint
+    @just lint-schema
     @just doctest
     @just test
+    @just test-schema
     @just test-l2
     @just test-browser
 
@@ -127,6 +153,7 @@ lint:
     @just _lint schematic-define
     @just _lint schematic-gen
     @just _lint schematic-definitions
+    @just _lint schematic-oauth
 
 # generate OpenAI API client code (dry-run preview)
 generate-dry-run:
@@ -135,6 +162,24 @@ generate-dry-run:
     @echo "-------------------------"
     @echo ""
     @cargo run -p schematic-gen -- --api openai --dry-run
+
+# re-import the OpenAI definition from its vendored OpenAPI spec
+#
+# Rewrites definitions/src/openai/{mod,types}.rs. Run `just generate` afterwards
+# to rebuild the client and the exported artifacts. The Assistants family is
+# excluded: OpenAI has superseded it with Responses + Conversations.
+import-openai:
+    @echo ""
+    @echo "Importing OpenAI Definition"
+    @echo "---------------------------"
+    @echo ""
+    @cargo run -p schematic-gen -- import \
+        --input specs/openai/openapi.yaml \
+        --api-name OpenAI \
+        --module-path openai \
+        --definitions-out definitions/src/openai \
+        --exclude-path /assistants \
+        --exclude-path /threads
 
 # generate all API clients to schematic/schema
 generate:
@@ -212,6 +257,8 @@ full: generate
     @echo "------------------------"
     @echo ""
     @cargo check --manifest-path schema/Cargo.toml
+    @just lint-schema
+    @just test-schema
     @echo ""
     @echo "Generation complete and verified!"
 

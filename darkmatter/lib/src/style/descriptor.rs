@@ -5,6 +5,10 @@
 //! to dispatch to the right typed validator. Add a row here whenever a field
 //! is added to any per-bucket schema struct.
 //!
+//! Sub-specs covered: #2 (page), #3 (table/images/block-quote), #4 (lists),
+//! #5 (color), #6 (hr), #7 (bespoke knobs), #8 (disclosure), #9 (Style
+//! Everywhere expanded surface).
+//!
 //! ## Canonical-path discipline
 //!
 //! The walker and validators canonicalize *per segment* by replacing `_` with
@@ -21,6 +25,9 @@
 pub enum LeafType {
     /// `renderable::layout::Length` parsed from `"2ch"`, `"50%"`, `"40"`.
     HorizontalLength,
+    /// `CommonStyle.width` parsed from explicit width modes or a horizontal
+    /// length (`"auto" | "fit-content" | "fit_content" | "40ch"`).
+    WidthOrMode,
     /// `u16` row count parsed from a JSON integer.
     RowCount,
     /// `renderable::layout::Alignment` parsed from `"left" | "center" |
@@ -42,6 +49,12 @@ pub enum LeafType {
     HrWeight,
     /// `HrAlignment` enum (`"full" | "left" | "center" | "right"`).
     HrAlignment,
+    /// A compound style value (`border`, `emphasis`). Validated by serde
+    /// during typed deserialization.
+    CompoundStyle,
+    /// A `word-wrap` keyword (`"none" | "wrap" | "truncate" | "wrap-prose"`).
+    /// Validated by serde during typed deserialization.
+    WordWrap,
 }
 
 /// A single schema leaf: its canonical kebab-case path, any documented
@@ -83,64 +96,99 @@ pub const SCHEMA: &[SchemaLeaf] = &[
     SchemaLeaf { canonical: "page.code.theme",     alias: None,                        sub_spec: 7, leaf_type: LeafType::StringValue },
 
     // ── table ───────────────────────────────────────────────────────────
-    SchemaLeaf { canonical: "table.width",     alias: None,                    sub_spec: 3, leaf_type: LeafType::HorizontalLength },
-    SchemaLeaf { canonical: "table.max-width", alias: Some("table.max_width"), sub_spec: 3, leaf_type: LeafType::HorizontalLength },
-    SchemaLeaf { canonical: "table.alignment", alias: None,                    sub_spec: 3, leaf_type: LeafType::Alignment },
-    SchemaLeaf { canonical: "table.color",     alias: None,                    sub_spec: 5, leaf_type: LeafType::Color },
-    SchemaLeaf { canonical: "table.bg-color",  alias: Some("table.bg_color"),  sub_spec: 5, leaf_type: LeafType::Color },
+    SchemaLeaf { canonical: "table.width",       alias: None,                    sub_spec: 3, leaf_type: LeafType::WidthOrMode },
+    SchemaLeaf { canonical: "table.max-width",   alias: Some("table.max_width"), sub_spec: 3, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "table.alignment",   alias: None,                    sub_spec: 3, leaf_type: LeafType::Alignment },
+    SchemaLeaf { canonical: "table.color",       alias: None,                    sub_spec: 5, leaf_type: LeafType::Color },
+    SchemaLeaf { canonical: "table.bg-color",    alias: Some("table.bg_color"),  sub_spec: 5, leaf_type: LeafType::Color },
+    SchemaLeaf { canonical: "table.margin",      alias: None,                    sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "table.padding",     alias: None,                    sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "table.border",      alias: None,                    sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "table.emphasis",    alias: None,                    sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "table.word-wrap",   alias: Some("table.word_wrap"), sub_spec: 9, leaf_type: LeafType::WordWrap },
 
     // ── block-quote ─────────────────────────────────────────────────────
-    SchemaLeaf { canonical: "block-quote.width",     alias: Some("block_quote.width"),     sub_spec: 3, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "block-quote.width",     alias: Some("block_quote.width"),     sub_spec: 3, leaf_type: LeafType::WidthOrMode },
     SchemaLeaf { canonical: "block-quote.max-width", alias: Some("block_quote.max_width"), sub_spec: 3, leaf_type: LeafType::HorizontalLength },
     SchemaLeaf { canonical: "block-quote.alignment", alias: Some("block_quote.alignment"), sub_spec: 3, leaf_type: LeafType::Alignment },
     SchemaLeaf { canonical: "block-quote.color",     alias: Some("block_quote.color"),     sub_spec: 5, leaf_type: LeafType::Color },
     SchemaLeaf { canonical: "block-quote.bg-color",  alias: Some("block_quote.bg_color"),  sub_spec: 5, leaf_type: LeafType::Color },
+    SchemaLeaf { canonical: "block-quote.margin",    alias: Some("block_quote.margin"),    sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "block-quote.padding",   alias: Some("block_quote.padding"),   sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "block-quote.border",    alias: Some("block_quote.border"),    sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "block-quote.emphasis",  alias: Some("block_quote.emphasis"),  sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "block-quote.word-wrap", alias: Some("block_quote.word_wrap"), sub_spec: 9, leaf_type: LeafType::WordWrap },
 
     // ── ul ──────────────────────────────────────────────────────────────
-    SchemaLeaf { canonical: "ul.width",       alias: None,                   sub_spec: 4, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "ul.width",       alias: None,                   sub_spec: 4, leaf_type: LeafType::WidthOrMode },
     SchemaLeaf { canonical: "ul.max-width",   alias: Some("ul.max_width"),   sub_spec: 4, leaf_type: LeafType::HorizontalLength },
     SchemaLeaf { canonical: "ul.alignment",   alias: None,                   sub_spec: 4, leaf_type: LeafType::Alignment },
     SchemaLeaf { canonical: "ul.color",       alias: None,                   sub_spec: 5, leaf_type: LeafType::Color },
     SchemaLeaf { canonical: "ul.bg-color",    alias: Some("ul.bg_color"),    sub_spec: 5, leaf_type: LeafType::Color },
     SchemaLeaf { canonical: "ul.left-margin", alias: Some("ul.left_margin"), sub_spec: 4, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "ul.margin",      alias: None,                   sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "ul.padding",     alias: None,                   sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "ul.border",      alias: None,                   sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "ul.emphasis",    alias: None,                   sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "ul.word-wrap",   alias: Some("ul.word_wrap"),   sub_spec: 9, leaf_type: LeafType::WordWrap },
 
     // ── ol ──────────────────────────────────────────────────────────────
-    SchemaLeaf { canonical: "ol.width",     alias: None,                  sub_spec: 4, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "ol.width",     alias: None,                  sub_spec: 4, leaf_type: LeafType::WidthOrMode },
     SchemaLeaf { canonical: "ol.max-width", alias: Some("ol.max_width"),  sub_spec: 4, leaf_type: LeafType::HorizontalLength },
     SchemaLeaf { canonical: "ol.alignment", alias: None,                  sub_spec: 4, leaf_type: LeafType::Alignment },
     SchemaLeaf { canonical: "ol.color",     alias: None,                  sub_spec: 5, leaf_type: LeafType::Color },
     SchemaLeaf { canonical: "ol.bg-color",  alias: Some("ol.bg_color"),   sub_spec: 5, leaf_type: LeafType::Color },
+    SchemaLeaf { canonical: "ol.margin",    alias: None,                  sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "ol.padding",   alias: None,                  sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "ol.border",    alias: None,                  sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "ol.emphasis",  alias: None,                  sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "ol.word-wrap", alias: Some("ol.word_wrap"),  sub_spec: 9, leaf_type: LeafType::WordWrap },
 
     // ── li ──────────────────────────────────────────────────────────────
-    SchemaLeaf { canonical: "li.width",     alias: None,                  sub_spec: 4, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "li.width",     alias: None,                  sub_spec: 4, leaf_type: LeafType::WidthOrMode },
     SchemaLeaf { canonical: "li.max-width", alias: Some("li.max_width"),  sub_spec: 4, leaf_type: LeafType::HorizontalLength },
     SchemaLeaf { canonical: "li.alignment", alias: None,                  sub_spec: 4, leaf_type: LeafType::Alignment },
     SchemaLeaf { canonical: "li.color",     alias: None,                  sub_spec: 5, leaf_type: LeafType::Color },
     SchemaLeaf { canonical: "li.bg-color",  alias: Some("li.bg_color"),   sub_spec: 5, leaf_type: LeafType::Color },
+    SchemaLeaf { canonical: "li.margin",    alias: None,                  sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "li.padding",   alias: None,                  sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "li.border",    alias: None,                  sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "li.emphasis",  alias: None,                  sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "li.word-wrap", alias: Some("li.word_wrap"),  sub_spec: 9, leaf_type: LeafType::WordWrap },
 
     // ── hyperlinks ──────────────────────────────────────────────────────
-    SchemaLeaf { canonical: "hyperlinks.width",                 alias: None,                                            sub_spec: 7, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "hyperlinks.width",                 alias: None,                                            sub_spec: 7, leaf_type: LeafType::WidthOrMode },
     SchemaLeaf { canonical: "hyperlinks.max-width",             alias: Some("hyperlinks.max_width"),                    sub_spec: 7, leaf_type: LeafType::HorizontalLength },
     SchemaLeaf { canonical: "hyperlinks.alignment",             alias: None,                                            sub_spec: 7, leaf_type: LeafType::Alignment },
     SchemaLeaf { canonical: "hyperlinks.color",                 alias: None,                                            sub_spec: 5, leaf_type: LeafType::Color },
     SchemaLeaf { canonical: "hyperlinks.bg-color",              alias: Some("hyperlinks.bg_color"),                     sub_spec: 5, leaf_type: LeafType::Color },
-    SchemaLeaf { canonical: "hyperlinks.local-style.width",     alias: Some("hyperlinks.local_style.width"),            sub_spec: 7, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "hyperlinks.local-style.width",     alias: Some("hyperlinks.local_style.width"),            sub_spec: 7, leaf_type: LeafType::WidthOrMode },
     SchemaLeaf { canonical: "hyperlinks.local-style.max-width", alias: Some("hyperlinks.local_style.max_width"),        sub_spec: 7, leaf_type: LeafType::HorizontalLength },
     SchemaLeaf { canonical: "hyperlinks.local-style.alignment", alias: Some("hyperlinks.local_style.alignment"),        sub_spec: 7, leaf_type: LeafType::Alignment },
     SchemaLeaf { canonical: "hyperlinks.local-style.color",     alias: Some("hyperlinks.local_style.color"),            sub_spec: 7, leaf_type: LeafType::Color },
     SchemaLeaf { canonical: "hyperlinks.local-style.bg-color",  alias: Some("hyperlinks.local_style.bg_color"),         sub_spec: 7, leaf_type: LeafType::Color },
+    SchemaLeaf { canonical: "hyperlinks.local-style.margin",    alias: Some("hyperlinks.local_style.margin"),           sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "hyperlinks.local-style.padding",   alias: Some("hyperlinks.local_style.padding"),          sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "hyperlinks.local-style.border",    alias: Some("hyperlinks.local_style.border"),           sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "hyperlinks.local-style.emphasis",  alias: Some("hyperlinks.local_style.emphasis"),         sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "hyperlinks.local-style.word-wrap", alias: Some("hyperlinks.local_style.word_wrap"),        sub_spec: 9, leaf_type: LeafType::WordWrap },
 
     // ── images ──────────────────────────────────────────────────────────
-    SchemaLeaf { canonical: "images.width",                 alias: None,                                       sub_spec: 3, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "images.width",                 alias: None,                                       sub_spec: 3, leaf_type: LeafType::WidthOrMode },
     SchemaLeaf { canonical: "images.max-width",             alias: Some("images.max_width"),                   sub_spec: 3, leaf_type: LeafType::HorizontalLength },
     SchemaLeaf { canonical: "images.alignment",             alias: None,                                       sub_spec: 3, leaf_type: LeafType::Alignment },
     SchemaLeaf { canonical: "images.color",                 alias: None,                                       sub_spec: 5, leaf_type: LeafType::Color },
     SchemaLeaf { canonical: "images.bg-color",              alias: Some("images.bg_color"),                    sub_spec: 5, leaf_type: LeafType::Color },
-    SchemaLeaf { canonical: "images.local-style.width",     alias: Some("images.local_style.width"),           sub_spec: 7, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "images.local-style.width",     alias: Some("images.local_style.width"),           sub_spec: 7, leaf_type: LeafType::WidthOrMode },
     SchemaLeaf { canonical: "images.local-style.max-width", alias: Some("images.local_style.max_width"),       sub_spec: 7, leaf_type: LeafType::HorizontalLength },
     SchemaLeaf { canonical: "images.local-style.alignment", alias: Some("images.local_style.alignment"),       sub_spec: 7, leaf_type: LeafType::Alignment },
     SchemaLeaf { canonical: "images.local-style.color",     alias: Some("images.local_style.color"),           sub_spec: 7, leaf_type: LeafType::Color },
     SchemaLeaf { canonical: "images.local-style.bg-color",  alias: Some("images.local_style.bg_color"),        sub_spec: 7, leaf_type: LeafType::Color },
+    SchemaLeaf { canonical: "images.local-style.margin",    alias: Some("images.local_style.margin"),          sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "images.local-style.padding",   alias: Some("images.local_style.padding"),         sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "images.local-style.border",    alias: Some("images.local_style.border"),          sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "images.local-style.emphasis",  alias: Some("images.local_style.emphasis"),        sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "images.local-style.word-wrap", alias: Some("images.local_style.word_wrap"),       sub_spec: 9, leaf_type: LeafType::WordWrap },
 
     // ── hr ──────────────────────────────────────────────────────────────
     SchemaLeaf { canonical: "hr.width",     alias: None,                 sub_spec: 6, leaf_type: LeafType::HorizontalLength },
@@ -150,13 +198,35 @@ pub const SCHEMA: &[SchemaLeaf] = &[
     SchemaLeaf { canonical: "hr.bg-color",  alias: Some("hr.bg_color"),  sub_spec: 6, leaf_type: LeafType::Color },
     SchemaLeaf { canonical: "hr.kind",      alias: None,                 sub_spec: 6, leaf_type: LeafType::HrKind },
     SchemaLeaf { canonical: "hr.weight",    alias: None,                 sub_spec: 6, leaf_type: LeafType::HrWeight },
+    SchemaLeaf { canonical: "hr.margin",    alias: None,                 sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "hr.padding",   alias: None,                 sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "hr.border",    alias: None,                 sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "hr.emphasis",  alias: None,                 sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "hr.word-wrap", alias: Some("hr.word_wrap"), sub_spec: 9, leaf_type: LeafType::WordWrap },
 
     // ── disclosure ──────────────────────────────────────────────────────
-    SchemaLeaf { canonical: "disclosure.width",     alias: None,                          sub_spec: 8, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "disclosure.width",     alias: None,                          sub_spec: 8, leaf_type: LeafType::WidthOrMode },
     SchemaLeaf { canonical: "disclosure.max-width", alias: Some("disclosure.max_width"),  sub_spec: 8, leaf_type: LeafType::HorizontalLength },
     SchemaLeaf { canonical: "disclosure.alignment", alias: None,                          sub_spec: 8, leaf_type: LeafType::Alignment },
     SchemaLeaf { canonical: "disclosure.color",     alias: None,                          sub_spec: 8, leaf_type: LeafType::Color },
     SchemaLeaf { canonical: "disclosure.bg-color",  alias: Some("disclosure.bg_color"),   sub_spec: 8, leaf_type: LeafType::Color },
+    SchemaLeaf { canonical: "disclosure.margin",    alias: None,                          sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "disclosure.padding",   alias: None,                          sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "disclosure.border",    alias: None,                          sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "disclosure.emphasis",  alias: None,                          sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "disclosure.word-wrap", alias: Some("disclosure.word_wrap"),  sub_spec: 9, leaf_type: LeafType::WordWrap },
+
+    // ── code-block ──────────────────────────────────────────────────────
+    SchemaLeaf { canonical: "code-block.width",     alias: Some("code_block.width"),     sub_spec: 9, leaf_type: LeafType::WidthOrMode },
+    SchemaLeaf { canonical: "code-block.max-width", alias: Some("code_block.max_width"), sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "code-block.alignment", alias: Some("code_block.alignment"), sub_spec: 9, leaf_type: LeafType::Alignment },
+    SchemaLeaf { canonical: "code-block.color",     alias: Some("code_block.color"),     sub_spec: 9, leaf_type: LeafType::Color },
+    SchemaLeaf { canonical: "code-block.bg-color",  alias: Some("code_block.bg_color"),  sub_spec: 9, leaf_type: LeafType::Color },
+    SchemaLeaf { canonical: "code-block.margin",    alias: Some("code_block.margin"),    sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "code-block.padding",   alias: Some("code_block.padding"),   sub_spec: 9, leaf_type: LeafType::HorizontalLength },
+    SchemaLeaf { canonical: "code-block.border",    alias: Some("code_block.border"),    sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "code-block.emphasis",  alias: Some("code_block.emphasis"),  sub_spec: 9, leaf_type: LeafType::CompoundStyle },
+    SchemaLeaf { canonical: "code-block.word-wrap", alias: Some("code_block.word_wrap"), sub_spec: 9, leaf_type: LeafType::WordWrap },
 ];
 
 /// Return the canonical schema leaf for `raw_path` if it matches either a
@@ -196,6 +266,7 @@ pub fn is_canonical_container(path: &str) -> bool {
             | "li"
             | "page.code"
             | "disclosure"
+            | "code-block"
     )
 }
 

@@ -27,6 +27,10 @@ model: ""
 
 The core implementation shape looks aligned with the dry-run behavior: composition and shell/harness preflight run, then `execute_composition_request_inner` returns before provider launch at the post-preflight seam. I did not find a functional blocker in the compose/inline/sequence L1 paths I inspected.
 
+> **Superseded:** the current seam is immediately after provider/model
+> resolution and before selected-executable validation or launch wiring. This
+> paragraph records the implementation reviewed at the time.
+
 ## Tests Run
 
 - `cargo test -p claudine-cli compose_dry_run --no-default-features --color=never`

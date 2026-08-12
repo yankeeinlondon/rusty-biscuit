@@ -16,7 +16,8 @@
 //!   and a deny-all policy — never the user's real provider home,
 //! - an explicit environment allowlist (no ambient-environment leakage),
 //! - real provider tool-denial controls (Claude deny-all `settings.json` +
-//!   strict MCP config; Codex read-only sandbox), with the guard prompt and
+//!   strict MCP config; Codex read-only sandbox — blocks writes, with network
+//!   denial treated as defense-in-depth), with the guard prompt and
 //!   post-hoc stream rejection as defense-in-depth,
 //! - adapter-owned guard instructions delivered out-of-band from the prompt
 //!   where the provider exposes a system-prompt channel.
@@ -51,5 +52,4 @@ mod support;
 mod tests;
 
 pub use adapter::ClaudineInferenceAdapter;
-pub use session::{RawSession, SessionPlan, SessionRunner};
 pub use support::{ProviderSupport, provider_support, support_matrix, SupportRow};

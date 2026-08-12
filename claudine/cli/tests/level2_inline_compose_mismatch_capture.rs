@@ -11,8 +11,12 @@
 //! emulator, not just that the string was assembled.
 //!
 //! - `tmux` (portable, headless): the visible text and SGR contract.
-//! - `WezTerm` (OSC8 fidelity): the resolved document is a real OSC8 `file://`
-//!   hyperlink and the diagnostic carries diagnostic-specific SGR styling.
+//! - `WezTerm`: the authored-frontmatter YAML CodeBlock re-renders with syntax
+//!   styling through a real emulator. (The OSC 8 `file://` document link lives
+//!   in the diagnostic, which the tall YAML block scrolls past WezTerm's short
+//!   visible pane — and the capture has no scrollback — so OSC 8 + cyan-SGR
+//!   fidelity for this error is asserted by the L1 PTY test, which reads the
+//!   full raw transcript.)
 //!
 //! Skip-clean via `Harness::available()`; `BISCUIT_TEST_LEVEL_REQUIRED=2`
 //! turns a missing backend into a hard failure. Run via `just test-l2`.
@@ -27,15 +31,22 @@ use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use std::fs;
 use std::time::{Duration, Instant};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 mod common;
-use common::TestWorkspace;
+use common::{TestWorkspace, assert_row_is_styled, clear_no_color};
 
 /// Mismatch fixture exercising the YAML fidelity surface (comment, anchor +
 /// alias, block scalar, non-canonical order). Both `prompt` and `sequence` are
 /// non-null, so this is an inline-compose / sequence mismatch.
 const MISMATCH_FIXTURE: &str = "---\n# leading comment\nsequence: &seq\n  - name: Hello\n  - name: Goodbye\nprompt: |-\n  multi\n  line\nalias: *seq\n---\nbody\n";
+
+/// A compact mismatch fixture whose authored frontmatter renders to a short
+/// YAML block. Used by the WezTerm test so the full diagnostic — including the
+/// OSC 8 document link at the top — stays within the visible pane (the capture
+/// has no scrollback, and the tall fidelity fixture would scroll the diagnostic
+/// off the WezTerm window).
+const MINIMAL_FIXTURE: &str = "---\nprompt: Do something\nsequence: []\n---\nbody\n";
 
 /// A staged workspace with a minimal config (so the first-run wizard never
 /// intercepts) and the mismatch fixture document.
@@ -44,14 +55,14 @@ struct Staged {
     doc: std::path::PathBuf,
 }
 
-fn stage() -> Staged {
+fn stage(fixture: &str) -> Staged {
     let workspace = TestWorkspace::named("claudine-inline-mismatch-l2");
     let claudine_dir = workspace.path().join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
     fs::write(claudine_dir.join("config.json"), "{}").unwrap();
 
     let doc = workspace.path().join("doc.md");
-    fs::write(&doc, MISMATCH_FIXTURE).unwrap();
+    fs::write(&doc, fixture).unwrap();
 
     Staged { workspace, doc }
 }
@@ -76,16 +87,20 @@ fn wait_for_pane_marker(harness: &mut TmuxHarness, marker: &str, deadline: Durat
 }
 
 /// The mismatch diagnostic, rendered through a real terminal emulator, shows
-/// the styled diagnostic, the linked document, and the verbatim authored YAML.
+/// the styled diagnostic, the linked document, and the authored YAML rendered
+/// as a CodeBlock.
 #[test]
 #[serial(level2_terminal)]
 fn level2_tmux_mismatch_renders_styled_diagnostic_with_yaml() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut harness = TmuxHarness::shared_or_spawn().expect("tmux harness");
-    let staged = stage();
+    // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
+    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
+    clear_no_color(&mut harness);
+    let staged = stage(MISMATCH_FIXTURE);
     let home = staged.workspace.path().to_string_lossy().into_owned();
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
 
     harness.send_text(b"clear\n").expect("clear pane");
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -107,13 +122,13 @@ fn level2_tmux_mismatch_renders_styled_diagnostic_with_yaml() {
         )
         .expect("send inline-compose");
 
-    // The verbatim YAML is appended last, so the final fragment proves the full
+    // The YAML CodeBlock is appended last, so its final line proves the full
     // diagnostic rendered.
     let frame = wait_for_pane_marker(&mut harness, "alias: *seq", Duration::from_secs(15));
 
     // Visible-text contract (assert on `plain`): the diagnostic directs the
-    // user to `claudine sequence`, identifies the document, and reproduces the
-    // authored YAML verbatim.
+    // user to `claudine sequence`, identifies the document, and shows the
+    // authored YAML as a CodeBlock.
     assert!(
         frame.plain.contains("claudine sequence"),
         "diagnostic must direct the user to `claudine sequence`.\nplain:\n{}",
@@ -127,46 +142,50 @@ fn level2_tmux_mismatch_renders_styled_diagnostic_with_yaml() {
     for fragment in ["# leading comment", "sequence: &seq", "prompt: |-", "alias: *seq"] {
         assert!(
             frame.plain.contains(fragment),
-            "verbatim YAML fragment `{fragment}` missing.\nplain:\n{}",
+            "YAML block fragment `{fragment}` missing.\nplain:\n{}",
             frame.plain,
         );
     }
 
-    // Styling contract (assert on `raw`): the emulator re-rendered a *styled*
-    // surface — the status-block border and inline tags carry SGR escapes. This
-    // is what makes the test a genuine real-terminal capture rather than an L1
-    // string comparison.
-    assert!(
-        frame.raw.contains('\u{1b}'),
-        "expected the rendered diagnostic to carry styling (escape sequences) \
-         through the real terminal.\nraw:\n{}",
-        frame.raw,
+    // Styling contract, anchored on the diagnostic's own row. A bare
+    // `frame.raw.contains(ESC)` is satisfied by any escape anywhere in the pane
+    // — a colored shell prompt included — so it can hold on a run that rendered
+    // the diagnostic with no styling at all.
+    assert_row_is_styled(
+        &frame.raw,
+        "claudine sequence",
+        "inline-mismatch diagnostic (tmux)",
     );
 }
 
-/// WezTerm preserves OSC 8 hyperlinks through its `get-text` capture, so it is
-/// the backend that proves the resolved document is a real `file://` link (and,
-/// for free, the same SGR contract).
+/// WezTerm re-renders the authored-frontmatter YAML CodeBlock with syntax
+/// styling. The OSC 8 document link in the diagnostic scrolls past WezTerm's
+/// short visible pane (no scrollback capture), so its fidelity is asserted by
+/// the L1 PTY test instead.
 #[test]
 #[serial(level2_terminal)]
-fn level2_wezterm_mismatch_renders_osc8_link_and_diagnostic_sgr() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+fn level2_wezterm_mismatch_renders_yaml_codeblock() {
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut harness = WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm");
-    let staged = stage();
+    // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
+    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
+    clear_no_color(&mut harness);
+    let staged = stage(MINIMAL_FIXTURE);
     let home = staged.workspace.path().to_string_lossy().into_owned();
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
 
+    harness.send_text(b"clear\n").expect("clear pane");
+    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
     harness
         .send_text(format!("cd {}\n", staged.workspace.path().display()).as_bytes())
         .expect("cd into workspace");
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
 
-    let cmd = format!("{claudine} inline-compose {}", staged.doc.display());
+    let cmd = format!(
+        "{claudine} inline-compose {} 2>&1 | sed -n '1,80p'",
+        staged.doc.display()
+    );
     harness
         .send_command_with_env(
             &cmd,
@@ -182,30 +201,26 @@ fn level2_wezterm_mismatch_renders_osc8_link_and_diagnostic_sgr() {
 
     let frame = harness.capture().expect("capture failed");
 
-    // Visible-text contract.
+    // Visible-text contract: the authored frontmatter renders as a YAML
+    // CodeBlock — its keys are visible in the re-rendered pane.
     assert!(
-        frame.plain.contains("claudine sequence"),
-        "diagnostic must direct the user to `claudine sequence`.\nplain:\n{}",
+        frame.plain.contains("prompt: Do something"),
+        "YAML CodeBlock must show the authored `prompt`.\nplain:\n{}",
         frame.plain,
     );
     assert!(
-        frame.plain.contains("doc.md"),
-        "the linked document name must be visible.\nplain:\n{}",
+        frame.plain.contains("sequence:"),
+        "YAML CodeBlock must show the authored `sequence`.\nplain:\n{}",
         frame.plain,
     );
 
-    // OSC 8 contract: the resolved document is rendered as a `file://` link.
+    // Styling contract: WezTerm re-rendered a *styled* surface — the CodeBlock's
+    // syntax highlighting carries SGR escapes, proving a genuine real-terminal
+    // capture rather than a plain string.
     assert!(
-        frame.raw.contains("\x1b]8;;file://"),
-        "expected an OSC8 `file://` hyperlink for the resolved document.\nraw:\n{}",
-        frame.raw,
-    );
-
-    // Diagnostic-specific SGR contract: the `<cyan>` inline tags in the
-    // mismatch diagnostic emit `\x1b[36m` — not just any escape byte.
-    assert!(
-        frame.raw.contains("\x1b[36m"),
-        "expected diagnostic-specific cyan styling (SGR 36).\nraw:\n{}",
+        frame.raw.contains('\u{1b}'),
+        "expected the YAML CodeBlock to carry styling (escape sequences) \
+         through WezTerm.\nraw:\n{}",
         frame.raw,
     );
 }

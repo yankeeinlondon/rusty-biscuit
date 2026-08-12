@@ -15,6 +15,8 @@ use super::expression::{
     CtxLookup, EvaluationLookup, ResolutionContext, doc_namespace, evaluate, is_truthy,
     parse_condition,
 };
+use super::interpolation::Evaluator;
+use crate::markdown::compose::ComposeWarning;
 use biscuit_terminal::errors::SourceContext;
 use serde_json::Value;
 use std::ops::Range;
@@ -143,17 +145,41 @@ pub fn evaluate_condition<L: EvaluationLookup>(
         span: parse_error_span(expr, e.position),
     })?;
 
-    let value = evaluate(&parsed, state).map_err(|message| ConditionError::Eval {
+    let value = evaluate(&parsed, state).map_err(|error| ConditionError::Eval {
         ctx: Box::new(ctx),
         expr: expr.to_string(),
         line,
-        message,
+        message: error.to_string(),
     })?;
 
     let result = is_truthy(&value);
     debug!(expr = %expr, result, "conditions: evaluated");
 
     Ok(result)
+}
+
+/// Collects context-typo warnings for a `when=` condition expression.
+///
+/// Parses `expr` in condition mode and walks the resulting AST for `ctx.*`
+/// references that do not resolve to a known runtime context variable, reusing
+/// the same AST-based check as `{{ ... }}` interpolation. Because the walk is
+/// parser-aware, a string literal such as `state == "ctx.toady"` never triggers
+/// a warning — only genuine `ctx.*` variable references do.
+///
+/// Parse failures yield no warnings here: a malformed condition is surfaced as
+/// a fatal [`ConditionError::Parse`] by [`evaluate_condition`] at evaluation
+/// time, so this additive diagnostic stays silent rather than double-reporting.
+///
+/// `warning_stage` labels the produced [`ComposeWarning`]s (e.g. `"condition"`).
+pub fn collect_condition_context_warnings<L: EvaluationLookup>(
+    expr: &str,
+    state: &L,
+    warning_stage: &'static str,
+) -> Vec<ComposeWarning> {
+    let Ok(parsed) = parse_condition(expr) else {
+        return Vec::new();
+    };
+    Evaluator::new(state).collect_context_warnings(&parsed, warning_stage)
 }
 
 fn parse_error_span(expr: &str, position: usize) -> Range<usize> {
@@ -252,11 +278,11 @@ pub fn evaluate_condition_against(
     })?;
 
     let lookup = ShortcutLookup::new(data, work_dir);
-    let value = evaluate(&parsed, &lookup).map_err(|message| ConditionError::Eval {
+    let value = evaluate(&parsed, &lookup).map_err(|error| ConditionError::Eval {
         ctx: Box::new(ctx),
         expr: expr.to_string(),
         line: 1,
-        message,
+        message: error.to_string(),
     })?;
 
     let result = is_truthy(&value);
@@ -345,6 +371,12 @@ impl EvaluationLookup for ShortcutLookup<'_> {
 
     fn resolution_context(&self) -> Option<ResolutionContext> {
         self.resolution_context.clone()
+    }
+
+    fn resolution_context_ref(&self) -> Option<&ResolutionContext> {
+        // Borrowed path (Finding 12) — condition evaluation reuses the context
+        // without cloning it per read-side function call.
+        self.resolution_context.as_ref()
     }
 }
 
@@ -961,6 +993,56 @@ mod tests {
             "Repo context should NOT be captured when ternary short-circuits else-branch: captured {:?}",
             captured
         );
+    }
+
+    // ── Condition context-typo diagnostics ───────────────────────────────
+    //
+    // `collect_condition_context_warnings` surfaces the same AST-based ctx-typo
+    // check used by interpolation, so `when=` conditions (transclusion /
+    // page-block / loop) warn on unknown `ctx.*` references without changing
+    // evaluation results.
+
+    #[test]
+    fn condition_ctx_typo_emits_warning_with_suggestion() {
+        let state = test_state(json!({}));
+        let warnings = collect_condition_context_warnings("ctx.toady", &state, "condition");
+        assert!(warnings.iter().any(|w| {
+            w.message.contains("unknown context variable") && w.message.contains("today")
+        }));
+    }
+
+    #[test]
+    fn condition_ctx_typo_does_not_change_evaluation() {
+        // The warning is additive: the typo'd `ctx.toady` still evaluates to a
+        // falsy null, exactly as before, without erroring.
+        let state = test_state(json!({}));
+        assert!(!evaluate_condition("ctx.toady", &state, 1, dummy_ctx()).unwrap());
+    }
+
+    #[test]
+    fn condition_string_literal_does_not_warn() {
+        // Comparing against the literal string "ctx.toady" must not warn —
+        // the check walks the AST, so a string literal is never a ctx ref.
+        let state = test_state(json!({ "name": "x" }));
+        let warnings =
+            collect_condition_context_warnings(r#"name == "ctx.toady""#, &state, "condition");
+        assert!(!warnings.iter().any(|w| w.message.contains("unknown context variable")));
+    }
+
+    #[test]
+    fn condition_valid_ctx_does_not_warn() {
+        let state = test_state(json!({}));
+        let warnings = collect_condition_context_warnings("ctx.repo", &state, "condition");
+        assert!(!warnings.iter().any(|w| w.message.contains("unknown context variable")));
+    }
+
+    #[test]
+    fn condition_parse_failure_yields_no_warnings() {
+        // A malformed condition is reported fatally by `evaluate_condition`;
+        // the additive diagnostic stays silent rather than double-reporting.
+        let state = test_state(json!({}));
+        let warnings = collect_condition_context_warnings("&& invalid", &state, "condition");
+        assert!(warnings.is_empty());
     }
 
     /// Integration coverage for the operators, access forms, and helpers

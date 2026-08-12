@@ -239,6 +239,12 @@ impl MermaidDiagram {
             theme.font_size = size as f32;
         }
 
+        // HIGHLIGHT git-graph nodes (e.g. the "+N" elision marker) take each
+        // branch's *inverse* hue from `git_inv_colors`, which renders as an
+        // unrelated color — a blue square on a yellow branch. Mirror the branch
+        // palette so every node on a branch shares one color.
+        theme.git_inv_colors = theme.git_colors.clone();
+
         if transparent_background {
             theme.background = "none".to_string();
             theme.edge_label_background = "none".to_string();

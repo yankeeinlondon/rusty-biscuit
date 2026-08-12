@@ -105,7 +105,8 @@ pub async fn run_pty_command(
 **Implementation**:
 - Wraps blocking PTY ops in `tokio::task::spawn_blocking`
 - Uses `portable-pty` with 24x80 terminal size
-- Drops slave PTY immediately after spawning (ensures EOF on exit)
+- Drops the slave PTY immediately after spawning
+- Waits for the child before closing the master PTY so ConPTY readers receive EOF
 - Reads output via `mpsc::channel` in separate thread
 - Default 5-second timeout (configurable)
 - Strips ANSI escape codes via `strip-ansi-escapes`

@@ -1,7 +1,28 @@
 use crate::args::LayoutArgs;
+use biscuit_terminal::components::prose::Prose;
+use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::components::terminal_image::parse_width_spec;
 use biscuit_terminal::components::two_column::ColumnWidth;
+use biscuit_terminal::discovery::detection::ColorDepth;
 use biscuit_terminal::terminal::Terminal;
+
+/// Returns the terminal to use for rendering CLI output.
+///
+/// When `plain` is true, detection still runs but color depth is forced to
+/// [`ColorDepth::None`], overriding `FORCE_COLOR` / `CLICOLOR_FORCE`.
+/// When `plain` is false, the conventional color-forcing env vars are honored
+/// and `NO_COLOR` is left to the normal detection path.
+pub fn terminal_for_render(plain: bool) -> Terminal {
+    if plain {
+        let detected = Terminal::new();
+        Terminal {
+            color_depth: ColorDepth::None,
+            ..detected
+        }
+    } else {
+        detect_terminal_honoring_force_color()
+    }
+}
 
 /// Returns whether the terminal is in dark mode.
 pub fn is_dark_mode() -> bool {
@@ -139,13 +160,21 @@ pub fn emit_image_output(output: &str) -> color_eyre::Result<()> {
 
 /// Prints the command used to generate an example diagram.
 ///
-/// Uses bold text for header and dim text for command.
-/// Avoids terminal color mode queries which can interfere with Kitty graphics protocol.
-pub fn print_example_command(cmd: &str) {
-    let s = crate::types::CliStyles::detect();
+/// Renders the header and command through [`Prose`] so the output degrades
+/// cleanly when color is disabled while preserving the legacy `Command:` label.
+pub fn print_example_command_with_terminal(cmd: &str, term: &Terminal) {
     println!();
-    println!("{}Command:{}", s.bold, s.reset);
-    println!("{}{}{}", s.dim, cmd, s.reset);
+    println!("{}", Prose::new("<b>Command:</b>").render(term));
+    println!(
+        "{}",
+        Prose::new(format!("<dim>{}</dim>", Prose::escape_text(cmd))).render(term)
+    );
+}
+
+pub fn print_example_command(cmd: &str) {
+    let plain = std::env::args_os().any(|arg| arg == "--plain");
+    let term = terminal_for_render(plain);
+    print_example_command_with_terminal(cmd, &term);
 }
 
 /// Emits a YAML frontmatter block carrying the CLI's `--margin-left` /

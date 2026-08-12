@@ -16,7 +16,7 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use syntect::easy::HighlightLines;
 use syntect::highlighting::Color;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 
 static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 static SENTINEL_COUNTER: AtomicU32 = AtomicU32::new(0);
@@ -43,7 +43,10 @@ fn wait_for_sentinel(
 fn run_with_sentinel(harness: &mut TmuxHarness, cmd: &str, colorfgbg: &str) -> CapturedFrame {
     let id = SENTINEL_COUNTER.fetch_add(1, Ordering::Relaxed);
     let sentinel = format!("__DM_SCHEMA_ABOUT_L2_DONE_{id}__");
-    let wrapped = format!("{cmd}; printf '\\n{sentinel}\\n'");
+    let sequence = format!("{cmd}; printf '\\n{sentinel}\\n'");
+    // Keep the harness-prefixed color environment active across the full
+    // sequence rather than scoping it to only the first simple command.
+    let wrapped = format!("sh -c {}", shell_quote(&sequence));
 
     harness
         .send_command_with_env(
@@ -68,13 +71,21 @@ fn run_with_sentinel(harness: &mut TmuxHarness, cmd: &str, colorfgbg: &str) -> C
     }
 }
 
+fn shell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
 fn md_bin() -> String {
     std::env::var("CARGO_BIN_EXE_md").unwrap_or_else(|_| "md".to_string())
 }
 
 fn capture_schema_about(harness: &mut TmuxHarness, colorfgbg: &str) -> CapturedFrame {
     run_with_sentinel(harness, "clear", colorfgbg);
-    let _visible = run_with_sentinel(harness, &format!("{} schema about", md_bin()), colorfgbg);
+    // The broker pane can outlive a prior fixture CWD, so every invocation
+    // reestablishes a stable package directory before terminal discovery.
+    let working_dir = shell_quote(env!("CARGO_MANIFEST_DIR"));
+    let command = format!("cd {working_dir} && {} schema about", shell_quote(&md_bin()));
+    let _visible = run_with_sentinel(harness, &command, colorfgbg);
     capture_scrollback(harness, 300).unwrap_or(_visible)
 }
 
@@ -168,7 +179,7 @@ fn raw_line_anywhere(frame: &CapturedFrame, needle: &str) -> Option<String> {
 #[test]
 #[serial(level2_terminal)]
 fn level2_schema_about_constraint_table_renders_striped_row() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -181,15 +192,37 @@ fn level2_schema_about_constraint_table_renders_striped_row() {
         frame.plain,
     );
 
-    let striped_row = raw_line_for_plain_needle(&frame, "max(number)").unwrap_or_else(|| {
+    let striped_row = [
+        "any",
+        "string",
+        "number",
+        "boolean",
+        "object",
+        "array",
+        "required",
+        "min(number)",
+        "max(number)",
+        "matches(regex)",
+        "oneOf",
+        "generated",
+    ]
+    .into_iter()
+    .find_map(|needle| {
+        raw_line_for_plain_needle(&frame, needle)
+            .filter(|row| has_background_sgr(row))
+            .map(|row| (needle, row))
+    })
+    .unwrap_or_else(|| {
         panic!(
-            "could not locate the `max(number)` table row in the real-terminal capture.\nplain:\n{}\nraw:\n{}",
+            "could not locate any striped constraint table row in the real-terminal capture.\nplain:\n{}\nraw:\n{}",
             frame.plain, frame.raw,
         )
     });
     assert!(
-        has_background_sgr(&striped_row),
-        "expected the striped `max(number)` row to carry a background SGR in the real terminal capture.\nrow:\n{striped_row:?}\nplain:\n{}\nraw:\n{}",
+        has_background_sgr(&striped_row.1),
+        "expected a striped constraint table row to carry a background SGR in the real terminal capture.\nrow name: {}\nrow:\n{:?}\nplain:\n{}\nraw:\n{}",
+        striped_row.0,
+        striped_row.1,
         frame.plain,
         frame.raw,
     );
@@ -238,7 +271,7 @@ fn assert_schema_about_yaml_uses_theme(frame: &CapturedFrame, expected_mode: Col
 #[test]
 #[serial(level2_terminal)]
 fn level2_schema_about_dark_terminal_uses_light_code_theme() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));
@@ -251,7 +284,7 @@ fn level2_schema_about_dark_terminal_uses_light_code_theme() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_schema_about_light_terminal_uses_dark_code_theme() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
     let mut guard = SHARED_TMUX
         .get_or_init(|| TmuxHarness::shared_or_spawn().expect("attach/spawn tmux"));

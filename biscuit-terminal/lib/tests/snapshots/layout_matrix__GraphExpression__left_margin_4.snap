@@ -1,0 +1,13 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: block
+---
+VIA_RENDER
+    [```graph-expression
+    a -> b -> c
+    ```]
+---
+VIA_TREE_DIRECT
+    [```graph-expression
+    a -> b -> c
+    ```]

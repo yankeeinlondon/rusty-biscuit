@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 288
 expression: convert_yaml(yaml)
 ---
 {
@@ -7,41 +8,83 @@ expression: convert_yaml(yaml)
   "additionalProperties": true,
   "properties": {
     "database": {
-      "additionalProperties": false,
-      "properties": {
-        "primary": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
           "additionalProperties": false,
           "properties": {
-            "host": {
-              "type": "string"
+            "primary": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "host": {
+                      "type": "string"
+                    },
+                    "port": {
+                      "anyOf": [
+                        {
+                          "type": "null"
+                        },
+                        {
+                          "type": "number"
+                        }
+                      ],
+                      "default": 5432
+                    }
+                  },
+                  "required": [
+                    "host"
+                  ],
+                  "type": "object"
+                }
+              ]
             },
-            "port": {
-              "default": 5432,
-              "type": "number"
+            "replicas": {
+              "anyOf": [
+                {
+                  "type": "null"
+                },
+                {
+                  "items": {
+                    "additionalProperties": false,
+                    "properties": {
+                      "host": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "port": {
+                        "anyOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "type": "number"
+                          }
+                        ]
+                      }
+                    },
+                    "type": "object"
+                  },
+                  "type": "array"
+                }
+              ]
             }
           },
-          "required": [
-            "host"
-          ],
           "type": "object"
-        },
-        "replicas": {
-          "items": {
-            "additionalProperties": false,
-            "properties": {
-              "host": {
-                "type": "string"
-              },
-              "port": {
-                "type": "number"
-              }
-            },
-            "type": "object"
-          },
-          "type": "array"
         }
-      },
-      "type": "object"
+      ]
     }
   },
   "type": "object"

@@ -43,6 +43,24 @@ Show a compact provider capability matrix with:
 - `Agent` support (custom agent/subagent definitions)
 - `Hooks` count (how many native hook events Claudine can attach to)
 
+`claudine providers agent-errors check <slug> [--findings <path>]` runs the
+deterministic research gate and writes an explicit outcome report. Fleet
+lifecycle documents use this trusted CLI surface instead of invoking the
+globally blacklisted `cargo` executable directly.
+
+### `claudine signals [check]`
+
+Inspect the compiled signal-detection tables. Bare `claudine signals` prints a per-provider summary (record/extraction counts, bespoke count, per-source breakdown) for all nine corpora, including the dormant kilo/pi tables.
+
+`claudine signals check` is dev/CI-facing and requires a rusty-biscuit checkout: it replays every detection record's evidence fixture from `docs/research/signals/` through the production engine, verifying evidence existence, positive firing, extraction resolution, and per-source-group overlap (benign overlaps are declared in `docs/research/signals/_overlap-exclusions.yaml` and reported as INFO lines). Bespoke records report as skipped until their E5 emitters land.
+
+| Flag | Description |
+|------|-------------|
+| `--provider <slug>` | Check a single provider corpus |
+| `--json` | Emit the machine-readable check report |
+
+**Unmatched-event harvest (opt-in).** With `harvest_unmatched: true` in `~/.claudine/config.json` (or `CLAUDINE_HARVEST=1`; `0`/`false` forces off, env wins over config), wrapped runs append error/warning-class payloads that fired no detection record to `~/.claudine/harvest/<provider>/<YYYY-MM-DD>.jsonl` as candidate detection evidence. Payloads are scrubbed (API-key/token shapes, key-named secrets, home paths, emails) before they are buffered, and the tree is retention-capped (30 days / 50 MiB, oldest first). Promotion into `docs/research/signals/fixtures/` remains human-reviewed (provenance class `capture`).
+
 ### `claudine sync [flags]`
 
 Re-apply hook registrations to match the current config.
@@ -65,7 +83,7 @@ Show which actions are configured and for which events across the user and repo 
 
 ### Dispatch Expressions
 
-Hook action templates, conditional `when` clauses, event binding matchers, and harness validation messages all share a single expression evaluator backed by Darkmatter's parser (see `claudine/lib/src/dispatch/expression.rs`). The same paths exposed by `claudine hooks --variables` are available everywhere expressions are evaluated.
+Hook action templates, conditional `when` clauses, event binding matchers, and lifecycle stack expressions all share a single expression evaluator backed by Darkmatter's parser (see `claudine/lib/src/dispatch/expression.rs`). The same paths exposed by `claudine hooks --variables` are available everywhere expressions are evaluated.
 
 **Template Interpolation.** Speak messages, bash params, report templates, and message bodies pass through `{{...}}` interpolation. In addition to simple variable references, authors can use:
 
@@ -169,7 +187,7 @@ Shared wrapper flags:
 | `--use <ID[,ID...]>` | Add specific MCP catalog IDs or aliases and enable MCP composition |
 | `--sandbox` | Enable provider-specific sandboxing |
 | `--repo` | Use only repo-scoped skills, commands, and agents via a shadow HOME |
-| `--dry-run` | Show what would be executed without launching the child |
+| `--dry-run` | Show what would be executed without requiring or launching the child executable |
 | `--perf` | Emit a detailed performance report to stderr after execution |
 | `-q, --quiet` | Show only the header line; suppress env details |
 | `--silent` | Suppress all Claudine preflight output |
@@ -177,6 +195,10 @@ Shared wrapper flags:
 
 Wrapper behavior:
 
+- **Dry-run executable independence**: provider wrappers render the planned
+  command using the profile's executable name without resolving it on `PATH`;
+  the provider need not be installed. Live runs still validate the executable
+  before launch.
 - **Interactivity default**: providing a prompt string implies non-interactive mode. Use `-i`/`--interactive` to override back to interactive when providing a startup prompt.
 - **Execution line**: displays `Claudine ▸ {provider} {badges} {prompt}` — only the user's prompt text is shown (provider-specific switches are not leaked). Truncated to one terminal line.
 - **Structured streaming**: non-interactive runs use provider-native structured output (stream-json, JSONL, NDJSON, or JSON-RPC 2.0 for Kimi) as the internal control plane. Claudine deserializes each line into a strongly typed `*Event` / `*Envelope` enum from `claudine::stream::protocol` (one module per provider), reconstructs clean assistant text for stdout, and emits metadata summaries to stderr. Every run follows a **9-section model** (execution line, env, system prompt, agent prompt, session ID, thinking prose, tool/info events, final STDOUT, and metadata) with strictly enforced spacing (at most one blank line between sections).
@@ -184,7 +206,7 @@ Wrapper behavior:
 - **Thinking prose**: reasoning and thinking content from providers (Claude, Codex, OpenCode, etc.) is rendered on stderr in `Section::Thinking` as a `BlockQuote` with the wider `▌ ` border (matching System Prompt and Agent Prompt) and dim-italic gray text, ensuring continuous feedback during long turns. OpenCode reasoning (`{"type":"reasoning","text":"…"}`, including nested `part.text`) routes through `SemanticEvent::Reasoning` like every other provider rather than falling through `ProviderExtension`. Claude assistant prose that appears in the same `assistant` envelope as a `tool_use` is also promoted to `Reasoning`, so "Let me investigate..." tool-preface narration no longer leaks onto stdout or creates extra section breaks between tool calls.
 - **Stderr status lines**: `LiveSemanticSink` renders tool/subagent/info/warning/error status lines. Tool calls use a canonical humanized contract — `→ {Name}({summary})` for outgoing and `← {Name}({slot})` for incoming — that reads like a function call. Shell tools (`Bash`, `bash`, `run_command`, Codex `shell`) prepend the canonical shell name to the command (`bash ls -la`) so the user can see how the line would actually execute. `Task` summaries prefer `description → subject → prompt → task` so the agent's task body wins over arbitrary fields like `subagent_type`. Unknown event types fall through to a silent skip so provider format drift never turns into a hard failure. Raw JSON is never dumped to the terminal for known tools.
 - **Typed error blocks**: `SemanticEvent::Error` now carries a `SemanticErrorKind` (`Configuration`, `AgentNative`, `ApiRemote`, `Interrupted`, `Unknown`) and renders as a colored `BlockQuote` with `▌ ` border instead of a single failure status line. Border colors and labels are: orange `Configuration Error`, red `Agent Error`, red `API Error`, yellow `Interrupted`, red `Error`. Replays of older JSONL streams without a `kind` field default to `Unknown` via `#[serde(default)]`. The kind maps directly onto `AgentErrorCategory` for end-of-run reports via `From<SemanticErrorKind> for AgentErrorCategory`. Dispatch behavior remains keyed off `terminal: bool`; `kind` is classificatory metadata, not a new dispatch switch.
-- **Idle output flush**: `StreamTextRenderer` records when the block buffer last grew. When the heartbeat thread runs, it calls `flush_if_idle(silence_window)` (default **30 s**) before emitting its own status line, so a dangling final paragraph from a slow-to-close provider becomes visible within the silence window even if the provider never closes stdout. Buffered content always appears above the next heartbeat.
+- **Idle output flush**: the lib `AssistantStream` streaming component records when the block buffer last grew. A dedicated ticker calls `flush_idle(silence_window)` on its own cadence, so a dangling final paragraph from a slow-to-close provider becomes visible within the silence window even if the provider never closes stdout. Cadence and silence window are a single value — **30 s** by default, overridable with `CLAUDINE_IDLE_FLUSH_INTERVAL` (duration string, read once when the ticker spawns; absent, malformed, or non-positive values keep the default). This is a render cadence, not a third timeout rule — it terminates nothing. See [`docs/topics/timeouts.md`](../docs/topics/timeouts.md#idle-flush-cadence).
 - **Unified timeout watchdog** (OpenCode stability): the wrapper enforces exactly two timeouts via a single ticker — `timeout` (wall-clock budget from child spawn, opt-in, no default) and `step_timeout` (stream-silence since the last parent-stream event, default **30m**). Both can be set via CLI flags (`--timeout`, `--step-timeout`), markdown frontmatter (`timeout:`, `step_timeout:`), or env-var defaults (`CLAUDINE_TIMEOUT`, `CLAUDINE_STEP_TIMEOUT`); precedence is CLI > frontmatter > env > built-in. Setting an env var to `0s` disables that rule. Watchdog cadence and SIGTERM→SIGKILL grace are tunable via `CLAUDINE_WATCHDOG_INTERVAL` (default **5s**) and `CLAUDINE_KILL_GRACE` (default **10s**). On breach, the watchdog renders an `Agent Error` `BlockQuote` on stderr (enumerating any outstanding subagents for `step_timeout`) and the synthesised summary records `error_kind: "timeout"` or `"step_timeout"`. See [`docs/topics/timeouts.md`](../docs/topics/timeouts.md) for the canonical reference.
 - **Verbosity**: `--quiet` shows only a compact completion line; `--silent` suppresses all Claudine output; `-v` adds detailed human-facing metadata on the second summary line.
 - **Diagnostics**: `--debug <level>` controls Claudine tracing (`trace`, `debug`, `info`, `warn`, `error`). `RUST_LOG` takes precedence and supports per-module targeting such as `RUST_LOG=claudine::dispatch=trace,claudine::stream=debug`.
@@ -203,7 +225,7 @@ Wrapper behavior:
 
 ### Composition commands
 
-Composition turns a Markdown document with frontmatter into a provider session, optionally merging the result back into the source file or running a sequence of steps. All three commands reuse the wrapper pipeline (env setup, harness detection, structured streaming, handler-driven recovery).
+Composition turns a Markdown document with frontmatter into a provider session, optionally merging the result back into the source file or running a sequence of steps. All three commands reuse the wrapper pipeline (env setup, harness detection, structured streaming, lifecycle-stack recovery).
 
 - **`claudine compose [flags] <file-ref> [key=value ...]`** — compose a Markdown file (Darkmatter transclusion/interpolation/conditionals/`::shell`) and send the result as a prompt. No file mutation.
 - **`claudine inline-compose [flags] <file-ref> [key=value ...]`** — compose the frontmatter `prompt` property and replace the document body with the provider's response. Original frontmatter is preserved byte-for-byte; `last_updated` is set to today's date; new frontmatter keys added by the provider are merged in.
@@ -232,7 +254,7 @@ claudine config set favorite-agent codex
 claudine config set favorite-agent none
 ```
 
-**Unified Harness Execution (2026-06-16).** Every non-dry-run `compose` and `inline-compose` run now routes through `run_harness_loop` with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. Documents without harness frontmatter yield the empty/bare plan; inline documents receive a single system-owned writability pre-check injected by `finalize_effective_plan`. The loop handles structured streaming, captured/non-structured fallback, inline closure, summary emission, and handler-driven recovery through one code path.
+**Unified Harness Execution (2026-06-16).** Every non-dry-run `compose` and `inline-compose` run now routes through `run_harness_loop` with `HarnessPromptMode::Compose` or `HarnessPromptMode::Inline`. Documents without harness frontmatter yield the empty/bare plan; the plan now carries only timeout configuration (the pre/post validation and handler-recovery DSL has been retired in favor of lifecycle stacks). The loop handles structured streaming, captured/non-structured fallback, inline closure, summary emission, and lifecycle-stack recovery (`Retry`/`Resume`/`Proxy`) through one code path.
 
 **Performance Reporting.** All three composition commands support `--perf`, which emits a post-execution performance report to stderr. `sequence` produces a single aggregated report covering all steps; `compose` and `inline-compose` produce one report per invocation. See the main README for report layout details.
 

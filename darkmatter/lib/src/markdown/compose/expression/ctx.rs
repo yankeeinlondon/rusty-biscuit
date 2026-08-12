@@ -58,7 +58,7 @@ impl<'a> CtxLookup<'a> {
 
     /// Captures a single context group and merges its values into the cache.
     fn capture_group(&self, group: super::super::context::capture::ContextGroup) {
-        let (values, _diagnostics, _timings) =
+        let (values, _diagnostics, _timings, _environment) =
             super::super::context::capture::capture_runtime_context_for_groups(
                 self.work_dir,
                 &[group],

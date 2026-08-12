@@ -79,7 +79,10 @@ async fn run_interactive_initialization() -> Result<()> {
     register_hooks_all_providers().await?;
 
     log::message("");
-    log::message(&format!("  Config: {}", path.display()));
+    log::message(&format!(
+        "  Config: {}",
+        biscuit_file::to_portable_string(&path)
+    ));
     log::message("  Edit with: claudine config");
     log::message("");
     Ok(())
@@ -276,6 +279,9 @@ fn build_config(
             error: Some("error-1".to_string()),
         },
         prompt_for_missing: true,
+        harvest_unmatched: false,
+        exit_expressions: None,
+        guard_settings: Default::default(),
     }
 }
 

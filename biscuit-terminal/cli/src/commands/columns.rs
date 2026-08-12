@@ -61,7 +61,7 @@ pub struct ColumnsArgs {
 }
 
 impl Run for ColumnsArgs {
-    fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
+    fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         let left = self
             .left
             .unwrap_or_else(|| COLUMNS_EXAMPLE_LEFT.to_string());
@@ -102,7 +102,7 @@ impl Run for ColumnsArgs {
         } else if self.md_plus {
             println!("{}", columns.render_markdown_plus());
         } else {
-            let term = detect_terminal_honoring_force_color();
+            let term = terminal_for_render(ctx.plain);
             let output = columns.render(&term);
             emit_vertical_margins(&self.layout, || {
                 println!("{}", output);

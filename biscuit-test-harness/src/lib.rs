@@ -12,27 +12,38 @@
 //!   through the real terminal's display path so glyph-width / SGR /
 //!   scroll-handling regressions are observable in captured pane text.
 //!   Input is injected as bytes via the terminal's CLI.
-//! - **Level 3** — OS-level keyboard injection (not covered by this
-//!   harness; see individual test suites for platform-specific tools).
+//! - **Level 3** — OS-level keyboard injection. The key event enters
+//!   where a physical keypress enters, so the terminal's *input encoder*
+//!   fires — the only way to observe what bytes a terminal emits for a
+//!   given chord. One injector module per platform: [`cliclick`] (macOS
+//!   Quartz events), [`xdotool`] (Linux X11 XTEST), and [`win_input`]
+//!   (Windows `SendKeys`/`SendInput` via PowerShell).
 //!
-//! Every harness's `available()` probe returns `false` cleanly when its
-//! required tooling is missing — tests then print `skipping: requires`
-//! and return `ok` without exercising the harness.
+//! Every harness's — and every Level-3 injector's — `available()` probe
+//! returns `false` cleanly when its required tooling or platform is
+//! missing; tests then print `skipping: requires` and return `ok`
+//! without exercising it. [`cliclick::available`] is the one exception:
+//! it only proves the binary is on `$PATH`, checking neither the host
+//! platform nor macOS Accessibility trust. Pair it with
+//! [`cliclick::accessibility_trusted`], which covers both.
 
 #![allow(dead_code)]
 
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
 
 pub mod apple_terminal;
+pub mod bin_exe;
 pub mod cliclick;
 pub mod kitty;
 pub mod layout_invariants;
 pub mod shared;
 pub mod tmux;
 pub mod wezterm;
+pub mod win_input;
+pub mod xdotool;
 
 /// Prefix used to mark resources owned by this test harness.
 ///
@@ -398,6 +409,32 @@ pub fn cargo_bin_dir(bin_name: &str) -> Option<PathBuf> {
     None
 }
 
+/// Appends a login-shell invocation that preserves the Cargo binary directory.
+///
+/// Login startup files may replace `PATH`, particularly when a terminal GUI
+/// launches from the desktop rather than an existing shell. The outer login
+/// shell therefore prepends the binary directory after startup, then replaces
+/// itself with the interactive shell used by the harness.
+pub(crate) fn configure_login_shell(
+    cmd: &mut Command,
+    shell: &str,
+    bin_dir: Option<&Path>,
+) {
+    cmd.arg(shell);
+    if let Some(bin_dir) = bin_dir {
+        cmd.args([
+            "-l",
+            "-c",
+            "export PATH=\"$BISCUIT_TEST_BIN_DIR:$PATH\"; \
+             unset BISCUIT_TEST_BIN_DIR; exec \"$0\" -i",
+            shell,
+        ]);
+        cmd.env("BISCUIT_TEST_BIN_DIR", bin_dir);
+    } else {
+        cmd.arg("-l");
+    }
+}
+
 /// Sets the conventional color-forcing env vars on `cmd` so the
 /// spawned shell (and any process it execs, including `bt`) emits SGR
 /// regardless of whether stdout is a TTY.
@@ -432,20 +469,53 @@ pub fn apply_color_forcing_env(cmd: &mut std::process::Command) {
     }
 }
 
-/// Waits for a shell prompt to appear in the harness output.
+/// Trailing glyphs that mark the end of an interactive shell prompt.
 ///
-/// Polls [`TerminalHarness::capture`] every 100 ms, looking for a
-/// trailing `$`, `#`, or `%` character on the last **non-blank** line.
-/// Times out after 5 seconds and returns silently so that callers don't hang.
+/// The POSIX trio (`$`, `#`, `%`) only covers a shell running its *stock*
+/// prompt. The harness spawns a login shell, so it inherits whatever the host's
+/// dotfiles install, and modern prompt generators end on a glyph instead:
+/// starship / pure / spaceship default to `❯`, and assorted themes use `»` or
+/// `λ`. Themes whose distinguishing glyph *leads* the prompt (oh-my-zsh's
+/// `robbyrussell` `➜`) are not detectable this way and fall back to the timeout.
+///
+/// An unrecognized terminator is silent but expensive rather than fatal: it
+/// costs [`wait_for_prompt`] its full 5 s budget and every [`capture_settled`]
+/// its full 2 s budget instead of roughly one poll. That was enough to push
+/// `level2_render_tree_style_in_tmux` (22 captures) past nextest's 30 s
+/// termination ceiling on a host whose `~/.bashrc` initializes starship.
+///
+/// `>` is deliberately absent. It is a plausible trailing character of ordinary
+/// rendered output, and reading one as "the prompt is back" settles a capture on
+/// a half-drawn frame.
+const PROMPT_TERMINATORS: &[char] = &['$', '#', '%', '❯', '»', 'λ'];
+
+/// Returns `true` when `line` ends like an interactive shell prompt.
+pub fn looks_like_prompt(line: &str) -> bool {
+    line.trim_end().ends_with(PROMPT_TERMINATORS)
+}
+
+/// Returns `true` when the bottom-most non-blank line of a captured frame's
+/// plain text ends like an interactive shell prompt.
 ///
 /// ## Notes
 ///
 /// tmux's `capture-pane` pads the capture with trailing blank lines, so the
 /// literal last line is usually empty. Scanning only `lines().last()` never
-/// matched the prompt and burned the full 5 s timeout on every tmux capture
-/// (multiplied across the many `bt` invocations in a single test). Scanning
-/// from the bottom for the last non-blank line fixes that without affecting
-/// backends whose capture is not padded.
+/// matched the prompt and burned the full timeout on every tmux capture,
+/// multiplied across the many `bt` invocations in a single test.
+pub fn frame_shows_prompt(plain: &str) -> bool {
+    plain
+        .lines()
+        .rev()
+        .find(|l| !l.trim().is_empty())
+        .is_some_and(looks_like_prompt)
+}
+
+/// Waits for a shell prompt to appear in the harness output.
+///
+/// Polls [`TerminalHarness::capture`] every 100 ms until
+/// [`frame_shows_prompt`] holds. Times out after 5 seconds and returns
+/// silently so that callers don't hang.
 pub fn wait_for_prompt(harness: &mut impl TerminalHarness) -> io::Result<()> {
     for _ in 0..50 {
         std::thread::sleep(Duration::from_millis(100));
@@ -453,11 +523,8 @@ pub fn wait_for_prompt(harness: &mut impl TerminalHarness) -> io::Result<()> {
             Ok(f) => f,
             Err(_) => continue,
         };
-        if let Some(last_line) = frame.plain.lines().rev().find(|l| !l.trim().is_empty()) {
-            let trimmed = last_line.trim_end();
-            if trimmed.ends_with('$') || trimmed.ends_with('#') || trimmed.ends_with('%') {
-                return Ok(());
-            }
+        if frame_shows_prompt(&frame.plain) {
+            return Ok(());
         }
     }
     Ok(())
@@ -475,9 +542,10 @@ pub fn wait_for_prompt(harness: &mut impl TerminalHarness) -> io::Result<()> {
 ///
 /// ## Notes
 ///
-/// The prompt check reuses the bottom-most non-blank heuristic from
-/// [`wait_for_prompt`]: emulators pad captures with trailing blank lines,
-/// so the literal last line is usually empty.
+/// Callers reach here through [`TerminalHarness::send_command_with_env`], which
+/// already spent a [`TerminalHarness::settle`] interval after pressing Enter.
+/// Without that head start the pre-command prompt would still be the
+/// bottom-most line and a stable pair could settle before the command ran.
 pub fn capture_settled(harness: &mut impl TerminalHarness) -> io::Result<CapturedFrame> {
     const POLL: Duration = Duration::from_millis(40);
     const MAX: Duration = Duration::from_millis(2000);
@@ -485,17 +553,7 @@ pub fn capture_settled(harness: &mut impl TerminalHarness) -> io::Result<Capture
     let mut prev: Option<String> = None;
     loop {
         let frame = harness.capture()?;
-        let prompt_ready = frame
-            .plain
-            .lines()
-            .rev()
-            .find(|l| !l.trim().is_empty())
-            .map(|l| {
-                let t = l.trim_end();
-                t.ends_with('$') || t.ends_with('#') || t.ends_with('%')
-            })
-            .unwrap_or(false);
-        if prompt_ready && prev.as_deref() == Some(frame.raw.as_str()) {
+        if frame_shows_prompt(&frame.plain) && prev.as_deref() == Some(frame.raw.as_str()) {
             return Ok(frame);
         }
         if Instant::now() >= deadline {
@@ -837,6 +895,48 @@ mod tests {
             // skip the strict assertion.
             assert!(!shell.is_empty());
         }
+    }
+
+    #[test]
+    fn looks_like_prompt_accepts_posix_terminators() {
+        assert!(looks_like_prompt("ken@host:~/src$ "));
+        assert!(looks_like_prompt("bash-5.2# "));
+        assert!(looks_like_prompt("host% "));
+    }
+
+    #[test]
+    fn looks_like_prompt_accepts_prompt_generator_glyphs() {
+        // starship / pure / spaceship, plus assorted glyph themes.
+        assert!(looks_like_prompt("🐧 ❯ "));
+        assert!(looks_like_prompt("~/src » "));
+        assert!(looks_like_prompt("λ "));
+    }
+
+    #[test]
+    fn looks_like_prompt_rejects_command_echo_and_output() {
+        assert!(!looks_like_prompt("❯ bt block \"bordered notice\""));
+        assert!(!looks_like_prompt("└──────────────┘"));
+        assert!(!looks_like_prompt(""));
+    }
+
+    #[test]
+    fn looks_like_prompt_rejects_trailing_angle_bracket() {
+        // `>` is excluded on purpose: rendered output ending in it would
+        // otherwise read as "the prompt is back" mid-draw.
+        assert!(!looks_like_prompt("<div>"));
+    }
+
+    #[test]
+    fn frame_shows_prompt_skips_trailing_blank_padding() {
+        // tmux's `capture-pane` pads a short pane out to its full height.
+        let frame = "❯ bt progress 50\n 50% Loading\n🐧 ❯ \n\n\n";
+        assert!(frame_shows_prompt(frame));
+    }
+
+    #[test]
+    fn frame_shows_prompt_is_false_while_a_command_is_still_running() {
+        let frame = "🐧 ❯ bt table --columns Name,Score\n\n\n";
+        assert!(!frame_shows_prompt(frame));
     }
 
     #[test]

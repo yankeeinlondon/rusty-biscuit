@@ -82,6 +82,15 @@ pub struct DisclosureStyleHints {
     /// Optional background color override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bg_color: Option<crate::style::PaintColor>,
+    /// Optional text emphasis override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emphasis: Option<crate::style::TextEmphasis>,
+    /// Optional border override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub border: Option<crate::style::Border>,
+    /// Optional word-wrap override.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub word_wrap: Option<crate::wrap_policy::WordWrap>,
 }
 
 /// How a sequence of children is joined when rendered.
@@ -3670,7 +3679,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_round_trip_and_sparsity() {
+    fn attrs_browser_round_trip_and_sparsity() {
         let mut attrs = NodeAttrs::default();
         assert!(attrs.browser().is_none());
 
@@ -3709,7 +3718,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_default_elides_when_empty() {
+    fn attrs_browser_default_elides_when_empty() {
         // An empty BrowserAttrs serializes to the empty object.
         assert_eq!(
             serde_json::to_string(&BrowserAttrs::default()).unwrap(),
@@ -3719,7 +3728,7 @@ mod tests {
     }
 
     #[test]
-    fn browser_mut_or_default_is_lazy_and_retains_sparsity() {
+    fn attrs_browser_mut_or_default_is_lazy_and_retains_sparsity() {
         let mut attrs = NodeAttrs::default();
         let _ = attrs.browser_mut_or_default();
         assert!(attrs.browser.is_some());

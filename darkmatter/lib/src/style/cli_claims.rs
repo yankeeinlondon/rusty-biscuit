@@ -398,6 +398,8 @@ pub fn component_style_overrides_from_claims(claims: &CliStyleClaims) -> Compone
         images_fill: fill_all || claims.fill_images.is_some(),
         block_quotes_alignment: alignment_all || claims.align_block_quotes.is_some(),
         block_quotes_fill: fill_all || claims.fill_block_quotes.is_some(),
+        code_blocks_alignment: alignment_all || claims.align_code_blocks.is_some(),
+        code_blocks_fill: fill_all || claims.fill_code_blocks.is_some(),
     }
 }
 

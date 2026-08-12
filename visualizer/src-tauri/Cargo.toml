@@ -1,0 +1,28 @@
+[package]
+name = "visualizer"
+version = "0.1.0"
+edition = "2021"
+license = "AGPL-3.0-only"
+
+[lib]
+# Tauri convention: the application logic lives in a library so it can be shared
+# with mobile targets; the binary in `main.rs` is a thin entry point.
+name = "visualizer_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+# Tauri's default `compression` feature pulls brotli's encoder via tauri-codegen.
+# brotli 8.0.3 requires alloc-no-stdlib ^2.0, so the graph must stay on
+# alloc-no-stdlib 2.0.4 — a clean resolve does this, but a stale lock with a
+# leftover alloc-no-stdlib 3.0.0 makes the encoder fail to compile (two
+# Allocator traits). Fix: `cargo update -p alloc-no-stdlib --precise 2.0.4`.
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# The Tauri shell and its packaging tests need these native headers on Linux.
+[package.metadata.ci.native]
+ubuntu-latest = ["libgtk-3-dev", "libwebkit2gtk-4.1-dev", "libdbus-1-dev"]

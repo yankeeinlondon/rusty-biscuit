@@ -1,11 +1,22 @@
 ---
-pkg: "{{ctx.current_package_area}}"
-file: "{{pkg}}/reviews/{{ctx.today}}-dry-review/review.md"
+$schema:
+    file: file
+file: "{{ctx.area}}/reviews/{{ctx.today}}-dry-review/review.md"
 
-success: "🍸 the DRY review `{{file}}` has completed"
-failure: "❌ the DRY review for `{{file}}` failed to complete!"
+success: 
+    stack:
+        - when: file_exists(file)
+          action:
+            - stderr: "🍸  the DRY review `{{file}}` has completed (_{{frontmatter(file, 'recommendations')}} recommendations_)"
+        - when: "!file_exists(file)"
+          action:
+            - warn: "the review file -- {{ file }} -- was not created!"
+failure: 
+    stderr: "💥  the DRY review for `{{file}}` failed to complete!"
 ---
-Review the {{pkg}} package area and focus on opportunities to:
+# DRY Review
+
+Review the {{ctx.area}} package area and focus on opportunities to:
 
 - Identify duplicated logic that should be extracted into a shared function, method, hook, trait, macro, or utility.
 - Look for repeated conditionals or branching logic that could be centralized behind a clearer abstraction.
@@ -28,15 +39,21 @@ Review the {{pkg}} package area and focus on opportunities to:
 - Check whether duplicated type definitions or interfaces should be consolidated or generated from a common source.
 - Look for repeated state-machine transitions, lifecycle steps, or workflow stages that could be modeled explicitly.
 
-To finalize the task:
+Write all your suggestions/opportunities to: {{file}}
 
-- Finalize the review document: 
-    - Make sure each of your review suggestions are categorized as one of the following:
+- Make sure each of your review suggestions are categorized in two ways:
+    - **Importance**:
         - CRITICAL
         - URGENT
         - IMPORTANT
         - NICE-TO-HAVE
-    - For each suggestion give a High/Medium/Low level of effort required to implement this suggestion
-    - Save your review recommendations to "{{file}}"
-- set the `recommendations` frontmatter on "{{file}}" to the total number of suggestions you came up with
-- set the `critical` frontmatter property on "{{file}}" to the total number or suggestions you feel are CRITICAL to get into the production code. Note: this kind of review doesn't typically surface too many CRITICAL suggestions because the nature of this review is more to "optimize" than "fix" but there it is possible that this review surfaced a logic problem, used poor type safety, 
+    - **Level of Effort**:
+        - HIGH
+        - MEDIUM
+        - LOW
+- set the Frontmatter of the review file ({{file}}):
+    - set `created` to '{{ctx.now}}'
+    - set `agent` to '{{ctx.agent}}/{{ctx.model}}'
+    - set `area` to '{{ctx.area}}'
+    - set `recommendations` to the total number of suggestions you came up with
+    - set `critical` to the total number of suggestions you feel are CRITICAL to get into the production code.

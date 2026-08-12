@@ -22,9 +22,11 @@ sfx-native = [
     "rodio/symphonia-ogg",
     "rodio/symphonia-pcm",
 ]
-sfx-native-macos = ["sfx-native", "coreaudio-sys"]
-sfx-native-windows = ["sfx-native", "windows"]
-sfx-native-linux = ["sfx-native", "libpulse-binding"]
+# OS-native SFX routing: CoreAudio on macOS, PulseAudio on Linux, WASAPI on
+# Windows. One feature covers every platform because each backing crate is an
+# optional dependency of a single `[target.'cfg(target_os = "…")']` section —
+# naming all three here enables only the one the build target selects.
+sfx-native-audio = ["sfx-native", "coreaudio-sys", "libpulse-binding", "windows"]
 
 # Extended native audio — general file playback with broad format support
 native-playback = [
@@ -42,11 +44,11 @@ sound-effects = ["sfx-ui", "sfx-cartoon", "sfx-reactions", "sfx-scifi", "sfx-atm
 
 # Individual categories (users pick what they need)
 sfx-ui = []         # doorbells, alerts, clicks, selections, window actions (~4MB, 43 files)
-sfx-cartoon = []    # cartoon accents (~8MB, 13 files)
-sfx-reactions = []  # laughs, cheers, trombone (~4MB, 6 files)
-sfx-scifi = []      # phase jumps, phasers (~3MB, 11 files)
-sfx-atmosphere = [] # music stings, transitions (~7MB, 5 files)
-sfx-motion = []     # whooshes, air sounds (~5MB, 7 files)
+sfx-cartoon = []    # cartoon accents (~6MB, 13 files)
+sfx-reactions = []  # laughs, cheers, trombone (~12MB, 9 files)
+sfx-scifi = []      # phase jumps, phasers (~100KB, 11 files)
+sfx-atmosphere = [] # music stings, transitions (~5MB, 5 files)
+sfx-motion = []     # whooshes, air sounds (~2MB, 7 files)
 
 [dependencies]
 infer = "0.19"
@@ -75,6 +77,9 @@ windows = { version = "0.62", optional = true, features = [
     "Win32_Media_Audio",
     "Win32_Media_Multimedia",
     "Win32_System_Com",
+    # IMMDevice::Activate's signature references PROPVARIANT, which lives behind
+    # this feature; without it the Activate method is gated out entirely.
+    "Win32_System_Com_StructuredStorage",
 ] }
 
 [dev-dependencies]
@@ -84,3 +89,7 @@ tokio = { version = "1", features = ["rt", "macros"] }
 [package.metadata.benchmarks]
 required = false
 reason = "Audio playback dispatch dominated by OS-native player processes; no measurable in-process hot paths."
+
+# CI policy: playa links ALSA and PulseAudio on Linux.
+[package.metadata.ci.native]
+ubuntu-latest = ["libasound2-dev", "libpulse-dev"]

@@ -12,7 +12,7 @@ use crate::{
     utils::block_constraint::{split_lines, visible_width, wrap_lines},
 };
 
-pub use renderable::layout::{Alignment, Edges, Layout, Length, TargetValue};
+pub use renderable::layout::{Alignment, Edges, Layout, Length, TargetValue, Width};
 pub use renderable::wrap_policy::WordWrap;
 
 /// Adds `cells` whole terminal cells to a `TargetValue<Length>` margin value.

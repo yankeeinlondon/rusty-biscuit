@@ -4,7 +4,9 @@
 //! For Markdown files, extracts and converts the frontmatter block.
 
 use biscuit_file::json5::{to_json5_compact, to_json5_pretty};
-use biscuit_file::{FileReference, FileType, Json5, Pdf, Toml, Yaml, detect_file_type};
+use biscuit_file::{
+    FileReference, FileType, Json5, Pdf, Toml, Yaml, detect_file_type, to_portable_string,
+};
 use clap::{ArgGroup, Parser, Subcommand, ValueEnum};
 use color_eyre::eyre::{Result, WrapErr, bail};
 use std::io::{IsTerminal, Read};
@@ -450,7 +452,11 @@ fn run_reference(
 
     match result {
         Ok(Some(path)) => {
-            println!("{}", path.display());
+            // stdout is a path→text boundary, and this one is usually consumed
+            // by a script that has to work the same on every host. A Windows
+            // namespace with no faithful portable spelling still prints
+            // natively rather than as something unopenable.
+            println!("{}", to_portable_string(&path));
             Ok(())
         }
         Ok(None) => {

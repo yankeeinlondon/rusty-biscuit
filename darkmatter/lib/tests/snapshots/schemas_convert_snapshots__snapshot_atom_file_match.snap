@@ -10,15 +10,14 @@ expression: "convert_atom(\"file(match('*.md', '!_*.md'))\")"
     "field": {
       "anyOf": [
         {
+          "type": "null"
+        },
+        {
           "const": ""
         },
         {
-          "format": "darkmatter-file",
-          "type": "string",
-          "x-darkmatter-match": [
-            "*.md",
-            "!_*.md"
-          ]
+          "format": "darkmatter-file-reference",
+          "type": "string"
         }
       ]
     }

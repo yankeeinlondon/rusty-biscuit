@@ -117,14 +117,12 @@ pub fn detect_locale() -> LocaleInfo {
 
 #[cfg(target_os = "windows")]
 fn detect_windows_locale() -> Option<String> {
-    let output = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-Command", "(Get-Culture).Name"])
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let name = String::from_utf8(output.stdout).ok()?.trim().to_string();
+    let name = crate::process::run_for_stdout(
+        "powershell",
+        &["-NoProfile", "-Command", "(Get-Culture).Name"],
+        crate::process::timeouts::WINDOWS_LOCALE,
+    )?;
+    let name = name.trim();
     if name.is_empty() {
         return None;
     }
@@ -355,7 +353,7 @@ mod tests {
 
         #[test]
         fn test_detect_locale_reads_lang() {
-            let _lock = ENV_MUTEX.lock().unwrap();
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let mut env = ScopedEnv::new();
             env.set("LANG", "en_US.UTF-8")
                 .remove("LC_ALL")
@@ -370,7 +368,7 @@ mod tests {
 
         #[test]
         fn test_lc_all_takes_priority_over_lang() {
-            let _lock = ENV_MUTEX.lock().unwrap();
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let mut env = ScopedEnv::new();
             env.set("LANG", "en_US.UTF-8")
                 .set("LC_ALL", "de_DE.ISO-8859-1")
@@ -384,7 +382,7 @@ mod tests {
 
         #[test]
         fn test_lc_messages_takes_priority_over_lang() {
-            let _lock = ENV_MUTEX.lock().unwrap();
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let mut env = ScopedEnv::new();
             env.set("LANG", "en_US.UTF-8")
                 .set("LC_MESSAGES", "fr_FR.UTF-8")
@@ -397,7 +395,7 @@ mod tests {
 
         #[test]
         fn test_lc_all_takes_priority_over_lc_messages() {
-            let _lock = ENV_MUTEX.lock().unwrap();
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let mut env = ScopedEnv::new();
             env.set("LANG", "en_US.UTF-8")
                 .set("LC_MESSAGES", "fr_FR.UTF-8")
@@ -410,7 +408,7 @@ mod tests {
 
         #[test]
         fn test_c_locale_is_skipped_in_priority() {
-            let _lock = ENV_MUTEX.lock().unwrap();
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let mut env = ScopedEnv::new();
             env.set("LANG", "en_US.UTF-8")
                 .set("LC_ALL", "C")
@@ -425,7 +423,7 @@ mod tests {
 
         #[test]
         fn test_posix_locale_is_skipped_in_priority() {
-            let _lock = ENV_MUTEX.lock().unwrap();
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let mut env = ScopedEnv::new();
             env.set("LANG", "de_DE.UTF-8")
                 .set("LC_ALL", "POSIX")
@@ -438,7 +436,7 @@ mod tests {
 
         #[test]
         fn test_all_lc_vars_captured() {
-            let _lock = ENV_MUTEX.lock().unwrap();
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let mut env = ScopedEnv::new();
             env.set("LANG", "en_US.UTF-8")
                 .set("LC_ALL", "de_DE.UTF-8")
@@ -457,7 +455,7 @@ mod tests {
 
         #[test]
         fn test_missing_vars_are_none() {
-            let _lock = ENV_MUTEX.lock().unwrap();
+            let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
             let mut env = ScopedEnv::new();
             env.remove("LANG")
                 .remove("LC_ALL")
@@ -472,8 +470,15 @@ mod tests {
             assert!(locale.lc_ctype.is_none());
             assert!(locale.lc_messages.is_none());
             assert!(locale.lc_time.is_none());
-            assert!(locale.preferred_language.is_none());
-            assert!(locale.encoding.is_none());
+            #[cfg(not(target_os = "windows"))]
+            {
+                assert!(locale.preferred_language.is_none());
+                assert!(locale.encoding.is_none());
+            }
+            #[cfg(target_os = "windows")]
+            {
+                assert!(locale.preferred_language.is_some());
+            }
         }
 
         #[test]

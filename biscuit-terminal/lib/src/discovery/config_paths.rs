@@ -14,33 +14,21 @@
 //! }
 //! ```
 
+use super::app_metadata::default_config_paths;
 use super::detection::TerminalApp;
-use super::os_detection::{OsType, detect_os_type};
-use std::env;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-/// Get the configuration file path for a terminal application.
+/// Get the primary default configuration file path for a terminal application.
 ///
-/// Returns the primary configuration file path for the given terminal,
-/// taking into account the current operating system. Returns `None` if:
+/// Thin back-compat wrapper over the [`app_metadata`](super::app_metadata) seed
+/// table: it returns the *first* candidate for the current OS target, expanded
+/// but **not** existence-checked. For "what config is actually in use on this
+/// host" (env overrides, first existing file, provenance), use
+/// [`TerminalApp::get_config_file`](super::detection::TerminalApp::get_config_file).
 ///
-/// - The terminal doesn't have a file-based configuration (e.g., GNOME Terminal uses dconf)
-/// - The terminal is unknown
-/// - The home directory cannot be determined
-///
-/// ## Platform-Specific Paths
-///
-/// | Terminal | Linux/macOS | Windows |
-/// |----------|-------------|---------|
-/// | WezTerm | `~/.config/wezterm/wezterm.lua` | `%USERPROFILE%\.config\wezterm\wezterm.lua` |
-/// | Kitty | `~/.config/kitty/kitty.conf` | N/A |
-/// | Ghostty | `~/.config/ghostty/config` | N/A |
-/// | Alacritty | `~/.config/alacritty/alacritty.toml` | `%APPDATA%\alacritty\alacritty.toml` |
-/// | iTerm2 | `~/Library/Preferences/com.googlecode.iterm2.plist` | N/A |
-/// | Apple Terminal | `~/Library/Preferences/com.apple.Terminal.plist` | N/A |
-/// | VS Code | Handled via VS Code settings | N/A |
-/// | GNOME Terminal | dconf (not file-based) | N/A |
-/// | Konsole | `~/.local/share/konsole/` (profiles) | N/A |
+/// Returns `None` when the app has no candidate for the current OS target (e.g.
+/// GNOME Terminal is dconf-managed, or the app is unknown), or when the primary
+/// candidate's path tokens cannot be resolved.
 ///
 /// ## Examples
 ///
@@ -56,29 +44,7 @@ use std::path::{Path, PathBuf};
 /// assert!(unknown.is_none());
 /// ```
 pub fn get_terminal_config_path(app: &TerminalApp) -> Option<PathBuf> {
-    let os = detect_os_type();
-    let home = home_dir()?;
-
-    let result = match app {
-        TerminalApp::Wezterm => Some(wezterm_config_path(&home, os)),
-        TerminalApp::Kitty => kitty_config_path(&home, os),
-        TerminalApp::Ghostty => ghostty_config_path(&home, os),
-        TerminalApp::Alacritty => alacritty_config_path(&home, os),
-        TerminalApp::ITerm2 => iterm2_config_path(&home, os),
-        TerminalApp::AppleTerminal => apple_terminal_config_path(&home, os),
-        TerminalApp::Konsole => konsole_config_path(&home, os),
-        TerminalApp::Foot => foot_config_path(&home, os),
-        TerminalApp::Contour => contour_config_path(&home, os),
-        TerminalApp::Warp => warp_config_path(&home, os),
-        // GNOME Terminal uses dconf, not a config file
-        TerminalApp::GnomeTerminal => None,
-        // VS Code terminal settings are managed via VS Code settings.json
-        TerminalApp::VsCode => vscode_settings_path(&home, os),
-        // Wast doesn't have a standard config location yet
-        TerminalApp::Wast => None,
-        // Unknown terminals
-        TerminalApp::Other(_) => None,
-    };
+    let result = get_terminal_config_paths(app).into_iter().next();
     tracing::debug!(path = ?result, app = ?app, "Terminal config file path");
     result
 }
@@ -98,241 +64,12 @@ pub fn get_terminal_config_path(app: &TerminalApp) -> Option<PathBuf> {
 /// let paths = get_terminal_config_paths(&TerminalApp::Alacritty);
 /// ```
 pub fn get_terminal_config_paths(app: &TerminalApp) -> Vec<PathBuf> {
-    let os = detect_os_type();
-    let Some(home) = home_dir() else {
-        return Vec::new();
-    };
-
-    match app {
-        TerminalApp::Alacritty => alacritty_config_paths(&home, os),
-        TerminalApp::Konsole => konsole_profile_paths(&home, os),
-        _ => get_terminal_config_path(app)
-            .map(|p| vec![p])
-            .unwrap_or_default(),
-    }
-}
-
-/// Get the user's home directory.
-fn home_dir() -> Option<PathBuf> {
-    // Try HOME first (Unix-like systems)
-    if let Ok(home) = env::var("HOME") {
-        return Some(PathBuf::from(home));
-    }
-
-    // Try USERPROFILE (Windows)
-    if let Ok(profile) = env::var("USERPROFILE") {
-        return Some(PathBuf::from(profile));
-    }
-
-    // Try combining HOMEDRIVE and HOMEPATH (Windows fallback)
-    if let (Ok(drive), Ok(path)) = (env::var("HOMEDRIVE"), env::var("HOMEPATH")) {
-        return Some(PathBuf::from(format!("{}{}", drive, path)));
-    }
-
-    None
-}
-
-/// Get XDG config directory, with fallback to ~/.config
-fn config_dir(home: &Path) -> PathBuf {
-    env::var("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home.join(".config"))
-}
-
-/// Get XDG data directory, with fallback to ~/.local/share
-fn data_dir(home: &Path) -> PathBuf {
-    env::var("XDG_DATA_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|_| home.join(".local").join("share"))
-}
-
-// Terminal-specific path functions
-
-fn wezterm_config_path(home: &Path, os: OsType) -> PathBuf {
-    match os {
-        OsType::Windows => home.join(".config").join("wezterm").join("wezterm.lua"),
-        OsType::MacOS => config_dir(home).join("wezterm").join("wezterm.lua"),
-        _ => config_dir(home).join("wezterm").join("wezterm.lua"),
-    }
-}
-
-fn kitty_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
-    match os {
-        OsType::Windows => None, // Kitty doesn't officially support Windows
-        OsType::MacOS => Some(config_dir(home).join("kitty").join("kitty.conf")),
-        OsType::Linux => Some(config_dir(home).join("kitty").join("kitty.conf")),
-        _ => None,
-    }
-}
-
-fn ghostty_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
-    match os {
-        OsType::MacOS | OsType::Linux => Some(config_dir(home).join("ghostty").join("config")),
-        _ => None,
-    }
-}
-
-fn alacritty_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
-    match os {
-        OsType::Windows => Some(
-            env::var("APPDATA")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| home.join("AppData").join("Roaming"))
-                .join("alacritty")
-                .join("alacritty.toml"),
-        ),
-        _ => Some(config_dir(home).join("alacritty").join("alacritty.toml")),
-    }
-}
-
-fn alacritty_config_paths(home: &Path, os: OsType) -> Vec<PathBuf> {
-    let config = config_dir(home);
-
-    match os {
-        OsType::Windows => {
-            let appdata = env::var("APPDATA")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| home.join("AppData").join("Roaming"));
-            vec![
-                appdata.join("alacritty").join("alacritty.toml"),
-                appdata.join("alacritty").join("alacritty.yml"),
-            ]
-        }
-        _ => {
-            vec![
-                config.join("alacritty").join("alacritty.toml"),
-                config.join("alacritty").join("alacritty.yml"),
-                home.join(".alacritty.toml"),
-                home.join(".alacritty.yml"),
-            ]
-        }
-    }
-}
-
-fn iterm2_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
-    match os {
-        OsType::MacOS => Some(
-            home.join("Library")
-                .join("Preferences")
-                .join("com.googlecode.iterm2.plist"),
-        ),
-        _ => None, // iTerm2 is macOS-only
-    }
-}
-
-fn apple_terminal_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
-    match os {
-        OsType::MacOS => Some(
-            home.join("Library")
-                .join("Preferences")
-                .join("com.apple.Terminal.plist"),
-        ),
-        _ => None, // Apple Terminal is macOS-only
-    }
-}
-
-fn konsole_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
-    match os {
-        OsType::Linux | OsType::FreeBSD | OsType::NetBSD | OsType::OpenBSD => {
-            // Konsole uses profiles in the data directory
-            // Return the profile directory; specific profiles are *.profile files
-            Some(data_dir(home).join("konsole"))
-        }
-        _ => None, // Konsole is primarily Linux/BSD
-    }
-}
-
-fn konsole_profile_paths(home: &Path, os: OsType) -> Vec<PathBuf> {
-    match os {
-        OsType::Linux | OsType::FreeBSD | OsType::NetBSD | OsType::OpenBSD => {
-            let data = data_dir(home);
-            vec![
-                data.join("konsole"),               // Profile directory
-                config_dir(home).join("konsolerc"), // Main config
-            ]
-        }
-        _ => Vec::new(),
-    }
-}
-
-fn foot_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
-    match os {
-        OsType::Linux | OsType::FreeBSD => Some(config_dir(home).join("foot").join("foot.ini")),
-        _ => None, // Foot is Wayland-only, primarily Linux
-    }
-}
-
-fn contour_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
-    match os {
-        OsType::Windows => {
-            let local_appdata = env::var("LOCALAPPDATA")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| home.join("AppData").join("Local"));
-            Some(local_appdata.join("contour").join("contour.yml"))
-        }
-        OsType::MacOS => Some(
-            home.join("Library")
-                .join("Application Support")
-                .join("contour")
-                .join("contour.yml"),
-        ),
-        OsType::Linux => Some(config_dir(home).join("contour").join("contour.yml")),
-        _ => None,
-    }
-}
-
-fn warp_config_path(home: &Path, os: OsType) -> Option<PathBuf> {
-    match os {
-        OsType::MacOS => Some(home.join(".warp")),
-        OsType::Linux => Some(home.join(".warp")),
-        _ => None, // Warp is macOS/Linux only
-    }
-}
-
-fn vscode_settings_path(home: &Path, os: OsType) -> Option<PathBuf> {
-    match os {
-        OsType::Windows => {
-            let appdata = env::var("APPDATA")
-                .map(PathBuf::from)
-                .unwrap_or_else(|_| home.join("AppData").join("Roaming"));
-            Some(appdata.join("Code").join("User").join("settings.json"))
-        }
-        OsType::MacOS => Some(
-            home.join("Library")
-                .join("Application Support")
-                .join("Code")
-                .join("User")
-                .join("settings.json"),
-        ),
-        OsType::Linux => Some(
-            config_dir(home)
-                .join("Code")
-                .join("User")
-                .join("settings.json"),
-        ),
-        _ => None,
-    }
+    default_config_paths(app)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn test_home_dir_returns_some() {
-        // Should return Some on all platforms with proper environment
-        let home = home_dir();
-        assert!(home.is_some(), "home_dir() should return Some");
-    }
-
-    #[test]
-    fn test_config_dir_respects_xdg() {
-        let home = PathBuf::from("/home/test");
-        // Default behavior without XDG_CONFIG_HOME
-        let config = config_dir(&home);
-        // Should either be XDG_CONFIG_HOME or ~/.config
-        assert!(config.to_string_lossy().contains("config") || config == home.join(".config"));
-    }
 
     #[test]
     fn test_wezterm_config_path() {
@@ -385,18 +122,15 @@ mod tests {
     #[test]
     fn test_alacritty_config_paths_multiple() {
         let paths = get_terminal_config_paths(&TerminalApp::Alacritty);
-        #[cfg(not(target_os = "windows"))]
-        {
-            assert!(
-                paths.len() >= 2,
-                "Alacritty should have multiple config paths"
-            );
-            // Should include both .toml and .yml options
-            let has_toml = paths.iter().any(|p| p.to_string_lossy().contains(".toml"));
-            let has_yml = paths.iter().any(|p| p.to_string_lossy().contains(".yml"));
-            assert!(has_toml, "Should include .toml path");
-            assert!(has_yml, "Should include .yml path");
-        }
+        assert!(
+            paths.len() >= 2,
+            "Alacritty should have multiple config paths"
+        );
+        // Should include both .toml and .yml options
+        let has_toml = paths.iter().any(|p| p.to_string_lossy().contains(".toml"));
+        let has_yml = paths.iter().any(|p| p.to_string_lossy().contains(".yml"));
+        assert!(has_toml, "Should include .toml path");
+        assert!(has_yml, "Should include .yml path");
     }
 
     #[test]
@@ -443,8 +177,8 @@ mod tests {
         let _path = get_terminal_config_path(&TerminalApp::Konsole);
         #[cfg(target_os = "linux")]
         {
-            assert!(path.is_some());
-            let path = path.unwrap();
+            assert!(_path.is_some());
+            let path = _path.unwrap();
             assert!(path.to_string_lossy().contains("konsole"));
         }
     }
@@ -454,8 +188,8 @@ mod tests {
         let _path = get_terminal_config_path(&TerminalApp::Foot);
         #[cfg(target_os = "linux")]
         {
-            assert!(path.is_some());
-            let path = path.unwrap();
+            assert!(_path.is_some());
+            let path = _path.unwrap();
             assert!(path.to_string_lossy().contains("foot"));
         }
     }
@@ -498,13 +232,18 @@ mod tests {
             let path = path.unwrap();
             assert!(path.to_string_lossy().contains(".warp"));
         }
+        #[cfg(target_os = "windows")]
+        assert!(path.is_none(), "Warp has no Windows config candidate");
     }
 
     #[test]
-    fn test_get_terminal_config_paths_single_path_terminal() {
-        // Terminals with single config path should return vec with one element
+    fn test_get_terminal_config_paths_wezterm() {
+        // WezTerm now exposes an ordered candidate list (XDG path + ~/.wezterm.lua);
+        // the primary candidate is the XDG-based .lua file.
         let paths = get_terminal_config_paths(&TerminalApp::Wezterm);
-        assert_eq!(paths.len(), 1);
+        assert!(!paths.is_empty());
+        assert!(paths[0].to_string_lossy().contains("wezterm"));
+        assert!(paths[0].extension().map(|e| e == "lua").unwrap_or(false));
     }
 
     #[test]
@@ -598,7 +337,7 @@ mod tests {
         #[cfg(target_os = "linux")]
         {
             let paths = get_terminal_config_paths(&TerminalApp::Konsole);
-            assert!(paths.len() >= 1, "Konsole should have at least one path");
+            assert!(!paths.is_empty(), "Konsole should have at least one path");
             // Should include the konsole directory
             assert!(
                 paths
@@ -610,16 +349,72 @@ mod tests {
     }
 
     #[test]
-    fn test_data_dir_respects_xdg() {
-        let home = PathBuf::from("/home/test");
-        // Default behavior without XDG_DATA_HOME
-        let data = data_dir(&home);
-        // Should either be XDG_DATA_HOME or ~/.local/share
-        assert!(
-            data.to_string_lossy().contains("share")
-                || data == home.join(".local").join("share")
-                || data.to_string_lossy().starts_with("/")
-        );
+    fn test_app_coverage_floor_no_regression() {
+        use super::super::app_metadata::ConfigOsTarget;
+
+        let floor: &[(TerminalApp, &[ConfigOsTarget])] = &[
+            (
+                TerminalApp::Wezterm,
+                &[
+                    ConfigOsTarget::Linux,
+                    ConfigOsTarget::MacOS,
+                    ConfigOsTarget::Windows,
+                ],
+            ),
+            (
+                TerminalApp::Kitty,
+                &[ConfigOsTarget::Linux, ConfigOsTarget::MacOS],
+            ),
+            (
+                TerminalApp::Ghostty,
+                &[ConfigOsTarget::Linux, ConfigOsTarget::MacOS],
+            ),
+            (
+                TerminalApp::Alacritty,
+                &[
+                    ConfigOsTarget::Linux,
+                    ConfigOsTarget::MacOS,
+                    ConfigOsTarget::Windows,
+                ],
+            ),
+            (TerminalApp::ITerm2, &[ConfigOsTarget::MacOS]),
+            (TerminalApp::AppleTerminal, &[ConfigOsTarget::MacOS]),
+            (TerminalApp::Konsole, &[ConfigOsTarget::Linux]),
+            (TerminalApp::Foot, &[ConfigOsTarget::Linux]),
+            (
+                TerminalApp::Contour,
+                &[
+                    ConfigOsTarget::Linux,
+                    ConfigOsTarget::MacOS,
+                    ConfigOsTarget::Windows,
+                ],
+            ),
+            (
+                TerminalApp::Warp,
+                &[ConfigOsTarget::Linux, ConfigOsTarget::MacOS],
+            ),
+            (
+                TerminalApp::VsCode,
+                &[
+                    ConfigOsTarget::Linux,
+                    ConfigOsTarget::MacOS,
+                    ConfigOsTarget::Windows,
+                ],
+            ),
+        ];
+
+        for (app, targets) in floor {
+            let metadata = app
+                .metadata()
+                .unwrap_or_else(|| panic!("{app:?} regressed to uncovered metadata"));
+
+            for target in *targets {
+                assert!(
+                    !metadata.config.locations.for_target(*target).is_empty(),
+                    "{app:?} regressed to no {target:?} config candidates"
+                );
+            }
+        }
     }
 
     #[test]

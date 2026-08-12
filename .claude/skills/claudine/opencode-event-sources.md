@@ -1,8 +1,23 @@
 ---
-hash: 39a0c5d58ef53df2-dc0521dad5458b1b
+hash: ef46db3751d8e999-e0f59bf1a61e2da8
+last_updated: 2026-07-23
 ---
 
 # OpenCode Event Sources
+
+## Contents
+
+- Why the stderr source is mandatory for OpenCode
+- Configuration
+- Signal → Classification → SemanticEvent
+- Failure Classifications
+- Deduplication strategy
+- Watchdog interaction
+- End-of-run summary enrichment
+- Related files
+
+Use heading search to jump to the listed subsystem.
+
 
 OpenCode is the only provider Claudine wraps where **stdout NDJSON alone is
 insufficient** to drive the live renderer, the silence watchdog, and the
@@ -37,7 +52,7 @@ the renderer report progress while NDJSON is silent.
   heartbeat protects the silence watchdog but does not feed semantic
   rendering. Stderr fills that semantic gap.
 
-See [timeouts.md](../../../claudine/docs/topics/timeouts.md) for the full
+See [timeouts.md](timeouts.md) for the full
 silence-rule story and the per-step `provider_status` grace.
 
 ## Configuration
@@ -59,8 +74,8 @@ semantic event.
 ## Signal → Classification → SemanticEvent
 
 The table below is the authoritative mapping from stderr log lines (as
-classified by [`classify_lifecycle`](../../../claudine/lib/src/stream/logs/opencode/errors.rs))
-to the semantic events emitted by [`OpenCodeLogBridge`](../../../claudine/lib/src/stream/logs/opencode/reasoning.rs).
+classified by `classify_lifecycle`)
+to the semantic events emitted by `OpenCodeLogBridge`.
 
 | Stderr line shape | `LogClassification` variant | `SemanticEvent` emitted | Notes |
 |---|---|---|---|
@@ -77,9 +92,15 @@ to the semantic events emitted by [`OpenCodeLogBridge`](../../../claudine/lib/sr
 Failure-shaped lines (`ProviderLimit`, `MalformedAsset`, `ApiFailure`,
 `AuthFailure`, `UncaughtError`) continue to route through their existing
 `Warning` / `Error` handlers and are documented in
-[`reasoning.rs`](../../../claudine/lib/src/stream/logs/opencode/reasoning.rs).
+`bridge/mod.rs`.
 
 ## Failure Classifications
+
+For stdout NDJSON, a concrete provider error takes precedence over a later
+`Unexpected server error. Check server logs for details.` event from the same
+turn. OpenCode can emit both for one failure; Claudine emits and retains only
+the actionable first error so terminal output and the end-of-run summary agree.
+Other error sequences retain their normal last-event behavior.
 
 The `ProviderLimit` classification replaces the earlier monolithic `RateLimit`
 variant with a four-kind model that distinguishes **provider capacity** from
@@ -97,16 +118,92 @@ variant with a four-kind model that distinguishes **provider capacity** from
 The classifier applies these rules in strict priority order inside
 `classify_llm_failure`:
 
-1. **Cap with context** — `has_cap` ( `"code":"1308"`, `exceeded_current_quota_error`, or `"Usage limit reached"` ) **AND** the record carries an `error` tag → `UsageCap`.
+1. **Cap with context** — `has_cap` ( `"code":"1308"`, `exceeded_current_quota_error`, or `"Usage limit reached"` ) **AND** the record carries an error-context tag → `UsageCap`.
 2. **Retry exhaustion** — `status_code == 429` AND (`AI_RetryError` OR `maxRetriesExceeded`) → `RetriesExhausted`.
-3. **Cap without context** — `has_cap` but NO `error` tag → non-fatal `ApiFailure` (advisory path).
+3. **Cap without context** — `has_cap` but no error-context tag → non-fatal `ApiFailure` (advisory path).
 4. **Plain overload** — `status_code == 429` AND `is_overload` (case-insensitive match for `overload` / `engine_overloaded_error`) → `Overloaded`.
 5. **Plain rate limit** — `status_code == 429` with none of the above → `RateLimited`.
 
-The **error-context gate** (`record.tags.get("error").is_some()`) is the
-primary defense against false-positive termination. Only the presence of an
-`error` tag proves the line came from an OpenCode error envelope rather than
-echoed or quoted text.
+The failure path runs whenever the **effective** service is `llm`/`provider` —
+the literal `service=` tag, or, when absent, the value inferred from the
+`message` tag. OpenCode **1.17.8** emits stream failures as `message="stream
+error"` with no `service=` tag and the payload nested under `error.error="…"`
+(a flat string, not the legacy `error={JSON}` envelope), so both the
+service-inference and the error-context lookup must cover that shape.
+
+The **error-context gate** (`error_context(record).is_some()`, checking `error`,
+`error.error`, then `err`) is the primary defense against false-positive
+termination. Only the presence of an error-context tag proves the line came
+from an OpenCode error envelope rather than echoed or quoted text.
+
+### Repeated-stream-error backstop
+
+Independent of classification, the bridge counts consecutive `message="stream
+error"` records with no intervening step advance. Crossing
+`MAX_CONSECUTIVE_STREAM_ERRORS` (5) emits a terminal
+`Error { "provider stream failed N times…" }` and fires
+`EarlyTermination::RepeatedStreamError` (`error_kind = "repeated_stream_error"`,
+maps to `ProcessTermination::Aborted` → fail-fast `AgentFailure`). This bounds
+OpenCode's unbounded backoff retries so a *future* error vocabulary the
+classifier does not recognize as terminal still degrades to a bounded abort
+rather than an indefinite hang. The counter resets on any genuine step
+transition. See `fixes/_completed/2026-06-21-opencode-log-fix`.
+
+### Stalled-generation backstop (live-but-dead guard)
+
+A second, independent stderr backstop catches the **live-but-dead** shape: a
+run that keeps retrying a *dropped generation*. OpenCode re-emits a
+`service=llm ... stream` (`LlmCall` with `is_stream == true`) record on every
+retry, and those retries keep the byte heartbeat alive, so `step_timeout`
+never fires — yet no assistant text, tool call, or step advance is produced.
+The classifier sees no terminal error, so `RepeatedStreamError` does not fire
+either; the run is alive on the wire but producing nothing.
+
+The bridge counts streamed `LlmCall` records since the last progress event in
+`generation_count_since_progress`. The guard trips only when **both**
+conditions hold on the same `llm_call_start`:
+
+1. **Retry churn** — `generation_count_since_progress >= MAX_GENERATIONS_WITHOUT_PROGRESS` (`4`).
+2. **Progress silence** — `now - last_progress_at >= stall_timeout` (default `10m`).
+
+Either condition alone never fires — the count condition exempts a single
+legitimately-slow generation, and a long tool emitting **no** `LlmCall`
+records never trips even past `stall_timeout`. The two conditions are
+anti-correlated with healthy output: any stdout-origin progress would reset
+the count before it could reach the threshold.
+
+**Reset taxonomy.** The two progress clocks (`last_progress_at` +
+`generation_count_since_progress`) live in a shared `StalledGenerationProgress`
+cell so both producers can clear them. On the **stderr** bridge,
+`reset_stalled_generation_progress` advances `last_progress_at` and zeroes the
+count on the bridge-visible progress class — a genuine `StepLoop` advance
+(after the `(session_id, step)` dedup passes), `StepExit`, and subagent
+lifecycle (`SubagentStart` / `SubagentStop`). On the **stdout** NDJSON stream
+(a different reader thread), a `StalledProgressObserverSink` built from the same
+cell resets it for each progress-class semantic event
+(`SemanticEvent::is_stdout_progress_class`: `OutputText`, `Reasoning`,
+`ToolCall`, `ToolResult`, `SubagentStart`, `SubagentStop`, `FileChange`,
+`PlanUpdate`). Without the stdout-side reset a run could make real stdout
+progress and still trip on a later `llm_call_start`, because the stderr bridge
+never sees stdout events. Liveness-only events do **not** reset on either
+producer: another `LlmCall`, a deduped/repeated `StepLoop` for the same
+`(session_id, step)`, `http_response`, `permission_evaluated`, `service=bus`
+lines, raw bytes, and the stdout `Info`/`Warning`/`Error`/session-turn-envelope
+events.
+
+On trip the bridge emits a terminal `SemanticEvent::Error`
+(`SemanticErrorKind::AgentNative`, label **"Stalled Generation"**, carrying
+`generation_count` and the stall duration plus safe OpenCode metadata —
+session id, step, agent, provider id, model id, mode; never prompt text or
+tool payloads) and fires `EarlyTermination::StalledGeneration`
+(`error_kind = "stalled_generation"`, maps to `ProcessTermination::Aborted` →
+fail-fast `AgentFailure`, **never** `handle_timeout:`). The two backstops are
+fully independent: `LlmCall` churn never clears `consecutive_stream_errors`,
+and a `stream error` never clears `generation_count_since_progress`. Both
+share the bridge's single `fire_early_termination` idempotency, so at most one
+terminal abort is emitted per bridge. See
+[timeouts.md — OpenCode stalled-generation backstop](timeouts.md#opencode-stalled-generation-backstop)
+and the spec.
 
 ### The `kimi-for-coding` gap
 
@@ -164,10 +261,11 @@ NDJSON omits it.
 
 ## Related files
 
-- [`claudine/cli/src/commands/wrap/profile/opencode.rs`](../../../claudine/cli/src/commands/wrap/profile/opencode.rs) — argv configuration (`--print-logs --log-level INFO`).
-- [`claudine/lib/src/stream/logs/opencode/events.rs`](../../../claudine/lib/src/stream/logs/opencode/events.rs) — JSONL header / body parser and `LogClassification` enum.
-- [`claudine/lib/src/stream/logs/opencode/errors.rs`](../../../claudine/lib/src/stream/logs/opencode/errors.rs) — `classify` / `classify_lifecycle` / failure classifiers.
-- [`claudine/lib/src/stream/logs/opencode/reasoning.rs`](../../../claudine/lib/src/stream/logs/opencode/reasoning.rs) — `OpenCodeLogBridge` and `merge_stderr_state_into_summary`.
-- [`claudine/lib/src/stream/providers/opencode.rs`](../../../claudine/lib/src/stream/providers/opencode.rs) — NDJSON parser; no longer synthesizes `SubagentStart`/`SubagentStop` from `task` tool_use.
-- [`claudine/docs/topics/timeouts.md`](../../../claudine/docs/topics/timeouts.md) — `step_timeout`, byte heartbeat, per-step grace.
-- [`claudine/docs/research/agent-cli/opencode.md`](../../../claudine/docs/research/agent-cli/opencode.md) — research source for the stderr schema.
+- `claudine/cli/src/commands/wrap/profile/opencode.rs` — argv configuration (`--print-logs --log-level INFO`).
+- `claudine/lib/src/stream/logs/opencode/events.rs` — JSONL header / body parser and `LogClassification` enum.
+- `claudine/lib/src/stream/logs/opencode/classify/mod.rs` — `classify` / `classify_raw` / failure classifiers and `merge_rate_limit`.
+- `claudine/lib/src/stream/logs/opencode/bridge/mod.rs` — `OpenCodeLogBridge` (stderr bridge).
+- `claudine/lib/src/stream/logs/opencode/state.rs` — `SharedStderrState` and `merge_stderr_state_into_summary`.
+- `claudine/lib/src/stream/providers/opencode.rs` — NDJSON parser; no longer synthesizes `SubagentStart`/`SubagentStop` from `task` tool_use.
+- [`timeouts.md`](timeouts.md) — `step_timeout`, byte heartbeat, per-step grace.
+- `claudine/docs/research/agent-cli/opencode.md` — research source for the stderr schema.

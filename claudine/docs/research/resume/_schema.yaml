@@ -1,0 +1,74 @@
+# SimplifiedSchema for the resume research topic.
+#
+# Captures provider session continuation behavior for Claudine lifecycle
+# `resume`, recovery, and possible human-in-the-loop continuation.
+$schema:
+    # Date the research file was first created.
+    created: date
+
+    # Date the provider resume behavior was last verified.
+    last_updated: date(required)
+
+    # Agent/model that produced the research.
+    agent: string(required)
+    model: string(required)
+
+    # Primary official session/resume documentation URL.
+    docs: url
+
+    # Overall resume support level for Claudine integration.
+    support: enum(first_class,partial,interactive_only,non_interactive_only,none,unknown; required)
+
+    # What "resume" means for this provider. Transcript replay reconstructs
+    # context from saved messages; server_session reattaches to remote state;
+    # live_process attaches to a still-running process; checkpoint_snapshot
+    # restores a named branch/checkpoint.
+    continuity_model: enum(transcript_replay,server_session,live_process,checkpoint_snapshot,mixed,none,unknown)
+
+    # Supported resume modes and entry points.
+    resume_modes: "{ mode: enum(interactive,non_interactive,headless_server,ide,api,unknown; required), supported: boolean(required), mechanisms: string[], accepts_followup_prompt: boolean, selection_methods: enum(latest,id,name,index,picker,all_projects,worktree,branch,pr,unknown,other)[], notes: string }[]"
+
+    # How session identifiers, names, or transcript references are emitted or discovered.
+    session_id_capture: "{ surface: enum(stdout,stderr,json_stream,log_file,session_file,cli_command,interactive_ui,hook,unknown,other; required), field: string, format: string, notes: string }[]"
+
+    # Exact commands, slash commands, API calls, or UI paths that continue an
+    # existing session.
+    resume_invocations: "{ mode: enum(interactive,non_interactive,headless_server,ide,api,both; required), invocation: string(required), accepts_prompt: boolean, selection: enum(latest,id,name,index,picker,all_projects,worktree,branch,pr,unknown,other), notes: string }[]"
+
+    # Local/server persistence of resumable state.
+    state_storage: "{ location: enum(local,server,both,none,unknown; required), os: enum(macos,linux,windows), path: string, format: string, retention: string, notes: string }[]"
+
+    # Scope rules for finding resumable sessions.
+    resume_scope: "{ project_scoped: boolean, cwd_scoped: boolean, worktree_aware: boolean, all_projects_supported: boolean, branch_filtering: boolean, notes: string }"
+
+    # Branch, fork, rewind, or checkpoint behavior related to resume.
+    branching_checkpointing: "{ branch_supported: boolean, checkpoint_supported: boolean, fork_invocation: string, checkpoint_invocation: string, preserves_original: boolean, notes: string }"
+
+    # Whether approvals, model choice, tools, roots, and environment are restored
+    # or recalculated when a session resumes.
+    restored_state: "{ transcript: boolean, tool_results: boolean, approvals: enum(preserved,cleared,session_only,unknown), model: enum(restored,overridable,recalculated,unknown), cwd: enum(restored,current_launch_dir,configurable,unknown), env: enum(restored,current_process,explicit_only,unknown), notes: string }"
+
+    # Whether interrupted permission/user questions can be resumed with answers.
+    hitl_resume: "{ supported: boolean(required), question_capture: string, answer_injection: string, limitations: string }"
+
+    # Behavior after crash, Ctrl+C, process kill, terminal close, network loss, or
+    # provider-side failure.
+    interruption_recovery: "{ crash_resume: boolean, ctrl_c_resume: boolean, pending_tool_resume: boolean, pending_approval_resume: boolean, limitations: string }"
+
+    # Stream/hook observability relevant to resume.
+    observability: "{ stream_events: string[], hook_events: string[], failure_modes: string[], notes: string }"
+
+    # Provider-specific surprises, edge cases, or unsafe assumptions.
+    quirks: string[]
+
+    # Claims that current docs/local inspection could not verify.
+    gaps: string[]
+
+    # Update-mode changelog entries. Fresh first-run documents should use [].
+    changes: string[]
+
+    # Whether discovered behavior requires Claudine code/generated metadata changes.
+    requires_claudine_update: boolean(required)
+
+    # Short explanation for `requires_claudine_update`.
+    reason: string

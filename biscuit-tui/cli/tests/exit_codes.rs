@@ -1,11 +1,11 @@
 mod common;
+use test_toolkit::{Level, require_level};
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 
 #[test]
 fn choose_one_exits_nonzero_when_no_option_source() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-one"])
         .assert()
         .failure()
@@ -15,7 +15,7 @@ fn choose_one_exits_nonzero_when_no_option_source() {
 
 #[test]
 fn choose_many_exits_nonzero_when_no_option_source() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["choose-many"])
         .assert()
         .failure()
@@ -25,7 +25,7 @@ fn choose_many_exits_nonzero_when_no_option_source() {
 
 #[test]
 fn input_table_exits_nonzero_with_malformed_columns() {
-    cargo_bin_cmd!("question")
+    assert_cmd::Command::cargo_bin("question").unwrap()
         .args(["input-table", "--columns", "not-json"])
         .assert()
         .failure()
@@ -73,7 +73,7 @@ fn every_subcommand_exits_with_code_1_on_non_tty_event_loop_read() {
     ];
 
     for (_name, args) in test_cases {
-        cargo_bin_cmd!("question")
+        assert_cmd::Command::cargo_bin("question").unwrap()
             .args(&args)
             .assert()
             .failure()
@@ -83,7 +83,12 @@ fn every_subcommand_exits_with_code_1_on_non_tty_event_loop_read() {
 }
 
 #[test]
-fn text_input_exits_with_code_1_on_escape_in_real_tty() {
+fn level2_text_input_exits_with_code_1_on_escape_in_pty() {
+    require_level!(
+        Level::L2,
+        common::expect_driver_available(),
+        "expect (PTY script driver)"
+    );
     // Phase 12 split: Esc now maps to exit code 1 (ABORTED), distinct
     // from Ctrl+C which continues to map to 130 (CANCELLED).
     let output = common::run_question_in_pty(&["text-input", "--initial", "Ada"], r"\033", 1);

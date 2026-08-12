@@ -49,23 +49,7 @@ pub fn get_current_worktree_name(cwd: &Path) -> Result<Option<String>, Box<dyn E
     let Some(repo) = super::open::trusted_discover(cwd)? else {
         return Ok(None);
     };
-
-    // Not a linked worktree — either the main repo or a bare repo. A linked
-    // worktree has a per-worktree git dir distinct from the common dir.
-    if !is_linked_worktree(&repo) {
-        return Ok(None);
-    }
-
-    let Some(workdir) = repo.workdir() else {
-        return Ok(None);
-    };
-
-    // Canonicalize first: gix may report a relative workdir (no `file_name`).
-    let canonical = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
-    Ok(canonical
-        .file_name()
-        .and_then(|n| n.to_str())
-        .map(String::from))
+    Ok(current_worktree_name_from_gix(&repo))
 }
 
 /// True when `repo` is a linked worktree rather than the main worktree.
@@ -130,15 +114,48 @@ pub fn list_worktrees(base_dir: &Path) -> Result<Option<Vec<WorktreeEntry>>, Box
     let Some(discovered) = super::open::trusted_discover(base_dir)? else {
         return Ok(None);
     };
+    list_worktrees_from_gix(&discovered).map(Some)
+}
 
+/// [`list_worktrees`] against an already-discovered repository.
+///
+/// Identical output to `list_worktrees(repo.repo_root())`, without the second
+/// `trusted_discover`. Exists so an aggregate observation can enumerate
+/// worktrees on the one handle it already holds.
+pub fn list_worktrees_with_repo(repo: &super::GitRepo) -> Result<Vec<WorktreeEntry>, Box<dyn Error>> {
+    repo.with_cached_gix(list_worktrees_from_gix)
+}
+
+/// [`get_current_worktree_name`] against an already-discovered repository.
+pub fn current_worktree_name_with_repo(repo: &super::GitRepo) -> Option<String> {
+    repo.with_cached_gix(current_worktree_name_from_gix)
+}
+
+pub(crate) fn current_worktree_name_from_gix(repo: &gix::Repository) -> Option<String> {
+    // Not a linked worktree — either the main repo or a bare repo.
+    if !is_linked_worktree(repo) {
+        return None;
+    }
+    let workdir = repo.workdir()?;
+    // Canonicalize first: gix may report a relative workdir (no `file_name`).
+    let canonical = std::fs::canonicalize(workdir).unwrap_or_else(|_| workdir.to_path_buf());
+    canonical
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(String::from)
+}
+
+pub(crate) fn list_worktrees_from_gix(
+    discovered: &gix::Repository,
+) -> Result<Vec<WorktreeEntry>, Box<dyn Error>> {
     // If discovery landed on a linked worktree, open the base repository so
     // that worktree enumeration includes the main worktree as well.
-    let base_repo = if is_linked_worktree(&discovered) {
+    let base_repo = if is_linked_worktree(discovered) {
         Some(super::open::trusted_open(discovered.common_dir())?)
     } else {
         None
     };
-    let repo = base_repo.as_ref().unwrap_or(&discovered);
+    let repo = base_repo.as_ref().unwrap_or(discovered);
 
     // Determine the current workdir so we can mark exactly one entry as current.
     let current_workdir = std::env::current_dir().ok();
@@ -182,13 +199,19 @@ pub fn list_worktrees(base_dir: &Path) -> Result<Option<Vec<WorktreeEntry>>, Box
         let path = proxy
             .base()
             .map_err(|e| SniffError::git("worktree_base", e))?;
-        let canonical = std::fs::canonicalize(&path).unwrap_or(path);
+        if path.as_os_str().is_empty() {
+            return Err(SniffError::git("worktree_base", "worktree path is empty").into());
+        }
+        let canonical = std::fs::canonicalize(&path).unwrap_or_else(|_| {
+            match (path.parent(), path.file_name()) {
+                (Some(parent), Some(name)) => std::fs::canonicalize(parent)
+                    .map(|canonical_parent| canonical_parent.join(name))
+                    .unwrap_or(path),
+                _ => path,
+            }
+        });
 
-        // Open the worktree as its own repository to read HEAD.
-        let (branch, is_detached) = {
-            let wt_repo = super::open::trusted_open(&canonical)?;
-            resolve_branch_and_detached(&wt_repo)
-        };
+        let (branch, is_detached) = resolve_linked_branch_and_detached(proxy.git_dir());
 
         let is_current = is_worktree_current(&canonical, current_canonical.as_deref());
 
@@ -202,7 +225,7 @@ pub fn list_worktrees(base_dir: &Path) -> Result<Option<Vec<WorktreeEntry>>, Box
     }
 
     entries.sort_by(|a, b| a.name.cmp(&b.name));
-    Ok(Some(entries))
+    Ok(entries)
 }
 
 /// Resolves the branch name and detached-HEAD state for a repository.
@@ -217,6 +240,23 @@ fn resolve_branch_and_detached(repo: &gix::Repository) -> (Option<String>, bool)
         head.referent_name().map(|name| name.shorten().to_string())
     };
     (branch, is_detached)
+}
+
+fn resolve_linked_branch_and_detached(git_dir: &Path) -> (Option<String>, bool) {
+    let Ok(bytes) = std::fs::read(git_dir.join("HEAD")) else {
+        return (None, false);
+    };
+    let head = bytes.trim();
+    if let Some(reference) = head.strip_prefix(b"ref: ") {
+        let reference = reference.as_bstr().to_str_lossy();
+        let branch = reference
+            .strip_prefix("refs/heads/")
+            .unwrap_or(&reference)
+            .to_string();
+        (Some(branch), false)
+    } else {
+        (None, gix::ObjectId::from_hex(head).is_ok())
+    }
 }
 
 /// Checks whether a worktree's canonical path matches the current directory.
@@ -355,6 +395,28 @@ mod tests {
     }
 
     #[test]
+    fn list_worktrees_from_bare_common_repo_has_no_main_entry() {
+        let common = TempDir::new().unwrap();
+        let checkout = TempDir::new().unwrap();
+        let checkout_path = checkout.path().join("linked");
+        let repo = git2::Repository::init_bare(common.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.treebuilder(None).unwrap().write().unwrap();
+        let tree = repo.find_tree(tree_id).unwrap();
+        repo.commit(Some("HEAD"), &sig, &sig, "initial", &tree, &[])
+            .unwrap();
+        repo.worktree("linked", &checkout_path, None).unwrap();
+
+        let worktrees = list_worktrees(&checkout_path).unwrap().unwrap();
+        assert_eq!(worktrees.len(), 1, "a bare common repo has no main checkout");
+        assert_eq!(worktrees[0].name, "linked");
+        assert_eq!(
+            worktrees[0].path,
+            std::fs::canonicalize(checkout_path).unwrap()
+        );
+    }
+
+    #[test]
     fn list_worktrees_with_linked_worktrees() {
         let (dir, repo) = setup_repo();
 
@@ -417,6 +479,67 @@ mod tests {
             .expect("detached worktree should exist");
         assert!(detached.is_detached, "linked worktree should be detached");
         assert_eq!(detached.branch, None, "branch should be None when detached");
+    }
+
+    #[test]
+    fn list_worktrees_reads_linked_admin_metadata_without_repository_open() {
+        let (dir, repo) = setup_repo();
+        let wt_path = dir.path().join("native-ü-path");
+        repo.worktree("native-ü", &wt_path, None).unwrap();
+
+        let collector = crate::performance::PerformanceCollector::new_shared();
+        let worktrees = crate::performance::with_current_collector(
+            Some(collector.clone()),
+            || list_worktrees(dir.path()).unwrap().unwrap(),
+        );
+        let counters = collector
+            .snapshot(std::time::Duration::ZERO)
+            .counters;
+
+        assert_eq!(
+            counters
+                .get(crate::performance::counters::GIT_WORKTREE_OPENS)
+                .copied()
+                .unwrap_or(0),
+            0,
+            "branch and detached state come from admin HEAD: {counters:?}"
+        );
+        let linked = worktrees
+            .iter()
+            .find(|worktree| worktree.name == "native-ü")
+            .unwrap();
+        assert_eq!(linked.path, std::fs::canonicalize(&wt_path).unwrap());
+        assert!(linked.branch.is_some());
+        assert!(!linked.is_detached);
+    }
+
+    #[test]
+    fn list_worktrees_preserves_prunable_and_missing_head_metadata() {
+        let (dir, repo) = setup_repo();
+        let wt_path = dir.path().join("prunable");
+        repo.worktree("prunable", &wt_path, None).unwrap();
+        let admin = dir.path().join(".git/worktrees/prunable");
+
+        std::fs::remove_dir_all(&wt_path).unwrap();
+        let prunable = list_worktrees(dir.path()).unwrap().unwrap();
+        let linked = prunable
+            .iter()
+            .find(|worktree| worktree.name == "prunable")
+            .expect("stale checkout remains represented by its admin metadata");
+        assert_eq!(
+            linked.path,
+            std::fs::canonicalize(dir.path()).unwrap().join("prunable")
+        );
+        assert!(linked.branch.is_some());
+
+        std::fs::remove_file(admin.join("HEAD")).unwrap();
+        let missing_head = list_worktrees(dir.path()).unwrap().unwrap();
+        let linked = missing_head
+            .iter()
+            .find(|worktree| worktree.name == "prunable")
+            .expect("missing HEAD does not erase the registered worktree");
+        assert_eq!(linked.branch, None);
+        assert!(!linked.is_detached);
     }
 
     #[test]

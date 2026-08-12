@@ -11,7 +11,7 @@
 //! authoritative, so the section classifications and rendered text live here and
 //! are owned by the hashing feature.
 
-use super::compare::{ComparisonDetail, HashComparison, IgnorePolicyAdvisory};
+use super::compare::{ComparisonDetail, HashComparison, IgnorePolicyAdvisory, compare_options};
 use super::compute::{ComputedHash, SectionTuple};
 use super::kind::MdHashKind;
 use super::options::MdHashOptions;
@@ -451,8 +451,49 @@ impl Markdown {
         stored: &StoredHash,
         options: &MdHashOptions,
     ) -> MarkdownResult<HashExplanation> {
-        let comparison = self.compare_hash(stored, options)?;
+        Ok(self.diff_hash(stored, options)?.1)
+    }
 
+    /// The comparison **and** the explanation for one diff, derived from a
+    /// single computed artifact.
+    ///
+    /// The shared implementation behind [`Self::explain_hash_diff`], which needs
+    /// the comparison to build the explanation from. Private: publishing the
+    /// pairing would add public API shape, which compatibility invariant 2 of
+    /// the 2026-07-15 performance follow-up bars.
+    ///
+    /// ## Errors
+    ///
+    /// Propagates [`MarkdownError::MalformedStoredHash`] from
+    /// [`Self::compare_hash`] when a stored value is malformed for its kind.
+    ///
+    /// [`MarkdownError::MalformedStoredHash`]: crate::markdown::MarkdownError::MalformedStoredHash
+    fn diff_hash(
+        &self,
+        stored: &StoredHash,
+        options: &MdHashOptions,
+    ) -> MarkdownResult<(HashComparison, HashExplanation)> {
+        let computed = self.compute_hash(stored.kind, &compare_options(stored, options));
+        self.diff_with_computed(stored, options, &computed)
+    }
+
+    /// [`Self::diff_hash`] against an already-computed artifact.
+    ///
+    /// `computed` **must** be `compute_hash(stored.kind, compare_options(stored,
+    /// options))`; the comparison and the explanation are only like-for-like
+    /// under that identity.
+    fn diff_with_computed(
+        &self,
+        stored: &StoredHash,
+        options: &MdHashOptions,
+        computed: &ComputedHash,
+    ) -> MarkdownResult<(HashComparison, HashExplanation)> {
+        let comparison = self.compare_with_computed(stored, options, computed)?;
+
+        // The detailed per-section alignment needs the same artifact the
+        // comparison used: `detailed_body` is only reachable through
+        // `ComparisonDetail::Detailed`, which only arises when
+        // `stored.kind == Detailed`, so they are provably the same artifact.
         let body = match comparison.detail {
             ComparisonDetail::Coarse => coarse_body(stored.kind, &comparison),
             ComparisonDetail::Structured {
@@ -466,22 +507,27 @@ impl Markdown {
                 fm_keys_changed, ..
             } => ExplanationBody::Detailed {
                 frontmatter: FmConcern::from_signals(comparison.frontmatter_changed, fm_keys_changed),
-                body: self.detailed_body(stored, options)?,
+                body: Self::detailed_body(stored, options, computed)?,
             },
         };
 
-        Ok(HashExplanation {
+        let explanation = HashExplanation {
             body,
-            ignore_policy: comparison.ignore_policy,
-        })
+            ignore_policy: comparison.ignore_policy.clone(),
+        };
+        Ok((comparison, explanation))
     }
 
-    /// Recomputes the detailed value under the stored ignore-set and aligns it
-    /// against the stored detailed value to produce per-section reports.
+    /// Aligns the like-for-like detailed artifact against the stored detailed
+    /// value to produce per-section reports.
+    ///
+    /// `computed` is the caller's already-computed
+    /// `compute_hash(Detailed, compare_options(..))`; this no longer recomputes
+    /// it, since the caller needed the same artifact for the comparison.
     fn detailed_body(
-        &self,
         stored: &StoredHash,
         options: &MdHashOptions,
+        computed: &ComputedHash,
     ) -> MarkdownResult<DetailedBody> {
         let StoredHashValue::Detailed(stored_value) = &stored.value else {
             return Err(malformed(
@@ -490,16 +536,10 @@ impl Markdown {
             ));
         };
 
-        // Like-for-like: recompute under the STORED ignore-set, never the env set.
-        let compare_opts = MdHashOptions {
-            property: options.property.clone(),
-            extra_ignored: stored.ignored.clone(),
-            forced_kind: None,
-            strict: options.strict,
-        };
-        let ComputedHash::Detailed(current) = self.compute_hash(MdHashKind::Detailed, &compare_opts)
-        else {
-            unreachable!("compute_hash(Detailed, …) always yields ComputedHash::Detailed");
+        let ComputedHash::Detailed(current) = computed else {
+            unreachable!(
+                "detailed_body is only reachable via ComparisonDetail::Detailed, which requires a Detailed artifact"
+            );
         };
 
         let preamble = preamble_report(&stored_value.preamble, &current.preamble);

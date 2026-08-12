@@ -5,9 +5,9 @@
 //! > Interactive approval prompts for unapproved shell commands appear
 //! > exactly as in normal mode.
 //!
-//! The Level 1 process tests in `wrap_commands.rs` cover the **non-TTY**
-//! gate (`compose_dry_run_non_tty_unapproved_shell_emits_gate_error`) and
-//! the `--yolo` bypass. This file drives the approval prompt through a real
+//! The Level 1 process tests in `wrap_compose_preflight.rs` cover the
+//! **non-TTY** gate (`compose_dry_run_non_tty_unapproved_shell_emits_gate_error`)
+//! and the `--yolo` bypass. This file drives the approval prompt through a real
 //! pseudo-terminal to prove the interactive handler still fires under
 //! `--dry-run` — `dry_run` only changes the *no-handler* branch, so with a
 //! TTY (handler present) the prompt path must be untouched.
@@ -164,7 +164,7 @@ fn stage_shell_approval_doc() -> StagedApproval {
 /// fixture, with the environment normalized so the approval prompt renders
 /// identically regardless of the developer's shell.
 fn compose_command(staged: &StagedApproval, dry_run: bool) -> Command {
-    let mut cmd = Command::new(cargo_bin!("claudine"));
+    let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.arg("compose").arg("--goose");
     if dry_run {
         cmd.arg("--dry-run");

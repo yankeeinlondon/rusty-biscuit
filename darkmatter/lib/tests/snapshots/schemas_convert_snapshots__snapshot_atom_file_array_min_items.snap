@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 115
 expression: "convert_atom(\"file(match('*.png'))[](min(1))\")"
 ---
 {
@@ -7,15 +8,19 @@ expression: "convert_atom(\"file(match('*.png'))[](min(1))\")"
   "additionalProperties": true,
   "properties": {
     "field": {
-      "items": {
-        "format": "darkmatter-file",
-        "type": "string",
-        "x-darkmatter-match": [
-          "*.png"
-        ]
-      },
-      "minItems": 1,
-      "type": "array"
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "items": {
+            "format": "darkmatter-file-reference",
+            "type": "string"
+          },
+          "minItems": 1,
+          "type": "array"
+        }
+      ]
     }
   },
   "type": "object"

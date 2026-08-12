@@ -39,6 +39,17 @@ mod runit;
 mod systemd;
 mod windows_scm;
 
+#[cfg(any(test, feature = "bench-internals"))]
+#[doc(hidden)]
+pub mod benchmark;
+
+/// Units per enrichment subprocess when a backend queries many services at once.
+///
+/// This bounds command-line length, nothing else — a backend must not treat it as
+/// a limit on how many services it reports. Sized well under the smallest
+/// `ARG_MAX` sniff targets even with long unit names.
+pub(crate) const ENRICHMENT_CHUNK: usize = 128;
+
 // =============================================================================
 // Host OS Detection
 // =============================================================================

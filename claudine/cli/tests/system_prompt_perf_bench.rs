@@ -9,7 +9,8 @@
 //! The test is `#[ignore]`d by default — it's diagnostic, not a gate.
 
 use claudine::system_prompt::{
-    ResolvedSystemPrompt, LaunchContext, SystemPromptArgs, resolve_and_prepare_for_session,
+    LaunchContext, ResolvedSystemPrompt, SystemPromptArgs,
+    resolve_and_prepare_for_session_with_context,
 };
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;
@@ -29,7 +30,7 @@ fn launch_context_for_root(root: &std::path::Path) -> LaunchContext {
         agent: None,
         cwd: root.to_path_buf(),
         repo_root: Some(root.to_path_buf()),
-        package_area_root: None,
+        package_area_root: Some(root.to_path_buf()),
         package_root: None,
     }
 }
@@ -44,24 +45,30 @@ fn bench_system_prompt_resolution_cold_and_warm() {
     }
     let ctx = launch_context_for_root(&root);
     let args = SystemPromptArgs::default();
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(&root);
 
     // First call: cold — pays for any one-time lazy initialisations
     // (Darkmatter parsers, syntect grammar tables, regex compiles, …).
     let t0 = Instant::now();
-    let cold = resolve_and_prepare_for_session(&args, &ctx, true).unwrap();
+    let cold =
+        resolve_and_prepare_for_session_with_context(&args, &ctx, true, &invocation).unwrap();
     let cold_elapsed = t0.elapsed();
     eprintln!("cold resolve_and_prepare_for_session: {cold_elapsed:?}");
+    eprintln!("cold work: {:#?}", invocation.work_snapshot());
 
     // Second call in the same process: warm — pays only the actual
     // composition cost. The delta from cold isolates lazy init overhead.
     let t1 = Instant::now();
-    let warm = resolve_and_prepare_for_session(&args, &ctx, true).unwrap();
+    let warm =
+        resolve_and_prepare_for_session_with_context(&args, &ctx, true, &invocation).unwrap();
     let warm_elapsed = t1.elapsed();
     eprintln!("warm resolve_and_prepare_for_session: {warm_elapsed:?}");
+    eprintln!("warm cumulative work: {:#?}", invocation.work_snapshot());
 
     // Third call to confirm warm path is stable.
     let t2 = Instant::now();
-    let _ = resolve_and_prepare_for_session(&args, &ctx, true).unwrap();
+    let _ =
+        resolve_and_prepare_for_session_with_context(&args, &ctx, true, &invocation).unwrap();
     let warm2 = t2.elapsed();
     eprintln!("warm #2 resolve_and_prepare_for_session: {warm2:?}");
 
@@ -88,6 +95,7 @@ fn bench_resolve_and_prepare_step_by_step() {
     let root = worktree_root();
     let ctx = launch_context_for_root(&root);
     let args = SystemPromptArgs::default();
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(&root);
 
     for run in 1..=3 {
         let t0 = Instant::now();
@@ -152,12 +160,72 @@ fn bench_resolve_and_prepare_step_by_step() {
     // Now call the real function for comparison.
     for run in 1..=3 {
         let t = Instant::now();
-        let _ = resolve_and_prepare_for_session(&args, &ctx, true).unwrap();
+        let _ =
+            resolve_and_prepare_for_session_with_context(&args, &ctx, true, &invocation).unwrap();
         eprintln!(
             "run #{run} resolve_and_prepare_for_session: {:?}",
             t.elapsed()
         );
+        eprintln!("run #{run} cumulative work: {:#?}", invocation.work_snapshot());
     }
+}
+
+#[test]
+#[ignore = "diagnostic perf bench; run with --ignored --nocapture"]
+fn bench_request_topology_probe_and_reuse() {
+    fn init_repo(path: &std::path::Path) {
+        let status = std::process::Command::new("git")
+            .args(["init", "--initial-branch=main", "--quiet"])
+            .current_dir(path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    let fixture = tempfile::tempdir().unwrap();
+    let launch = fixture.path().join("launch");
+    let sibling = fixture.path().join("sibling");
+    std::fs::create_dir_all(&launch).unwrap();
+    std::fs::create_dir_all(&sibling).unwrap();
+    init_repo(&launch);
+    init_repo(&sibling);
+    let launch_prompt = launch.join("prompt.md");
+    let sibling_prompt = sibling.join("prompt.md");
+    std::fs::write(&launch_prompt, "launch {{ ctx.repo.root }}").unwrap();
+    std::fs::write(&sibling_prompt, "sibling {{ ctx.repo.root }}").unwrap();
+
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(&launch);
+    let ctx = launch_context_for_root(&launch);
+    let prepare = |path: &std::path::Path| {
+        let args = SystemPromptArgs {
+            append_file: None,
+            replace_file: Some(path.to_string_lossy().into_owned()),
+        };
+        resolve_and_prepare_for_session_with_context(&args, &ctx, false, &invocation).unwrap()
+    };
+    let launch_started = Instant::now();
+    prepare(&launch_prompt);
+    eprintln!(
+        "launch source: {:?}, work={:#?}",
+        launch_started.elapsed(),
+        invocation.work_snapshot()
+    );
+
+    let reuse_started = Instant::now();
+    prepare(&launch_prompt);
+    eprintln!(
+        "launch source reuse: {:?}, work={:#?}",
+        reuse_started.elapsed(),
+        invocation.work_snapshot()
+    );
+
+    let sibling_started = Instant::now();
+    prepare(&sibling_prompt);
+    eprintln!(
+        "sibling source: {:?}, work={:#?}",
+        sibling_started.elapsed(),
+        invocation.work_snapshot()
+    );
 }
 
 #[test]

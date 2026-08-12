@@ -290,7 +290,7 @@ mod tests {
         use winreg::RegKey;
         use winreg::enums::{HKEY_CURRENT_USER, KEY_ALL_ACCESS};
 
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
 
         let tmp = NamedTempFile::new().unwrap();
         let tmp_path = tmp.path().to_path_buf();
@@ -328,7 +328,7 @@ mod tests {
         use winreg::RegKey;
         use winreg::enums::HKEY_CURRENT_USER;
 
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
 
         const TEST_KEY: &str =
             r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\sniff_test_orphan_99999.exe";
@@ -424,7 +424,7 @@ mod tests {
     fn install_root_dirs_reads_env_vars() {
         use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
 
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let mut env = ScopedEnv::new();
         env.set("ProgramFiles", r"C:\pf");
         env.set("ProgramFiles(x86)", r"C:\pf86");

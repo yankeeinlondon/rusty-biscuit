@@ -20,7 +20,7 @@ use common::pane_geometry::{find_row_of, parse_debug_cursor_before, parse_debug_
 use common::send_bt_command;
 use serial_test::serial;
 use std::time::Duration;
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Backend, Level, require_level};
 use unicode_width::UnicodeWidthStr;
 
 /// Process-shared WezTerm pane reused across the cursor / hygiene tests.
@@ -52,11 +52,7 @@ fn position_cursor(harness: &mut impl TerminalHarness, row: u32) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_cursor_lands_below_rendered_image() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -166,11 +162,7 @@ fn level2_cursor_lands_below_rendered_image() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_no_orphan_save_restore_sequences() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));
@@ -200,11 +192,7 @@ fn level2_no_orphan_save_restore_sequences() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_dir_command_unicode_widths_in_capture() {
-    require_level!(
-        Level::L2,
-        WezTermHarness::available(),
-        "WezTerm CLI (set WEZTERM_UNIX_SOCKET)",
-    );
+    require_level!(Level::L2, WezTermHarness::available(), Backend::WezTerm);
 
     let mut guard = SHARED_WEZTERM
         .get_or_init(|| WezTermHarness::shared_or_spawn().expect("attach/spawn WezTerm"));

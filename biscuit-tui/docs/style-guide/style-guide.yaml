@@ -34,7 +34,7 @@ list:
     - name: trippy
       desc: a network monitoring tool
       kind: example
-    - name: Refine Design Language
+    - name: Style Guide
       agent: claude
     - name: boolean_switch
       kind: component

@@ -79,12 +79,14 @@ pub(crate) mod parse_utils;
 pub(crate) mod perf;
 pub(crate) mod pipeline;
 mod schema_validation;
+pub mod subtree;
 mod util;
 
 #[cfg(test)]
 mod type_tests;
 
 pub mod block_pairs;
+pub mod directives_api;
 pub mod expression;
 pub mod file_links;
 pub(crate) mod inline;
@@ -103,7 +105,9 @@ pub mod transclusion;
 
 pub use biscuit_file::PathPosition;
 pub use cache::{CacheAccessMode, CacheFreshnessMode, CacheStats};
-pub use context::ContextMergeDiagnostic;
+pub use context::{
+    ContextCaptureEvidence, ContextGroup, ContextMergeDiagnostic, ContextRequirements,
+};
 pub use file_links::FileLinksError;
 pub use remote::{
     DEFAULT_REMOTE_CONCURRENCY, DiscoveredRemoteUrl, REMOTE_CONCURRENCY_ENV, RemoteFreshnessMode,
@@ -111,6 +115,10 @@ pub use remote::{
     resolve_remote_concurrency,
 };
 pub use remote_fetch::RemoteFetchStats;
+pub use frontmatter_shell_expansion::{
+    FrontmatterShellAction, FrontmatterShellBody, FrontmatterShellPipeline, FrontmatterShellSuffix,
+    FrontmatterShellTernary, FrontmatterShellValue, parse_frontmatter_shell_value_spanned,
+};
 pub use preflight::{ComposePreflightApprovals, ComposePreflightReport, PreflightApprovalStats, collect_shell_commands};
 pub use shell_blocks::ShellBlockError;
 pub use shell_expansion::ShellCommandOrigin;
@@ -119,6 +127,7 @@ pub use shell_expansion::ShellTimeoutBehavior;
 pub use context::effective_state::{EffectiveState, EffectiveStateBuilder};
 pub(crate) use context::effective_state::ResolvingLookup;
 pub use context::options::{ComposeOptions, ComposeSource};
+pub(crate) use context::options::ReferenceGraphOptionsIdentity;
 pub use context::report::{ComposeReport, ComposeWarning, SourceRange};
 pub use context::runtime::ComposeContext;
 pub use perf::{
@@ -135,8 +144,11 @@ pub use transclusion::TransclusionError;
 pub(crate) use context::options::TransclusionOptions;
 
 // Shared helpers, re-exported so in-crate callers reach them as `compose::<name>`.
+pub use util::find_git_root_from;
 pub(crate) use util::{
-    abbreviate_path, find_git_root_from, find_target_range, prepare_frontmatter_for_compose,
+    abbreviate_path, document_resolution_context, find_package_area_from, find_target_range,
+    package_area_for_reference,
+    prepare_frontmatter_for_compose,
 };
 
 use super::Markdown;

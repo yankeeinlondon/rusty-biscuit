@@ -109,28 +109,12 @@ KimiCode stores agent definitions as YAML files in `.kimi/agents/`.
 
 KimiCode agents are fundamentally incompatible because two of the three required properties (`system_prompt_path` and `tools` as a structured type) have no Claude equivalent and cannot be derived from any information in a Claude agent definition.
 
-### RooCode — YAML Mode Definitions
-
-RooCode stores agent-equivalent "mode" definitions as YAML in `.roomodes/` (repo) or `.roo/custom_modes.yaml` (user).
-
-| RooCode Property | Required | Claude Equivalent | Notes |
-|---|---|---|---|
-| `slug` | **Yes** | _(none)_ | URL-safe identifier; no Claude equivalent |
-| `name` | **Yes** | `name` | Same name |
-| `roleDefinition` | **Yes** | _(none)_ | Persona definition; semantically distinct from `description` |
-| `groups` | **Yes** | _(none)_ | Permission groups (`read`, `edit`, `command`, etc.); no Claude equivalent |
-| `description` | No | `description` | Same name but optional in Roo, not the primary identifier |
-| `whenToUse` | No | _(none)_ | Trigger conditions; no Claude equivalent |
-| `customInstructions` | No | body content | Closest equivalent to Markdown body |
-
-All four required properties present a portability problem: `slug` and `groups` have no Claude equivalent, and `roleDefinition` is semantically different from `description` (it defines a persona, not a usage hint). Automated conversion is not feasible.
-
 ### Why Automated Format Conversion Is Not Viable
 
 The `link` command's derived artifact workflow attempts to bridge the format gap by converting Markdown frontmatter to TOML or YAML. However, this conversion is purely a _serialization_ change -- it copies Claude's frontmatter keys into the target format and maps the body to a `prompt` field. It does not:
 
 - Translate property names (`name` → `title` for Goose)
-- Generate required properties that have no source (`system_prompt_path` for Kimi, `slug`/`groups`/`roleDefinition` for Roo)
+- Generate required properties that have no source (`system_prompt_path` for Kimi)
 - Convert value formats (`tools: Bash, Read` as a string → structured YAML mapping for Kimi)
 
 The resulting files would fail schema validation for every YAML-based provider. This means the derived artifact workflow produces non-functional output for agent definitions, and the `FormatIncompatible` exception raised by `skills --apply`, `agents --apply`, and `commands --apply` is the correct behavior.
@@ -139,7 +123,7 @@ For **Gemini TOML commands**, the conversion is closer to viable because Gemini'
 
 ## Required Property Gaps
 
-Even among providers that _do_ use Markdown, their schemas may require properties that the canonical source does not provide. For example, RooCode agent definitions require `slug`, `roleDefinition`, and `groups` fields that Claude Code definitions lack entirely. KimiCode requires `system_prompt_path` and `tools` (as a structured type). When a target provider requires a property that the source file does not contain, linking is blocked and an `Invalid` / `MissingProperties` exception is raised.
+Even among providers that _do_ use Markdown, their schemas may require properties that the canonical source does not provide. For example, KimiCode requires `system_prompt_path` and `tools` (as a structured type) that Claude Code definitions lack entirely. When a target provider requires a property that the source file does not contain, linking is blocked and an `Invalid` / `MissingProperties` exception is raised.
 
 ## Exception Categories
 

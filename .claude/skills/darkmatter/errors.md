@@ -5,6 +5,20 @@ description: Conventions for implementing rich, source-aware diagnostics in dark
 
 # darkmatter Error Conventions
 
+## Contents
+
+- Body Contract: Vec<Prose>
+- Escape User-Supplied Tokens
+- SourceContext for File-Origin Errors
+- Standard Structural Layout
+- Snapshot Tests
+- Adding a New Error Variant
+- Anti-Patterns to Avoid
+- See Also
+
+Use heading search to jump to the listed subsystem.
+
+
 User-facing diagnostics in darkmatter are rendered through the `BlockError`
 trait from `biscuit-terminal`. Every variant follows the structural rules
 below so that rendered errors are consistently rich, actionable, and
@@ -78,12 +92,12 @@ bottom):
    Directive tokens are highlighted with `<inverse>`.
 
 Reference implementation:
-[`PageBlockError::UnterminatedBlock`](../../../darkmatter/lib/src/markdown/compose/page_blocks/types.rs)
+`PageBlockError::UnterminatedBlock`
 
 ## Snapshot Tests
 
 Every `BlockError` variant is exercised by an integration test under
-[`darkmatter/lib/tests/error_snapshots/`](../../../darkmatter/lib/tests/error_snapshots/).
+`darkmatter/lib/tests/error_snapshots/`.
 Tests:
 
 1. Construct the variant with a representative payload.
@@ -133,7 +147,7 @@ output fails the build.
 
 ## See Also
 
-- [Error rendering reference](../../../darkmatter/docs/errors/README.md)
-- [biscuit-terminal/SKILL.md](../biscuit-terminal/SKILL.md) — Prose grammar
+- Error rendering reference
+- biscuit-terminal/SKILL.md — Prose grammar
   and `StatusBlock` mechanics.
-- [features/2026-05-08-good-errors/spec.md](../../../darkmatter/features/2026-05-08-good-errors/spec.md)
+- features/_completed/2026-05-08-good-errors/spec.md

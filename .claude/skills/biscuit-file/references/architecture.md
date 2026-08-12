@@ -11,6 +11,7 @@ Source: `biscuit-file/lib/src/`
 | `file_reference` | `file-reference` | `FileReference`, `FileReferenceError`, `PathPosition` |
 | `detect` | (always) | `FileType`, `detect_file_type`, `detect_file_type_from_bytes` |
 | `format` | (always) | `DataFormat` |
+| `path_text` | (always) | `to_portable_string`, `try_portable_string` |
 | `error` | (always) | `BiscuitFileError` |
 
 ## Feature Flags

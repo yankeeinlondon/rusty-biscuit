@@ -18,6 +18,32 @@ static EAGER_PATH_CACHE: OnceLock<HashMap<OsString, PathBuf>> = OnceLock::new();
 #[cfg(target_os = "macos")]
 static BUNDLE_INDEX_CACHE: OnceLock<HashMap<String, PathBuf>> = OnceLock::new();
 
+/// How [`ExecutableIndex::build_with`] obtains PATH entries.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PathScan {
+    /// Delegate each lookup to `which`, walking PATH once per program name.
+    Lazy,
+    /// Traverse PATH once up front, then probe an in-memory map.
+    Eager,
+}
+
+/// Whether [`ExecutableIndex::build_with`] indexes the non-PATH lookup layers
+/// (macOS app bundles, Windows App Paths / install roots).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Fallbacks {
+    Include,
+    Exclude,
+}
+
+/// Whether the process-global eager PATH cache has been populated.
+///
+/// Test seam: lets a caller of a bulk detection entry point prove it routed
+/// through an eager builder rather than per-name `which` walks.
+#[cfg(test)]
+pub(crate) fn eager_path_cache_is_populated() -> bool {
+    EAGER_PATH_CACHE.get().is_some()
+}
+
 /// Lazy lookup index for executables on PATH, macOS app bundles, and Windows
 /// fallback layers.
 ///
@@ -70,15 +96,20 @@ impl ExecutableIndex {
     ///
     /// PATH is **not** scanned during construction; lookups are delegated to
     /// the `which` crate on demand.
+    ///
+    /// ## Notes
+    ///
+    /// macOS bundle discovery is served from a process-global cache, so it runs
+    /// at most once per process however many indexes are built.
     #[instrument(skip_all)]
     pub fn build() -> Self {
-        Self::build_with_bundles(true)
+        Self::build_with(PathScan::Lazy, Fallbacks::Include)
     }
 
-    /// Build an index with PATH lookup only (no bundle or Windows indexes).
+    /// Build an index with lazy PATH lookup only (no bundle or Windows indexes).
     #[instrument(skip_all)]
     pub fn build_path_only() -> Self {
-        Self::build_with_bundles(false)
+        Self::build_with(PathScan::Lazy, Fallbacks::Exclude)
     }
 
     /// Build an index that eagerly scans every directory on `PATH`.
@@ -89,48 +120,53 @@ impl ExecutableIndex {
     /// scans. Single-shot callers should prefer [`Self::build`] (lazy `which`).
     #[instrument(skip_all)]
     pub fn build_eager_path() -> Self {
-        let path_dir_count = std::env::var_os("PATH")
-            .map(|p| std::env::split_paths(&p).count())
-            .unwrap_or(0);
-
-        let eager_path = EAGER_PATH_CACHE.get_or_init(scan_path_executables).clone();
-
-        debug!(entries = eager_path.len(), "eager PATH index built");
-
-        Self {
-            path_dir_count,
-            eager_path: Some(eager_path),
-            #[cfg(target_os = "macos")]
-            bundle_executables: BUNDLE_INDEX_CACHE.get_or_init(build_bundle_index).clone(),
-            #[cfg(target_os = "windows")]
-            windows_index: crate::programs::windows_apps::build_windows_index(),
-        }
+        Self::build_with(PathScan::Eager, Fallbacks::Include)
     }
 
-    fn build_with_bundles(include_bundles: bool) -> Self {
-        #[cfg(not(target_os = "macos"))]
-        let _ = include_bundles;
+    /// Build an eager PATH index with no bundle or Windows fallback layers.
+    ///
+    /// The lookup surface is exactly [`Self::build_path_only`]'s — PATH and
+    /// nothing else — so results are identical; only the work differs, since
+    /// PATH is traversed once rather than once per program name. Bulk callers
+    /// that must not resolve a program outside PATH (e.g.
+    /// `HostCapabilities::detect`) use this instead of [`Self::build_eager_path`].
+    #[instrument(skip_all)]
+    pub fn build_eager_path_only() -> Self {
+        Self::build_with(PathScan::Eager, Fallbacks::Exclude)
+    }
+
+    fn build_with(path_scan: PathScan, fallbacks: Fallbacks) -> Self {
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+        let _ = fallbacks;
 
         let path_dir_count = std::env::var_os("PATH")
             .map(|p| std::env::split_paths(&p).count())
             .unwrap_or(0);
 
-        debug!(path_dir_count, "lazy PATH index created");
+        let eager_path = match path_scan {
+            PathScan::Eager => {
+                let map = EAGER_PATH_CACHE.get_or_init(scan_path_executables).clone();
+                debug!(entries = map.len(), "eager PATH index built");
+                Some(map)
+            }
+            PathScan::Lazy => {
+                debug!(path_dir_count, "lazy PATH index created");
+                None
+            }
+        };
 
         Self {
             path_dir_count,
-            eager_path: None,
+            eager_path,
             #[cfg(target_os = "macos")]
-            bundle_executables: if include_bundles {
-                build_bundle_index()
-            } else {
-                HashMap::new()
+            bundle_executables: match fallbacks {
+                Fallbacks::Include => BUNDLE_INDEX_CACHE.get_or_init(build_bundle_index).clone(),
+                Fallbacks::Exclude => HashMap::new(),
             },
             #[cfg(target_os = "windows")]
-            windows_index: if include_bundles {
-                crate::programs::windows_apps::build_windows_index()
-            } else {
-                crate::programs::windows_apps::WindowsIndex::default()
+            windows_index: match fallbacks {
+                Fallbacks::Include => crate::programs::windows_apps::build_windows_index(),
+                Fallbacks::Exclude => crate::programs::windows_apps::WindowsIndex::default(),
             },
         }
     }
@@ -325,7 +361,7 @@ fn is_executable(path: &std::path::Path) -> bool {
             return false;
         };
         let dot_ext = format!(".{}", ext.to_ascii_lowercase());
-        get_pathext_extensions().iter().any(|pe| *pe == dot_ext)
+        get_pathext_extensions().contains(&dot_ext)
     }
 }
 
@@ -491,7 +527,7 @@ mod tests {
         use std::fs;
         use tempfile::tempdir;
 
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
         let non_exec = dir.path().join("not-a-program");
         fs::write(&non_exec, "data").unwrap();
@@ -503,10 +539,7 @@ mod tests {
         }
 
         let mut env = ScopedEnv::new();
-        let original_path = std::env::var_os("PATH").unwrap_or_default();
-        let mut new_path = std::ffi::OsString::from(dir.path());
-        new_path.push(":");
-        new_path.push(&original_path);
+        let new_path = crate::test_helpers::prepend_to_path([dir.path()]);
         env.set_os("PATH", &new_path);
 
         let index = ExecutableIndex::build();
@@ -526,17 +559,14 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
         let exec = dir.path().join("test-exec-prog");
         fs::write(&exec, "#!/bin/sh\ntrue").unwrap();
         fs::set_permissions(&exec, fs::Permissions::from_mode(0o755)).unwrap();
 
         let mut env = ScopedEnv::new();
-        let original_path = std::env::var_os("PATH").unwrap_or_default();
-        let mut new_path = std::ffi::OsString::from(dir.path());
-        new_path.push(":");
-        new_path.push(&original_path);
+        let new_path = crate::test_helpers::prepend_to_path([dir.path()]);
         env.set_os("PATH", &new_path);
 
         let index = ExecutableIndex::build();
@@ -555,7 +585,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
 
         for name in ["eager-a", "eager-b", "eager-c"] {
@@ -570,10 +600,7 @@ mod tests {
         }
 
         let mut env = ScopedEnv::new();
-        let original_path = std::env::var_os("PATH").unwrap_or_default();
-        let mut new_path = std::ffi::OsString::from(dir.path());
-        new_path.push(":");
-        new_path.push(&original_path);
+        let new_path = crate::test_helpers::prepend_to_path([dir.path()]);
         env.set_os("PATH", &new_path);
 
         let eager_path = scan_path_executables();
@@ -622,7 +649,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let dir_first = tempdir().unwrap();
         let dir_second = tempdir().unwrap();
 
@@ -639,9 +666,8 @@ mod tests {
         }
 
         let mut env = ScopedEnv::new();
-        let mut new_path = std::ffi::OsString::from(dir_first.path());
-        new_path.push(":");
-        new_path.push(dir_second.path());
+        let new_path = std::env::join_paths([dir_first.path(), dir_second.path()])
+            .expect("join PATH dirs");
         env.set_os("PATH", &new_path);
 
         let eager_path = scan_path_executables();
@@ -674,7 +700,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         use tempfile::tempdir;
 
-        let _lock = ENV_MUTEX.lock().unwrap();
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempdir().unwrap();
         let exec = dir.path().join("eager-lookup-test");
         fs::write(&exec, "#!/bin/sh\ntrue").unwrap();
@@ -682,9 +708,7 @@ mod tests {
         fs::set_permissions(&exec, fs::Permissions::from_mode(0o755)).unwrap();
 
         let mut env = ScopedEnv::new();
-        let mut new_path = std::ffi::OsString::from(dir.path());
-        new_path.push(":");
-        new_path.push(std::env::var_os("PATH").unwrap_or_default());
+        let new_path = crate::test_helpers::prepend_to_path([dir.path()]);
         env.set_os("PATH", &new_path);
 
         let eager_path = scan_path_executables();
@@ -724,6 +748,123 @@ mod tests {
         assert!(
             index.eager_path.is_some(),
             "Eager index should have a PATH map"
+        );
+    }
+
+    /// PATH must be traversed at most once per process.
+    ///
+    /// The second build runs under a PATH that shares no directory with the
+    /// first, so a re-scan could not reproduce the first map.
+    #[test]
+    fn eager_path_is_traversed_once_per_process() {
+        use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
+        use std::fs;
+        #[cfg(unix)]
+        use std::os::unix::fs::PermissionsExt;
+        use tempfile::tempdir;
+
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        let exec = dir.path().join("scan-once-shim");
+        fs::write(&exec, "#!/bin/sh\ntrue").unwrap();
+        #[cfg(unix)]
+        fs::set_permissions(&exec, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut env = ScopedEnv::new();
+        env.set_os("PATH", &crate::test_helpers::prepend_to_path([dir.path()]));
+        let first = ExecutableIndex::build_eager_path_only();
+        let first_map = first
+            .eager_path
+            .clone()
+            .expect("eager builder builds a map");
+
+        let empty = tempdir().unwrap();
+        env.set_os(
+            "PATH",
+            &std::env::join_paths([empty.path()]).expect("join PATH dirs"),
+        );
+        let second = ExecutableIndex::build_eager_path_only();
+
+        assert_eq!(
+            second.eager_path.as_ref(),
+            Some(&first_map),
+            "second build re-scanned PATH instead of reusing the cached traversal"
+        );
+        assert!(
+            eager_path_cache_is_populated(),
+            "eager build must populate the shared PATH cache"
+        );
+    }
+
+    #[test]
+    fn eager_path_only_index_has_no_fallback_layers() {
+        let index = ExecutableIndex::build_eager_path_only();
+        assert!(
+            index.eager_path.is_some(),
+            "eager PATH-only index should have a PATH map"
+        );
+        #[cfg(target_os = "macos")]
+        assert!(
+            index.bundle_executables.is_empty(),
+            "PATH-only index must not resolve programs through app bundles"
+        );
+        #[cfg(target_os = "windows")]
+        {
+            assert!(index.windows_index.app_paths.is_empty());
+            assert!(index.windows_index.install_roots.is_empty());
+        }
+    }
+
+    /// Lookups must not change when PATH is scanned eagerly rather than lazily.
+    #[cfg(unix)]
+    #[test]
+    fn eager_path_only_agrees_with_lazy_path_only() {
+        use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+        use tempfile::tempdir;
+
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempdir().unwrap();
+        let exec = dir.path().join("agreement-shim");
+        fs::write(&exec, "#!/bin/sh\ntrue").unwrap();
+        fs::set_permissions(&exec, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut env = ScopedEnv::new();
+        env.set_os("PATH", &crate::test_helpers::prepend_to_path([dir.path()]));
+
+        let eager = ExecutableIndex::build_eager_path_only();
+        let lazy = ExecutableIndex::build_path_only();
+
+        for name in ["agreement-shim", "sh", "no-such-program-anywhere-xyz123"] {
+            assert_eq!(
+                eager.find_with_source(name).is_some(),
+                lazy.find_with_source(name).is_some(),
+                "eager and lazy PATH-only indexes disagree on {name}"
+            );
+        }
+    }
+
+    /// Bundle discovery is cache-backed, so it runs at most once per process.
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn bundle_index_is_discovered_once_per_process() {
+        let first = ExecutableIndex::build();
+        assert!(
+            BUNDLE_INDEX_CACHE.get().is_some(),
+            "build() must route bundle discovery through the shared cache"
+        );
+
+        let second = ExecutableIndex::build();
+        let third = ExecutableIndex::build_eager_path();
+        assert_eq!(first.bundle_executables, second.bundle_executables);
+        assert_eq!(
+            first.bundle_executables, third.bundle_executables,
+            "build() and build_eager_path() must share one bundle index"
+        );
+        assert_eq!(
+            BUNDLE_INDEX_CACHE.get().map(HashMap::len),
+            Some(first.bundle_executables.len())
         );
     }
 

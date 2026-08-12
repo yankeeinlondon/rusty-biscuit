@@ -28,8 +28,28 @@ fn wrapper_command(
         Commands::Qwen(args) => Ok((Provider::QwenCode, args)),
         Commands::Opencode(args) => Ok((Provider::OpenCode, args)),
         Commands::Goose(args) => Ok((Provider::Goose, args)),
+        Commands::Kilo(args) => Ok((Provider::Kilo, args)),
+        Commands::Pi(args) => Ok((Provider::Pi, args)),
+        Commands::Antigravity(args) => Ok((Provider::Antigravity, args)),
         other => Err(Box::new(other)),
     }
+}
+
+/// Attach the pre-clap agent tail ([`argv::partition_composition_tail`]) to
+/// the composition command's shared args. A no-op for every other command and
+/// when the tail is empty.
+fn inject_provider_tail(cli: &mut Cli, tail: argv::ProviderArgs) {
+    let Some(command) = cli.command.as_mut() else {
+        return;
+    };
+    let shared = match command {
+        Commands::Compose(args) => &mut args.shared,
+        Commands::InlineCompose(args) => &mut args.shared,
+        Commands::Sequence(args) => &mut args.shared,
+        _ => return,
+    };
+    shared.provider_args = tail.args;
+    shared.provider_args_explicit = tail.explicit;
 }
 
 /// Check if the Claudine config file exists and is valid. If not (missing or
@@ -177,6 +197,12 @@ fn main() -> Result<()> {
 /// (preserving the styled `Error:` label) when no cause in the chain
 /// implements `BlockError`.
 fn render_top_level_error(report: &Report) {
+    // A lifecycle evaluation error already rendered its styled block to stderr
+    // at its catch point (Decision #2), before any catch events fired. Suppress
+    // the duplicate styled block here while still exiting non-zero.
+    if output::error_walker::evaluation_error_already_emitted(report) {
+        return;
+    }
     let term = log::terminal();
     if let Some(rendered) = output::error_walker::try_render_block_report(report, &term) {
         log::message("");
@@ -202,7 +228,12 @@ fn run() -> Result<()> {
     let perf_bootstrap = perf::scan_perf_bootstrap(&raw_argv);
 
     let arg_parse_start = std::time::Instant::now();
-    let argv: Vec<OsString> = argv::normalize(raw_argv);
+    let normalized: Vec<OsString> = argv::normalize(raw_argv);
+
+    // Ownership partition (replaces the retired Rule 3): split composition argv
+    // into the Claudine argv handed to clap and the agent tail forwarded to the
+    // provider. Non-composition argv passes through unchanged with an empty tail.
+    let (argv, provider_tail) = argv::partition_composition_tail(normalized)?;
 
     // Pre-scan the normalized argv for --plain so clap's ANSI styling is
     // disabled before parsing. Uses the same token stream the parse will see.
@@ -223,6 +254,7 @@ fn run() -> Result<()> {
         .build()?;
     runtime.block_on(async_main(
         argv,
+        provider_tail,
         perf_bootstrap,
         arg_parse_start,
         process_start,
@@ -231,11 +263,15 @@ fn run() -> Result<()> {
 
 async fn async_main(
     argv: Vec<OsString>,
+    provider_tail: argv::ProviderArgs,
     perf_bootstrap: perf::PerfBootstrap,
     arg_parse_start: std::time::Instant,
     process_start: std::time::Instant,
 ) -> Result<()> {
-    let cli = parse_cli_from(&argv);
+    let mut cli = parse_cli_from(&argv);
+    // Attach the partitioned agent tail to the composition command. The tail is
+    // captured before clap and never reconstructed from clap matches or argv.
+    inject_provider_tail(&mut cli, provider_tail);
     let perf_arg_parsing = arg_parse_start.elapsed();
     log::set_plain(cli.plain);
 
@@ -326,6 +362,7 @@ async fn async_main(
         Commands::Agents(args) => commands::agents::run(args, cli.verbose > 0).await,
         Commands::SlashCommands(args) => commands::slash_commands::run(args, cli.verbose > 0).await,
         Commands::Providers(args) => commands::providers::run(args),
+        Commands::Signals(args) => commands::signals::run(args),
         Commands::Logs(args) => commands::logs::run(args).await,
         Commands::Uninstall(args) => commands::uninstall::run(args),
         Commands::Mcp(args) => commands::mcp::run(args),
@@ -335,7 +372,10 @@ async fn async_main(
         | Commands::Kimi(_)
         | Commands::Qwen(_)
         | Commands::Opencode(_)
-        | Commands::Goose(_) => unreachable!("wrapper commands are handled before this match"),
+        | Commands::Goose(_)
+        | Commands::Kilo(_)
+        | Commands::Pi(_)
+        | Commands::Antigravity(_) => unreachable!("wrapper commands are handled before this match"),
         Commands::Compose(args) => {
             commands::compose::run_compose(args, cli.verbose, startup_timings)
         }
@@ -345,6 +385,8 @@ async fn async_main(
         Commands::Sequence(args) => {
             commands::sequence::run_sequence(args, cli.verbose, startup_timings)
         }
+        Commands::Dashboard(args) => commands::dashboard::run(args).await,
         Commands::Context(args) => commands::context::run(args),
+        Commands::Errors(args) => commands::errors::run(args),
     }
 }

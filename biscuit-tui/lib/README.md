@@ -29,6 +29,7 @@ The [`core`](src/core) module provides cross-cutting primitives shared by every 
 - **`KeyBindings`** — fully configurable key bindings with vim-compatible defaults (`h`/`j`/`k`/`l`)
 - **`ComponentTheme`** — centralized visual constants (glyphs, colors, styles)
 - **`FrameChrome`** / **`FrameChromeConfig`** — optional borders, margins, padding, and height specs
+- **`SplitPane`** / **`SplitDirection`** / **`SplitRatio`** — geometry-only two-pane layout primitive (`SplitPane::split(area) -> (Rect, Rect)`); a *container/layout* primitive like `FrameChrome`, not an input (captures no value, handles no input). `Auto` direction is resolved from the area's shape each split, 50/50 default; ratios clamp on construction
 - **`FuzzyFilter`** — fast fuzzy search over option labels via `nucleo-matcher`
 - **`ValidationState`** — uniform read access to submit-time validation errors
 - **`Label`** / **`LabelPosition`** / **`render_with_label`** — shared label placement
@@ -165,6 +166,13 @@ for row in rows {
     }
 }
 ```
+
+`InputTableState::new` panics on invalid input (row-shape mismatch,
+duplicate/unknown/missing column ids, or a typed cell mismatch). For rows
+sourced from user or config data, use the fallible
+`InputTableState::try_new`, which returns a typed `InputTableError`
+instead of panicking. `InputTableError` is re-exported from the crate
+root and prelude alongside the other public table types.
 
 ## Validation
 

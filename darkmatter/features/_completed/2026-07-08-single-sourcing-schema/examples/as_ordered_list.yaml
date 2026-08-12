@@ -1,0 +1,17 @@
+kind: example
+parameters:
+    - list:
+        - first
+        - - a
+          - b
+        - second
+invocation: "as_ordered_list(list)"
+returns: |-
+    1. first
+      1. a
+      2. b
+    2. second
+description: |-
+    `as_ordered_list(list)` renders a Markdown ordered list. A nested array
+    element auto-nests as an indented sublist that restarts numbering, so
+    structure is a property of the data rather than a separate function.

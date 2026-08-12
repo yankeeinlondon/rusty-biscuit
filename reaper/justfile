@@ -3,7 +3,9 @@ set positional-arguments
 
 # set allow-duplicate-recipes
 
-set shell := ["bash", "-eu", "-o", "pipefail", "-c"]
+# `env CYG_SYS_BASHRC=1` guards against Cygwin's /etc/bash.bashrc tripping `-u`;
+# see the root justfile for the full explanation.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
 
 import "../just/lifecycle.just"
 import "../just/plan.just"
@@ -56,8 +58,7 @@ install *args="":
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity reaper
-    @just _sanity reaper-cli
+    @just _sanity_all "reaper reaper-cli"
 
 # test just the CLI in reaper
 test-cli *args="":
@@ -69,8 +70,7 @@ test-library *args="":
 
 # Test both library and CLI.
 test *args="":
-    @just _test reaper {{ args }}
-    @just _test reaper-cli {{ args }}
+    @just _test_all "reaper reaper-cli" {{ args }}
 
 # not applicable: reaper emits terminal/CLI output, not HTML
 test-browser:

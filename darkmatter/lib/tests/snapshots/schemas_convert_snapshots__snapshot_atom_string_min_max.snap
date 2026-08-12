@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 45
 expression: "convert_atom(\"string(min(5); max(80))\")"
 ---
 {
@@ -7,9 +8,16 @@ expression: "convert_atom(\"string(min(5); max(80))\")"
   "additionalProperties": true,
   "properties": {
     "field": {
-      "maxLength": 80,
-      "minLength": 5,
-      "type": "string"
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "maxLength": 80,
+          "minLength": 5,
+          "type": "string"
+        }
+      ]
     }
   },
   "type": "object"

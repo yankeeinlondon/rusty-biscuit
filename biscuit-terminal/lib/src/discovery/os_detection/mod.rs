@@ -41,6 +41,6 @@ pub mod types;
 
 pub use ci::is_ci;
 pub use family::infer_linux_family;
-pub use linux::{detect_linux_distro, is_wsl1};
+pub use linux::{detect_linux_distro, is_wsl1, is_wsl2};
 pub use os_type::detect_os_type;
 pub use types::{LinuxDistro, LinuxFamily, OsType};

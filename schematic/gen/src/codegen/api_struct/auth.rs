@@ -1,6 +1,23 @@
 use proc_macro2::TokenStream;
 use quote::quote;
-use schematic_define::{AuthPolicy, AuthStrategy};
+use schematic_define::{ApiKeyLocation, AuthPolicy, AuthStrategy};
+
+/// Emits an `Option<String>` literal for an auth value prefix.
+fn value_prefix_tokens(value_prefix: &Option<String>) -> TokenStream {
+    match value_prefix {
+        Some(prefix) => quote! { Some(#prefix.to_string()) },
+        None => quote! { None },
+    }
+}
+
+/// Emits an [`ApiKeyLocation`] literal.
+fn api_key_location_tokens(location: &ApiKeyLocation) -> TokenStream {
+    match location {
+        ApiKeyLocation::Query => quote! { schematic_define::ApiKeyLocation::Query },
+        ApiKeyLocation::Cookie => quote! { schematic_define::ApiKeyLocation::Cookie },
+        _ => quote! { schematic_define::ApiKeyLocation::Query },
+    }
+}
 
 /// Generates the initialization code for an AuthStrategy value.
 pub(crate) fn generate_auth_strategy_init(auth: &AuthStrategy) -> TokenStream {
@@ -12,8 +29,16 @@ pub(crate) fn generate_auth_strategy_init(auth: &AuthStrategy) -> TokenStream {
             }
             None => quote! { schematic_define::AuthStrategy::BearerToken { header: None } },
         },
-        AuthStrategy::ApiKey { header } => {
-            quote! { schematic_define::AuthStrategy::ApiKey { header: #header.to_string() } }
+        AuthStrategy::ApiKey {
+            header,
+            value_prefix,
+        } => {
+            let value_prefix = value_prefix_tokens(value_prefix);
+            quote! { schematic_define::AuthStrategy::ApiKey { header: #header.to_string(), value_prefix: #value_prefix } }
+        }
+        AuthStrategy::ApiKeyParam { name, location } => {
+            let location = api_key_location_tokens(location);
+            quote! { schematic_define::AuthStrategy::ApiKeyParam { name: #name.to_string(), location: #location } }
         }
         AuthStrategy::Basic => quote! { schematic_define::AuthStrategy::Basic },
         AuthStrategy::OAuth2(config) => {
@@ -112,8 +137,16 @@ pub(crate) fn generate_auth_method_init(method: &schematic_define::AuthMethod) -
             }
             None => quote! { schematic_define::AuthMethod::BearerToken { header: None } },
         },
-        schematic_define::AuthMethod::ApiKey { header } => {
-            quote! { schematic_define::AuthMethod::ApiKey { header: #header.to_string() } }
+        schematic_define::AuthMethod::ApiKey {
+            header,
+            value_prefix,
+        } => {
+            let value_prefix = value_prefix_tokens(value_prefix);
+            quote! { schematic_define::AuthMethod::ApiKey { header: #header.to_string(), value_prefix: #value_prefix } }
+        }
+        schematic_define::AuthMethod::ApiKeyParam { name, location } => {
+            let location = api_key_location_tokens(location);
+            quote! { schematic_define::AuthMethod::ApiKeyParam { name: #name.to_string(), location: #location } }
         }
         schematic_define::AuthMethod::Basic => quote! { schematic_define::AuthMethod::Basic },
         schematic_define::AuthMethod::OAuth2(config) => {
@@ -139,8 +172,16 @@ pub(crate) fn generate_env_auth_strategy_init(
             }
             None => quote! { schematic_define::EnvAuthStrategy::BearerToken { header: None } },
         },
-        schematic_define::EnvAuthStrategy::ApiKey { header } => {
-            quote! { schematic_define::EnvAuthStrategy::ApiKey { header: #header.to_string() } }
+        schematic_define::EnvAuthStrategy::ApiKey {
+            header,
+            value_prefix,
+        } => {
+            let value_prefix = value_prefix_tokens(value_prefix);
+            quote! { schematic_define::EnvAuthStrategy::ApiKey { header: #header.to_string(), value_prefix: #value_prefix } }
+        }
+        schematic_define::EnvAuthStrategy::ApiKeyParam { name, location } => {
+            let location = api_key_location_tokens(location);
+            quote! { schematic_define::EnvAuthStrategy::ApiKeyParam { name: #name.to_string(), location: #location } }
         }
         schematic_define::EnvAuthStrategy::Basic => {
             quote! { schematic_define::EnvAuthStrategy::Basic }

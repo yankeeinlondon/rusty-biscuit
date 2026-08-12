@@ -1,62 +1,38 @@
-use biscuit_terminal::components::prose::Prose;
+use std::io::{IsTerminal, Write};
+
 use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
-use biscuit_terminal::utils::layout::WordWrap;
+use claudine::render::FinalMessage;
 
-/// Render assistant terminal text through `Prose` so wrapping and styling are terminal-aware.
-pub(crate) fn render_assistant_text(text: &str, term: &Terminal) -> String {
-    Prose::new(text)
-        .with_word_wrap(WordWrap::WrapProse(None, None))
-        .render(term)
-}
+use crate::commands::wrap::section::SectionStream;
 
-/// Render assistant text as full Markdown via darkmatter for rich terminal output.
+/// Write the agent's final message to stdout: rendered through
+/// [`FinalMessage`] when stdout is a TTY, raw bytes otherwise. Guarantees a
+/// trailing newline and flushes.
 ///
-/// Produces syntax-highlighted code blocks, formatted tables, bold/italic styling,
-/// etc. Falls back to [`render_assistant_text`] (Prose word-wrap only) on error.
-pub(crate) fn render_assistant_markdown(text: &str, term: &Terminal) -> String {
-    render_assistant_markdown_with_options(text, term, None)
-}
-
-/// Render assistant text as Markdown with pre-built [`TerminalOptions`].
-///
-/// When `options` is `None`, a fresh default is created (incurs theme detection).
-/// Pass a cached instance for hot paths like streaming.
-pub(crate) fn render_assistant_markdown_with_options(
+/// When `section_stream` is provided, the `FinalStdout` section transition
+/// is recorded first so section spacing stays consistent with the live
+/// stream (the capture path has no section stream and passes `None`).
+pub(crate) fn emit_final_message(
     text: &str,
     term: &Terminal,
-    options: Option<&darkmatter::markdown::output::terminal::TerminalOptions>,
-) -> String {
-    use darkmatter::markdown::Markdown;
-    use darkmatter::markdown::output::terminal::TerminalOptions;
-
-    let owned;
-    let opts = match options {
-        Some(o) => o,
-        None => {
-            owned = TerminalOptions::default();
-            &owned
+    section_stream: Option<&SectionStream>,
+) -> std::io::Result<()> {
+    if let Some(stream) = section_stream {
+        stream.enter_final_stdout();
+    }
+    let mut stdout = std::io::stdout();
+    if stdout.is_terminal() {
+        let rendered = FinalMessage::new(text).render(term);
+        stdout.write_all(rendered.as_bytes())?;
+        if !rendered.ends_with('\n') {
+            stdout.write_all(b"\n")?;
         }
-    };
-
-    let md = Markdown::new(text.trim());
-    match md.as_terminal(opts.clone()) {
-        Ok(rendered) => rendered,
-        Err(_) => render_assistant_text(text, term),
+    } else {
+        stdout.write_all(text.as_bytes())?;
+        if !text.ends_with('\n') {
+            stdout.write_all(b"\n")?;
+        }
     }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn render_assistant_text_wraps_long_terminal_output() {
-        let term = Terminal::new_optimistic(24);
-        let rendered = render_assistant_text(
-            "This is a long assistant sentence that should wrap cleanly in the terminal.",
-            &term,
-        );
-        assert!(rendered.contains('\n'));
-    }
+    stdout.flush()
 }

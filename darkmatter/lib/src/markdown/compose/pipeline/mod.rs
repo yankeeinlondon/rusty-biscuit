@@ -26,7 +26,14 @@ use tracing::{info, instrument, trace};
 
 impl Markdown {
     /// Internal pipeline runner.
-    pub(crate) fn run_compose_pipeline(&mut self, options: ComposeOptions) -> MarkdownResult<ComposeReport> {
+    pub(crate) fn run_compose_pipeline(&mut self, mut options: ComposeOptions) -> MarkdownResult<ComposeReport> {
+        // `ComposeOptions::new` captures no discovered `ctx.*` group because a
+        // constructor has no document to justify the walk. This is the first
+        // point that has both, so it is where the two meet: the context grows
+        // to exactly the groups this document names, and stays untouched when
+        // it names none or when the caller chose the context themselves.
+        options.upgrade_ambient_context_for(self);
+
         // Resolve persistent cache root if configured
         let persistent_root = options.cache_root.as_ref().map(|root| {
             cache::FileStore::resolve_cache_root(Some(root), options.cache_namespace.as_deref())
@@ -36,6 +43,7 @@ impl Markdown {
         // walk and this pass fetch each URL once); otherwise build one whose
         // persistent store is shared with the local compose artifact cache.
         let remote_fetch = options.remote_fetch_runtime();
+        options.remote_fetch = Some(remote_fetch.clone());
 
         let mut runtime = shell_expansion::types::PipelineRuntime::with_remote_fetch(
             options.max_transclusion_depth,
@@ -153,13 +161,20 @@ impl Markdown {
             // those keys against the shell-expanded values.
             if options.is_enabled(ComposeOperation::FrontmatterInterpolation) {
                 let fm_start = perf.is_enabled().then(std::time::Instant::now);
+                // Capture the on-disk locus before borrowing frontmatter so a
+                // file-reference failure can render an OSC8 link + focused
+                // excerpt instead of the late-binding fallback.
+                let fm_source_ctx = self.full_source_context_for_errors();
                 let fm_report = frontmatter_interpolation::interpolate_frontmatter(
                     self.frontmatter_mut(),
                     options.context(),
                     options.fail_fast,
                     shell_expansion_enabled,
                     Some(options.frontmatter_resolution_context()),
-                )?;
+                    &options.exclude_keys,
+                    &options.name_coercion_keys,
+                )
+                .map_err(|e| e.with_on_disk_source(&fm_source_ctx))?;
                 report.frontmatter_interpolations_applied = fm_report.replacements;
                 report.warnings.extend(fm_report.warnings);
                 if let Some(start) = fm_start {
@@ -168,6 +183,20 @@ impl Markdown {
                         start.elapsed(),
                     );
                 }
+            }
+
+            // Surface the set of deferred keys that are actually present in
+            // this document's frontmatter (DM1 metadata). Lets callers
+            // distinguish "raw because deferred" from "raw because composition
+            // failed" for dry-run labeling and diagnostics.
+            if !options.exclude_keys.is_empty() {
+                let fm = self.frontmatter().as_map();
+                report.deferred_frontmatter_keys = options
+                    .exclude_keys
+                    .iter()
+                    .filter(|k| fm.contains_key(*k))
+                    .cloned()
+                    .collect();
             }
 
             // Schema Validation: check frontmatter against $schema or baseline
@@ -190,9 +219,21 @@ impl Markdown {
             // `ComposeOptions::defer_shell_pending_schema_problems` so a
             // still-literal `$(...)` value is deferred rather than reported as a
             // final violation here.
+            // Trigger-schema registry shared across both schema-validation
+            // passes: the first pass (here) scans the `schemas/` ancestry from
+            // disk; the post-shell pass below reuses that registry instead of
+            // re-walking it (F8). Matching is re-evaluated against the current
+            // frontmatter in each pass regardless.
+            let mut trigger_registry = None;
+            let mut presentation_overrides = std::collections::HashMap::new();
             {
                 let sv_start = perf.is_enabled().then(std::time::Instant::now);
-                schema_validation::run(self, &options)?;
+                schema_validation::run_with_registry(
+                    self,
+                    &options,
+                    &mut trigger_registry,
+                    &mut presentation_overrides,
+                )?;
                 if let Some(start) = sv_start {
                     perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
                 }
@@ -222,7 +263,7 @@ impl Markdown {
             // visible to all later stages.
             if shell_expansion_enabled {
                 let fse_start = perf.is_enabled().then(std::time::Instant::now);
-                let fse_ctx = self.source_context_for_errors();
+                let fse_ctx = self.full_source_context_for_errors();
                 let fse_report = frontmatter_shell_expansion::execute_frontmatter_shell_expansion(
                     self.frontmatter_mut(),
                     &options,
@@ -247,13 +288,17 @@ impl Markdown {
                     && fse_report.replacements > 0
                 {
                     let fm_start = perf.is_enabled().then(std::time::Instant::now);
+                    let fm_source_ctx = self.full_source_context_for_errors();
                     let fm_report = frontmatter_interpolation::interpolate_frontmatter(
                         self.frontmatter_mut(),
                         options.context(),
                         options.fail_fast,
                         false,
                         Some(options.frontmatter_resolution_context()),
-                    )?;
+                        &options.exclude_keys,
+                        &options.name_coercion_keys,
+                    )
+                    .map_err(|e| e.with_on_disk_source(&fm_source_ctx))?;
                     report.frontmatter_interpolations_applied += fm_report.replacements;
                     report.warnings.extend(fm_report.warnings);
                     if let Some(start) = fm_start {
@@ -262,6 +307,18 @@ impl Markdown {
                             start.elapsed(),
                         );
                     }
+                }
+
+                // Trigger activation is a function of the current frontmatter
+                // snapshot. Re-assemble after shell expansion and interpolation
+                // pass 2 so concrete values can activate or deactivate payloads.
+                if options.trigger_schemas {
+                    schema_validation::run_with_registry(
+                        self,
+                        &options,
+                        &mut trigger_registry,
+                        &mut presentation_overrides,
+                    )?;
                 }
             }
 
@@ -285,6 +342,8 @@ impl Markdown {
                 .with_replace_parent_wins(options.replace_parent_wins)
                 .with_context(options.context().clone())
                 .with_allow_ctx_override(options.allow_ctx_override)
+                .with_name_coercion_keys(options.name_coercion_keys.clone())
+                .with_presentation_values(presentation_overrides)
                 .build()?;
             if let Some(start) = esb_start {
                 perf.record(perf::PerfMetricKind::EffectiveStateBuild, start.elapsed());

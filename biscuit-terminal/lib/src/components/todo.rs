@@ -169,6 +169,29 @@ pub static TODO_CHAR_LOOKUP: LazyLock<HashMap<TodoState, TodoStateRep>> = LazyLo
 /// | Completed    | ✓          | `[✔]`    | green |
 /// | Cancelled    | ⃠          | `[-]`    | dim   |
 /// | Blocked      | ⏺         | `[!]`    | red   |
+///
+/// ## Layout & Style Contract
+///
+/// `Todo` is an internal-layout component (spec C2). It projects to a
+/// [`TaskList`](renderable::tree::NodeKind::TaskList) node carrying
+/// [`TaskHints`] and the configured [`Layout`]; the shared render-tree fold
+/// resolves the outer box, and the item body wraps inside the resolved content
+/// width:
+///
+/// - [`Width::Auto`](renderable::layout::Width::Auto) (default) and
+///   [`Width::Fixed`](renderable::layout::Width::Fixed) fill the available
+///   width; [`Width::FitContent`](renderable::layout::Width::FitContent) hugs
+///   the item text.
+/// - **Slack sink** (spec D2): the item body text column. The checkbox marker
+///   and its trailing separator stay fixed across width modes.
+/// - A fractional `Fixed(50%)` is resolved exactly once by the fold; the body
+///   wraps to the resolved content width and never re-resolves the raw
+///   percentage (the `Fixed(50%) → 25%` double-application bug).
+/// - The projected [`TaskHints`] round-trip carries the [`Layout`] onto the
+///   task-list node (C4), so the box contract survives a second render pass.
+/// - All applicable `Style` properties (`color`, `background`, `emphasis`,
+///   `border`) are honored via the shared fold; Markdown degrades them by
+///   Decision D1 and preserves the GFM task-checkbox syntax.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Todo {
     state: TodoState,
@@ -179,6 +202,8 @@ pub struct Todo {
     use_prose: bool,
     #[serde(skip)]
     layout: Layout,
+    #[serde(skip)]
+    style: RStyle,
 }
 
 impl PartialEq for Todo {
@@ -210,6 +235,7 @@ impl Default for Todo {
             last_updated: Utc::now(),
             use_prose: false,
             layout: Layout::default(),
+            style: RStyle::default(),
         }
     }
 }
@@ -396,6 +422,7 @@ impl Todo {
             list.attrs.set_layout(&self.layout);
         }
 
+        crate::components::renderable::overlay_style_onto_node(&mut list, &self.style);
         list
     }
 
@@ -450,6 +477,14 @@ impl TerminalRenderable for Todo {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> RStyle {
+        self.style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut RStyle> {
+        Some(&mut self.style)
     }
 
     /// Projects this `Todo` into a `NodeKind::List` render-tree node.

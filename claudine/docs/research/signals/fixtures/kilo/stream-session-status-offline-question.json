@@ -1,0 +1,15 @@
+{
+  "directory": "/workspace/project",
+  "payload": {
+    "id": "evt_scrubbed_status_offline",
+    "type": "session.status",
+    "properties": {
+      "sessionID": "ses_scrubbed",
+      "status": {
+        "type": "offline",
+        "requestID": "question_scrubbed",
+        "message": "Waiting for user input"
+      }
+    }
+  }
+}

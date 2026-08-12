@@ -13,9 +13,9 @@
 //!   on the classifier's internal state.
 //! - The value is classified by its first non-quote character. `@`
 //!   triggers file completion against the `docs/`, `features/`, `fixes/`,
-//!   and `reviews/` subdirectories at repo root, package-area, and
-//!   package levels. Any other leading character returns zero candidates
-//!   so the shell's default completion takes over.
+//!   and `reviews/` subdirectories under the invoking `cwd` (the launch
+//!   area). Any other leading character returns zero candidates so the
+//!   shell's default completion takes over.
 //! - Leading `"` and `'` quotes are stripped for classification; the
 //!   emitted candidate always wraps the value in `'...'`. A user-typed
 //!   opening `"` is effectively normalized to `'` (spec §5.4).
@@ -26,14 +26,17 @@
 //!
 //! ## Rendering
 //!
-//! Matched files are rendered as paths relative to the repo root (when a
-//! repo is detected via `sniff` or a `.git` ancestor) or the current
-//! working directory otherwise. This matches the mental model of a doc
-//! path typed into a frontmatter override: it should resolve the same
-//! way whether the user typed it by hand or selected it from completion.
+//! Matched files are rendered as paths relative to the invoking `cwd` (the
+//! launch area). This matches the mental model of a doc path typed into a
+//! frontmatter override: a frontmatter file reference resolves at runtime
+//! against the launch area, so completion offers exactly those `cwd`-relative
+//! paths the runtime resolver will accept — whether the user typed them by
+//! hand or selected them from completion.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+
+use biscuit_file::to_portable_string;
 
 use super::fuzzy::{self, PartialLen};
 use super::scopes::{self, Scope, ScopeContext, ScopeKind};
@@ -129,7 +132,7 @@ fn strip_leading_quote(value: &str) -> (&str, Option<char>) {
 fn gather_value_candidates(active: &str, ctx: &ScopeContext) -> Vec<String> {
     let partial_len = PartialLen::classify(active.chars().count());
     let scopes = resolve_setter_scopes(ctx);
-    let base = repo_or_cwd(ctx);
+    let base = scopes::property_value_root(ctx).to_path_buf();
 
     let mut out: Vec<(u8, String)> = Vec::new();
     let mut seen_entries: HashSet<PathBuf> = HashSet::new();
@@ -185,70 +188,26 @@ fn gather_value_candidates(active: &str, ctx: &ScopeContext) -> Vec<String> {
 
 /// Resolve the ordered scope list for setter-value `@` completion.
 ///
-/// Scopes are emitted in priority order: repo root, package-area root,
-/// package root — each crossed with [`SETTER_VALUE_SUBDIRS`]. The
-/// walker tolerates missing directories, so non-existent roots are
-/// returned as-is and silently ignored at walk time.
+/// Each [`SETTER_VALUE_SUBDIRS`] entry is joined under the invoking `cwd`
+/// (the launch area; see [`scopes::property_value_root`]) — the same anchor
+/// the runtime read-side resolver uses for frontmatter file references, so a
+/// selected candidate resolves at launch exactly as it was offered. The
+/// walker tolerates missing directories, so non-existent subdirs are returned
+/// as-is and silently ignored at walk time.
 ///
 /// Symlinks are always followed — none of these scopes are agent-skill
 /// peer directories where Claudine's linker produces cross-provider
 /// duplicates.
 fn resolve_setter_scopes(ctx: &ScopeContext) -> Vec<Scope> {
-    let mut scopes: Vec<Scope> = Vec::new();
-
-    let repo_root = scopes::effective_repo_root(ctx);
-
-    let area_root: Option<PathBuf> = ctx.repo_info.as_ref().and_then(|info| {
-        let area = info.package_area_for_dir(&ctx.cwd)?;
-        if area == "root" {
-            return None;
-        }
-        Some(info.root.join(area))
-    });
-
-    let pkg_root: Option<PathBuf> = ctx
-        .repo_info
-        .as_ref()
-        .and_then(|info| info.package_for_dir(&ctx.cwd).map(|pkg| pkg.path.clone()));
-
-    let push_scopes = |scopes: &mut Vec<Scope>, base: &Path| {
-        for sub in SETTER_VALUE_SUBDIRS {
-            scopes.push(Scope {
-                kind: ScopeKind::RepoDocs,
-                path: base.join(sub),
-                follow_links: true,
-            });
-        }
-    };
-
-    if let Some(root) = repo_root {
-        push_scopes(&mut scopes, root);
-    }
-    if let Some(root) = area_root.as_deref() {
-        push_scopes(&mut scopes, root);
-    }
-    if let Some(root) = pkg_root.as_deref() {
-        push_scopes(&mut scopes, root);
-    }
-
-    // When cwd is at the repo root, the area_root / pkg_root branches
-    // resolve to the same path as the repo branch, so the same
-    // subdirectories would be enumerated twice. Dedup on exact path
-    // keeps the walker's work bounded and eliminates double-ranked
-    // candidates in `finalize()`.
-    let mut seen: HashSet<PathBuf> = HashSet::new();
-    scopes.retain(|scope| seen.insert(scope.path.clone()));
-    scopes
-}
-
-/// Pick the repo root (from `sniff` or git fallback) for rendering.
-/// Falls back to the cwd when neither is available — the completer is
-/// still useful in a standalone directory, the rendered paths just
-/// reflect the cwd's view of the filesystem.
-fn repo_or_cwd(ctx: &ScopeContext) -> PathBuf {
-    scopes::effective_repo_root(ctx)
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| ctx.cwd.clone())
+    let base = scopes::property_value_root(ctx);
+    SETTER_VALUE_SUBDIRS
+        .iter()
+        .map(|sub| Scope {
+            kind: ScopeKind::RepoDocs,
+            path: base.join(sub),
+            follow_links: true,
+        })
+        .collect()
 }
 
 /// Render `entry` as a path relative to `base`. Returns `None` when
@@ -256,10 +215,7 @@ fn repo_or_cwd(ctx: &ScopeContext) -> PathBuf {
 /// because every scope we walk is rooted under `base`, but keeping the
 /// guard avoids rendering absolute paths on unusual filesystem layouts.
 fn format_relative(base: &Path, entry: &Path) -> Option<String> {
-    entry
-        .strip_prefix(base)
-        .ok()
-        .and_then(|r| r.to_str().map(str::to_string))
+    entry.strip_prefix(base).ok().map(to_portable_string)
 }
 
 /// Strip the last extension from a filename (for match-target purposes
@@ -285,490 +241,4 @@ fn has_markdown_extension(path: &Path) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::TempDir;
-
-    fn write(path: &Path, content: &str) {
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).unwrap();
-        }
-        fs::write(path, content).unwrap();
-    }
-
-    fn seed_cargo_workspace(root: &Path, members: &[&str]) {
-        fs::create_dir_all(root.join(".git")).unwrap();
-        let members_list = members
-            .iter()
-            .map(|m| format!("    \"{m}\""))
-            .collect::<Vec<_>>()
-            .join(",\n");
-        let root_manifest =
-            format!("[workspace]\nresolver = \"2\"\nmembers = [\n{members_list}\n]\n");
-        fs::write(root.join("Cargo.toml"), root_manifest).unwrap();
-        for member in members {
-            let member_dir = root.join(member);
-            fs::create_dir_all(member_dir.join("src")).unwrap();
-            let name = member.replace('/', "-");
-            fs::write(
-                member_dir.join("Cargo.toml"),
-                format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
-            )
-            .unwrap();
-            fs::write(member_dir.join("src").join("lib.rs"), "").unwrap();
-        }
-    }
-
-    // -- SetterToken::parse ------------------------------------------------
-
-    #[test]
-    fn parse_accepts_plain_setter() {
-        let got = SetterToken::parse("spec=@s").unwrap();
-        assert_eq!(got.name, "spec");
-        assert_eq!(got.raw_value, "@s");
-    }
-
-    #[test]
-    fn parse_accepts_underscore_and_dash() {
-        let got = SetterToken::parse("_foo-bar=val").unwrap();
-        assert_eq!(got.name, "_foo-bar");
-        assert_eq!(got.raw_value, "val");
-    }
-
-    #[test]
-    fn parse_accepts_empty_value() {
-        let got = SetterToken::parse("spec=").unwrap();
-        assert_eq!(got.name, "spec");
-        assert_eq!(got.raw_value, "");
-    }
-
-    #[test]
-    fn parse_rejects_missing_equals() {
-        assert!(SetterToken::parse("spec").is_none());
-    }
-
-    #[test]
-    fn parse_rejects_leading_equals() {
-        assert!(SetterToken::parse("=value").is_none());
-    }
-
-    #[test]
-    fn parse_rejects_digit_first() {
-        assert!(SetterToken::parse("1spec=val").is_none());
-    }
-
-    #[test]
-    fn parse_rejects_bad_char_in_name() {
-        assert!(SetterToken::parse("sp ec=val").is_none());
-        assert!(SetterToken::parse("sp.ec=val").is_none());
-    }
-
-    // -- strip_leading_quote -----------------------------------------------
-
-    #[test]
-    fn strip_leading_quote_handles_double_quote() {
-        let (body, quote) = strip_leading_quote("\"@s");
-        assert_eq!(body, "@s");
-        assert_eq!(quote, Some('"'));
-    }
-
-    #[test]
-    fn strip_leading_quote_handles_single_quote() {
-        let (body, quote) = strip_leading_quote("'@s");
-        assert_eq!(body, "@s");
-        assert_eq!(quote, Some('\''));
-    }
-
-    #[test]
-    fn strip_leading_quote_unquoted_is_passthrough() {
-        let (body, quote) = strip_leading_quote("@s");
-        assert_eq!(body, "@s");
-        assert_eq!(quote, None);
-    }
-
-    #[test]
-    fn strip_leading_quote_empty_returns_empty() {
-        let (body, quote) = strip_leading_quote("");
-        assert_eq!(body, "");
-        assert_eq!(quote, None);
-    }
-
-    // -- strip_file_extension ----------------------------------------------
-
-    #[test]
-    fn strip_file_extension_removes_last_extension() {
-        assert_eq!(strip_file_extension("plan.md"), "plan");
-        assert_eq!(strip_file_extension("plan.tar.gz"), "plan.tar");
-        assert_eq!(strip_file_extension("no-ext"), "no-ext");
-    }
-
-    // -- run: @-gated trigger ---------------------------------------------
-
-    #[test]
-    fn run_returns_empty_for_non_at_value() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        let docs = tmp.path().join("docs");
-        write(&docs.join("plan.md"), "# p\n");
-        let ctx = ScopeContext::discover_from(tmp.path());
-        assert!(run("spec=bar", &ctx).is_empty());
-    }
-
-    #[test]
-    fn run_returns_empty_for_empty_value() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        let docs = tmp.path().join("docs");
-        write(&docs.join("plan.md"), "# p\n");
-        let ctx = ScopeContext::discover_from(tmp.path());
-        assert!(run("spec=", &ctx).is_empty());
-    }
-
-    #[test]
-    fn run_returns_empty_for_invalid_shape() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        let ctx = ScopeContext::discover_from(tmp.path());
-        assert!(run("not-a-setter", &ctx).is_empty());
-        assert!(run("=value", &ctx).is_empty());
-    }
-
-    // -- run: repo-level scopes -------------------------------------------
-
-    #[test]
-    fn run_surfaces_repo_docs_under_at_sigil() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        let docs = tmp.path().join("docs");
-        write(&docs.join("spec.md"), "# s\n");
-        write(&docs.join("unrelated.md"), "# u\n");
-
-        let ctx = ScopeContext::discover_from(tmp.path());
-        let got = run("spec=@s", &ctx);
-        assert!(
-            got.iter().any(|c| c == "spec='docs/spec.md'"),
-            "expected spec='docs/spec.md' in {got:?}"
-        );
-        // `u` is not a subsequence of `s` so unrelated.md should not match.
-        assert!(
-            !got.iter().any(|c| c.contains("unrelated.md")),
-            "unrelated.md should not match on `s` prefix: {got:?}"
-        );
-    }
-
-    #[test]
-    fn run_wraps_value_in_single_quotes_even_when_user_typed_double() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        let docs = tmp.path().join("docs");
-        write(&docs.join("spec.md"), "# s\n");
-
-        let ctx = ScopeContext::discover_from(tmp.path());
-        let got = run("spec=\"@s", &ctx);
-        assert!(
-            got.iter().all(|c| !c.contains('"')),
-            "double quote must be normalized to single quote: {got:?}"
-        );
-        assert!(
-            got.iter().any(|c| c == "spec='docs/spec.md'"),
-            "expected spec='docs/spec.md' after quote normalization: {got:?}"
-        );
-    }
-
-    #[test]
-    fn run_wraps_value_in_single_quotes_when_user_typed_single() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        let docs = tmp.path().join("docs");
-        write(&docs.join("spec.md"), "# s\n");
-
-        let ctx = ScopeContext::discover_from(tmp.path());
-        let got = run("spec='@s", &ctx);
-        assert!(
-            got.iter().any(|c| c == "spec='docs/spec.md'"),
-            "expected spec='docs/spec.md' with single-quoted body: {got:?}"
-        );
-    }
-
-    // -- run: empty @ returns everything in scope -------------------------
-
-    #[test]
-    fn run_empty_at_surfaces_every_file_in_scope() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        write(&tmp.path().join("docs").join("one.md"), "# 1\n");
-        write(&tmp.path().join("features").join("two.md"), "# 2\n");
-
-        let ctx = ScopeContext::discover_from(tmp.path());
-        let got = run("ref=@", &ctx);
-        assert!(got.iter().any(|c| c == "ref='docs/one.md'"), "{got:?}");
-        assert!(got.iter().any(|c| c == "ref='features/two.md'"), "{got:?}");
-    }
-
-    // -- run: scope resolution (repo + area + package) --------------------
-
-    #[test]
-    fn run_cwd_at_repo_root_only_repo_scope() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        write(&tmp.path().join("docs").join("plan.md"), "# p\n");
-        let ctx = ScopeContext::discover_from(tmp.path());
-        let got = run("spec=@p", &ctx);
-        assert_eq!(got, vec!["spec='docs/plan.md'"]);
-    }
-
-    #[test]
-    fn run_cwd_inside_package_area_uses_area_scope() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["claudine/lib"]);
-        // Area-level feature doc.
-        let area_feat = tmp.path().join("claudine").join("features");
-        write(&area_feat.join("plan.md"), "# p\n");
-
-        // cwd is the area directory itself.
-        let ctx = ScopeContext::discover_from(&tmp.path().join("claudine"));
-        let got = run("spec=@p", &ctx);
-        assert!(
-            got.iter().any(|c| c == "spec='claudine/features/plan.md'"),
-            "expected area-scope plan: {got:?}"
-        );
-    }
-
-    #[test]
-    fn run_cwd_inside_package_uses_package_scope() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["claudine/lib"]);
-        // Package-level doc.
-        let pkg_docs = tmp.path().join("claudine").join("lib").join("docs");
-        write(&pkg_docs.join("pkg.md"), "# x\n");
-
-        // cwd is the package directory.
-        let ctx = ScopeContext::discover_from(&tmp.path().join("claudine").join("lib"));
-        let got = run("ref=@pk", &ctx);
-        assert!(
-            got.iter().any(|c| c == "ref='claudine/lib/docs/pkg.md'"),
-            "expected package-scope doc: {got:?}"
-        );
-    }
-
-    #[test]
-    fn run_returns_empty_when_no_matches() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        write(&tmp.path().join("docs").join("unrelated.md"), "# u\n");
-        let ctx = ScopeContext::discover_from(tmp.path());
-        let got = run("spec=@xyz", &ctx);
-        assert!(
-            got.is_empty(),
-            "expected no matches for 'xyz' query: {got:?}"
-        );
-    }
-
-    #[test]
-    fn run_excludes_directories() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        fs::create_dir_all(tmp.path().join("docs").join("planning")).unwrap();
-        let ctx = ScopeContext::discover_from(tmp.path());
-        let got = run("spec=@pla", &ctx);
-        // Even with a 3+ char prefix we never emit directories — setter
-        // values target files only.
-        assert!(
-            !got.iter()
-                .any(|c| c.contains("planning") && c.ends_with("/'")),
-            "directory should not appear in setter-value output: {got:?}"
-        );
-    }
-
-    // -- run: Markdown extension gate (finding #1) ------------------------
-
-    #[test]
-    fn setter_value_skips_txt_files() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        let docs = tmp.path().join("docs");
-        write(&docs.join("spec.md"), "# s\n");
-        write(&docs.join("spec.txt"), "not markdown\n");
-        let ctx = ScopeContext::discover_from(tmp.path());
-        let got = run("spec=@s", &ctx);
-        assert!(
-            got.iter().any(|c| c == "spec='docs/spec.md'"),
-            "expected .md to surface: {got:?}"
-        );
-        assert!(
-            !got.iter().any(|c| c.contains("spec.txt")),
-            ".txt must be rejected by the extension gate: {got:?}"
-        );
-    }
-
-    #[test]
-    fn setter_value_skips_yaml_files() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        let docs = tmp.path().join("docs");
-        write(&docs.join("plan.yaml"), "key: value\n");
-        let ctx = ScopeContext::discover_from(tmp.path());
-        let got = run("plan=@p", &ctx);
-        assert!(
-            !got.iter().any(|c| c.contains("plan.yaml")),
-            ".yaml must be rejected by the extension gate: {got:?}"
-        );
-    }
-
-    #[test]
-    fn setter_value_skips_extensionless_files() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        let docs = tmp.path().join("docs");
-        write(&docs.join("notes"), "just a text file\n");
-        let ctx = ScopeContext::discover_from(tmp.path());
-        let got = run("notes=@n", &ctx);
-        assert!(
-            !got.iter().any(|c| c.contains("'docs/notes'")),
-            "extensionless files must be rejected: {got:?}"
-        );
-    }
-
-    #[test]
-    fn setter_value_accepts_uppercase_md() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        let docs = tmp.path().join("docs");
-        write(&docs.join("PLAN.MD"), "# P\n");
-        let ctx = ScopeContext::discover_from(tmp.path());
-        let got = run("ref=@P", &ctx);
-        assert!(
-            got.iter().any(|c| c == "ref='docs/PLAN.MD'"),
-            "uppercase .MD must be accepted (case-insensitive): {got:?}"
-        );
-    }
-
-    #[test]
-    fn setter_value_accepts_uppercase_markdown() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        let docs = tmp.path().join("docs");
-        write(&docs.join("README.MARKDOWN"), "# R\n");
-        let ctx = ScopeContext::discover_from(tmp.path());
-        let got = run("ref=@R", &ctx);
-        assert!(
-            got.iter().any(|c| c == "ref='docs/README.MARKDOWN'"),
-            "uppercase .MARKDOWN must be accepted (case-insensitive): {got:?}"
-        );
-    }
-
-    // -- has_markdown_extension unit tests --------------------------------
-
-    #[test]
-    fn has_markdown_extension_accepts_md_and_markdown_case_insensitive() {
-        assert!(has_markdown_extension(Path::new("a.md")));
-        assert!(has_markdown_extension(Path::new("a.MD")));
-        assert!(has_markdown_extension(Path::new("a.markdown")));
-        assert!(has_markdown_extension(Path::new("a.Markdown")));
-        assert!(has_markdown_extension(Path::new("a.MARKDOWN")));
-        assert!(!has_markdown_extension(Path::new("a.txt")));
-        assert!(!has_markdown_extension(Path::new("a.yaml")));
-        assert!(!has_markdown_extension(Path::new("a")));
-        assert!(!has_markdown_extension(Path::new("no-extension")));
-    }
-
-    #[test]
-    fn run_excludes_underscore_prefixed_files() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        let docs = tmp.path().join("docs");
-        write(&docs.join("_draft.md"), "# d\n");
-        write(&docs.join("published.md"), "# p\n");
-        let ctx = ScopeContext::discover_from(tmp.path());
-        let got = run("spec=@", &ctx);
-        assert!(
-            !got.iter().any(|c| c.contains("_draft")),
-            "underscore-prefixed files must be elided: {got:?}"
-        );
-        assert!(
-            got.iter().any(|c| c == "spec='docs/published.md'"),
-            "non-underscore file must surface: {got:?}"
-        );
-    }
-
-    #[test]
-    fn run_multi_scope_orders_repo_before_area() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["claudine/lib"]);
-        write(&tmp.path().join("docs").join("plan.md"), "# p\n");
-        write(
-            &tmp.path().join("claudine").join("docs").join("plan.md"),
-            "# p2\n",
-        );
-
-        let ctx = ScopeContext::discover_from(&tmp.path().join("claudine").join("lib"));
-        let got = run("spec=@p", &ctx);
-        // Both files should appear; repo-scope first (rank 0), package-
-        // area and package-scope after.
-        assert!(got.iter().any(|c| c == "spec='docs/plan.md'"), "{got:?}");
-        assert!(
-            got.iter().any(|c| c == "spec='claudine/docs/plan.md'"),
-            "{got:?}"
-        );
-        let idx_repo = got.iter().position(|c| c == "spec='docs/plan.md'").unwrap();
-        let idx_area = got
-            .iter()
-            .position(|c| c == "spec='claudine/docs/plan.md'")
-            .unwrap();
-        assert!(
-            idx_repo < idx_area,
-            "repo scope must sort before area scope: {got:?}"
-        );
-    }
-
-    // -- scope resolution helpers -----------------------------------------
-
-    #[test]
-    fn resolve_setter_scopes_includes_all_four_subdirs() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        let ctx = ScopeContext::discover_from(tmp.path());
-        let scopes = resolve_setter_scopes(&ctx);
-        for sub in SETTER_VALUE_SUBDIRS {
-            let expected = tmp.path().join(sub);
-            assert!(
-                scopes.iter().any(|s| s.path == expected),
-                "missing scope {sub}: {scopes:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn resolve_setter_scopes_dedups_when_area_equals_repo() {
-        // cwd at repo root: package_area_for_dir() returns None, so
-        // no area-level scopes are produced. But the dedup logic also
-        // protects against the case where they DO coincide.
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        let ctx = ScopeContext::discover_from(tmp.path());
-        let scopes = resolve_setter_scopes(&ctx);
-        // No duplicate paths.
-        let mut seen: HashSet<PathBuf> = HashSet::new();
-        for scope in &scopes {
-            assert!(
-                seen.insert(scope.path.clone()),
-                "duplicate scope path: {scope:?}"
-            );
-        }
-    }
-
-    #[test]
-    fn resolve_setter_scopes_all_follow_links() {
-        let tmp = TempDir::new().unwrap();
-        seed_cargo_workspace(tmp.path(), &["a/lib"]);
-        let ctx = ScopeContext::discover_from(tmp.path());
-        let scopes = resolve_setter_scopes(&ctx);
-        for scope in &scopes {
-            assert!(
-                scope.follow_links,
-                "setter scope must follow links: {scope:?}"
-            );
-        }
-    }
-}
+mod tests;

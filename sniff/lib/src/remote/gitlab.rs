@@ -16,9 +16,11 @@ use schematic_schema::gitlab::*;
 use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
 
 use super::{
+    count_api_request,
     provider::RemoteRepoProvider,
+    snapshot::{documents_from_tree, RemoteRepoSnapshot, RemoteTree, RemoteTreeFile},
     types::{
-        CiCdInfo, DocumentCategory, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo,
+        CiCdInfo, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo,
         OrgRepoRef, PullRequestInfo, PullRequestState, ReleaseInfo, RepoMetadata, TagInfo,
         TagsAndReleases,
     },
@@ -121,6 +123,65 @@ impl GitLabRemote {
             .auth_update(UpdateStrategy::ChangeTo(AuthStrategy::None))
             .build()
     }
+
+    /// Fetches the root tree listing.
+    ///
+    /// Counted as `tree`, not `metadata`: absent `GetProject`, the metadata path
+    /// pays for a full tree fetch, and the counter names the work done.
+    async fn fetch_tree_items(&self, owner: &str, repo: &str) -> Result<Vec<TreeItem>, SniffError> {
+        let project_id = encode_project_id(owner, repo);
+        let request = ListRepositoryTreeRequest::new(&project_id);
+        count_api_request("tree");
+        self.client
+            .request(request)
+            .await
+            .map_err(map_schematic_error)
+    }
+
+    /// Builds the minimal metadata GitLab can report without `GetProject`.
+    ///
+    /// Pure — the caller has already proven the project exists by fetching its
+    /// tree. Adding `GetProject` to schematic-definitions is what would let these
+    /// `None`s become real values.
+    fn stub_metadata(&self, owner: &str, repo: &str) -> RepoMetadata {
+        let full_name = format!("{}/{}", owner, repo);
+        let html_url = format!("{}/{}", self.base_url, full_name);
+
+        RepoMetadata {
+            name: repo.to_string(),
+            full_name,
+            description: None,                  // Requires GetProject
+            private: false,                     // Requires GetProject (assume public if accessible)
+            default_branch: "main".to_string(), // Requires GetProject; assume "main"
+            language: None,                     // Requires GetProject
+            stars: None,                        // Requires GetProject
+            forks: None,                        // Requires GetProject
+            open_issues: None,                  // Requires GetProject
+            archived: false,                    // Requires GetProject
+            created_at: None,                   // Requires GetProject
+            updated_at: None,                   // Requires GetProject
+            pushed_at: None,                    // Requires GetProject
+            license: None,                      // Requires GetProject
+            topics: Vec::new(),                 // Requires GetProject
+            has_issues: None,                   // Requires GetProject
+            has_wiki: None,                     // Requires GetProject
+            homepage: None,                     // Requires GetProject
+            html_url,
+        }
+    }
+}
+
+/// Keeps blob entries and drops directories, normalizing to [`RemoteTreeFile`].
+fn blobs_of(items: Vec<TreeItem>) -> Vec<RemoteTreeFile> {
+    items
+        .into_iter()
+        .filter(|entry| entry.item_type == "blob")
+        .map(|entry| RemoteTreeFile {
+            path: entry.path,
+            // GitLab's tree listing does not include size.
+            size: None,
+        })
+        .collect()
 }
 
 /// Encode a project path for GitLab API.
@@ -216,55 +277,6 @@ fn map_schematic_error(err: SchematicError) -> SniffError {
     }
 }
 
-/// Categorize a file path as a document type.
-fn categorize_document(path: &str) -> Option<DocumentCategory> {
-    let lower = path.to_lowercase();
-    let filename = path.rsplit('/').next().unwrap_or(path).to_lowercase();
-
-    // Files in src/ directories (source documentation) - check first
-    if lower.starts_with("src/") {
-        // Only markdown/text files in src count as source docs
-        if is_documentation_file(&filename) {
-            return Some(DocumentCategory::SourceDoc);
-        }
-        return None;
-    }
-
-    // Files in docs/ or doc/ directories
-    if lower.starts_with("docs/") || lower.starts_with("doc/") {
-        return Some(DocumentCategory::DocsFolder);
-    }
-
-    // README files at root or in non-src directories
-    if filename.starts_with("readme") {
-        return Some(DocumentCategory::Readme);
-    }
-
-    // Other markdown/text files at root or elsewhere
-    if is_documentation_file(&filename) {
-        return Some(DocumentCategory::Other);
-    }
-
-    None
-}
-
-/// Check if a filename is a documentation file.
-fn is_documentation_file(filename: &str) -> bool {
-    let lower = filename.to_lowercase();
-    lower.ends_with(".md")
-        || lower.ends_with(".markdown")
-        || lower.ends_with(".txt")
-        || lower.ends_with(".rst")
-        || lower == "license"
-        || lower == "licence"
-        || lower == "changelog"
-        || lower == "changes"
-        || lower == "history"
-        || lower == "contributing"
-        || lower == "authors"
-        || lower == "contributors"
-        || lower == "code_of_conduct"
-}
 
 #[async_trait]
 impl RemoteRepoProvider for GitLabRemote {
@@ -276,39 +288,25 @@ impl RemoteRepoProvider for GitLabRemote {
         // GitLab's schematic client does not include GetProject.
         // Use ListRepositoryTree to verify project existence and extract basic info.
         // This is a mitigation documented in phase0-audit.md.
-        let project_id = encode_project_id(owner, repo);
-        let request = ListRepositoryTreeRequest::new(&project_id);
-        let _tree: Vec<TreeItem> = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        self.fetch_tree_items(owner, repo).await?;
+        Ok(self.stub_metadata(owner, repo))
+    }
 
-        // Without GetProject, we can only return minimal metadata.
-        // Full metadata would require adding GetProject to schematic-definitions.
-        let full_name = format!("{}/{}", owner, repo);
-        let html_url = format!("{}/{}", self.base_url, full_name);
-
-        Ok(RepoMetadata {
-            name: repo.to_string(),
-            full_name,
-            description: None,                  // Requires GetProject
-            private: false,                     // Requires GetProject (assume public if accessible)
-            default_branch: "main".to_string(), // Requires GetProject; assume "main"
-            language: None,                     // Requires GetProject
-            stars: None,                        // Requires GetProject
-            forks: None,                        // Requires GetProject
-            open_issues: None,                  // Requires GetProject
-            archived: false,                    // Requires GetProject
-            created_at: None,                   // Requires GetProject
-            updated_at: None,                   // Requires GetProject
-            pushed_at: None,                    // Requires GetProject
-            license: None,                      // Requires GetProject
-            topics: Vec::new(),                 // Requires GetProject
-            has_issues: None,                   // Requires GetProject
-            has_wiki: None,                     // Requires GetProject
-            homepage: None,                     // Requires GetProject
-            html_url,
+    /// Resolves the one tree that serves as both existence probe and evidence.
+    ///
+    /// Absent `GetProject`, GitLab's "metadata" call *is* a tree fetch whose result
+    /// was thrown away — so a report used to pay for the identical tree three
+    /// times (metadata, documents, CI/CD). Keeping the result collapses that to one.
+    async fn snapshot(&self, owner: &str, repo: &str) -> Result<RemoteRepoSnapshot, SniffError> {
+        let items = self.fetch_tree_items(owner, repo).await?;
+        Ok(RemoteRepoSnapshot {
+            owner: owner.to_string(),
+            repo: repo.to_string(),
+            metadata: self.stub_metadata(owner, repo),
+            // GitLab's listing is flat and carries no truncation signal, so a
+            // subtree continuation has nothing to key off. Root-only document and
+            // CI/CD detection is the pre-existing contract, not a regression here.
+            tree: RemoteTree::observed(blobs_of(items), false),
         })
     }
 
@@ -326,27 +324,15 @@ impl RemoteRepoProvider for GitLabRemote {
         owner: &str,
         repo: &str,
     ) -> Result<Vec<DocumentRef>, SniffError> {
-        let project_id = encode_project_id(owner, repo);
-        let request = ListRepositoryTreeRequest::new(&project_id);
-        let tree: Vec<TreeItem> = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let snapshot = self.snapshot(owner, repo).await?;
+        self.list_documents_with(&snapshot).await
+    }
 
-        let documents: Vec<DocumentRef> = tree
-            .into_iter()
-            .filter(|entry| entry.item_type == "blob")
-            .filter_map(|entry| {
-                categorize_document(&entry.path).map(|category| DocumentRef {
-                    path: entry.path,
-                    category,
-                    size: None, // GitLab tree doesn't include size
-                })
-            })
-            .collect();
-
-        Ok(documents)
+    async fn list_documents_with(
+        &self,
+        snapshot: &RemoteRepoSnapshot,
+    ) -> Result<Vec<DocumentRef>, SniffError> {
+        Ok(documents_from_tree(&snapshot.tree))
     }
 
     async fn get_file_content(
@@ -360,6 +346,7 @@ impl RemoteRepoProvider for GitLabRemote {
         let encoded_path = urlencoding::encode(path);
         // Use "HEAD" as default ref (GitLab API accepts this for default branch)
         let request = GetRepositoryFileRequest::new(&project_id, &*encoded_path, "HEAD");
+        count_api_request("contents");
         let file: FileContent = self
             .client
             .request(request)
@@ -411,14 +398,17 @@ impl RemoteRepoProvider for GitLabRemote {
         // because no credentials are available, retry once with an explicitly
         // unauthenticated client. Only after the anonymous retry also fails
         // (or on a real 401/403) do we surface a credentials error.
+        count_api_request("pulls");
         let mrs: Vec<MergeRequest> = match self.client.request(request.clone()).await {
             Ok(mrs) => mrs,
             Err(SchematicError::MissingCredential { .. })
-            | Err(SchematicError::AuthenticationRequired { .. }) => self
-                .unauthenticated_client()
-                .request(request)
-                .await
-                .map_err(map_schematic_error)?,
+            | Err(SchematicError::AuthenticationRequired { .. }) => {
+                count_api_request("pulls");
+                self.unauthenticated_client()
+                    .request(request)
+                    .await
+                    .map_err(map_schematic_error)?
+            }
             Err(err) => return Err(map_schematic_error(err)),
         };
 
@@ -452,6 +442,7 @@ impl RemoteRepoProvider for GitLabRemote {
     async fn list_issues(&self, owner: &str, repo: &str) -> Result<Vec<IssueInfo>, SniffError> {
         let project_id = encode_project_id(owner, repo);
         let request = ListIssuesRequest::new(&project_id);
+        count_api_request("issues");
         let issues: Vec<Issue> = self
             .client
             .request(request)
@@ -485,6 +476,7 @@ impl RemoteRepoProvider for GitLabRemote {
 
         // Fetch tags
         let tags_request = ListTagsRequest::new(&project_id);
+        count_api_request("tags");
         let tags: Vec<Tag> = self
             .client
             .request(tags_request)
@@ -493,6 +485,7 @@ impl RemoteRepoProvider for GitLabRemote {
 
         // Fetch releases
         let releases_request = ListReleasesRequest::new(&project_id);
+        count_api_request("releases");
         let releases: Vec<Release> = self
             .client
             .request(releases_request)
@@ -537,34 +530,32 @@ impl RemoteRepoProvider for GitLabRemote {
     }
 
     async fn detect_cicd(&self, owner: &str, repo: &str) -> Result<Option<CiCdInfo>, SniffError> {
-        let project_id = encode_project_id(owner, repo);
-        let request = ListRepositoryTreeRequest::new(&project_id);
-        let tree: Vec<TreeItem> = self
-            .client
-            .request(request)
-            .await
-            .map_err(map_schematic_error)?;
+        let snapshot = self.snapshot(owner, repo).await?;
+        self.detect_cicd_with(&snapshot).await
+    }
 
-        // Look for GitLab CI configuration file
-        let has_gitlab_ci = tree
-            .iter()
-            .any(|entry| entry.path == ".gitlab-ci.yml" && entry.item_type == "blob");
-
-        if has_gitlab_ci {
-            Ok(Some(CiCdInfo {
-                provider: "GitLab CI".to_string(),
-                config_path: Some(".gitlab-ci.yml".to_string()),
-                name: "GitLab CI".to_string(),
-                status: "detected".to_string(),
-                conclusion: None,
-                html_url: Some(format!("{}/{}/{}/-/pipelines", self.base_url, owner, repo)),
-                started_at: None,
-                head_branch: None,
-                event: None,
-            }))
-        } else {
-            Ok(None)
+    async fn detect_cicd_with(
+        &self,
+        snapshot: &RemoteRepoSnapshot,
+    ) -> Result<Option<CiCdInfo>, SniffError> {
+        if !snapshot.tree.contains(".gitlab-ci.yml") {
+            return Ok(None);
         }
+
+        Ok(Some(CiCdInfo {
+            provider: "GitLab CI".to_string(),
+            config_path: Some(".gitlab-ci.yml".to_string()),
+            name: "GitLab CI".to_string(),
+            status: "detected".to_string(),
+            conclusion: None,
+            html_url: Some(format!(
+                "{}/{}/{}/-/pipelines",
+                self.base_url, snapshot.owner, snapshot.repo
+            )),
+            started_at: None,
+            head_branch: None,
+            event: None,
+        }))
     }
 
     async fn list_org_repos(&self, _org: &str) -> Result<Vec<OrgRepoRef>, SniffError> {
@@ -603,65 +594,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn test_categorize_readme() {
-        assert_eq!(
-            categorize_document("README.md"),
-            Some(DocumentCategory::Readme)
-        );
-        assert_eq!(
-            categorize_document("readme.txt"),
-            Some(DocumentCategory::Readme)
-        );
-        assert_eq!(
-            categorize_document("sub/README.md"),
-            Some(DocumentCategory::Readme)
-        );
-    }
-
-    #[test]
-    fn test_categorize_docs_folder() {
-        assert_eq!(
-            categorize_document("docs/guide.md"),
-            Some(DocumentCategory::DocsFolder)
-        );
-        assert_eq!(
-            categorize_document("doc/api.md"),
-            Some(DocumentCategory::DocsFolder)
-        );
-    }
-
-    #[test]
-    fn test_categorize_source_doc() {
-        assert_eq!(
-            categorize_document("src/README.md"),
-            Some(DocumentCategory::SourceDoc)
-        );
-        // Non-doc files in src/ should be None
-        assert_eq!(categorize_document("src/main.rs"), None);
-    }
-
-    #[test]
-    fn test_categorize_other() {
-        assert_eq!(
-            categorize_document("CHANGELOG.md"),
-            Some(DocumentCategory::Other)
-        );
-        assert_eq!(
-            categorize_document("LICENSE"),
-            Some(DocumentCategory::Other)
-        );
-        assert_eq!(
-            categorize_document("CONTRIBUTING.md"),
-            Some(DocumentCategory::Other)
-        );
-    }
-
-    #[test]
-    fn test_categorize_non_doc() {
-        assert_eq!(categorize_document("main.rs"), None);
-        assert_eq!(categorize_document("lib/utils.js"), None);
-    }
 
     #[test]
     fn test_build_key_urls() {

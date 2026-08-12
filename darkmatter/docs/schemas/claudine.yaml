@@ -1,0 +1,76 @@
+# Baseline SimplifiedSchema for Claudine-owned Markdown frontmatter.
+# Darkmatter-owned properties are inherited through the effective baseline and
+# intentionally are not redeclared here.
+$schema:
+    prompt: "string -> Inline composition prompt. Required for inline-compose; composed through Darkmatter before being sent to the provider."
+    agent:
+        - "string -> Preferred agentic CLI provider."
+        - "string[] -> Ordered provider preference list; the first installed provider wins in non-interactive mode."
+    model:
+        - "string -> Preferred model for the selected provider."
+        - "string[] -> Ordered model preference list."
+    interactive: "boolean -> Default interactive session mode for compose and inline-compose. Rejected for sequence automation."
+    fail_fast: "boolean(default(true)) -> Sequence and loop error policy. true stops after the first failure; false runs all steps and returns failure if any step failed."
+    sequence:
+        - "file -> File reference to external sequence state."
+        - "any[] -> Inline sequence steps. Each step may be a scalar or object state value."
+
+    loop: "loop-event@./claudine-types.yaml -> Repeated-execution controls and post-finalize lifecycle concerns."
+
+    operation: "string -> You can add an operation label/name so that it will be tagged in logs and so that memory can be gathered for that operation."
+    yolo: "boolean -> Explicitly allow high-trust execution mode when the caller has opted into it."
+
+    initialize: "lifecycle-event@./claudine-types.yaml -> Lifecycle concerns emitted before schema validation and shell pre-flight."
+    start: "lifecycle-event@./claudine-types.yaml -> Lifecycle event emitted immediately before provider invocation."
+    blocked: "lifecycle-event@./claudine-types.yaml -> Lifecycle event emitted when execution stops before provider launch."
+    success: "lifecycle-event@./claudine-types.yaml -> Lifecycle event emitted after a successful provider session."
+    failure: "lifecycle-event@./claudine-types.yaml -> Lifecycle event emitted after a provider-session error."
+    finalize: "lifecycle-event@./claudine-types.yaml -> Lifecycle event emitted once after each terminal event."
+
+    timeout: "string(not-empty) -> Optional wall-clock timeout duration for the provider run."
+    step_timeout: "string(not-empty) -> Stream-silence timeout duration. Defaults to 30m when not otherwise configured."
+    timeout_warn: "string(not-empty) -> Warning threshold before the wall-clock timeout."
+    step_timeout_warn: "string(not-empty) -> Warning threshold before the step timeout."
+    exit_expressions:
+        - "exit-expression[]@./claudine-types.yaml -> Bare rule array; the frontmatter layer merges with lower-precedence rules."
+        - "exit-expression-layer@./claudine-types.yaml"
+
+    guard_settings:
+        repetition:
+            enabled: "boolean(default(true)) -> Enables repeated-output cycle detection."
+            max_repeats: "number(integer; min(1)) -> Maximum repeated cycles before aborting."
+            max_cycle_length: "number(integer; min(1)) -> Maximum cycle length considered by repetition detection."
+        volume:
+            enabled: "boolean(default(true)) -> Enables runaway output volume detection."
+            max_lines: "number(integer; min(1)) -> Maximum output lines before aborting."
+            max_bytes: "number(integer; min(1)) -> Maximum output bytes before aborting."
+
+    name: "string -> Resource name for linked skills, commands, and agents."
+    allowed-tools:
+        - "string -> Provider-specific allowed tools expression."
+        - "string[] -> Provider-specific allowed tools list."
+    tools: "any -> Provider-specific agent/tool declaration. Shape varies across providers."
+    skills: "any -> Provider-specific skill references. Shape varies across providers."
+    license: "string -> SPDX license identifier for linked skills."
+    compatibility: "any -> Skill or resource compatibility metadata."
+    user-invocable: "boolean -> Provider-specific flag controlling direct user invocation."
+    disable-model-invocation: "boolean -> Provider-specific flag preventing model-initiated invocation."
+    argument-hint: "string -> Slash-command argument hint."
+    max_turns: "number(integer; min(1)) -> Maximum turns for providers that use snake_case frontmatter."
+
+    verbosity: "enum(silent, quiet, verbose) -> Prompt-reporting verbosity for system-prompt documents."
+    mode: "enum(append, replace) -> Delivery mode for automatically discovered system-prompt documents."
+
+    state: "any(generated; required) -> Current sequence step state injected as a reserved frontmatter override."
+    previous_state: "any(generated) -> Previous sequence step state, or null for the first step."
+    next_state: "any(generated) -> Next sequence step state, or null for the last step."
+    is_first: "boolean(generated; required) -> true when the current sequence step is first."
+    is_last: "boolean(generated; required) -> true when the current sequence step is last."
+    step: "number(integer; min(1); generated; required) -> 1-based sequence step index."
+    total_steps: "number(integer; min(1); generated; required) -> Total number of sequence steps."
+
+    _loop_count: "number(integer; min(1); generated; required) -> 1-based loop iteration counter."
+    _loop_is_first: "boolean(generated; required) -> true on the first loop iteration."
+    _loop_is_last: "boolean(generated; required) -> true when the current loop iteration is expected to be final."
+    _loop_last_output: "string(generated; required) -> Captured output from the previous loop iteration. Empty on the first iteration."
+    _loop_last_exit_code: "number(integer; generated; required) -> Exit code from the previous loop iteration. 0 on the first iteration."

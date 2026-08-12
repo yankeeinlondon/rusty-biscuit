@@ -241,6 +241,39 @@ to SIGKILL. These internals are intentionally not part of the
 user-facing surface; they are constants from the user's perspective and
 must not be promoted to a third public timeout concept.
 
+### Idle-flush cadence
+
+A **second, separate ticker** runs `flush_if_idle`: it releases assistant
+prose still sitting in the block buffer during a silence, and emits the
+awaiting-subagent diagnostic described under
+[Subagent diagnostics](#subagent-diagnostics-in-error-reports). Its cadence
+and its silence window are one value, defaulting to `30s`.
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `CLAUDINE_IDLE_FLUSH_INTERVAL` | `30s` | How often the idle-flush ticker runs, **and** how long a held block must sit before a tick releases it. Duration string. |
+
+This is a **render cadence, not a timeout rule.** It terminates nothing and
+produces no `error_kind`; `timeout` and `step_timeout` remain the only two
+rules Claudine enforces. Lowering it surfaces held prose sooner at the cost
+of more wake-ups; raising it batches prose into fewer, larger flushes.
+
+Cadence and window are deliberately a single knob rather than two, because
+the window means *"held for at least one full tick"* — a window longer than
+the cadence only spends ticks that cannot flush, and a shorter one buys no
+granularity, since nothing between ticks can observe it.
+
+Parsing follows the same `parse_timeout` grammar as the two timeouts and the
+same fall-back posture as `CLAUDINE_WATCHDOG_INTERVAL`: the value is read
+once when the ticker spawns, and an absent, malformed, or non-positive value
+(including `0s`) takes the built-in `30s`. There is **no** `0s` disable
+sentinel here — a zero cadence would be a spin loop, not a disabled rule.
+
+The override exists because the flush is only observable end-to-end from a
+real terminal. `level2_prompt_idle_flush_keeps_the_task_bar_in_tmux` drives
+the real binary in a tmux pane, where an environment variable is the only
+seam that reaches the ticker.
+
 ## Defaults and rationale
 
 - **Why `timeout` has no built-in default.** The wall-clock ceiling is a
@@ -339,7 +372,8 @@ labelled `Step Timeout` (rendered through `SemanticEvent::Error` with
 other agent-native errors), enumerating each outstanding subagent's id,
 name, and elapsed time since its last progress event.
 
-In addition, the 30-second `flush_if_idle` ticker (which already exists
+In addition, the `flush_if_idle` ticker (30s by default — see
+[Idle-flush cadence](#idle-flush-cadence); it already exists
 to flush dangling assistant prose during long silences) emits at most
 **one** diagnostic line per active subagent per silence window:
 
@@ -381,6 +415,177 @@ built-in default), so simply leaving `timeout` out of frontmatter does
 **not** disable it — that just means "use whatever lower-priority source
 is configured."
 
+## Content guards (runaway-output)
+
+The two timeout rules above are *time*-driven: they catch a child that has
+gone **silent**. They cannot catch the opposite failure — a child that
+floods the stream with degenerate output and never stops. A
+non-interactive run that enters a tight token-level repetition loop keeps
+the byte heartbeat alive (bytes are flowing), so `step_timeout` never
+fires, and `timeout` is opt-in. The **content guards** are the
+*volume*-driven backstop for exactly this class.
+
+Three guards scan the typed semantic stream — `OutputText` and
+`Reasoning` text only, **never** tool-call / tool-result payloads — as it
+flows:
+
+| Guard | `error_kind` | Trips when | Built-in default | Kill-switch |
+|---|---|---|---|---|
+| Exit expression | `exit_expression` | A completed line matches a user-authored literal/regex pattern in scope | none declared (off) | omit / empty list |
+| Runaway repetition | `runaway_repetition` | A group-cycle of length `L ≤ 16` repeats `≥ 30` full times | on (30 cycles) | `guard_settings.repetition.enabled: false` |
+| Runaway volume | `runaway_volume` | A turn exceeds `50_000` lines **or** `32 MiB` | on | `guard_settings.volume.enabled: false` |
+
+The repetition guard counts the smallest repeating group, so single-line
+spam is just the `L = 1` case. Volume is counted **per turn** on the
+streaming path (reset on `TurnComplete`) and **per run** on the
+capture path; the capture path gets *only* the volume cap plus Ctrl+C,
+not exit-expression or repetition detection.
+
+### Aborted, not timed out
+
+All three guards converge on the same SIGTERM → SIGKILL plumbing the
+timeouts use (see [Termination path](#termination-path)), but they
+synthesize a distinct termination:
+[`ProcessTermination::Aborted`](../../lib/src/harness/model.rs), **not**
+`TimedOut`. This is deliberate — `Aborted` maps to
+`FailureEvent::AgentFailure` (fail-fast), so a guard trip **never** takes
+a `failure`-stack `Retry` path that would re-run the provider and
+reproduce the runaway. It is also never `Interrupted` (which would
+suppress failure handling like a user cancel). The honest per-guard
+`error_kind` is carried through the synthesized `session_end` summary, so
+a lifecycle `failure`/`finalize` stack can branch on the `err` global
+(`runaway_repetition` versus a generic `agent_failure`).
+
+| Termination | `error_kind` | Failure event | Recovery path |
+|---|---|---|---|
+| `TimedOut` | `timeout` / `step_timeout` | `Timeout` | `failure` stack `Retry`/`Resume` |
+| `Aborted` | `exit_expression` / `runaway_repetition` / `runaway_volume` / `repeated_stream_error` / `stalled_generation` | `AgentFailure` | none (fail-fast) |
+
+`repeated_stream_error` is an OpenCode-specific stderr backstop: consecutive
+`message="stream error"` records crossing `MAX_CONSECUTIVE_STREAM_ERRORS` (5)
+with no step advance abort the run, bounding OpenCode's unbounded backoff
+retries when the provider fails every attempt. It is fail-fast (`Aborted`),
+never a `failure`-stack `Retry` that would reproduce the failure loop.
+
+`stalled_generation` is the OpenCode **live-but-dead** backstop — see
+[OpenCode stalled-generation backstop](#opencode-stalled-generation-backstop)
+below. It is likewise fail-fast (`Aborted`), never a `failure`-stack `Retry`.
+
+### Configuration surface
+
+`exit_expressions` is declared per layer (user config, repo
+`.claudine` config, and document frontmatter) and accepts either a bare
+array or an explicit `{ mode, rules }` object. Each entry takes a single
+`pattern:` or a `patterns:` array, an optional `kind: literal | regex`
+(default `literal`, to avoid metacharacter surprises like the regex
+`STOP.` matching `STOPS`), an optional `ignore_case` (literal-only), and
+an optional `scope` (`{agent}` or `{agent}/{model}`; absent = global).
+Scopes are **additive** — a run is checked against the union of every
+matching entry. Invalid regex, an unknown agent in a `scope`, and an
+empty `patterns` are rejected at config-load, never mid-stream.
+
+```yaml
+---
+exit_expressions:
+    - pattern: "I have completed the task"     # literal, global
+    - patterns: ["FATAL", "unrecoverable"]
+      kind: regex
+      scope: opencode/kimi-for-coding/k2p7     # only this agent+model
+guard_settings:
+    repetition:
+        enabled: true
+        max_repeats: 30        # full cycles before trip
+        max_cycle_length: 16   # largest group L the detector recognizes
+    volume:
+        enabled: true
+        max_lines: 50000       # per-turn line cap
+        max_bytes: 33554432    # per-turn byte cap (32 MiB)
+---
+```
+
+The repetition/volume scalar settings use last-writer precedence
+(frontmatter > repo > user > built-in), like `timeout` / `step_timeout`.
+Only the list-typed `exit_expressions` carries a per-layer combine mode
+(repo defaults to `override`, frontmatter to `merge`).
+
+### False-positive posture
+
+The thresholds are deliberately conservative — a *wrongful* kill of an
+honest run is the worst outcome, far worse than letting a real runaway
+stream a few thousand extra lines before the cap. Repetition uses
+**exact** line equality (no fuzzy matching) and requires 30 full cycles;
+the volume cap sits at 50k lines / 32 MiB. Do not tune these down
+without a real false-positive incident. The wall-clock `timeout` remains
+opt-in and unchanged; the volume cap is the always-on content backstop
+that bounds the unbounded capture buffer even when no timeout is set.
+
+## OpenCode stalled-generation backstop
+
+This is **not** a third general timeout rule — `timeout` and `step_timeout`
+remain the only two (see [Overview](#overview)). The stalled-generation
+backstop is an **OpenCode-scoped** guard for a failure shape neither timeout
+catches: a *live-but-dead* run where the provider keeps retrying a dropped
+generation. OpenCode re-emits a `service=llm ... stream` (`llm_call_start`)
+record on every retry, and those retries keep the byte heartbeat alive, so
+`step_timeout` never fires — yet no assistant text, reasoning, tool call, or
+step advance is ever produced. The run is "alive" on the wire but
+producing nothing.
+
+The guard keys on a **retry-churn fingerprint** and trips only when **both**
+conditions hold on the same `llm_call_start`:
+
+1. **Retry churn.** The count of streamed `LlmCall` (`is_stream == true`)
+   records since the last progress event is
+   `>= MAX_GENERATIONS_WITHOUT_PROGRESS` (a constant, `4`).
+2. **Progress silence.** `now - last_progress_at >= stall_timeout`
+   (built-in default `10m`).
+
+Either condition alone never fires. The count condition is what makes the
+guard safe against a single legitimately-slow generation: one slow first
+call past the silence budget does not trip, because the retry count has not
+accumulated. The two conditions are also **anti-correlated** with healthy
+output — a run streaming assistant text or advancing steps resets the count,
+so it cannot reach the churn threshold. A long tool producing **no**
+`llm_call_start` records at all never trips this guard, even past
+`stall_timeout`.
+
+Progress events that reset the count and advance `last_progress_at` come from
+**both** producers, which share one progress cell. On the stderr bridge: a
+genuine `StepLoop` advance, `StepExit`, and subagent lifecycle (`SubagentStart`
+/ `SubagentStop`). On the stdout NDJSON stream (a separate reader thread): every
+progress-class semantic event — `OutputText`, `Reasoning`, `ToolCall`,
+`ToolResult`, `SubagentStart`, `SubagentStop`, `FileChange`, `PlanUpdate` — via
+a stdout progress observer wired to the same cell. This matters because the
+stderr bridge never sees stdout events; without the stdout-side reset a run that
+made real stdout progress could still trip on a later `llm_call_start`.
+Liveness-only events do **not** reset on either producer: another
+`llm_call_start`, a deduped/repeated `StepLoop` for the same `(session_id,
+step)`, `http_response`, `permission_evaluated`, `service=bus` lines, raw bytes,
+and the stdout `Info`/`Warning`/`Error`/session-turn-envelope events.
+
+On trip the guard emits a terminal `SemanticEvent::Error`
+(`SemanticErrorKind::AgentNative`, label **"Stalled Generation"**) and routes
+to `ProcessTermination::Aborted` with `error_kind = "stalled_generation"`. It
+is **fail-fast** — never `TimedOut`, so it never takes a `handle_timeout:` /
+`failure`-stack `Retry` path that would re-launch the provider and reproduce
+the stall. The synthesized `session_end` summary carries `generation_count`
+and `stall_duration_ms` plus available OpenCode metadata (session id, step,
+agent, provider id, model id, mode); it never stores prompt text or tool
+payloads.
+
+### Configuration
+
+| Layer | Surface | Notes |
+|---|---|---|
+| CLI flag | `--stall-timeout <DURATION>` | wrapper and compose; highest priority |
+| Env default | `CLAUDINE_OPENCODE_STALL_TIMEOUT` | duration string |
+| Built-in | `10m` | `Duration::from_secs(10 * 60)` |
+
+Precedence is CLI > env > built-in, and the same duration grammar as the two
+general timeouts applies. `0s` from the CLI or environment **disables** the
+guard for that run. The OpenCode-specific guard is intentionally not exposed
+in Markdown frontmatter. There is no `stall_timeout_warn` companion.
+
 ## Provider-specific stream variants
 
 Claudine's `step_timeout` rule and its in-flight gate both depend on the
@@ -403,7 +608,6 @@ inert).
 | Kimi Code | parsed | parsed | (n/a) | (n/a) | parsed | parsed |
 | OpenCode | **silent** | parsed | **stderr-promoted** | **stderr-promoted** | parsed | parsed |
 | Qwen Code | parsed | parsed | (n/a) | (n/a) | parsed | parsed |
-| Roo Code | parsed | parsed | parsed | parsed | parsed | parsed |
 
 The OpenCode row is the structurally important one and is detailed
 below. "stderr-promoted" entries mean the event is not on stdout NDJSON
@@ -457,7 +661,7 @@ second source:
 4. **Stderr-promoted activity and lifecycle.** Claudine opts the
    OpenCode wrapper into the structured stderr stream
    (`--print-logs --log-level INFO`) and classifies INFO log records
-   through [`OpenCodeLogBridge`](../../lib/src/stream/logs/opencode/reasoning.rs).
+   through [`OpenCodeLogBridge`](../../lib/src/stream/logs/opencode/bridge/mod.rs).
    Boot, `service=session` (parent + child), `service=llm` LLM calls,
    `service=session.prompt` step loops and exits, `service=permission`
    evaluations, and `service=default` HTTP responses are promoted to

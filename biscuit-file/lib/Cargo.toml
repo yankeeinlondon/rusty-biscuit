@@ -25,7 +25,7 @@ lopdf = ["dep:lopdf"]
 pdfium = ["dep:pdfium-render"]
 
 # File reference resolution
-file-reference = ["dep:gix", "dep:cargo_metadata", "dep:walkdir", "url"]
+file-reference = ["dep:gix", "dep:cargo_metadata", "dep:walkdir", "dep:dirs", "url"]
 
 # URL support (automatically enabled by file-reference)
 url = ["dep:url"]
@@ -71,6 +71,15 @@ cargo_metadata = { version = "0.19", optional = true }
 walkdir = { version = "2", optional = true }
 url = { version = "2.5", optional = true }
 
+# Cross-platform home directory (Windows-correct, unlike `$HOME` alone)
+dirs = { version = "6", optional = true }
+
+# Windows `\\?\` verbatim-prefix stripping (no-op on every other target).
+# Unconditional: it serves the resolver's root boundary (`simplify_root`, behind
+# `file-reference`) *and* the unfeatured path→text boundary
+# (`to_portable_string`), which must build with no default features.
+dunce = "1"
+
 # Remote fetch
 reqwest = { version = "0.13", optional = true, features = ["json"] }
 bytes = { version = "1", optional = true }
@@ -85,6 +94,7 @@ toml = "1.0"
 serde_yaml_ng = "0.10"
 tempfile = "3"
 serial_test = "3"
+proptest = "1.6"
 criterion = { version = "0.5", features = ["html_reports"] }
 wiremock = "0.6"
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }

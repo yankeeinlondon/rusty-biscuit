@@ -1,0 +1,228 @@
+# Baseline SimplifiedSchema for Darkmatter-owned Markdown frontmatter.
+# This is the authored source of truth for the darkmatter base schema; the
+# library loads it via include_str! and the docs transclude it verbatim.
+$schema:
+    "$schema": "schema -> Declares an inline SimplifiedSchema mapping, referenced schema file, or root union for this document. Raw JSON Schema is supported through referenced files only. Document schemas override baseline properties on conflict."
+
+    title: "string -> Human-readable document title. Used by markdown_title(), reports, diagnostics, and downstream tools that need a display name."
+    description: "string -> Human-readable document summary. Used by reports and diagnostics when identifying a document."
+    tags: "string[] -> Freeform document tags."
+    draft: "boolish -> Author-controlled draft marker. Darkmatter does not use this for compose control but commonly ignores it during hash workflows."
+    last_updated: "date -> Managed content-change date in YYYY-MM-DD form. Hash save and downstream tools may update it when content changes."
+    metadata: "object -> Arbitrary author metadata. Darkmatter preserves it and leaves interpretation to downstream tools."
+
+    hash:
+        - "string -> Stored shorthand hash. The simple form is '<frontmatter>-<body>' with 16 hexadecimal characters per segment."
+        - kind: "enum(fm, body, simple, structured, detailed; default(simple)) -> Hash resolution stored in longhand form."
+          value: "any -> Stored hash payload. A string is used for fm, body, simple, and structured hashes; detailed hashes use a nested object."
+          ignored: "string[] -> Extra frontmatter keys ignored during hash computation. The managed hash key and last_updated are always ignored and should not be listed."
+
+    # Canonical kebab-case style surface. Anchors keep the repeated component
+    # shapes identical; the runtime parser remains authoritative for deprecated
+    # snake_case aliases and cross-field constraints such as width/max-width.
+    style:
+        page:
+            left-margin: &style-length
+                - "string -> Horizontal length such as 2ch or 10%."
+                - "number(integer; min(0)) -> Character-cell length."
+            right-margin: *style-length
+            top-margin: &style-rows "number(integer; min(0); max(65535)) -> Terminal row count."
+            bottom-margin: *style-rows
+            left-padding: *style-length
+            right-padding: *style-length
+            top-padding: *style-rows
+            bottom-padding: *style-rows
+            max-width: *style-length
+            alignment: &style-alignment "enum(left, center, right) -> Horizontal alignment."
+            color: &style-color "string -> Tailwind, hexadecimal, or CSS named foreground color, optionally with opacity."
+            bg-color: *style-color
+            background: "enum(transparent, subtle, pronounced) -> Page background fill strategy."
+            stylesheet: "file -> CSS file reference or URL used for browser rendering."
+            meta: "object -> Browser metadata passed through to generated HTML."
+            code:
+                theme: "string -> Syntax-highlighting theme pair for code blocks."
+
+        table: &style-common
+            width: &style-width
+                - "enum(auto, fit-content) -> Intrinsic component width mode."
+                - "string -> Fixed width such as 40ch or 50%."
+                - "number(integer; min(0)) -> Fixed character-cell width."
+            max-width: *style-length
+            alignment: *style-alignment
+            color: *style-color
+            bg-color: *style-color
+            margin: *style-length
+            padding: *style-length
+            border: &style-border
+                - "boolean -> Enables or disables a thin border on all sides."
+                - "enum(thin, medium, thick, none) -> Border weight on all sides."
+                - left: "boolean -> Whether to draw the left border."
+                  right: "boolean -> Whether to draw the right border."
+                  top: "boolean -> Whether to draw the top border."
+                  bottom: "boolean -> Whether to draw the bottom border."
+                  weight: "enum(thin, medium, thick) -> Border weight."
+                  color: *style-color
+                  style: "enum(solid, dashed, dotted, double) -> Border line style."
+                  radius: *style-length
+            emphasis: &style-emphasis
+                bold: boolean
+                dim: boolean
+                italic: boolean
+                strikethrough: boolean
+                underline: "enum(straight, double, curly, dotted, dashed) -> Underline style."
+                inverse: boolean
+                blink: boolean
+            word-wrap: &style-word-wrap "enum(none, wrap, truncate, wrap-prose) -> Component wrapping policy."
+
+        block-quote: *style-common
+
+        ul:
+            width: *style-width
+            max-width: *style-length
+            alignment: *style-alignment
+            color: *style-color
+            bg-color: *style-color
+            left-margin: *style-length
+            margin: *style-length
+            padding: *style-length
+            border: *style-border
+            emphasis: *style-emphasis
+            word-wrap: *style-word-wrap
+
+        ol: *style-common
+        li: *style-common
+
+        hyperlinks:
+            width: *style-width
+            max-width: *style-length
+            alignment: *style-alignment
+            color: *style-color
+            bg-color: *style-color
+            local-style: *style-common
+
+        images:
+            width: *style-width
+            max-width: *style-length
+            alignment: *style-alignment
+            color: *style-color
+            bg-color: *style-color
+            local-style: *style-common
+
+        hr:
+            width: *style-length
+            max-width: *style-length
+            alignment: "enum(full, left, center, right) -> Horizontal-rule alignment."
+            color: *style-color
+            bg-color: *style-color
+            kind: "enum(dashes, dots, waves, line-star, line-circle, inset-line, curtain-rod) -> Horizontal-rule glyph style."
+            weight: "enum(thin, medium, thick) -> Horizontal-rule weight."
+            margin: *style-length
+            padding: *style-length
+            border: *style-border
+            emphasis: *style-emphasis
+            word-wrap: *style-word-wrap
+
+        disclosure: *style-common
+        code-block: *style-common
+
+    change: "any -> Change metadata used by Darkmatter workflows. The v1 baseline accepts all shapes until the public change contract is finalized."
+    replace: "object -> Literal text replacement map applied during compose. Keys are source strings and values are replacement strings."
+    ctx:
+        now: "datetime(generated; required) -> Local date and time in ISO-8601 format."
+        now_utc: "datetime(generated; required) -> UTC date and time in ISO-8601 format."
+        today: "date(generated; required) -> Local date in ISO-8601 format."
+        today_utc: "date(generated; required) -> UTC date in ISO-8601 format."
+        yesterday: "date(generated; required) -> Local date for yesterday in ISO-8601 format."
+        yesterday_utc: "date(generated; required) -> UTC date for yesterday in ISO-8601 format."
+        tomorrow: "date(generated; required) -> Local date for tomorrow in ISO-8601 format."
+        tomorrow_utc: "date(generated; required) -> UTC date for tomorrow in ISO-8601 format."
+        day: "string(generated; required) -> Full day of week name, local time."
+        day_utc: "string(generated; required) -> Full day of week name, UTC."
+        day_abbr: "string(generated; required) -> Abbreviated day of week name, local time."
+        day_abbr_utc: "string(generated; required) -> Abbreviated day of week name, UTC."
+        year: "string(generated; required) -> Current year, local time."
+        year_utc: "string(generated; required) -> Current year, UTC."
+        month: "string(generated; required) -> Current month as a zero-padded number, local time."
+        month_name: "string(generated; required) -> Current month name, local time."
+        month_name_abbr: "string(generated; required) -> Abbreviated current month name, local time."
+        day_of_month: "string(generated; required) -> Current day of month."
+        day_of_month_suffixed: "string(generated; required) -> Current day of month with ordinal suffix."
+        time: "string(generated; required) -> Local time in 12-hour format with AM/PM."
+        time_military: "string(generated; required) -> Local time in 24-hour format."
+        time_utc: "string(generated; required) -> UTC time in 12-hour format with AM/PM."
+        time_military_utc: "string(generated; required) -> UTC time in 24-hour format."
+        timezone: "string(generated) -> Local timezone abbreviation, or null when unavailable."
+        timezone_offset: "string(generated; required) -> Local UTC offset."
+        timezone_iana: "string(generated) -> Local IANA timezone name, or null when unavailable."
+        start_of_week_sun: "date(generated; required) -> Start of the current Sunday-based week, local time."
+        end_of_week_sun: "date(generated; required) -> End of the current Sunday-based week, local time."
+        start_of_week_mon: "date(generated; required) -> Start of the current Monday-based week, local time."
+        end_of_week_mon: "date(generated; required) -> End of the current Monday-based week, local time."
+        start_of_week_sun_utc: "date(generated; required) -> Start of the current Sunday-based week, UTC."
+        end_of_week_sun_utc: "date(generated; required) -> End of the current Sunday-based week, UTC."
+        start_of_week_mon_utc: "date(generated; required) -> Start of the current Monday-based week, UTC."
+        end_of_week_mon_utc: "date(generated; required) -> End of the current Monday-based week, UTC."
+        season: "string(generated; required) -> Current meteorological season."
+        timestamp: "number(integer; generated; required) -> Current Unix timestamp in seconds."
+        timestamp_ms: "number(integer; generated; required) -> Current Unix timestamp in milliseconds."
+        utc: "datetime(generated; required) -> Alias for now_utc."
+        dow: "string(generated; required) -> Alias for day."
+        dow_abbr: "string(generated; required) -> Alias for day_abbr."
+        repo: "string(generated) -> Repository name from the preferred remote URL, or null when unavailable."
+        repo_root: "string(generated) -> Absolute repository root path, or null when unavailable."
+        branch: "string(generated) -> Current local Git branch name, or null outside a repository or at detached HEAD."
+        worktree: "string(generated) -> Current linked Git worktree name, or null in the main worktree or outside a repository."
+        is_monorepo: "boolean(generated; required) -> Whether the current repository is a monorepo."
+        package_root: "string(generated) -> Absolute current package root path, or null when unavailable."
+        package_area_root: "string(generated) -> Absolute current package area root path, or null when unavailable."
+        packages: "string[](generated) -> Package names, or null when unavailable."
+        package_areas: "string[](generated) -> Package area names, or null when unavailable."
+        current_package: "string(generated) -> Current package name, or null when unavailable."
+        current_package_area: "string(generated) -> Current package area, or null when unavailable."
+        area: "string(generated; required) -> Scoped area name."
+        area_description: "string(generated; required) -> Human-readable scoped area description."
+        area_root: "string(generated; required) -> Absolute scoped area root path."
+        current_packages: "string[](generated; required) -> Packages under the current directory."
+        depends_on: "object[](generated; required) -> Workspace-internal package dependencies. Each item is an object with a `package` (string) field and a `dependencies` (string[]) field listing the packages it depends on."
+        used_by: "object[](generated; required) -> Workspace-internal package reverse dependencies. Each item is an object with a `package` (string) field and a `users` (string[]) field listing the packages that depend on it."
+        dirty_files: "string[](generated; required) -> Dirty file paths."
+        merge_conflicts: "string[](generated; required) -> Repository-relative paths currently in an unresolved Git index state."
+        dirty_source_code_files: "string[](generated; required) -> Dirty source-code file paths."
+        staged_files: "string[](generated; required) -> Staged file paths."
+        untracked_files: "string[](generated; required) -> Untracked file paths."
+        dirty_packages: "string[](generated; required) -> Dirty package names."
+        dirty_package_areas: "string[](generated; required) -> Dirty package area names."
+        staged_packages: "string[](generated; required) -> Staged package names."
+        staged_package_areas: "string[](generated; required) -> Staged package area names."
+        current_package_has_staged_files: "boolean(generated; required) -> Whether the current package has staged files."
+        current_package_area_has_staged_files: "boolean(generated; required) -> Whether the current package area has staged files."
+        current_package_has_dirty_files: "boolean(generated; required) -> Whether the current package has dirty files."
+        current_package_area_has_dirty_files: "boolean(generated; required) -> Whether the current package area has dirty files."
+        programming_languages_in_repo: "string[](generated) -> Programming languages in the repository, or null when unavailable."
+        programming_language: "string(generated) -> Context-sensitive primary programming language, or null when unavailable."
+        package_manager: "string(generated) -> Context-sensitive package manager, or null when unavailable."
+        docs_readme: "string[](generated; required) -> README paths, scope-filtered."
+        docs_blast_radius: "string[](generated; required) -> Docs with blast_radius frontmatter, scope-filtered."
+        docs_drift: "string[](generated; required) -> Docs at risk of drift from source changes."
+        docs_skill: "string(generated) -> Repo-relative path to the best matching skill file, or null when unavailable."
+        os: "string(generated) -> Operating system name, or null when unavailable."
+        os_distro: "string(generated; required) -> Linux distribution name, empty on macOS and Windows."
+        os_package_manager: "string(generated) -> Primary system package manager, or null when unavailable."
+        os_version: "string(generated; required) -> Operating system version."
+        memory_total: "string(generated) -> Total system memory in bytes, or null when unavailable."
+        memory_used: "string(generated) -> Percentage of memory currently used, or null when unavailable."
+        memory_avail: "string(generated) -> Available system memory in bytes, or null when unavailable."
+        cpu_cores: "number(integer; generated) -> Number of logical CPU cores, or null when unavailable."
+        cpu_arch: "string(generated) -> CPU architecture, or null when unavailable."
+        gpu: "string(generated) -> GPU device names, or null when unavailable."
+        agent: "string(generated; required) -> The agentic CLI provider being used in the current session."
+        model: 'string(generated; required) -> Active model identifier, trimmed from the MODEL env var; defaults to "default".'
+
+    prologue:
+        - "string(default(null)) -> File reference, inline text, or bare filename inserted before the body during transclusion."
+        - "string[] -> Ordered prologue references inserted before the body during transclusion."
+    epilogue:
+        - "string(default(null)) -> File reference, inline text, or bare filename inserted after the body during transclusion."
+        - "string[] -> Ordered epilogue references inserted after the body during transclusion."
+    ignore_invalid: "boolish -> Allows invalid transclusion references to be left in place as warnings instead of aborting composition."
+    interpolate_code_blocks: "boolish -> Enables interpolation inside fenced code blocks. Disabled by default so code examples stay literal."

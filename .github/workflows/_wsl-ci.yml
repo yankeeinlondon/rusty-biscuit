@@ -1,0 +1,803 @@
+name: wsl-ci
+
+# The `wsl2-ubuntu` environment: one Cargo package's canonical L1 suite, run
+# inside a WSL2 Ubuntu guest hosted by a `windows-latest` runner.
+#
+# WHY THIS IS A SEPARATE WORKFLOW
+#
+# WSL2 cannot be another entry in `_package-ci.yml`'s `runs-on` matrix. The job
+# still runs on `windows-latest` and every command executes through `wsl-bash`,
+# so a shared job would evaluate `runner.os == 'Windows'` and take the Windows
+# branch for native-package installation, path handling, shell
+# selection, cache keys, and artifact collection — while the code under test is
+# actually running on Linux. Isolating it here makes that impossible by
+# construction rather than by review discipline.
+#
+# WSL2, NOT WSL1
+#
+# `Vampire/setup-wsl` defaults to version 2 and GitHub's Windows runners have had
+# nested virtualization since the Dadsv5 move in January 2024, so no version pin
+# appears below. WSL1 is not an acceptable fallback: WSLg (GUI, audio, clipboard,
+# D-Bus) is WSL2-only, so under WSL1 `playa`, `messenger`, `biscuit-clipboard`,
+# `biscuit-visualized`, and `renderable` all take their no-capability fallback
+# branches and a green leg would misreport those packages for every real user.
+# Networking differs too — WSL1 shares the Windows stack, WSL2 is NAT'd — which
+# is material for `sniff`, `homelab`, and `rendezvous`.
+#
+# EXT4, NOT /mnt/c
+#
+# The repo is cloned into the guest filesystem rather than built over
+# `GITHUB_WORKSPACE`, which is a 9p mount. The 9p boundary
+# penalty is severe for a build tree, and ext4 is also where real WSL developers
+# keep their repos, so this is the configuration worth testing.
+#
+# BUILD ONCE, RUN IN THE GUEST
+#
+# `cargo nextest archive` builds `x86_64-unknown-linux-gnu` on `ubuntu-latest`
+# and the guest only *runs* the archived binaries. No rustup, no toolchain, no
+# compile inside WSL, and the binaries are byte-identical to the Linux leg's, so
+# a `wsl2-ubuntu` failure is an environment difference rather than a build
+# difference. L1 ONLY — the L2 tier needs the broker binary and a live tmux
+# server, which an archive does not carry; the environment capability table
+# (`.github/ci/environments.json`) records `wsl2-ubuntu` as archive-only with no
+# tmux, so the rollup renders the package's L2 cell there as a POLICY GAP.
+
+on:
+  workflow_call:
+    inputs:
+      package:
+        description: "Cargo package name; the unit of selection, execution, and result identity (e.g. sniff-cli)."
+        type: string
+        required: true
+      check-args:
+        description: "Cargo package selector and declared features for the archive build (e.g. '-p sniff --features remote')."
+        type: string
+        required: true
+      test-args:
+        description: "Extra args forwarded to the canonical test recipe (declared feature flags; dropped in archive mode, where they are already baked in)."
+        type: string
+        default: ""
+      l1-include-slow:
+        description: "Keep `slow_` tests inside the L1 selection (darkmatter's declared L1 contract). Forwarded to the guest or its L1 suite silently narrows relative to every other leg."
+        type: boolean
+        default: false
+      runner-tools:
+        description: "JSON array from the closed runner-tool vocabulary; messenger-desktop-stubs is delivered as a Linux sidecar."
+        type: string
+        default: '[]'
+      native:
+        description: "JSON map of runner OS -> system packages, the union of `native` requirements across this package's dependency closure. Both the archive builder and the guest consume the ubuntu-latest list."
+        type: string
+        default: '{}'
+      distribution:
+        description: "WSL distribution to provision."
+        type: string
+        default: Ubuntu-24.04
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Cargo package to run inside WSL2."
+        type: string
+        required: true
+        default: sniff
+      check-args:
+        description: "Cargo package selector and features for the archive build."
+        type: string
+        required: true
+        default: "-p sniff --features remote"
+      test-args:
+        description: "Extra args forwarded to the canonical test recipe."
+        type: string
+        default: "--features remote"
+      l1-include-slow:
+        description: "Keep `slow_` tests inside the L1 selection."
+        type: boolean
+        default: false
+      runner-tools:
+        description: "JSON array of package-owned runner tools."
+        type: string
+        default: '[]'
+      native:
+        description: "JSON map of runner OS -> system packages."
+        type: string
+        default: '{}'
+      distribution:
+        description: "WSL distribution to provision."
+        type: string
+        default: Ubuntu-24.04
+
+env:
+  # No rustc wrapper is tracked by the repository; cleared explicitly so a stray
+  # environment value cannot reach the archive build.
+  RUSTC_WRAPPER: ""
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  COLORTERM: truecolor
+  NEXTEST_PROFILE: ci
+  ARCHIVE_NAME: nextest-archive.tar.zst
+  # Pinned so the guest's installer never has to ASK which version is newest.
+  # That question is `GET https://api.github.com/repos/casey/just/releases/latest`
+  # — an authenticated-or-60-per-hour-per-IP endpoint — and the guest is the one
+  # place in this repository that reaches it unauthenticated. See the guest
+  # install step for the full account.
+  #
+  # Used for BOTH the host and the guest so the two run the same `just` against
+  # the same recipes. Bump them together.
+  JUST_VERSION: "1.58.0"
+
+jobs:
+  # Linux build host. Produces the artifact the guest consumes; nothing here
+  # touches WSL.
+  archive:
+    name: archive (${{ inputs.package }} for wsl2)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install just
+        uses: extractions/setup-just@v2
+        with:
+          just-version: ${{ env.JUST_VERSION }}
+      # Every test binary in the archive carries this job's workspace path baked
+      # in as `env!("CARGO_MANIFEST_DIR")`, and the guest clones itself to the
+      # same literal so those fixtures resolve. Nothing else enforces that
+      # coupling, so assert it here — a mismatch caught now is one clear error,
+      # where a mismatch discovered later is every fixture-reading test in the
+      # package failing on a missing file and looking like a code regression.
+      - name: Verify the guest path assumption holds
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="/home/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}"
+          if [ "$GITHUB_WORKSPACE" != "$expected" ]; then
+            echo "The WSL2 guest clones to '$expected', but this archive is being" >&2
+            echo "built at '$GITHUB_WORKSPACE'." >&2
+            echo "Every env!(\"CARGO_MANIFEST_DIR\") fixture lookup would miss in the guest." >&2
+            echo "Update GUEST_ROOT in .github/workflows/_wsl-ci.yml to match." >&2
+            exit 1
+          fi
+          echo "archive build path matches the guest clone path: $expected"
+      - name: Verify the archive passthrough is wired
+        shell: bash
+        run: |
+          set -euo pipefail
+          # The guest has no Cargo, so the canonical recipes must be able to (a)
+          # invoke the standalone `cargo-nextest` binary, (b) forward
+          # --archive-file/--workspace-remap untouched, and (c) stage their JUnit
+          # report without shelling out to `cargo metadata`. Fail here, with a
+          # pointer, rather than deep inside `wsl-bash` with a confusing error.
+          missing=()
+          for knob in BISCUIT_NEXTEST_BIN BISCUIT_JUNIT_TARGET_DIR BISCUIT_JUNIT_WORKSPACE_ROOT; do
+            grep -q "$knob" just/devops.just || missing+=("$knob")
+          done
+          if [ ${#missing[@]} -gt 0 ]; then
+            echo "just/devops.just is missing the WSL archive passthrough: ${missing[*]}" >&2
+            echo "See fixes/2026-07-27-refactor/wsl-archive-requirements.md for the exact contract." >&2
+            exit 1
+          fi
+      # The package's own native requirements AND any it compiles from its
+      # dependency closure: the scope job computed the union, and an archived
+      # binary that dynamically links a library the guest lacks fails there,
+      # not here — so both sides install it.
+      - name: Install native prerequisites
+        shell: bash
+        env:
+          NATIVE: ${{ inputs.native }}
+        run: |
+          set -euo pipefail
+          packages="$(jq -r '."ubuntu-latest" // [] | join(" ")' <<<"$NATIVE")"
+          if [ -n "$packages" ]; then
+            just _ensure-native-libs $packages
+          fi
+      - name: Set up the pinned Rust toolchain
+        run: rustup show
+      - name: Install protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ". -> target"
+          shared-key: package-ci-${{ inputs.package }}-test-ubuntu-latest
+      - name: Install cargo-nextest
+        uses: taiki-e/install-action@nextest
+      - name: Build the nextest archive
+        shell: bash
+        run: |
+          set -euo pipefail
+          # An explicit --target keeps the archived binaries unambiguously
+          # x86_64-unknown-linux-gnu, which is exactly what the guest executes.
+          cargo nextest archive \
+            --archive-file "$RUNNER_TEMP/$ARCHIVE_NAME" \
+            --target x86_64-unknown-linux-gnu \
+            ${{ inputs.check-args }}
+      - name: Build messenger desktop stub sidecar
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'messenger-desktop-stubs') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          stubs="stub_dunstify stub_notify_send stub_snoretoast stub_burnttoast stub_terminal_notifier stub_alerter"
+          build_args=(--all-features -p messenger --target x86_64-unknown-linux-gnu)
+          for stub in $stubs; do
+            build_args+=(--bin "$stub")
+          done
+          cargo build "${build_args[@]}"
+
+          sidecar="$RUNNER_TEMP/messenger-desktop-stubs"
+          mkdir -p "$sidecar"
+          for stub in $stubs; do
+            source="target/x86_64-unknown-linux-gnu/debug/$stub"
+            [ -x "$source" ] || { echo "Linux messenger stub missing: $source" >&2; exit 1; }
+            cp "$source" "$sidecar/$stub"
+          done
+      - name: Upload the nextest archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: nextest-archive-${{ inputs.package }}-wsl2-ubuntu
+          path: ${{ runner.temp }}/${{ env.ARCHIVE_NAME }}
+          retention-days: 1
+          if-no-files-found: error
+      - name: Upload the messenger desktop stub sidecar
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'messenger-desktop-stubs') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: messenger-desktop-stubs-${{ inputs.package }}-wsl2-ubuntu
+          path: ${{ runner.temp }}/messenger-desktop-stubs
+          retention-days: 1
+          if-no-files-found: error
+
+  wsl:
+    name: test (${{ inputs.package }} on wsl2-ubuntu)
+    needs: archive
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      # Result identity, declared once. The environment is `wsl2-ubuntu` even
+      # though the runner label is `windows-latest`; stamping the label here
+      # would silently merge this leg into the native Windows rollup cell.
+      BISCUIT_CI_ENVIRONMENT: wsl2-ubuntu
+      # The guest checkout must sit at the SAME ABSOLUTE PATH the archive was
+      # built at, because `env!("CARGO_MANIFEST_DIR")` is a string literal
+      # compiled into every test binary. `--workspace-remap` cannot touch it —
+      # that only tells nextest where the workspace root moved to — so any test
+      # resolving a fixture through the macro opened a path that did not exist
+      # in the guest and failed on a missing file, not on its own assertion.
+      #
+      # The archive is built by the `archive` job on `ubuntu-latest`, where
+      # `GITHUB_WORKSPACE` is `/home/runner/work/<repo>/<repo>`. Deriving it from
+      # the repository name keeps the two ends coupled through one expression
+      # rather than a hardcoded string that drifts if the repo is renamed. The
+      # verification step below asserts the coupling actually holds rather than
+      # trusting it.
+      GUEST_ROOT: /home/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}
+      # Pinned rather than defaulted. The guest's staging root is the one path
+      # two different `wsl-bash` invocations must agree on — the tests write it,
+      # and a later step copies it across the 9p mount for upload — and each
+      # invocation gets a fresh environment, so the value is declared once here
+      # and interpolated into both.
+      # Spelled out rather than built from `GUEST_ROOT`: one `env:` entry cannot
+      # reference another in the same block.
+      BISCUIT_JUNIT_STAGE_DIR: /home/runner/work/${{ github.event.repository.name }}/${{ github.event.repository.name }}/target/nextest/ci-reports
+      # The package's declared L1 contract (`l1-include-slow` in
+      # `[package.metadata.ci.tests]`), re-exported inside the guest below so
+      # darkmatter's `slow_` tests run here exactly as on the native legs.
+      BISCUIT_L1_INCLUDE_SLOW: ${{ inputs.l1-include-slow && '1' || '' }}
+    steps:
+      - uses: actions/checkout@v4
+      # Inside the workspace, not RUNNER_TEMP: the guest reaches this through
+      # the 9p mount by resolving `pwd`, which needs no environment forwarding.
+      - name: Download the nextest archive
+        uses: actions/download-artifact@v4
+        with:
+          name: nextest-archive-${{ inputs.package }}-wsl2-ubuntu
+          path: ${{ github.workspace }}/nextest-archive
+      - name: Download the messenger desktop stub sidecar
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'messenger-desktop-stubs') }}
+        uses: actions/download-artifact@v4
+        with:
+          name: messenger-desktop-stubs-${{ inputs.package }}-wsl2-ubuntu
+          path: ${{ github.workspace }}/messenger-desktop-stubs
+      # No `wsl-version:` pin — the action already defaults to 2, and pinning 1
+      # would be an explicit downgrade to an environment without WSLg.
+      #
+      # WHY v7 AND NOT v4 — THIS IS WHAT STOPS THE 403
+      #
+      # v4 issued `wsl.exe --update` unconditionally whenever WSLv2 was to be
+      # used, and that call is what failed: `Forbidden (403)`,
+      # `Wsl/UpdatePackage/0x80190193`, returned by Microsoft's update endpoint.
+      # It took out `biscuit-contract` and `biscuit-tui` in run 30755610413 —
+      # both attempts below, so no guest existed and the cells reported MISSING.
+      #
+      # The action cannot be told to skip that call, and retrying does not fix
+      # it: upstream already retries ten times internally and the maintainer
+      # closed Vampire/setup-wsl#66 concluding there is nothing more the action
+      # can do, pending actions/runner-images#10563.
+      #
+      # v5.0.0 changed the behaviour instead of the retry count: the update is
+      # now issued ONLY for GitHub-hosted `windows-2022`, because the newer
+      # images already ship it. These legs run `windows-latest`, which is
+      # `windows-2025-vs2026` (Windows Server 2025, 10.0.26100) — so on v5+ the
+      # call is not made at all and the 403 has no surface to appear on.
+      # v6 additionally retries Debian's apt step; v7 moves to Node 24, which
+      # these runs are already forced onto by `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24`.
+      #
+      # WHY A SECOND ATTEMPT SURVIVES
+      #
+      # Provisioning can still fail for reasons unrelated to `--update` — the
+      # distribution appx download and the guest's own apt step both cross the
+      # network. `continue-on-error` on the first attempt is what makes the
+      # second reachable; the second is NOT `continue-on-error`, because a guest
+      # that cannot be provisioned twice must still turn the cell red.
+      #
+      # The 90s wait is retained but no longer rests on the contention theory it
+      # was written for. Run 30755610413 does not support that theory: claudine's
+      # four shards started within two seconds of each other and all provisioned
+      # cleanly, while the two 403s hit isolated legs 28 minutes apart. Treat the
+      # wait as ordinary backoff against a flaky endpoint, not as de-racing.
+      - name: Provision the WSL2 guest
+        id: provision
+        continue-on-error: true
+        uses: Vampire/setup-wsl@v7
+        with:
+          distribution: ${{ inputs.distribution }}
+          set-as-default: true
+          # jq is NOT optional: the guest's native-prerequisites step parses the
+          # scope-computed package list with it, for every package, before any
+          # recipe that could bootstrap it has run.
+          additional-packages: ca-certificates curl git xz-utils jq
+      - name: Let the endpoint settle before a second attempt
+        if: ${{ steps.provision.outcome == 'failure' }}
+        shell: bash
+        run: sleep 90
+      - name: Provision the WSL2 guest (second attempt)
+        id: provision_retry
+        if: ${{ steps.provision.outcome == 'failure' }}
+        uses: Vampire/setup-wsl@v7
+        with:
+          distribution: ${{ inputs.distribution }}
+          set-as-default: true
+          additional-packages: ca-certificates curl git xz-utils jq
+      - name: Verify the guest is WSL2
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          uname -a
+          # WSL2 runs a real Linux kernel and says so; WSL1's syscall translation
+          # layer reports a Microsoft build instead. A silent downgrade to WSL1
+          # would make every WSLg-dependent package (playa, messenger,
+          # biscuit-clipboard, biscuit-visualized, renderable) report its
+          # no-capability fallback, and NAT'd networking would stop applying to
+          # sniff, homelab, and rendezvous.
+          case "$(uname -r)" in
+            *microsoft-standard-WSL2*) ;;
+            *)
+              echo "guest is not WSL2 (kernel: $(uname -r)); refusing to report a result" >&2
+              exit 1
+              ;;
+          esac
+      # The default wsl-bash user is root, and root ignores file permissions —
+      # which silently inverts every permission-denial test fixture (a readonly
+      # file that must fail validation validates; a copy rigged to fail
+      # succeeds). Real WSL2 development happens as an ordinary user, so the
+      # tests run as one. Provisioning steps stay root; only the test step
+      # drops privileges.
+      - name: Create the unprivileged test user
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          id -u biscuit >/dev/null 2>&1 || useradd -m -s /bin/bash biscuit
+          # Passwordless sudo so recipes that self-elevate (apt installs in
+          # `_ensure-native-libs`) keep working if ever invoked as the user.
+          echo 'biscuit ALL=(ALL) NOPASSWD:ALL' >/etc/sudoers.d/biscuit
+          chmod 0440 /etc/sudoers.d/biscuit
+      - name: Clone the repository onto ext4
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          # `wsl-bash` starts in the translated workspace directory, so `pwd` is
+          # the one workspace path that needs no WSLENV forwarding to be correct.
+          workspace="$(pwd)"
+          git config --global --add safe.directory '*'
+          revision="$(git -C "$workspace" rev-parse HEAD)"
+          rm -rf "${{ env.GUEST_ROOT }}"
+          # `git clone` creates the leaf but not the intervening directories, and
+          # the guest has no `/home/runner/work` until something makes it.
+          mkdir -p "$(dirname "${{ env.GUEST_ROOT }}")"
+          # Building over the workspace pays the 9p boundary penalty on every
+          # file access; ext4 is both faster and where real WSL developers keep
+          # their repositories, so it is the configuration worth testing.
+          git clone --no-hardlinks "$workspace" "${{ env.GUEST_ROOT }}"
+          git -C "${{ env.GUEST_ROOT }}" checkout --detach "$revision"
+          cp "$workspace/nextest-archive/nextest-archive.tar.zst" /home/runner/
+          # The test step runs as `biscuit` (see the user-creation step); the
+          # tree it executes in must be writable by that user, not root.
+          chown -R biscuit:biscuit /home/runner
+      - name: Copy messenger desktop stubs onto ext4
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'messenger-desktop-stubs') }}
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          workspace="$(pwd)"
+          sidecar=/home/runner/messenger-desktop-stubs
+          stubs="stub_dunstify stub_notify_send stub_snoretoast stub_burnttoast stub_terminal_notifier stub_alerter"
+          mkdir -p "$sidecar"
+          for stub in $stubs; do
+            source="$workspace/messenger-desktop-stubs/$stub"
+            [ -f "$source" ] || { echo "messenger sidecar fixture missing: $source" >&2; exit 1; }
+            cp "$source" "$sidecar/$stub"
+            chmod 0755 "$sidecar/$stub"
+          done
+          chown -R biscuit:biscuit "$sidecar"
+      - name: Install just and cargo-nextest in the guest
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          # Deliberately NOT rustup: the guest only RUNS prebuilt test binaries
+          # from the archive, so a Rust toolchain would add minutes and buy
+          # nothing. cargo-nextest executes an archive without Cargo or rustc.
+          #
+          # THE 403, AND WHY IT LANDS ONLY HERE
+          #
+          # Every other environment installs `just` with `extractions/setup-just`,
+          # which passes `${{ github.token }}` by default. Its API calls are
+          # therefore authenticated: 5,000/hour against this repository.
+          #
+          # A GitHub Action cannot run inside the guest — actions execute on the
+          # runner, and the guest is a separate VM reached through a bash
+          # wrapper. So this is the one place tools are installed by shell
+          # script, and the one place the request is anonymous: 60/hour shared
+          # across every job on the runner's IP. `biscuit-terminal` was
+          # lost that way in run 30755610413, and `unchained-ai` in 31041986681.
+          #
+          # `--retry-all-errors` was the previous attempt and could never have
+          # worked. It does retry a 403 — verified, six attempts over 25s — but
+          # the failing request is not this curl. `just.systems/install.sh`
+          # downloads fine; the SCRIPT then calls
+          # `api.github.com/repos/casey/just/releases/latest` using its own curl,
+          # which carries no retry flags. Run 31041986681 failed in 0.9s, which
+          # is the proof: a real retry cycle takes 25.
+          #
+          # Two fixes, both supported by the installer itself. `--tag` skips that
+          # API call entirely (it only asks when it has no version), and
+          # GITHUB_TOKEN authenticates anything that still reaches the API.
+          # Exported by interpolation rather than left to WSLENV, for the reason
+          # given on the L1 step below.
+          export GITHUB_TOKEN='${{ secrets.GITHUB_TOKEN }}'
+          #
+          # `get.nexte.st` is a plain 302 to a release asset, not an API call, so
+          # it is not subject to that limit — but a single 403 anywhere here is
+          # fatal twice over: `-f` makes curl exit non-zero and `pipefail`
+          # propagates it from upstream of a pipe. The retry stays.
+          curl_get() {
+            curl --proto '=https' --tlsv1.2 -sSfL \
+              --retry 5 --retry-delay 5 --retry-all-errors \
+              --connect-timeout 15 "$@"
+          }
+          curl_get https://just.systems/install.sh |
+            bash -s -- --tag '${{ env.JUST_VERSION }}' --to /usr/local/bin
+          curl_get https://get.nexte.st/latest/linux | tar zxf - -C /usr/local/bin
+          just --version
+          cargo-nextest nextest --version
+      - name: Install native prerequisites in the guest
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          # A WSL2 guest IS Linux, so it consumes the `ubuntu-latest` package
+          # list — the same dependency-closure union the archive builder
+          # installed. Satisfying only the builder is insufficient when an
+          # archived binary dynamically links a library the guest lacks.
+          #
+          # Interpolated, NOT read from `env:`: step env lives on the Windows
+          # host process, and `wsl-bash` forwards only WSLENV-listed variables
+          # into the guest — an `env:`-sourced $NATIVE is unbound here.
+          cd "${{ env.GUEST_ROOT }}"
+          packages="$(jq -r '."ubuntu-latest" // [] | join(" ")' <<<'${{ inputs.native }}')"
+          if [ -n "$packages" ]; then
+            just _ensure-native-libs $packages
+          fi
+      # DIAGNOSTIC ONLY — nothing below changes what runs or how it is reported.
+      #
+      # THE CONFIRMED FAILURE, AND WHY THE CENSUS RUNS *BEFORE* EXTRACTION
+      #
+      # Extracting a large archive into the guest exhausts the WINDOWS RUNNER's
+      # disk, not the guest's. Run 30605643702, all four claudine shards, ~3
+      # minutes after `Extracting 153 binaries`:
+      #
+      #   ##[error]There is not enough space on the disk. :
+      #     'C:\actions-runner\cached\2.336.0\_diag\blocks\...'
+      #
+      # That path is the runner's OWN diagnostic writer. Once it cannot write,
+      # the runner is finished: every remaining step is abandoned, including the
+      # `always()` producer status. That is why claudine published no
+      # `status-claudine-L1-wsl2-ubuntu-*` artifact at all while darkmatter — same
+      # run, same shard count — published all four.
+      #
+      # In run 30595280027 the same exhaustion surfaced one layer down as SIGBUS
+      # (signal 7, exit 135): a page mapped from a VHDX that could no longer grow
+      # cannot be backed, and an unbacked mapped page is a bus error rather than
+      # an `ENOSPC` return. Same cause, different symptom depending on which
+      # write hits the wall first.
+      #
+      # It is a capacity threshold, not a code question — claudine's archive was
+      # 6.4 GiB when it carried five packages, darkmatter's 3.9 GiB and its
+      # guests survive. Per-package archives are far smaller, but the census
+      # stays: it is cheap, and the next capacity cliff is unknowable in advance.
+      #
+      # Hence the ordering below. A post-mortem cannot run on a runner that has
+      # already died, so the measurement that matters is taken BEFORE extraction,
+      # where it is guaranteed to reach the log.
+      - name: Census the Windows host before extraction
+        if: ${{ !cancelled() }}
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # Headroom on the volume the guest's VHDX grows into. This number is
+          # the whole diagnosis: compare it against the extracted size of the
+          # package's archive.
+          Get-PSDrive -PSProvider FileSystem |
+            Select-Object Name, @{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}},
+                                @{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}} |
+            Format-Table | Out-String | Write-Host
+      - name: Census the guest before the archive is extracted
+        if: ${{ !cancelled() }}
+        shell: wsl-bash {0}
+        run: |
+          set -uo pipefail
+          workspace="$(pwd)"
+          mkdir -p "$workspace/wsl-diag"
+          {
+            echo "=== $(date -u +%FT%TZ) guest census ==="
+            uname -a
+            echo "--- filesystem backing each path extraction touches ---"
+            for path in /tmp / /home; do
+              # -T resolves the mount for a PATH, so this is correct whether or
+              # not the directory is itself a mount point.
+              findmnt -T "$path" -o TARGET,SOURCE,FSTYPE,SIZE,AVAIL 2>&1 || echo "$path: findmnt failed"
+            done
+            echo "--- df ---"
+            df -h / /tmp /home 2>&1
+            echo "--- memory ---"
+            free -m
+            swapon --show 2>&1 || true
+          } 2>&1 | tee "$workspace/wsl-diag/guest-census.txt"
+      - name: L1 tests from the archive
+        id: l1
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          # Drop to the unprivileged user: root ignores file permissions, which
+          # inverts permission-denial fixtures (claudine's readonly-file and
+          # shadow-home-copy tests, sniff's worktree-registry test). `env`
+          # preserves the wrapper environment while giving the user its own
+          # HOME, which tests that write under HOME rely on.
+          # `-u XDG_RUNTIME_DIR`: the preserved environment carries root's
+          # `/run/user/0`, and `just` dies with EACCES trying to use it as the
+          # unprivileged user — which took out every guest leg on run
+          # 31415404872. Unset, it falls back to a user-writable location.
+          if [ "$(id -u)" -eq 0 ]; then
+            exec runuser -u biscuit -- env -u XDG_RUNTIME_DIR HOME=/home/biscuit USER=biscuit LOGNAME=biscuit bash "$0"
+          fi
+          # Re-exported from the job-level `env:` block through GitHub expression
+          # interpolation rather than read from the guest environment: whether
+          # `wsl-bash` forwards a given variable depends on WSLENV, and the
+          # result identity is far too consequential to leave to that. A missing
+          # or wrong BISCUIT_CI_ENVIRONMENT does not fail — it silently files
+          # these results under the native Windows cell.
+          export BISCUIT_CI_ENVIRONMENT='${{ env.BISCUIT_CI_ENVIRONMENT }}'
+          export NEXTEST_PROFILE='${{ env.NEXTEST_PROFILE }}'
+          export COLORTERM='${{ env.COLORTERM }}'
+          export BISCUIT_L1_INCLUDE_SLOW='${{ env.BISCUIT_L1_INCLUDE_SLOW }}'
+          if [ "$(jq -r 'contains(["messenger-desktop-stubs"])' <<<'${{ inputs.runner-tools }}')" = "true" ]; then
+            export MESSENGER_STUB_BIN_DIR=/home/runner/messenger-desktop-stubs
+            for stub in stub_dunstify stub_notify_send stub_snoretoast stub_burnttoast stub_terminal_notifier stub_alerter; do
+              [ -x "$MESSENGER_STUB_BIN_DIR/$stub" ] || {
+                echo "messenger sidecar fixture unavailable in guest: $MESSENGER_STUB_BIN_DIR/$stub" >&2
+                exit 1
+              }
+            done
+            if command -v cargo >/dev/null 2>&1 || command -v rustc >/dev/null 2>&1; then
+              echo "messenger WSL2 tests require a toolchain-free unprivileged guest" >&2
+              exit 1
+            fi
+          fi
+          # No Cargo in the guest, so the canonical recipe must reach nextest as
+          # a standalone binary and stage its JUnit report without shelling out
+          # to `cargo metadata`. See fixes/2026-07-27-refactor/wsl-archive-requirements.md.
+          export BISCUIT_NEXTEST_BIN='cargo-nextest nextest'
+          export BISCUIT_JUNIT_WORKSPACE_ROOT="${{ env.GUEST_ROOT }}"
+          export BISCUIT_JUNIT_TARGET_DIR="${{ env.GUEST_ROOT }}/target"
+          # insta finds the workspace root by running `cargo metadata`; with no
+          # cargo in the guest its manifest-dir fallback DOUBLES the snapshot
+          # path (darkmatter/lib/darkmatter/lib/...), every .snap looks absent,
+          # and each snapshot test fails while rendering correct output — 165
+          # phantom failures on run 30791562395. Pin the root explicitly.
+          export INSTA_WORKSPACE_ROOT="${{ env.GUEST_ROOT }}"
+          export BISCUIT_JUNIT_STAGE_DIR='${{ env.BISCUIT_JUNIT_STAGE_DIR }}'
+
+          archive=/home/runner/nextest-archive.tar.zst
+          [ -f "$archive" ] || { echo "nextest archive missing at $archive" >&2; exit 1; }
+
+          # DIAGNOSTIC ONLY. Started HERE rather than in its own step so it is
+          # unambiguously alive across extraction — a background process from an
+          # earlier `wsl-bash` invocation would depend on surviving that
+          # invocation's exit, which is exactly the assumption a dying guest
+          # breaks. It writes across the 9p mount, ON PURPOSE: a log on ext4 is
+          # unreachable from the Windows host once the VM is gone, and a VM that
+          # is gone is the case being diagnosed. Self-limiting so nothing outlives
+          # the job's own ceiling.
+          workspace="$(pwd)"
+          mkdir -p "$workspace/wsl-diag"
+          cat >/tmp/biscuit-sampler.sh <<'SAMPLER'
+          #!/bin/bash
+          out="$1"
+          for _ in $(seq 1 400); do
+            {
+              printf '%s' "$(date -u +%FT%TZ)"
+              df -BM --output=target,avail /tmp / /home 2>/dev/null | tail -n +2 | tr -s ' \n' ' '
+              printf '| memAvailMiB=%s' "$(awk '/MemAvailable/{print int($2/1024)}' /proc/meminfo)"
+              printf ' | %s\n' "$(tr '\n' ' ' </proc/pressure/memory 2>/dev/null)"
+            } >>"$out"
+            sleep 10
+          done
+          SAMPLER
+          chmod +x /tmp/biscuit-sampler.sh
+          setsid nohup /tmp/biscuit-sampler.sh \
+            "$workspace/wsl-diag/guest-resources.log" >/dev/null 2>&1 &
+
+          # --workspace-remap is not optional: the archive records the BUILD
+          # host's source paths, and the guest checkout is somewhere else.
+          # Declared feature flags are passed along and dropped by
+          # `_archive_drop_build_flags` — they were baked into the archive.
+          cd "${{ env.GUEST_ROOT }}"
+          just _test "${{ inputs.package }}" \
+            --no-fail-fast \
+            --archive-file "$archive" \
+            --workspace-remap "${{ env.GUEST_ROOT }}" \
+            ${{ inputs.test-args }}
+      - name: Stage the JUnit reports for upload
+        id: stage_junit
+        if: ${{ !cancelled() }}
+        shell: wsl-bash {0}
+        run: |
+          set -uo pipefail
+          # The upload runs on the Windows host, which cannot read ext4, so the
+          # reports cross the 9p mount once, at the end, rather than per test.
+          workspace="$(pwd)"
+          rm -rf "$workspace/wsl-junit"
+          mkdir -p "$workspace/wsl-junit"
+          # The CONTENTS of the staging root, so `manifest.jsonl` lands at the
+          # artifact root. `ci-rollup` reads the manifest only from there;
+          # copying `target/nextest/` instead would bury it one level down.
+          cp -R '${{ env.BISCUIT_JUNIT_STAGE_DIR }}/.' "$workspace/wsl-junit/" 2>/dev/null || true
+          # Staging must never change the tier's outcome.
+          exit 0
+      - name: Upload wsl2-ubuntu L1 JUnit
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-${{ inputs.package }}-L1-wsl2-ubuntu
+          path: wsl-junit
+          if-no-files-found: ignore
+      # DIAGNOSTIC ONLY, and deliberately `continue-on-error`: if the guest is
+      # dead this step cannot run, and that failure is itself the finding — it
+      # must not be allowed to overwrite the tier's real outcome.
+      - name: Guest post-mortem
+        id: guest_postmortem
+        if: ${{ steps.l1.outcome == 'failure' }}
+        continue-on-error: true
+        shell: wsl-bash {0}
+        run: |
+          set -uo pipefail
+          workspace="$(pwd)"
+          mkdir -p "$workspace/wsl-diag"
+          {
+            echo "=== $(date -u +%FT%TZ) guest post-mortem ==="
+            df -h / /tmp /home 2>&1
+            free -m
+            # An OOM kill or an ext4 I/O error — the two ways a backing store
+            # failure becomes a signal — are both recorded here and nowhere else.
+            echo "--- dmesg tail ---"
+            dmesg -T 2>&1 | tail -120
+          } 2>&1 | tee "$workspace/wsl-diag/guest-postmortem.txt"
+      - name: Host post-mortem
+        if: ${{ steps.l1.outcome == 'failure' }}
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # The VHDX only ever grows, so a Windows volume that is full HERE was
+          # full when the guest died. This is the measurement that separates "the
+          # guest filled its own filesystem" from "the guest's disk could not grow
+          # because the host had nothing left to give it".
+          $ErrorActionPreference = 'Continue'
+          # wsl.exe emits UTF-16 by default, which is why it renders as spaced-out
+          # characters in the raw Actions logs. WSL_UTF8 makes it emit UTF-8
+          # instead. Reaching for [Console]::OutputEncoding would be the wrong
+          # lever: it also governs what pwsh WRITES, so it would garble this
+          # step's own output to fix someone else's.
+          $env:WSL_UTF8 = '1'
+          New-Item -ItemType Directory -Force -Path wsl-diag | Out-Null
+          $report = @("=== host post-mortem $(Get-Date -Format o) ===")
+          $report += Get-PSDrive -PSProvider FileSystem |
+            Select-Object Name, @{n='UsedGB';e={[math]::Round($_.Used/1GB,1)}},
+                                @{n='FreeGB';e={[math]::Round($_.Free/1GB,1)}} |
+            Out-String
+          $report += "--- wsl --status ---"
+          $report += (wsl.exe --status 2>&1 | Out-String)
+          $report += "--- wsl --list --verbose ---"
+          $report += (wsl.exe --list --verbose 2>&1 | Out-String)
+          $report += "--- backing VHDX ---"
+          # Bounded depth: a recursive sweep of the whole profile would cost
+          # minutes on a Windows runner for a file whose location is well known.
+          $roots = @("$env:LOCALAPPDATA\Packages", "$env:LOCALAPPDATA\wsl") |
+            Where-Object { Test-Path $_ }
+          if ($roots) {
+            # No backtick continuations anywhere in this step: a single trailing
+            # space after one silently turns it into a syntax error, and this
+            # script cannot be parse-checked on a macOS or Linux host.
+            $vhdx = Get-ChildItem -Path $roots -Recurse -Depth 3 -Filter 'ext4.vhdx' -ErrorAction SilentlyContinue
+            $report += $vhdx |
+              Select-Object FullName, @{n='SizeGB';e={[math]::Round($_.Length/1GB,2)}} |
+              Out-String
+          }
+          $report | Tee-Object -FilePath wsl-diag/host-postmortem.txt
+      - name: Upload WSL2 diagnostics
+        if: ${{ steps.l1.outcome == 'failure' }}
+        uses: actions/upload-artifact@v4
+        with:
+          # A prefix `ci-rollup` does not walk: this is evidence for a human
+          # reading a failure, never an input to a cell's verdict.
+          name: wsl-diag-${{ inputs.package }}-wsl2-ubuntu
+          path: wsl-diag
+          if-no-files-found: ignore
+          retention-days: 3
+      # `L1`, not `wsl`: `ci-rollup` keys a status by TIER, and this job produces
+      # the wsl2-ubuntu L1 evidence. A non-tier name would manufacture a phantom
+      # cell beside the real one.
+      - name: Record producer status
+        if: ${{ always() }}
+        shell: bash
+        env:
+          PACKAGE: ${{ inputs.package }}
+          JOB: L1
+          ENVIRONMENT: wsl2-ubuntu
+          RESULT: ${{ job.status }}
+          # Provisioning is two steps, so its outcome is the SECOND attempt's
+          # unless the first already succeeded — otherwise a guest that came up
+          # on the retry would still be reported as never having provisioned.
+          PROVISION: ${{ steps.provision.outcome == 'success' && 'success' || steps.provision_retry.outcome }}
+          PROVISION_FIRST: ${{ steps.provision.outcome }}
+          L1: ${{ steps.l1.outcome }}
+          STAGED: ${{ steps.stage_junit.outcome }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/status"
+          # Name WHY no evidence exists, when that is the case.
+          #
+          # A guest that dies takes the staging step with it, `wsl-junit` stays
+          # empty, and `if-no-files-found: ignore` uploads nothing successfully —
+          # so the rollup could only say "produced no report at all", which reads
+          # identically to a tier that ran and had no tests. Only the producer
+          # can tell those apart, so it says which.
+          #
+          # A failing TEST does not reach here: the guest stays healthy, staging
+          # succeeds, and the report is uploaded normally.
+          detail=""
+          if [ "$PROVISION" != "success" ]; then
+            detail="the WSL2 guest failed to provision (attempt 1: ${PROVISION_FIRST}, attempt 2: ${PROVISION}); no test could run"
+          elif [ "$STAGED" != "success" ]; then
+            detail="the WSL2 guest became unreachable after the test step (L1: ${L1}, staging: ${STAGED}); its reports could not be collected"
+          fi
+          if [ -n "$detail" ]; then
+            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s","detail":"%s"}\n' \
+              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" "$detail" \
+              >"$RUNNER_TEMP/status/status.json"
+          else
+            printf '{"package":"%s","job":"%s","environment":"%s","result":"%s"}\n' \
+              "$PACKAGE" "$JOB" "$ENVIRONMENT" "$RESULT" \
+              >"$RUNNER_TEMP/status/status.json"
+          fi
+      - name: Upload producer status
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: status-${{ inputs.package }}-L1-wsl2-ubuntu
+          path: ${{ runner.temp }}/status

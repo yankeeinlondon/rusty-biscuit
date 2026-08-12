@@ -399,6 +399,32 @@ pub async fn link(
 mod tests {
     use super::*;
 
+    /// Whether this process is permitted to create symlinks.
+    ///
+    /// Windows grants symlink creation only under Developer Mode or
+    /// `SeCreateSymbolicLinkPrivilege`. That is a runtime privilege no `cfg`
+    /// can answer, so this probes it for real. Tests below skip when it is
+    /// withheld, because the OS refusing the syscall is not a defect in the
+    /// code under test — every other failure still fails the test.
+    fn symlinks_supported() -> bool {
+        #[cfg(not(windows))]
+        {
+            true
+        }
+
+        #[cfg(windows)]
+        {
+            let Ok(probe) = tempfile::TempDir::new() else {
+                return false;
+            };
+            let target = probe.path().join("probe_target");
+            if std::fs::create_dir(&target).is_err() {
+                return false;
+            }
+            std::os::windows::fs::symlink_dir(&target, probe.path().join("probe_link")).is_ok()
+        }
+    }
+
     #[tokio::test]
     async fn test_link_basic_functionality() {
         // Set RESEARCH_DIR to a directory that exists (current directory has .research/library)
@@ -429,6 +455,9 @@ mod tests {
 
     #[test]
     fn test_create_service_skill_link_success() {
+        if !symlinks_supported() {
+            return;
+        }
         let temp = tempfile::TempDir::new().unwrap();
         let source = temp.path().join("source_skill");
         std::fs::create_dir_all(&source).unwrap();
@@ -452,6 +481,9 @@ mod tests {
 
     #[test]
     fn test_create_service_doc_link_already_linked() {
+        if !symlinks_supported() {
+            return;
+        }
         let temp = tempfile::TempDir::new().unwrap();
         let source = temp.path().join("source.md");
         std::fs::write(&source, "content").unwrap();
@@ -459,6 +491,8 @@ mod tests {
         let target = temp.path().join("target.md");
         #[cfg(unix)]
         std::os::unix::fs::symlink(&source, &target).unwrap();
+        #[cfg(windows)]
+        std::os::windows::fs::symlink_file(&source, &target).unwrap();
 
         let mut errors = Vec::new();
         let action =

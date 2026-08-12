@@ -1,0 +1,10 @@
+---
+source: biscuit-terminal/lib/tests/layout_matrix.rs
+expression: md
+---
+⤫ Shell Expansion Failed
+
+>
+> Missing closing brace in template directive.
+>
+> _Check the template syntax and retry._

@@ -1,5 +1,6 @@
 ---
 source: darkmatter/lib/tests/schemas_convert_snapshots.rs
+assertion_line: 85
 expression: "convert_atom(\"numberlike\")"
 ---
 {
@@ -9,11 +10,18 @@ expression: "convert_atom(\"numberlike\")"
     "field": {
       "anyOf": [
         {
-          "type": "number"
+          "type": "null"
         },
         {
-          "pattern": "^-?\\d+(\\.\\d+)?$",
-          "type": "string"
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "pattern": "^-?\\d+(\\.\\d+)?$",
+              "type": "string"
+            }
+          ]
         }
       ]
     }

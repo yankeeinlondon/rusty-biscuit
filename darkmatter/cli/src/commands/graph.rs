@@ -26,12 +26,7 @@ pub(crate) fn run_graph(input: &PathBuf, follow: bool, validate: bool, json: boo
     // ── JSON output ──────────────────────────────────────────────────
     if json {
         if let Some(graph) = tree.graph() {
-            use darkmatter::markdown::reference::types::ReferenceGraphNodeView;
-            let mut root_json = serde_json::to_value(ReferenceGraphNodeView {
-                node: &graph.root,
-                graph,
-                follow,
-            })?;
+            let mut root_json = serde_json::to_value(graph.view(follow))?;
 
             if validate && let Some(report) = tree.validation_report() {
                 root_json["validation"] = serde_json::to_value(report)?;

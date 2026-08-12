@@ -23,9 +23,14 @@
 //!
 //! ## Safety Guarantees
 //!
-//! - **Validation**: All generated code is validated with `syn` before writing
+//! - **Syntax validation**: All generated code is parsed with `syn` before
+//!   writing, which catches grammar/syntax errors only — it does not
+//!   type-check, resolve names, or guarantee the code compiles.
 //! - **Formatting**: Output is formatted with `prettyplease` for consistent style
 //! - **Atomic writes**: Uses temp file + rename pattern to prevent partial writes
+//! - **Ownership-aware cleanup**: Stale-file removal only touches artifacts this
+//!   generator produced (identified by the generated-file header), so
+//!   hand-written files in the output directory are never deleted.
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs;
@@ -48,7 +53,7 @@ pub use assemble::{
     assemble_shared_module, assemble_split_api_module, assemble_split_combined_api_module,
     get_module_path, get_request_suffix,
 };
-pub use format::{format_code, validate_code};
+pub use format::{GENERATED_FILE_HEADER, format_code, validate_code};
 pub use options::OutputOptions;
 pub use write::write_atomic;
 
@@ -215,7 +220,7 @@ pub fn generate_and_write_all(
             println!("=== {} ===\n{}\n", filename, content);
         }
     } else {
-        remove_conflicting_paths(output_dir, &generated);
+        remove_conflicting_paths(output_dir, &generated)?;
 
         write_atomic(&output_dir.join("lib.rs"), &lib_formatted)?;
 
@@ -250,7 +255,7 @@ pub fn generate_and_write_all(
         }
 
         let stale_names = collect_expected_files(&generated, &ws_shared_filename, &ws_modules_list);
-        cleanup_stale_files(output_dir, &stale_names);
+        cleanup_stale_files(output_dir, &stale_names)?;
     }
 
     Ok(generated
@@ -291,30 +296,95 @@ fn collect_expected_files(
     files
 }
 
+/// Returns whether `path` is a `.rs` file this generator wrote.
+///
+/// Ownership is proven by the [`GENERATED_FILE_HEADER`] on the first line.
+/// Files without the header (hand-written, or produced by another tool) are
+/// reported as not owned and are therefore never removed by cleanup.
+fn is_generator_owned_rs_file(path: &Path) -> bool {
+    if path.extension().is_none_or(|ext| ext != "rs") {
+        return false;
+    }
+    match fs::read_to_string(path) {
+        Ok(contents) => contents
+            .lines()
+            .next()
+            .is_some_and(|line| line.starts_with(GENERATED_FILE_HEADER)),
+        Err(_) => false,
+    }
+}
+
+/// Returns whether `dir` and its entire subtree were produced by this generator.
+///
+/// True only when every regular file carries the generated header and every
+/// subdirectory is itself generator-owned. An empty directory is owned
+/// vacuously. This is the gate for recursively removing a directory: the
+/// generator never `remove_dir_all`s a tree it cannot prove it created.
+fn is_generator_owned_dir(dir: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return false;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let owned = if path.is_dir() {
+            is_generator_owned_dir(&path)
+        } else {
+            is_generator_owned_rs_file(&path)
+        };
+        if !owned {
+            return false;
+        }
+    }
+    true
+}
+
+/// Removes a generator-owned file, surfacing any I/O error.
+fn remove_owned_file(path: &Path) -> Result<(), GeneratorError> {
+    fs::remove_file(path).map_err(|source| GeneratorError::WriteError {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
+/// Removes a generator-owned directory tree, surfacing any I/O error.
+fn remove_owned_dir(path: &Path) -> Result<(), GeneratorError> {
+    fs::remove_dir_all(path).map_err(|source| GeneratorError::WriteError {
+        path: path.display().to_string(),
+        source,
+    })
+}
+
 /// Removes files or directories that would conflict with new module output.
 ///
 /// When a module transitions from single-file to directory (or vice versa),
 /// the old artifact must be removed before the new one is written, because
-/// a file and directory cannot share the same path.
-fn remove_conflicting_paths(output_dir: &Path, generated: &[GeneratedModule]) {
+/// a file and directory cannot share the same path. Only generator-owned
+/// artifacts are removed; a conflicting hand-written file or directory is left
+/// in place (the subsequent write will surface the conflict instead of this
+/// helper silently destroying user content).
+fn remove_conflicting_paths(
+    output_dir: &Path,
+    generated: &[GeneratedModule],
+) -> Result<(), GeneratorError> {
     for module in generated {
         match module {
             GeneratedModule::SingleFile { filename, .. } => {
                 let dir_name = filename.strip_suffix(".rs").unwrap_or(filename);
                 let dir_path = output_dir.join(dir_name);
-                if dir_path.is_dir() {
-                    let _ = fs::remove_dir_all(&dir_path);
+                if dir_path.is_dir() && is_generator_owned_dir(&dir_path) {
+                    remove_owned_dir(&dir_path)?;
                 }
             }
             GeneratedModule::Directory { module_path, .. } => {
                 let rs_filename = format!("{}.rs", module_path);
                 let rs_path = output_dir.join(&rs_filename);
-                if rs_path.is_file() {
-                    let _ = fs::remove_file(&rs_path);
+                if rs_path.is_file() && is_generator_owned_rs_file(&rs_path) {
+                    remove_owned_file(&rs_path)?;
                 }
             }
         }
     }
+    Ok(())
 }
 
 /// Generates and writes standalone API code (for imported OpenAPI specs).
@@ -375,6 +445,16 @@ pub fn generate_and_write_standalone(
         println!("=== prelude.rs ===\n{}\n", prelude_formatted);
         println!("=== {} ===\n{}\n", api_filename, api_formatted);
     } else {
+        // The import path writes the API as a single `{module}.rs` file. If a
+        // prior run left a directory-form `{module}/`, remove it first (when
+        // owned) so we don't leave `foo.rs` beside `foo/`, which Rust rejects
+        // as an ambiguous module.
+        let module = GeneratedModule::SingleFile {
+            filename: api_filename.clone(),
+            content: api_formatted.clone(),
+        };
+        remove_conflicting_paths(output_dir, std::slice::from_ref(&module))?;
+
         write_atomic(&output_dir.join("lib.rs"), &lib_formatted)?;
 
         write_atomic(&output_dir.join("shared.rs"), &shared_formatted)?;
@@ -387,31 +467,42 @@ pub fn generate_and_write_standalone(
     Ok(api_formatted)
 }
 
-/// Removes stale `.rs` files and module directories from the output directory
-/// that are not part of the current generation set.
+/// Removes stale generator-owned artifacts from the output directory that are
+/// not part of the current generation set.
 ///
 /// For single-file modules, removes `{name}.rs` if no longer expected.
 /// For directory modules, the directory itself is expected; stale `.rs`
 /// files at the top level are also removed.
-fn cleanup_stale_files(output_dir: &Path, expected: &HashSet<String>) {
-    if let Ok(entries) = fs::read_dir(output_dir) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_file()
-                && path.extension().is_some_and(|ext| ext == "rs")
-                && let Some(name) = path.file_name().and_then(|n| n.to_str())
-                && !expected.contains(name)
-            {
-                let _ = fs::remove_file(&path);
+///
+/// Only artifacts this generator provably owns are removed: `.rs` files must
+/// carry the generated header, and directories must contain only
+/// generator-owned content. Anything else (hand-written files, unrelated
+/// subdirectories such as `bin/`) is left untouched. Removal errors are
+/// surfaced rather than discarded.
+fn cleanup_stale_files(
+    output_dir: &Path,
+    expected: &HashSet<String>,
+) -> Result<(), GeneratorError> {
+    let Ok(entries) = fs::read_dir(output_dir) else {
+        return Ok(());
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if expected.contains(name) {
+            continue;
+        }
+        if path.is_file() {
+            if is_generator_owned_rs_file(&path) {
+                remove_owned_file(&path)?;
             }
-            if path.is_dir()
-                && let Some(name) = path.file_name().and_then(|n| n.to_str())
-                && !expected.contains(name)
-            {
-                let _ = fs::remove_dir_all(&path);
-            }
+        } else if path.is_dir() && is_generator_owned_dir(&path) {
+            remove_owned_dir(&path)?;
         }
     }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -730,6 +821,7 @@ mod tests {
             (
                 AuthStrategy::ApiKey {
                     header: "X-API-Key".to_string(),
+                    value_prefix: None,
                 },
                 vec!["KEY".to_string()],
                 None,
@@ -1011,8 +1103,11 @@ mod tests {
         let api = make_simple_api();
         let apis: Vec<&RestApi> = vec![&api];
         let temp_dir = TempDir::new().unwrap();
-        fs::write(temp_dir.path().join("ollamaopenai.rs"), "// stale").unwrap();
-        fs::write(temp_dir.path().join("old_api.rs"), "// stale").unwrap();
+        // Stale files from a prior generation carry the generated header, so
+        // they are owned and get removed.
+        let stale = format!("{GENERATED_FILE_HEADER}\n\n// stale");
+        fs::write(temp_dir.path().join("ollamaopenai.rs"), &stale).unwrap();
+        fs::write(temp_dir.path().join("old_api.rs"), &stale).unwrap();
         fs::write(temp_dir.path().join("Cargo.toml"), "# keep").unwrap();
         generate_and_write_all(&apis, temp_dir.path(), false).unwrap();
         assert!(
@@ -1031,6 +1126,90 @@ mod tests {
         assert!(temp_dir.path().join("shared.rs").exists());
         assert!(temp_dir.path().join("prelude.rs").exists());
         assert!(temp_dir.path().join("test.rs").exists());
+    }
+
+    #[test]
+    fn cleanup_preserves_hand_written_files_and_foreign_dirs() {
+        let api = make_simple_api();
+        let apis: Vec<&RestApi> = vec![&api];
+        let temp_dir = TempDir::new().unwrap();
+
+        // A hand-written module WITHOUT the generated header must survive.
+        let hand_written = temp_dir.path().join("handwritten.rs");
+        fs::write(&hand_written, "pub fn keep_me() {}\n").unwrap();
+
+        // An unrelated subdirectory (e.g. a binary crate) must survive intact.
+        let bin_dir = temp_dir.path().join("bin");
+        fs::create_dir_all(&bin_dir).unwrap();
+        let bin_main = bin_dir.join("main.rs");
+        fs::write(&bin_main, "fn main() {}\n").unwrap();
+
+        // A directory that mixes generator output with a hand-written file must
+        // survive: it is not provably generator-owned.
+        let mixed_dir = temp_dir.path().join("mixed");
+        fs::create_dir_all(&mixed_dir).unwrap();
+        fs::write(
+            mixed_dir.join("generated.rs"),
+            format!("{GENERATED_FILE_HEADER}\n\n// gen"),
+        )
+        .unwrap();
+        let mixed_keep = mixed_dir.join("keep.rs");
+        fs::write(&mixed_keep, "pub fn keep() {}\n").unwrap();
+
+        generate_and_write_all(&apis, temp_dir.path(), false).unwrap();
+
+        assert!(hand_written.exists(), "hand-written .rs must survive");
+        assert!(bin_dir.is_dir(), "unrelated bin/ dir must survive");
+        assert!(bin_main.exists(), "bin/main.rs must survive");
+        assert!(
+            mixed_dir.is_dir() && mixed_keep.exists(),
+            "a dir containing hand-written content must survive"
+        );
+    }
+
+    #[test]
+    fn standalone_import_removes_conflicting_owned_directory() {
+        let api = make_simple_api();
+        let temp_dir = TempDir::new().unwrap();
+        let module = get_module_path(&api);
+
+        // Simulate a prior directory-form module owned by the generator.
+        let dir = temp_dir.path().join(&module);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("mod.rs"),
+            format!("{GENERATED_FILE_HEADER}\n\n// old"),
+        )
+        .unwrap();
+
+        generate_and_write_standalone(&api, temp_dir.path(), false, false).unwrap();
+
+        assert!(
+            !dir.is_dir(),
+            "prior directory-form module must be removed to avoid foo.rs/foo ambiguity"
+        );
+        assert!(
+            temp_dir.path().join(format!("{module}.rs")).exists(),
+            "single-file module should be written"
+        );
+    }
+
+    #[test]
+    fn standalone_import_preserves_hand_written_conflicting_directory() {
+        let api = make_simple_api();
+        let temp_dir = TempDir::new().unwrap();
+        let module = get_module_path(&api);
+
+        // A conflicting directory that is NOT generator-owned must be left in
+        // place rather than destroyed.
+        let dir = temp_dir.path().join(&module);
+        fs::create_dir_all(&dir).unwrap();
+        let keep = dir.join("keep.rs");
+        fs::write(&keep, "pub fn keep() {}\n").unwrap();
+
+        generate_and_write_standalone(&api, temp_dir.path(), false, false).unwrap();
+
+        assert!(keep.exists(), "hand-written directory content must survive");
     }
 
     #[test]

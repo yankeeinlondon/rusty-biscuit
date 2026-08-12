@@ -5,6 +5,7 @@
 
 use std::borrow::Cow;
 use std::collections::BTreeMap;
+#[cfg(test)]
 use std::env;
 use std::fmt;
 use std::hash::{Hash, Hasher};
@@ -16,6 +17,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use crate::render::stylesheet::{CssStyle, StylesheetBlockError, StylesheetError};
+use crate::render::metadata_codec::{self, MetadataPolicy};
+use crate::render::reference_parse;
 
 /// BEL character used by OSC 8 hyperlinks.
 const BEL: &str = "\x07";
@@ -599,18 +602,40 @@ impl Link {
         self.to_markdown(false)
     }
 
-    /// Renders HTML with Popover companion element when prompt is present.
-    pub fn to_html_with_popover(&self) -> Option<(String, String)> {
+    /// Renders the accessible prompted-link markup when a prompt is present.
+    ///
+    /// The returned string is the canonical wrapper/anchor/prompt structure the
+    /// production render-tree browser path emits (see
+    /// `renderable::tree::render`): a `dm-popover-wrapper` span holding the
+    /// navigable anchor (real `href`, `interestfor` + `aria-describedby`
+    /// association) followed by a `dm-popover-prompt` `popover="hint"` element
+    /// with escaped content. The shared Popover CSS is supplied separately by the
+    /// feature resolver. This standalone helper is for callers rendering a single
+    /// `Link` outside the document pipeline; it deliberately mirrors production so
+    /// the two do not diverge.
+    ///
+    /// ## Returns
+    ///
+    /// `None` when the link carries no prompt.
+    ///
+    /// ## Notes
+    ///
+    /// The popover `id` is derived deterministically from this link's target and
+    /// display alone, with no document-scoped occurrence state, so this helper
+    /// guarantees a document-unique id only for a **single** prompted link.
+    /// Emitting several links this way and concatenating the fragments can repeat
+    /// an id and make `aria-describedby` ambiguous. For a document with more than
+    /// one prompted link, render through the render-tree browser path
+    /// (`renderable::tree::render`), which defers id allocation to final-document
+    /// assembly and keeps every occurrence unique.
+    pub fn to_html_with_popover(&self) -> Option<String> {
         let prompt = self
             .prompt
             .as_ref()
             .and_then(|p| normalize_optional(strip_ansi_sequences(p)))?;
 
         let id = generate_popover_id(&self.link_to, &self.display);
-        let mut attrs = vec![
-            format!(r#"href="{}""#, html_escape(&self.link_to)),
-            format!(r#"interestfor="{}""#, id),
-        ];
+        let mut attrs = vec![format!(r#"href="{}""#, html_escape(&self.link_to))];
 
         if let Some(class) = &self.class {
             attrs.push(format!(r#"class="{}""#, html_escape(class)));
@@ -636,22 +661,26 @@ impl Link {
             ));
         }
 
+        attrs.push(format!(r#"interestfor="{id}""#));
+        attrs.push(format!(r#"aria-describedby="{id}""#));
+
         let anchor = format!(
             "<a {}>{}</a>",
             attrs.join(" "),
             html_escape(&self.display_plain())
         );
-        let popover = format!(
-            r#"<div id="{}" popover="hint">{}</div>"#,
-            id,
+        let prompt = format!(
+            r#"<span id="{id}" class="dm-popover-prompt" popover="hint" role="note">{}</span>"#,
             html_escape(&prompt)
         );
 
-        Some((anchor, popover))
+        Some(format!(
+            r#"<span class="dm-popover-wrapper">{anchor}{prompt}</span>"#
+        ))
     }
 
     /// Backward-compatible alias for legacy callers.
-    pub fn to_browser_with_popover(&self) -> Option<(String, String)> {
+    pub fn to_browser_with_popover(&self) -> Option<String> {
         self.to_html_with_popover()
     }
 
@@ -818,27 +847,8 @@ impl From<(&String, &Prose)> for Link {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum MetadataPolicy {
-    Inline,
-    Strip,
-    Lossless,
-}
-
 fn metadata_policy(with_inline: bool) -> MetadataPolicy {
-    if with_inline {
-        return MetadataPolicy::Inline;
-    }
-
-    let value = env::var(LINK_METADATA_ENV)
-        .ok()
-        .map(|value| value.trim().to_ascii_lowercase());
-
-    match value.as_deref() {
-        Some("inline") => MetadataPolicy::Inline,
-        Some("strip") => MetadataPolicy::Strip,
-        _ => MetadataPolicy::Lossless,
-    }
+    metadata_codec::metadata_policy(with_inline, LINK_METADATA_ENV)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1049,285 +1059,33 @@ fn parse_markdown_link(input: &str) -> Result<Link, LinkError> {
 }
 
 fn parse_html_attributes(input: &str) -> BTreeMap<String, String> {
-    let mut attrs = BTreeMap::new();
-    let mut chars = input.chars().peekable();
-
-    while chars.peek().is_some() {
-        while chars.peek().is_some_and(|c| c.is_whitespace()) {
-            chars.next();
-        }
-
-        let mut name = String::new();
-        while let Some(&c) = chars.peek() {
-            if c == '=' || c.is_whitespace() {
-                break;
-            }
-            name.push(c);
-            chars.next();
-        }
-
-        if name.is_empty() {
-            break;
-        }
-
-        while chars.peek().is_some_and(|c| c.is_whitespace()) {
-            chars.next();
-        }
-
-        if chars.peek() != Some(&'=') {
-            attrs.insert(name.to_lowercase(), String::new());
-            continue;
-        }
-        chars.next();
-
-        while chars.peek().is_some_and(|c| c.is_whitespace()) {
-            chars.next();
-        }
-
-        let value = if chars.peek() == Some(&'"') || chars.peek() == Some(&'\'') {
-            let quote = chars.next().unwrap_or('"');
-            let mut val = String::new();
-            for c in chars.by_ref() {
-                if c == quote {
-                    break;
-                }
-                val.push(c);
-            }
-            html_unescape(&val)
-        } else {
-            let mut val = String::new();
-            while let Some(&c) = chars.peek() {
-                if c.is_whitespace() {
-                    break;
-                }
-                val.push(c);
-                chars.next();
-            }
-            html_unescape(&val)
-        };
-
-        attrs.insert(name.to_lowercase(), value);
-    }
-
-    attrs
+    reference_parse::parse_html_attributes(input)
 }
 
 fn find_closing_bracket(input: &str, start: usize) -> Result<usize, LinkError> {
-    let bytes = input.as_bytes();
-    let mut depth = 0usize;
-    let mut idx = start;
-
-    while idx < bytes.len() {
-        match bytes[idx] {
-            b'\\' if idx + 1 < bytes.len() => idx += 2,
-            b'[' => {
-                depth += 1;
-                idx += 1;
-            }
-            b']' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    return Ok(idx);
-                }
-                idx += 1;
-            }
-            _ => idx += 1,
-        }
-    }
-
-    Err(LinkError::malformed_markdown_with_context(
-        "unmatched '[' in link",
-        input,
-        start,
-    ))
+    reference_parse::find_closing_bracket(input, start).ok_or_else(|| {
+        LinkError::malformed_markdown_with_context("unmatched '[' in link", input, start)
+    })
 }
 
 fn find_closing_paren(input: &str, start: usize) -> Result<usize, LinkError> {
-    let bytes = input.as_bytes();
-    let mut depth = 0usize;
-    let mut idx = start;
-    let mut in_quotes = false;
-    let mut quote_char = b'"';
-
-    while idx < bytes.len() {
-        let b = bytes[idx];
-
-        if in_quotes {
-            if b == b'\\' && idx + 1 < bytes.len() {
-                idx += 2;
-                continue;
-            }
-            if b == quote_char {
-                in_quotes = false;
-            }
-            idx += 1;
-            continue;
-        }
-
-        match b {
-            b'"' | b'\'' => {
-                in_quotes = true;
-                quote_char = b;
-                idx += 1;
-            }
-            b'(' => {
-                depth += 1;
-                idx += 1;
-            }
-            b')' => {
-                depth = depth.saturating_sub(1);
-                if depth == 0 {
-                    return Ok(idx);
-                }
-                idx += 1;
-            }
-            _ => idx += 1,
-        }
-    }
-
-    Err(LinkError::malformed_markdown_with_context(
-        "unmatched '(' in link",
-        input,
-        start,
-    ))
+    reference_parse::find_closing_paren(input, start).ok_or_else(|| {
+        LinkError::malformed_markdown_with_context("unmatched '(' in link", input, start)
+    })
 }
 
 fn extract_url(content: &str) -> (String, &str) {
-    let content = content.trim();
-    let bytes = content.as_bytes();
-    let mut i = 0;
-
-    if bytes.first() == Some(&b'<') {
-        i = 1;
-        while i < bytes.len() && bytes[i] != b'>' {
-            i += 1;
-        }
-        if i < bytes.len() {
-            return (content[1..i].to_string(), &content[i + 1..]);
-        }
-    }
-
-    while i < bytes.len() {
-        if bytes[i].is_ascii_whitespace() {
-            break;
-        }
-        i += 1;
-    }
-
-    (content[..i].to_string(), &content[i..])
+    reference_parse::extract_markdown_url(content)
 }
 
 fn is_structured_mode(content: &str) -> bool {
-    let content = content.trim();
-
-    let mut in_quotes = false;
-    let mut quote_char = '"';
-    let bytes = content.as_bytes();
-
-    for (i, &b) in bytes.iter().enumerate() {
-        if in_quotes {
-            if b == b'\\' {
-                continue;
-            }
-            if b == quote_char as u8 {
-                in_quotes = false;
-            }
-        } else {
-            match b {
-                b'"' | b'\'' => {
-                    in_quotes = true;
-                    quote_char = b as char;
-                }
-                b'=' => {
-                    let before = &content[..i];
-                    let key_part = before
-                        .trim()
-                        .split(&[' ', ','][..])
-                        .next_back()
-                        .unwrap_or("");
-                    if !key_part.is_empty()
-                        && key_part
-                            .chars()
-                            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
-                    {
-                        return true;
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
-    false
+    reference_parse::is_structured(content)
 }
 
 fn parse_structured_props(link: &mut Link, content: &str) {
-    let mut chars = content.chars().peekable();
-
-    while chars.peek().is_some() {
-        while chars.peek().is_some_and(|&c| c.is_whitespace() || c == ',') {
-            chars.next();
-        }
-
-        if chars.peek().is_none() {
-            break;
-        }
-
-        let mut key = String::new();
-        while let Some(&c) = chars.peek() {
-            if c == '=' || c.is_whitespace() || c == ',' {
-                break;
-            }
-            key.push(c);
-            chars.next();
-        }
-
-        if key.is_empty() {
-            break;
-        }
-
-        while chars.peek().is_some_and(|c| c.is_whitespace()) {
-            chars.next();
-        }
-
-        if chars.peek() != Some(&'=') {
-            continue;
-        }
-        chars.next();
-
-        while chars.peek().is_some_and(|c| c.is_whitespace()) {
-            chars.next();
-        }
-
-        let value = if chars.peek() == Some(&'"') || chars.peek() == Some(&'\'') {
-            let quote = chars.next().unwrap_or('"');
-            let mut value = String::new();
-            while let Some(c) = chars.next() {
-                if c == '\\' {
-                    if let Some(escaped) = chars.next() {
-                        value.push(escaped);
-                    }
-                } else if c == quote {
-                    break;
-                } else {
-                    value.push(c);
-                }
-            }
-            value
-        } else {
-            let mut value = String::new();
-            while let Some(&c) = chars.peek() {
-                if c.is_whitespace() || c == ',' {
-                    break;
-                }
-                value.push(c);
-                chars.next();
-            }
-            value
-        };
-
-        apply_structured_prop(link, key.trim(), value);
-    }
+    reference_parse::parse_structured(content, |key, value| {
+        apply_structured_prop(link, key, value);
+    });
 }
 
 fn apply_structured_prop(link: &mut Link, key: &str, value: String) {
@@ -1361,31 +1119,7 @@ fn apply_structured_prop(link: &mut Link, key: &str, value: String) {
 }
 
 fn parse_title_value(content: &str) -> String {
-    let content = content.trim();
-    if content.is_empty() {
-        return String::new();
-    }
-
-    let bytes = content.as_bytes();
-    if (bytes[0] == b'"' || bytes[0] == b'\'') && bytes.len() > 1 {
-        let quote = bytes[0];
-        let mut i = 1;
-        let mut result = String::new();
-        while i < bytes.len() {
-            if bytes[i] == b'\\' && i + 1 < bytes.len() {
-                result.push(content.chars().nth(i + 1).unwrap_or('\\'));
-                i += 2;
-            } else if bytes[i] == quote {
-                break;
-            } else {
-                result.push(content.chars().nth(i).unwrap_or(' '));
-                i += 1;
-            }
-        }
-        result
-    } else {
-        content.to_string()
-    }
+    reference_parse::parse_title(content)
 }
 
 fn unescape_markdown_display(value: &str) -> String {
@@ -1400,22 +1134,19 @@ fn escape_markdown_display(value: &str) -> String {
 }
 
 fn decode_markdown_url(value: &str) -> String {
-    value.replace("%28", "(").replace("%29", ")")
+    reference_parse::decode_markdown_url(value)
 }
 
 fn escape_markdown_url(value: &str) -> String {
-    value.replace('(', "%28").replace(')', "%29")
+    reference_parse::escape_markdown_url(value)
 }
 
 fn encode_markdown_metadata(value: &LinkMarkdownMetadataPackage) -> Option<String> {
-    let json = serde_json::to_string(value).ok()?;
-    Some(base64_encode(json.as_bytes()))
+    metadata_codec::encode(value)
 }
 
 fn decode_markdown_metadata(value: &str) -> Option<LinkMarkdownMetadataPackage> {
-    let decoded = base64_decode(value.trim())?;
-    let json = String::from_utf8(decoded).ok()?;
-    let metadata = serde_json::from_str::<LinkMarkdownMetadataPackage>(&json).ok()?;
+    let metadata: LinkMarkdownMetadataPackage = metadata_codec::decode(value)?;
     if metadata.marker == MARKDOWN_METADATA_MARKER {
         Some(metadata)
     } else {
@@ -1467,183 +1198,25 @@ fn style_inline_css(style: Option<&CssStyle>) -> Option<String> {
 }
 
 fn normalize_optional(value: String) -> Option<String> {
-    let trimmed = value.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
+    reference_parse::normalize_optional(value)
 }
 
 fn normalize_data_key(key: String) -> Option<String> {
-    let key = key.trim();
-    if key.is_empty() {
-        return None;
-    }
-
-    let normalized = key.strip_prefix("data-").unwrap_or(key);
-    if normalized.is_empty() {
-        None
-    } else {
-        Some(normalized.to_string())
-    }
+    reference_parse::normalize_data_key(key)
 }
 
 fn html_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
-        .replace('\'', "&#x27;")
+    reference_parse::html_escape(value)
 }
 
 fn html_unescape(value: &str) -> String {
-    value
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#x27;", "'")
-        .replace("&#39;", "'")
+    reference_parse::html_unescape(value)
 }
 
 fn strip_ansi_sequences(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    let mut chars = value.chars().peekable();
-
-    while let Some(ch) = chars.next() {
-        if ch != '\u{1b}' {
-            out.push(ch);
-            continue;
-        }
-
-        match chars.peek().copied() {
-            Some('[') => {
-                chars.next();
-                for c in chars.by_ref() {
-                    if ('@'..='~').contains(&c) {
-                        break;
-                    }
-                }
-            }
-            Some(']') => {
-                chars.next();
-                let mut prev_escape = false;
-                for c in chars.by_ref() {
-                    if c == '\u{7}' {
-                        break;
-                    }
-                    if prev_escape && c == '\\' {
-                        break;
-                    }
-                    prev_escape = c == '\u{1b}';
-                }
-            }
-            _ => {}
-        }
-    }
-
-    out
+    reference_parse::strip_ansi_sequences(value)
 }
 
-fn base64_encode(input: &[u8]) -> String {
-    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-
-    let mut out = String::with_capacity(input.len().div_ceil(3) * 4);
-    let mut idx = 0usize;
-
-    while idx < input.len() {
-        let b0 = input[idx];
-        let b1 = if idx + 1 < input.len() {
-            input[idx + 1]
-        } else {
-            0
-        };
-        let b2 = if idx + 2 < input.len() {
-            input[idx + 2]
-        } else {
-            0
-        };
-
-        let n = ((b0 as u32) << 16) | ((b1 as u32) << 8) | (b2 as u32);
-        out.push(TABLE[((n >> 18) & 0x3f) as usize] as char);
-        out.push(TABLE[((n >> 12) & 0x3f) as usize] as char);
-        if idx + 1 < input.len() {
-            out.push(TABLE[((n >> 6) & 0x3f) as usize] as char);
-        } else {
-            out.push('=');
-        }
-        if idx + 2 < input.len() {
-            out.push(TABLE[(n & 0x3f) as usize] as char);
-        } else {
-            out.push('=');
-        }
-
-        idx += 3;
-    }
-
-    out
-}
-
-fn base64_decode(input: &str) -> Option<Vec<u8>> {
-    let input = input.trim();
-    if input.is_empty() || !input.len().is_multiple_of(4) {
-        return None;
-    }
-
-    let mut out = Vec::with_capacity(input.len() / 4 * 3);
-    let bytes = input.as_bytes();
-    let mut idx = 0usize;
-
-    while idx < bytes.len() {
-        let c0 = bytes[idx] as char;
-        let c1 = bytes[idx + 1] as char;
-        let c2 = bytes[idx + 2] as char;
-        let c3 = bytes[idx + 3] as char;
-
-        let v0 = base64_value(c0)?;
-        let v1 = base64_value(c1)?;
-        let v2 = if c2 == '=' {
-            None
-        } else {
-            Some(base64_value(c2)?)
-        };
-        let v3 = if c3 == '=' {
-            None
-        } else {
-            Some(base64_value(c3)?)
-        };
-
-        let n = ((v0 as u32) << 18)
-            | ((v1 as u32) << 12)
-            | ((v2.unwrap_or(0) as u32) << 6)
-            | (v3.unwrap_or(0) as u32);
-
-        out.push(((n >> 16) & 0xff) as u8);
-        if v2.is_some() {
-            out.push(((n >> 8) & 0xff) as u8);
-        }
-        if v3.is_some() {
-            out.push((n & 0xff) as u8);
-        }
-
-        idx += 4;
-    }
-
-    Some(out)
-}
-
-fn base64_value(ch: char) -> Option<u8> {
-    match ch {
-        'A'..='Z' => Some((ch as u8) - b'A'),
-        'a'..='z' => Some((ch as u8) - b'a' + 26),
-        '0'..='9' => Some((ch as u8) - b'0' + 52),
-        '+' => Some(62),
-        '/' => Some(63),
-        _ => None,
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -1917,10 +1490,13 @@ mod tests {
             .expect("link should build")
             .with_prompt("Hover me");
 
-        let (anchor, popover) = link
+        let html = link
             .to_html_with_popover()
             .expect("popover should be generated");
-        assert!(anchor.contains("interestfor"));
-        assert!(popover.contains("popover=\"hint\""));
+        assert!(html.contains(r#"<span class="dm-popover-wrapper">"#));
+        assert!(html.contains("interestfor"));
+        assert!(html.contains("aria-describedby"));
+        assert!(html.contains(r#"popover="hint""#));
+        assert!(html.contains(r#"class="dm-popover-prompt""#));
     }
 }

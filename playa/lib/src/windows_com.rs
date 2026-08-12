@@ -8,7 +8,6 @@
 //! `PWSTR` strings to Rust `String` values with automatic memory cleanup.
 
 use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx, CoUninitialize};
-use windows::core::HRESULT;
 
 /// HRESULT for "COM already initialized with a different threading model".
 const RPC_E_CHANGED_MODE: i32 = -2147417850_i32; // 0x80010106
@@ -28,13 +27,6 @@ impl std::fmt::Display for ComInitError {
 }
 
 impl std::error::Error for ComInitError {}
-
-impl ComInitError {
-    /// Returns the raw HRESULT value.
-    pub fn hresult(&self) -> i32 {
-        self.hr
-    }
-}
 
 /// Classification of COM initialization outcomes.
 ///
@@ -106,9 +98,11 @@ impl ComGuard {
     /// Returns [`ComInitError`] if COM initialization fails for a reason
     /// other than `RPC_E_CHANGED_MODE`.
     pub fn new() -> Result<Self, ComInitError> {
+        // `CoInitializeEx` returns the raw `HRESULT` directly (not a `Result`)
+        // because `S_FALSE` and `RPC_E_CHANGED_MODE` are meaningful non-error
+        // outcomes we must classify ourselves rather than treat as failures.
         let hr = unsafe { CoInitializeEx(None, COINIT_MULTITHREADED) };
-        let raw_hr = hr.map_err(|e| e.code()).unwrap_or(HRESULT(0));
-        let kind = ComInitKind::from_hresult(raw_hr.0)?;
+        let kind = ComInitKind::from_hresult(hr.0)?;
         Ok(Self {
             should_uninit: kind.should_uninit(),
         })
@@ -134,11 +128,13 @@ impl Drop for ComGuard {
 ///
 /// The caller must ensure `pwstr` points to a valid null-terminated UTF-16
 /// string.
+#[cfg(any(test, feature = "audio-ducking-windows"))]
 unsafe fn pwstr_to_string(pwstr: windows::core::PWSTR) -> Option<String> {
     if pwstr.is_null() {
         return None;
     }
-    pwstr.to_string().ok()
+    // SAFETY: The caller guarantees a valid null-terminated UTF-16 string.
+    unsafe { pwstr.to_string() }.ok()
 }
 
 /// Converts a COM-allocated `PWSTR` to a `String` and frees the allocation.
@@ -152,10 +148,17 @@ unsafe fn pwstr_to_string(pwstr: windows::core::PWSTR) -> Option<String> {
 /// The caller must ensure `pwstr` points to a valid null-terminated UTF-16
 /// string allocated with `CoTaskMemAlloc` (or returned by a COM method that
 /// uses `CoTaskMemAlloc`).
+#[cfg(any(test, feature = "audio-ducking-windows"))]
 pub(crate) unsafe fn pwstr_to_string_and_free(pwstr: windows::core::PWSTR) -> Option<String> {
-    let result = pwstr_to_string(pwstr);
+    // SAFETY: The caller provides the valid COM-allocated string required by
+    // this function's contract.
+    let result = unsafe { pwstr_to_string(pwstr) };
     if !pwstr.is_null() {
-        windows::Win32::System::Com::CoTaskMemFree(Some(pwstr.0 as *const _));
+        // SAFETY: The caller guarantees the non-null pointer came from COM's
+        // task allocator, and this function frees it exactly once.
+        unsafe {
+            windows::Win32::System::Com::CoTaskMemFree(Some(pwstr.0 as *const _));
+        }
     }
     result
 }
@@ -190,14 +193,14 @@ mod tests {
         let result = ComInitKind::from_hresult(-2147467259); // E_FAIL 0x80004005
         assert!(result.is_err());
         let err = result.unwrap_err();
-        assert_eq!(err.hresult(), -2147467259);
+        assert_eq!(err.hr, -2147467259);
     }
 
     #[test]
     fn classify_preserves_hresult_in_error() {
         let hr = -2147418113i32; // CO_E_NOTINITIALIZED
         let err = ComInitKind::from_hresult(hr).unwrap_err();
-        assert_eq!(err.hresult(), hr);
+        assert_eq!(err.hr, hr);
     }
 
     #[test]

@@ -3,46 +3,61 @@
 //! Verifies that `cursor_position` emits `CSI 6n` and correctly parses
 //! the CPR (`CSI row;col R`) response.
 //!
+//! The production query uses `/dev/tty` and is Unix-only.
+//!
 //! Run `cargo build -p biscuit-terminal --example discovery_probe` first.
+
+#![cfg(unix)]
 
 mod common;
 
-use std::io::Write;
 use std::time::Duration;
 
-use common::pty::spawn_with_env;
+use common::pty::{ProbeAnswer, drive_probe, spawn_with_env};
 use serial_test::serial;
+
+/// The DSR cursor-position query, `CSI 6 n`, as it appears in the master
+/// stream once the probe has entered raw mode and written it to `/dev/tty`.
+const DSR_QUERY: &[u8] = b"\x1b[6n";
+
+/// Upper bound on the whole spawn/query/reply/print cycle. Generous on
+/// purpose: it exists to fail a wedged probe, not to police timing.
+const PROBE_DEADLINE: Duration = Duration::from_secs(5);
+
+/// Spawn the cursor probe, answer its DSR query with `reply` once the query
+/// appears in the master stream, and return the collected output after the
+/// probe has printed `marker`.
+///
+/// Replying on observation rather than after a fixed sleep is load-bearing.
+/// `cursor_position` allows the terminal 100ms to respond, and
+/// `Session::spawn` returns long before the probe emits its query, so a timed
+/// reply spends most of that budget on process startup and lands with only a
+/// few tens of milliseconds to spare — enough on an idle host, not enough on a
+/// contended CI runner, where the probe reports `None`.
+///
+/// This removes spawn latency from the response path entirely. It does not
+/// make the exchange instantaneous: the driver polls on an interval and can
+/// still be descheduled between seeing the query and writing the reply. The
+/// gain is a far larger share of the probe's budget, not a guaranteed margin.
+///
+/// Draining through `marker` (rather than stopping at the query) also lets the
+/// probe run to completion before the session is dropped.
+fn cursor_probe_output(mode: &str, reply: &'static [u8], marker: &str) -> String {
+    let mut session = spawn_with_env(&[("PROBE", mode), ("PROBE_TERM_PROGRAM", "WezTerm")]);
+    let mut answers = [ProbeAnswer::new(DSR_QUERY, reply)];
+    let collected = drive_probe(&mut session, &mut answers, marker, PROBE_DEADLINE);
+    String::from_utf8_lossy(&collected).into_owned()
+}
 
 #[test]
 #[serial]
 fn cursor_position_query_emits_csi_6n() {
-    let mut session = spawn_with_env(&[("PROBE", "cursor"), ("PROBE_TERM_PROGRAM", "WezTerm")]);
+    // A valid CPR is supplied even though this test only asserts on the query,
+    // so the probe completes its exchange instead of being torn down mid-read.
+    let output = cursor_probe_output("cursor", b"\x1b[12;34R", "cursor_position=");
 
-    std::thread::sleep(Duration::from_millis(80));
-
-    // Manufacture a CPR response.
-    session
-        .write_all(b"\x1b[12;34R")
-        .expect("failed to send CPR reply");
-    session.flush().unwrap();
-
-    std::thread::sleep(Duration::from_millis(80));
-
-    let mut output = String::new();
-    let mut scratch = [0u8; 4096];
-    loop {
-        match session.try_read(&mut scratch) {
-            Ok(0) => break,
-            Ok(n) => output.push_str(&String::from_utf8_lossy(&scratch[..n])),
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => break,
-            Err(_) => break,
-        }
-    }
-
-    // The query itself is sent to stdout (the PTY), so we should be able
-    // to see it in the captured output as well.
+    // The query goes to /dev/tty, which is the same PTY the probe's stdout
+    // lands on, so it is visible in the collected master stream.
     assert!(
         output.contains("\x1b[6n"),
         "expected DSR query in output, got: {output:?}"
@@ -52,30 +67,7 @@ fn cursor_position_query_emits_csi_6n() {
 #[test]
 #[serial]
 fn cursor_position_parses_csi_r_reply() {
-    let mut session = spawn_with_env(&[("PROBE", "cursor"), ("PROBE_TERM_PROGRAM", "WezTerm")]);
-
-    std::thread::sleep(Duration::from_millis(80));
-
-    // Manufacture a CPR response: row 12, col 34.
-    session
-        .write_all(b"\x1b[12;34R")
-        .expect("failed to send CPR reply");
-    session.flush().unwrap();
-
-    std::thread::sleep(Duration::from_millis(80));
-
-    let mut output = String::new();
-    let mut scratch = [0u8; 4096];
-    loop {
-        match session.try_read(&mut scratch) {
-            Ok(0) => break,
-            Ok(n) => output.push_str(&String::from_utf8_lossy(&scratch[..n])),
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => break,
-            Err(_) => break,
-        }
-    }
+    let output = cursor_probe_output("cursor", b"\x1b[12;34R", "cursor_position=");
 
     assert!(
         output.contains("cursor_position=Some(CursorPosition { row: 12, col: 34 })"),
@@ -86,33 +78,7 @@ fn cursor_position_parses_csi_r_reply() {
 #[test]
 #[serial]
 fn cursor_position_with_timeout_parses_cpr_reply() {
-    let mut session = spawn_with_env(&[
-        ("PROBE", "cursor_timeout"),
-        ("PROBE_TERM_PROGRAM", "WezTerm"),
-    ]);
-
-    std::thread::sleep(Duration::from_millis(80));
-
-    // Manufacture a CPR response: row 7, col 42.
-    session
-        .write_all(b"\x1b[7;42R")
-        .expect("failed to send CPR reply");
-    session.flush().unwrap();
-
-    std::thread::sleep(Duration::from_millis(80));
-
-    let mut output = String::new();
-    let mut scratch = [0u8; 4096];
-    loop {
-        match session.try_read(&mut scratch) {
-            Ok(0) => break,
-            Ok(n) => output.push_str(&String::from_utf8_lossy(&scratch[..n])),
-            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
-            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-            Err(e) if e.kind() == std::io::ErrorKind::TimedOut => break,
-            Err(_) => break,
-        }
-    }
+    let output = cursor_probe_output("cursor_timeout", b"\x1b[7;42R", "cursor_timeout=");
 
     assert!(
         output.contains("cursor_timeout=Some(CursorPosition { row: 7, col: 42 })"),

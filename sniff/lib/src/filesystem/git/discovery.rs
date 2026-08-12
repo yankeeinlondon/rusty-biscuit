@@ -10,6 +10,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, instrument};
 
+use crate::performance::{self, counters};
 use crate::request::GitRequest;
 use crate::{Result, SniffError};
 
@@ -138,86 +139,18 @@ pub(crate) fn collect_ref_decorations(
 pub(crate) fn collect_ref_decorations_fallible(
     repo: &gix::Repository,
 ) -> Result<HashMap<gix::ObjectId, Vec<RefDecoration>>> {
-    let mut decorations: HashMap<gix::ObjectId, Vec<RefDecoration>> = HashMap::new();
-
-    // Short name of the branch HEAD points to (None when HEAD is detached), so
-    // the active branch can be marked.
-    let head_target: Option<String> = repo
-        .head_name()
-        .map_err(|e| {
-            debug!(error = %e, "could not read HEAD for decorations");
-            e
-        })
-        .ok()
-        .flatten()
-        .map(|full| full.shorten().to_string());
-
-    let platform = repo
-        .references()
-        .map_err(|e| SniffError::git("references", e))?;
-    let iter = platform
-        .all()
-        .map_err(|e| SniffError::git("references", e))?;
-
-    for reference in iter {
-        let reference = reference.map_err(|e| SniffError::git("references", e))?;
-        let full_name = reference.name().as_bstr().to_string();
-
-        // Peel through annotated tags to the commit the ref ultimately names.
-        let oid = reference
-            .into_fully_peeled_id()
-            .map_err(|e| SniffError::git("peel", e))?
-            .detach();
-
-        // Determine ref kind and display name
-        let (kind, display_name) = if let Some(branch) = full_name.strip_prefix("refs/heads/") {
-            (RefKind::LocalBranch, branch.to_string())
-        } else if let Some(remote) = full_name.strip_prefix("refs/remotes/") {
-            (RefKind::RemoteBranch, remote.to_string())
-        } else if let Some(tag) = full_name.strip_prefix("refs/tags/") {
-            (RefKind::Tag, tag.to_string())
-        } else {
-            continue; // Skip other refs (notes, stash, etc.)
-        };
-
-        // Check if this is the HEAD branch
-        let is_head = kind == RefKind::LocalBranch
-            && head_target.as_ref().is_some_and(|h| h == &display_name);
-
-        let decoration = RefDecoration {
-            name: display_name,
-            kind,
-            is_head,
-        };
-
-        decorations.entry(oid).or_default().push(decoration);
-    }
-
-    // Sort decorations: HEAD branch first, then local branches, remote branches, tags
-    for refs in decorations.values_mut() {
-        refs.sort_by(|a, b| {
-            // HEAD branch comes first
-            if a.is_head != b.is_head {
-                return b.is_head.cmp(&a.is_head);
-            }
-            // Then by kind: LocalBranch < RemoteBranch < Tag
-            match (a.kind, b.kind) {
-                (RefKind::LocalBranch, RefKind::LocalBranch) => a.name.cmp(&b.name),
-                (RefKind::LocalBranch, _) => std::cmp::Ordering::Less,
-                (_, RefKind::LocalBranch) => std::cmp::Ordering::Greater,
-                (RefKind::RemoteBranch, RefKind::RemoteBranch) => a.name.cmp(&b.name),
-                (RefKind::RemoteBranch, _) => std::cmp::Ordering::Less,
-                (_, RefKind::RemoteBranch) => std::cmp::Ordering::Greater,
-                (RefKind::Tag, RefKind::Tag) => a.name.cmp(&b.name),
-            }
-        });
-    }
-
-    Ok(decorations)
+    Ok(super::remote_refresh::RefSnapshot::observe(repo, true, true, true)?
+        .decorations()
+        .clone())
 }
 
-/// Gets the last N commits from HEAD using a gix revwalk, with optional
-/// pre-computed ref decorations.
+/// Gets the last N commits from HEAD using a gix revwalk, attaching
+/// `ref_decorations` to the commits they point at.
+///
+/// `ref_decorations` is the decoration source: `None` attaches none. It does
+/// **not** mean "collect them for me" — a caller that wants decorations owns the
+/// cache and passes it in, so the ref-store walk happens once per request rather
+/// than once per query.
 ///
 /// Errors are suppressed: an unreadable HEAD, revwalk, or commit object yields
 /// an empty or truncated history. For error propagation, use
@@ -233,9 +166,9 @@ pub(crate) fn get_recent_commits_with_decorations(
 /// Fallible variant of [`get_recent_commits_with_decorations`].
 ///
 /// An unborn HEAD (no commits) is `Ok(empty)`. HEAD, revwalk creation, revwalk
-/// items, object decode, author, time, message, and ref-decoration failures
-/// propagate as [`SniffError::Git`] rather than truncating history into a
-/// successful-looking partial result.
+/// items, object decode, author, time, and message failures propagate as
+/// [`SniffError::Git`] rather than truncating history into a successful-looking
+/// partial result.
 pub(crate) fn get_recent_commits_fallible(
     repo: &gix::Repository,
     count: usize,
@@ -256,18 +189,16 @@ pub(crate) fn get_recent_commits_fallible(
         .all()
         .map_err(|e| SniffError::git("revwalk", e))?;
 
-    // Collect ref decorations once for all commits (if not provided).
-    let cached = ref_decorations.cloned();
-    let decorations = match cached {
-        Some(d) => d,
-        None => collect_ref_decorations_fallible(repo)?,
-    };
-
     for info_result in walk.take(count) {
         let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
+        performance::increment_counter(counters::GIT_COMMIT_VISITS, 1);
         let commit = info.object().map_err(|e| SniffError::git("object", e))?;
 
-        let refs = decorations.get(&info.id).cloned().unwrap_or_default();
+        // Only the small vector attached to this commit is cloned; the map is
+        // borrowed from the caller's cache rather than copied wholesale.
+        let refs = ref_decorations
+            .and_then(|d| d.get(&info.id).cloned())
+            .unwrap_or_default();
 
         let author = commit.author().map_err(|e| SniffError::git("author", e))?;
         let time = commit
@@ -503,29 +434,7 @@ pub(crate) fn get_commit_files_with_cache_fallible(
     commit_id: gix::ObjectId,
     cache: &mut gix::diff::blob::Platform,
 ) -> Result<Vec<(PathBuf, DeltaKind)>> {
-    let commit = repo
-        .find_object(commit_id)
-        .map_err(|e| SniffError::git("object", e))?
-        .try_into_commit()
-        .map_err(|e| SniffError::git("object", e))?;
-    let tree = commit.tree().map_err(|e| SniffError::git("tree", e))?;
-
-    let parent_tree = match commit.parent_ids().next() {
-        Some(parent_id) => {
-            let parent_commit = repo
-                .find_object(parent_id.detach())
-                .map_err(|e| SniffError::git("object", e))?
-                .try_into_commit()
-                .map_err(|e| SniffError::git("object", e))?;
-            Some(
-                parent_commit
-                    .tree()
-                    .map_err(|e| SniffError::git("tree", e))?,
-            )
-        }
-        None => None,
-    };
-
+    let (tree, parent_tree) = commit_trees(repo, commit_id)?;
     let empty_tree = repo.empty_tree();
     let old_tree = parent_tree.as_ref().unwrap_or(&empty_tree);
 
@@ -564,6 +473,16 @@ pub(crate) fn get_commit_files_with_cache_fallible(
 /// Returns `true` if the commit `oid` touches any file whose path starts with
 /// `path_prefix`.
 ///
+/// Stops the tree diff at the **first** matching path rather than materializing
+/// and sorting every changed path and filtering afterwards, which is what made
+/// a path-history walk pay a whole-tree diff per commit regardless of how early
+/// the answer was known.
+///
+/// The match is a string prefix over the same lossy path the file listing
+/// produces, preserving the pre-existing filter semantics exactly; it is
+/// deliberately not upgraded to a component-wise or pathspec match here, which
+/// would change which commits a caller sees.
+///
 /// Propagates object/tree/diff failures as [`SniffError::Git`] so a corrupt
 /// commit is not silently treated as "does not touch the path".
 fn commit_touches_path(
@@ -572,27 +491,218 @@ fn commit_touches_path(
     oid: gix::ObjectId,
     path_prefix: &str,
 ) -> Result<bool> {
-    let files = get_commit_files_with_cache_fallible(repo, oid, cache)?;
-    Ok(files
-        .iter()
-        .any(|(p, _)| p.to_string_lossy().starts_with(path_prefix)))
+    let (tree, parent_tree) = commit_trees(repo, oid)?;
+    let empty_tree = repo.empty_tree();
+    let old_tree = parent_tree.as_ref().unwrap_or(&empty_tree);
+
+    let mut platform = old_tree.changes().map_err(|e| SniffError::git("diff", e))?;
+    platform.options(|opts| {
+        opts.track_path().track_rewrites(None);
+    });
+
+    let mut touched = false;
+    let outcome = platform.for_each_to_obtain_tree_with_cache(
+        &tree,
+        cache,
+        |change| -> std::result::Result<std::ops::ControlFlow<()>, std::convert::Infallible> {
+            if change.entry_mode().is_tree() {
+                return Ok(std::ops::ControlFlow::Continue(()));
+            }
+            let path = lossy_path(change.location());
+            if path.as_os_str().is_empty() {
+                return Ok(std::ops::ControlFlow::Continue(()));
+            }
+            if path.to_string_lossy().starts_with(path_prefix) {
+                touched = true;
+                return Ok(std::ops::ControlFlow::Break(()));
+            }
+            Ok(std::ops::ControlFlow::Continue(()))
+        },
+    );
+
+    // `Break` surfaces from gix as a `Cancelled` diff error. Checking `touched`
+    // first is what distinguishes our own deliberate early stop from a real
+    // diff failure — propagating the cancellation would report a successful
+    // match as a corrupt repository.
+    if touched {
+        return Ok(true);
+    }
+    outcome.map_err(|e| SniffError::git("diff", e))?;
+
+    Ok(false)
 }
+
+/// Resolve a commit's tree and its first parent's tree.
+///
+/// A root commit reports `None`, which callers diff against the empty tree.
+/// Only the first parent is considered, so a merge commit is compared against
+/// its mainline — the pre-existing behavior of the file listing.
+///
+/// ## Notes
+///
+/// A commit at a **shallow boundary** also reports `None`. It names a parent
+/// that the object database does not contain, so `try_find_object` returns
+/// `None` rather than an error, and the commit is treated exactly as a root:
+/// every file in its tree reads as added. That is the honest answer when the
+/// preceding history is absent, and it is the only answer available.
+///
+/// This matters because a shallow clone is the *normal* CI checkout —
+/// `actions/checkout@v4` fetches depth 1 by default. Resolving the parent with
+/// `find_object` made `sniff repo --json` abort with "An object with id … could
+/// not be found" on every runner, while `sniff repo` and `--plain` succeeded
+/// because they do not collect commit history.
+fn commit_trees(
+    repo: &gix::Repository,
+    commit_id: gix::ObjectId,
+) -> Result<(gix::Tree<'_>, Option<gix::Tree<'_>>)> {
+    let commit = repo
+        .find_object(commit_id)
+        .map_err(|e| SniffError::git("object", e))?
+        .try_into_commit()
+        .map_err(|e| SniffError::git("object", e))?;
+    let tree = commit.tree().map_err(|e| SniffError::git("tree", e))?;
+
+    let parent_tree = match commit.parent_ids().next() {
+        Some(parent_id) => {
+            let parent_object = repo
+                .try_find_object(parent_id.detach())
+                .map_err(|e| SniffError::git("object", e))?;
+            match parent_object {
+                Some(object) => {
+                    let parent_commit = object
+                        .try_into_commit()
+                        .map_err(|e| SniffError::git("object", e))?;
+                    Some(
+                        parent_commit
+                            .tree()
+                            .map_err(|e| SniffError::git("tree", e))?,
+                    )
+                }
+                None => None,
+            }
+        }
+        None => None,
+    };
+
+    Ok((tree, parent_tree))
+}
+
+/// Default bound on commits a path-history walk will examine.
+///
+/// The bound exists for the sparse-match case, where the walk would otherwise
+/// run to the root of history looking for matches that are not there. It caps
+/// the tail; it is not what makes the common case fast — stopping at
+/// [`PathHistoryOptions::count`] matches does that.
+///
+/// 10,000 is a policy default, not a measured optimum. See the Phase 5 sub-spec
+/// (`sniff/features/2026-07-16-performance/phases/_completed/05-git-observation/spec.md`)
+/// for why lowering it would make [`PathHistoryResult::limit_reached`] routine
+/// enough that callers learn to ignore it.
+pub const DEFAULT_PATH_HISTORY_SCAN_LIMIT: usize = 10_000;
+
+/// How far a path-history query may look, and how much it should return.
+///
+/// ## Examples
+///
+/// ```
+/// use sniff::filesystem::git::PathHistoryOptions;
+///
+/// // Ten matches, default scan bound.
+/// let opts = PathHistoryOptions::new(10);
+///
+/// // A cheaper bound for a latency-sensitive caller.
+/// let opts = PathHistoryOptions::new(10).scan_limit(500);
+/// assert_eq!(opts.scan_limit_value(), 500);
+/// ```
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PathHistoryOptions {
+    scan_limit: usize,
+    count: usize,
+}
+
+impl PathHistoryOptions {
+    /// Return at most `count` matching commits, scanning at most
+    /// [`DEFAULT_PATH_HISTORY_SCAN_LIMIT`] commits.
+    ///
+    /// `count == 0` means "no match cap" — the walk is then bounded only by the
+    /// scan limit.
+    pub fn new(count: usize) -> Self {
+        Self {
+            scan_limit: DEFAULT_PATH_HISTORY_SCAN_LIMIT,
+            count,
+        }
+    }
+
+    /// Set the maximum number of commits to examine.
+    ///
+    /// A zero limit is rejected in favor of the default: it would return an
+    /// empty history indistinguishable from "this path was never touched",
+    /// which is the failure this bounded API exists to prevent.
+    pub fn scan_limit(mut self, limit: usize) -> Self {
+        self.scan_limit = if limit == 0 {
+            DEFAULT_PATH_HISTORY_SCAN_LIMIT
+        } else {
+            limit
+        };
+        self
+    }
+
+    /// The effective scan bound.
+    pub fn scan_limit_value(&self) -> usize {
+        self.scan_limit
+    }
+
+    /// The effective match cap (`0` means uncapped).
+    pub fn count(&self) -> usize {
+        self.count
+    }
+}
+
+impl Default for PathHistoryOptions {
+    fn default() -> Self {
+        Self::new(0)
+    }
+}
+
+/// The outcome of a bounded path-history query.
+///
+/// `history_exhausted` and `limit_reached` are **not** complements: a walk that
+/// collected `count` matches before reaching either boundary reports both as
+/// `false`. Distinguishing those three outcomes is the entire reason this type
+/// exists — a bare `Vec<CommitInfo>` cannot say whether a short result means
+/// "that is all there is" or "we stopped looking".
+#[derive(Debug, Clone, Default)]
+pub struct PathHistoryResult {
+    /// Matching commits, newest first.
+    pub commits: Vec<CommitInfo>,
+    /// How many commits the walk examined.
+    pub commits_scanned: usize,
+    /// The walk reached the end of history.
+    pub history_exhausted: bool,
+    /// The walk stopped at the scan limit rather than exhausting history.
+    pub limit_reached: bool,
+}
+
+/// How often a long walk releases its bounded diff resource cache (R10.5).
+const DIFF_CACHE_CLEAR_INTERVAL: usize = 1_000;
 
 /// Get recent commits that touch files under a specific path prefix.
 ///
-/// Walks the commit history from HEAD, computes diffs for each commit,
-/// and includes commits where at least one changed file starts with `path_prefix`.
+/// Walks the commit history from HEAD and includes commits where at least one
+/// changed file starts with `path_prefix`. The walk is bounded by
+/// `options.scan_limit`; consult [`PathHistoryResult::limit_reached`] to tell an
+/// exhausted history from a truncated scan.
 ///
 /// Ref decorations are collected once and reused for all matching commits.
 ///
 /// Errors are suppressed: a corrupt revwalk, object, or ref store yields an
-/// empty list. For error propagation, use [`get_commits_for_path_fallible`].
+/// empty result. For error propagation, use [`get_commits_for_path_fallible`].
 pub fn get_commits_for_path(
     repo: &gix::Repository,
     path_prefix: &str,
-    count: usize,
-) -> Vec<CommitInfo> {
-    get_commits_for_path_with_decorations(repo, path_prefix, count, None)
+    options: PathHistoryOptions,
+) -> PathHistoryResult {
+    get_commits_for_path_with_decorations(repo, path_prefix, options, None)
 }
 
 /// Get recent commits for a path with optional pre-computed ref decorations.
@@ -601,29 +711,31 @@ pub fn get_commits_for_path(
 pub(crate) fn get_commits_for_path_with_decorations(
     repo: &gix::Repository,
     path_prefix: &str,
-    count: usize,
+    options: PathHistoryOptions,
     ref_decorations: Option<&HashMap<gix::ObjectId, Vec<RefDecoration>>>,
-) -> Vec<CommitInfo> {
-    get_commits_for_path_fallible(repo, path_prefix, count, ref_decorations).unwrap_or_default()
+) -> PathHistoryResult {
+    get_commits_for_path_fallible(repo, path_prefix, options, ref_decorations).unwrap_or_default()
 }
 
 /// Fallible variant of [`get_commits_for_path`].
 ///
-/// An unborn HEAD (no history) is `Ok(empty)`. Revwalk, object, author, time,
-/// message, ref-decoration, and per-commit diff failures propagate as
+/// An unborn HEAD (no history) is an `Ok` empty result with
+/// `history_exhausted: true`. Revwalk, object, author, time, message,
+/// ref-decoration, and per-commit diff failures propagate as
 /// [`SniffError::Git`] rather than silently skipping commits.
 pub(crate) fn get_commits_for_path_fallible(
     repo: &gix::Repository,
     path_prefix: &str,
-    count: usize,
+    options: PathHistoryOptions,
     ref_decorations: Option<&HashMap<gix::ObjectId, Vec<RefDecoration>>>,
-) -> Result<Vec<CommitInfo>> {
-    let mut commits = Vec::new();
+) -> Result<PathHistoryResult> {
+    let mut result = PathHistoryResult::default();
 
     // An unborn HEAD has no history to walk — a legitimate empty result; a
     // malformed/unreadable HEAD propagates instead.
     let Some(head) = head_id_opt(repo)? else {
-        return Ok(commits);
+        result.history_exhausted = true;
+        return Ok(result);
     };
 
     let walk = repo
@@ -635,20 +747,49 @@ pub(crate) fn get_commits_for_path_fallible(
         .all()
         .map_err(|e| SniffError::git("revwalk", e))?;
 
-    let decorations = match ref_decorations {
-        Some(d) => d.clone(),
-        None => collect_ref_decorations_fallible(repo)?,
+    // Borrowed, never cloned: a caller that supplied a decoration cache did so
+    // to avoid rebuilding it, and copying the whole map here defeated that.
+    // Only the small per-commit vector attached to a match is cloned.
+    let owned_decorations = match ref_decorations {
+        Some(_) => None,
+        None => Some(collect_ref_decorations_fallible(repo)?),
     };
+    let decorations = ref_decorations.unwrap_or_else(|| {
+        owned_decorations
+            .as_ref()
+            .expect("collected when none supplied")
+    });
 
     let mut diff_cache = repo
         .diff_resource_cache_for_tree_diff()
         .map_err(|e| SniffError::git("diff", e))?;
 
+    let capped = options.count > 0;
+    let mut exhausted = true;
+
     for info_result in walk {
-        if commits.len() >= count {
+        if capped && result.commits.len() >= options.count {
+            // Satisfied before either boundary: neither exhausted nor limited.
+            exhausted = false;
             break;
         }
+        if result.commits_scanned >= options.scan_limit {
+            result.limit_reached = true;
+            exhausted = false;
+            break;
+        }
+
         let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
+        // Counted before the path filter: a commit the walk yielded and
+        // rejected still cost a visit.
+        performance::increment_counter(counters::GIT_COMMIT_VISITS, 1);
+        result.commits_scanned += 1;
+
+        // The tree-diff cache grows with every commit examined; release it
+        // periodically so a long walk's memory stays bounded.
+        if result.commits_scanned % DIFF_CACHE_CLEAR_INTERVAL == 0 {
+            diff_cache.clear_resource_cache();
+        }
 
         if !commit_touches_path(repo, &mut diff_cache, info.id, path_prefix)? {
             continue;
@@ -665,7 +806,7 @@ pub(crate) fn get_commits_for_path_fallible(
             .message_raw()
             .map_err(|e| SniffError::git("message", e))?;
 
-        commits.push(CommitInfo {
+        result.commits.push(CommitInfo {
             sha: info.id.to_string(),
             message: String::from_utf8_lossy(message.trim()).to_string(),
             author: author.name.to_string(),
@@ -675,7 +816,8 @@ pub(crate) fn get_commits_for_path_fallible(
         });
     }
 
-    Ok(commits)
+    result.history_exhausted = exhausted;
+    Ok(result)
 }
 
 /// Get the last N commits walked from a named branch's tip.
@@ -751,6 +893,7 @@ pub(crate) fn get_commits_for_branch_fallible(
 
     for info_result in walk.take(count) {
         let info = info_result.map_err(|e| SniffError::git("revwalk", e))?;
+        performance::increment_counter(counters::GIT_COMMIT_VISITS, 1);
         let commit = info.object().map_err(|e| SniffError::git("object", e))?;
 
         let refs = decorations.get(&info.id).cloned().unwrap_or_default();
@@ -774,4 +917,162 @@ pub(crate) fn get_commits_for_branch_fallible(
     }
 
     Ok(commits)
+}
+
+#[cfg(test)]
+mod path_history_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    /// A repo whose history is `depth` commits, all touching `other/`, with the
+    /// single oldest commit touching `wanted/` so a match is only found by
+    /// walking to the very bottom.
+    fn repo_with_sparse_match(depth: usize) -> (TempDir, gix::Repository) {
+        let dir = TempDir::new().unwrap();
+        let repo = git2::Repository::init(dir.path()).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+
+        std::fs::create_dir_all(dir.path().join("wanted")).unwrap();
+        std::fs::create_dir_all(dir.path().join("other")).unwrap();
+
+        let mut parents: Vec<git2::Oid> = Vec::new();
+        for i in 0..depth {
+            // Only the first (oldest) commit touches `wanted/`.
+            let rel = if i == 0 {
+                "wanted/hit.txt"
+            } else {
+                "other/miss.txt"
+            };
+            std::fs::write(dir.path().join(rel), format!("v{i}\n")).unwrap();
+
+            let mut index = repo.index().unwrap();
+            index.add_path(Path::new(rel)).unwrap();
+            index.write().unwrap();
+            let tree_id = index.write_tree().unwrap();
+            let tree = repo.find_tree(tree_id).unwrap();
+
+            let parent_commits: Vec<git2::Commit> = parents
+                .iter()
+                .map(|id| repo.find_commit(*id).unwrap())
+                .collect();
+            let parent_refs: Vec<&git2::Commit> = parent_commits.iter().collect();
+            let id = repo
+                .commit(
+                    Some("HEAD"),
+                    &sig,
+                    &sig,
+                    &format!("commit {i}"),
+                    &tree,
+                    &parent_refs,
+                )
+                .unwrap();
+            parents = vec![id];
+        }
+
+        let gix_repo = gix::open(dir.path()).unwrap();
+        (dir, gix_repo)
+    }
+
+    /// R10.2: the scan limit bounds the walk, and says so.
+    #[test]
+    fn scan_limit_stops_the_walk_and_reports_incompleteness() {
+        let (_dir, repo) = repo_with_sparse_match(6);
+
+        let result = get_commits_for_path_fallible(
+            &repo,
+            "wanted/",
+            PathHistoryOptions::new(10).scan_limit(3),
+            None,
+        )
+        .unwrap();
+
+        assert_eq!(result.commits_scanned, 3, "must stop at the bound");
+        assert!(result.limit_reached, "stopping at the bound must be visible");
+        assert!(
+            !result.history_exhausted,
+            "a bounded stop is not an exhausted history"
+        );
+        assert!(
+            result.commits.is_empty(),
+            "the only match is below the bound"
+        );
+    }
+
+    /// The same query without a restrictive bound finds the match and reports
+    /// an exhausted history — proving the flags above describe the bound, not
+    /// the repository.
+    #[test]
+    fn exhausting_history_reports_exhausted_not_limited() {
+        let (_dir, repo) = repo_with_sparse_match(6);
+
+        let result =
+            get_commits_for_path_fallible(&repo, "wanted/", PathHistoryOptions::new(10), None)
+                .unwrap();
+
+        assert_eq!(result.commits.len(), 1);
+        assert_eq!(result.commits_scanned, 6);
+        assert!(result.history_exhausted);
+        assert!(!result.limit_reached);
+    }
+
+    /// R10: satisfying `count` is neither exhaustion nor truncation. This is the
+    /// third state a bare `Vec<CommitInfo>` could not express.
+    #[test]
+    fn satisfying_the_count_reports_neither_boundary() {
+        let (_dir, repo) = repo_with_sparse_match(6);
+
+        let result =
+            get_commits_for_path_fallible(&repo, "other/", PathHistoryOptions::new(2), None)
+                .unwrap();
+
+        assert_eq!(result.commits.len(), 2);
+        assert!(!result.history_exhausted, "we stopped early, by choice");
+        assert!(!result.limit_reached, "and not because of the scan bound");
+    }
+
+    /// R10.1: the walk must not visit more commits than its bound, whatever the
+    /// history's size.
+    #[test]
+    fn commit_visits_are_bounded_by_the_scan_limit() {
+        let (_dir, repo) = repo_with_sparse_match(8);
+
+        let collector = crate::performance::PerformanceCollector::new_shared();
+        crate::performance::with_current_collector(Some(collector.clone()), || {
+            get_commits_for_path_fallible(
+                &repo,
+                "wanted/",
+                PathHistoryOptions::new(10).scan_limit(4),
+                None,
+            )
+            .unwrap()
+        });
+        let counters = collector
+            .snapshot(std::time::Duration::from_secs(0))
+            .counters;
+
+        assert_eq!(
+            counters
+                .get(counters::GIT_COMMIT_VISITS)
+                .copied()
+                .unwrap_or(0),
+            4,
+            "the bound must cap visits: {counters:?}"
+        );
+    }
+
+    /// An unborn HEAD has genuinely exhausted its (empty) history.
+    #[test]
+    fn unborn_head_is_exhausted_not_limited() {
+        let dir = TempDir::new().unwrap();
+        git2::Repository::init(dir.path()).unwrap();
+        let repo = gix::open(dir.path()).unwrap();
+
+        let result =
+            get_commits_for_path_fallible(&repo, "", PathHistoryOptions::new(10), None).unwrap();
+
+        assert!(result.commits.is_empty());
+        assert_eq!(result.commits_scanned, 0);
+        assert!(result.history_exhausted);
+        assert!(!result.limit_reached);
+    }
 }

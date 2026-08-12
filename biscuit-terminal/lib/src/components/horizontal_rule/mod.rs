@@ -12,6 +12,7 @@ pub mod style;
 
 pub use style::{RuleAlignment, RuleStyle, RuleWeight};
 
+use std::borrow::Cow;
 #[cfg(feature = "image")]
 use std::io::Cursor;
 
@@ -21,9 +22,12 @@ use crate::components::terminal_image::TerminalImage;
 use crate::discovery::detection::{ColorDepth, ColorMode, ImageSupport};
 use crate::terminal::Terminal;
 use crate::utils::color::TermColor;
-use crate::utils::layout::Layout;
+use crate::utils::layout::{Layout, LayoutTerminalExt};
 
 use self::browser::{parse_basic_color, parse_hex_color};
+use renderable::tree::{
+    HrAlignment, HrKind, HrWeight, RenderNode, ThematicBreakAttrs, TreeRenderable,
+};
 
 /// Default cell width (in pixels) used by `render_image_tier` and
 /// `resolve_width`'s `"NNpx"` branch when the terminal does not advertise a
@@ -36,6 +40,32 @@ pub(crate) const DEFAULT_CELL_WIDTH: u32 = 8;
 pub(crate) const DEFAULT_CELL_HEIGHT: u32 = 16;
 
 /// A horizontal rule component for terminal and browser rendering.
+///
+/// ## Layout & Style Contract
+///
+/// `HorizontalRule` is a bespoke component (spec C5/D5) with two render
+/// tiers: the **image tier** (Kitty graphics protocol, active on capable
+/// TTYs) and the **text tier** (Unicode or ASCII glyphs). The drawn glyph
+/// / image core is irreducible — no render-tree `NodeKind` can represent
+/// either — so the component emits those bytes directly. The structural
+/// `ThematicBreak` semantics (spec C9) are preserved on every target.
+///
+/// The honored subset (spec C5: minimum bar) is the outer placement,
+/// applied to both tiers:
+///
+/// | Property | Status | Rationale |
+/// |----------|--------|-----------|
+/// | `Layout::margin` | **Honored** | Outer placement is target-agnostic; the rule is positioned within the available width after margins. |
+/// | `Layout::alignment` | **Honored** | `RuleAlignment::Centered` / `Left` / `Right` already mirror this contract on the text tier; `Layout::alignment` is reserved for the outer block box. |
+/// | `Layout::max_width` | **Honored** | Caps the rule's outer width. |
+/// | `Layout::width` | **Honored** (via the rule's own `width()` builder) | The HR has its own CSS-like width specification (`"50%"` / `"20ch"` / `"200px"`) that drives `resolve_width`. Setting `Layout::width` itself is honored on the same outer box. |
+/// | `Layout::padding` | **N/A** | Padding cannot paint the glyph/image core; there is no padding box. |
+/// | `Layout::word_wrap` | **N/A** | A horizontal rule cannot wrap. |
+/// | `Style::color` / `emphasis` | **N/A** | The HR has its own `color()` builder (CSS color string) routed through `apply_terminal_color`. `Style::color` / `Style::emphasis` are not lowered onto the glyph core. |
+/// | `Style::background` | **N/A** | A block background would have to paint cells *around* the glyph/image bytes; the protocol/glyph owns the cells it covers. |
+/// | `Style::border` | **N/A** | Box-drawing glyphs cannot frame an HR glyph/image without disrupting the rule itself. |
+///
+/// Parity for the honored subset is pinned in `horizontal_rule_parity.rs`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct HorizontalRule {
     style: RuleStyle,
@@ -153,13 +183,29 @@ impl Default for HorizontalRule {
 
 impl TerminalRenderable for HorizontalRule {
     fn render(&self, term: &Terminal) -> String {
+        // Mirror the render-tree block contract (`render_with_layout`): the
+        // horizontal margins and `max_width` narrow the box the rule is drawn
+        // into, then the drawn block is placed within the remaining slack.
+        // The tree path applies its own layout around `render_*_tier`, so this
+        // wrapper lives on `render` alone and never double-applies.
+        let term_width = term.width();
+        let inner_width = self.layout.content_width(term_width);
+        let inner = if inner_width == term_width {
+            Cow::Borrowed(term)
+        } else {
+            let mut narrowed = term.clone();
+            narrowed.fixed_width = Some(inner_width);
+            Cow::Owned(narrowed)
+        };
+
         // Tier 1: SVG -> PNG -> Kitty graphics protocol. Any capability or
         // rasterization failure falls through to the text tiers below.
-        if let Some(image) = self.render_image_tier(term) {
-            return image;
-        }
+        let content = match self.render_image_tier(&inner) {
+            Some(image) => image,
+            None => self.render_text_tier(&inner),
+        };
 
-        self.render_text_tier(term)
+        self.layout.apply_block_layout(&content, term_width)
     }
 
     fn layout(&self) -> &Layout {
@@ -176,6 +222,47 @@ impl TerminalRenderable for HorizontalRule {
 
     fn as_any(&self) -> &dyn std::any::Any {
         self
+    }
+}
+
+impl TreeRenderable for HorizontalRule {
+    /// Projects the rule into a [`NodeKind::ThematicBreak`] node carrying the
+    /// component's [`Layout`] and typed [`ThematicBreakAttrs`].
+    ///
+    /// The structural `ThematicBreak` semantics (spec C9) are preserved on
+    /// every target. The terminal renderer reconstructs a `HorizontalRule`
+    /// from the typed attrs, so the bespoke glyph/image core survives a
+    /// tree round-trip; Browser lowers to `<hr>` and Markdown to `---`.
+    ///
+    /// [`NodeKind::ThematicBreak`]: renderable::tree::NodeKind::ThematicBreak
+    fn render_tree(&self) -> RenderNode {
+        let mut node = RenderNode::thematic_break();
+        node.attrs.set_thematic_break(&ThematicBreakAttrs {
+            kind: Some(match self.style {
+                RuleStyle::Dashes => HrKind::Dashes,
+                RuleStyle::Dots => HrKind::Dots,
+                RuleStyle::Waves => HrKind::Waves,
+                RuleStyle::LineStar => HrKind::LineStar,
+                RuleStyle::LineCircle => HrKind::LineCircle,
+                RuleStyle::InsetLine => HrKind::InsetLine,
+                RuleStyle::CurtainRod => HrKind::CurtainRod,
+            }),
+            alignment: Some(match self.alignment {
+                RuleAlignment::Full => HrAlignment::Full,
+                RuleAlignment::Centered => HrAlignment::Center,
+                RuleAlignment::Left => HrAlignment::Left,
+                RuleAlignment::Right => HrAlignment::Right,
+            }),
+            weight: Some(match self.weight {
+                RuleWeight::Thin => HrWeight::Thin,
+                RuleWeight::Medium => HrWeight::Medium,
+                RuleWeight::Thick => HrWeight::Thick,
+            }),
+            width: self.width.clone(),
+            color: self.color.clone(),
+        });
+        node.attrs.set_layout(&self.layout);
+        node
     }
 }
 

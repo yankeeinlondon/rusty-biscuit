@@ -18,7 +18,7 @@ use super::super::{
 };
 use tracing::{debug, info};
 
-use transclusion::{ApplyTarget, SectionSlot, TransclusionEngine};
+use transclusion::{ApplyTarget, ResolvedTransclusion, SectionSlot, TransclusionEngine};
 
 impl Markdown {
     pub(crate) fn run_inline_pre_operation(
@@ -53,13 +53,15 @@ impl Markdown {
                 inline::shell_expansion::run_stage(self, options, runtime, report, perf)
             }
             ComposeOperation::ShellBlocks => {
-                let sb_ctx = self.source_context_for_errors();
+                let sb_ctx = self.full_source_context_for_errors();
+                let line_offset = self.frontmatter_line_count();
                 shell_blocks::run_shell_blocks_stage_for_markdown(
                     &mut self.content,
                     options,
                     &mut runtime.shell,
                     report,
                     &sb_ctx,
+                    line_offset,
                 )
             }
             ComposeOperation::LinkResolve => link_resolve::link_resolve(self, options, report),
@@ -75,23 +77,57 @@ impl Markdown {
     ) -> MarkdownResult<()> {
         match operation {
             ComposeOperation::Cleanup => {
-                let original_content = self.content.clone();
-                self.content = match options.list_spacing {
-                    cleanup::ListSpacingMode::Normal => {
+                // Detect whether cleanup changed the body via an xxHash of the
+                // before/after content instead of cloning the whole body and
+                // comparing (F34). A cache-key-strength collision would only
+                // mis-set the advisory `cleanup_changed` report flag.
+                let original_hash = biscuit_hash::xx_hash(&self.content);
+                // Fixed-width reflow must run over canonical unwrapped prose, so a
+                // requested `fixed_width` forces incidental-newline stripping even
+                // under `Preserve`. Otherwise reflow would re-wrap the source's own
+                // incidental wrapping rather than the document's canonical form.
+                let strip_incidental = options.incidental_newline_mode
+                    == cleanup::IncidentalNewlineMode::Strip
+                    || options.fixed_width.is_some();
+                self.content = match (options.list_spacing, strip_incidental) {
+                    (cleanup::ListSpacingMode::Normal, true) => {
                         cleanup::cleanup_content_with_indent(&self.content, options.indent_size)
                     }
-                    cleanup::ListSpacingMode::Compact => {
+                    (cleanup::ListSpacingMode::Compact, true) => {
                         cleanup::cleanup_content_with_indent_compact(
                             &self.content,
                             options.indent_size,
                         )
                     }
-                    cleanup::ListSpacingMode::Loose => cleanup::cleanup_content_with_indent_loose(
-                        &self.content,
-                        options.indent_size,
-                    ),
+                    (cleanup::ListSpacingMode::Loose, true) => {
+                        cleanup::cleanup_content_with_indent_loose(
+                            &self.content,
+                            options.indent_size,
+                        )
+                    }
+                    (cleanup::ListSpacingMode::Normal, false) => {
+                        cleanup::cleanup_content_with_indent_preserving_incidental(
+                            &self.content,
+                            options.indent_size,
+                        )
+                    }
+                    (cleanup::ListSpacingMode::Compact, false) => {
+                        cleanup::cleanup_content_with_indent_compact_preserving_incidental(
+                            &self.content,
+                            options.indent_size,
+                        )
+                    }
+                    (cleanup::ListSpacingMode::Loose, false) => {
+                        cleanup::cleanup_content_with_indent_loose_preserving_incidental(
+                            &self.content,
+                            options.indent_size,
+                        )
+                    }
                 };
-                report.cleanup_changed = self.content != original_content;
+                if let Some(width) = options.fixed_width {
+                    self.content = cleanup::reflow_to_width(&self.content, width);
+                }
+                report.cleanup_changed = biscuit_hash::xx_hash(&self.content) != original_hash;
                 Ok(())
             }
             ComposeOperation::Normalization => match inline::normalize::run_stage(self) {
@@ -288,10 +324,33 @@ impl Markdown {
 
         let resolve_start = perf_collector.is_enabled().then(std::time::Instant::now);
 
+        // 35.1: the effective-state and context hashes are phase-wide — the same
+        // `EffectiveState` drives every directive resolved below. Capture the
+        // pair once here instead of re-canonicalizing the full state/context
+        // maps inside each markdown transclusion's cache-key construction.
+        let state_identity = crate::markdown::compose::cache::hashing::PhaseStateIdentity::capture(state);
         let runtime_mutex = std::sync::Mutex::new(runtime);
         let results = prepared
             .into_par_iter()
-            .map(|item| engine.resolve_prepared_transclusion(item, state, options, &runtime_mutex))
+            .map(|item| {
+                // The anchor is taken before `item` is consumed: a resolution
+                // error carries no span, and without one a tolerated failure
+                // can only be skipped — which leaves the authored directive
+                // text in the document.
+                let anchor = item.failure_anchor();
+                engine
+                    .resolve_prepared_transclusion(
+                        item,
+                        state,
+                        state_identity,
+                        options,
+                        &runtime_mutex,
+                    )
+                    // Boxed because this pair is the `Err` of a hot `Result`
+                    // returned for every prepared item, and the anchor makes it
+                    // large enough to widen the success path's stack footprint.
+                    .map_err(|error| Box::new((anchor, error)))
+            })
             .collect::<Vec<_>>();
 
         debug!(
@@ -317,7 +376,8 @@ impl Markdown {
         for result in results {
             let resolved = match result {
                 Ok(resolved) => resolved,
-                Err(error) => {
+                Err(failure) => {
+                    let (anchor, error) = *failure;
                     let is_structural = matches!(
                         error,
                         MarkdownError::Transclusion(ref inner)
@@ -331,8 +391,23 @@ impl Markdown {
                     if is_structural || options.fail_fast {
                         return Err(error);
                     }
-                    report.add_warning(ComposeWarning::new("transclusion", error.to_string()));
-                    continue;
+                    // Tolerating the failure is a promise that the output stays
+                    // usable, and a document that silently omits a transcluded
+                    // section does not keep it — the gap has to be visible in
+                    // the artifact, not only in a warning on stderr. This
+                    // matches the removal-and-warn the engine already applies
+                    // to resolution failures under `ignore_invalid`, except
+                    // that the span is filled rather than emptied.
+                    let mut skipped = ComposeReport::new();
+                    skipped.transclusions_skipped = 1;
+                    skipped.add_warning(ComposeWarning::new("transclusion", error.to_string()));
+                    ResolvedTransclusion {
+                        order: anchor.order,
+                        content: Some(self.fit_notice_to_span(&anchor.target, anchor.notice)),
+                        target: anchor.target,
+                        report: skipped,
+                        source_file: None,
+                    }
                 }
             };
 
@@ -421,5 +496,29 @@ impl Markdown {
         }
 
         Ok(())
+    }
+
+    /// Shapes a failure notice to sit where the directive it replaces did.
+    ///
+    /// Every directive parser starts a span at its line's first byte and ends
+    /// it past the newline, so the replaced range owns both the leading
+    /// indentation and the line break. A bare notice would therefore unnest a
+    /// directive written inside a list item and glue the following line onto
+    /// itself. Successful replacements carry their own indentation from the
+    /// renderer that built them; this is the failure path's equivalent.
+    fn fit_notice_to_span(&self, target: &ApplyTarget, notice: String) -> String {
+        let ApplyTarget::Replace(span) = target else {
+            return notice;
+        };
+        let indent: String = self.content[span.start..]
+            .chars()
+            .take_while(|character| *character == ' ' || *character == '\t')
+            .collect();
+        let newline = if self.content[..span.end].ends_with('\n') {
+            "\n"
+        } else {
+            ""
+        };
+        format!("{indent}{notice}{newline}")
     }
 }

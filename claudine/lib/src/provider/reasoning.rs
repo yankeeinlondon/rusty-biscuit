@@ -1,8 +1,8 @@
 //! Typed reasoning / extended-thinking metadata.
 //!
 //! Phase 5 of the centralized providers refactor replaces the
-//! `(ReasoningStyle, Vec<&'static str>)` pair on
-//! [`ReasoningCapabilities`](crate::agents::ReasoningCapabilities) with
+//! `(ReasoningStyle, Vec<&'static str>)` pair on the retired legacy
+//! `ReasoningCapabilities` tree with
 //! a structured [`ReasoningSupport`] enum that distinguishes named-level,
 //! numeric-budget, binary-toggle, and provider-specific reasoning surfaces.
 
@@ -57,9 +57,6 @@ pub enum ReasoningCustomTag {
     /// Goose: reasoning effort is delegated through provider-specific
     /// environment variables (e.g. `GEMINI3_THINKING_LEVEL`).
     GooseDelegated,
-    /// Roo Code: reasoning surface is provider-specific, mediated by
-    /// the underlying VSCode extension's mode configuration.
-    RooModeBased,
     /// Catch-all for not-yet-categorized reasoning surfaces.
     Other,
 }

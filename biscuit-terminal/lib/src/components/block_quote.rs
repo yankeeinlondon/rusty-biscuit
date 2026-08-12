@@ -117,6 +117,22 @@ fn left_border(color: Color) -> Border {
 /// assert!(result.contains("│"));
 /// assert!(result.contains("— Anonymous"));
 /// ```
+///
+/// ## Layout & Style Contract
+///
+/// `BlockQuote` is a block component that routes through the shared render-tree
+/// fold (spec C1). All applicable `Layout` properties (`margin`, `padding`,
+/// `width`, `max_width`, `alignment`, `word_wrap`) and `Style` properties
+/// (`color`, `background`, `emphasis`, `border`) are honored on Terminal and
+/// Browser; Markdown degrades layout/appearance attrs by Decision D1 and
+/// preserves only structural output.
+///
+/// The default left border (`│ `) is represented as a typed
+/// [`Border`](renderable::style::Border) on the projected node. A custom
+/// border prefix supplied through [`BlockQuote::with_border`] routes the
+/// terminal [`TerminalRenderable`] impl through a bespoke compatibility
+/// renderer because the render tree cannot express an arbitrary target-specific
+/// prefix string.
 #[derive(Debug, Clone)]
 pub struct BlockQuote {
     /// the content being wrapped in the block quote
@@ -430,6 +446,14 @@ impl TerminalRenderable for BlockQuote {
 
     fn layout_mut(&mut self) -> &mut Layout {
         &mut self.layout
+    }
+
+    fn style(&self) -> Style {
+        self.style.clone()
+    }
+
+    fn style_mut(&mut self) -> Option<&mut Style> {
+        Some(&mut self.style)
     }
 
     fn is_block_level(&self) -> bool {
@@ -1353,7 +1377,7 @@ mod tests {
     fn test_browser_renderable_page_includes_fragment() {
         let quote = BlockQuote::from("Quoted text");
         let page = BrowserRenderable::render_html_page(&quote, None);
-        let html = page.render();
+        let html = page.render().expect("render");
         assert!(html.contains("<html"));
         assert!(html.contains("<body>"));
         assert!(html.contains("<blockquote"));
@@ -1372,7 +1396,7 @@ mod tests {
                 ..PageOptions::default()
             }),
         );
-        let html = page.render();
+        let html = page.render().expect("render");
         // PageOptions wire through to the rolled-up CSS, and the fragment is
         // preserved inside the body.
         assert!(html.contains("<blockquote"));

@@ -324,7 +324,7 @@ flow filter="":
                 'zai-coding-plan/glm-5.2'
                 'minimax/MiniMax-M2.7-highspeed'
                 'minimax/MiniMax-M3'
-                'kimi-for-coding/k2p7'
+                'kimi-for-coding/k3'
             )
         fi
         choose_from "Choose ${stage} Opencode model" "${models[@]}"

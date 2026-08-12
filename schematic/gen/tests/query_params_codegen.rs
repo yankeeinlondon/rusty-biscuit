@@ -642,10 +642,12 @@ fn generated_code_uses_urlencoding_for_query_values() {
         code
     );
 
-    // Should format key=encoded_value
+    // Should format encoded_key=encoded_value
     assert!(
-        code.contains(r#"format!("{}={}", k, urlencoding::encode(v))"#),
-        "Should format key=encoded_value\nGenerated code:\n{}",
+        code.contains(
+            r#"format!("{}={}", urlencoding::encode(k), urlencoding::encode(v))"#
+        ),
+        "Should format encoded_key=encoded_value\nGenerated code:\n{}",
         code
     );
 }
@@ -679,5 +681,54 @@ fn query_params_in_example_use_builder_pattern() {
         code.contains(".with_limit(/* value */)") || code.contains(".with_limit"),
         "Example should show with_limit builder\nGenerated code:\n{}",
         code
+    );
+}
+
+// =============================================================================
+// Non-identifier query parameter names (sanitization + serde rename)
+// =============================================================================
+
+#[test]
+fn special_char_query_params_are_sanitized_with_serde_rename() {
+    // `$top` and `user.name` are not valid Rust identifiers; generation must
+    // not panic, and the wire names must be preserved via serde rename and the
+    // query-string key.
+    let endpoint = make_endpoint_with_query(
+        "SearchItems",
+        RestMethod::Get,
+        "/items",
+        vec![
+            ("$top", QueryParamType::Integer),
+            ("user.name", QueryParamType::String),
+        ],
+    );
+
+    let tokens = generate_request_struct(&endpoint);
+    let code = format_tokens(&tokens);
+
+    assert!(
+        code.contains("pub _top: Option<i64>"),
+        "`$top` should become `_top`:\n{code}"
+    );
+    assert!(
+        code.contains("pub user_name: Option<String>"),
+        "`user.name` should become `user_name`:\n{code}"
+    );
+    assert!(
+        code.contains(r#"#[serde(rename = "$top")]"#),
+        "must preserve the `$top` wire name:\n{code}"
+    );
+    assert!(
+        code.contains(r#"#[serde(rename = "user.name")]"#),
+        "must preserve the `user.name` wire name:\n{code}"
+    );
+    // The query string is still keyed by the original wire names.
+    assert!(
+        code.contains(r#"query_pairs.push(("$top""#),
+        "query key should stay `$top`:\n{code}"
+    );
+    assert!(
+        code.contains(r#"query_pairs.push(("user.name""#),
+        "query key should stay `user.name`:\n{code}"
     );
 }

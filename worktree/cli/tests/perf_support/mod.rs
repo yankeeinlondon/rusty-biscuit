@@ -192,10 +192,8 @@ pub fn parse_perf_duration(token: &str) -> Option<Duration> {
         (rest, 1e6)
     } else if let Some(rest) = token.strip_suffix("ns") {
         (rest, 1e9)
-    } else if let Some(rest) = token.strip_suffix('s') {
-        (rest, 1.0)
     } else {
-        return None;
+        (token.strip_suffix('s')?, 1.0)
     };
     let value: f64 = number.parse().ok()?;
     Some(Duration::from_secs_f64(value / divisor))

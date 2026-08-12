@@ -8,27 +8,40 @@
 //! type_expr_string := type_expr ( "->" description )?
 //! type_expr        := simple_type
 //!                   | inline_object
+//!                   | import
 //! simple_type      := type_name ( "(" item_constraints ")" )?
 //!                                ( "[]" ( "(" arr_constraints ")" )? )?
 //! inline_object    := "{" ws* property_list? ws* "}"
 //!                     ( "(" item_constraints ")"
 //!                     | "[]" ( "(" arr_constraints ")" )?
 //!                     )?
+//! import           := identifier ( "[]" )? ( "(" item_constraints ")" )?
+//!                     "@" fileref                             (Feature B, O-B1)
 //! property_list    := property_def ( "," ws* property_def )* ","?
-//! property_def     := identifier ws* ":" ws* type_expr_string
+//! property_def     := ( identifier | pattern_key ) ws* ":" ws* type_expr_string
+//! pattern_key      := "<" pattern_body ">"                   (Feature C)
 //! ws               := <whitespace or line-break>
 //! identifier       := ( ASCII_ALNUM | "-" | "_" )+
 //! type_name        := "string" | "date" | "datetime" | "time" | "number"
 //!                   | "numberlike" | "boolean" | "boolish" | "object"
-//!                   | "file" | "enum" | "url" | "email" | "any"
+//!                   | "file" | "enum" | "url" | "email" | "yaml" | "json"
+//!                   | "literal" | "expression" | "type-definition" | "schema"
+//!                   | "any"
 //! item_constraints := constraint ( ";" constraint )*
 //! arr_constraints  := constraint ( ";" constraint )*
 //! constraint       := IDENT
 //!                   | IDENT "(" arglist ")"
 //! arglist          := arg ( "," arg )*
 //! arg              := NUMBER | BARE_WORD | SQUOTED | DQUOTED
+//! fileref          := <biscuit-file file reference> | "this"
 //! description      := <rest-of-top-level-field, trimmed>
 //! ```
+//!
+//! An `import` (`Name@fileref`) inlines a named type from another schema file
+//! and is represented as [`TypeExpr::Imported`] until the resolver expands it.
+//! A `pattern_key` (`<string>`, `<starting::P>`, `<ending::S>`, `<pattern::RE>`)
+//! keys a dictionary/pattern-keyed object; see [`PatternKey`]. Both are
+//! additive — a schema using neither parses exactly as before.
 //!
 //! Inside an `inline_object`, `description` consumes text only until the
 //! next top-level comma or closing brace (Decision #9). Inline object
@@ -37,11 +50,14 @@
 //! Errors surface as [`SchemaError::Grammar`] with the byte span of the
 //! offending token.
 
-use std::ops::Range;
+use std::{ops::Range, str::FromStr};
 
 use crate::markdown::schemas::errors::SchemaError;
 
-use super::types::{Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType, TypeExpr};
+use super::types::{
+    Constraint, PatternKey, PatternKeyDef, PropertyAtom, PropertyDef, SchemaShape, SimplifiedType,
+    SuggestionCandidate, TypeExpr,
+};
 
 /// Hard maximum number of nested inline object levels the parser will accept.
 /// Exceeding this depth is a grammar error (Decision #11).
@@ -82,14 +98,14 @@ struct Token {
     span: Range<usize>,
 }
 
-struct Lexer<'a> {
+pub(super) struct Lexer<'a> {
     src: &'a str,
     bytes: &'a [u8],
-    pos: usize,
+    pub(super) pos: usize,
 }
 
 impl<'a> Lexer<'a> {
-    fn new(src: &'a str) -> Self {
+    pub(super) fn new(src: &'a str) -> Self {
         Self {
             src,
             bytes: src.as_bytes(),
@@ -97,11 +113,11 @@ impl<'a> Lexer<'a> {
         }
     }
 
-    fn peek_byte(&self) -> Option<u8> {
+    pub(super) fn peek_byte(&self) -> Option<u8> {
         self.bytes.get(self.pos).copied()
     }
 
-    fn skip_ws(&mut self) {
+    pub(super) fn skip_ws(&mut self) {
         while let Some(b) = self.peek_byte() {
             if b.is_ascii_whitespace() {
                 self.pos += 1;
@@ -150,8 +166,12 @@ impl<'a> Lexer<'a> {
                 self.pos += 1;
                 return Ok((out, start..self.pos));
             } else {
-                out.push(b as char);
-                self.pos += 1;
+                let ch = self.src[self.pos..]
+                    .chars()
+                    .next()
+                    .expect("peek_byte established remaining source");
+                out.push(ch);
+                self.pos += ch.len_utf8();
             }
         }
     }
@@ -165,7 +185,7 @@ impl<'a> Lexer<'a> {
     ///
     /// `-` is a normal word character except when followed by `>` (the
     /// description arrow), where the `-` terminates the word.
-    fn read_word(&mut self) -> (String, Range<usize>) {
+    pub(super) fn read_word(&mut self) -> (String, Range<usize>) {
         let start = self.pos;
         while let Some(b) = self.peek_byte() {
             if matches!(b, b',' | b';' | b'(' | b')' | b'\'' | b'"') || b.is_ascii_whitespace() {
@@ -182,7 +202,7 @@ impl<'a> Lexer<'a> {
 
     /// Read an identifier (`[a-z][a-z0-9-]*`). Used in the type-name and
     /// constraint-keyword positions.
-    fn read_ident(&mut self) -> (String, Range<usize>) {
+    pub(super) fn read_ident(&mut self) -> (String, Range<usize>) {
         let start = self.pos;
         while let Some(b) = self.peek_byte() {
             if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' {
@@ -269,6 +289,7 @@ struct Parser<'a> {
     property: &'a str,
     src: &'a str,
     lex: Lexer<'a>,
+    defer_suggestion_target: bool,
 }
 
 impl<'a> Parser<'a> {
@@ -277,6 +298,7 @@ impl<'a> Parser<'a> {
             property,
             src,
             lex: Lexer::new(src),
+            defer_suggestion_target: false,
         }
     }
 
@@ -453,7 +475,7 @@ impl<'a> Parser<'a> {
         self.lex.skip_ws();
         if self.lex.peek_byte() == Some(b'(') {
             self.lex.pos += 1;
-            value_constraints = self.parse_constraint_list(SimplifiedType::String, false)?;
+            value_constraints = self.parse_constraint_list(SimplifiedType::Any, false)?;
             self.expect(Tok::RParen)?;
         }
 
@@ -473,7 +495,7 @@ impl<'a> Parser<'a> {
             self.lex.skip_ws();
             if self.lex.peek_byte() == Some(b'(') {
                 self.lex.pos += 1;
-                array_constraints = self.parse_constraint_list(SimplifiedType::String, true)?;
+                array_constraints = self.parse_constraint_list(SimplifiedType::Any, true)?;
                 self.expect(Tok::RParen)?;
             }
         }
@@ -519,29 +541,46 @@ impl<'a> Parser<'a> {
         // Consume opening `{`.
         self.expect_byte(b'{', "expected `{` to start an inline object")?;
         let mut properties = indexmap::IndexMap::new();
+        // Pattern (dictionary) keys are collected separately so literal keys
+        // retain precedence during conversion (Feature C).
+        let mut pattern_keys: Vec<PatternKeyDef> = Vec::new();
         self.lex.skip_ws();
         // Empty object `{}` is legal.
         if self.lex.peek_byte() == Some(b'}') {
             self.lex.pos += 1;
-            return Ok(SchemaShape { properties });
+            return Ok(SchemaShape {
+                properties,
+                pattern_keys,
+                ..Default::default()
+            });
         }
         loop {
             self.lex.skip_ws();
-            // Read property name (unquoted identifier per Decision #8).
-            let (name, name_span) = self.read_inline_object_ident()?;
-            if name.is_empty() {
-                return self.err("expected an inline object property name", name_span);
-            }
-            self.lex.skip_ws();
-            self.expect_byte(b':', "expected `:` after inline object property name")?;
-            self.lex.skip_ws();
-            // Read the property's type expression string (recursively).
-            let def = self.parse_inline_object_property_value(depth)?;
-            if properties.insert(name.clone(), def).is_some() {
-                return self.err(
-                    format!("duplicate property `{name}` in inline object"),
-                    name_span,
-                );
+            // A key is either a `<...>` pattern key or a literal identifier
+            // (unquoted, per Decision #8).
+            if self.lex.peek_byte() == Some(b'<') {
+                let (key, _key_span) = self.read_inline_pattern_key()?;
+                self.lex.skip_ws();
+                self.expect_byte(b':', "expected `:` after inline object pattern key")?;
+                self.lex.skip_ws();
+                let def = self.parse_inline_object_property_value(depth)?;
+                pattern_keys.push(PatternKeyDef { key, def });
+            } else {
+                let (name, name_span) = self.read_inline_object_ident()?;
+                if name.is_empty() {
+                    return self.err("expected an inline object property name", name_span);
+                }
+                self.lex.skip_ws();
+                self.expect_byte(b':', "expected `:` after inline object property name")?;
+                self.lex.skip_ws();
+                // Read the property's type expression string (recursively).
+                let def = self.parse_inline_object_property_value(depth)?;
+                if properties.insert(name.clone(), def).is_some() {
+                    return self.err(
+                        format!("duplicate property `{name}` in inline object"),
+                        name_span,
+                    );
+                }
             }
             self.lex.skip_ws();
             match self.lex.peek_byte() {
@@ -551,12 +590,20 @@ impl<'a> Parser<'a> {
                     // Trailing comma is legal: `{ foo: string, }`.
                     if self.lex.peek_byte() == Some(b'}') {
                         self.lex.pos += 1;
-                        return Ok(SchemaShape { properties });
+                        return Ok(SchemaShape {
+                            properties,
+                            pattern_keys,
+                            ..Default::default()
+                        });
                     }
                 }
                 Some(b'}') => {
                     self.lex.pos += 1;
-                    return Ok(SchemaShape { properties });
+                    return Ok(SchemaShape {
+                        properties,
+                        pattern_keys,
+                        ..Default::default()
+                    });
                 }
                 Some(other) => {
                     let span = self.lex.pos..self.lex.pos + 1;
@@ -595,6 +642,28 @@ impl<'a> Parser<'a> {
         }
         let name = self.src[start..self.lex.pos].to_string();
         Ok((name, start..self.lex.pos))
+    }
+
+    /// Reads a `<...>` pattern-key token starting at the current `<` and parses
+    /// it into a [`PatternKey`] (Feature C). The body runs to the first `>`.
+    fn read_inline_pattern_key(&mut self) -> Result<(PatternKey, Range<usize>), SchemaError> {
+        let start = self.lex.pos; // positioned at `<`
+        let mut pos = start + 1;
+        while pos < self.lex.bytes.len() && self.lex.bytes[pos] != b'>' {
+            pos += 1;
+        }
+        if pos >= self.lex.bytes.len() {
+            return self.err("unterminated pattern key (missing `>`)", start..pos);
+        }
+        pos += 1; // consume `>`
+        let raw = &self.src[start..pos];
+        let key = PatternKey::parse(raw).map_err(|message| SchemaError::Grammar {
+            property: self.property.to_string(),
+            message,
+            span: start..pos,
+        })?;
+        self.lex.pos = pos;
+        Ok((key, start..pos))
     }
 
     /// Parses a single property value inside an inline object: the
@@ -728,6 +797,15 @@ impl<'a> Parser<'a> {
                 );
             }
         };
+        // A cross-file named-type import (`Name@fileref`, Feature B) is
+        // detected here: after the base name the grammar is
+        // `('[]')? ('(' constraints ')')? '@' fileref` (O-B1). The base name
+        // is an arbitrary named type, not a built-in keyword, so import
+        // detection runs *before* the `SimplifiedType::from_keyword` check.
+        if self.looks_like_import_suffix() {
+            return self.parse_import(name);
+        }
+
         let ty = SimplifiedType::from_keyword(&name).ok_or_else(|| SchemaError::Grammar {
             property: self.property.to_string(),
             message: format!("unknown type `{name}`"),
@@ -761,6 +839,19 @@ impl<'a> Parser<'a> {
             }
         }
 
+        self.validate_semantic_constraints(
+            ty,
+            &item_constraints,
+            false,
+            name_span.clone(),
+        )?;
+        self.validate_semantic_constraints(
+            ty,
+            &array_constraints,
+            true,
+            name_span.clone(),
+        )?;
+
         // Enum requires members.
         if matches!(ty, SimplifiedType::Enum)
             && !item_constraints
@@ -773,6 +864,16 @@ impl<'a> Parser<'a> {
             );
         }
 
+        // A `literal` atom without a `LiteralValue` (bare `literal` or
+        // `literal()`) is rejected the same way `enum` without members is.
+        if matches!(ty, SimplifiedType::Literal)
+            && !item_constraints
+                .iter()
+                .any(|c| matches!(c, Constraint::LiteralValue(_)))
+        {
+            return self.err("literal requires a value", name_span);
+        }
+
         Ok(PropertyAtom {
             ty: TypeExpr::Primitive(ty),
             is_array,
@@ -780,6 +881,186 @@ impl<'a> Parser<'a> {
             array_constraints,
             description: None,
         })
+    }
+
+    fn validate_semantic_constraints(
+        &self,
+        ty: SimplifiedType,
+        constraints: &[Constraint],
+        is_array_level: bool,
+        span: Range<usize>,
+    ) -> Result<(), SchemaError> {
+        if !matches!(ty, SimplifiedType::TypeDefinition | SimplifiedType::Schema) {
+            return Ok(());
+        }
+
+        for constraint in constraints {
+            match constraint {
+                Constraint::Required | Constraint::Generated => {}
+                Constraint::Default(value) => {
+                    let Some(default) = value.as_str() else {
+                        return self.err(
+                            format!(
+                                "`default` value is not valid on `{}`; expected a scalar semantic value",
+                                ty.as_keyword()
+                            ),
+                            span.clone(),
+                        );
+                    };
+                    let value = serde_yaml_ng::Value::String(default.to_string());
+                    let result = match ty {
+                        SimplifiedType::TypeDefinition => {
+                            super::parse_property_definition(self.property, &value).map(|_| ())
+                        }
+                        SimplifiedType::Schema => {
+                            super::parse_schema_declaration(&value).map(|_| ())
+                        }
+                        _ => unreachable!("semantic type checked above"),
+                    };
+                    if let Err(error) = result {
+                        return self.err(
+                            format!(
+                                "`default` value is not valid on `{}`: {error}",
+                                ty.as_keyword()
+                            ),
+                            span.clone(),
+                        );
+                    }
+                }
+                Constraint::MinItems(_) | Constraint::MaxItems(_) | Constraint::Unique
+                    if is_array_level => {}
+                other => {
+                    return self.err(
+                        format!(
+                            "constraint `{}` is not valid on `{}`{}",
+                            other.keyword(),
+                            ty.as_keyword(),
+                            if is_array_level { " arrays" } else { "" }
+                        ),
+                        span.clone(),
+                    );
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Pure lookahead: returns `true` when the token stream immediately after
+    /// the base identifier matches the import postfix
+    /// `('[]')? ('(' … ')')?` followed by `@`. Does not consume input and does
+    /// not interpret constraint contents (so it never raises spurious errors on
+    /// non-import expressions like `enum(a, b, c)`).
+    fn looks_like_import_suffix(&self) -> bool {
+        let bytes = self.lex.bytes;
+        let mut pos = self.lex.pos;
+        let skip_ws = |pos: &mut usize| {
+            while *pos < bytes.len() && bytes[*pos].is_ascii_whitespace() {
+                *pos += 1;
+            }
+        };
+        skip_ws(&mut pos);
+        // optional `[]`
+        if bytes.get(pos) == Some(&b'[') {
+            if bytes.get(pos + 1) == Some(&b']') {
+                pos += 2;
+                skip_ws(&mut pos);
+            } else {
+                return false;
+            }
+        }
+        // optional balanced `(...)`, quote-aware
+        if bytes.get(pos) == Some(&b'(') {
+            pos += 1;
+            let mut depth = 1usize;
+            let mut quote: Option<u8> = None;
+            while pos < bytes.len() && depth > 0 {
+                let b = bytes[pos];
+                match quote {
+                    Some(q) => {
+                        if b == b'\\' {
+                            pos += 1;
+                        } else if b == q {
+                            quote = None;
+                        }
+                    }
+                    None => match b {
+                        b'\'' | b'"' => quote = Some(b),
+                        b'(' => depth += 1,
+                        b')' => depth -= 1,
+                        _ => {}
+                    },
+                }
+                pos += 1;
+            }
+            if depth != 0 {
+                return false;
+            }
+            skip_ws(&mut pos);
+        }
+        bytes.get(pos) == Some(&b'@')
+    }
+
+    /// Parses the import postfix after the base `name` has been read:
+    /// `('[]')? ('(' constraints ')')? '@' fileref` (O-B1). Postfix `[]` and
+    /// constraints ride on the enclosing [`PropertyAtom`]; the constraints are
+    /// re-interpreted against the resolved type in Phase 4, so they are parsed
+    /// here with a neutral type.
+    fn parse_import(&mut self, name: String) -> Result<PropertyAtom, SchemaError> {
+        let mut is_array = false;
+        self.lex.skip_ws();
+        if self.lex.peek_byte() == Some(b'[') {
+            self.lex.pos += 1;
+            self.expect(Tok::RBracket)?;
+            is_array = true;
+        }
+
+        let mut constraints = Vec::new();
+        self.lex.skip_ws();
+        if self.lex.peek_byte() == Some(b'(') {
+            self.lex.pos += 1;
+            self.defer_suggestion_target = !is_array;
+            constraints = self.parse_constraint_list(SimplifiedType::Any, is_array)?;
+            self.defer_suggestion_target = false;
+            self.expect(Tok::RParen)?;
+        }
+
+        self.lex.skip_ws();
+        self.expect_byte(b'@', "expected `@` in an imported type reference")?;
+        let reference = self.read_fileref()?;
+
+        Ok(PropertyAtom {
+            ty: TypeExpr::Imported { name, reference },
+            is_array,
+            constraints,
+            array_constraints: Vec::new(),
+            description: None,
+        })
+    }
+
+    /// Reads the file reference to the right of `@`. Runs to the end of the
+    /// current sub-expression: stops at `->` (description arrow), a top-level
+    /// `,` or `}` (inline-object terminators), or end of input.
+    fn read_fileref(&mut self) -> Result<String, SchemaError> {
+        self.lex.skip_ws();
+        let start = self.lex.pos;
+        let bytes = self.lex.bytes;
+        let mut pos = start;
+        while pos < bytes.len() {
+            let b = bytes[pos];
+            if b == b',' || b == b'}' {
+                break;
+            }
+            if b == b'-' && bytes.get(pos + 1) == Some(&b'>') {
+                break;
+            }
+            pos += 1;
+        }
+        let raw = self.src[start..pos].trim();
+        if raw.is_empty() {
+            return self.err("expected a file reference after `@`", start..pos);
+        }
+        self.lex.pos = pos;
+        Ok(raw.to_string())
     }
 
     fn expect(&mut self, expected: Tok) -> Result<Token, SchemaError> {
@@ -828,9 +1109,27 @@ impl<'a> Parser<'a> {
             return Ok(constraints);
         }
 
+        // `literal` mirrors the enum delimiter rules but takes exactly one
+        // positional (typed) value, then `;`-separated constraints. The
+        // array-level paren list is regular array constraints.
+        if matches!(ty, SimplifiedType::Literal) && !is_array_level {
+            return self.parse_literal_value();
+        }
+
         loop {
             self.lex.skip_ws();
+            let constraint_start = self.lex.pos;
             let constraint = self.parse_one_constraint(ty, is_array_level)?;
+            if matches!(constraint, Constraint::Suggest(_))
+                && constraints
+                    .iter()
+                    .any(|existing| matches!(existing, Constraint::Suggest(_)))
+            {
+                return self.err(
+                    "a property definition may contain at most one `suggest` constraint",
+                    constraint_start..self.lex.pos,
+                );
+            }
             constraints.push(constraint);
             self.lex.skip_ws();
             match self.lex.peek_byte() {
@@ -1004,6 +1303,62 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// Parses a `literal(...)` item-constraint list: exactly one positional
+    /// value (typed per the Q1 ruling) followed by optional `;`-separated
+    /// constraints. Positioned just after the opening `(` with the leading
+    /// whitespace already skipped and a non-`)` byte guaranteed.
+    fn parse_literal_value(&mut self) -> Result<Vec<Constraint>, SchemaError> {
+        self.lex.skip_ws();
+        let tok = self.next_token(LexMode::ArgList)?;
+        let value = match tok.tok {
+            // Quoted values are always strings (quoting opts out of typing).
+            Tok::Quoted(s) => serde_json::Value::String(s),
+            // Bare tokens are typed like YAML would type the frontmatter value.
+            Tok::Number(_) | Tok::Word(_) => {
+                let raw = self.src[tok.span.clone()].to_string();
+                match classify_bare_literal(&raw) {
+                    BareLiteral::Value(value) => value,
+                    BareLiteral::RejectedNull => {
+                        return self.err(
+                            "bare `null` is not a valid literal value; quote it \
+                             (`literal('null')`) or drop the optional key",
+                            tok.span,
+                        );
+                    }
+                }
+            }
+            other => {
+                return self.err(
+                    format!("expected a literal value, found `{other:?}`"),
+                    tok.span,
+                );
+            }
+        };
+
+        let constraints = vec![Constraint::LiteralValue(value)];
+        self.lex.skip_ws();
+        match self.lex.peek_byte() {
+            Some(b',') => self.err(
+                "`literal` takes exactly one value; use `enum(...)` for multiple allowed values",
+                self.lex.pos..self.lex.pos + 1,
+            ),
+            Some(b';') => {
+                self.lex.pos += 1;
+                // Tail constraints accumulate after the leading `LiteralValue`.
+                self.parse_remaining_constraints(SimplifiedType::Literal, constraints)
+            }
+            Some(b')') => Ok(constraints),
+            Some(other) => self.err(
+                format!("expected `;` or `)` after the literal value, found `{}`", other as char),
+                self.lex.pos..self.lex.pos + 1,
+            ),
+            None => self.err(
+                "unterminated constraint list (missing `)`)",
+                self.lex.pos..self.lex.pos,
+            ),
+        }
+    }
+
     fn parse_one_constraint(
         &mut self,
         ty: SimplifiedType,
@@ -1026,11 +1381,19 @@ impl<'a> Parser<'a> {
 
         let constraint = match (keyword.as_str(), has_args) {
             ("required", false) => Constraint::Required,
+            ("eager", false) => Constraint::Eager,
             ("not-empty", false) => Constraint::NotEmpty,
             ("integer", false) => Constraint::Integer,
             ("unique", false) => Constraint::Unique,
+            ("generated", false) => Constraint::Generated,
             ("required", true) => {
                 return self.err("`required` does not take arguments", kw_span);
+            }
+            ("eager", true) => {
+                return self.err("`eager` does not take arguments", kw_span);
+            }
+            ("generated", true) => {
+                return self.err("`generated` does not take arguments", kw_span);
             }
             ("default", true) => {
                 self.lex.pos += 1; // consume (
@@ -1106,6 +1469,46 @@ impl<'a> Parser<'a> {
                 }
                 Constraint::Pattern(args[0].lex.clone())
             }
+            ("suggest", true) => {
+                self.lex.pos += 1;
+                let args = self.parse_arglist()?;
+                self.expect(Tok::RParen)?;
+                if args.is_empty() {
+                    return self.err(
+                        "`suggest` requires at least one candidate",
+                        kw_span.start..self.lex.pos,
+                    );
+                }
+                let deferred_import = self.defer_suggestion_target && matches!(ty, SimplifiedType::Any);
+                if is_array_level
+                    || (!deferred_import
+                        && !matches!(ty, SimplifiedType::String | SimplifiedType::Number))
+                {
+                    return self.err(
+                        format!("`suggest` is not valid on `{}`", ty.as_keyword()),
+                        kw_span.start..self.lex.pos,
+                    );
+                }
+
+                let mut candidates = Vec::with_capacity(args.len());
+                for arg in args {
+                    let candidate = interpret_suggestion(
+                        &arg,
+                        if deferred_import {
+                            SimplifiedType::String
+                        } else {
+                            ty
+                        },
+                    );
+                    if candidates.iter().any(|existing: &SuggestionCandidate| {
+                        existing.interpreted == candidate.interpreted
+                    }) {
+                        return self.err("duplicate suggestion candidate", candidate.span);
+                    }
+                    candidates.push(candidate);
+                }
+                Constraint::Suggest(candidates)
+            }
             ("match", true) => {
                 self.lex.pos += 1;
                 let args = self.parse_arglist()?;
@@ -1128,6 +1531,59 @@ impl<'a> Parser<'a> {
                     .map(|a| a.lex.to_ascii_lowercase())
                     .collect();
                 Constraint::Scheme(schemes)
+            }
+            ("example", true) => {
+                self.lex.pos += 1;
+                let args = self.parse_arglist()?;
+                self.expect(Tok::RParen)?;
+                if args.is_empty() {
+                    return self.err("`example` requires at least one file reference", kw_span);
+                }
+                let refs = args.into_iter().map(|a| a.lex).collect();
+                Constraint::Example(refs)
+            }
+            ("min-keys", true) => {
+                self.lex.pos += 1;
+                let args = self.parse_arglist()?;
+                self.expect(Tok::RParen)?;
+                if args.len() != 1 {
+                    return self.err(
+                        format!("`min-keys` takes exactly 1 argument, got {}", args.len()),
+                        kw_span,
+                    );
+                }
+                let n = arg_to_number(&args[0]).ok_or_else(|| SchemaError::Grammar {
+                    property: self.property.to_string(),
+                    message: format!(
+                        "`min-keys` requires a numeric argument, got `{}`",
+                        args[0].lex
+                    ),
+                    span: args[0].span.clone(),
+                })?;
+                Constraint::MinKeys(number_to_usize(n, "min-keys", &args[0], self.property)?)
+            }
+            ("max-keys", true) => {
+                self.lex.pos += 1;
+                let args = self.parse_arglist()?;
+                self.expect(Tok::RParen)?;
+                if args.len() != 1 {
+                    return self.err(
+                        format!("`max-keys` takes exactly 1 argument, got {}", args.len()),
+                        kw_span,
+                    );
+                }
+                let n = arg_to_number(&args[0]).ok_or_else(|| SchemaError::Grammar {
+                    property: self.property.to_string(),
+                    message: format!(
+                        "`max-keys` requires a numeric argument, got `{}`",
+                        args[0].lex
+                    ),
+                    span: args[0].span.clone(),
+                })?;
+                Constraint::MaxKeys(number_to_usize(n, "max-keys", &args[0], self.property)?)
+            }
+            ("min-keys" | "max-keys" | "example" | "suggest", false) => {
+                return self.err(format!("`{keyword}` requires arguments"), kw_span);
             }
             (other, has_args_) => {
                 let suffix = if has_args_ { "(...)" } else { "" };
@@ -1210,6 +1666,145 @@ fn arg_to_number(arg: &Arg) -> Option<f64> {
     arg.number.or_else(|| arg.lex.parse().ok())
 }
 
+fn interpret_suggestion(arg: &Arg, ty: SimplifiedType) -> SuggestionCandidate {
+    interpret_suggestion_parts(&arg.lex, arg.span.clone(), ty)
+}
+
+fn interpret_suggestion_parts(
+    decoded: &str,
+    span: Range<usize>,
+    ty: SimplifiedType,
+) -> SuggestionCandidate {
+    if matches!(ty, SimplifiedType::String) {
+        return SuggestionCandidate {
+            decoded: decoded.to_string(),
+            interpreted: serde_json::Value::String(decoded.to_string()),
+            canonical_decimal: None,
+            span,
+        };
+    }
+
+    let Some(canonical) = normalize_simple_decimal(decoded) else {
+        return SuggestionCandidate {
+            decoded: decoded.to_string(),
+            interpreted: serde_json::Value::String(decoded.to_string()),
+            canonical_decimal: None,
+            span,
+        };
+    };
+    let interpreted = serde_json::Number::from_str(&canonical)
+        .ok()
+        .filter(|number| {
+            expand_json_number(&number.to_string())
+                .and_then(|serialized| normalize_simple_decimal(&serialized))
+                .as_deref()
+                == Some(canonical.as_str())
+        })
+        .map(serde_json::Value::Number)
+        .unwrap_or_else(|| serde_json::Value::String(canonical.clone()));
+
+    SuggestionCandidate {
+        decoded: decoded.to_string(),
+        interpreted,
+        canonical_decimal: Some(canonical),
+        span,
+    }
+}
+
+pub(crate) fn reinterpret_suggestion_candidates(
+    candidates: &mut [SuggestionCandidate],
+    ty: SimplifiedType,
+    property: &str,
+) -> Result<(), SchemaError> {
+    for index in 0..candidates.len() {
+        let candidate = interpret_suggestion_parts(
+            &candidates[index].decoded,
+            candidates[index].span.clone(),
+            ty,
+        );
+        if candidates[..index]
+            .iter()
+            .any(|existing| existing.interpreted == candidate.interpreted)
+        {
+            return Err(SchemaError::Grammar {
+                property: property.to_string(),
+                message: "duplicate suggestion candidate".into(),
+                span: candidate.span,
+            });
+        }
+        candidates[index] = candidate;
+    }
+    Ok(())
+}
+
+/// Normalizes the feature's simple-decimal grammar without converting through
+/// a machine numeric type.
+pub fn normalize_simple_decimal(input: &str) -> Option<String> {
+    let (negative, unsigned) = match input.strip_prefix('-') {
+        Some(rest) => (true, rest),
+        None => (false, input),
+    };
+    let (integer, fraction) = match unsigned.split_once('.') {
+        Some((integer, fraction)) => (integer, Some(fraction)),
+        None => (unsigned, None),
+    };
+    if integer.is_empty()
+        || !integer.bytes().all(|byte| byte.is_ascii_digit())
+        || fraction.is_some_and(|value| {
+            value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    {
+        return None;
+    }
+
+    let integer = integer.trim_start_matches('0');
+    let integer = if integer.is_empty() { "0" } else { integer };
+    let fraction = fraction.map(|value| value.trim_end_matches('0'));
+    let is_zero = integer == "0" && fraction.is_none_or(str::is_empty);
+    let mut canonical = String::new();
+    if negative && !is_zero {
+        canonical.push('-');
+    }
+    canonical.push_str(integer);
+    if let Some(fraction) = fraction.filter(|value| !value.is_empty()) {
+        canonical.push('.');
+        canonical.push_str(fraction);
+    }
+    Some(canonical)
+}
+
+fn expand_json_number(input: &str) -> Option<String> {
+    let Some(exponent_at) = input.find(['e', 'E']) else {
+        return Some(input.to_string());
+    };
+    let (mantissa, exponent) = input.split_at(exponent_at);
+    let exponent: i64 = exponent[1..].parse().ok()?;
+    let (sign, mantissa) = mantissa
+        .strip_prefix('-')
+        .map_or(("", mantissa), |rest| ("-", rest));
+    let decimal_at = mantissa.find('.').unwrap_or(mantissa.len());
+    let digits: String = mantissa.chars().filter(|ch| *ch != '.').collect();
+    let decimal_at = i64::try_from(decimal_at).ok()?.checked_add(exponent)?;
+
+    let mut expanded = String::from(sign);
+    if decimal_at <= 0 {
+        expanded.push_str("0.");
+        expanded.extend(std::iter::repeat_n('0', usize::try_from(-decimal_at).ok()?));
+        expanded.push_str(&digits);
+    } else {
+        let decimal_at = usize::try_from(decimal_at).ok()?;
+        if decimal_at >= digits.len() {
+            expanded.push_str(&digits);
+            expanded.extend(std::iter::repeat_n('0', decimal_at - digits.len()));
+        } else {
+            expanded.push_str(&digits[..decimal_at]);
+            expanded.push('.');
+            expanded.push_str(&digits[decimal_at..]);
+        }
+    }
+    Some(expanded)
+}
+
 fn number_to_usize(
     n: f64,
     constraint: &str,
@@ -1231,6 +1826,13 @@ fn number_to_usize(
 
 fn arg_to_json(arg: &Arg) -> serde_json::Value {
     if let Some(n) = arg.number {
+        // Parse the exact source spelling first so a large-integer default
+        // (`default(9007199254740993)`) keeps i64/u64 precision — the pre-lexed
+        // f64 `n` has already rounded values past 2^53. Non-JSON-shaped numeric
+        // tokens fall back to that f64.
+        if let Ok(num) = serde_json::Number::from_str(&arg.lex) {
+            return serde_json::Value::Number(num);
+        }
         if let Some(num) = serde_json::Number::from_f64(n) {
             return serde_json::Value::Number(num);
         }
@@ -1249,6 +1851,75 @@ fn format_number(n: f64) -> String {
         format!("{}", n as i64)
     } else {
         format!("{n}")
+    }
+}
+
+/// Classification of an unquoted `literal(...)` value token (Q1 typing rule).
+///
+/// A quoted value is always a string and never routed through here.
+pub(super) enum BareLiteral {
+    /// A typed scalar: `Bool`, a JSON `Number`, or a plain `String` (the raw
+    /// token spelling that fails the boolean/number shape tests).
+    Value(serde_json::Value),
+    /// Bare `null` — always an authoring mistake for a literal (an optional
+    /// property already accepts `null`), rejected with an actionable error.
+    RejectedNull,
+}
+
+/// Types an unquoted `literal(...)` value token the way YAML would type the
+/// frontmatter value it validates: bare `true`/`false` → boolean, a
+/// numberlike token → number, everything else → string. Bare `null` is
+/// rejected ([`BareLiteral::RejectedNull`]).
+pub(super) fn classify_bare_literal(raw: &str) -> BareLiteral {
+    match raw {
+        "true" => BareLiteral::Value(serde_json::Value::Bool(true)),
+        "false" => BareLiteral::Value(serde_json::Value::Bool(false)),
+        "null" => BareLiteral::RejectedNull,
+        _ => BareLiteral::Value(
+            literal_number(raw).unwrap_or_else(|| serde_json::Value::String(raw.to_string())),
+        ),
+    }
+}
+
+/// Returns `true` when a bare (unquoted) string value round-trips through the
+/// literal grammar as the *same* string — i.e. it is neither `true`/`false`/
+/// `null` nor numberlike. Serialization uses this to decide whether a literal
+/// string value must be quoted so it does not re-type on re-parse.
+pub(super) fn bare_literal_round_trips_as_string(value: &str) -> bool {
+    !matches!(value, "true" | "false" | "null") && literal_number(value).is_none()
+}
+
+/// Parses a numberlike-shaped bare token into a typed JSON number, preserving
+/// integer vs. float. Rejects any spelling that is not `^-?\d+(\.\d+)?$` and
+/// leading-zero integers (`007`), which stay strings (no octal surprises, per
+/// the Q1 ruling).
+fn literal_number(raw: &str) -> Option<serde_json::Value> {
+    if !is_literal_numberlike(raw) {
+        return None;
+    }
+    serde_json::Number::from_str(raw)
+        .ok()
+        .map(serde_json::Value::Number)
+}
+
+/// Mirrors `^-?\d+(\.\d+)?$` (an optional `-`, one or more integer digits, an
+/// optional `.` plus one or more fraction digits) and additionally rejects a
+/// multi-digit integer part with a leading zero (`007`, `-08`).
+fn is_literal_numberlike(s: &str) -> bool {
+    let unsigned = s.strip_prefix('-').unwrap_or(s);
+    let (integer, fraction) = match unsigned.split_once('.') {
+        Some((integer, fraction)) => (integer, Some(fraction)),
+        None => (unsigned, None),
+    };
+    if integer.is_empty() || !integer.bytes().all(|b| b.is_ascii_digit()) {
+        return false;
+    }
+    if integer.len() > 1 && integer.starts_with('0') {
+        return false;
+    }
+    match fraction {
+        Some(fraction) => !fraction.is_empty() && fraction.bytes().all(|b| b.is_ascii_digit()),
+        None => true,
     }
 }
 
@@ -1305,6 +1976,8 @@ mod tests {
             SimplifiedType::File,
             SimplifiedType::Url,
             SimplifiedType::Email,
+            SimplifiedType::Yaml,
+            SimplifiedType::Json,
             SimplifiedType::Any,
         ] {
             let atom = parse(ty.as_keyword());
@@ -1325,6 +1998,38 @@ mod tests {
     fn parses_required_constraint() {
         let atom = parse("string(required)");
         assert_eq!(atom.constraints, vec![Constraint::Required]);
+    }
+
+    #[test]
+    fn parses_generated_constraint() {
+        let atom = parse("string(generated)");
+        assert_eq!(atom.constraints, vec![Constraint::Generated]);
+    }
+
+    #[test]
+    fn parses_generated_with_required() {
+        // `generated` and `required` are orthogonal: `generated` describes
+        // ownership/supply semantics; `required` controls type/nullability.
+        // Both constraints must survive parsing in either order.
+        let atom = parse("string(generated; required)");
+        assert_eq!(
+            atom.constraints,
+            vec![Constraint::Generated, Constraint::Required]
+        );
+        let atom_rev = parse("string(required; generated)");
+        assert_eq!(
+            atom_rev.constraints,
+            vec![Constraint::Required, Constraint::Generated]
+        );
+    }
+
+    #[test]
+    fn generated_takes_no_args() {
+        let err = parse_err("string(generated())");
+        let SchemaError::Grammar { message, .. } = err else {
+            panic!("expected Grammar error, got {err:?}")
+        };
+        assert!(message.contains("does not take arguments"));
     }
 
     #[test]
@@ -1421,10 +2126,12 @@ mod tests {
 
     #[test]
     fn parses_default_number() {
+        // An integer default keeps integer typing (parsed from the exact source
+        // lexeme), so precision survives for values past f64's 2^53 range.
         let atom = parse("number(default(3))");
         assert_eq!(
             atom.constraints,
-            vec![Constraint::Default(serde_json::json!(3.0))]
+            vec![Constraint::Default(serde_json::json!(3))]
         );
     }
 
@@ -1492,6 +2199,125 @@ mod tests {
         assert!(message.contains("requires a constraint list"));
     }
 
+    // ── literal grammar ────────────────────────────────────────────────
+
+    fn literal_value(atom: &PropertyAtom) -> &serde_json::Value {
+        atom.constraints
+            .iter()
+            .find_map(|c| match c {
+                Constraint::LiteralValue(v) => Some(v),
+                _ => None,
+            })
+            .expect("expected a LiteralValue constraint")
+    }
+
+    #[test]
+    fn parses_bare_string_literal() {
+        let atom = parse("literal(spec)");
+        assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Literal));
+        assert_eq!(literal_value(&atom), &serde_json::json!("spec"));
+    }
+
+    #[test]
+    fn types_bare_number_literal() {
+        assert_eq!(literal_value(&parse("literal(2)")), &serde_json::json!(2));
+        assert_eq!(literal_value(&parse("literal(-5)")), &serde_json::json!(-5));
+        assert_eq!(literal_value(&parse("literal(2.5)")), &serde_json::json!(2.5));
+    }
+
+    #[test]
+    fn types_bare_boolean_literal() {
+        assert_eq!(literal_value(&parse("literal(true)")), &serde_json::json!(true));
+        assert_eq!(literal_value(&parse("literal(false)")), &serde_json::json!(false));
+    }
+
+    #[test]
+    fn quoted_literal_is_always_string() {
+        assert_eq!(literal_value(&parse("literal('2')")), &serde_json::json!("2"));
+        assert_eq!(literal_value(&parse(r#"literal("true")"#)), &serde_json::json!("true"));
+        assert_eq!(literal_value(&parse("literal('a, b')")), &serde_json::json!("a, b"));
+    }
+
+    #[test]
+    fn leading_zero_literal_is_string() {
+        // `007` fails the numberlike shape test (leading zero) → typed as text.
+        assert_eq!(literal_value(&parse("literal(007)")), &serde_json::json!("007"));
+    }
+
+    #[test]
+    fn literal_with_constraints() {
+        let atom = parse("literal(spec; required)");
+        assert_eq!(
+            atom.constraints,
+            vec![
+                Constraint::LiteralValue(serde_json::json!("spec")),
+                Constraint::Required,
+            ]
+        );
+    }
+
+    #[test]
+    fn literal_array_suffix() {
+        let atom = parse("literal(auto)[]");
+        assert!(atom.is_array);
+        assert_eq!(literal_value(&atom), &serde_json::json!("auto"));
+    }
+
+    #[test]
+    fn bare_literal_requires_value() {
+        for input in ["literal", "literal()"] {
+            let SchemaError::Grammar { message, .. } = parse_err(input) else {
+                panic!("expected Grammar error for {input:?}");
+            };
+            assert!(
+                message.contains("literal requires a value"),
+                "unexpected message for {input:?}: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn literal_multiple_values_directs_to_enum() {
+        let SchemaError::Grammar { message, .. } = parse_err("literal(a, b)") else {
+            panic!("expected Grammar error");
+        };
+        assert!(message.contains("enum"), "got: {message}");
+    }
+
+    #[test]
+    fn bare_null_literal_rejected() {
+        let SchemaError::Grammar { message, .. } = parse_err("literal(null)") else {
+            panic!("expected Grammar error");
+        };
+        let lower = message.to_lowercase();
+        assert!(lower.contains("quote") || lower.contains("drop"), "got: {message}");
+    }
+
+    // ── expression grammar ─────────────────────────────────────────────
+
+    #[test]
+    fn parses_bare_expression() {
+        let atom = parse("expression");
+        assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Expression));
+        assert!(atom.constraints.is_empty());
+    }
+
+    #[test]
+    fn parses_expression_with_required() {
+        let atom = parse("expression(required)");
+        assert_eq!(atom.constraints, vec![Constraint::Required]);
+    }
+
+    #[test]
+    fn parameterized_expression_is_rejected() {
+        // The reserved future `expression(condition)` form is rejected in v1
+        // as an unknown constraint (never the generic unknown-type error).
+        let SchemaError::Grammar { message, .. } = parse_err("expression(condition)") else {
+            panic!("expected Grammar error");
+        };
+        assert!(!message.contains("unknown type"), "got: {message}");
+    }
+
     #[test]
     fn parses_file_match() {
         let atom = parse("file(match('*.md', '!_*.md'))");
@@ -1499,6 +2325,35 @@ mod tests {
             atom.constraints,
             vec![Constraint::Match(vec!["*.md".into(), "!_*.md".into()])]
         );
+    }
+
+    #[test]
+    fn parses_file_eager() {
+        let atom = parse("file(eager)");
+        assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::File));
+        assert_eq!(atom.constraints, vec![Constraint::Eager]);
+    }
+
+    #[test]
+    fn parses_file_eager_with_required_and_match() {
+        let atom = parse("file(eager; required; match('**/*review*.md'))");
+        assert_eq!(
+            atom.constraints,
+            vec![
+                Constraint::Eager,
+                Constraint::Required,
+                Constraint::Match(vec!["**/*review*.md".into()]),
+            ]
+        );
+    }
+
+    #[test]
+    fn eager_takes_no_args() {
+        let err = parse_err("file(eager())");
+        let SchemaError::Grammar { message, .. } = err else {
+            panic!("expected Grammar error, got {err:?}")
+        };
+        assert!(message.contains("does not take arguments"));
     }
 
     #[test]
@@ -1866,5 +2721,139 @@ mod tests {
         let atom = parse(value);
         let shape = inline_shape(&atom);
         assert_eq!(shape.properties.len(), 2);
+    }
+}
+
+/// Phase 1 (TDD scaffolding) for the schema-plus composition primitives
+/// (`darkmatter/features/2026-07-08-schema-plus/`).
+///
+/// Each test pins the target parse behavior for a not-yet-implemented feature
+/// and is `#[ignore]`-gated so `just test` stays green until the feature lands.
+/// The `#[ignore]` reason names the phase that will implement it; remove the
+/// attribute in that phase. Confirm they fail for the expected missing feature
+/// with:
+///
+/// ```text
+/// cargo nextest run -p darkmatter --run-ignored ignored-only schema_plus
+/// ```
+#[cfg(test)]
+mod schema_plus_phase1 {
+    use super::*;
+
+    // ── Feature A — `example()` constraint ───────────────────────────────
+
+    #[test]
+    fn parses_example_constraint_single_file() {
+        let atom = parse_type_expr(
+            "today",
+            "date(generated; required; example(./today-example.yaml))",
+        )
+        .expect("`example(...)` should parse as a constraint");
+        assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Date));
+        assert!(
+            atom.constraints
+                .contains(&Constraint::Example(vec!["./today-example.yaml".into()])),
+            "expected an Example constraint: {:?}",
+            atom.constraints
+        );
+    }
+
+    #[test]
+    fn parses_example_constraint_multiple_files() {
+        let atom = parse_type_expr("x", "string(example(./a.yaml, ./b.yaml))")
+            .expect("`example(...)` should accept comma-separated file references");
+        assert!(
+            atom.constraints.contains(&Constraint::Example(vec![
+                "./a.yaml".into(),
+                "./b.yaml".into()
+            ])),
+            "expected a two-file Example constraint: {:?}",
+            atom.constraints
+        );
+    }
+
+    // ── Feature B — `@` cross-file named-type import ─────────────────────
+
+    #[test]
+    fn parses_named_type_import() {
+        let atom = parse_type_expr("type", "type@./types.yaml")
+            .expect("`type@./types.yaml` should parse as an imported type");
+        assert_eq!(
+            atom.ty,
+            TypeExpr::Imported {
+                name: "type".into(),
+                reference: "./types.yaml".into(),
+            }
+        );
+        assert!(!atom.is_array);
+    }
+
+    #[test]
+    fn parses_array_named_type_import() {
+        let atom = parse_type_expr("parameters", "parameter[]@./types.yaml")
+            .expect("`parameter[]@./types.yaml` should parse");
+        assert!(atom.is_array, "postfix `[]` binds to the imported name");
+        assert_eq!(
+            atom.ty,
+            TypeExpr::Imported {
+                name: "parameter".into(),
+                reference: "./types.yaml".into(),
+            }
+        );
+    }
+
+    #[test]
+    fn parses_constrained_self_import() {
+        let atom = parse_type_expr("value", "type(required)@this")
+            .expect("`type(required)@this` should parse");
+        assert_eq!(
+            atom.ty,
+            TypeExpr::Imported {
+                name: "type".into(),
+                reference: "this".into(),
+            }
+        );
+        assert_eq!(atom.constraints, vec![Constraint::Required]);
+    }
+
+    // ── Feature C — inline-object pattern/dictionary keys ────────────────
+
+    #[test]
+    fn parses_inline_catch_all_key() {
+        let atom = parse_type_expr("parameter", "{ <string>: any }")
+            .expect("`<string>` catch-all key should parse in an inline object");
+        let TypeExpr::InlineObject(shape) = &atom.ty else {
+            panic!("expected inline object, got {:?}", atom.ty);
+        };
+        assert!(shape.properties.is_empty(), "catch-all is not a literal key");
+        assert_eq!(shape.pattern_keys.len(), 1);
+        assert_eq!(shape.pattern_keys[0].key, PatternKey::CatchAll);
+    }
+
+    #[test]
+    fn parses_inline_regex_pattern_key() {
+        let atom = parse_type_expr("dict", "{ <pattern::[0-9]$>: number }")
+            .expect("`<pattern::[0-9]$>` pattern key should parse in an inline object");
+        let TypeExpr::InlineObject(shape) = &atom.ty else {
+            panic!("expected inline object, got {:?}", atom.ty);
+        };
+        assert_eq!(
+            shape.pattern_keys[0].key,
+            PatternKey::Pattern("[0-9]$".into())
+        );
+    }
+
+    // ── Feature D — content-format string types ──────────────────────────
+
+    #[test]
+    fn parses_yaml_type_keyword() {
+        let atom = parse_type_expr("frontmatter", "yaml").expect("`yaml` should parse as a type");
+        assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Yaml));
+    }
+
+    #[test]
+    fn parses_json_type_keyword() {
+        let atom = parse_type_expr("config", "json").expect("`json` should parse as a type");
+        assert_eq!(atom.ty, TypeExpr::Primitive(SimplifiedType::Json));
     }
 }

@@ -19,9 +19,7 @@ use std::time::Duration;
 use quinn::crypto::rustls::QuicClientConfig;
 use quinn::{ClientConfig, Endpoint, ServerConfig, TransportConfig};
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
-use rustls::pki_types::{
-    CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime,
-};
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, PrivatePkcs8KeyDer, ServerName, UnixTime};
 use rustls::{DigitallySignedStruct, SignatureScheme};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
@@ -99,19 +97,16 @@ impl QuicEndpoint {
         install_default_crypto_provider();
 
         let (server_config, client_config) = build_quinn_configs()?;
-        let mut endpoint = Endpoint::server(server_config, bind_addr).map_err(|source| {
-            QuicError::Bind {
-                addr: bind_addr,
-                source,
-            }
-        })?;
-        endpoint.set_default_client_config(client_config);
-        let local_addr = endpoint
-            .local_addr()
-            .map_err(|source| QuicError::Bind {
+        let mut endpoint =
+            Endpoint::server(server_config, bind_addr).map_err(|source| QuicError::Bind {
                 addr: bind_addr,
                 source,
             })?;
+        endpoint.set_default_client_config(client_config);
+        let local_addr = endpoint.local_addr().map_err(|source| QuicError::Bind {
+            addr: bind_addr,
+            source,
+        })?;
 
         let (tx, rx) = mpsc::unbounded_channel();
         let endpoint_clone = endpoint.clone();
@@ -211,9 +206,7 @@ async fn run_accept_loop(endpoint: Endpoint, tx: mpsc::UnboundedSender<InboundCo
 fn build_quinn_configs() -> Result<(ServerConfig, ClientConfig), QuicError> {
     let cert_key = rcgen::generate_simple_self_signed(vec!["rendezvous".to_string()])?;
     let cert_der = CertificateDer::from(cert_key.cert.der().to_vec());
-    let key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(
-        cert_key.key_pair.serialize_der(),
-    ));
+    let key_der = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(cert_key.key_pair.serialize_der()));
 
     let mut server_crypto = rustls::ServerConfig::builder()
         .with_no_client_auth()
@@ -249,10 +242,23 @@ fn install_default_crypto_provider() {
 }
 
 /// rustls server-cert verifier that accepts any presented certificate.
-/// Acceptable for the Phase 4 POC because peer authenticity is
-/// enforced separately by the [`crate::session_log`] signed-envelope
-/// layer once data starts flowing. Replace before shipping to the
-/// public internet.
+///
+/// ## Why this is permissive
+///
+/// Every daemon generates a fresh self-signed certificate on startup.
+/// There is no CA or pinned certificate distribution in Phase 4, so the
+/// TLS layer cannot authenticate the peer. Instead, peer identity is
+/// established by the [`crate::session_log`] signed-envelope layer:
+/// each sync delta/snapshot is signed with the peer's long-term Ed25519
+/// identity key, and the receiver verifies the signature and checks that
+/// the sender owns the document namespace before accepting the payload.
+///
+/// ## Future hardening
+///
+/// Replace this verifier before exposing rendezvous to untrusted
+/// networks. Options include pinning the peer's certificate or public
+/// key after first use (TOFU), requiring invitations to carry a
+/// certificate fingerprint, or running a small internal CA for the mesh.
 #[derive(Debug)]
 struct AcceptAnyServerCert;
 

@@ -19,8 +19,10 @@ members = [
     "biscuit-speaks/lib",
     "biscuit-terminal/cli",
     "biscuit-terminal/lib",
+    "claudine/catalog-types",
     "claudine/cli",
     "claudine/contract",
+    "claudine/gen",
     "claudine/lib",
     "darkmatter/cli",
     "darkmatter/lib",
@@ -50,6 +52,7 @@ members = [
     "claudine/rendezvous/core",
     "claudine/rendezvous/daemon",
     "claudine/rendezvous/client",
+    "visualizer/src-tauri",
     "sniff/lib",
     "sniff/cli",
     "renderable",
@@ -70,13 +73,18 @@ members = [
     "schematic/oauth",
     "agent-sandbox/cli",
 ]
-exclude = ["schematic/schema"]
+exclude = ["schematic/schema", "darkmatter/dmls/zed-dmls"]
 
 [profile.dev]
 # Keep panic/backtrace line numbers but drop full DWARF (variables/types) -- the bulk of
 # debug-build artifact size. Shrinks target/ substantially and speeds linking. Switch to
 # `debug = true` if you need a step-debugger (lldb/gdb) with variable inspection.
 debug = "line-tables-only"
+
+# Dependency frames do not need source locations in workspace backtraces.
+# Workspace members retain the line tables configured above.
+[profile.dev.package."*"]
+debug = 0
 
 [profile.profiling]
 inherits = "release"

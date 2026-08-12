@@ -172,12 +172,20 @@ pub fn create_skill_symlink(
     std::os::unix::fs::symlink(&absolute_source, symlink_location)
         .map_err(CreationError::SymlinkCreation)?;
 
-    #[cfg(not(unix))]
+    // Windows fixes the link type at creation time and has no call that covers
+    // both; a skill source is always a directory. Creating any symlink there
+    // additionally needs Developer Mode or `SeCreateSymbolicLinkPrivilege`, so
+    // this can fail at runtime with `ERROR_PRIVILEGE_NOT_HELD` (1314) on a host
+    // where the identical Unix call would succeed.
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(&absolute_source, symlink_location)
+        .map_err(CreationError::SymlinkCreation)?;
+
+    #[cfg(not(any(unix, windows)))]
     {
-        // This should never happen as the project targets Unix-like systems
         return Err(CreationError::SymlinkCreation(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
-            "Symlink creation is only supported on Unix-like systems",
+            "Symlink creation is not supported on this platform",
         )));
     }
 
@@ -277,11 +285,18 @@ pub fn create_deep_dive_symlink(
     std::os::unix::fs::symlink(&absolute_source, symlink_location)
         .map_err(CreationError::SymlinkCreation)?;
 
-    #[cfg(not(unix))]
+    // A deep dive source is a file, so Windows needs `symlink_file` rather than
+    // the `symlink_dir` used for skill directories. See `create_skill_symlink`
+    // for the privilege requirement this shares.
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_file(&absolute_source, symlink_location)
+        .map_err(CreationError::SymlinkCreation)?;
+
+    #[cfg(not(any(unix, windows)))]
     {
         return Err(CreationError::SymlinkCreation(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
-            "Symlink creation is only supported on Unix-like systems",
+            "Symlink creation is not supported on this platform",
         )));
     }
 
@@ -295,6 +310,32 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use tempfile::TempDir;
+
+    /// Whether this process is permitted to create symlinks.
+    ///
+    /// Windows grants symlink creation only under Developer Mode or
+    /// `SeCreateSymbolicLinkPrivilege`. That is a runtime privilege no `cfg`
+    /// can answer, so this probes it for real. Tests below skip when it is
+    /// withheld, because the OS refusing the syscall is not a defect in the
+    /// code under test — every other failure still fails the test.
+    fn symlinks_supported() -> bool {
+        #[cfg(not(windows))]
+        {
+            true
+        }
+
+        #[cfg(windows)]
+        {
+            let Ok(probe) = TempDir::new() else {
+                return false;
+            };
+            let target = probe.path().join("probe_target");
+            if fs::create_dir(&target).is_err() {
+                return false;
+            }
+            std::os::windows::fs::symlink_dir(&target, probe.path().join("probe_link")).is_ok()
+        }
+    }
 
     // Helper function to create a valid skill directory
     fn create_valid_skill_dir(base: &Path, name: &str) -> PathBuf {
@@ -410,6 +451,9 @@ mod tests {
     // create_skill_symlink tests
     #[test]
     fn create_skill_symlink_creates_valid_symlink() {
+        if !symlinks_supported() {
+            return;
+        }
         let temp = TempDir::new().unwrap();
         let skill_dir = create_valid_skill_dir(temp.path(), "skill");
         let symlink_location = temp.path().join("links").join("my_skill");
@@ -422,6 +466,9 @@ mod tests {
 
     #[test]
     fn create_skill_symlink_creates_absolute_symlink() {
+        if !symlinks_supported() {
+            return;
+        }
         let temp = TempDir::new().unwrap();
         let skill_dir = create_valid_skill_dir(temp.path(), "skill");
         let symlink_location = temp.path().join("links").join("my_skill");
@@ -436,6 +483,9 @@ mod tests {
 
     #[test]
     fn create_skill_symlink_creates_parent_directories() {
+        if !symlinks_supported() {
+            return;
+        }
         let temp = TempDir::new().unwrap();
         let skill_dir = create_valid_skill_dir(temp.path(), "skill");
         let symlink_location = temp.path().join("a").join("b").join("c").join("my_skill");
@@ -469,6 +519,9 @@ mod tests {
 
     #[test]
     fn create_skill_symlink_verifies_symlink_points_to_correct_target() {
+        if !symlinks_supported() {
+            return;
+        }
         let temp = TempDir::new().unwrap();
         let skill_dir = create_valid_skill_dir(temp.path(), "skill");
         let symlink_location = temp.path().join("link");
@@ -476,12 +529,16 @@ mod tests {
         create_skill_symlink(&skill_dir, &symlink_location).unwrap();
 
         let target = fs::read_link(&symlink_location).unwrap();
+        let target = target.canonicalize().unwrap();
         let expected = skill_dir.canonicalize().unwrap();
         assert_eq!(target, expected);
     }
 
     #[test]
     fn create_skill_symlink_fails_when_symlink_already_exists() {
+        if !symlinks_supported() {
+            return;
+        }
         let temp = TempDir::new().unwrap();
         let skill_dir = create_valid_skill_dir(temp.path(), "skill");
         let symlink_location = temp.path().join("link");
@@ -525,6 +582,9 @@ mod tests {
 
     #[test]
     fn create_skill_symlink_with_complex_directory_structure() {
+        if !symlinks_supported() {
+            return;
+        }
         let temp = TempDir::new().unwrap();
 
         // Create skill directory with subdirectories
@@ -582,6 +642,9 @@ mod tests {
     // Tests for create_deep_dive_symlink
     #[test]
     fn create_deep_dive_symlink_creates_valid_symlink() {
+        if !symlinks_supported() {
+            return;
+        }
         let temp = TempDir::new().unwrap();
         let deep_dive = temp.path().join("deep_dive.md");
         let mut file = File::create(&deep_dive).unwrap();
@@ -597,6 +660,9 @@ mod tests {
 
     #[test]
     fn create_deep_dive_symlink_creates_absolute_symlink() {
+        if !symlinks_supported() {
+            return;
+        }
         let temp = TempDir::new().unwrap();
         let deep_dive = temp.path().join("deep_dive.md");
         let mut file = File::create(&deep_dive).unwrap();
@@ -614,6 +680,9 @@ mod tests {
 
     #[test]
     fn create_deep_dive_symlink_creates_parent_directories() {
+        if !symlinks_supported() {
+            return;
+        }
         let temp = TempDir::new().unwrap();
         let deep_dive = temp.path().join("deep_dive.md");
         let mut file = File::create(&deep_dive).unwrap();
@@ -639,6 +708,9 @@ mod tests {
 
     #[test]
     fn create_deep_dive_symlink_fails_when_symlink_already_exists() {
+        if !symlinks_supported() {
+            return;
+        }
         let temp = TempDir::new().unwrap();
         let deep_dive = temp.path().join("deep_dive.md");
         let mut file = File::create(&deep_dive).unwrap();
@@ -656,6 +728,9 @@ mod tests {
 
     #[test]
     fn create_deep_dive_symlink_verifies_symlink_points_to_correct_target() {
+        if !symlinks_supported() {
+            return;
+        }
         let temp = TempDir::new().unwrap();
         let deep_dive = temp.path().join("deep_dive.md");
         let mut file = File::create(&deep_dive).unwrap();
@@ -666,6 +741,7 @@ mod tests {
         create_deep_dive_symlink(&deep_dive, &symlink_location).unwrap();
 
         let target = fs::read_link(&symlink_location).unwrap();
+        let target = target.canonicalize().unwrap();
         let expected = deep_dive.canonicalize().unwrap();
         assert_eq!(target, expected);
     }

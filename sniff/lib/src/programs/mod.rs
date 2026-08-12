@@ -15,6 +15,7 @@
 //! - **Headless Audio**: Background audio players (afplay, pacat, aplay, etc.)
 //! - **AI CLI Tools**: AI-powered coding assistants (claude, aider, goose, etc.)
 //! - **Notification Helpers**: Desktop notification utilities (terminal-notifier, alerter, snoretoast, burnttoast, dunstify, notify-send)
+//! - **Test Runners**: Project test runners (cargo test, vitest, pytest, go test, etc.)
 //!
 //! ## Usage
 //!
@@ -144,7 +145,8 @@ pub use install::{
     InstallOutputStream, InstallPlan, InstallPlanOption, InstallPlanReason, InstallResult,
     InstallStatusKind, RetryChoice, RetryPrompt, RetryPromptChoice, build_install_announcement,
     build_install_failure_status, build_install_plan, build_install_success_status,
-    build_retry_choice_prose, build_retry_quit_prose, execute_install, execute_versioned_install,
+    build_install_timeout_warning, build_retry_choice_prose, build_retry_quit_prose,
+    execute_install, execute_versioned_install,
     get_install_command, get_versioned_install_command, run_install_interview,
 };
 pub use inventory::Program;
@@ -164,7 +166,7 @@ pub use types::ProgramDetector;
 ///
 /// Contains detection results for all supported program categories:
 /// editors, utilities, package managers, TTS clients, terminal apps, headless audio players,
-/// AI CLI tools, and test runners.
+/// AI CLI tools, notification helpers, and test runners.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct ProgramsInfo {
     /// Text editors and IDEs installed on the system.
@@ -205,7 +207,7 @@ impl ProgramsInfo {
     /// Detect all installed programs across all categories.
     ///
     /// Builds a shared executable index once (scanning all PATH dirs and macOS app bundles),
-    /// then detects all 9 categories in parallel using Rayon's `join` API. Each category
+    /// then detects all 10 categories in parallel using Rayon's `join` API. Each category
     /// uses the shared index for O(1) lookups instead of repeated filesystem traversal.
     /// The test-runner category additionally probes project-local bin directories via
     /// [`LocalBinIndex`] (cwd-sensitive) before falling back to PATH and parent-binary
@@ -214,8 +216,8 @@ impl ProgramsInfo {
     /// ## Performance
     ///
     /// The shared index eliminates redundant filesystem scans:
-    /// - PATH scan: once (instead of 9x per category)
-    /// - macOS bundle check: once (instead of 9x per category)
+    /// - PATH scan: once (instead of 10x per category)
+    /// - macOS bundle check: once (instead of 10x per category)
     /// - Subsequent lookups: O(1) HashMap access
     #[instrument(skip_all)]
     pub fn detect() -> Self {

@@ -135,33 +135,6 @@
             "type": "string"
           },
           "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "app_id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "app_id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
-        },
-        {
-          "in": "path",
-          "name": "app_id",
-          "required": true,
-          "schema": {
-            "type": "string"
-          },
-          "style": "simple"
         }
       ]
     },

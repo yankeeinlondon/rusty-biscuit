@@ -64,7 +64,8 @@ pub struct QwenInit {
 }
 
 /// `system` events only become session-start signals when `subtype` is
-/// `"session_start"`. Other subtypes are ignored by the parser.
+/// `"session_start"` or `"init"` (the latter emitted since qwen 0.19.6 with
+/// model/session metadata). Other subtypes are ignored by the parser.
 #[derive(Debug, Default, Deserialize, Serialize)]
 pub struct QwenSystem {
     #[serde(default)]
@@ -77,7 +78,7 @@ pub struct QwenSystem {
 
 impl QwenSystem {
     pub fn is_session_start(&self) -> bool {
-        self.subtype.as_deref() == Some("session_start")
+        matches!(self.subtype.as_deref(), Some("session_start") | Some("init"))
     }
 
     pub fn into_init(self) -> QwenInit {
@@ -304,6 +305,23 @@ mod tests {
     }
 
     #[test]
+    fn qwen_system_init_detection() {
+        // Wire sample from the signals corpus (qwen.md record
+        // `stream-model_resolved-system-init`, since 0.19.6).
+        const QWEN_SYSTEM_INIT: &str = include_str!(
+            "../../../../docs/research/signals/fixtures/qwen/system-init-model-version.jsonl"
+        );
+        let event = parse(QWEN_SYSTEM_INIT.trim());
+        let QwenEvent::System(sys) = event else {
+            panic!("expected System");
+        };
+        assert!(sys.is_session_start());
+        let init = sys.into_init();
+        assert_eq!(init.session_id.as_deref(), Some("qw-1"));
+        assert_eq!(init.model.as_deref(), Some("qwen3-coder-plus"));
+    }
+
+    #[test]
     fn qwen_system_other_subtype_ignored() {
         let event = parse(r#"{"type":"system","subtype":"some_other"}"#);
         let QwenEvent::System(sys) = event else {
@@ -355,11 +373,29 @@ mod tests {
         let QwenEvent::Result(result) = event else {
             panic!("expected Result");
         };
+        assert!(
+            result.extra.is_empty(),
+            "known result fields must not land in extra; extra={:?}",
+            result.extra
+        );
         let (usage, meta) = result.resolved_usage();
         assert_eq!(meta.duration_ms, Some(5000));
         let usage = usage.expect("usage");
         assert_eq!(usage.input_tokens, Some(300));
         assert_eq!(usage.output_tokens, Some(150));
+    }
+
+    #[test]
+    fn qwen_result_round_trips_through_json() {
+        let line = r#"{"type":"result","duration_ms":1200,"usage":{"input_tokens":10,"output_tokens":5},"cost_usd":0.0001}"#;
+        let event = parse(line);
+        let serialized = serde_json::to_string(&event).unwrap();
+        let reparsed: QwenEvent = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(
+            serde_json::to_string(&reparsed).unwrap(),
+            serialized,
+            "parse -> serialize -> parse should be stable for a known event"
+        );
     }
 
     #[test]

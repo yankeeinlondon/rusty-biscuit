@@ -1,0 +1,79 @@
+set dotenv-load
+set positional-arguments
+# set allow-duplicate-recipes
+# `env CYG_SYS_BASHRC=1` guards against Cygwin's /etc/bash.bashrc tripping `-u`;
+# see the root justfile for the full explanation.
+set shell := ["env", "CYG_SYS_BASHRC=1", "bash", "-eu", "-o", "pipefail", "-c"]
+
+import "../just/lifecycle.just"
+import "../just/plan.just"
+import "../just/review.just"
+import "../just/notify.just"
+import "../just/ai.just"
+import "../just/devops.just"
+
+BOLD := '\033[1m'
+DIM := '\033[2m'
+ITALIC := '\033[3m'
+RESET := '\033[0m'
+BLACK := '\033[30m'
+RED := '\033[31m'
+GREEN := '\033[32m'
+YELLOW := '\033[33m'
+BLUE := '\033[34m'
+MAGENTA := '\033[35m'
+CYAN := '\033[36m'
+WHITE := '\033[37m'
+
+PACKAGE := "Visualizer"
+CRATE := "visualizer"
+DOCS := ""
+TODAY := `date +%F`
+
+
+default:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if command -v md &> /dev/null; then
+        md just.md
+    fi
+
+    echo
+    echo -e "{{BOLD}}{{PACKAGE}} ({{RESET}}Tauri 2 Desktop App{{BOLD}}){{RESET}}"
+    echo "======================================================================================"
+    echo ""
+    just --list | grep -v 'default'
+    echo
+
+# run the app (embeds the static `dist/` frontend; no tauri CLI required)
+run *args="":
+    @cargo run -p {{CRATE}} {{args}}
+
+# run with the Tauri CLI dev loop (requires `cargo install tauri-cli`)
+dev *args="":
+    @cargo tauri dev {{args}}
+
+# bundle a distributable build (requires the Tauri CLI and platform icons)
+bundle *args="":
+    @cargo tauri build {{args}}
+
+# build the app crate
+build *args="":
+    @echo -e "Building {{BOLD}}{{CRATE}}{{RESET}}..."
+    @echo
+    @cargo build -p {{CRATE}} {{args}}
+    @echo
+
+# test the app crate
+test *args="":
+    @just _test {{CRATE}} {{ args }}
+
+# lint with clippy
+lint *args="":
+    @cargo clippy -p {{CRATE}} -- {{args}}
+
+# No-op recipe: reference color vars so linters won't report them as unused.
+# Run `just _colors` if you want to exercise this (it does nothing).
+_colors:
+    @: {{BOLD}} {{ITALIC}} {{RESET}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} {{DIM}} {{TODAY}} {{DOCS}} >/dev/null || true

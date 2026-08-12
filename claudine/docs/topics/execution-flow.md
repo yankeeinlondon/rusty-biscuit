@@ -1,13 +1,14 @@
 ---
 prompt: |-
-    Review the execution flow of the 'claudine compose', 'claudine inline-compose', 'claudine sequence'.
+  Review the execution flow of the 'claudine compose', 'claudine inline-compose', 'claudine sequence'.
 
-    - identify the precise steps that each command takes to produce it's results
-    - describe each step in the process
-    - identify what CLI switches or prompt frontmatter has an impact on each step and what that impact is
+  - identify the precise steps that each command takes to produce it's results
+  - describe each step in the process
+  - identify what CLI switches or prompt frontmatter has an impact on each step and what that impact is
 
-    After fully documenting the flows add a section called `## Future Improvements` and add any improvements you think could be made to the current flow
-last_updated: 2026-04-27
+  After fully documenting the flows add a section called `## Future Improvements` and add any improvements you think could be made to the current flow
+last_updated: 2026-07-04
+hash: 7738d51f4cfa73e2-83b6b84817b7ee16
 ---
 Let me explore the composition-related source code and documentation to trace the exact execution flows.Now let me read the existing composition topic doc and the key source files for precision:Now let me read the critical execution pipeline files:Now let me read the remaining portions of the composition executor to get the full execution pipeline:Now I have a comprehensive understanding of all three flows. Let me compose the complete Markdown body.Now I have all the details needed. Let me produce the comprehensive Markdown body content:Now I have all the details. Let me compose the full Markdown document body:
 
@@ -65,7 +66,8 @@ Dynamic completion fires at markdown-expecting argument positions on all
 three composition commands and on the `--append-system-prompt` /
 `--replace-system-prompt` flag values — both on compose/inline-compose/
 sequence themselves and on every wrapped provider subcommand (`claude`,
-`codex`, `gemini`, `goose`, `kimi`, `opencode`, `qwen`). All three
+`codex`, `gemini`, `goose`, `kimi`, `opencode`, `qwen`, `kilo`, `pi`,
+`antigravity`). All three
 composition commands share one markdown-only contract; there is no
 per-command frontmatter validation at completion time.
 
@@ -89,8 +91,12 @@ every `<TAB>`. The supplement engine applies these rules in order:
 - **Case-insensitive substring matching** on the filename with `.md`
     stripped for matching only. `@omp<TAB>` matches `prompt.md`.
 
-- **`KEY=<TAB>` setters** return zero candidates so shell default
-    behavior kicks in.
+- **`KEY=<TAB>` setters** offer schema-aware completion when the prompt
+    declares `$schema` (property names before `=`; enum members and
+    `file`-glob paths after `=`). Without a schema, the value slot still
+    supports `@`-gated file completion; plain string/number values yield
+    no candidates so shell default behavior kicks in. See
+    [Shell Completions](completions/shell-completions.md).
 
 Install with `claudine completions <shell>` — regenerate and reinstall
 after a Claudine upgrade that changes the callback wiring. The hidden
@@ -99,7 +105,7 @@ the completion candidates themselves never go stale. PowerShell and
 Elvish retain the legacy one-line `COMPLETE=<shell>` bootstrap; users
 who installed an older `COMPLETE=<shell>` snippet continue to reach the
 legacy completion path on every shell until they regenerate. See
-[shell-completions.md](../shell-completions.md) for the full install
+[completions/shell-completions.md](completions/shell-completions.md) for the full install
 matrix, supported token shapes, and the open-questions list.
 
 ## Execution Flows
@@ -112,12 +118,14 @@ All three commands share the same bootstrap path before diverging:
 
 **Source:** `cli/src/argv.rs`
 
-Before clap parses anything, `argv::normalize()` applies four syntactic rewrite rules in fixed order:
+Before clap parses anything, `argv::normalize()` applies three syntactic rewrite rules in fixed order:
 
-1. **Rule 1** — Rewrites provider boolean flags (`--claude`, `--codex`, `--gemini`, `--goose`, `--kimi`, `--opencode`, `--qwen`, `--roo`) to `--provider <slug>` on composition subcommands only, so wrapper passthrough is preserved.
+1. **Rule 1** — Rewrites the catalog-derived provider boolean flags to `--provider <slug>` on composition subcommands only, so wrapper passthrough is preserved.
 2. **Rule 2** — Canonicalizes `--provider <value>` / `--provider=<value>` via `Provider::fuzzy_match_cli_name` (e.g. `cl` → `claude`).
 3. **Rule 4** — Hoists a trailing `--help` / `-h` to argv position 1 on composition subcommands so the root custom help handler fires.
-4. **Rule 3** — Inserts a single `--` separator before the first `key=value` setter that follows an interleaved flag after a previously seen positional, fixing ambiguous arg boundaries.
+
+The retired Rule 3 no longer inserts a synthetic `--`; the post-normalization
+composition-tail partition owns setter and provider-argument boundaries.
 
 The normalizer is a strict no-op under `COMPLETE` (shell completion), after the first literal `--`, on non-UTF-8 tokens, for argv with fewer than two elements, and on non-composition subcommands.
 
@@ -384,7 +392,14 @@ Delivers the composed prompt via `profile.prompt_delivery()` (places prompt in a
 
 ##### 6i. Dry Run Check
 
-If `--dry-run`: prints what would be executed and exits with code 0.
+This is the raw provider-wrapper dry-run seam: it renders the planned command
+using the profile's executable name and exits with code 0 without resolving
+that executable on `PATH`.
+
+Composition commands return at their earlier post-composition seam, immediately
+after provider/model resolution. They do not enter the provider/env wiring
+steps above, validate or resolve the selected executable, construct MCP/argv/
+system-prompt launch state, or build the lifecycle runtime.
 
 ##### 6j. Preflight Checks
 
@@ -456,9 +471,9 @@ Identical to compose Step 3.
 4. Calls `temp_md.compose_with(compose_opts)` through Darkmatter on the temporary document
 5. Extracts effective frontmatter, agent/model hints, lifecycle config
 6. **Appends guardrails** via `load_or_create_guardrails(source_repo_root)` — adds instructions like "Return the replacement Markdown body content only". Guardrails are loaded from `.claudine/inline-compose.md` in the repo root (created on first use), falling back to a built-in default.
-7. **Captures pre-execution body hash** via `source.markdown.hash_body(false)` for closure validation
+7. **Captures pre-execution Simple hash** via `source.markdown.compute_hash(MdHashKind::Simple, &inline_hash_options())` for closure validation
 
-**Returns:** `PreparedComposition { mode: InlineFrontmatterPrompt, ..., closure: Inline(InlineClosurePlan { original_document_text, original_body_hash }) }`
+**Returns:** `PreparedComposition { mode: InlineFrontmatterPrompt, ..., closure: Inline(InlineClosurePlan { original_document_text, original_hash }) }`
 
 **Affected by:**
 
@@ -518,26 +533,21 @@ After the provider completes, the inline closure pipeline rewrites the target fi
 
 `closure::apply_inline_closure(plan, body, path, today, post_run_fm)`:
 
-1. Validates replacement body is non-empty and hash differs from original
-2. Compares frontmatter to detect new and modified properties
-3. Calls `rewrite_inline_document()`:
+1. Validates replacement body is non-empty
+2. Runs `darkmatter::markdown::cleanup::cleanup_content()` on the body so the cleaned body is what is hashed, stamped, and written (one atomic write; `result.body_cleaned` records whether cleanup changed anything)
+3. Rejects when the **body segment** of the Simple hash of the *cleaned* body matches the original
+4. Compares frontmatter to detect new and modified properties
+5. Calls `rewrite_inline_document()`:
 
     - Splits frontmatter from source text (preserving byte-for-byte layout including block scalars)
     - Updates `last_updated` to today's date (local time, `YYYY-MM-DD`)
+    - Stamps a Darkmatter `Simple` content hash into the `hash:` frontmatter property (see [Composition — `hash` property](composition.md#hash-property-auto-stamped))
     - Merges new frontmatter properties from agent (inserted before `last_updated`)
     - Preserves original frontmatter values (reverts agent modifications with a warning)
 
-4. Writes atomically via `atomic_write()`
+6. Writes atomically via `atomic_write()`
 
-##### 9d. Markdown Cleanup
-
-`cleanup_inline_output(resolved_path)`:
-
-1. Splits frontmatter from body
-2. Runs `darkmatter::markdown::cleanup::cleanup_content()` on body only
-3. Writes back only if content changed
-
-##### 9e. Summary Emission
+##### 9d. Summary Emission
 
 Summary is deferred until after closure validation messages (unlike compose which emits immediately), so the section separator does not split the validation block.
 
@@ -546,6 +556,7 @@ Summary is deferred until after closure validation messages (unlike compose whic
 | Input                      | Impact                                                                                            |
 |----------------------------|---------------------------------------------------------------------------------------------------|
 | Frontmatter `last_updated` | Auto-updated by Claudine on each successful write                                                 |
+| Frontmatter `hash`         | Auto-stamped Darkmatter `Simple` content hash on each successful write                            |
 | Provider output            | Must be replacement body content only (no frontmatter); guardrails instruct the agent accordingly |
 | `--silent`                 | Suppresses check/validation messages                                                              |
 
@@ -713,7 +724,7 @@ When stdout is a terminal and no explicit `--<provider>` flag is given:
 
 When stdout is not a terminal (e.g., CI, scripts), resolution follows a strict chain with no interactive fallback:
 
-1. **Explicit flag** (`--provider <slug>`, or the shorthand booleans `--claude`, `--codex`, `--gemini`, `--opencode`, `--qwen`, `--goose`, `--kimi`) — highest priority
+1. **Explicit flag** (`--provider <slug>`, or its catalog-derived `--<provider>` shorthand boolean) — highest priority
 2. **Singular frontmatter `agent`** — a single provider name in the effective (composed) frontmatter, fuzzy-matched against known providers
 3. **List-valued frontmatter `agent`** — an ordered list of provider names; the first installed provider in the list is chosen
 4. **Config favorite** — `favorite_agent` from `~/.claudine/config.json`
@@ -752,10 +763,6 @@ OpenCode requires a model in non-interactive mode. If no model survives the reso
 OpenCode requires a model in non-interactive mode; set --model, OPENCODE_MODEL, or MODEL
 ```
 
-### Roo Exclusion
-
-Roo Code is excluded from composition provider selection because it is a VS Code extension rather than a wrappable CLI. Roo does not appear in the TTY picker and is silently filtered from the installed-provider snapshot in non-TTY resolution.
-
 ### Shorthand Flags
 
 The shorthand booleans and the `--provider` value both accept fuzzy input (`cl` → `claude`, `gem` → `gemini`, `oc` → `opencode`). The [argv normalizer](argv-normalization.md) rewrites every shorthand into a canonical `--provider <slug>` pair before clap runs, so runtime provider selection only ever reads the single `--provider` field.
@@ -770,26 +777,19 @@ The shorthand booleans and the `--provider` value both accept fuzzy input (`cl` 
 
 `--exclude <PROVIDER>` removes a provider from automatic selection (repeatable). Explicit flags (`--codex`, etc.) override exclusions.
 
-## Harness: Validations and Handlers
+## Migrating from the Retired Harness DSL
 
-Composed documents can declare **pre-checks**, **post-checks**, **timeouts**, and **handlers** in their frontmatter. When present, Claudine activates a harness that gates provider execution behind validation rules and can recover from failures automatically.
+Earlier Claudine releases let composed documents declare `pre_checks`, `post_checks`, `handle_*` handlers, a programmatic `handle`, and `deviate` recovery commands in their frontmatter. That validation-and-handler DSL has been **removed**; its gating, verification, and recovery roles are now expressed through the [lifecycle stack](lifecycle.md). A document that still declares any of these keys fails composition with a typed `RemovedValidationKey` diagnostic naming the offending key and its replacement surface:
 
-The harness reads from the **effective (composed) frontmatter** — not from the raw source file. This means composition can inject harness properties dynamically via Darkmatter transclusion or interpolation.
+| Removed key | Replacement |
+|-------------|-------------|
+| `pre_checks` | the `initialize` or `start` lifecycle stack |
+| `post_checks` | the `success` or `finalize` lifecycle stack |
+| `handle_<event>` (e.g. `handle_timeout`, `handle_inline_body_unchanged`) | the `blocked` or `failure` lifecycle recovery actions |
+| `handle` | a lifecycle `shell` action or other lifecycle action |
+| `deviate` | a lifecycle `shell` action plus a recovery action (`retry`, `resume`, etc.) |
 
-### Pre-checks and Post-checks
-
-Pre-checks run before the provider launches; post-checks run after:
-
-```yaml
-pre_checks:
-  - file_exists: "@docs/plan.md"
-  - dir_exists: "@src/components"
-post_checks:
-  - file_changed: "@docs/plan.md"
-  - response_includes: "## Summary"
-```
-
-Available validations include filesystem checks (`file_exists`, `dir_exists`, `json_file_exists`, `yaml_file_exists`, `toml_file_exists`, `has_write_permission`), git checks (`no_dirty_source_code`, `has_dirty_source_code`), post-only file comparisons (`file_changed`, `file_unchanged`), frontmatter comparisons (`frontmatter_prop_changed`, `frontmatter_prop_unchanged`, `frontmatter_prop_equals`), response checks (`response_length_at_least`, `response_length_at_most`, `response_includes`, `response_missing`), and shell commands (`shell_command`).
+See [Composition — Migrating from the Retired Harness DSL](composition.md#migrating-from-the-retired-harness-dsl) for the full guidance and [lifecycle.md](lifecycle.md) for the replacement action catalog.
 
 ### Timeouts
 
@@ -811,8 +811,8 @@ step_timeout: 30s
     tool result, reasoning chunk, assistant text, info/warning, etc.). If no
     event is observed for longer than the budget, Claudine kills the child.
 
-Both timeouts surface as the same `FailureEvent::Timeout` variant, so a
-single `handle_timeout` handler matches either one.
+Both timeouts surface as the same timeout failure and route to the
+`failure` lifecycle event, where a `Retry` or `Resume` action can recover.
 
 **Streaming-only.** `step_timeout` requires structured streaming. If the
 selected provider runs in capture or passthrough mode, Claudine emits a
@@ -889,38 +889,13 @@ run. `step_timeout_warn` fires at most once per stall episode; once
 activity resumes it re-arms for the next stall. Neither emission blocks
 the provider or affects hard-timeout behavior.
 
-### Handlers
+### Recovery
 
-Handlers define recovery actions when failures occur:
-
-```yaml
-handle_timeout:
-  resume:
-    prompt: "Continue from where you stopped."
-
-handle_agent_failure:
-  retry:
-    prompt_suffix: "The previous attempt failed. Please try again."
-    retries: 3
-
-handle_file_exists:
-  "@docs/plan.md":
-    redirect:
-      file: "./fallback.md"
-```
-
-Four handler actions are available:
-
-- **retry** — re-run the same prompt with optional modifications
-- **resume** — continue from the previous session (provider must support session resume)
-- **redirect** — switch to a different source document
-- **deviate** — execute a shell command, then re-evaluate post-checks
-
-A programmatic `handle` property accepts a shell command that receives failure context on stdin and returns a handler action as JSON on stdout.
+Recovery is expressed through the lifecycle stacks — `failure` and `blocked` are its natural homes, but flow control is universal and every event may recover. The available lifecycle recovery actions are `retry`, `resume`, `proxy`, and `defer` (`defer` is parse-valid but not yet implemented). See [lifecycle.md](lifecycle.md) for the full reference and the [migration table](#migrating-from-the-retired-harness-dsl) for the mapping from the removed `handle_*` keys.
 
 ### Shell Policy
 
-All shell commands — `::shell` directives in the template, top-level frontmatter `$(cmd)` expressions, `shell_command` validations, and `deviate`/`handle` declarations — are approved upfront during the pre-flight phase, before the provider session starts. See [Pre-Flight Shell Approval](pre-flight-checks.md) for the full flow.
+All shell commands — `::shell` directives in the template, top-level frontmatter `$(cmd)` expressions, and lifecycle `shell` stack actions — are approved upfront during the pre-flight phase, before the provider session starts. See [Pre-Flight Shell Approval](pre-flight-checks.md) for the full flow.
 
 ## Retired Interfaces
 
@@ -949,7 +924,7 @@ Resolve → Pre-Flight → Prepare → Select Provider → Launch → Closure
 ```
 
 - **Resolve**: `composition::resolve_composition_source()` loads the Markdown file
-- **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and harness `shell_command` validations / `deviate` / `handle` actions — checks whitelists, and prompts the user to approve any unapproved commands before proceeding (see [Pre-Flight Shell Approval](pre-flight-checks.md))
+- **Pre-Flight**: `composition::resolve_shell_approvals()` discovers every shell command in the document graph — template `::shell` directives, top-level frontmatter `$(...)` expressions, and lifecycle `shell` stack actions — checks whitelists, and prompts the user to approve any unapproved commands before proceeding (see [Pre-Flight Shell Approval](pre-flight-checks.md))
 - **Prepare**: `composition::prepare_direct()` or `composition::prepare_inline()` composes through Darkmatter with the pre-approved command set and produces a `PreparedComposition` with `effective_frontmatter`
 - **Select**: Provider selection applies the precedence chain described in [Provider Selection](#provider-selection)
 - **Launch**: `wrap::composition::execute_composition_request()` runs the provider through the full wrapper pipeline (env, MCP, harness, streaming)

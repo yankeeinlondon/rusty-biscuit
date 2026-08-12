@@ -1,0 +1,19 @@
+{
+  "directory": "/workspace/project",
+  "payload": {
+    "id": "evt_scrubbed_no_funds",
+    "type": "session.error",
+    "properties": {
+      "sessionID": "ses_scrubbed",
+      "error": {
+        "name": "APIError",
+        "data": {
+          "message": "Insufficient balance",
+          "statusCode": 402,
+          "isRetryable": false,
+          "responseBody": "{\"error\":{\"message\":\"Insufficient balance. Please add credits to continue.\",\"code\":402,\"metadata\":{\"buyCreditsUrl\":\"https://app.kilo.ai/credits\"}}}"
+        }
+      }
+    }
+  }
+}

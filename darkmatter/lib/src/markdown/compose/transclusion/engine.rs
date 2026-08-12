@@ -17,6 +17,7 @@ use crate::markdown::compose::{
     transclusion,
 };
 use crate::markdown::normalize::HeadingLevel;
+use crate::markdown::span::{line_at_offset, newline_offset_table};
 use crate::markdown::types::MarkdownResult;
 use pulldown_cmark::{Event, HeadingLevel as PulldownHeadingLevel, Parser, Tag, TagEnd};
 use serde_json::{Map, Value};
@@ -24,7 +25,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 /// Builds a target→resolved-target cache from a preflight graph node's
-/// outgoing edges, keyed by the normalized transclusion target.
+/// outgoing edges, keyed by the authored transclusion target.
 ///
 /// [`TransclusionEngine::prepare_block_transclusions`] consults this to skip a
 /// second [`resolve_target`](transclusion::resolve_target) pass for a directive
@@ -39,7 +40,7 @@ pub(crate) fn build_resolution_cache(
         .iter()
         .map(|edge| {
             (
-                transclusion::normalize_reference_token(&edge.directive.raw_target),
+                edge.directive.raw_target.clone(),
                 edge.resolved_target.clone(),
             )
         })
@@ -85,7 +86,6 @@ pub fn relevel_with_overflow(content: &str, target: HeadingLevel) -> (String, Ve
         return (content.to_string(), Vec::new());
     }
 
-    #[derive(Debug, Clone)]
     enum Replacement {
         Prefix {
             start: usize,
@@ -125,33 +125,26 @@ pub fn relevel_with_overflow(content: &str, target: HeadingLevel) -> (String, Ve
         }
     }
 
-    replacements.sort_by(|left, right| {
-        let left_start = match left {
-            Replacement::Prefix { start, .. } | Replacement::Overflow { start, .. } => *start,
-        };
-        let right_start = match right {
-            Replacement::Prefix { start, .. } | Replacement::Overflow { start, .. } => *start,
-        };
-        right_start.cmp(&left_start)
-    });
+    // `extract_headings` already yields headings in ascending document order and
+    // heading spans never overlap, so the output is assembled in one forward
+    // pass: copy the gap before each replacement, then the replacement itself.
+    // The previous code rebuilt the entire document once per heading (descending
+    // order kept the offsets valid), which made re-leveling quadratic.
+    let mut result = String::with_capacity(content.len());
+    let mut cursor = 0usize;
 
-    let mut result = content.to_string();
-
-    for replacement in replacements {
+    for replacement in &replacements {
         match replacement {
             Replacement::Prefix {
                 start,
                 old_level,
                 new_level,
             } => {
-                let prefix_end = start + old_level.hash_count();
-                let replacement = "#".repeat(new_level.hash_count());
-                result = format!(
-                    "{}{}{}",
-                    &result[..start],
-                    replacement,
-                    &result[prefix_end..]
-                );
+                result.push_str(&content[cursor..*start]);
+                for _ in 0..new_level.hash_count() {
+                    result.push('#');
+                }
+                cursor = start + old_level.hash_count();
             }
             Replacement::Overflow {
                 start,
@@ -160,8 +153,11 @@ pub fn relevel_with_overflow(content: &str, target: HeadingLevel) -> (String, Ve
                 line,
                 new_level_raw,
             } => {
-                let bold_block = format!("\n\n**{}**\n\n", title.trim());
-                result = format!("{}{}{}", &result[..start], bold_block, &result[end..]);
+                result.push_str(&content[cursor..*start]);
+                result.push_str("\n\n**");
+                result.push_str(title.trim());
+                result.push_str("**\n\n");
+                cursor = *end;
                 warnings.push(
                     ComposeWarning::new(
                         "transclusion",
@@ -169,11 +165,18 @@ pub fn relevel_with_overflow(content: &str, target: HeadingLevel) -> (String, Ve
                             "Heading overflow at line {line}: converted to bold text (would become H{new_level_raw})"
                         ),
                     )
-                    .at_line(line),
+                    .at_line(*line),
                 );
             }
         }
     }
+    result.push_str(&content[cursor..]);
+
+    // The pre-existing contract emits overflow warnings in reverse document
+    // order: the old replacement loop ran descending to keep byte offsets valid
+    // and pushed warnings as it went. The forward pass above collects them
+    // ascending, so restore the observed order rather than silently changing it.
+    warnings.reverse();
 
     (result, warnings)
 }
@@ -181,6 +184,14 @@ pub fn relevel_with_overflow(content: &str, target: HeadingLevel) -> (String, Ve
 fn extract_headings(content: &str) -> Vec<HeadingInfo> {
     let mut headings = Vec::new();
     let mut current: Option<(HeadingLevel, String, usize)> = None;
+
+    // Built once on the first heading so each line number is a binary search
+    // rather than a fresh `content[..start]` rescan, which made extraction
+    // quadratic in document size. `line_at_offset` reproduces
+    // `lines().count() + 1` exactly. Deferred rather than eager so a
+    // heading-free document — which returns without ever asking for a line —
+    // does not pay for the table.
+    let mut newline_offsets: Option<Vec<usize>> = None;
 
     for (event, range) in Parser::new(content).into_offset_iter() {
         match event {
@@ -194,7 +205,9 @@ fn extract_headings(content: &str) -> Vec<HeadingInfo> {
             }
             Event::End(TagEnd::Heading(_)) => {
                 if let Some((level, title, start)) = current.take() {
-                    let line = content[..start].lines().count() + 1;
+                    let offsets =
+                        newline_offsets.get_or_insert_with(|| newline_offset_table(content));
+                    let line = line_at_offset(offsets, content, start);
                     headings.push(HeadingInfo {
                         level,
                         title,
@@ -280,6 +293,93 @@ pub(crate) enum PreparedTransclusion {
     },
 }
 
+/// Where a failed resolution's notice belongs, and what it should say.
+///
+/// Captured before the prepared value is consumed, because a resolution error
+/// carries no span of its own. Without it the apply loop can only drop the
+/// result, and dropping a result is not the same as emitting nothing for its
+/// span: the authored `::file …` line survives into the composed document and
+/// renders as a literal paragraph of directive syntax.
+pub(crate) struct FailureAnchor {
+    pub(crate) order: usize,
+    pub(crate) target: ApplyTarget,
+    pub(crate) notice: String,
+}
+
+impl PreparedTransclusion {
+    /// The anchor and notice to substitute if resolving this item fails.
+    ///
+    /// The name goes in a code span deliberately. CommonMark processes
+    /// backslash escapes in ordinary text, and a Windows path reaches this
+    /// point often enough that an unquoted name would be silently mangled.
+    pub(crate) fn failure_anchor(&self) -> FailureAnchor {
+        let named = |path: &PathBuf| {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| path.to_string_lossy().into_owned());
+            format!("_Could not transclude `{name}`_")
+        };
+
+        let (order, target, notice) = match self {
+            Self::FixedReplace { order, span, .. } => (
+                *order,
+                ApplyTarget::Replace(span.clone()),
+                "_Could not transclude_".to_string(),
+            ),
+            Self::FixedSection { order, slot, .. } => (
+                *order,
+                ApplyTarget::Section(*slot),
+                "_Could not transclude_".to_string(),
+            ),
+            Self::Markdown {
+                order, target, path, ..
+            } => (*order, target.clone(), named(path)),
+            Self::Code {
+                order, span, path, ..
+            } => (*order, ApplyTarget::Replace(span.clone()), named(path)),
+            Self::RemoteFile {
+                order, target, url, ..
+            } => (
+                *order,
+                target.clone(),
+                format!("_Could not transclude `{url}`_"),
+            ),
+            Self::RemoteCode {
+                order, span, url, ..
+            } => (
+                *order,
+                ApplyTarget::Replace(span.clone()),
+                format!("_Could not transclude `{url}`_"),
+            ),
+            Self::Toc {
+                order,
+                span,
+                directive,
+            } => {
+                // `targets` is a fallback chain; the first entry is what the
+                // author wrote and the one the reader can act on.
+                let notice = match directive.targets.first() {
+                    Some(target) => format!("_Could not link headings from `{target}`_"),
+                    None => "_Could not link headings_".to_string(),
+                };
+                (*order, ApplyTarget::Replace(span.clone()), notice)
+            }
+            Self::FileLinks { order, span, .. } => (
+                *order,
+                ApplyTarget::Replace(span.clone()),
+                "_Could not build the file listing_".to_string(),
+            ),
+        };
+
+        FailureAnchor {
+            order,
+            target,
+            notice,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub(crate) enum SectionSlot {
     Prologue(usize),
@@ -307,11 +407,36 @@ pub(crate) struct ResolvedTransclusion {
 /// methods were lifted verbatim off `impl Markdown` so behavior is unchanged.
 pub(crate) struct TransclusionEngine<'a> {
     markdown: &'a Markdown,
+    /// Ascending `(heading_start_offset, level)` table over the parent body,
+    /// parsed once and shared across the parallel resolve stage (F15). The
+    /// body is immutable for the engine's lifetime, so this replaces the
+    /// per-directive full re-parse in `find_preceding_heading_level`.
+    heading_starts: std::sync::OnceLock<Vec<(usize, HeadingLevel)>>,
 }
 
 impl<'a> TransclusionEngine<'a> {
     pub(crate) fn new(markdown: &'a Markdown) -> Self {
-        Self { markdown }
+        Self {
+            markdown,
+            heading_starts: std::sync::OnceLock::new(),
+        }
+    }
+
+    /// Nearest preceding heading level before `offset`, using the memoized
+    /// heading table. Byte-identical to [`find_preceding_heading_level`]: both
+    /// return the last heading whose start is strictly before `offset`.
+    fn preceding_heading_level(&self, offset: usize) -> Option<HeadingLevel> {
+        let table = self.heading_starts.get_or_init(|| {
+            let mut table = Vec::new();
+            for (event, range) in Parser::new(&self.markdown.content).into_offset_iter() {
+                if let Event::Start(Tag::Heading { level, .. }) = event {
+                    table.push((range.start, pulldown_to_heading_level(level)));
+                }
+            }
+            table
+        });
+        let idx = table.partition_point(|(start, _)| *start < offset);
+        (idx > 0).then(|| table[idx - 1].1)
     }
 
     /// Records a fetched remote URL body as a closure-hash dependency.
@@ -447,6 +572,13 @@ impl<'a> TransclusionEngine<'a> {
                     state,
                     options.expression_resolution_context(remote_fetch),
                 );
+                for warning in
+                    crate::markdown::compose::conditions::collect_condition_context_warnings(
+                        expr, &lookup, "condition",
+                    )
+                {
+                    report.add_warning(warning.at_line(directive.line));
+                }
                 let should_include = transclusion::evaluate_condition(
                     expr,
                     &lookup,
@@ -467,8 +599,8 @@ impl<'a> TransclusionEngine<'a> {
                 }
             }
 
-            let target = transclusion::normalize_reference_token(&directive.raw_target);
-            let cached = resolved_cache.and_then(|cache| cache.get(&target));
+            let target = &directive.raw_target;
+            let cached = resolved_cache.and_then(|cache| cache.get(target));
             let resolved = if let Some(cached) = cached {
                 // Reuse the preflight-resolved target, skipping a second
                 // `resolve_target` pass. The span still rides on `directive`
@@ -493,7 +625,7 @@ impl<'a> TransclusionEngine<'a> {
             } else {
                 match transclusion::resolve_target(
                     directive.kind,
-                    &target,
+                    target,
                     &transclusion_opts,
                     &options.source,
                     directive.line,
@@ -652,29 +784,29 @@ impl<'a> TransclusionEngine<'a> {
         prepared: &mut Vec<PreparedTransclusion>,
         next_order: &mut usize,
     ) -> MarkdownResult<()> {
-        if !transclusion::is_url_like(reference) && !transclusion::is_file_like_reference(reference)
-        {
-            prepared.push(PreparedTransclusion::FixedSection {
-                order: *next_order,
-                slot,
-                content: Some(reference.to_string()),
-                report: ComposeReport::new(),
-            });
-            *next_order += 1;
-            return Ok(());
-        }
-
-        let kind = if transclusion::is_url_like(reference) {
-            transclusion::DirectiveKind::Url
-        } else {
-            transclusion::DirectiveKind::File
+        let file_ref = match transclusion::classify_frontmatter_reference(reference) {
+            transclusion::FrontmatterReference::Inline => {
+                prepared.push(PreparedTransclusion::FixedSection {
+                    order: *next_order,
+                    slot,
+                    content: Some(reference.to_string()),
+                    report: ComposeReport::new(),
+                });
+                *next_order += 1;
+                return Ok(());
+            }
+            transclusion::FrontmatterReference::Parsed(file_ref) => file_ref,
+            transclusion::FrontmatterReference::ParseError(error) => {
+                return Err(transclusion::TransclusionError::from(error).into());
+            }
         };
+
         let ignore_invalid = self.resolve_ignore_invalid(options);
         let transclusion_opts = options.transclusion_options();
 
-        let resolved = match transclusion::resolve_target(
-            kind,
-            reference,
+        let resolved = match transclusion::resolve_parsed_target(
+            transclusion::DirectiveKind::File,
+            &file_ref,
             &transclusion_opts,
             &options.source,
             0,
@@ -797,6 +929,7 @@ impl<'a> TransclusionEngine<'a> {
         &self,
         item: PreparedTransclusion,
         state: &EffectiveState,
+        state_identity: cache::hashing::PhaseStateIdentity,
         options: &ComposeOptions,
         runtime_mutex: &std::sync::Mutex<&mut shell_expansion::types::PipelineRuntime>,
     ) -> MarkdownResult<ResolvedTransclusion> {
@@ -842,6 +975,7 @@ impl<'a> TransclusionEngine<'a> {
                     insertion_context,
                     &directive_options,
                     state,
+                    state_identity,
                     options,
                     &mut child_runtime,
                     &mut child_report,
@@ -976,8 +1110,7 @@ impl<'a> TransclusionEngine<'a> {
                 // too. Mirrors the local-file path; a miss falls back to None.
                 child_options.preflight_graph = options
                     .preflight_graph()
-                    .and_then(|graph| graph.child_for_url(&url).cloned())
-                    .map(std::sync::Arc::new);
+                    .and_then(|graph| graph.child_for_url(&url).cloned());
 
                 let child_report = child
                     .run_compose_pipeline_internal(child_options, &mut child_runtime)?;
@@ -991,8 +1124,7 @@ impl<'a> TransclusionEngine<'a> {
                 merged_report.transclusions_applied += 1;
 
                 if let Some((offset, line)) = insertion_context
-                    && let Some(parent_level) =
-                        transclusion::find_preceding_heading_level(&self.markdown.content, offset)
+                    && let Some(parent_level) = self.preceding_heading_level(offset)
                 {
                     let target_level =
                         HeadingLevel::new((parent_level.as_u8() + 1).min(6))
@@ -1293,6 +1425,7 @@ impl<'a> TransclusionEngine<'a> {
         insertion_context: Option<(usize, usize)>,
         directive_options: &transclusion::BlockOptions,
         state: &EffectiveState,
+        state_identity: cache::hashing::PhaseStateIdentity,
         options: &ComposeOptions,
         runtime: &mut shell_expansion::types::PipelineRuntime,
         report: &mut ComposeReport,
@@ -1306,10 +1439,12 @@ impl<'a> TransclusionEngine<'a> {
             cache::hashing::options_hash(options),
             overlay_hash,
         );
+        // 35.1: the state and context hashes are phase-wide (identical for every
+        // directive), captured once by the caller and threaded in here.
         let persistent_ctx = cache::PersistentContext {
             source_id: cache::hashing::source_id_hash(&cache::compose_cache_key_for_path(path)),
-            state_hash: cache::hashing::effective_state_hash(state),
-            context_hash: cache::hashing::context_hash(state.context()),
+            state_hash: state_identity.state_hash,
+            context_hash: state_identity.context_hash,
             options_hash,
         };
         let cache_key = format!(
@@ -1344,13 +1479,14 @@ impl<'a> TransclusionEngine<'a> {
             &cache_key,
             Some(&persistent_ctx),
             options.cache_freshness_mode,
+            options.persistent_cache_eligible(),
             || {
                 let mut child_options = options
                     .clone()
                     .with_replace_parent_wins(replace_parent_wins)
                     .with_one_off_replace(one_off.clone());
                 child_options.external_state = Some(inherited.clone());
-                child_options.source = ComposeSource::File(path_buf.clone());
+                child_options = child_options.with_accepted_source_file(path_buf.clone());
                 // Recursive graph reuse: hand the child its OWN preflight
                 // sub-node (whose edges point at grandchildren), so the child's
                 // transclusion stage reuses grandchild target resolution too.
@@ -1360,8 +1496,7 @@ impl<'a> TransclusionEngine<'a> {
                 // child was not in the preflight walk) falls back to None.
                 child_options.preflight_graph = options
                     .preflight_graph()
-                    .and_then(|graph| graph.child_for_source(&path_buf).cloned())
-                    .map(std::sync::Arc::new);
+                    .and_then(|graph| graph.child_for_source(&path_buf).cloned());
 
                 let mut compose_runtime = runtime.clone_for_child();
                 let mut child = compose_runtime.load_markdown(path)?;
@@ -1409,8 +1544,7 @@ impl<'a> TransclusionEngine<'a> {
         }
 
         if let Some((offset, line)) = insertion_context
-            && let Some(parent_level) =
-                transclusion::find_preceding_heading_level(&self.markdown.content, offset)
+            && let Some(parent_level) = self.preceding_heading_level(offset)
         {
             let target_level =
                 HeadingLevel::new((parent_level.as_u8() + 1).min(6))
@@ -1613,5 +1747,346 @@ mod tests {
         assert!(new_content.contains("###### Section"));
         assert!(new_content.contains("**Deep**"));
         assert_eq!(warnings.len(), 1);
+    }
+
+    /// Finding 35.2 regression coverage.
+    ///
+    /// The optimization replaced a per-heading whole-document rebuild and a
+    /// per-heading `content[..start]` rescan with one forward output pass and one
+    /// newline-offset table. Both are pure performance changes, so the contract
+    /// is exact equality with the pre-change algorithm — proven differentially
+    /// against an oracle rather than by re-asserting hand-picked substrings.
+    mod finding_35_2 {
+        use super::*;
+
+        /// Byte-for-byte reimplementation of the pre-optimization
+        /// `relevel_with_overflow`: per-heading line numbers via
+        /// `content[..start].lines().count() + 1`, replacements applied
+        /// descending with a full-document rebuild per heading, and warnings
+        /// pushed in that descending order.
+        fn naive_relevel(content: &str, target: HeadingLevel) -> (String, Vec<ComposeWarning>) {
+            #[derive(Clone)]
+            enum Replacement {
+                Prefix {
+                    start: usize,
+                    old_level: HeadingLevel,
+                    new_level: HeadingLevel,
+                },
+                Overflow {
+                    start: usize,
+                    end: usize,
+                    title: String,
+                    line: usize,
+                    new_level_raw: u8,
+                },
+            }
+
+            let headings = naive_extract_headings(content);
+            if headings.is_empty() {
+                return (content.to_string(), Vec::new());
+            }
+
+            let root = headings[0].level;
+            let adjustment = target.as_u8() as i8 - root.as_u8() as i8;
+            if adjustment == 0 {
+                return (content.to_string(), Vec::new());
+            }
+
+            let mut replacements = Vec::new();
+            let mut warnings = Vec::new();
+
+            for heading in &headings {
+                let new_level_raw = heading.level.as_u8() as i8 + adjustment;
+                if (1..=6).contains(&new_level_raw) {
+                    if let Some(level) = HeadingLevel::new(new_level_raw as u8) {
+                        replacements.push(Replacement::Prefix {
+                            start: heading.start,
+                            old_level: heading.level,
+                            new_level: level,
+                        });
+                    }
+                } else {
+                    replacements.push(Replacement::Overflow {
+                        start: heading.start,
+                        end: heading.end,
+                        title: heading.title.clone(),
+                        line: heading.line,
+                        new_level_raw: new_level_raw.max(7) as u8,
+                    });
+                }
+            }
+
+            replacements.sort_by(|left, right| {
+                let left_start = match left {
+                    Replacement::Prefix { start, .. } | Replacement::Overflow { start, .. } => {
+                        *start
+                    }
+                };
+                let right_start = match right {
+                    Replacement::Prefix { start, .. } | Replacement::Overflow { start, .. } => {
+                        *start
+                    }
+                };
+                right_start.cmp(&left_start)
+            });
+
+            let mut result = content.to_string();
+
+            for replacement in replacements {
+                match replacement {
+                    Replacement::Prefix {
+                        start,
+                        old_level,
+                        new_level,
+                    } => {
+                        let prefix_end = start + old_level.hash_count();
+                        let replacement = "#".repeat(new_level.hash_count());
+                        result =
+                            format!("{}{}{}", &result[..start], replacement, &result[prefix_end..]);
+                    }
+                    Replacement::Overflow {
+                        start,
+                        end,
+                        title,
+                        line,
+                        new_level_raw,
+                    } => {
+                        let bold_block = format!("\n\n**{}**\n\n", title.trim());
+                        result = format!("{}{}{}", &result[..start], bold_block, &result[end..]);
+                        warnings.push(
+                            ComposeWarning::new(
+                                "transclusion",
+                                format!(
+                                    "Heading overflow at line {line}: converted to bold text (would become H{new_level_raw})"
+                                ),
+                            )
+                            .at_line(line),
+                        );
+                    }
+                }
+            }
+
+            (result, warnings)
+        }
+
+        /// Pre-optimization heading extraction: the line number is a fresh
+        /// `lines().count()` over the growing prefix.
+        fn naive_extract_headings(content: &str) -> Vec<HeadingInfo> {
+            let mut headings = Vec::new();
+            let mut current: Option<(HeadingLevel, String, usize)> = None;
+
+            for (event, range) in Parser::new(content).into_offset_iter() {
+                match event {
+                    Event::Start(Tag::Heading { level, .. }) => {
+                        current =
+                            Some((pulldown_to_heading_level(level), String::new(), range.start));
+                    }
+                    Event::Text(text) | Event::Code(text) => {
+                        if let Some((_, title, _)) = current.as_mut() {
+                            title.push_str(&text);
+                        }
+                    }
+                    Event::End(TagEnd::Heading(_)) => {
+                        if let Some((level, title, start)) = current.take() {
+                            let line = content[..start].lines().count() + 1;
+                            headings.push(HeadingInfo {
+                                level,
+                                title,
+                                line,
+                                start,
+                                end: range.end,
+                            });
+                        }
+                    }
+                    _ => {}
+                }
+            }
+
+            headings
+        }
+
+        fn all_levels() -> [HeadingLevel; 6] {
+            [
+                HeadingLevel::H1,
+                HeadingLevel::H2,
+                HeadingLevel::H3,
+                HeadingLevel::H4,
+                HeadingLevel::H5,
+                HeadingLevel::H6,
+            ]
+        }
+
+        fn assert_matches_oracle(label: &str, content: &str) {
+            for target in all_levels() {
+                let (actual_text, actual_warnings) = relevel_with_overflow(content, target);
+                let (expected_text, expected_warnings) = naive_relevel(content, target);
+
+                assert_eq!(
+                    actual_text, expected_text,
+                    "{label}: releveled text differs from the pre-optimization output at target {target:?}"
+                );
+                assert_eq!(
+                    actual_warnings, expected_warnings,
+                    "{label}: overflow warnings (content, line, and order) differ at target {target:?}"
+                );
+            }
+        }
+
+        /// Content shapes that exercise line counting, offsets, and the
+        /// replacement branches. Each is checked at all six target levels, so
+        /// every case covers the prefix branch, the overflow branch, and the
+        /// zero-adjustment fast path.
+        fn cases() -> Vec<(&'static str, String)> {
+            vec![
+                ("single h1", "# Only\n".to_string()),
+                ("no trailing newline", "# Only".to_string()),
+                ("no headings", "Just prose.\n\nMore prose.\n".to_string()),
+                ("empty document", String::new()),
+                (
+                    "descending levels",
+                    "# Root\n\nText\n\n## Two\n\n### Three\n\n#### Four\n\n##### Five\n\n###### Six\n"
+                        .to_string(),
+                ),
+                (
+                    "deep root forces overflow",
+                    "##### Deep\n\n###### Deeper\n\ntail\n".to_string(),
+                ),
+                (
+                    "consecutive headings",
+                    "# A\n## B\n### C\n".to_string(),
+                ),
+                (
+                    "blank line runs",
+                    "# A\n\n\n\n## B\n\n\n\n### C\n".to_string(),
+                ),
+                (
+                    "crlf newlines",
+                    "# A\r\n\r\n## B\r\n\r\ntext\r\n\r\n### C\r\n".to_string(),
+                ),
+                (
+                    "multibyte prose before headings",
+                    format!("{}\n\n# Ünïcödé Rüt\n\n## Naïve — Sección\n\ntail\n", "é".repeat(200)),
+                ),
+                (
+                    "heading with inline code",
+                    "# Root\n\n## Uses `code` here\n".to_string(),
+                ),
+                (
+                    "heading inside blockquote",
+                    "# Root\n\n> ## Quoted\n\ntail\n".to_string(),
+                ),
+                (
+                    "fenced block containing hashes",
+                    "# Root\n\n```md\n# Not a heading\n```\n\n## Real\n".to_string(),
+                ),
+                (
+                    "setext headings",
+                    "Root\n====\n\nSub\n---\n\ntail\n".to_string(),
+                ),
+                (
+                    "whitespace-padded titles",
+                    "#   Padded Root   \n\n##\tTabbed\n".to_string(),
+                ),
+                (
+                    "many headings",
+                    (0..60)
+                        .map(|i| format!("## Section {i}\n\nProse for section {i}.\n\n"))
+                        .collect::<String>(),
+                ),
+            ]
+        }
+
+        #[test]
+        fn relevel_output_matches_the_pre_optimization_algorithm() {
+            for (label, content) in cases() {
+                assert_matches_oracle(label, &content);
+            }
+        }
+
+        /// The committed benchmark fixtures are the exact bytes the Phase-10
+        /// measurement runs against, so they are also the passive corpus for the
+        /// equivalence claim.
+        #[test]
+        fn relevel_output_matches_the_oracle_across_shipped_fixtures() {
+            let dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                .join("../features/2026-07-15-performance-followup/benchmarks/fixtures");
+
+            let mut checked = 0;
+            for entry in std::fs::read_dir(&dir).expect("fixture directory readable") {
+                let path = entry.expect("readable dir entry").path();
+                if path.extension().and_then(|e| e.to_str()) != Some("md") {
+                    continue;
+                }
+                let content = std::fs::read_to_string(&path).expect("fixture readable");
+                assert_matches_oracle(&path.display().to_string(), &content);
+                checked += 1;
+            }
+
+            assert!(
+                checked >= 13,
+                "expected the shipped fixture corpus, found only {checked} markdown fixtures"
+            );
+        }
+
+        /// Pins the observed warning order explicitly. The forward output pass
+        /// collects overflow warnings ascending, so the reverse-document-order
+        /// contract of the descending rebuild has to be restored deliberately —
+        /// an assertion on `len()` alone would not catch losing it.
+        #[test]
+        fn overflow_warnings_stay_in_reverse_document_order() {
+            let content = "### First\n\n#### Second\n\n##### Third\n";
+            let (_, warnings) = relevel_with_overflow(content, HeadingLevel::H6);
+
+            let lines: Vec<Option<usize>> = warnings.iter().map(|w| w.line_number).collect();
+            assert_eq!(
+                lines,
+                vec![Some(5), Some(3)],
+                "overflow warnings must stay in reverse document order"
+            );
+            assert!(
+                warnings[0].message.contains("would become H8"),
+                "unexpected first warning: {}",
+                warnings[0].message
+            );
+            assert!(
+                warnings[1].message.contains("would become H7"),
+                "unexpected second warning: {}",
+                warnings[1].message
+            );
+        }
+
+        /// The overflow warning's line must be the heading's own source line, not
+        /// a position derived from the rewritten output.
+        #[test]
+        fn overflow_warning_lines_track_source_lines_after_multibyte_prose() {
+            let prose = "é".repeat(300);
+            let content = format!("### Root\n\n{prose}\n\n#### Overflowing\n");
+            let (_, warnings) = relevel_with_overflow(&content, HeadingLevel::H6);
+
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(
+                warnings[0].line_number,
+                Some(5),
+                "line must count newlines, not bytes or chars"
+            );
+        }
+
+        #[test]
+        fn zero_adjustment_returns_content_verbatim() {
+            let content = "## Root\n\n### Child\n\ntail\n";
+            let (text, warnings) = relevel_with_overflow(content, HeadingLevel::H2);
+
+            assert_eq!(text, content);
+            assert!(warnings.is_empty());
+        }
+
+        #[test]
+        fn heading_free_content_returns_verbatim() {
+            let content = "Just prose.\n\nNo headings at all.\n";
+            let (text, warnings) = relevel_with_overflow(content, HeadingLevel::H3);
+
+            assert_eq!(text, content);
+            assert!(warnings.is_empty());
+        }
     }
 }

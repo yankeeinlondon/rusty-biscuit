@@ -72,7 +72,7 @@ pub struct ListArgs {
 }
 
 impl Run for ListArgs {
-    fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
+    fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         let items: Vec<String> = if self.example {
             let source = if self.ordered {
                 ORDERED_LIST_EXAMPLE
@@ -109,14 +109,14 @@ impl Run for ListArgs {
         if self.ordered {
             let mut list = OrderedList::from(prose_items);
             apply_layout(&mut list, &self.layout);
-            self.dispatch_ordered_render(&list)?;
+            self.dispatch_ordered_render(&list, ctx.plain)?;
         } else {
             let mut list = UnorderedList::from(prose_items).with_bullet(&self.bullet);
             if self.no_hanging_indent {
                 list = list.without_hanging_indent();
             }
             apply_layout(&mut list, &self.layout);
-            self.dispatch_unordered_render(&list)?;
+            self.dispatch_unordered_render(&list, ctx.plain)?;
         }
 
         if self.example {
@@ -138,7 +138,7 @@ impl ListArgs {
     /// [`OrderedList`] implements [`TerminalRenderable`],
     /// [`MarkdownRenderable`], and [`BrowserRenderable`] via the canonical
     /// render tree, so cross-target rendering is uniform.
-    fn dispatch_ordered_render(&self, list: &OrderedList) -> color_eyre::Result<()> {
+    fn dispatch_ordered_render(&self, list: &OrderedList, plain: bool) -> color_eyre::Result<()> {
         if self.html {
             println!(
                 "{}",
@@ -160,7 +160,7 @@ impl ListArgs {
             );
             return Ok(());
         }
-        self.render_terminal(list)
+        self.render_terminal(list, plain)
     }
 
     /// Dispatches an unordered-list render to the chosen target.
@@ -173,7 +173,11 @@ impl ListArgs {
     /// A custom `--bullet` is honored on the terminal target only; the
     /// Markdown and Browser tree renderers emit standard `- ` markers and
     /// `<ul>`/`<li>` respectively regardless of the configured bullet.
-    fn dispatch_unordered_render(&self, list: &UnorderedList) -> color_eyre::Result<()> {
+    fn dispatch_unordered_render(
+        &self,
+        list: &UnorderedList,
+        plain: bool,
+    ) -> color_eyre::Result<()> {
         if self.html {
             println!(
                 "{}",
@@ -195,11 +199,11 @@ impl ListArgs {
             );
             return Ok(());
         }
-        self.render_terminal(list)
+        self.render_terminal(list, plain)
     }
 
-    fn render_terminal<L: TerminalRenderable>(&self, list: &L) -> color_eyre::Result<()> {
-        let term = detect_terminal_honoring_force_color();
+    fn render_terminal<L: TerminalRenderable>(&self, list: &L, plain: bool) -> color_eyre::Result<()> {
+        let term = terminal_for_render(plain);
         let output = list.render(&term);
         emit_vertical_margins(&self.layout, || {
             println!("{}", output);

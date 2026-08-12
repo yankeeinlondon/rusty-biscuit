@@ -23,10 +23,10 @@
 //! - **inverse inline code** — the `` `||` `` mode header and alias-row
 //!   descriptions render with the inverse SGR (`\x1b[7m`), never literal
 //!   backticks/markup.
-//! - **unordered list** — operator lists render with the `- ` marker and a
-//!   hanging indent on wrapped continuation lines, surrounded by exactly one
-//!   blank line on each side, and reserve a 1ch right margin so list lines
-//!   never reach the full pane width.
+//! - **unordered list** — the modes consequence list renders with the `- `
+//!   marker and a hanging indent on wrapped continuation lines, surrounded by
+//!   exactly one blank line on each side, and reserves a 1ch right margin so
+//!   list lines never reach the full pane width.
 //!
 //! ## Per-report narrow widths
 //!
@@ -67,7 +67,10 @@ use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
-use test_toolkit::{require_level, Level};
+use test_toolkit::{Backend, Level, require_level};
+
+mod common;
+use common::clear_no_color;
 
 /// Captures a `claudine context <args>` run inside a freshly spawned tmux
 /// session of `cols` × `rows` cells, then tears the session down.
@@ -84,7 +87,10 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
         std::process::id(),
         SEQ.fetch_add(1, Ordering::Relaxed)
     );
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
+    // POSIX shell (bash/sh), not the developer's `$SHELL`: a custom login
+    // prompt (e.g. Starship's `❯`) never ends in `$`/`#`/`%`, so
+    // `wait_for_prompt` would never match and burn its full timeout twice.
+    let shell = biscuit_test_harness::detect_shell();
     let spawned = std::process::Command::new("tmux")
         .args([
             "new-session",
@@ -105,14 +111,21 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+    // This fixture asserts a *colored* surface under `FORCE_COLOR=1`, which an
+    // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
+    clear_no_color(&mut harness);
 
-    let claudine = cargo_bin!("claudine").display().to_string();
+    let claudine = cargo_bin("claudine").display().to_string();
     let cols_s = cols.to_string();
-    let cmd = format!("{claudine} context {}", args.join(" "));
-    let send = harness.send_command_with_env(
-        &cmd,
-        &[("FORCE_COLOR", "1"), ("COLUMNS", cols_s.as_str())],
+    // The environment is bound through `env` rather than the harness' inline
+    // `KEY='v' cmd` prefix so the line can open with the `REPORT_SENTINEL`
+    // print — see `report_plain_slice` for why the sentinel has to precede
+    // claudine's first byte of output.
+    let cmd = format!(
+        "printf '{REPORT_SENTINEL}\\n'; env FORCE_COLOR=1 COLUMNS={cols_s} {claudine} context {}",
+        args.join(" ")
     );
+    let send = harness.send_command_with_env(&cmd, &[]);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
     std::thread::sleep(Duration::from_millis(250));
     let frame = harness.capture();
@@ -122,11 +135,38 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
     frame.expect("capture failed")
 }
 
-/// Maximum visible width across all rendered rows (trailing pad stripped, since
-/// tmux pads its capture to the pane width).
+/// Printed by the shell immediately before claudine runs, so everything after
+/// it in the captured pane is claudine's own output.
+const REPORT_SENTINEL: &str = "__CTX_L2_REPORT_BEGIN__";
+
+/// The captured pane text with the leading shell noise removed.
+///
+/// The pane also holds the shell's echo of the typed command, which carries the
+/// absolute binary path and readily exceeds the report's width envelope. That
+/// echo is a *single logical line*, so the terminal wraps it into as many
+/// physical rows as it needs — and every wrapped row but the last is exactly
+/// pane-width. Filtering rows by a substring of the command cannot remove them:
+/// the wrap lands wherever the prompt length puts it, frequently mid-token, so
+/// the marker is split across two rows and matches neither. That is a false
+/// "report is too wide" of exactly `cols` cells, and it is why the command is
+/// preceded by `REPORT_SENTINEL`. Anchoring on the *last* occurrence picks the
+/// printed sentinel over the echoed one.
+///
+/// Falls back to the whole frame when the sentinel is absent, which happens when
+/// an over-tall report has scrolled it off the pane — in which case the echo has
+/// scrolled off with it and there is no shell noise left to drop.
+fn report_plain_slice(frame: &CapturedFrame) -> &str {
+    let Some(idx) = frame.plain.rfind(REPORT_SENTINEL) else {
+        return &frame.plain;
+    };
+    let rest = &frame.plain[idx..];
+    rest.find('\n').map_or(rest, |nl| &rest[nl + 1..])
+}
+
+/// Maximum visible width across the rendered report rows (trailing pad
+/// stripped, since tmux pads its capture to the pane width).
 fn max_visible_width(frame: &CapturedFrame) -> usize {
-    frame
-        .plain
+    report_plain_slice(frame)
         .lines()
         .map(|l| visible_width(l.trim_end()) as usize)
         .max()
@@ -176,6 +216,14 @@ fn assert_fills_to_140_cap_with_right_margin(frame: &CapturedFrame) {
     );
 }
 
+fn context_report_plain(frame: &CapturedFrame) -> &str {
+    frame
+        .plain
+        .find("Darkmatter Expression Engine")
+        .map(|idx| &frame.plain[idx..])
+        .unwrap_or(&frame.plain)
+}
+
 /// Asserts the unordered list bracketed by the `heading` line and the
 /// `next_heading` line is surrounded by exactly one blank line on each side.
 ///
@@ -183,49 +231,67 @@ fn assert_fills_to_140_cap_with_right_margin(frame: &CapturedFrame) {
 /// list. Earlier iterations double-spaced these lists because the caller emitted
 /// its own `log::data("")` on top of the blank line the list helper already
 /// owns. Counting blanks from the bytes the emulator actually displayed guards
-/// that contract: the line directly after `heading` must be blank and the next
-/// must open the list (`- `), and the line directly before `next_heading` must
-/// be blank while the line above it still carries list content.
-fn assert_list_single_blank_lines(frame: &CapturedFrame, heading: &str, next_heading: &str) {
-    let lines: Vec<&str> = frame.plain.lines().map(|l| l.trim_end()).collect();
+/// that contract: the list must have exactly one blank line immediately before
+/// its first marker and exactly one blank line immediately after its last
+/// content line.
+///
+/// The operator sections that once rendered as lists are now descriptor tables,
+/// so the only unordered list left in the `--expressions` report is the modes
+/// consequence list that closes the `Interpolation vs. Condition Mode` section
+/// and precedes `Null Propagation Summary`. That list does not open directly
+/// under its own heading (an intro paragraph and the modes table sit between),
+/// so this searches forward from `heading` for the first `- ` marker rather
+/// than assuming it sits on the line directly below.
+fn assert_list_single_blank_lines(plain: &str, heading: &str, next_heading: &str) {
+    let lines: Vec<&str> = plain.lines().map(|l| l.trim_end()).collect();
     let find = |label: &str| {
         lines
             .iter()
             .position(|l| l.trim() == label)
-            .unwrap_or_else(|| panic!("heading `{label}` not found.\nplain:\n{}", frame.plain))
+            .unwrap_or_else(|| panic!("heading `{label}` not found.\nplain:\n{plain}"))
     };
     let h = find(heading);
     let n = find(next_heading);
+    let list_start = lines[h + 1..n]
+        .iter()
+        .position(|l| l.trim_start().starts_with("- "))
+        .map(|offset| h + 1 + offset)
+        .unwrap_or_else(|| {
+            panic!("expected a list between `{heading}` and `{next_heading}`.\nplain:\n{plain}")
+        });
+    let list_end = lines[list_start + 1..n]
+        .iter()
+        .position(|l| l.is_empty())
+        .map(|offset| list_start + 1 + offset)
+        .unwrap_or(n);
     assert!(
-        n >= h + 4,
+        list_end > list_start,
         "expected a list between `{heading}` and `{next_heading}`.\nplain:\n{}",
-        frame.plain,
+        plain,
     );
 
     // Exactly one blank line before the list.
     assert!(
-        lines[h + 1].is_empty(),
-        "expected one blank line directly after `{heading}`.\nplain:\n{}",
-        frame.plain,
+        list_start > 0 && lines[list_start - 1].is_empty(),
+        "expected one blank line directly before the `{heading}` list.\nplain:\n{}",
+        plain,
     );
     assert!(
-        lines[h + 2].trim_start().starts_with("- "),
-        "expected the list to open one line below the blank (a double blank before \
-         the `{heading}` list).\nplain:\n{}",
-        frame.plain,
+        list_start == 1 || !lines[list_start - 2].is_empty(),
+        "expected exactly one blank before the `{heading}` list.\nplain:\n{}",
+        plain,
     );
 
     // Exactly one blank line after the list.
     assert!(
-        lines[n - 1].is_empty(),
-        "expected one blank line directly before `{next_heading}`.\nplain:\n{}",
-        frame.plain,
+        lines[list_end].is_empty(),
+        "expected one blank line directly after the `{heading}` list.\nplain:\n{}",
+        plain,
     );
     assert!(
-        !lines[n - 2].is_empty(),
-        "expected list content directly above the trailing blank (a double blank \
-         after the list preceding `{next_heading}`).\nplain:\n{}",
-        frame.plain,
+        list_end + 1 >= lines.len() || !lines[list_end + 1].is_empty(),
+        "expected exactly one blank after the list preceding `{next_heading}`.\nplain:\n{}",
+        plain,
     );
 }
 
@@ -308,7 +374,7 @@ fn has_wrapped_continuation(frame: &CapturedFrame) -> bool {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_default_styled_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&[], 120, 320);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -348,7 +414,7 @@ fn level2_context_default_styled_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_default_narrow_preserves_type_and_wraps_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&[], 78, 400);
 
     for header in ["Property", "Type", "Description"] {
@@ -380,7 +446,7 @@ fn level2_context_default_narrow_preserves_type_and_wraps_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_default_at_140_fills_cap_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&[], 140, 320);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -398,7 +464,7 @@ fn level2_context_default_at_140_fills_cap_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_default_caps_at_140_in_wide_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&[], 160, 320);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -421,7 +487,7 @@ fn level2_context_default_caps_at_140_in_wide_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_values_narrow_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--values"], 120, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -454,7 +520,7 @@ fn level2_context_values_narrow_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_values_at_140_fills_cap_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--values"], 140, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -477,7 +543,7 @@ fn level2_context_values_at_140_fills_cap_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_values_caps_at_140_in_wide_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--values"], 160, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -494,19 +560,26 @@ fn level2_context_values_caps_at_140_in_wide_tmux() {
 // ---------------------------------------------------------------------------
 
 /// `--expressions` narrow (`COLUMNS=100`, below its ~114 natural width so
-/// wrapping is active): the `` `||` `` mode header renders inverse, operator
-/// lists use the `- ` marker with a hanging indent, each list is surrounded by
-/// exactly one blank line, and rows fit the pane.
+/// wrapping is active): the `` `||` `` mode header renders inverse, the modes
+/// consequence list uses the `- ` marker with a hanging indent and is surrounded
+/// by exactly one blank line, and rows fit the pane.
+///
+/// At 100 columns the `Example` column is kept (100 >= the 70-cell threshold),
+/// so the function catalog wraps the report to ~533 lines. The `||` mode header
+/// and the modes consequence list anchor assertions past the descriptor-table
+/// operator sections, so the pane must hold the whole report — `capture-pane`
+/// has no scrollback. 700 rows fit it with headroom.
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
-    let frame = capture_context(&["--expressions"], 100, 320);
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    let frame = capture_context(&["--expressions"], 100, 700);
+    let report_plain = context_report_plain(&frame);
 
     assert!(
-        !frame.plain.contains("`||`"),
+        !report_plain.contains("`||`"),
         "styled output must not show literal backticks around `||`.\nplain:\n{}",
-        frame.plain,
+        report_plain,
     );
     assert!(
         frame.raw.contains("\x1b[7m"),
@@ -514,15 +587,16 @@ fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
         frame.raw,
     );
 
-    // Unordered lists use the `- ` marker (e.g. the comparison-operator list).
+    // The modes consequence list uses the `- ` marker.
     let marker_line = frame
         .plain
         .lines()
+        .skip_while(|l| !l.contains("Darkmatter Expression Engine"))
         .find(|l| l.trim_start().starts_with("- "))
-        .unwrap_or_else(|| panic!("expected a `- ` list marker.\nplain:\n{}", frame.plain));
+        .unwrap_or_else(|| panic!("expected a `- ` list marker.\nplain:\n{}", report_plain));
     let bullet_indent = marker_line.len() - marker_line.trim_start().len();
     // A wrapped continuation line of a list item is indented past the bullet.
-    let has_hanging_indent = frame.plain.lines().any(|l| {
+    let has_hanging_indent = report_plain.lines().any(|l| {
         let trimmed = l.trim();
         let indent = l.len() - l.trim_start().len();
         !trimmed.is_empty()
@@ -533,13 +607,19 @@ fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
     assert!(
         has_hanging_indent,
         "wrapped list items must hang-indent past the `- ` bullet.\nplain:\n{}",
-        frame.plain,
+        report_plain,
     );
 
-    // The comparison-operator list is bracketed by the `Comparison Operators`
-    // and `Arithmetic Operators` headings and must carry exactly one blank line
-    // on each side (spec: one blank before and after every unordered list).
-    assert_list_single_blank_lines(&frame, "Comparison Operators", "Arithmetic Operators");
+    // The modes consequence list (the only unordered list in this report — the
+    // operator sections are now descriptor tables) closes the
+    // `Interpolation vs. Condition Mode` section and precedes
+    // `Null Propagation Summary`, and must carry exactly one blank line on each
+    // side (spec: one blank before and after every unordered list).
+    assert_list_single_blank_lines(
+        report_plain,
+        "Interpolation vs. Condition Mode",
+        "Null Propagation Summary",
+    );
 
     assert!(
         max_visible_width(&frame) <= 100,
@@ -552,7 +632,7 @@ fn level2_context_expressions_narrow_inline_code_and_list_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_expressions_at_140_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--expressions"], 140, 320);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -573,7 +653,7 @@ fn level2_context_expressions_at_140_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_expressions_caps_at_140_in_wide_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--expressions"], 160, 320);
 
     assert!(
@@ -599,8 +679,13 @@ fn level2_context_expressions_caps_at_140_in_wide_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_expressions_list_reserves_right_margin_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
-    let frame = capture_context(&["--expressions"], 65, 320);
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
+    // At 65 columns the `--expressions` report wraps to ~772 lines. The only
+    // `- ` list is the modes consequence list, the 7th of 9 sections; the
+    // Functions catalog below it must not push that list above the captured
+    // pane (`capture-pane` has no scrollback). 820 rows fit the full report
+    // with headroom for the prompt echo and footer.
+    let frame = capture_context(&["--expressions"], 65, 820);
 
     assert_list_lines_reserve_right_margin(&frame, 65);
 }
@@ -615,7 +700,7 @@ fn level2_context_expressions_list_reserves_right_margin_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_side_effects_narrow_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--side-effects"], 128, 200);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -643,7 +728,7 @@ fn level2_context_side_effects_narrow_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_side_effects_at_140_fills_cap_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--side-effects"], 140, 200);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -662,7 +747,7 @@ fn level2_context_side_effects_at_140_fills_cap_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_side_effects_caps_at_140_in_wide_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--side-effects"], 160, 200);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -679,7 +764,7 @@ fn level2_context_side_effects_caps_at_140_in_wide_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_side_effects_list_reserves_right_margin_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--side-effects"], 60, 200);
 
     assert_list_lines_reserve_right_margin(&frame, 60);
@@ -730,7 +815,7 @@ fn assert_headers_present(frame: &CapturedFrame, headers: &[&str]) {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_default_preserves_columns_at_min_width_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&[], MIN_SUPPORTED_WIDTH, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -762,7 +847,7 @@ fn level2_context_default_preserves_columns_at_min_width_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_values_preserves_columns_at_min_width_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--values"], MIN_SUPPORTED_WIDTH, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -788,7 +873,7 @@ fn level2_context_values_preserves_columns_at_min_width_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_expressions_constrained_50_wraps_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--expressions"], 50, 400);
 
     assert_box_glyphs_and_left_margin(&frame);
@@ -812,7 +897,7 @@ fn level2_context_expressions_constrained_50_wraps_in_tmux() {
 #[test]
 #[serial(level2_terminal)]
 fn level2_context_side_effects_preserves_columns_at_min_width_in_tmux() {
-    require_level!(Level::L2, TmuxHarness::available(), "tmux");
+    require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
     let frame = capture_context(&["--side-effects"], MIN_SUPPORTED_WIDTH, 200);
 
     assert_box_glyphs_and_left_margin(&frame);

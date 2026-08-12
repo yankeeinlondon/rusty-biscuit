@@ -1,0 +1,16 @@
+{
+  "directory": "/workspace/project",
+  "payload": {
+    "id": "evt_scrubbed_retry",
+    "type": "session.next.retried",
+    "properties": {
+      "timestamp": "2026-07-05T12:00:10.000Z",
+      "sessionID": "ses_scrubbed",
+      "attempt": 2,
+      "error": {
+        "message": "Rate limited",
+        "isRetryable": true
+      }
+    }
+  }
+}

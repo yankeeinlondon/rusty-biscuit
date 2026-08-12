@@ -87,7 +87,7 @@ pub struct ComposeArgs {
 }
 
 impl Run for ComposeArgs {
-    fn run(self, _ctx: &CliContext) -> color_eyre::Result<()> {
+    fn run(self, ctx: &CliContext) -> color_eyre::Result<()> {
         let example = self.example;
         let md = self.md;
         let md_plus = self.md_plus;
@@ -125,7 +125,7 @@ impl Run for ComposeArgs {
             return Ok(());
         }
 
-        let term = detect_terminal_honoring_force_color();
+        let term = terminal_for_render(ctx.plain);
         let output = compose.render(&term);
         let output = if std::env::var("NO_COLOR").is_ok() {
             strip_sgr_sequences(&output)

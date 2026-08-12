@@ -8,6 +8,8 @@
 
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
@@ -44,6 +46,7 @@ pub struct DiscoveryHandle {
     instance_fullname: String,
     discovery_rx: Option<mpsc::UnboundedReceiver<DiscoveredPeer>>,
     browse_task: Option<JoinHandle<()>>,
+    shutdown: Arc<AtomicBool>,
 }
 
 impl std::fmt::Debug for DiscoveryHandle {
@@ -71,6 +74,7 @@ impl DiscoveryHandle {
 
     /// Stop publishing and browsing. Safe to call multiple times.
     pub async fn shutdown(&mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
         let _ = self.daemon.unregister(&self.instance_fullname);
         let _ = self.daemon.stop_browse(SERVICE_TYPE);
         let _ = self.daemon.shutdown();
@@ -82,6 +86,7 @@ impl DiscoveryHandle {
 
 impl Drop for DiscoveryHandle {
     fn drop(&mut self) {
+        self.shutdown.store(true, Ordering::Relaxed);
         let _ = self.daemon.unregister(&self.instance_fullname);
         let _ = self.daemon.stop_browse(SERVICE_TYPE);
         let _ = self.daemon.shutdown();
@@ -126,37 +131,50 @@ pub fn start(
     let receiver = daemon.browse(SERVICE_TYPE)?;
     let (tx, rx) = mpsc::unbounded_channel();
     let self_fullname = instance_fullname.clone();
+    let shutdown = Arc::new(AtomicBool::new(false));
 
-    let browse_task = tokio::task::spawn_blocking(move || {
-        while let Ok(event) = receiver.recv() {
-            if let ServiceEvent::ServiceResolved(info) = event {
-                let fullname = info.get_fullname().to_string();
-                if fullname == self_fullname {
-                    continue;
-                }
-                let node_id = info
-                    .get_property_val_str(NODE_ID_TXT_KEY)
-                    .unwrap_or_default()
-                    .to_string();
-                let port = info.get_port();
-                for addr in info.get_addresses() {
-                    let sock = SocketAddr::new(*addr, port);
-                    let peer = DiscoveredPeer {
-                        node_id: node_id.clone(),
-                        socket_addr: sock,
-                    };
-                    if tx.send(peer).is_err() {
-                        return;
+    let browse_task = {
+        let shutdown = Arc::clone(&shutdown);
+        tokio::task::spawn_blocking(move || {
+            loop {
+                match receiver.recv_timeout(Duration::from_millis(500)) {
+                    Ok(ServiceEvent::ServiceResolved(info)) => {
+                        let fullname = info.get_fullname().to_string();
+                        if fullname == self_fullname {
+                            continue;
+                        }
+                        let node_id = info
+                            .get_property_val_str(NODE_ID_TXT_KEY)
+                            .unwrap_or_default()
+                            .to_string();
+                        let port = info.get_port();
+                        for addr in info.get_addresses() {
+                            let sock = SocketAddr::new(*addr, port);
+                            let peer = DiscoveredPeer {
+                                node_id: node_id.clone(),
+                                socket_addr: sock,
+                            };
+                            if tx.send(peer).is_err() {
+                                return;
+                            }
+                        }
+                    }
+                    Ok(_) => {}
+                    Err(_) => {
+                        if shutdown.load(Ordering::Relaxed) {
+                            return;
+                        }
                     }
                 }
             }
-        }
-    });
+        })
+    };
 
     Ok(DiscoveryHandle {
         daemon,
         instance_fullname,
         discovery_rx: Some(rx),
         browse_task: Some(browse_task),
+        shutdown,
     })
 }

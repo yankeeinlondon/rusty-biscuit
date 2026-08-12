@@ -1,4 +1,5 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 /// Error types for the Sniff library.
 ///
@@ -23,6 +24,30 @@ pub enum SniffError {
         /// The underlying backend error.
         #[source]
         source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
+
+    /// A request reused a previously failed observation.
+    ///
+    /// The original typed error remains available through the source chain.
+    /// Wrapping it in an [`Arc`] lets request-scoped owners retain one failure
+    /// and project it to multiple strict consumers without retrying the work.
+    #[error("{source}")]
+    RetainedObservation {
+        /// The original observation failure.
+        #[source]
+        source: Arc<SniffError>,
+    },
+
+    /// A committed-tip merge would require repository-defined executable behavior.
+    #[error(
+        "unsupported merge configuration '{setting}' applies to '{}'",
+        path.display()
+    )]
+    UnsupportedMergeConfiguration {
+        /// The Git setting that would require a command or unsupported normalization.
+        setting: String,
+        /// Repository-relative path to which the setting applies.
+        path: PathBuf,
     },
 
     /// The specified path is not a git repository.
@@ -67,6 +92,34 @@ pub enum SniffError {
     #[error("Language detection failed: {0}")]
     LanguageDetection(String),
 
+    /// An OS call made while discovering the current user's stable identity
+    /// failed.
+    ///
+    /// The `operation` tag names the OS API that failed (e.g.
+    /// "OpenProcessToken", "GetTokenInformation") and the underlying error is
+    /// boxed as a source so its concrete type survives in the cause chain.
+    /// Callers must not soften this into a username or a placeholder: a
+    /// process that cannot learn its own principal must not create per-user
+    /// private state.
+    #[error("user identity error during {operation}: {source}")]
+    UserIdentity {
+        /// The OS operation that failed.
+        operation: &'static str,
+        /// The underlying OS error.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync + 'static>,
+    },
+
+    /// The OS succeeded but returned something that is not a usable account
+    /// identifier (e.g. a malformed SID or an undersized token buffer).
+    #[error("invalid user identity from {operation}: {message}")]
+    InvalidUserIdentity {
+        /// The OS operation that produced the unusable value.
+        operation: &'static str,
+        /// What failed validation.
+        message: String,
+    },
+
     // ─────────────────────────────────────────────────────────────────────────
     // Remote provider errors (requires `remote` feature)
     // ─────────────────────────────────────────────────────────────────────────
@@ -98,6 +151,108 @@ pub enum SniffError {
     UnsupportedProvider {
         /// The remote URL that could not be resolved to a supported provider.
         url: String,
+    },
+
+    /// A requested configured remote does not exist.
+    #[error("remote `{name}` is not configured")]
+    RemoteNotConfigured {
+        /// Exact case-sensitive remote name requested by the caller.
+        name: String,
+    },
+
+    /// A configured remote has no usable fetch URL.
+    #[error("remote `{name}` has no usable URL")]
+    RemoteUrlMissing {
+        /// Remote whose URL could not be resolved.
+        name: String,
+    },
+
+    /// The remote host was rejected before network access.
+    #[error("remote host `{host}` is not allowed by network policy")]
+    RemotePolicyDenied {
+        /// Exact host rejected by the shared fetch policy.
+        host: String,
+    },
+
+    /// The requested observation cannot be performed for this transport/provider.
+    #[error("remote capability `{capability}` is unsupported for {target}")]
+    UnsupportedRemoteCapability {
+        /// Operation the caller requested.
+        capability: &'static str,
+        /// Transport or provider that cannot supply it.
+        target: String,
+    },
+
+    /// A provider family was identified, but its server version cannot supply
+    /// the requested endpoint contract.
+    #[error(
+        "{provider} API flavor {flavor} at server version {version} does not support {capability}; {requirement}"
+    )]
+    UnsupportedServerVersion {
+        /// Provider family selected for the query.
+        provider: String,
+        /// Concrete API flavor detected from the server response.
+        flavor: String,
+        /// Server-reported version, retained verbatim for diagnosis.
+        version: String,
+        /// Operation that cannot be performed.
+        capability: &'static str,
+        /// Minimum version or endpoint requirement that would satisfy it.
+        requirement: &'static str,
+    },
+
+    /// The remote endpoint could not be reached or decoded.
+    #[error("remote endpoint `{url}` is unreachable: {message}")]
+    RemoteUnreachable {
+        /// Sanitized endpoint URL without credentials.
+        url: String,
+        /// Focused transport or response error.
+        message: String,
+    },
+
+    /// The remote authenticated the request but denied the operation.
+    #[error("{provider} denied remote operation: {message}")]
+    RemoteForbidden {
+        /// Provider or transport that returned the denial.
+        provider: String,
+        /// Focused denial detail.
+        message: String,
+    },
+
+    /// A provider query is malformed before any request is issued.
+    #[error("invalid remote query field `{field}`: {message}")]
+    InvalidRemoteQuery {
+        /// Query field that failed validation.
+        field: &'static str,
+        /// Focused validation detail.
+        message: String,
+    },
+
+    /// A valid canonical filter cannot be honored exactly by the selected adapter.
+    #[error("remote filter `{field}` is unsupported by {provider}")]
+    UnsupportedRemoteFilter {
+        /// Canonical query field that is unavailable.
+        field: &'static str,
+        /// Provider and API flavor selected for the query.
+        provider: String,
+    },
+
+    /// A bounded-traversal cap was reached before the provider exhausted the
+    /// result set, so no complete result domain exists.
+    ///
+    /// Exact canonical filters and ordering are emulated locally over the whole
+    /// domain. A partial domain would silently answer the wrong question, so the
+    /// query fails instead of returning truncated or empty items.
+    #[error(
+        "remote query against {provider} reached the bounded `{bound}` limit of {limit} before the provider was exhausted; narrow the query so a complete result domain can be traversed"
+    )]
+    IncompleteRemoteDomain {
+        /// Provider and API flavor selected for the query.
+        provider: String,
+        /// Traversal bound that stopped the walk.
+        bound: &'static str,
+        /// Configured maximum for that bound.
+        limit: usize,
     },
 
     /// Authentication credentials not configured for provider.
@@ -164,6 +319,22 @@ pub enum SniffInstallationError {
         msg: String,
     },
 
+    /// The install command was killed at its deadline rather than exiting.
+    ///
+    /// Distinct from [`SniffInstallationError::PackageManagerFailed`]: the
+    /// package manager never reached a verdict, so the host may hold a
+    /// partial install. On Unix termination is best-effort — a descendant
+    /// that detached with `setsid()` outlives the kill and may still be
+    /// modifying the host. Callers that surface this to a user must say so.
+    #[error(
+        "The package manager {manager} did not finish installing {pkg} within {timeout_secs}s and was terminated; a detached installer process may still be modifying this host"
+    )]
+    InstallationTimedOut {
+        pkg: String,
+        manager: String,
+        timeout_secs: u64,
+    },
+
     #[error("The package {pkg} is not installable on {os}!")]
     NotInstallableOnOs { pkg: String, os: String },
 
@@ -194,6 +365,22 @@ impl SniffError {
         source: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
     ) -> Self {
         SniffError::Git {
+            operation,
+            source: source.into(),
+        }
+    }
+
+    /// Construct a [`SniffError::UserIdentity`] tagging the failing OS
+    /// operation and boxing its error as the source.
+    ///
+    /// Only the Windows identity backend can fail this way today — `geteuid`
+    /// is infallible — so non-Windows builds see this only from tests.
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn user_identity(
+        operation: &'static str,
+        source: impl Into<Box<dyn std::error::Error + Send + Sync + 'static>>,
+    ) -> Self {
+        SniffError::UserIdentity {
             operation,
             source: source.into(),
         }

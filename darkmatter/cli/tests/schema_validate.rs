@@ -1,13 +1,12 @@
 //! Integration tests for `md schema validate`.
 
-use assert_cmd::cargo::cargo_bin_cmd;
 use predicates::prelude::*;
 use std::io::Write;
 use std::path::PathBuf;
 use tempfile::TempDir;
 
 fn md_cmd() -> assert_cmd::Command {
-    cargo_bin_cmd!("md")
+    assert_cmd::Command::cargo_bin("md").unwrap()
 }
 
 fn write_file(dir: &TempDir, name: &str, content: &str) -> PathBuf {
@@ -534,6 +533,87 @@ fn schema_validate_assignment_keeps_boolean_for_boolean_typed_property() {
         .arg("flag=true")
         .assert()
         .success();
+}
+
+#[test]
+fn schema_validate_pretty_surfaces_property_description() {
+    // Track A: a `-> {description}` arrow on the failing property surfaces as
+    // a dimmed sub-line beneath the problem bullet.
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "post.md",
+        "---\n$schema:\n  title: 'string(required) -> The headline shown in listing pages'\nother: stuff\n---\nBody\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(
+            "The headline shown in listing pages",
+        ));
+}
+
+#[test]
+fn schema_validate_pretty_omits_sub_line_when_no_description() {
+    // Track A: a description-less schema renders no description text — the
+    // feature is purely additive (Decision #8).
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "draft.md",
+        "---\n$schema:\n  rating: number\nrating: nope\n---\nBody\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("rating"))
+        .stdout(predicate::str::contains("The headline").not());
+}
+
+#[test]
+fn schema_validate_json_carries_description_field() {
+    // Track B: the JSON problem object gains a `"description"` field with the
+    // declared description string.
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "post.md",
+        "---\n$schema:\n  title: 'string(required) -> The headline shown in listing pages'\nother: stuff\n---\nBody\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate", "--format", "json"])
+        .arg(&doc)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains(
+            "\"description\":\"The headline shown in listing pages\"",
+        ));
+}
+
+#[test]
+fn schema_validate_json_description_is_null_when_absent() {
+    // Track B: the JSON problem object carries `"description":null` when the
+    // property declares no description.
+    let tmp = TempDir::new().unwrap();
+    let doc = write_file(
+        &tmp,
+        "draft.md",
+        "---\n$schema:\n  rating: number\nrating: nope\n---\nBody\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate", "--format", "json"])
+        .arg(&doc)
+        .assert()
+        .code(1)
+        .stdout(predicate::str::contains("\"description\":null"));
 }
 
 #[test]

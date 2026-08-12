@@ -1046,7 +1046,7 @@ use schematic_definitions::openai::define_openai_api;
 
 let openai = define_openai_api();
 assert_eq!(openai.name, "OpenAI");
-assert_eq!(openai.endpoints.len(), 3);
+assert!(openai.endpoints.len() > 200);
 ```
 
 See the [schematic-definitions README](../definitions/README.md) for available APIs.

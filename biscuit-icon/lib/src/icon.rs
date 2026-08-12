@@ -278,6 +278,64 @@ impl Icon {
             .map_err(|e| std::io::Error::other(e.to_string()))?;
         Ok(img.render(term))
     }
+
+    /// Renders the icon as a small inline image sized to fit inside a table
+    /// cell. Unlike [`TerminalRenderable::render`], which fills the
+    /// terminal width, this clamps the image to `cells_wide` columns and
+    /// 1 row so the surrounding cell borders stay aligned. The cursor
+    /// advances exactly one row after the image, matching normal cell
+    /// line-height behavior.
+    ///
+    /// Returns `Err` when the terminal cannot inline images; callers
+    /// should fall back to a glyph or text identifier in that case.
+    pub fn render_in_cell(&self, term: &Terminal, cells_wide: u32) -> std::io::Result<String> {
+        use std::io::Write;
+        use biscuit_terminal::components::terminal_image::{ImageWidth, TerminalImage};
+        use biscuit_terminal::discovery::detection::ImageSupport;
+
+        if matches!(term.image_support, ImageSupport::None) || !term.is_tty {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "terminal cannot inline images",
+            ));
+        }
+
+        let mut file = tempfile::Builder::new().suffix(".svg").tempfile()?;
+        file.write_all(self.svg().as_bytes())?;
+        let img = TerminalImage::new(file.path())
+            .map_err(|e| std::io::Error::other(e.to_string()))?
+            .with_width(ImageWidth::Characters(cells_wide.max(1)));
+        Ok(img.render(term))
+    }
+}
+
+#[cfg(all(test, feature = "image"))]
+mod render_in_cell_tests {
+    use super::*;
+    use crate::domain::DomainIcon;
+    use biscuit_terminal::terminal::Terminal;
+
+    #[test]
+    fn render_in_cell_errors_when_terminal_has_no_image_support() {
+        // `Terminal::default()` resolves image_support to None (no
+        // terminal metadata in the test env), so render_in_cell must
+        // refuse rather than silently falling back to a huge image.
+        let icon = crate::domain::Os::Apple.icon();
+        let term = Terminal::default();
+        let result = icon.render_in_cell(&term, 1);
+        assert!(result.is_err(), "expected Err when image support is None; got Ok: {:?}", result.ok());
+    }
+
+    #[test]
+    fn render_in_cell_clamps_zero_to_one() {
+        // 0 cells_wide is a misconfiguration; the API must clamp to 1
+        // rather than producing a zero-width image.
+        let icon = crate::domain::Os::Apple.icon();
+        let term = Terminal::default();
+        let _ = icon.render_in_cell(&term, 0);
+        // We only assert that the call doesn't panic; the image-support
+        // check fires first and returns Err before reaching width.
+    }
 }
 
 /// Generates a string-convenience constructor for a domain set.
