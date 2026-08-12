@@ -89,6 +89,23 @@ fn enrich_report(
     }
 }
 
+fn capture_document_epoch_context(
+    invocation: &InvocationContext,
+    source: &ResolvedCompositionSource,
+    env_overrides: &BTreeMap<String, String>,
+) -> (
+    darkmatter::markdown::compose::ComposeContext,
+    darkmatter::markdown::compose::ContextRequirements,
+) {
+    let requirements =
+        darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
+    let mut context = invocation.capture_launch_context(&requirements);
+    for (key, value) in env_overrides {
+        context.env_mut().insert(key.clone(), value.clone());
+    }
+    (context, requirements)
+}
+
 /// What running one active document produced.
 ///
 /// The composition command owns an active-document coordinator above both the
@@ -488,6 +505,12 @@ pub(crate) fn prepare_and_run_active_document(
         install_agent_env_for_composition(target, shared.yolo, &mut env_overrides);
     }
 
+    let (prepared_context, context_requirements) = capture_document_epoch_context(
+        &prep_context.invocation,
+        &source,
+        &env_overrides,
+    );
+
     // Render the execution line the moment the agent is known. Eager
     // resolution above prompts the interactive picker when the agent is
     // ambiguous, so by this point the target is settled for every real
@@ -537,27 +560,13 @@ pub(crate) fn prepare_and_run_active_document(
     // `runtime_agent: '{{ env.AGENT }}'`) fail Darkmatter's built-in schema
     // validation during preflight, before reaching `prepare_direct_with_schema`.
     //
-    // Anchored on the launch area, never the process CWD: the wrapper mutates
-    // the parent CWD to the repo root, so an ambient capture would answer
-    // `ctx.area` differently depending on when it ran — and would disagree with
-    // the launch-area-anchored snapshot the body compose uses, so the audit
-    // could discover different commands than the compose expands.
+    // The epoch owner captured this snapshot after target resolution. Preflight,
+    // preparation, loops, and lifecycle all receive clones of this same
+    // immutable snapshot; no stage reconstructs an equivalent context.
     let compose_options = {
-        let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
-            &source.markdown,
-        );
-        let evidence = prep_context
-            .invocation
-            .runtime_evidence(&prep_context.source_context, &requirements);
-        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-            prep_context.source_context.base_dir(),
-            &requirements,
-            &evidence,
-        );
-        for (key, value) in &env_overrides {
-            ctx.env_mut().insert(key.clone(), value.clone());
-        }
-        let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
+        let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(
+            prepared_context.clone(),
+        )
             .with_source_file(&source.resolved_path)
             .with_file_resolution_context(file_resolution_context.clone())
             // Lifecycle subtrees remain deferred because their file references
@@ -628,6 +637,8 @@ pub(crate) fn prepare_and_run_active_document(
         prep_context,
         resolved_target,
         env_overrides,
+        prepared_context,
+        context_requirements,
         header_emitted,
         preflight,
         Arc::clone(shared_approval_cache),
@@ -772,6 +783,7 @@ fn build_and_run_loop(
     header_emitted: bool,
     prep_context: &CompositionPrepContext,
     prepared_context: &darkmatter::markdown::compose::ComposeContext,
+    context_requirements: &darkmatter::markdown::compose::ContextRequirements,
     verbose: u8,
     shared: &SharedComposeArgs,
     proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
@@ -934,6 +946,7 @@ fn build_and_run_loop(
                 // A looping proxy target runs its `initialize` through the loop
                 // engine, not the staged bootstrap, so it is never adopted here.
                 None,
+                Some(context_requirements.clone()),
             );
 
             let outcome = execute_composition_attempt(
@@ -1001,6 +1014,7 @@ fn build_execution_request(
     proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
     handoff_ledger: SharedRunLedger,
     adopted_handoff: Option<Box<ProxyHandoff>>,
+    epoch_context_requirements: Option<darkmatter::markdown::compose::ContextRequirements>,
 ) -> CompositionExecutionRequest {
     let resolved = shared.resolve_session_interactivity(prepared.selection_hints.interactive);
     CompositionExecutionRequest {
@@ -1035,6 +1049,7 @@ fn build_execution_request(
         installed_snapshot: Some(prep_context.installed_snapshot.clone()),
         invocation_context: Some(prep_context.invocation.clone()),
         source_context: Some(prep_context.source_context.clone()),
+        epoch_context_requirements,
         prep_launch_workspace: Some(prep_context.launch_workspace.clone()),
         prep_launch_context: Some(prep_context.launch_context.clone()),
         prep_env_context: Some(prep_context.env_context.clone()),
@@ -1085,6 +1100,8 @@ fn execute_loop_or_single(
     prep_context: CompositionPrepContext,
     resolved_target: Option<ResolvedExecutionTarget>,
     env_overrides: BTreeMap<String, String>,
+    prepared_context: darkmatter::markdown::compose::ComposeContext,
+    context_requirements: darkmatter::markdown::compose::ContextRequirements,
     header_emitted: bool,
     preflight: claudine::composition::PreFlightResult,
     shared_approval_cache: SharedApprovalCache,
@@ -1116,36 +1133,6 @@ fn execute_loop_or_single(
         || std::env::var_os("FORCE_COLOR").is_some();
 
     let file_for_loop = file.clone();
-
-    // Capture the early-binding context ONCE, against the launch area (the
-    // package area the caller launched from), and reuse the same snapshot for
-    // body compose and lifecycle events. This is the single source of truth for
-    // `ctx.*`/`env.*`: the body and the lifecycle can no longer diverge, and
-    // there is no per-event re-scan. `capture_for_document` is demand-driven
-    // over both frontmatter and body, so the lifecycle `{{ctx.*}}` strings in
-    // frontmatter pull in the groups they need. `current.*` stays event-time and
-    // is captured separately.
-    //
-    // Constructed exactly as the pre-flight snapshot in `prepare_composition`
-    // is, so the commands the audit discovered are the commands this compose
-    // expands.
-    let prepared_context = {
-        let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
-            &source.markdown,
-        );
-        let evidence = prep_context
-            .invocation
-            .runtime_evidence(&prep_context.source_context, &requirements);
-        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-            prep_context.source_context.base_dir(),
-            &requirements,
-            &evidence,
-        );
-        for (key, value) in &env_overrides {
-            ctx.env_mut().insert(key.clone(), value.clone());
-        }
-        ctx
-    };
 
     let loop_prepare_options = PrepareOptions {
         invocation_context: Some(prep_context.invocation.clone()),
@@ -1190,6 +1177,7 @@ fn execute_loop_or_single(
             header_emitted,
             &prep_context,
             &prepared_context,
+            &context_requirements,
             verbose,
             shared,
             &proxy_overlay,
@@ -1293,6 +1281,7 @@ fn execute_loop_or_single(
         &proxy_overlay,
         handoff_ledger,
         adopted_handoff,
+        Some(context_requirements),
     );
 
     if let Some(ref mut timings) = startup_timings {

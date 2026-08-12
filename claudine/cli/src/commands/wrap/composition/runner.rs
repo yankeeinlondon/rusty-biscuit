@@ -437,6 +437,8 @@ pub(super) fn run_composition_body(
         entry: request.prepared.entry,
         invocation_context: request.invocation_context.clone(),
         source_context: request.source_context.clone(),
+        epoch_context: Some(request.prepared.compose_context.clone()),
+        epoch_context_requirements: request.epoch_context_requirements.clone(),
     };
 
     let mut harness_base_args = args_before_prompt.clone();

@@ -222,7 +222,8 @@ fn rebuild_projects_target_model_into_env_and_context() {
     // A namespaced local-runner id is catalog-valid by construction, so this
     // is independent of the host's live model listings.
     let target = target_with_model(Some("llamacpp/probe-model-x"));
-    let rebuild = rebuild_target_launch(&intent(), None, None, Path::new("."), &target).unwrap();
+    let rebuild =
+        rebuild_target_launch(&intent(), None, None, Path::new("."), None, &target).unwrap();
 
     assert_eq!(value_of(&rebuild.env_overrides, "AGENT"), Some("goose"));
     assert_eq!(
@@ -238,6 +239,31 @@ fn rebuild_projects_target_model_into_env_and_context() {
     );
 }
 
+#[test]
+fn rebuild_records_an_invocation_backed_missing_prepared_context() {
+    let fixture = tempfile::tempdir().unwrap();
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(fixture.path());
+    let target = target_with_model(None);
+
+    let rebuild = rebuild_target_launch(
+        &intent(),
+        None,
+        None,
+        fixture.path(),
+        Some(&invocation),
+        &target,
+    )
+    .unwrap();
+
+    assert_eq!(
+        rebuild.prepared_context.env().get("AGENT").map(String::as_str),
+        Some("goose")
+    );
+    let work = invocation.work_snapshot();
+    assert_eq!(work.launch_context_constructions, 1);
+    assert_eq!(work.ambient_fallbacks, 0);
+}
+
 /// Explicit `--model` is immutable invocation intent: it stays authoritative
 /// over the target's frontmatter `model:` exactly as it would for a direct
 /// invocation under the same CLI arguments.
@@ -249,6 +275,7 @@ fn rebuild_keeps_explicit_cli_model_authoritative() {
         Some("llamacpp/cli-pinned"),
         None,
         Path::new("."),
+        None,
         &target,
     )
     .unwrap();

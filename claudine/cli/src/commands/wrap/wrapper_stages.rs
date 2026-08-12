@@ -543,6 +543,8 @@ pub(crate) fn run_execution_stage(
             entry: claudine::composition::DocumentEntryReason::Direct,
             invocation_context: Some(invocation.clone()),
             source_context: Some(source_context),
+            epoch_context: initial_compose_context.clone(),
+            epoch_context_requirements: None,
         };
 
         let mut harness_base_args = child_args.to_vec();

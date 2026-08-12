@@ -4,6 +4,7 @@
 //! conflict detection.
 
 use super::*;
+use super::pipeline::prepared_lifecycle_context;
 
 /// W0 regression: when the executor is given a precomputed
 /// `prep_launch_workspace`, [`select_launch_workspace`] must
@@ -56,6 +57,35 @@ fn select_launch_workspace_falls_back_once_when_prep_missing() {
         1,
         "missing prep_launch_workspace must call the fallback walker exactly once"
     );
+}
+
+#[test]
+fn lifecycle_context_consumes_prepared_snapshot_and_accounts_for_a_missing_one() {
+    let fixture = tempfile::tempdir().unwrap();
+    let source_path = fixture.path().join("prompt.md");
+    std::fs::write(&source_path, "{{ ctx.area }}").unwrap();
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(fixture.path());
+    let requirements =
+        darkmatter::markdown::compose::ContextRequirements::for_content("{{ ctx.area }}");
+    let prepared = invocation.capture_launch_context(&requirements);
+
+    let supplied = prepared_lifecycle_context(
+        Some(&prepared),
+        Some(&invocation),
+        fixture.path(),
+        "{{ ctx.area }}",
+    );
+    assert!(supplied.get("area").is_some());
+    assert_eq!(invocation.work_snapshot().ambient_fallbacks, 0);
+
+    let fallback = prepared_lifecycle_context(
+        None,
+        Some(&invocation),
+        fixture.path(),
+        "{{ ctx.area }}",
+    );
+    assert!(fallback.get("area").is_some());
+    assert_eq!(invocation.work_snapshot().ambient_fallbacks, 1);
 }
 
 #[test]

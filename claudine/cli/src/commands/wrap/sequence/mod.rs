@@ -50,6 +50,16 @@ pub(super) fn run_was_interrupted(exit_code: i32, interrupted: &AtomicBool) -> b
     exit_code == SEQUENCE_INTERRUPT_EXIT_CODE || interrupted.load(Ordering::SeqCst)
 }
 
+struct PreflightApprovalContext<'a> {
+    source_context: &'a claudine::invocation_context::SourceContext,
+    approval_cache: composition::SharedApprovalCache,
+    shared: &'a SharedComposeArgs,
+    launch_area: Option<&'a std::path::Path>,
+    invocation: &'a claudine::invocation_context::InvocationContext,
+    launch_context: &'a darkmatter::markdown::compose::ComposeContext,
+    target_envs: &'a [std::collections::BTreeMap<String, String>],
+}
+
 /// Approve every shell command the preflight graph can reach.
 ///
 /// The graph's own commands arrive already resolved, so what the gate approves
@@ -60,11 +70,7 @@ pub(super) fn run_was_interrupted(exit_code: i32, interrupted: &AtomicBool) -> b
 fn approve_preflight_graph(
     graph: &composition::PreflightGraph,
     source: &ResolvedCompositionSource,
-    source_context: &claudine::invocation_context::SourceContext,
-    approval_cache: composition::SharedApprovalCache,
-    shared: &SharedComposeArgs,
-    launch_area: Option<&std::path::Path>,
-    invocation: &claudine::invocation_context::InvocationContext,
+    context: PreflightApprovalContext<'_>,
 ) -> Result<HashSet<String>> {
     if graph.shell_commands.is_empty() && graph.prompt_documents.is_empty() {
         return Ok(HashSet::new());
@@ -73,29 +79,26 @@ fn approve_preflight_graph(
     let approval_options = super::apply_composition_shell_overrides(
         super::build_harness_shell_options_for_source_with_cache(
             &source.resolved_path,
-            source_context.repository_root(),
-            Some(approval_cache),
+            context.source_context.repository_root(),
+            Some(context.approval_cache),
         ),
-        shared.dry_run,
-        shared.yolo,
+        context.shared.dry_run,
+        context.shared.yolo,
     );
 
-    let compose_options = |path: &std::path::Path| {
-        let source_context = invocation
+    let compose_options = |path: &std::path::Path,
+                           env: &std::collections::BTreeMap<String, String>| {
+        let source_context = context
+            .invocation
             .derive_source(path)
             .expect("resolved prompt document always has a parent directory");
-        let document = darkmatter::markdown::Markdown::try_from(path)
-            .expect("preflight graph already loaded the prompt document");
-        let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
-            &document,
-        );
-        let evidence = invocation.runtime_evidence(&source_context, &requirements);
-        let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-            source_context.base_dir(),
-            &requirements,
-            &evidence,
-        );
-        let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(context)
+        let mut compose_context = context.launch_context.clone();
+        for (key, value) in env {
+            compose_context.env_mut().insert(key.clone(), value.clone());
+        }
+        let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(
+            compose_context,
+        )
             .with_source_file(path)
             .with_file_resolution_context(source_context.file_resolution_context().clone())
             // Defer the lifecycle subtree exactly as the per-step template
@@ -104,15 +107,49 @@ fn approve_preflight_graph(
             // -side file reference here would trip on a file that event has
             // not created yet.
             .with_exclude_keys(claudine::composition::LIFECYCLE_EVENT_KEYS.iter().copied());
-        if let Some(area) = launch_area {
+        if let Some(area) = context.launch_area {
             opts = opts.with_file_ref_fallback_dir(area.to_path_buf());
         }
         opts
     };
 
-    let result =
-        composition::resolve_graph_shell_approvals(graph, &approval_options, &compose_options)?;
-    Ok(result.approved_commands)
+    let command_graph = composition::PreflightGraph {
+        shell_commands: graph.shell_commands.clone(),
+        ..Default::default()
+    };
+    let empty_env = std::collections::BTreeMap::new();
+    let command_options = |path: &std::path::Path| compose_options(path, &empty_env);
+    let mut approved = composition::resolve_graph_shell_approvals(
+        &command_graph,
+        &approval_options,
+        &command_options,
+    )?
+    .approved_commands;
+
+    if !graph.prompt_documents.is_empty() {
+        let prompt_graph = composition::PreflightGraph {
+            prompt_documents: graph.prompt_documents.clone(),
+            ..Default::default()
+        };
+        let fallback_envs = [std::collections::BTreeMap::new()];
+        let envs = if context.target_envs.is_empty() {
+            fallback_envs.as_slice()
+        } else {
+            context.target_envs
+        };
+        for env in envs {
+            let prompt_options = |path: &std::path::Path| compose_options(path, env);
+            approved.extend(
+                composition::resolve_graph_shell_approvals(
+                    &prompt_graph,
+                    &approval_options,
+                    &prompt_options,
+                )?
+                .approved_commands,
+            );
+        }
+    }
+    Ok(approved)
 }
 
 /// Execute a full sequence: iterate steps, compose each, and report results.
@@ -237,40 +274,36 @@ pub(crate) fn execute_sequence(
 
     // ── Static preflight: the recursive task graph ──────────────────────
     //
-    // Everything statically knowable is settled here, before a target is
-    // resolved or a provider is launched: every referenced task, group,
-    // catalog entry, and prompt document is loaded transitively; blocked
-    // constructs are rejected; and every reachable shell command — including
-    // ones behind `when:` guards that read false today — is resolved to bytes
-    // and approved. A failure at this point is abort-all regardless of
-    // `fail_fast`, and `--dry-run` performs this identical walk.
+    // Before target selection, every referenced task, group, catalog entry,
+    // and prompt document is loaded transitively; blocked constructs are
+    // rejected; and graph-level shell commands — including ones behind
+    // `when:` guards that read false today — are resolved to bytes. Approval
+    // follows target selection so task-scoped prompt commands can use the
+    // selected provider and model. Either preflight stage is abort-all
+    // regardless of `fail_fast`, and `--dry-run` performs the same walk.
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
         &source.markdown,
     );
-    let evidence = prep_context
-        .invocation
-        .runtime_evidence(&prep_context.source_context, &requirements);
-    let graph_context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-        prep_context.source_context.base_dir(),
-        &requirements,
-        &evidence,
-    );
+    let graph_context = prep_context.invocation.capture_launch_context(&requirements);
     let graph = composition::build_preflight_graph_with_invocation(
         &plan,
         source,
-        graph_context,
+        graph_context.clone(),
         &prep_context.invocation,
         &prep_context.source_context,
     )?;
-    let preflight_approved = approve_preflight_graph(
-        &graph,
-        source,
-        &prep_context.source_context,
-        Arc::clone(&shared_approval_cache),
-        shared,
-        Some(prep_context.launch_workspace.launch_cwd.as_path()),
-        &prep_context.invocation,
-    )?;
+    let mut approval_context = graph_context.clone();
+    let mut approval_requirements = requirements.clone();
+    for prompt in &graph.prompt_documents {
+        let required = darkmatter::markdown::compose::ContextRequirements::for_document(
+            &prompt.markdown,
+        );
+        prep_context.invocation.extend_launch_context(
+            &mut approval_context,
+            &mut approval_requirements,
+            &required,
+        );
+    }
     let catalog = match prep_context.selection_config.as_ref() {
         Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(
             cfg.model_overrides.clone(),
@@ -520,6 +553,27 @@ pub(crate) fn execute_sequence(
         live_targets.into_iter().map(Some).collect()
     };
 
+    let mut preflight_envs = Vec::new();
+    for target in &resolved_targets {
+        let env = jit::step_env_overrides(effective_fail_fast, shared, target.as_ref());
+        if !preflight_envs.contains(&env) {
+            preflight_envs.push(env);
+        }
+    }
+    let preflight_approved = approve_preflight_graph(
+        &graph,
+        source,
+        PreflightApprovalContext {
+            source_context: &prep_context.source_context,
+            approval_cache: Arc::clone(&shared_approval_cache),
+            shared,
+            launch_area: Some(prep_context.launch_workspace.launch_cwd.as_path()),
+            invocation: &prep_context.invocation,
+            launch_context: &approval_context,
+            target_envs: &preflight_envs,
+        },
+    )?;
+
     // Announced *before* Phase 1c, not after it. Schema validation and shell
     // approval can be slow or interactive, so this is the progress feedback the
     // user waits behind — emitting it afterwards would describe finished work.
@@ -548,6 +602,8 @@ pub(crate) fn execute_sequence(
         inline_mode,
         file_resolution_context: &file_resolution_context,
         invocation: &prep_context.invocation,
+        launch_context: &graph_context,
+        launch_requirements: &requirements,
     };
 
     let Some(validated) = run_phase_1c_with_schema(

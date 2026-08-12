@@ -88,7 +88,13 @@ pub(super) fn run_step_task(
     };
 
     let (task_source_context, task_context) =
-        prepare_task_context(&run.prep_context.invocation, task, env_overrides);
+        prepare_task_context(
+            &run.prep_context.invocation,
+            task,
+            &prepared.compose_context,
+            run.compose.launch_requirements,
+            env_overrides,
+        );
 
     // A task stack mutates relative to the document that authored the task,
     // including when that document lives outside the sequence repository.
@@ -199,6 +205,8 @@ pub(super) fn run_step_task(
 fn prepare_task_context(
     invocation: &InvocationContext,
     task: &PreflightTask,
+    epoch_context: &darkmatter::markdown::compose::ComposeContext,
+    captured_requirements: &darkmatter::markdown::compose::ContextRequirements,
     env_overrides: &BTreeMap<String, String>,
 ) -> (SourceContext, darkmatter::markdown::compose::ComposeContext) {
     let task_source_context = invocation
@@ -206,11 +214,12 @@ fn prepare_task_context(
         .expect("resolved task document always has a parent directory");
     let scan = task_context_scan(task);
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(&scan);
-    let evidence = invocation.runtime_evidence(&task_source_context, &requirements);
-    let mut task_context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-        task_source_context.base_dir(),
+    let mut task_context = epoch_context.clone();
+    let mut captured = captured_requirements.clone();
+    invocation.extend_launch_context(
+        &mut task_context,
+        &mut captured,
         &requirements,
-        &evidence,
     );
     for (key, value) in env_overrides {
         task_context.env_mut().insert(key.clone(), value.clone());
@@ -452,6 +461,7 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             installed_snapshot: Some(self.run.prep_context.installed_snapshot.clone()),
             invocation_context: Some(self.run.prep_context.invocation.clone()),
             source_context: Some(prompt_source_context),
+            epoch_context_requirements: None,
             prep_launch_workspace: Some(self.run.prep_context.launch_workspace.clone()),
             prep_launch_context: Some(self.run.prep_context.launch_context.clone()),
             prep_env_context: Some(self.run.prep_context.env_context.clone()),
@@ -577,8 +587,18 @@ mod tests {
         }
     }
 
+    fn prepare_for_test(
+        invocation: &InvocationContext,
+        task: &PreflightTask,
+        env: &BTreeMap<String, String>,
+    ) -> (SourceContext, darkmatter::markdown::compose::ComposeContext) {
+        let requirements = darkmatter::markdown::compose::ContextRequirements::for_content("");
+        let context = invocation.capture_launch_context(&requirements);
+        prepare_task_context(invocation, task, &context, &requirements, env)
+    }
+
     #[test]
-    fn task_stack_context_belongs_to_the_authoring_repository() {
+    fn task_stack_keeps_source_resolution_but_uses_the_launch_repository_context() {
         let fixture = Fixture::new();
         let origin_path = fixture.origin_path();
         let mut task = fixture.task();
@@ -588,7 +608,7 @@ mod tests {
         let invocation = InvocationContext::capture_at(&fixture.launch_repo);
         let env = BTreeMap::from([("TASK_MARKER".to_string(), "owned".to_string())]);
 
-        let (source, context) = prepare_task_context(&invocation, &task, &env);
+        let (source, context) = prepare_for_test(&invocation, &task, &env);
 
         assert_eq!(source.base_dir(), fixture.task_dir);
         assert_eq!(source.repository_root(), Some(fixture.task_repo.as_path()));
@@ -602,9 +622,13 @@ mod tests {
         );
         assert_eq!(
             context.get("repo_root").and_then(Value::as_str),
-            Some(fixture.task_repo.to_string_lossy().as_ref())
+            Some(fixture.launch_repo.to_string_lossy().as_ref())
         );
         assert_eq!(context.env().get("TASK_MARKER").map(String::as_str), Some("owned"));
+        let work = invocation.work_snapshot();
+        assert_eq!(work.launch_context_constructions, 1);
+        assert_eq!(work.launch_context_extensions, 1);
+        assert_eq!(work.ambient_fallbacks, 0);
     }
 
     /// The control the per-field cases are read against: without a reference the
@@ -615,7 +639,7 @@ mod tests {
         let fixture = Fixture::new();
         let invocation = InvocationContext::capture_at(&fixture.launch_repo);
 
-        let (_, context) = prepare_task_context(&invocation, &fixture.task(), &BTreeMap::new());
+        let (_, context) = prepare_for_test(&invocation, &fixture.task(), &BTreeMap::new());
 
         assert_eq!(context.get("repo_root"), None);
     }
@@ -685,11 +709,11 @@ mod tests {
             let mut task = fixture.task();
             plant(&mut task);
 
-            let (_, context) = prepare_task_context(&invocation, &task, &BTreeMap::new());
+            let (_, context) = prepare_for_test(&invocation, &task, &BTreeMap::new());
 
             assert_eq!(
                 context.get("repo_root").and_then(Value::as_str),
-                Some(fixture.task_repo.to_string_lossy().as_ref()),
+                Some(fixture.launch_repo.to_string_lossy().as_ref()),
                 "`{field}` was not scanned for runtime-context references"
             );
         }
@@ -727,11 +751,11 @@ mod tests {
             let mut task = fixture.task();
             task.action = action;
 
-            let (_, context) = prepare_task_context(&invocation, &task, &BTreeMap::new());
+            let (_, context) = prepare_for_test(&invocation, &task, &BTreeMap::new());
 
             assert_eq!(
                 context.get("repo_root").and_then(Value::as_str),
-                Some(fixture.task_repo.to_string_lossy().as_ref()),
+                Some(fixture.launch_repo.to_string_lossy().as_ref()),
                 "`{label}` was not scanned for runtime-context references"
             );
         }

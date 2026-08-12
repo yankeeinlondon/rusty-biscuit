@@ -181,6 +181,23 @@ struct LifecyclePhase {
     context: darkmatter::markdown::compose::ComposeContext,
 }
 
+pub(super) fn prepared_lifecycle_context(
+    prepared: Option<&darkmatter::markdown::compose::ComposeContext>,
+    invocation: Option<&claudine::invocation_context::InvocationContext>,
+    launch_cwd: &Path,
+    content: &str,
+) -> darkmatter::markdown::compose::ComposeContext {
+    match prepared {
+        Some(prepared) => prepared.clone(),
+        None => {
+            if let Some(invocation) = invocation {
+                invocation.record_ambient_fallback();
+            }
+            claudine::composition::capture_compatibility_context_for_content(launch_cwd, content)
+        }
+    }
+}
+
 fn record_substage(
     collector: &mut Option<crate::perf::CommandPerfCollector>,
     checkpoint: &mut Instant,
@@ -1287,42 +1304,14 @@ fn construct_lifecycle_runtime(
             .auto_rehash(false)
             .build();
 
-        // Capture the early-binding context ONCE for this run, against the launch
-        // area (the package area the caller launched from), and reuse the same
-        // snapshot for every lifecycle event (the pre-flight `blocked`/`finalize`
-        // stacks and the post-closure `initialize`) so plain `ctx.*`/`env.*` cannot
-        // diverge per event and no per-event sniff scan runs. Demand-driven over
-        // the effective frontmatter (which still carries the deferred lifecycle
-        // `{{ctx.*}}` strings) plus the composed body. `env_overrides` mirror what
-        // `prepare` applied. `current.*` stays event-time and is captured below.
-        let lifecycle_context = {
-            let fm_json =
-                serde_json::to_string(&request.prepared.effective_frontmatter).unwrap_or_default();
-            let scan = format!("{fm_json}\n{}", request.prepared.prompt);
-            let mut ctx = match (
-                request.invocation_context.as_ref(),
-                request.source_context.as_ref(),
-            ) {
-                (Some(invocation), Some(source_context)) => {
-                    let requirements =
-                        darkmatter::markdown::compose::ContextRequirements::for_content(&scan);
-                    let evidence = invocation.runtime_evidence(source_context, &requirements);
-                    darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-                        source_context.base_dir(),
-                        &requirements,
-                        &evidence,
-                    )
-                }
-                _ => darkmatter::markdown::compose::ComposeContext::capture_for_content(
-                    launch_workspace.launch_cwd.as_path(),
-                    &scan,
-                ),
-            };
-            for (key, value) in &request.env_overrides {
-                ctx.env_mut().insert(key.clone(), value.clone());
-            }
-            ctx
-        };
+        // Lifecycle consumes the document epoch's prepared snapshot. Live
+        // `current.ctx.*` remains separately captured at event time below.
+        let lifecycle_context = prepared_lifecycle_context(
+            Some(&request.prepared.compose_context),
+            request.invocation_context.as_ref(),
+            launch_workspace.launch_cwd.as_path(),
+            "",
+        );
 
         Ok(LifecyclePhase {
             shell_options,

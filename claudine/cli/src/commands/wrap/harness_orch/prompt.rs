@@ -128,7 +128,7 @@ fn load_overlaid_source(
 /// composition commands' first preparation assembles the same shape in
 /// `compose/prep.rs`.
 fn harness_prepare_options(
-    state: &HarnessPromptState,
+    state: &mut HarnessPromptState,
     source: &claudine::composition::ResolvedCompositionSource,
     child_cwd: &Path,
 ) -> claudine::composition::PrepareOptions {
@@ -161,31 +161,40 @@ fn harness_prepare_options(
         .source_context
         .as_ref()
         .or(compatibility_source_context.as_ref());
-    let propagated = state
-        .invocation_context
-        .as_ref()
-        .zip(source_context)
-        .map(|(invocation, source_context)| {
-            let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
-                &source.markdown,
-            );
-            let evidence = invocation.runtime_evidence(source_context, &requirements);
-            let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-                source_context.base_dir(),
-                &requirements,
-                &evidence,
-            );
-            (context, source_context.file_resolution_context().clone())
-        });
+    let requirements =
+        darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
+    let propagated = state.invocation_context.as_ref().map(|invocation| {
+        match (
+            state.epoch_context.as_mut(),
+            state.epoch_context_requirements.as_mut(),
+        ) {
+            (Some(context), Some(captured)) => {
+                invocation.extend_launch_context(context, captured, &requirements);
+            }
+            _ => {
+                let mut context = invocation.capture_launch_context(&requirements);
+                for (key, value) in &input_layers.env_overrides {
+                    context.env_mut().insert(key.clone(), value.clone());
+                }
+                state.epoch_context = Some(context);
+                state.epoch_context_requirements = Some(requirements.clone());
+            }
+        }
+        state
+            .epoch_context
+            .as_ref()
+            .expect("invocation-backed epoch context was initialized")
+            .clone()
+    });
     let mut options = input_layers.apply_to(claudine::composition::PrepareOptions {
         invocation_context: state.invocation_context.clone(),
         shell_working_directory: Some(child_cwd.to_path_buf()),
         ..claudine::composition::PrepareOptions::default()
     });
-    if let Some((context, file_resolution)) = propagated {
+    if let Some(context) = propagated {
         options.prepared_context = Some(context);
-        options.file_resolution_context = Some(file_resolution);
-    } else if let Some(source_context) = source_context {
+    }
+    if let Some(source_context) = source_context {
         options.file_resolution_context = Some(source_context.file_resolution_context().clone());
     }
     options
@@ -222,7 +231,7 @@ pub(crate) fn preflight_proxy_target(
 }
 
 pub(crate) fn materialize_harness_prompt(
-    state: &HarnessPromptState,
+    state: &mut HarnessPromptState,
     _repo_root: Option<&Path>,
     child_cwd: &Path,
     // The resume follow-up recorded on the active document's provider-attempt
@@ -346,7 +355,184 @@ mod tests {
             entry: DocumentEntryReason::ProxyTarget,
             invocation_context: None,
             source_context: None,
+            epoch_context: None,
+            epoch_context_requirements: None,
         }
+    }
+
+    fn init_repo(root: &Path) {
+        std::fs::create_dir_all(root).unwrap();
+        let output = std::process::Command::new("git")
+            .args(["init", "--quiet", "--initial-branch=main"])
+            .current_dir(root)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+    }
+
+    #[test]
+    fn stabilized_reread_extends_one_launch_epoch_without_reanchoring_identity() {
+        let fixture = tempfile::tempdir().unwrap();
+        let launch_root = fixture.path().join("launch");
+        let launch_area = launch_root.join("alpha/lib");
+        init_repo(&launch_root);
+        let beta_area = launch_root.join("beta/lib");
+        std::fs::create_dir_all(launch_area.join("src")).unwrap();
+        std::fs::create_dir_all(beta_area.join("src")).unwrap();
+        std::fs::write(
+            launch_root.join("Cargo.toml"),
+            "[workspace]\nresolver = \"2\"\nmembers = [\"alpha/lib\", \"beta/lib\"]\n",
+        )
+        .unwrap();
+        std::fs::write(
+            launch_area.join("Cargo.toml"),
+            "[package]\nname = \"alpha-lib\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        std::fs::write(launch_area.join("src/lib.rs"), "").unwrap();
+        std::fs::write(
+            beta_area.join("Cargo.toml"),
+            "[package]\nname = \"beta-lib\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        std::fs::write(beta_area.join("src/lib.rs"), "").unwrap();
+
+        let source_root = fixture.path().join("source");
+        init_repo(&source_root);
+        let target = source_root.join("target.md");
+        std::fs::write(&target, "---\n---\n{{ ctx.area }}/{{ ctx.agent }}\n").unwrap();
+
+        let invocation =
+            claudine::invocation_context::InvocationContext::capture_at(&launch_area);
+        let source_context = invocation.derive_source(&target).unwrap();
+        let source = load_overlaid_source(&compose_state(
+            &target,
+            CallerInputLayers::default(),
+        ))
+        .unwrap();
+        let requirements =
+            darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
+        let mut context = invocation.capture_launch_context(&requirements);
+        context
+            .env_mut()
+            .insert("AGENT".to_string(), "codex".to_string());
+        context
+            .env_mut()
+            .insert("MODEL".to_string(), "gpt-test".to_string());
+
+        let mut env = BTreeMap::new();
+        env.insert("AGENT".to_string(), "codex".to_string());
+        env.insert("MODEL".to_string(), "gpt-test".to_string());
+        let mut state = compose_state(
+            &target,
+            CallerInputLayers {
+                env_overrides: env,
+                ..CallerInputLayers::default()
+            },
+        );
+        state.invocation_context = Some(invocation.clone());
+        state.source_context = Some(source_context);
+        state.epoch_context = Some(context);
+        state.epoch_context_requirements = Some(requirements);
+
+        let first = harness_prepare_options(&mut state, &source, &launch_root);
+        let first_context = first.prepared_context.expect("prepared epoch context");
+        assert_eq!(first_context.get("area").and_then(|v| v.as_str()), Some("alpha-lib"));
+        assert_eq!(first_context.get("agent").and_then(|v| v.as_str()), Some("codex"));
+        assert_eq!(invocation.work_snapshot().launch_context_constructions, 1);
+        assert_eq!(invocation.work_snapshot().launch_context_extensions, 0);
+
+        std::fs::write(
+            &target,
+            "---\n---\n{{ ctx.area }}/{{ ctx.agent }}/{{ ctx.os }}\n",
+        )
+        .unwrap();
+        let reread = load_overlaid_source(&state).unwrap();
+        let second = harness_prepare_options(&mut state, &reread, &launch_root);
+        let second_context = second.prepared_context.expect("extended epoch context");
+        let effective = second_context.as_object();
+        assert_eq!(second_context.get("area").and_then(|v| v.as_str()), Some("alpha-lib"));
+        assert_eq!(effective.get("agent").and_then(|v| v.as_str()), Some("codex"));
+        assert_eq!(effective.get("model").and_then(|v| v.as_str()), Some("gpt-test"));
+        assert!(second_context.get("os").is_some());
+
+        let work = invocation.work_snapshot();
+        assert_eq!(work.launch_context_constructions, 1);
+        assert_eq!(work.launch_context_extensions, 1);
+        assert_eq!(work.ambient_fallbacks, 0);
+    }
+
+    #[test]
+    fn proxy_retry_and_resume_start_fresh_target_adjusted_launch_epochs() {
+        let fixture = tempfile::tempdir().unwrap();
+        let launch_root = fixture.path().join("launch");
+        init_repo(&launch_root);
+        let source_root = fixture.path().join("source");
+        init_repo(&source_root);
+        let target = source_root.join("target.md");
+        std::fs::write(
+            &target,
+            "---\n---\n{{ ctx.agent }}/{{ ctx.model }}/{{ env.AGENT }}/{{ env.MODEL }}/{{ ctx.repo_root }}\n",
+        )
+        .unwrap();
+
+        let invocation =
+            claudine::invocation_context::InvocationContext::capture_at(&launch_root);
+        for entry in [
+            DocumentEntryReason::ProxyTarget,
+            DocumentEntryReason::Retry,
+            DocumentEntryReason::Resume,
+        ] {
+            let mut state = compose_state(
+                &target,
+                CallerInputLayers {
+                    env_overrides: BTreeMap::from([
+                        ("AGENT".to_string(), "codex".to_string()),
+                        ("MODEL".to_string(), "gpt-reentry".to_string()),
+                    ]),
+                    ..CallerInputLayers::default()
+                },
+            );
+            state.entry = entry;
+            state.invocation_context = Some(invocation.clone());
+            state.source_context = Some(invocation.derive_source(&target).unwrap());
+            let expected_source_root = state
+                .source_context
+                .as_ref()
+                .and_then(claudine::invocation_context::SourceContext::repository_root)
+                .unwrap()
+                .to_path_buf();
+
+            let materialized = materialize_harness_prompt(
+                &mut state,
+                None,
+                &launch_root,
+                None,
+                SchemaStage::Validate,
+            )
+            .unwrap();
+            assert_eq!(
+                materialized.prompt.trim(),
+                format!(
+                    "codex/gpt-reentry/codex/gpt-reentry/{}",
+                    launch_root.display()
+                ),
+                "wrong target-adjusted launch snapshot for {entry:?}"
+            );
+            assert_eq!(
+                materialized
+                    .file_resolution_context
+                    .as_ref()
+                    .and_then(biscuit_file::FileResolutionContext::repository_root),
+                Some(expected_source_root.as_path()),
+                "file resolution must remain source-relative for {entry:?}"
+            );
+        }
+
+        let work = invocation.work_snapshot();
+        assert_eq!(work.launch_context_constructions, 3);
+        assert_eq!(work.launch_context_extensions, 0);
+        assert_eq!(work.ambient_fallbacks, 0);
     }
 
     /// Issue #2 regression: a proxy/retry re-materialization must resolve
@@ -363,7 +549,7 @@ mod tests {
         let mut env = BTreeMap::new();
         env.insert("AGENT".to_string(), "codex".to_string());
         env.insert("MODEL".to_string(), "gpt-5".to_string());
-        let state = compose_state(
+        let mut state = compose_state(
             &target,
             CallerInputLayers {
                 env_overrides: env,
@@ -371,7 +557,7 @@ mod tests {
             },
         );
 
-        let materialized = materialize_harness_prompt(&state, None, dir.path(), None, SchemaStage::Validate).unwrap();
+        let materialized = materialize_harness_prompt(&mut state, None, dir.path(), None, SchemaStage::Validate).unwrap();
         assert_eq!(
             materialized.prompt.trim(),
             "codex/gpt-5",
@@ -430,7 +616,7 @@ mod tests {
 
         // The re-materialize compose now expands the frontmatter command against
         // the augmented pre-approved set instead of failing NotPreApproved.
-        let materialized = materialize_harness_prompt(&state, None, dir.path(), None, SchemaStage::Validate).unwrap();
+        let materialized = materialize_harness_prompt(&mut state, None, dir.path(), None, SchemaStage::Validate).unwrap();
         assert_eq!(materialized.prompt.trim(), "reviewing spec.md");
     }
 }

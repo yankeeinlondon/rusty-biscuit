@@ -128,6 +128,8 @@ pub(super) fn dispatch_terminal_control(
                 std::thread::sleep(delay);
             }
             prompt_state.entry = claudine::composition::DocumentEntryReason::Retry;
+            prompt_state.epoch_context = None;
+            prompt_state.epoch_context_requirements = None;
             // Replace the provider-attempt slice: a fresh attempt number and no
             // carried session, so the retried attempt starts a fresh provider
             // session. The enclosing retry budget is retained — that is why it
@@ -155,6 +157,8 @@ pub(super) fn dispatch_terminal_control(
                 return TerminalControlAction::Abort(e);
             }
             prompt_state.entry = claudine::composition::DocumentEntryReason::Resume;
+            prompt_state.epoch_context = None;
+            prompt_state.epoch_context_requirements = None;
             prompt_state.prompt_tail.clear();
             // Replace the provider-attempt slice, retaining the live session and
             // substituting the follow-up message as the next provider input. A

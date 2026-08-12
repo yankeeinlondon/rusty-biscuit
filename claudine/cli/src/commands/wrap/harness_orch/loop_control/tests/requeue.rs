@@ -21,6 +21,8 @@ fn requeue_prompt_state(source: &Path) -> HarnessPromptState {
         entry: claudine::composition::DocumentEntryReason::Direct,
         invocation_context: None,
         source_context: None,
+        epoch_context: None,
+        epoch_context_requirements: None,
     }
 }
 

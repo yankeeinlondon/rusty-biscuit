@@ -47,6 +47,11 @@ pub(super) struct StepComposeContext<'a> {
     /// Immutable request-scoped file-resolution snapshot.
     pub(super) file_resolution_context: &'a biscuit_file::FileResolutionContext,
     pub(super) invocation: &'a claudine::invocation_context::InvocationContext,
+    /// Invocation-anchored graph snapshot cloned into each step epoch.
+    pub(super) launch_context: &'a darkmatter::markdown::compose::ComposeContext,
+    /// Groups already present in `launch_context`.
+    pub(super) launch_requirements:
+        &'a darkmatter::markdown::compose::ContextRequirements,
 }
 
 impl<'ctx> StepComposeContext<'ctx> {
@@ -67,6 +72,16 @@ impl<'ctx> StepComposeContext<'ctx> {
             ..self.clone()
         }
     }
+}
+
+/// Context ownership and resolution inputs for template shell preflight.
+pub(super) struct TemplatePreflightContext<'a> {
+    pub(super) launch_area: Option<&'a Path>,
+    pub(super) file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
+    pub(super) invocation: Option<&'a claudine::invocation_context::InvocationContext>,
+    pub(super) launch_context: Option<&'a darkmatter::markdown::compose::ComposeContext>,
+    pub(super) launch_requirements:
+        Option<&'a darkmatter::markdown::compose::ContextRequirements>,
 }
 
 /// One step's composed document, plus the approvals its composition contributed.
@@ -167,9 +182,13 @@ pub(super) fn compose_step(
         &step_source.resolved_path,
         &step_source.markdown,
         &step_overrides,
-        ctx.launch_area,
-        Some(ctx.file_resolution_context),
-        Some(ctx.invocation),
+        TemplatePreflightContext {
+            launch_area: ctx.launch_area,
+            file_resolution_context: Some(ctx.file_resolution_context),
+            invocation: Some(ctx.invocation),
+            launch_context: Some(ctx.launch_context),
+            launch_requirements: Some(ctx.launch_requirements),
+        },
     );
 
     let approval_options = super::super::apply_composition_shell_overrides(
@@ -251,33 +270,38 @@ pub(super) fn build_template_preflight_options(
     source_path: &Path,
     markdown: &darkmatter::markdown::Markdown,
     set_overrides: &Value,
-    launch_area: Option<&Path>,
-    file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
-    invocation: Option<&claudine::invocation_context::InvocationContext>,
+    runtime: TemplatePreflightContext<'_>,
 ) -> (
     darkmatter::markdown::compose::ComposeOptions,
     darkmatter::markdown::compose::ComposeContext,
 ) {
-    let anchor = launch_area
+    let anchor = runtime
+        .launch_area
         .or_else(|| source_path.parent())
         .unwrap_or_else(|| Path::new("."));
-    let derived_source_context = invocation.map(|invocation| {
+    let derived_source_context = runtime.invocation.map(|invocation| {
         invocation
             .derive_source(source_path)
             .expect("resolved sequence document always has a parent directory")
     });
-    let mut ctx = match (invocation, derived_source_context.as_ref()) {
-        (Some(invocation), Some(source_context)) => {
+    let mut ctx = match (
+        runtime.invocation,
+        runtime.launch_context,
+        runtime.launch_requirements,
+    ) {
+        (Some(invocation), Some(launch_context), Some(launch_requirements)) => {
             let requirements =
                 darkmatter::markdown::compose::ContextRequirements::for_document(markdown);
-            let evidence = invocation.runtime_evidence(source_context, &requirements);
-            darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-                source_context.base_dir(),
+            let mut context = launch_context.clone();
+            let mut captured = launch_requirements.clone();
+            invocation.extend_launch_context(
+                &mut context,
+                &mut captured,
                 &requirements,
-                &evidence,
-            )
+            );
+            context
         }
-        _ => darkmatter::markdown::compose::ComposeContext::capture_for_document(anchor, markdown),
+        _ => claudine::composition::capture_compatibility_context_for_document(anchor, markdown),
     };
     for (key, value) in env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
@@ -294,10 +318,10 @@ pub(super) fn build_template_preflight_options(
         .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied());
     if let Some(source_context) = derived_source_context.as_ref() {
         opts = opts.with_file_resolution_context(source_context.file_resolution_context().clone());
-    } else if let Some(context) = file_resolution_context {
+    } else if let Some(context) = runtime.file_resolution_context {
         opts = opts.with_file_resolution_context(context.clone());
     }
-    if let Some(launch_area) = launch_area {
+    if let Some(launch_area) = runtime.launch_area {
         opts = opts.with_file_ref_fallback_dir(launch_area.to_path_buf());
     }
     opts = opts.with_set_overrides(set_overrides.clone());

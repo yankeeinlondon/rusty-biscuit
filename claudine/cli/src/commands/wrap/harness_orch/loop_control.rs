@@ -916,6 +916,7 @@ fn bootstrap_adopted_document_phase(
             control.cli_model,
             prompt.repo_root,
             &launch_area,
+            prompt.prompt_state.invocation_context.as_ref(),
             materialized,
         ) {
             Ok(rebuild) => rebuild,

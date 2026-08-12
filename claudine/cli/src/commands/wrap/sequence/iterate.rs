@@ -533,6 +533,7 @@ fn build_body_request(
         installed_snapshot: Some(run.prep_context.installed_snapshot.clone()),
         invocation_context: Some(run.prep_context.invocation.clone()),
         source_context: Some(run.prep_context.source_context.clone()),
+        epoch_context_requirements: None,
         prep_launch_workspace: Some(run.prep_context.launch_workspace.clone()),
         prep_launch_context: Some(run.prep_context.launch_context.clone()),
         prep_env_context: Some(run.prep_context.env_context.clone()),

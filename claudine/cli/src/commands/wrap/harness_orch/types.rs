@@ -73,6 +73,11 @@ pub(crate) struct HarnessPromptState {
     /// `Some` with no repository is authoritative: callers must not replace it
     /// with the launch repository merely because the source is outside Git.
     pub(crate) source_context: Option<claudine::invocation_context::SourceContext>,
+    /// Prepared plain-`ctx.*` snapshot for the active document epoch.
+    pub(crate) epoch_context: Option<darkmatter::markdown::compose::ComposeContext>,
+    /// Demand-driven groups already projected into [`Self::epoch_context`].
+    pub(crate) epoch_context_requirements:
+        Option<darkmatter::markdown::compose::ContextRequirements>,
 }
 
 impl HarnessPromptState {

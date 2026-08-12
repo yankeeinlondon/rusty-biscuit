@@ -100,3 +100,81 @@ fn inline_compose_source_load_error_is_frontmatter_enriched() {
 
     assert_frontmatter_enriched(report);
 }
+
+#[test]
+fn document_epoch_reuses_one_target_adjusted_launch_snapshot() {
+    let dir = TempDir::new().unwrap();
+    let source_path = dir.path().join("prompt.md");
+    fs::write(
+        &source_path,
+        "---\nidentity: '{{ ctx.agent }}/{{ ctx.model }}'\nsuccess:\n  warn: '{{ ctx.agent }}/{{ ctx.model }}'\n---\n{{ ctx.agent }}/{{ ctx.model }}\n",
+    )
+    .unwrap();
+    let source = claudine::composition::resolve_composition_source(
+        source_path.to_str().unwrap(),
+    )
+    .unwrap();
+    let invocation = InvocationContext::capture_at(dir.path());
+    let mut overrides = BTreeMap::new();
+    overrides.insert("AGENT".to_string(), "codex".to_string());
+    overrides.insert("MODEL".to_string(), "gpt-epoch".to_string());
+
+    let (epoch, requirements) =
+        capture_document_epoch_context(&invocation, &source, &overrides);
+    assert!(!requirements.is_empty());
+    assert_eq!(invocation.work_snapshot().launch_context_constructions, 1);
+
+    let preflight = epoch.as_object();
+    assert_eq!(preflight.get("agent").and_then(|v| v.as_str()), Some("codex"));
+    assert_eq!(preflight.get("model").and_then(|v| v.as_str()), Some("gpt-epoch"));
+
+    let prepared = claudine::composition::prepare_direct_with_schema(
+        &source,
+        PrepareOptions {
+            invocation_context: Some(invocation.clone()),
+            env_overrides: overrides,
+            prepared_context: Some(epoch.clone()),
+            file_resolution_context: Some(
+                invocation
+                    .derive_source(&source_path)
+                    .unwrap()
+                    .file_resolution_context()
+                    .clone(),
+            ),
+            ..PrepareOptions::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(prepared.prompt.trim(), "codex/gpt-epoch");
+    assert_eq!(
+        prepared
+            .effective_frontmatter
+            .get("identity")
+            .and_then(|v| v.as_str()),
+        Some("codex/gpt-epoch")
+    );
+    let lifecycle = prepared.compose_context.as_object();
+    assert_eq!(lifecycle.get("agent").and_then(|v| v.as_str()), Some("codex"));
+    assert_eq!(lifecycle.get("model").and_then(|v| v.as_str()), Some("gpt-epoch"));
+
+    let loop_iteration = claudine::composition::prepare_direct_with_schema(
+        &source,
+        PrepareOptions {
+            invocation_context: Some(invocation.clone()),
+            env_overrides: BTreeMap::from([
+                ("AGENT".to_string(), "codex".to_string()),
+                ("MODEL".to_string(), "gpt-epoch".to_string()),
+            ]),
+            prepared_context: Some(epoch),
+            file_resolution_context: prepared.input_layers.file_resolution_context.clone(),
+            ..PrepareOptions::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(loop_iteration.prompt.trim(), "codex/gpt-epoch");
+
+    let work = invocation.work_snapshot();
+    assert_eq!(work.launch_context_constructions, 1);
+    assert_eq!(work.launch_context_extensions, 0);
+    assert_eq!(work.ambient_fallbacks, 0);
+}

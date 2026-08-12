@@ -224,6 +224,8 @@ impl ActiveDocumentCoordinator {
         prompt_state.source_path = handoff.resolved_target().to_path_buf();
         prompt_state.original_ref = handoff.authored_target().to_string();
         prompt_state.entry = DocumentEntryReason::ProxyTarget;
+        prompt_state.epoch_context = None;
+        prompt_state.epoch_context_requirements = None;
         if let Some(source_context) = source_context.as_ref() {
             prompt_state.input_layers.file_resolution_context =
                 Some(source_context.file_resolution_context().clone());

@@ -3,7 +3,7 @@
 //! The layering helpers are pure; the template-preflight options carry the
 //! document-relative resolution contract a step's approved shell bytes depend on.
 
-use super::build_template_preflight_options;
+use super::{TemplatePreflightContext, build_template_preflight_options};
 use std::collections::BTreeMap;
 
 use darkmatter::markdown::Markdown;
@@ -81,9 +81,13 @@ fn template_preflight_resolves_against_document_dir() {
         &source_path,
         &md,
         &overrides,
-        Some(launch_dir.path()),
-        None,
-        None,
+        TemplatePreflightContext {
+            launch_area: Some(launch_dir.path()),
+            file_resolution_context: None,
+            invocation: None,
+            launch_context: None,
+            launch_requirements: None,
+        },
     );
     let result =
         resolve_shell_approvals(Some(&md), Some(&opts), &approval_options, None, None).unwrap();
@@ -135,9 +139,13 @@ fn template_preflight_does_not_resolve_launch_only_file() {
         &source_path,
         &md,
         &overrides,
-        None,
-        None,
-        None,
+        TemplatePreflightContext {
+            launch_area: None,
+            file_resolution_context: None,
+            invocation: None,
+            launch_context: None,
+            launch_requirements: None,
+        },
     );
     let result =
         resolve_shell_approvals(Some(&md), Some(&opts), &approval_options, None, None).unwrap();
@@ -153,6 +161,87 @@ fn template_preflight_does_not_resolve_launch_only_file() {
         "document-backed resolution must not see the launch-area file; approved: {:?}",
         result.approved_commands,
     );
+}
+
+#[test]
+fn template_preflight_combines_launch_facts_with_the_selected_target() {
+    let fixture = tempfile::TempDir::new().unwrap();
+    let launch_repo = fixture.path().join("launch");
+    let source_repo = fixture.path().join("source");
+    std::fs::create_dir_all(&launch_repo).unwrap();
+    std::fs::create_dir_all(&source_repo).unwrap();
+    for repo in [&launch_repo, &source_repo] {
+        let status = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(repo)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    let source_path = source_repo.join("prompt.md");
+    std::fs::write(
+        &source_path,
+        "::shell echo {{ ctx.repo_root }} {{ ctx.agent }} {{ ctx.model }} \
+         {{ env.AGENT }} {{ env.MODEL }}\n",
+    )
+    .unwrap();
+    std::fs::write(
+        source_repo.join(".darkmatter-shell-whitelist"),
+        "prefix echo\n",
+    )
+    .unwrap();
+
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(&launch_repo);
+    let source_context = invocation.derive_source(&source_path).unwrap();
+    let markdown = Markdown::try_from(source_path.as_path()).unwrap();
+    let launch_requirements =
+        darkmatter::markdown::compose::ContextRequirements::for_content("");
+    let launch_context = invocation.capture_launch_context(&launch_requirements);
+    let env_overrides = BTreeMap::from([
+        ("AGENT".to_string(), "claude".to_string()),
+        ("MODEL".to_string(), "claude-sonnet-4-6".to_string()),
+    ]);
+    let (options, prepared_context) = build_template_preflight_options(
+        &env_overrides,
+        &source_path,
+        &markdown,
+        &serde_json::json!({}),
+        TemplatePreflightContext {
+            launch_area: Some(&launch_repo),
+            file_resolution_context: Some(source_context.file_resolution_context()),
+            invocation: Some(&invocation),
+            launch_context: Some(&launch_context),
+            launch_requirements: Some(&launch_requirements),
+        },
+    );
+    let approval_options = ShellApprovalOptions {
+        policy_root: Some(source_repo),
+        ..Default::default()
+    };
+
+    let result = resolve_shell_approvals(
+        Some(&markdown),
+        Some(&options),
+        &approval_options,
+        None,
+        None,
+    )
+    .unwrap();
+    let launch_root = prepared_context
+        .get("repo_root")
+        .and_then(serde_json::Value::as_str)
+        .unwrap();
+    assert_eq!(launch_root, launch_repo.to_string_lossy());
+    assert!(
+        result.approved_commands.contains(&format!(
+            "echo {launch_root} claude claude-sonnet-4-6 claude claude-sonnet-4-6"
+        )),
+        "target-adjusted command was not approved: {:?}",
+        result.approved_commands
+    );
+    assert_eq!(invocation.work_snapshot().launch_context_constructions, 1);
+    assert_eq!(invocation.work_snapshot().ambient_fallbacks, 0);
 }
 // ---------------------------------------------------------------------------
 // Layer precedence

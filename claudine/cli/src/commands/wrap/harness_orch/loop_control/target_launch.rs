@@ -618,6 +618,7 @@ pub(super) fn rebuild_target_launch(
     cli_model: Option<&str>,
     repo_root: Option<&Path>,
     launch_area: &Path,
+    invocation: Option<&claudine::invocation_context::InvocationContext>,
     target: &MaterializedHarnessPrompt,
 ) -> Result<TargetLaunchRebuild, crate::commands::wrap::launch_plan::LaunchPlanError> {
     // Passes no source path: it is only the diagnostic an unavailable-provider
@@ -637,12 +638,22 @@ pub(super) fn rebuild_target_launch(
 
     // Reuse the exact context retained with target materialization, then overlay
     // the rebuilt identity so `env.AGENT`/`env.MODEL`/`env.YOLO` resolve to it.
-    // The ambient branch is retained for synthetic compatibility fixtures that
-    // construct a materialized prompt without canonical preparation.
+    // Synthetic invocation-backed inputs still use the canonical launch owner;
+    // the ambient branch exists only for fixtures with no invocation context.
     let mut prepared_context = target.compose_context.clone().unwrap_or_else(|| {
         let fm_json = serde_json::to_string(&target.frontmatter).unwrap_or_default();
         let scan = format!("{fm_json}\n{}", target.prompt);
-        darkmatter::markdown::compose::ComposeContext::capture_for_content(launch_area, &scan)
+        let requirements =
+            darkmatter::markdown::compose::ContextRequirements::for_content(&scan);
+        invocation.map_or_else(
+            || {
+                claudine::composition::capture_compatibility_context_for_content(
+                    launch_area,
+                    &scan,
+                )
+            },
+            |invocation| invocation.capture_launch_context(&requirements),
+        )
     });
     for (key, value) in &env_overrides {
         prepared_context.env_mut().insert(key.clone(), value.clone());
