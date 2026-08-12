@@ -43,8 +43,14 @@ revalidates values deferred because they contained pending shell syntax.
 
 Validation-only APIs are passive and read-only. Composition may coerce declared
 scalar types and normalize a successful eager `file(eager)` value to its
-repo-relative path. Missing optional properties and explicit `null` are
-equivalent.
+repo-relative path. At the same schema seam, after first-pass frontmatter
+interpolation and before coercion, composition materializes an absent optional,
+no-default top-level property as `null` only when the winning declaration comes
+from the document's inline or referenced SimplifiedSchema. Baseline and trigger
+properties, raw JSON Schema, root unions, nested properties, required
+properties, and defaulted properties do not materialize. A compose run with no
+effective schema and all validation-only APIs remain non-mutating. Repeated
+schema passes are idempotent, and present values are preserved exactly.
 
 Caller-originated eager-file overrides instead retain an absolute native value
 in effective frontmatter. Markdown body interpolation reads a separate portable
