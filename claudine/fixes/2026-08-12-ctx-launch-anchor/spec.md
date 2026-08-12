@@ -4,7 +4,8 @@ created: 2026-08-12
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-08-12
-review_iterations: 1
+review_iterations: 2
+implemented: true
 clarified: claude/claude-fable-5
 area: claudine
 packages:

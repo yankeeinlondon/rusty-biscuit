@@ -4,7 +4,10 @@ ready: false
 agent: codex/default
 created: 2026-08-12T20:04:08+01:00
 spec: 2026-08-12-ctx-launch-anchor/spec.md
-implemented: false
+log: claudine/fixes/2026-08-12-ctx-launch-anchor/log.md
+implemented: true
+implemented_by: codex/default
+next: 2026-08-12-ctx-launch-anchor/review-2.md
 description: A **fix** review of `2026-08-12-ctx-launch-anchor/spec.md`
 fix: 2026-08-12-ctx-launch-anchor/review-1.md
 ---
