@@ -71,8 +71,8 @@ The library pipeline lives in `claudine/lib/src/system_prompt/`:
 3. each selected file receives a source-derived `SourceContext` and
    `FileResolutionContext`
 4. `ContextRequirements` scans the primary prompt and appendix candidates as a
-   union; the invocation supplies one demand-driven runtime snapshot for their
-   composition
+   union; `InvocationContext::capture_launch_context` supplies one snapshot
+   anchored to the caller's launch CWD and launch repository evidence
 5. `prepare_system_prompt()` composes the selected file through Darkmatter
 6. non-interactive sessions append `.claudine/non-interactive.md`,
    `~/.claudine/non-interactive.md`, or the built-in fallback message
@@ -136,8 +136,11 @@ Current preparation behavior:
 - the source-derived `FileResolutionContext` is passed into
   `ComposeOptions::with_file_resolution_context(...)`
 - primary and appendix composition share one supplied, demand-driven
-  `ComposeContext`; it uses the invocation's frozen environment and does not
-  fall back to ambient Git, topology, HOME, or host capture
+  `ComposeContext`; relocating either source cannot change launch-facing plain
+  `ctx.*`, and the snapshot does not fall back to ambient Git, topology, HOME,
+  or host capture
+- every file keeps its own `SourceContext` for transclusion, `$schema`, and
+  authored file resolution
 - frontmatter is not forwarded to the provider
 - the canonical output is Markdown as authored after composition
 - if the composed body is empty or whitespace-only, Claudine treats that as an explicit disable for the selected scope

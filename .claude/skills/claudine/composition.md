@@ -79,12 +79,19 @@ different projection. Retry, resume, and JIT boundaries still reread document
 content; only immutable launch and repository evidence is reused.
 
 Before composing, Claudine scans the authored frontmatter and body with
-Darkmatter's `ContextRequirements`, asks the invocation owner only for the
-required runtime groups, and supplies the resulting evidence to
-`ComposeContext`. The environment comes from the frozen invocation snapshot.
-Missing supplied evidence remains a partial-capture diagnostic; canonical
-paths do not recover it from ambient CWD, HOME, environment, Git, or host
-discovery.
+Darkmatter's `ContextRequirements`. Each document preparation epoch asks the
+invocation owner for one launch-anchored `ComposeContext`, applies the selected
+target's agent/model environment overrides, and reuses that exact snapshot
+through preflight, composition, loops, and lifecycle evaluation. A stabilized
+post-`initialize` reread extends only newly required groups from the retained
+launch evidence. It never replaces the launch anchor, frozen environment, or
+target overrides.
+
+`SourceContext` remains separate: it owns `$schema`, transclusion, provenance,
+and authored file resolution, but never supplies prepared plain `ctx.*`.
+`current.ctx.*` is intentionally live at lifecycle event time. Canonical paths
+do not recover prepared context from ambient CWD, HOME, environment, Git, or
+host discovery.
 
 File provenance does not choose the provider child's working directory.
 Canonical `::shell` composition remains pinned to
@@ -743,7 +750,7 @@ Retry and resume want opposite things from that rebuild. A **retry** opens a fre
 
 The target's stabilized frontmatter is the basis for the target's decisions. What is rebuilt per target today:
 
-- **Context** — the prepared document stores the exact `ComposeContext` it composed against, derived from immutable launch inputs plus the target's own source, repo, and workspace. Body interpolation, effective frontmatter, lifecycle DM2 lookup, schema and file evaluation, and shell preflight all read that one stored snapshot; nothing recaptures ambient context at runtime, which matters because the wrapper deliberately moves the process CWD to the repo root. `current.ctx.*` remains live as a late-binding surface, and is explicitly *not* a fallback for a missing prepared `ctx.*`.
+- **Context** — the prepared document stores the exact `ComposeContext` it composed against. Plain `ctx.*` is projected from immutable invocation launch evidence, then target agent/model overrides are applied. Body interpolation, effective frontmatter, lifecycle DM2 lookup, and shell preflight share that snapshot; the target's separate `SourceContext` owns schema and authored file resolution. `current.ctx.*` remains live at event time and is not a fallback for prepared plain `ctx.*`.
 - **`initialize` and shell** — the target runs its own `initialize` behind a narrow safety gate that approves every potentially-selected `initialize` shell command first ("initialize before full pre-flight" never means "execute unapproved shell"), then rereads the stabilized target so initialize-time mutations are visible, then runs the full audit over every remaining lifecycle and template shell surface, reusing approvals the narrow gate already granted rather than re-prompting. An `initialize` proxy may chain another proxy; the chain stabilizes before any launch.
 - **Schema and diagnostics** — the target's `$schema` validates the target's effective frontmatter (including any `with:` overlay), and a given failure has one typed identity whichever route reached it.
 - **Launch identity** — when the handoff surfaces to the command-owned coordinator, `compose/prep.rs::prepare_and_run_active_document` re-prepares the target as a fresh document and re-enters the production selection/MCP/argv pipeline, rebuilding from the target's own frontmatter under explicit-CLI precedence: provider selection, profile/binary sub-selection, the argv entrypoint and flags, MCP runtime injection, the effective child environment, interactivity and structured-output mode, dispatch/correlation configuration, model selection, document-loop ownership/recognition, child CWD, and system-prompt delivery. A proxied target therefore selects its authored `agent:`/`model:`, gets its own provider binary and MCP server set, and acquires its own `loop:`, matching a direct invocation. Verified by L2 equivalence rows including a provider *switch* (`level2_lifecycle_equivalence_target_launch_bundle_matches_direct_run`, router `goose` → target `codex`; `level2_lifecycle_equivalence_target_mcp_injection_matches_direct_run`, router `codex` → target `gemini`).

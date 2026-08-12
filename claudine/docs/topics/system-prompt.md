@@ -50,8 +50,8 @@ The library pipeline lives in `claudine/lib/src/system_prompt/`:
 1. `InvocationContext` captures the launch CWD, HOME, environment, repository observation, and launch file-resolution rules once
 2. its `LaunchContext` projection selects either an explicit file or a discovered `system-prompt.md`; explicit references resolve through the invocation's launch `FileResolutionContext`
 3. each selected file retains a source-derived `SourceContext`, including its repository/package roots and `FileResolutionContext`
-4. the primary prompt and non-interactive candidates contribute one union of requested `ctx.*` groups; the invocation supplies cached evidence for one shared runtime context
-5. each file composes with that shared runtime context and its own retained file-resolution context
+4. the primary prompt and non-interactive candidates contribute one union of requested `ctx.*` groups; `InvocationContext::capture_launch_context` creates one shared snapshot anchored to the caller's launch CWD and launch repository evidence
+5. each file composes with that launch snapshot and its own retained source `FileResolutionContext`
 6. non-interactive sessions append `.claudine/non-interactive.md`, `~/.claudine/non-interactive.md`, or the built-in fallback message
 7. providers apply the prepared result through `WrapperProfile::apply_system_prompt()`
 
@@ -105,7 +105,8 @@ Current preparation behavior:
 
 - the source file path is passed into `ComposeOptions::with_source_file(...)`
 - the source-derived `FileResolutionContext` is passed into the same `ComposeOptions`, so transclusion and file-like values use the frozen launch/source roots, HOME, and environment rather than ambient process state
-- requested runtime groups are captured from invocation-owned evidence and shared across the primary prompt and appendix; downstream composition does not rediscover Git or topology
+- plain `ctx.*` comes from one launch-anchored snapshot shared by the primary prompt and appendix, so relocating either source cannot change launch repository or package-area values
+- each source retains its own `SourceContext` for transclusion, `$schema`, and file-like values; downstream composition does not rediscover Git or topology
 - `::shell` runs from the launch repository root; outside a repository it runs from the explicit launch CWD, never from the selected prompt's directory
 - frontmatter is not forwarded to the provider
 - the canonical output is Markdown as authored after composition

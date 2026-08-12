@@ -547,10 +547,12 @@ arrives as a value).
 row per `DocumentEntryReason` (`Direct`, `ProxyTarget`, `Retry`, `Resume`,
 `LoopIteration`), with no fall-through — and `service.rs::prepare_document`
 runs it around the two sanctioned composers (`prepare_direct` / `prepare_inline`
-in `prepare.rs`). A prepared document stores the **exact** `ComposeContext` it
-composed against; ambient `ComposeContext::capture()` is not a runtime fallback
-on any prepared path (the wrapper moves process CWD to the repo root, so a
-recapture reads the wrong anchor).
+in `prepare.rs`). A prepared document stores the **exact**, target-adjusted
+launch `ComposeContext` it composed against. Its separate `SourceContext` owns
+schema and authored file resolution. A stabilized reread extends the same epoch
+snapshot; proxy, retry, and resume entry construct a fresh epoch from the same
+immutable invocation launch evidence. `current.ctx.*` remains a separate live
+event-time capture.
 
 File-valued input keeps its provenance through that service. A reference
 authored in a document resolves from the document's source context; an eager
@@ -561,11 +563,11 @@ files. Overlay null-removal still applies to the authored layer because an
 override object cannot represent an absent key; non-null overlay values also
 travel through the caller layer so this resolution distinction is preserved.
 
-Two `cli/tests/composition_seams.rs` guards hold these lines mechanically: the
-`compose_with` allowlist (four sanctioned composer sites) and the ambient-capture
-ban. The ambient `ComposeContext::capture()` baseline is empty; sequence
-template preflight now captures one anchored context and reuses it through
-validation and execution.
+`cli/tests/composition_seams.rs` holds these lines mechanically: the
+`compose_with` allowlist identifies sanctioned composers, while the capture-owner
+inventory permits direct `ComposeContext::capture*` only at the invocation and
+canonical preparation owners plus reason-bearing public-library compatibility,
+`claudine context --values`, and live `current.ctx.*` exceptions.
 
 **Retired carriers.** `RematerializeInputs` → `CallerInputLayers` (the four
 invocation-scoped caller layers, an input of the canonical service — a
