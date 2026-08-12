@@ -38,10 +38,9 @@
 # recorded *example failing test* names (every JUnit-backed failing test carries
 # a `<package>::<module>::test` identity), with the shard dimension collapsed.
 #
-# Two entries are SYNTHETIC identities, not Cargo packages (`claudine-gen-drift`
-# and `coverage`): they stay here, never in any package scope, reported
-# `baseline-out-of-scope` until their specialized producers join the result
-# contract. They are carried forward without being renamed or dropped.
+# One entry is a SYNTHETIC identity, not a Cargo package (`coverage`): it stays
+# here, never in any package scope, reported `baseline-out-of-scope` until its
+# specialized producer joins the result contract.
 #
 # Every entry below is a CANDIDATE pending the Phase 4 bridging run — the first
 # full-scope run that produces package-keyed results. `ci-rollup verdict` will
@@ -212,22 +211,14 @@ expiry = "2026-11-30"
 # ---------------------------------------------------------------------------
 # Specialized workflows — SYNTHETIC identities, NOT Cargo packages
 #
-# `claudine-gen-drift` and `coverage` are not packages. They are recorded here
-# so the migration from the area-keyed baseline is lossless, but they are never
-# in any package scope, so `ci-rollup verdict` reports them
-# `baseline-out-of-scope` and IGNORES them — they neither block nor pass. They
-# move into the package-keyed result contract only when their specialized
-# producers emit the same schema (plan §3.5, out of scope here).
+# `coverage` is not a package. It is recorded here so the migration from the
+# area-keyed baseline is lossless, but it is never in any package scope, so
+# `ci-rollup verdict` reports it `baseline-out-of-scope` and IGNORES it — it
+# neither blocks nor passes. It moves into the package-keyed result contract
+# only when its specialized producer emits the same schema (plan §3.5, out of
+# scope here). `claudine-gen-drift` was retired with its standalone job: the
+# generator drift suite runs as the ordinary `claudine-gen` package cell.
 # ---------------------------------------------------------------------------
-
-[[failure]]
-package = "claudine-gen-drift"
-environment = "ubuntu-latest"
-tier = "lint"
-owner = "@yankeeinlondon"
-reason = "synthetic identity (the Claudine generator drift check), not a Cargo package; carried forward from the area-keyed baseline, ignored by the verdict until its producer emits package-keyed results"
-source_run = "30323254931"
-expiry = "2026-10-31"
 
 [[failure]]
 package = "coverage"
