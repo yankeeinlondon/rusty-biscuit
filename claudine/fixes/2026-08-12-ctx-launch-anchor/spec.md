@@ -4,6 +4,7 @@ created: 2026-08-12
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-08-12
+clarified: claude/claude-fable-5
 area: claudine
 packages:
     - claudine
@@ -166,6 +167,11 @@ projections share caching and work accounting without fabricating a prompt
 path or performing another host scan. Do not construct a fake `SourceContext`
 for the launch directory.
 
+Verify—and complete where missing—the `record_ambient_fallback` wiring so a
+consumer that drops its prepared context cannot fall through to darkmatter's
+ambient capture unobserved. AC5's counter proof depends on that accounting
+having no blind spot.
+
 Alternatives considered:
 
 - **Replace only the anchor at each call site.** Small diff, but it combines
@@ -217,11 +223,26 @@ invocation evidence. Loop iterations that reuse one prepared document also
 reuse its stored snapshot. `current.ctx.*` remains separately captured and
 live.
 
+The post-`initialize` stabilized reread stays inside the same epoch; it is not
+a fresh preparation. Because `initialize` may rewrite the document, the
+reread's demand-driven `ContextRequirements` can exceed the groups the stored
+snapshot was captured with. When they do, the epoch owner extends the snapshot
+by projecting only the missing groups from the same retained launch evidence.
+Extension never re-anchors: the capture anchor, the environment capture, and
+the applied target overrides remain immutable for the life of the epoch.
+
 Static sequence graph preflight occurs before per-task target selection, so it
 uses one launch-evidence base context for launch-facing expressions. Each task's
 prepared epoch then clones or projects that launch context and applies its own
-resolved target environment overrides. Any command audited in both phases must
-resolve to identical bytes or retain the existing late-binding rejection.
+resolved target environment overrides. Sequence preflight resolves shell bytes
+once, and the resolved bytes are what execution runs; there is no second
+resolution that could detect divergence. A command audited in the
+pre-selection graph phase that references a target-dependent identity root
+(`ctx.agent`, `ctx.model`, `env.AGENT`, `env.MODEL`) is therefore rejected at
+graph preflight with a typed error that mirrors the existing late-binding
+rejection: it names the offending root and directs the author to task-scoped
+commands. Per-task and JIT audits, where the selected target is available,
+continue to permit those roots.
 
 ### D5 — Canonical-path audit and guard
 
@@ -279,16 +300,26 @@ allowlisted with a reason.
   they do not pass a hand-built executor snapshot and thereby skip the faulty
   seam.
 - **AC5 — exact snapshot reuse.** A deterministic test proves preflight, body,
-  effective frontmatter, and lifecycle receive the same epoch snapshot. Prefer
-  a capture identity/counter assertion so two separately constructed but
-  usually equal values cannot pass.
+  effective frontmatter, and lifecycle receive the same epoch snapshot, via
+  per-epoch work-accounting assertions in Claudine only — no darkmatter
+  identity field and no `Arc` plumbing refactor. The assertion counts exactly
+  one launch-capture construction per epoch plus zero or more group extensions
+  for the stabilized reread; extensions must reuse retained launch evidence
+  (AC11). It also asserts an ambient-fallback count of zero and that each
+  consumer seam observed a populated prepared context, so two separately
+  constructed but usually equal values cannot pass.
 - **AC6 — target identity.** `ctx.agent`, `ctx.model`, `env.AGENT`, and
   `env.MODEL` reflect the resolved target's environment overrides on direct,
-  proxy, retry/resume, loop, and sequence-task paths.
+  proxy, retry/resume, loop, and sequence-task paths. Sequence commands
+  audited before target selection reject these roots instead of expanding
+  them (AC7).
 - **AC7 — sequence parity.** Root graph preflight, nested prompt documents,
   task/group expressions, template preflight, and task execution all use launch
   facts. A sequence file and task prompt stored in different repositories do
-  not substitute either source repository for the launch repository.
+  not substitute either source repository for the launch repository. A
+  root-graph command referencing `ctx.agent`, `ctx.model`, `env.AGENT`, or
+  `env.MODEL` fails graph preflight with the typed target-identity rejection —
+  a preflight error, never a wrong-value expansion.
 - **AC8 — proxy/re-entry parity.** Direct and proxied execution of the same
   target agree on launch-facing `ctx.*`; retry and resume fresh reads do not
   drift to the prompt directory; loop iterations retain the epoch snapshot.
@@ -331,3 +362,16 @@ and package-area values are absent even when the prompt itself lives in a
 repository; AC3 locks that decision. The prompt's own location remains
 available to source/file-resolution infrastructure but is not projected into
 plain `ctx.*`.
+
+Three residual questions were surfaced in review and ratified 2026-08-12:
+
+- **Pre-selection target identity.** Graph-phase sequence commands referencing
+  `ctx.agent`/`ctx.model`/`env.AGENT`/`env.MODEL` are rejected with a typed
+  preflight error; the resolve-once design offers no byte-equality safety net
+  (D4, AC6, AC7).
+- **Stabilized reread.** The post-`initialize` reread is the same epoch; the
+  snapshot extends missing requirement groups from retained launch evidence
+  and never re-anchors (D4, AC5).
+- **AC5 mechanism.** Snapshot-reuse proof is Claudine-only work accounting —
+  no darkmatter identity field, no `Arc` refactor; the `packages` scope in the
+  frontmatter is intentional (D2, AC5).
