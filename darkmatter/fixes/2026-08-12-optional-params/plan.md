@@ -2,7 +2,6 @@
 total_phases: 5
 created: 2026-08-12
 phase: 5
-completed: 2026-08-12
 agent: codex/default
 yolo: true
 packages:
