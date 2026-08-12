@@ -75,7 +75,7 @@ fn effective_state(
 }
 
 fn prepared_context() -> ComposeContext {
-    ComposeContext::capture_for_content(std::path::Path::new("."), "")
+    super::capture_compatibility_context_for_content(std::path::Path::new("."), "")
 }
 
 fn obj(value: Value) -> Map<String, Value> {

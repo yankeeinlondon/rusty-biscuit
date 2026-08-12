@@ -142,7 +142,10 @@ pub fn build_preflight_graph(
     source: &ResolvedCompositionSource,
 ) -> Result<PreflightGraph, CompositionError> {
     let anchor = source.resolved_path.parent().unwrap_or_else(|| Path::new("."));
-    let context = ComposeContext::capture_for_document(anchor, &source.markdown);
+    let context = super::super::capture_compatibility_context_for_document(
+        anchor,
+        &source.markdown,
+    );
     build_preflight_graph_with_context(plan, source, context)
 }
 
@@ -181,9 +184,9 @@ pub fn build_preflight_graph_with_context_and_resolution(
 
 /// Build preflight from one invocation's retained repository observations.
 ///
-/// Every referenced document derives its own [`SourceContext`], so nested
-/// references and early-bound `ctx.*` values follow the repository that owns
-/// the authoring document rather than inheriting the top-level sequence roots.
+/// Every referenced document derives its own [`SourceContext`] for file
+/// resolution, while early-bound plain `ctx.*` remains anchored to the
+/// invocation launch context supplied by `context`.
 pub fn build_preflight_graph_with_invocation(
     plan: &SequencePlan,
     source: &ResolvedCompositionSource,
@@ -217,6 +220,7 @@ struct Loader<'a> {
     /// Captured once: rebuilding it per shell command would re-probe the
     /// environment for every string in the graph.
     context: ComposeContext,
+    context_requirements: darkmatter::markdown::compose::ContextRequirements,
     file_resolution_context: Option<biscuit_file::FileResolutionContext>,
     invocation: Option<&'a InvocationContext>,
     source_contexts: HashMap<PathBuf, SourceContext>,
@@ -228,6 +232,8 @@ impl<'a> Loader<'a> {
         context: ComposeContext,
         file_resolution_context: Option<biscuit_file::FileResolutionContext>,
     ) -> Self {
+        let context_requirements =
+            darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
         Self {
             graph: PreflightGraph::default(),
             ancestry: Vec::new(),
@@ -235,6 +241,7 @@ impl<'a> Loader<'a> {
             source,
             source_path: canonical(&source.resolved_path),
             context,
+            context_requirements,
             file_resolution_context,
             invocation: None,
             source_contexts: HashMap::new(),
@@ -248,6 +255,8 @@ impl<'a> Loader<'a> {
         source_context: SourceContext,
     ) -> Self {
         let source_path = canonical(&source.resolved_path);
+        let context_requirements =
+            darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
         Self {
             graph: PreflightGraph::default(),
             ancestry: Vec::new(),
@@ -255,6 +264,7 @@ impl<'a> Loader<'a> {
             source,
             source_path: source_path.clone(),
             context,
+            context_requirements,
             file_resolution_context: Some(source_context.file_resolution_context().clone()),
             invocation: Some(invocation),
             source_contexts: HashMap::from([(source_path, source_context)]),
@@ -805,31 +815,29 @@ impl<'a> Loader<'a> {
                 task: label.to_string(),
             });
         }
+        if let Some(root) = shape::first_target_identity(raw) {
+            return Err(CompositionError::SequenceShellTargetIdentity {
+                command: raw.to_string(),
+                root,
+                task: label.to_string(),
+            });
+        }
 
         let source_context = self.source_context_for(origin);
-        let (runtime_context, file_resolution_context) = match source_context.as_ref() {
-            Some(source_context) => {
-                let invocation = self
-                    .invocation
-                    .expect("source context requires an invocation owner");
-                let requirements =
-                    darkmatter::markdown::compose::ContextRequirements::for_content(raw);
-                let evidence = invocation.runtime_evidence(source_context, &requirements);
-                let mut context = ComposeContext::capture_with_evidence(
-                    source_context.base_dir(),
-                    &requirements,
-                    &evidence,
-                );
-                for (key, value) in self.context.env() {
-                    context.env_mut().insert(key.clone(), value.clone());
-                }
-                (
-                    context,
-                    Some(source_context.file_resolution_context().clone()),
-                )
-            }
-            None => (self.context.clone(), self.file_resolution_context.clone()),
-        };
+        if let Some(invocation) = self.invocation {
+            let requirements =
+                darkmatter::markdown::compose::ContextRequirements::for_content(raw);
+            invocation.extend_launch_context(
+                &mut self.context,
+                &mut self.context_requirements,
+                &requirements,
+            );
+        }
+        let runtime_context = self.context.clone();
+        let file_resolution_context = source_context
+            .as_ref()
+            .map(|source| source.file_resolution_context().clone())
+            .or_else(|| self.file_resolution_context.clone());
         let resolution_ctx = super::super::document_expression_resolution_context(
             origin,
             Some(&runtime_context),

@@ -137,7 +137,7 @@ fn compose_prompt_markdown(
                 Some(parent) => parent.to_path_buf(),
                 None => std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from(".")),
             };
-            ComposeContext::capture_for_content(&base_dir, raw_text)
+            crate::composition::capture_compatibility_context_for_content(&base_dir, raw_text)
         }
     };
     let mut options = match source_path(source) {
@@ -208,40 +208,8 @@ fn build_shared_compose_context_with_invocation(
         }
     }
 
-    let source_context = primary
-        .and_then(|input| input.source_context.clone())
-        .or_else(|| {
-            appendix_candidates.and_then(|candidates| {
-                candidates
-                    .iter()
-                    .find_map(|input| input.source_context.clone())
-            })
-        });
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(&combined);
-    let mut runtime = match source_context.as_ref() {
-        Some(source_context) => {
-            let evidence = invocation.runtime_evidence(source_context, &requirements);
-            ComposeContext::capture_with_evidence(
-                source_context.base_dir(),
-                &requirements,
-                &evidence,
-            )
-        }
-        // Built-in appendix only: neither the primary prompt nor any
-        // appendix candidate has a file source to derive from. This stays
-        // on the request-owned evidence path (D4/D6): no fabricated
-        // `source_path` is invented to feed `derive_source`, and no ambient
-        // `std::env::vars()`/CWD read is substituted either — the evidence
-        // bundle carries only the invocation's captured environment, so any
-        // Git/repo/OS/etc. group a future built-in appendix might reference
-        // resolves to null rather than a live ambient read.
-        None => {
-            let evidence = darkmatter::markdown::compose::ContextCaptureEvidence::new(
-                invocation.environment().clone(),
-            );
-            ComposeContext::capture_with_evidence(invocation.launch_cwd(), &requirements, &evidence)
-        }
-    };
+    let mut runtime = invocation.capture_launch_context(&requirements);
     if let Some(agent) = launch_context.agent.as_ref() {
         runtime.env_mut().insert("AGENT".to_string(), agent.clone());
     }

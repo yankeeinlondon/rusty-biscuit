@@ -776,6 +776,13 @@ pub struct CompositionExecutionRequest {
     pub invocation_context: Option<crate::invocation_context::InvocationContext>,
     /// Definitive repository and file-resolution context for this source.
     pub source_context: Option<crate::invocation_context::SourceContext>,
+    /// Groups captured in the prepared document epoch snapshot.
+    ///
+    /// Canonical direct/inline paths populate this so a post-`initialize`
+    /// stabilized reread can extend the retained snapshot only for newly
+    /// demanded groups. Compatibility callers may leave it absent.
+    pub epoch_context_requirements:
+        Option<darkmatter::markdown::compose::ContextRequirements>,
     /// Launch-CWD `LaunchWorkspaceContext` projected from request-owned
     /// repository evidence. When `Some`, the executor reuses it
     /// instead of calling `resolve_launch_workspace_context` again for both

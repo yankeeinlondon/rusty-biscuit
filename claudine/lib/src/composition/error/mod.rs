@@ -1686,6 +1686,22 @@ pub enum CompositionError {
         task: String,
     },
 
+    /// A sequence graph command references target identity before the task's
+    /// provider and model have been selected.
+    #[error(
+        "shell command `{command}` in {task} references `{root}` before a task target is \
+         available during graph preflight; move target-dependent commands into a task-scoped \
+         prompt or lifecycle stack"
+    )]
+    SequenceShellTargetIdentity {
+        /// The authored command.
+        command: String,
+        /// The offending target-dependent path.
+        root: String,
+        /// A label locating the task.
+        task: String,
+    },
+
     /// A task's shell command failed early-binding resolution at preflight.
     #[error("shell command `{command}` in {task} could not be resolved at preflight: {message}")]
     SequenceShellResolution {

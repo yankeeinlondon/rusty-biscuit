@@ -101,6 +101,26 @@ fn canonical_preparation_records_each_compose_on_the_request_owner() {
 }
 
 #[test]
+fn invocation_backed_preparation_records_a_missing_prepared_context() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[], "body {{ ctx.area }}");
+    let invocation = crate::invocation_context::InvocationContext::capture_at(dir.path());
+
+    let prepared = prepare_direct(
+        &source,
+        PrepareOptions {
+            invocation_context: Some(invocation.clone()),
+            prepared_context: None,
+            ..PrepareOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert!(prepared.compose_context.get("area").is_some());
+    assert_eq!(invocation.work_snapshot().ambient_fallbacks, 1);
+}
+
+#[test]
 fn inline_composition_uses_effective_frontmatter() {
     let dir = TempDir::new().unwrap();
     let source = make_source(

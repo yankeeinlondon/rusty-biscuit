@@ -997,6 +997,145 @@ mod write_back {
 mod shell {
     use super::*;
 
+    #[test]
+    fn root_referenced_task_and_group_shells_share_one_launch_context() {
+        let fixture = TempDir::new().unwrap();
+        let launch_repo = fixture.path().join("launch");
+        let source_repo = fixture.path().join("source");
+        fs::create_dir_all(&launch_repo).unwrap();
+        fs::create_dir_all(&source_repo).unwrap();
+        for repo in [&launch_repo, &source_repo] {
+            let status = std::process::Command::new("git")
+                .args(["init", "--quiet"])
+                .current_dir(repo)
+                .status()
+                .unwrap();
+            assert!(status.success());
+        }
+        write_yaml(
+            &source_repo,
+            "task.yaml",
+            &json!({
+                "kind": "task",
+                "shell": "echo task {{ ctx.repo_root }}"
+            }),
+        );
+        write_yaml(
+            &source_repo,
+            "group.yaml",
+            &json!({
+                "kind": "group",
+                "name": "bundle",
+                "tasks": [{ "shell": "echo group {{ ctx.repo_root }}" }]
+            }),
+        );
+        let source_path = write_source(
+            &source_repo,
+            "seq.md",
+            &[(
+                "sequence",
+                json!([
+                    { "name": "root", "shell": "echo root {{ ctx.repo_root }}" },
+                    { "name": "task", "task": "task.yaml" },
+                    { "name": "group", "group": "group.yaml" }
+                ]),
+            )],
+            "Body.\n",
+        );
+        let source = crate::composition::resolve_composition_source(&source_path).unwrap();
+        let plan = resolve_sequence_plan(&source)
+            .unwrap()
+            .expect("fixture declares a sequence");
+        let invocation = crate::invocation_context::InvocationContext::capture_at(&launch_repo);
+        let requirements =
+            darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
+        let context = invocation.capture_launch_context(&requirements);
+
+        let graph = build_preflight_graph_with_invocation(
+            &plan,
+            &source,
+            context,
+            &invocation,
+            &invocation.derive_source(&source.resolved_path).unwrap(),
+        )
+        .unwrap();
+        let expected_root = launch_repo.to_string_lossy();
+        let commands: Vec<_> = graph
+            .shell_commands
+            .iter()
+            .map(|command| command.command.as_str())
+            .collect();
+        assert_eq!(
+            commands,
+            [
+                format!("echo root {expected_root}"),
+                format!("echo task {expected_root}"),
+                format!("echo group {expected_root}"),
+            ]
+        );
+        let work = invocation.work_snapshot();
+        assert_eq!(work.launch_context_constructions, 1);
+        assert_eq!(work.launch_context_extensions, 0);
+        assert_eq!(work.ambient_fallbacks, 0);
+    }
+
+    /// Graph preflight must reject every target-identity root before approving
+    /// bytes because no task target has been selected yet.
+    #[test]
+    #[serial_test::serial(ctx_launch_anchor_graph_identity)]
+    fn graph_preselection_rejects_each_target_identity_root() {
+        let _agent = test_toolkit::EnvGuard::set_safe("AGENT", "baseline-preselection-agent");
+        let _model = test_toolkit::EnvGuard::set_safe("MODEL", "baseline-preselection-model");
+        for (name, command, root) in [
+            ("ctx-agent", "echo {{ ctx.agent }}", "ctx.agent"),
+            ("ctx-model", "echo {{ ctx.model }}", "ctx.model"),
+            ("env-agent", "echo {{ env.AGENT }}", "env.AGENT"),
+            ("env-model", "echo {{ env.MODEL }}", "env.MODEL"),
+        ] {
+            let dir = TempDir::new().unwrap();
+            let source_path = write_source(
+                dir.path(),
+                "seq.md",
+                &[(
+                    "sequence",
+                    json!([{ "name": name, "shell": command }]),
+                )],
+                "Body.\n",
+            );
+            let source = crate::composition::resolve_composition_source(&source_path).unwrap();
+            let plan = resolve_sequence_plan(&source)
+                .unwrap()
+                .expect("fixture declares a sequence");
+            let invocation = crate::invocation_context::InvocationContext::capture_at(dir.path());
+            let source_context = invocation.derive_source(&source.resolved_path).unwrap();
+            let requirements =
+                darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
+            let context = invocation.capture_launch_context(&requirements);
+
+            let error = build_preflight_graph_with_invocation(
+                &plan,
+                &source,
+                context,
+                &invocation,
+                &source_context,
+            )
+            .expect_err("pre-selection target identity must fail graph preflight");
+
+            let CompositionError::SequenceShellTargetIdentity {
+                root: actual_root,
+                command: actual_command,
+                ..
+            } = &error
+            else {
+                panic!("expected typed target-identity rejection, got: {error}");
+            };
+            assert_eq!(actual_root, root);
+            assert_eq!(actual_command, command);
+            assert!(error.to_string().contains("task-scoped"));
+            assert_eq!(invocation.work_snapshot().ambient_fallbacks, 0);
+        }
+    }
+
     /// The stored command is the *resolved* string, so what preflight approves
     /// is exactly what runs.
     #[test]

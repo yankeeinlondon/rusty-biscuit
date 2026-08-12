@@ -770,7 +770,7 @@ impl StackExecutionContext<'_> {
                     .ctx_base_dir
                     .or(self.base_dir)
                     .unwrap_or_else(|| Path::new("."));
-                ComposeContext::capture_for_content(base, scan_hint)
+                super::super::capture_compatibility_context_for_content(base, scan_hint)
             }
         }
     }
@@ -1706,7 +1706,7 @@ fn capture_proxy_with_fallback(base: &Path, content: &str) -> ComposeContext {
     #[cfg(test)]
     PROXY_WITH_FALLBACK_CAPTURE_HINTS.with(|hints| hints.borrow_mut().push(content.to_string()));
 
-    ComposeContext::capture_for_content(base, content)
+    super::super::capture_compatibility_context_for_content(base, content)
 }
 
 #[cfg(test)]

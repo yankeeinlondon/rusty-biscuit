@@ -5,6 +5,60 @@ use tempfile::TempDir;
 
 use crate::system_prompt::context::LaunchContext;
 
+fn init_repo(root: &std::path::Path) {
+    std::fs::create_dir_all(root).unwrap();
+    let status = std::process::Command::new("git")
+        .args(["init", "-q"])
+        .current_dir(root)
+        .status()
+        .unwrap();
+    assert!(status.success());
+}
+
+fn write_two_area_workspace(root: &std::path::Path) {
+    for (area, package) in [("alpha", "alpha-lib"), ("beta", "beta-lib")] {
+        let package_root = root.join(area).join("lib");
+        std::fs::create_dir_all(package_root.join("src")).unwrap();
+        std::fs::write(
+            package_root.join("Cargo.toml"),
+            format!(
+                "[package]\nname = \"{package}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(package_root.join("src/lib.rs"), "").unwrap();
+    }
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"alpha/lib\", \"beta/lib\"]\nresolver = \"2\"\n",
+    )
+    .unwrap();
+}
+
+fn workspace_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("claudine/lib is nested under the workspace root")
+        .to_path_buf()
+}
+
+fn shipped_system_prompt_paths() -> Vec<PathBuf> {
+    let root = workspace_root();
+    let mut paths = vec![root.join("system-prompt.md")];
+    for entry in std::fs::read_dir(&root).unwrap() {
+        let entry = entry.unwrap();
+        if entry.file_type().unwrap().is_dir() {
+            let candidate = entry.path().join("system-prompt.md");
+            if candidate.is_file() {
+                paths.push(candidate);
+            }
+        }
+    }
+    paths.sort();
+    paths
+}
+
 /// Helper: create a temp file and return its path.
 fn write_temp_file(dir: &std::path::Path, name: &str, content: &str) -> PathBuf {
     let path = dir.join(name);
@@ -116,6 +170,190 @@ fn shared_context_uses_request_owned_repo_and_os_evidence() {
         }
         other => panic!("Expected Ready, got {other:?}"),
     }
+}
+
+#[test]
+fn shipped_system_prompt_corpus_parses_and_scans_requirements() {
+    let paths = shipped_system_prompt_paths();
+    assert!(!paths.is_empty(), "the shipped system-prompt corpus is empty");
+
+    for path in paths {
+        let raw = std::fs::read_to_string(&path).unwrap();
+        let markdown: darkmatter::markdown::Markdown = raw.into();
+        let _requirements =
+            darkmatter::markdown::compose::ContextRequirements::for_document(&markdown);
+        assert!(
+            !markdown.content().trim().is_empty(),
+            "shipped system prompt has an empty body: {}",
+            path.display()
+        );
+    }
+}
+
+#[test]
+fn normal_session_composes_the_shipped_root_system_prompt_from_launch_context() {
+    let root = workspace_root();
+    let launch = root.join("claudine");
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&launch);
+    let context = invocation.launch_context();
+
+    let result = resolve_and_prepare_for_session_with_context(
+        &SystemPromptArgs::default(),
+        &context,
+        false,
+        &invocation,
+    )
+    .unwrap();
+    let ResolvedSystemPrompt::Ready(prepared) = result else {
+        panic!("expected the shipped root system prompt to be discovered");
+    };
+
+    let shipped = root.join("system-prompt.md");
+    assert_eq!(source_path(&prepared.source), Some(shipped.as_path()));
+    assert!(prepared.composed_markdown.contains("rusty-biscuit"));
+    assert!(!prepared.composed_markdown.contains("{{ ctx."));
+    assert_eq!(invocation.work_snapshot().launch_context_constructions, 1);
+}
+
+#[test]
+fn primary_prompt_relocation_keeps_launch_context_and_source_local_files() {
+    let fixture = TempDir::new().unwrap();
+    let launch_repo = fixture.path().join("launch-repository");
+    let external_repo = fixture.path().join("external-repository");
+    init_repo(&launch_repo);
+    init_repo(&external_repo);
+    write_two_area_workspace(&launch_repo);
+
+    let sources = [
+        launch_repo.join("system-root.md"),
+        launch_repo.join("beta/lib/system-opposing.md"),
+        external_repo.join("system-external.md"),
+    ];
+    let invocation = crate::invocation_context::InvocationContext::capture_at(
+        &launch_repo.join("alpha/lib"),
+    );
+    let context = invocation.launch_context();
+
+    for (index, source) in sources.iter().enumerate() {
+        let parent = source.parent().unwrap();
+        std::fs::create_dir_all(parent).unwrap();
+        let fragment = format!("source-local-fragment-{index}");
+        std::fs::write(parent.join("fragment.md"), &fragment).unwrap();
+        std::fs::write(
+            source,
+            "launch.area={{ ctx.area }}\nlaunch.repo={{ ctx.repo_root }}\n\n::file ./fragment.md\n",
+        )
+        .unwrap();
+        let args = SystemPromptArgs {
+            append_file: Some(source.to_string_lossy().into_owned()),
+            ..Default::default()
+        };
+
+        let result = resolve_and_prepare_for_session_with_context(
+            &args,
+            &context,
+            false,
+            &invocation,
+        )
+        .unwrap();
+        let ResolvedSystemPrompt::Ready(prepared) = result else {
+            panic!("expected a prepared system prompt for {}", source.display());
+        };
+        assert!(
+            prepared.composed_markdown.contains("launch.area=alpha-lib"),
+            "source relocation changed ctx.area for {}: {}",
+            source.display(),
+            prepared.composed_markdown
+        );
+        assert!(
+            prepared
+                .composed_markdown
+                .contains(launch_repo.to_string_lossy().as_ref()),
+            "source relocation changed ctx.repo_root for {}: {}",
+            source.display(),
+            prepared.composed_markdown
+        );
+        assert!(
+            prepared.composed_markdown.contains(&fragment),
+            "source-local transclusion did not follow {}: {}",
+            source.display(),
+            prepared.composed_markdown
+        );
+    }
+
+    let work = invocation.work_snapshot();
+    assert_eq!(work.launch_context_constructions, sources.len());
+    assert_eq!(work.ambient_fallbacks, 0);
+}
+
+#[test]
+fn appendix_relocation_keeps_launch_context_and_source_local_files() {
+    let fixture = TempDir::new().unwrap();
+    let launch_repo = fixture.path().join("launch-repository");
+    let external_repo = fixture.path().join("external-repository");
+    init_repo(&launch_repo);
+    init_repo(&external_repo);
+    write_two_area_workspace(&launch_repo);
+
+    let sources = [
+        launch_repo.join("appendix-root.md"),
+        launch_repo.join("beta/lib/appendix-opposing.md"),
+        external_repo.join("appendix-external.md"),
+    ];
+    let invocation = crate::invocation_context::InvocationContext::capture_at(
+        &launch_repo.join("alpha/lib"),
+    );
+    let context = invocation.launch_context();
+
+    for (index, source) in sources.iter().enumerate() {
+        let parent = source.parent().unwrap();
+        std::fs::create_dir_all(parent).unwrap();
+        let fragment = format!("appendix-source-fragment-{index}");
+        std::fs::write(parent.join("appendix-fragment.md"), &fragment).unwrap();
+        let raw = "appendix.area={{ ctx.area }}\nappendix.repo={{ ctx.repo_root }}\n\n::file ./appendix-fragment.md\n";
+        std::fs::write(source, raw).unwrap();
+        let input = ResolvedPromptInput::capture(
+            (
+                SystemPromptSource::NonInteractiveFile {
+                    path: source.clone(),
+                    scope: StandardPromptScope::Repo,
+                },
+                raw.to_string(),
+            ),
+            &invocation,
+        )
+        .unwrap();
+        let candidates = vec![input];
+        let shared = build_shared_compose_context_with_invocation(
+            None,
+            Some(&candidates),
+            &context,
+            &invocation,
+        )
+        .unwrap();
+        let appendix =
+            prepare_non_interactive_appendix_from(candidates, Some(&shared), None).unwrap();
+
+        assert!(
+            appendix.composed_markdown.contains("appendix.area=alpha-lib"),
+            "appendix relocation changed ctx.area for {}: {}",
+            source.display(),
+            appendix.composed_markdown
+        );
+        assert!(
+            appendix
+                .composed_markdown
+                .contains(launch_repo.to_string_lossy().as_ref()),
+            "appendix relocation changed ctx.repo_root for {}: {}",
+            source.display(),
+            appendix.composed_markdown
+        );
+        assert!(appendix.composed_markdown.contains(&fragment));
+    }
+
+    let work = invocation.work_snapshot();
+    assert_eq!(work.launch_context_constructions, sources.len());
+    assert_eq!(work.ambient_fallbacks, 0);
 }
 
 #[test]

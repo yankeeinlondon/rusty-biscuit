@@ -167,6 +167,9 @@ fn derive_compose_context(
     if let Some(prepared) = options.prepared_context.clone() {
         return prepared;
     }
+    if let Some(invocation) = options.invocation_context.as_ref() {
+        invocation.record_ambient_fallback();
+    }
     let anchor = options
         .file_ref_fallback_dir
         .clone()

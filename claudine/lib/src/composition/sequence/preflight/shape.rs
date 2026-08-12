@@ -175,6 +175,76 @@ pub fn first_unavailable_root(raw: &str, roots: &[&str]) -> Option<String> {
     None
 }
 
+/// The first target identity path referenced by a template expression.
+pub fn first_target_identity(raw: &str) -> Option<String> {
+    const PATHS: &[&str] = &["ctx.agent", "ctx.model", "env.AGENT", "env.MODEL"];
+
+    for location in ExpressionFinder::find_all_plain(raw) {
+        let Ok(expr) = parse(&location.expression) else {
+            continue;
+        };
+        if let Some(path) = path_in_expr(&expr, PATHS) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn exact_path(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Variable(path) => Some(path.clone()),
+        Expr::MemberAccess { base, name } => {
+            exact_path(base).map(|base| format!("{base}.{name}"))
+        }
+        Expr::Index { base, index } => match index.as_ref() {
+            Expr::StringLiteral(key) => exact_path(base).map(|base| format!("{base}.{key}")),
+            _ => None,
+        },
+        Expr::Paren(inner) => exact_path(inner),
+        _ => None,
+    }
+}
+
+fn path_in_expr(expr: &Expr, paths: &[&str]) -> Option<String> {
+    if let Some(path) = exact_path(expr)
+        && paths.contains(&path.as_str())
+    {
+        return Some(path);
+    }
+
+    match expr {
+        Expr::MemberAccess { base, .. }
+        | Expr::UnaryNot(base)
+        | Expr::UnaryMinus(base)
+        | Expr::Paren(base) => path_in_expr(base, paths),
+        Expr::Binary { left, right, .. } | Expr::Comparison { left, right, .. } => {
+            path_in_expr(left, paths).or_else(|| path_in_expr(right, paths))
+        }
+        Expr::Index { base, index } => {
+            path_in_expr(base, paths).or_else(|| path_in_expr(index, paths))
+        }
+        Expr::FunctionCall { args, .. } => args.iter().find_map(|arg| path_in_expr(arg, paths)),
+        Expr::Fallback { primary, fallback } => {
+            path_in_expr(primary, paths).or_else(|| path_in_expr(fallback, paths))
+        }
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => path_in_expr(condition, paths)
+            .or_else(|| path_in_expr(then_branch, paths))
+            .or_else(|| path_in_expr(else_branch, paths)),
+        Expr::ArrayLiteral(items) => items.iter().find_map(|item| path_in_expr(item, paths)),
+        Expr::ObjectLiteral(entries) => entries
+            .iter()
+            .find_map(|(_, value)| path_in_expr(value, paths)),
+        Expr::Variable(_)
+        | Expr::StringLiteral(_)
+        | Expr::NumberLiteral(_)
+        | Expr::BoolLiteral(_) => None,
+    }
+}
+
 fn root_in_expr(expr: &Expr, roots: &[&str]) -> Option<String> {
     match expr {
         Expr::Variable(path) => {

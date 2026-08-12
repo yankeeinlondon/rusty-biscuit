@@ -258,6 +258,85 @@ fn repeated_derivation_for_retry_resume_and_jit_reuses_invocation_evidence() {
     assert_eq!(work.runtime_evidence_reuses.get("repo"), Some(&6));
 }
 
+/// Phase 1 work-accounting baseline for the launch/source relocation matrix.
+///
+/// This intentionally exercises the retained source-owned compatibility API.
+/// Canonical preparation uses one launch-context construction per document
+/// epoch; these counters keep extra Git, topology, host, environment, or
+/// unrecorded ambient work visible without timing.
+#[test]
+#[serial_test::serial(ctx_launch_anchor_work)]
+fn relocation_matrix_reuses_request_evidence_without_ambient_fallbacks() {
+    let fixture = TempDir::new().unwrap();
+    let root = fixture.path();
+    init_repo(root);
+    for (area, package) in [("alpha", "alpha-lib"), ("beta", "beta-lib")] {
+        fs::create_dir_all(root.join(area).join("lib/src")).unwrap();
+        fs::write(
+            root.join(area).join("lib/Cargo.toml"),
+            format!(
+                "[package]\nname = \"{package}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"
+            ),
+        )
+        .unwrap();
+        fs::write(root.join(area).join("lib/src/lib.rs"), "").unwrap();
+    }
+    fs::write(
+        root.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"alpha/lib\", \"beta/lib\"]\nresolver = \"2\"\n",
+    )
+    .unwrap();
+    let external = root.join("external-repository");
+    fs::create_dir_all(&external).unwrap();
+    init_repo(&external);
+
+    let documents = [
+        root.join("prompt.md"),
+        root.join("alpha/lib/prompt.md"),
+        root.join("beta/lib/prompt.md"),
+        external.join("prompt.md"),
+    ];
+    for document in &documents {
+        fs::write(document, "{{ ctx.area }} {{ ctx.repo_root }} {{ ctx.os }} {{ ctx.agent }}")
+            .unwrap();
+    }
+
+    let _captured_agent =
+        test_toolkit::EnvGuard::set_safe("AGENT", "baseline-captured-agent");
+    let invocation = InvocationContext::capture_at(&root.join("alpha/lib"));
+    let _later_agent = test_toolkit::EnvGuard::set_safe("AGENT", "ambient-mutated-agent");
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.area }} {{ ctx.repo_root }} {{ ctx.os }} {{ ctx.agent }}",
+    );
+
+    for document in &documents {
+        let source_context = invocation.derive_source(document).unwrap();
+        let evidence = invocation.runtime_evidence(&source_context, &requirements);
+        let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
+            source_context.base_dir(),
+            &requirements,
+            &evidence,
+        );
+        assert_eq!(
+            context.get("agent").and_then(serde_json::Value::as_str),
+            Some("baseline-captured-agent"),
+            "every route must consume the invocation's one environment snapshot"
+        );
+    }
+
+    let work = invocation.work_snapshot();
+    assert_eq!(work.git_root_discoveries, 2);
+    assert_eq!(work.topology_probes, 2);
+    assert_eq!(work.topology_reuses, 3);
+    assert_eq!(work.runtime_evidence_captures.get("os"), Some(&1));
+    assert_eq!(work.runtime_evidence_reuses.get("os"), Some(&3));
+    assert_eq!(work.runtime_evidence_captures.get("repo"), None);
+    assert_eq!(work.runtime_evidence_reuses.get("repo"), Some(&4));
+    assert_eq!(work.runtime_evidence_captures.get("agent"), None);
+    assert_eq!(work.runtime_evidence_reuses.get("agent"), Some(&4));
+    assert_eq!(work.ambient_fallbacks, 0);
+}
+
 /// A group whose evidence costs real work must be computed once per source
 /// directory no matter how many documents or derivations ask for it.
 #[test]
@@ -338,6 +417,218 @@ fn supplied_os_evidence_matches_ambient_os_capture() {
             "supplied and ambient capture must agree on `ctx.{key}`"
         );
     }
+}
+
+fn write_two_area_workspace(root: &Path) {
+    for (area, package) in [("alpha", "alpha-lib"), ("beta", "beta-lib")] {
+        let package_root = root.join(area).join("lib");
+        fs::create_dir_all(package_root.join("src")).unwrap();
+        fs::write(
+            package_root.join("Cargo.toml"),
+            format!(
+                "[package]\nname = \"{package}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"
+            ),
+        )
+        .unwrap();
+        fs::write(package_root.join("src/lib.rs"), "").unwrap();
+    }
+    fs::write(
+        root.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"alpha/lib\", \"beta/lib\"]\nresolver = \"2\"\n",
+    )
+    .unwrap();
+}
+
+#[test]
+fn launch_capture_ignores_same_opposing_and_external_document_sources() {
+    let fixture = TempDir::new().unwrap();
+    let launch_repo = fixture.path().join("launch-repository");
+    let external_repo = fixture.path().join("external-repository");
+    fs::create_dir_all(&launch_repo).unwrap();
+    fs::create_dir_all(&external_repo).unwrap();
+    init_repo(&launch_repo);
+    init_repo(&external_repo);
+    write_two_area_workspace(&launch_repo);
+
+    let documents = [
+        launch_repo.join("alpha/lib/prompt.md"),
+        launch_repo.join("beta/lib/prompt.md"),
+        external_repo.join("prompt.md"),
+    ];
+    for document in &documents {
+        fs::write(document, "{{ ctx.area }} {{ ctx.repo_root }}").unwrap();
+    }
+
+    let launch_dir = launch_repo.join("alpha/lib");
+    let invocation = InvocationContext::capture_at(&launch_dir);
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.area }} {{ ctx.repo_root }}",
+    );
+
+    for document in &documents {
+        let source = invocation.derive_source(document).unwrap();
+        assert_eq!(source.source_path(), document);
+        let before = invocation.work_snapshot();
+        let context = invocation.capture_launch_context(&requirements);
+        let after = invocation.work_snapshot();
+
+        assert_eq!(
+            context.get("area").and_then(serde_json::Value::as_str),
+            Some("alpha-lib")
+        );
+        assert_eq!(
+            context.get("repo_root").and_then(serde_json::Value::as_str),
+            Some(launch_repo.to_string_lossy().as_ref())
+        );
+        assert_eq!(after.git_root_discoveries, before.git_root_discoveries);
+        assert_eq!(after.topology_probes, before.topology_probes);
+    }
+
+    let work = invocation.work_snapshot();
+    assert_eq!(work.launch_context_constructions, documents.len());
+    assert_eq!(work.ambient_fallbacks, 0);
+}
+
+#[test]
+fn launch_capture_reports_no_repository_for_an_outside_launch() {
+    let fixture = TempDir::new().unwrap();
+    let outside = fixture.path().join("outside");
+    let source_repo = fixture.path().join("source-repository");
+    fs::create_dir_all(&outside).unwrap();
+    fs::create_dir_all(&source_repo).unwrap();
+    init_repo(&source_repo);
+    write_two_area_workspace(&source_repo);
+    let document = source_repo.join("alpha/lib/prompt.md");
+    fs::write(&document, "{{ ctx.area }} {{ ctx.repo_root }}").unwrap();
+
+    let invocation = InvocationContext::capture_at(&outside);
+    let source = invocation.derive_source(&document).unwrap();
+    assert_eq!(source.repository_root(), Some(source_repo.as_path()));
+    let before = invocation.work_snapshot();
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.area }} {{ ctx.repo_root }}",
+    );
+    let context = invocation.capture_launch_context(&requirements);
+    let after = invocation.work_snapshot();
+
+    assert_eq!(
+        context.get("area").and_then(serde_json::Value::as_str),
+        Some("")
+    );
+    assert_eq!(context.get("repo_root"), Some(&serde_json::Value::Null));
+    assert_eq!(after.git_root_discoveries, before.git_root_discoveries);
+    assert_eq!(after.topology_probes, before.topology_probes);
+    assert_eq!(after.launch_context_constructions, 1);
+    assert_eq!(after.ambient_fallbacks, 0);
+}
+
+#[test]
+#[serial_test::serial(cwd, env, ctx_launch_anchor_work)]
+fn repeated_launch_capture_reuses_retained_evidence_after_ambient_state_changes() {
+    let fixture = TempDir::new().unwrap();
+    let launch_repo = fixture.path().join("launch-repository");
+    let elsewhere = fixture.path().join("elsewhere");
+    fs::create_dir_all(&launch_repo).unwrap();
+    fs::create_dir_all(&elsewhere).unwrap();
+    init_repo(&launch_repo);
+    write_two_area_workspace(&launch_repo);
+    fs::write(launch_repo.join("alpha/lib/README.md"), "# Fixture\n").unwrap();
+
+    let guard = ProcessStateGuard {
+        cwd: std::env::current_dir().unwrap(),
+        home: std::env::var_os("HOME"),
+        marker: std::env::var_os("CLAUDINE_INVOCATION_CONTEXT_TEST"),
+    };
+    unsafe {
+        std::env::set_var("CLAUDINE_INVOCATION_CONTEXT_TEST", "captured");
+    }
+    let invocation = InvocationContext::capture_at(&launch_repo.join("alpha/lib"));
+    let captured_home = invocation.home_dir().map(Path::to_path_buf);
+
+    std::env::set_current_dir(&elsewhere).unwrap();
+    unsafe {
+        std::env::set_var("HOME", &elsewhere);
+        std::env::set_var("CLAUDINE_INVOCATION_CONTEXT_TEST", "mutated");
+    }
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.area }} {{ ctx.repo_root }} {{ ctx.dirty_files }} \
+         {{ ctx.programming_languages_in_repo }} {{ ctx.docs_readme }} \
+         {{ ctx.os }} {{ ctx.cpu_cores }} {{ ctx.gpu }}",
+    );
+
+    for _ in 0..2 {
+        let context = invocation.capture_launch_context(&requirements);
+        assert_eq!(
+            context.get("area").and_then(serde_json::Value::as_str),
+            Some("alpha-lib")
+        );
+        assert_eq!(
+            context
+                .env()
+                .get("CLAUDINE_INVOCATION_CONTEXT_TEST")
+                .map(String::as_str),
+            Some("captured")
+        );
+        assert_eq!(context.env().get("HOME").map(PathBuf::from), captured_home);
+    }
+
+    let work = invocation.work_snapshot();
+    assert_eq!(work.git_root_discoveries, 1);
+    assert_eq!(work.topology_probes, 1);
+    assert_eq!(work.launch_context_constructions, 2);
+    for group in ["file_changes", "languages", "documents", "os", "hardware", "gpu"] {
+        assert_eq!(work.runtime_evidence_captures.get(group), Some(&1), "{group}");
+        assert_eq!(work.runtime_evidence_reuses.get(group), Some(&1), "{group}");
+    }
+    assert_eq!(work.ambient_fallbacks, 0);
+    drop(guard);
+}
+
+#[test]
+#[serial_test::serial(env, ctx_launch_anchor_work)]
+fn launch_context_extension_projects_only_missing_groups_and_preserves_overrides() {
+    let fixture = TempDir::new().unwrap();
+    init_repo(fixture.path());
+    write_two_area_workspace(fixture.path());
+    let _agent = test_toolkit::EnvGuard::set_safe("AGENT", "invocation-agent");
+    let invocation = InvocationContext::capture_at(&fixture.path().join("alpha/lib"));
+    let mut captured = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.area }} {{ ctx.agent }}",
+    );
+    let mut context = invocation.capture_launch_context(&captured);
+    context
+        .env_mut()
+        .insert("AGENT".to_string(), "target-agent".to_string());
+    context
+        .env_mut()
+        .insert("MODEL".to_string(), "target-model".to_string());
+    let original_now = context.now().to_string();
+
+    let expanded = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.area }} {{ ctx.agent }} {{ ctx.os }} {{ ctx.cpu_cores }}",
+    );
+    invocation.extend_launch_context(&mut context, &mut captured, &expanded);
+    invocation.extend_launch_context(&mut context, &mut captured, &expanded);
+
+    assert_eq!(context.now(), original_now);
+    assert!(context.get("os").is_some());
+    assert!(context.get("cpu_cores").is_some());
+    let effective = context.as_object();
+    assert_eq!(effective.get("agent"), Some(&serde_json::json!("target-agent")));
+    assert_eq!(effective.get("model"), Some(&serde_json::json!("target-model")));
+    assert_eq!(context.env().get("AGENT").map(String::as_str), Some("target-agent"));
+    assert_eq!(context.env().get("MODEL").map(String::as_str), Some("target-model"));
+
+    let work = invocation.work_snapshot();
+    assert_eq!(work.launch_context_constructions, 1);
+    assert_eq!(work.launch_context_extensions, 1);
+    assert_eq!(work.runtime_evidence_reuses.get("repo"), Some(&1));
+    assert_eq!(work.runtime_evidence_reuses.get("agent"), Some(&1));
+    assert_eq!(work.runtime_evidence_captures.get("os"), Some(&1));
+    assert_eq!(work.runtime_evidence_captures.get("hardware"), Some(&1));
+    assert_eq!(work.git_root_discoveries, 1);
+    assert_eq!(work.topology_probes, 1);
+    assert_eq!(work.ambient_fallbacks, 0);
 }
 
 #[test]

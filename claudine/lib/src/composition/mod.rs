@@ -186,7 +186,7 @@ pub fn document_expression_resolution_context(
         let base = file_ref_fallback_dir
             .or_else(|| source_path.parent())
             .unwrap_or_else(|| Path::new("."));
-        darkmatter::markdown::compose::ComposeContext::capture_for_content(base, "")
+        capture_compatibility_context_for_content(base, "")
     });
     let mut options = darkmatter::markdown::compose::ComposeOptions::new_with_context(context)
         .with_source_file(source_path);
@@ -197,4 +197,29 @@ pub fn document_expression_resolution_context(
         options = options.with_file_ref_fallback_dir(fallback);
     }
     options.local_expression_resolution_context()
+}
+
+/// Capture demand-driven context for a caller that has no invocation snapshot.
+///
+/// Canonical CLI routes must use `InvocationContext::capture_launch_context`.
+/// This compatibility seam preserves the library APIs that may be called
+/// independently of a Claudine invocation.
+#[doc(hidden)]
+pub fn capture_compatibility_context_for_content(
+    base_dir: &Path,
+    content: &str,
+) -> darkmatter::markdown::compose::ComposeContext {
+    darkmatter::markdown::compose::ComposeContext::capture_for_content(base_dir, content)
+}
+
+/// Capture document requirements for a caller that has no invocation snapshot.
+///
+/// As with [`capture_compatibility_context_for_content`], this is not a
+/// canonical CLI preparation owner.
+#[doc(hidden)]
+pub fn capture_compatibility_context_for_document(
+    base_dir: &Path,
+    document: &darkmatter::markdown::Markdown,
+) -> darkmatter::markdown::compose::ComposeContext {
+    darkmatter::markdown::compose::ComposeContext::capture_for_document(base_dir, document)
 }
