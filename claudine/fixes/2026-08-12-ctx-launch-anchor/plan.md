@@ -29,6 +29,12 @@ The fix is complete when:
 - direct, inline, loop, proxy, retry/resume, sequence, harness, overlay, and
   system-prompt paths use the canonical launch capture;
 - one document preparation epoch reuses one exact target-adjusted snapshot;
+- the post-`initialize` stabilized reread stays inside its epoch: missing
+  requirement groups are extended from retained launch evidence, and the
+  anchor, environment capture, and applied target overrides never change;
+- a sequence graph-phase command referencing `ctx.agent`, `ctx.model`,
+  `env.AGENT`, or `env.MODEL` fails graph preflight with a typed
+  target-identity rejection instead of expanding a pre-selection value;
 - `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` retain resolved-target
   precedence;
 - source-relative document references, eager `file(...)` values, and `$schema`
@@ -78,10 +84,17 @@ of every production capture before changing ownership.
   templates, task execution, lifecycle pipeline re-materialization, overlays,
   passthrough harnesses, harness prompt preparation, and system-prompt
   preparation.
+- [ ] Record the current graph-phase behavior for a pre-selection sequence
+  command that references `ctx.agent`/`ctx.model`/`env.AGENT`/`env.MODEL`, so
+  the Phase 4 typed rejection has a frozen before-state (AC7).
 - [ ] Add or extend request-local work-accounting assertions around the baseline
   routes so later tests can detect extra Git discovery, topology work,
   environment capture, or runtime-evidence initialization without timing-based
   assertions (AC5, AC11).
+- [ ] Audit the `record_ambient_fallback` accounting for blind spots as part of
+  the capture inventory: identify every consumer seam that could drop its
+  prepared context and fall through to darkmatter's ambient capture unobserved
+  (D2, AC5).
 - [ ] Review the comments adjacent to the direct compose and lifecycle capture
   sites; mark comments that already state launch anchoring for preservation and
   comments that describe source-backed `ctx.*` for correction when their code
@@ -114,9 +127,20 @@ owned by `InvocationContext`.
   facts come from the launch repository, source-scanned groups use the launch
   base when requested, environment comes from the invocation snapshot, and
   host groups use the invocation's single-flight caches.
-- [ ] Add request-local accounting for launch-context construction or an
-  equivalent observable capture identity so tests can distinguish one reused
-  snapshot from two separately constructed but equal snapshots (AC5).
+- [ ] Add request-local work accounting for launch-context construction and
+  group extension — Claudine-only, per the ratified AC5 mechanism: no
+  darkmatter identity field and no `Arc` plumbing refactor — so tests can
+  count exactly one construction per epoch (plus reread extensions) and assert
+  an ambient-fallback count of zero, rather than accepting two separately
+  constructed but usually equal snapshots (AC5).
+- [ ] Complete the `record_ambient_fallback` wiring wherever the Phase 1 audit
+  found a consumer seam that could drop its prepared context and reach
+  darkmatter's ambient capture unobserved; AC5's zero-fallback assertion
+  depends on this accounting having no blind spot (D2, AC5).
+- [ ] Expose the epoch-extension operation: project only the missing
+  `ContextRequirements` groups from the same retained launch evidence into an
+  existing snapshot, without re-anchoring, re-capturing environment, or
+  re-applying target overrides (D4, AC5).
 - [ ] Keep `runtime_evidence(&SourceContext, ...)` available for genuinely
   source-specific compatibility consumers, and keep live `current.ctx.*`
   capture behavior unchanged.
@@ -161,6 +185,11 @@ document entry and pass it through every stage of that epoch.
   carried by the execution request instead of rebuilding a context from the
   composed prompt and active `SourceContext`; leave event-time `current.ctx.*`
   capture separate and live (AC5, AC8).
+- [ ] Keep the post-`initialize` stabilized reread inside the same epoch: when
+  the reread's demand-driven requirements exceed the stored snapshot's groups,
+  extend the snapshot through the epoch owner's extension operation; the
+  capture anchor, environment capture, and applied target overrides remain
+  immutable for the life of the epoch (D4, AC5).
 - [ ] Make loop iterations retain the epoch snapshot and prove that loop
   condition/body/lifecycle reads do not trigger a new launch capture (AC1,
   AC5, AC8).
@@ -182,9 +211,17 @@ document entry and pass it through every stage of that epoch.
   package-area prompts, opposing launch/source areas, and external sources;
   assert body, effective frontmatter, `when:`, preflight-expanded command
   bytes, and lifecycle all report launch facts (AC1–AC4).
-- [ ] Add a deterministic snapshot-identity/counter test proving preflight,
-  body, effective frontmatter, and lifecycle consumed one capture rather than
-  separately equal captures (AC5).
+- [ ] Add a deterministic work-accounting test proving preflight, body,
+  effective frontmatter, and lifecycle consumed one launch-capture
+  construction (plus zero or more reread extensions), with an
+  ambient-fallback count of zero and every consumer seam observing a
+  populated prepared context, so separately constructed but equal captures
+  cannot pass (AC5).
+- [ ] Add a stabilized-reread test in which `initialize` rewrites the document
+  to demand context groups the stored snapshot was not captured with; assert
+  the epoch snapshot is extended from retained launch evidence — counters
+  show one construction plus the extension, zero ambient fallbacks — and the
+  anchor and target overrides are unchanged (AC5, AC11).
 - [ ] Add direct, loop, proxy, retry, and resume tests asserting target-specific
   `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL`, plus launch-stable
   repository/package facts (AC6, AC8).
@@ -219,8 +256,17 @@ source-specific resolution or per-task target identity.
   `resolve_shell_bytes` (AC7, AC10).
 - [ ] Update preflight approval composition and JIT template preflight to clone
   or project the launch base, then apply the selected task target's environment
-  overrides where selection is available; approved and executed command bytes
-  must retain the existing equality guard (AC6, AC7).
+  overrides where selection is available; where an approval/execution pairing
+  exists, approved and executed command bytes retain the existing equality
+  guard (AC6, AC7).
+- [ ] Reject, at graph preflight, any pre-selection command whose expansion
+  references `ctx.agent`, `ctx.model`, `env.AGENT`, or `env.MODEL`, with a
+  typed error that mirrors the existing late-binding rejection: it names the
+  offending root and directs the author to task-scoped commands. Sequence
+  preflight resolves shell bytes once and execution runs those bytes, so this
+  rejection is the only safety net — there is no second resolution that could
+  detect a wrong-value expansion. Per-task and JIT audits, where the selected
+  target is available, continue to permit those roots (D4, AC6, AC7).
 - [ ] Update sequence task/group/prompt preparation and
   `prepare_task_context` so each task epoch gets one target-adjusted launch
   snapshot and reuses it through task composition and execution (AC5–AC7).
@@ -238,6 +284,11 @@ source-specific resolution or per-task target identity.
 - [ ] Add serial and parallel task tests proving per-task agent/model overrides
   are visible in both `ctx.*` and `env.*` without changing launch repo/area
   values (AC6, AC7).
+- [ ] Add graph-phase rejection tests: a root-graph command referencing each of
+  `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` fails preflight with
+  the typed target-identity rejection — a preflight error, never a
+  wrong-value expansion — while the same command inside a task with a
+  selected target still expands (AC6, AC7).
 - [ ] Add sequence conflict fixtures proving source-relative `$schema` and file
   references still choose the authored document's source while graph/task
   `ctx.*` chooses the invocation launch (AC10, AC13).
@@ -286,7 +337,7 @@ the final epoch/snapshot interfaces.
   `ComposeContext::capture*` calls outside `InvocationContext` and the canonical
   epoch owner; use explicit, reason-bearing allowlist entries only for public
   library compatibility paths, the `claudine context --values` command, and
-  live `current.ctx.*` capture sites (AC12).
+  live `current.ctx.*` capture sites (D5, AC12).
 - [ ] Make the guard scan path-normalized Rust source locations so it runs on
   macOS, Windows, and Linux without separator or case assumptions (AC12, AC13).
 - [ ] Update relevant Claudine architecture/composition/system-prompt docs and
@@ -315,8 +366,9 @@ package ready for implementation review.
 
 ### Tasks
 
-- [ ] Consolidate the direct/loop, opposing-area, external-source,
-  sequence, proxy/re-entry, system-prompt, overlay, and file-resolution
+- [ ] Consolidate the direct/loop, opposing-area, external-source, sequence
+  (including the graph-phase target-identity rejection), stabilized-reread
+  extension, proxy/re-entry, system-prompt, overlay, and file-resolution
   regressions into a documented AC1–AC10 matrix; every row must exercise the
   real CLI or canonical owner named by the criterion rather than inject a
   hand-built `ComposeContext` (AC4).
