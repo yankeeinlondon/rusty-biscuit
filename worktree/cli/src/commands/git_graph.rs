@@ -38,21 +38,22 @@ pub struct BranchGraphData {
     pub merge_base_idx: usize,
     /// Up to 2 context commits ending at the merge-base, oldest first.
     default_context: Vec<CommitId>,
-    /// Up to 5 commits on the default branch since the merge-base, oldest first.
-    default_after_base: Vec<CommitId>,
-    /// Commits on the default branch since the merge-base not shown in
-    /// `default_after_base` (older than the newest-5 window). Drives the
-    /// fork-adjacent elision marker on the default line.
+    /// Up to 5 commits reachable from the default tip but not the branch tip,
+    /// oldest first.
+    default_unique: Vec<CommitId>,
+    /// Default-tip-only commits older than the newest-5 display window.
+    /// Drives the fork-adjacent elision marker on the default line.
     default_hidden: usize,
-    /// Up to 5 commits on the branch since the merge-base, oldest first.
-    branch_after_base: Vec<CommitId>,
-    /// Commits on the branch since the merge-base not shown in
-    /// `branch_after_base` (older than the newest-5 window). Drives the
-    /// fork-adjacent elision marker on the branch line.
+    /// Up to 5 commits reachable from the branch tip but not the default tip,
+    /// oldest first.
+    branch_unique: Vec<CommitId>,
+    /// Branch-tip-only commits older than the newest-5 display window.
+    /// Drives the fork-adjacent elision marker on the branch line.
     branch_hidden: usize,
     /// Verbose detail for the merge-base commit, populated only when requested.
     pub merge_base_detail: Option<CommitDetail>,
-    /// Verbose details for branch commits since the merge-base, populated only when requested.
+    /// Verbose details for commits reachable only from the branch tip,
+    /// populated only when requested.
     pub branch_details: Vec<CommitDetail>,
 }
 
@@ -66,11 +67,11 @@ pub struct BaseGraphData {
 
 /// What subset of branch data a gather pass should collect.
 enum GatherScope {
-    /// Full data: default-context, post-divergence commits on both branches,
-    /// and optional verbose details.
+    /// Full data: shared merge-base context, tip-unique commits on both lanes,
+    /// and optional branch-tip-only verbose details.
     Full,
     /// Minimal data for the base-graph overview: merge-base identity and
-    /// branch commits since the merge-base only.
+    /// branch-tip-only commits.
     BaseOverview,
 }
 
@@ -83,8 +84,8 @@ pub fn gather_branch(default_branch: &str, branch: &str, verbose: bool) -> Optio
 }
 
 /// Gather only the data the base-graph renderer consumes: merge-base identity
-/// and branch commits since divergence. Skips the two per-branch default-branch
-/// log queries that [`gather_branch`] would collect but [`base_graph`] discards.
+/// and branch-tip-only commits. Skips the two per-branch default-lane queries
+/// that [`gather_branch`] would collect but [`base_graph`] discards.
 fn gather_branch_for_base(default_branch: &str, branch: &str) -> Option<BranchGraphData> {
     gather_branch_impl(default_branch, branch, GatherScope::BaseOverview, false)
 }
@@ -97,22 +98,22 @@ fn gather_branch_impl(
 ) -> Option<BranchGraphData> {
     let merge_base_full = get_merge_base(default_branch, branch)?;
 
-    let (default_context, default_after_base, default_hidden) = match scope {
+    let (default_context, default_unique, default_hidden) = match scope {
         GatherScope::Full => {
-            let after = commits_since(default_branch, &merge_base_full, 5);
-            let hidden = hidden_since(default_branch, &merge_base_full, after.len());
-            (ancestor_commits(&merge_base_full, 2), after, hidden)
+            let unique = commits_since(default_branch, branch, 5);
+            let hidden = hidden_since(default_branch, branch, unique.len());
+            (ancestor_commits(&merge_base_full, 2), unique, hidden)
         }
         GatherScope::BaseOverview => (Vec::new(), Vec::new(), 0),
     };
 
-    let branch_after_base = commits_since(branch, &merge_base_full, 5);
-    let branch_hidden = hidden_since(branch, &merge_base_full, branch_after_base.len());
+    let branch_unique = commits_since(branch, default_branch, 5);
+    let branch_hidden = hidden_since(branch, default_branch, branch_unique.len());
 
     let (merge_base_detail, branch_details) = if verbose {
         (
             commit_details(&merge_base_full, 1).into_iter().next(),
-            commit_details_since(branch, &merge_base_full),
+            commit_details_since(branch, default_branch),
         )
     } else {
         (None, Vec::new())
@@ -124,9 +125,9 @@ fn gather_branch_impl(
         merge_base_full,
         merge_base_idx: 0,
         default_context,
-        default_after_base,
+        default_unique,
         default_hidden,
-        branch_after_base,
+        branch_unique,
         branch_hidden,
         merge_base_detail,
         branch_details,
@@ -138,7 +139,7 @@ pub fn merge_base_commit(data: &BranchGraphData) -> Option<&CommitDetail> {
     data.merge_base_detail.as_ref()
 }
 
-/// Get detailed commits on a branch since the merge-base from already-gathered data.
+/// Get detailed commits reachable only from the branch tip from already-gathered data.
 pub fn branch_commits_detail(data: &BranchGraphData) -> &[CommitDetail] {
     &data.branch_details
 }
@@ -354,13 +355,13 @@ fn get_merge_base(a: &str, b: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-/// Count commits on `target` since `merge_base` that fall outside the displayed
-/// window, i.e. the older commits the newest-`shown` window elides.
+/// Count commits reachable from `target` but not `exclude` that fall outside
+/// the displayed window.
 ///
 /// Returns 0 on any git failure so a missing count degrades to "no elision
 /// marker" rather than suppressing the whole graph.
-fn hidden_since(target: &str, merge_base: &str, shown: usize) -> usize {
-    let total = git_command(&["rev-list", "--count", target, "--not", merge_base, "--"])
+fn hidden_since(target: &str, exclude: &str, shown: usize) -> usize {
+    let total = git_command(&["rev-list", "--count", target, "--not", exclude, "--"])
         .ok()
         .and_then(|s| s.trim().parse::<usize>().ok())
         .unwrap_or(0);
@@ -395,13 +396,13 @@ pub fn worktree_graph(data: &BranchGraphData) -> Option<String> {
     // Always show the branch — even with 0 new commits, the fork point matters.
     lines.push(format!("    branch {current_branch}"));
     lines.push(format!("    checkout {current_branch}"));
-    if data.branch_after_base.is_empty() {
+    if data.branch_unique.is_empty() {
         lines.push("    commit id: \"HEAD\"".to_string());
     } else {
         if data.branch_hidden > 0 {
             lines.push(elision_commit(data.branch_hidden));
         }
-        for commit in &data.branch_after_base {
+        for commit in &data.branch_unique {
             lines.push(format!("    commit id: \"{}\"", commit.display));
         }
     }
@@ -410,7 +411,7 @@ pub fn worktree_graph(data: &BranchGraphData) -> Option<String> {
     if data.default_hidden > 0 {
         lines.push(elision_commit(data.default_hidden));
     }
-    for commit in &data.default_after_base {
+    for commit in &data.default_unique {
         lines.push(format!("    commit id: \"{}\"", commit.display));
     }
 
@@ -483,13 +484,13 @@ pub fn base_graph(data: &BaseGraphData) -> Option<String> {
             let info = branch_iter.next().unwrap();
             lines.push(format!("    branch {}", info.branch));
             lines.push(format!("    checkout {}", info.branch));
-            if info.branch_after_base.is_empty() {
+            if info.branch_unique.is_empty() {
                 lines.push("    commit id: \"HEAD\"".to_string());
             } else {
                 if info.branch_hidden > 0 {
                     lines.push(elision_commit(info.branch_hidden));
                 }
-                for c in &info.branch_after_base {
+                for c in &info.branch_unique {
                     lines.push(format!("    commit id: \"{}\"", c.display));
                 }
             }
@@ -502,6 +503,7 @@ pub fn base_graph(data: &BaseGraphData) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command;
@@ -517,6 +519,62 @@ mod tests {
             .status()
             .expect("git should be installed");
         assert!(status.success(), "git {:?} failed in {:?}", args, repo);
+    }
+
+    fn git_output(repo: &Path, args: &[&str]) -> String {
+        let output = Command::new("git")
+            .current_dir(repo)
+            .args(args)
+            .output()
+            .expect("git should be installed");
+        assert!(
+            output.status.success(),
+            "git {:?} failed in {:?}: {}",
+            args,
+            repo,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("git output should be UTF-8")
+            .trim()
+            .to_string()
+    }
+
+    fn init_test_repo(path: &Path) {
+        run_git(path, &["init", "-b", DEFAULT_BRANCH]);
+        run_git(path, &["config", "user.email", "test@example.com"]);
+        run_git(path, &["config", "user.name", "Test User"]);
+        run_git(path, &["config", "commit.gpgsign", "false"]);
+        // Suppress optional Git workers so nextest does not report fixture leaks.
+        run_git(path, &["config", "gc.auto", "0"]);
+        run_git(path, &["config", "core.fsmonitor", "false"]);
+        run_git(path, &["config", "core.commitGraph", "false"]);
+    }
+
+    fn commit_file(path: &Path, file: &str, contents: &str, message: &str) {
+        fs::write(path.join(file), contents).expect("fixture file should be writable");
+        run_git(path, &["add", "--", file]);
+        run_git(path, &["commit", "-m", message]);
+    }
+
+    fn merge_noninteractive(path: &Path, revision: &str, message: &str) {
+        run_git(
+            path,
+            &["merge", "--no-ff", "--no-edit", "-m", message, revision],
+        );
+    }
+
+    fn is_ancestor(path: &Path, ancestor: &str, descendant: &str) -> bool {
+        let status = Command::new("git")
+            .current_dir(path)
+            .args(["merge-base", "--is-ancestor", ancestor, descendant])
+            .status()
+            .expect("git should be installed");
+        assert!(
+            status.success() || status.code() == Some(1),
+            "git merge-base --is-ancestor failed unexpectedly"
+        );
+        status.success()
     }
 
     /// RAII guard that changes CWD for the duration of a test and restores it on drop.
@@ -549,42 +607,388 @@ mod tests {
         let dir = tempfile::tempdir().expect("create temp dir");
         let path = dir.path();
 
-        run_git(path, &["init", "-b", "main"]);
-        run_git(path, &["config", "user.email", "test@example.com"]);
-        run_git(path, &["config", "user.name", "Test User"]);
-        run_git(path, &["config", "commit.gpgsign", "false"]);
-        // Suppress background/detached git work so nextest leak detection
-        // sees no lingering child processes after the test returns.
-        run_git(path, &["config", "gc.auto", "0"]);
-        run_git(path, &["config", "core.fsmonitor", "false"]);
-        run_git(path, &["config", "core.commitGraph", "false"]);
-
-        fs::write(path.join("file.txt"), "1\n").unwrap();
-        run_git(path, &["add", "."]);
-        run_git(path, &["commit", "-m", "commit 1"]);
-
-        fs::write(path.join("file.txt"), "2\n").unwrap();
-        run_git(path, &["add", "."]);
-        run_git(path, &["commit", "-m", "commit 2"]);
+        init_test_repo(path);
+        commit_file(path, "file.txt", "1\n", "commit 1");
+        commit_file(path, "file.txt", "2\n", "commit 2");
 
         run_git(path, &["checkout", "-b", "feature-a"]);
-        fs::write(path.join("a.txt"), "a\n").unwrap();
-        run_git(path, &["add", "."]);
-        run_git(path, &["commit", "-m", "feature a"]);
+        commit_file(path, "a.txt", "a\n", "feature a");
 
         run_git(path, &["checkout", "main"]);
-        fs::write(path.join("file.txt"), "3\n").unwrap();
-        run_git(path, &["add", "."]);
-        run_git(path, &["commit", "-m", "commit 3"]);
+        commit_file(path, "file.txt", "3\n", "commit 3");
 
         run_git(path, &["checkout", "-b", "feature-b"]);
-        fs::write(path.join("b.txt"), "b\n").unwrap();
-        run_git(path, &["add", "."]);
-        run_git(path, &["commit", "-m", "feature b"]);
+        commit_file(path, "b.txt", "b\n", "feature b");
 
         run_git(path, &["checkout", "main"]);
 
         dir
+    }
+
+    fn temp_repo_with_criss_cross_merge() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path();
+
+        init_test_repo(path);
+        commit_file(path, "root.txt", "root\n", "root");
+        let root = git_output(path, &["rev-parse", "HEAD"]);
+
+        commit_file(path, "main.txt", "main base\n", "main base");
+        let main_base = git_output(path, &["rev-parse", "HEAD"]);
+
+        run_git(path, &["checkout", "-b", "terminal", &root]);
+        commit_file(
+            path,
+            "terminal.txt",
+            "terminal base\n",
+            "terminal base",
+        );
+
+        run_git(path, &["checkout", "-b", "feature", &root]);
+        commit_file(path, "feature.txt", "feature root\n", "feature root");
+        merge_noninteractive(path, &main_base, "merge main into feature line");
+        commit_file(
+            path,
+            "feature-work.txt",
+            "feature work\n",
+            "feature work",
+        );
+
+        run_git(path, &["checkout", DEFAULT_BRANCH]);
+        merge_noninteractive(path, "terminal", "merge terminal into main");
+
+        run_git(path, &["checkout", "feature"]);
+        merge_noninteractive(path, "terminal", "merge terminal into feature");
+
+        dir
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn criss_cross_fixture_has_two_incomparable_best_bases() {
+        let repo = temp_repo_with_criss_cross_merge();
+        let path = repo.path();
+
+        let bases: HashSet<String> = git_output(
+            path,
+            &["merge-base", "--all", DEFAULT_BRANCH, "feature"],
+        )
+        .lines()
+        .map(str::to_string)
+        .collect();
+        assert_eq!(bases.len(), 2, "fixture must have two distinct best bases");
+
+        let mut bases_iter = bases.iter();
+        let first = bases_iter.next().expect("first merge-base");
+        let second = bases_iter.next().expect("second merge-base");
+        assert!(!is_ancestor(path, first, second));
+        assert!(!is_ancestor(path, second, first));
+
+        let selected = git_output(path, &["merge-base", DEFAULT_BRANCH, "feature"]);
+        assert!(
+            bases.contains(&selected),
+            "plain merge-base must select one of the best bases"
+        );
+
+        let common_outside_selected: Vec<String> = git_output(
+            path,
+            &["rev-list", DEFAULT_BRANCH, "--not", &selected, "--"],
+        )
+        .lines()
+        .filter(|commit| is_ancestor(path, commit, "feature"))
+        .map(str::to_string)
+        .collect();
+        assert!(
+            !common_outside_selected.is_empty(),
+            "the selected base must leave shared history reachable from both tips"
+        );
+    }
+
+    #[derive(Debug, Eq, PartialEq)]
+    enum MermaidNode {
+        Commit(String),
+        Elision(usize),
+        Head,
+    }
+
+    fn parse_mermaid_node(line: &str) -> MermaidNode {
+        let line = line.trim();
+        if line == "commit id: \"HEAD\"" {
+            return MermaidNode::Head;
+        }
+        if let Some(value) = line
+            .strip_prefix("commit id: \"+")
+            .and_then(|rest| rest.strip_suffix("\" type: HIGHLIGHT"))
+        {
+            return MermaidNode::Elision(
+                value
+                    .parse()
+                    .expect("elision labels should contain a count"),
+            );
+        }
+        let id = line
+            .strip_prefix("commit id: \"")
+            .and_then(|rest| rest.strip_suffix('"'))
+            .expect("branch segment should contain only commit nodes");
+        MermaidNode::Commit(id.to_string())
+    }
+
+    fn branch_segment(graph: &str, branch: &str, default_branch: &str) -> Vec<MermaidNode> {
+        let lines: Vec<&str> = graph.lines().collect();
+        let declaration = format!("    branch {branch}");
+        let branch_checkout = format!("    checkout {branch}");
+        let default_checkout = format!("    checkout {default_branch}");
+        let declaration_idx = lines
+            .iter()
+            .position(|line| *line == declaration)
+            .expect("branch declaration should be present");
+        let checkout_idx = lines
+            .iter()
+            .enumerate()
+            .skip(declaration_idx + 1)
+            .find_map(|(idx, line)| (*line == branch_checkout).then_some(idx))
+            .expect("branch checkout should follow its declaration");
+        let end_idx = lines
+            .iter()
+            .enumerate()
+            .skip(checkout_idx + 1)
+            .find_map(|(idx, line)| (*line == default_checkout).then_some(idx))
+            .expect("default checkout should close the branch segment");
+
+        lines[checkout_idx + 1..end_idx]
+            .iter()
+            .map(|line| parse_mermaid_node(line))
+            .collect()
+    }
+
+    fn focused_default_segment(graph: &str, default_branch: &str) -> Vec<MermaidNode> {
+        let checkout = format!("    checkout {default_branch}");
+        let lines: Vec<&str> = graph.lines().collect();
+        let checkout_idx = lines
+            .iter()
+            .rposition(|line| *line == checkout)
+            .expect("focused graph should return to the default branch");
+        lines[checkout_idx + 1..]
+            .iter()
+            .map(|line| parse_mermaid_node(line))
+            .collect()
+    }
+
+    fn commit_ids(commits: &[CommitId]) -> Vec<String> {
+        commits.iter().map(|commit| commit.full.clone()).collect()
+    }
+
+    fn rendered_commit_ids(nodes: &[MermaidNode], commits: &[CommitId]) -> Vec<String> {
+        nodes
+            .iter()
+            .filter_map(|node| match node {
+                MermaidNode::Commit(display) => {
+                    let matches: Vec<&CommitId> = commits
+                        .iter()
+                        .filter(|commit| commit.display == *display)
+                        .collect();
+                    assert_eq!(
+                        matches.len(),
+                        1,
+                        "rendered ID {display} should resolve to one gathered full SHA"
+                    );
+                    Some(matches[0].full.clone())
+                }
+                MermaidNode::Elision(_) | MermaidNode::Head => None,
+            })
+            .collect()
+    }
+
+    fn unique_commit_ids(target: &str, opposite_tip: &str) -> Vec<String> {
+        git_command(&[
+            "log",
+            "--format=%H",
+            "--reverse",
+            target,
+            "--not",
+            opposite_tip,
+            "--",
+        ])
+        .expect("unique commit log should succeed")
+        .lines()
+        .map(str::to_string)
+        .collect()
+    }
+
+    fn unique_commit_count(target: &str, opposite_tip: &str) -> usize {
+        git_command(&["rev-list", "--count", target, "--not", opposite_tip, "--"])
+            .expect("unique commit count should succeed")
+            .parse()
+            .expect("unique commit count should be numeric")
+    }
+
+    fn focused_graph_with_exclusions(
+        default_branch: &str,
+        branch: &str,
+        default_exclude: &str,
+        branch_exclude: &str,
+    ) -> String {
+        let merge_base_full = get_merge_base(default_branch, branch)
+            .expect("fixture branches should have a merge-base");
+        let default_unique = commits_since(default_branch, default_exclude, 5);
+        let branch_unique = commits_since(branch, branch_exclude, 5);
+        let data = BranchGraphData {
+            branch: branch.to_string(),
+            default_branch: default_branch.to_string(),
+            merge_base_full: merge_base_full.clone(),
+            merge_base_idx: 0,
+            default_context: ancestor_commits(&merge_base_full, 2),
+            default_hidden: hidden_since(default_branch, default_exclude, default_unique.len()),
+            default_unique,
+            branch_hidden: hidden_since(branch, branch_exclude, branch_unique.len()),
+            branch_unique,
+            merge_base_detail: None,
+            branch_details: Vec::new(),
+        };
+        worktree_graph(&data).expect("focused graph should render")
+    }
+
+    fn assert_linear_exclusions_render_identically(repo: &Path, branch: &str) {
+        let _guard = DirGuard::enter(repo);
+        let merge_base = get_merge_base(DEFAULT_BRANCH, branch)
+            .expect("fixture branches should have a merge-base");
+        let legacy = focused_graph_with_exclusions(
+            DEFAULT_BRANCH,
+            branch,
+            &merge_base,
+            &merge_base,
+        );
+        let opposite_tip =
+            focused_graph_with_exclusions(DEFAULT_BRANCH, branch, branch, DEFAULT_BRANCH);
+        assert_eq!(
+            opposite_tip, legacy,
+            "single-base linear history must render identically under either exclusion"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn criss_cross_focused_graph_uses_tip_unique_commits() {
+        let repo = temp_repo_with_criss_cross_merge();
+        let _guard = DirGuard::enter(repo.path());
+
+        let expected_branch = unique_commit_ids("feature", DEFAULT_BRANCH);
+        let expected_default = unique_commit_ids(DEFAULT_BRANCH, "feature");
+        assert!(expected_branch.len() <= 5 && expected_default.len() <= 5);
+
+        let data = gather_branch(DEFAULT_BRANCH, "feature", false)
+            .expect("focused graph gather should succeed");
+        assert_eq!(commit_ids(&data.branch_unique), expected_branch);
+        assert_eq!(commit_ids(&data.default_unique), expected_default);
+        assert_eq!(data.branch_hidden, 0);
+        assert_eq!(data.default_hidden, 0);
+
+        let graph = worktree_graph(&data).expect("focused graph should render");
+        let branch_nodes = branch_segment(&graph, "feature", DEFAULT_BRANCH);
+        let default_nodes = focused_default_segment(&graph, DEFAULT_BRANCH);
+        let rendered_branch = rendered_commit_ids(&branch_nodes, &data.branch_unique);
+        let rendered_default = rendered_commit_ids(&default_nodes, &data.default_unique);
+        assert_eq!(rendered_branch, expected_branch);
+        assert_eq!(rendered_default, expected_default);
+        assert!(
+            rendered_branch
+                .iter()
+                .all(|commit| !rendered_default.contains(commit)),
+            "focused lanes must be disjoint: {graph}"
+        );
+        assert_eq!(
+            rendered_branch.len(),
+            unique_commit_count("feature", DEFAULT_BRANCH)
+        );
+        assert_eq!(
+            rendered_default.len(),
+            unique_commit_count(DEFAULT_BRANCH, "feature")
+        );
+        assert!(
+            branch_nodes
+                .iter()
+                .chain(default_nodes.iter())
+                .all(|node| !matches!(node, MermaidNode::Elision(_))),
+            "no unique lane exceeds the display window: {graph}"
+        );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn criss_cross_verbose_details_use_feature_unique_commits() {
+        let repo = temp_repo_with_criss_cross_merge();
+        let _guard = DirGuard::enter(repo.path());
+
+        let expected = git_command(&[
+            "log",
+            "--format=%h",
+            "--reverse",
+            "feature",
+            "--not",
+            DEFAULT_BRANCH,
+            "--",
+        ])
+        .expect("feature-unique detail log should succeed");
+        let expected: Vec<String> = expected.lines().map(str::to_string).collect();
+
+        let data = gather_branch(DEFAULT_BRANCH, "feature", true)
+            .expect("verbose graph gather should succeed");
+        let actual: Vec<String> = data
+            .branch_details
+            .iter()
+            .map(|detail| detail.short_sha.clone())
+            .collect();
+        assert_eq!(actual, expected);
+        for detail in &data.branch_details {
+            let full = git_command(&["rev-parse", &detail.short_sha])
+                .expect("detail SHA should resolve");
+            assert!(
+                !is_ancestor(repo.path(), &full, DEFAULT_BRANCH),
+                "verbose detail {} must not be reachable from main",
+                detail.short_sha
+            );
+        }
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn criss_cross_base_graph_uses_unique_commits_at_selected_base() {
+        let repo = temp_repo_with_criss_cross_merge();
+        let _guard = DirGuard::enter(repo.path());
+
+        let expected_branch = unique_commit_ids("feature", DEFAULT_BRANCH);
+        let selected_base = git_command(&["merge-base", DEFAULT_BRANCH, "feature"])
+            .expect("selected merge-base should exist");
+        let branches = vec!["feature".to_string()];
+        let data = gather_base_graph(DEFAULT_BRANCH, &branches)
+            .expect("base graph gather should succeed");
+        let feature = data.branches.first().expect("feature data should exist");
+        let selected_idx = data
+            .main_commits
+            .iter()
+            .position(|commit| commit.full == selected_base)
+            .expect("selected merge-base should be in the ten-commit main window");
+        assert_eq!(feature.merge_base_idx, selected_idx);
+        assert_eq!(commit_ids(&feature.branch_unique), expected_branch);
+
+        let graph = base_graph(&data).expect("base graph should render");
+        let branch_nodes = branch_segment(&graph, "feature", DEFAULT_BRANCH);
+        assert_eq!(
+            rendered_commit_ids(&branch_nodes, &feature.branch_unique),
+            expected_branch
+        );
+
+        let lines: Vec<&str> = graph.lines().collect();
+        let branch_idx = lines
+            .iter()
+            .position(|line| *line == "    branch feature")
+            .expect("feature branch block should be present");
+        let anchor = parse_mermaid_node(lines[branch_idx - 1]);
+        assert_eq!(
+            anchor,
+            MermaidNode::Commit(data.main_commits[selected_idx].display.clone()),
+            "feature branch block should immediately follow the selected merge-base"
+        );
     }
 
     const DEFAULT_BRANCH: &str = "main";
@@ -671,6 +1075,22 @@ mod tests {
             "expected exactly one merge-base call, got {calls:?}"
         );
 
+        let log_count = count_matching(&calls, |args| {
+            args.first().map(String::as_str) == Some("log")
+        });
+        assert_eq!(
+            log_count, 5,
+            "expected context, two lane, and two detail logs, got {calls:?}"
+        );
+
+        let rev_list_count = count_matching(&calls, |args| {
+            args.first().map(String::as_str) == Some("rev-list")
+        });
+        assert_eq!(
+            rev_list_count, 2,
+            "expected one hidden-count query per lane, got {calls:?}"
+        );
+
         let short_sha_count = count_matching(&calls, |args| {
             args.len() >= 2 && args[0] == "rev-parse" && args[1] == "--short"
         });
@@ -728,7 +1148,7 @@ mod tests {
             "--reverse",
             branch,
             "--not",
-            &merge_base,
+            DEFAULT_BRANCH,
             "--",
         ])
         .expect("branch log should succeed");
@@ -741,7 +1161,7 @@ mod tests {
             "--reverse",
             DEFAULT_BRANCH,
             "--not",
-            &merge_base,
+            branch,
             "--",
         ])
         .expect("main log should succeed");
@@ -772,6 +1192,13 @@ mod tests {
             expected.join("\n"),
             "worktree_graph output must match the in-process display_sha contract (7-char truncation of %H)"
         );
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn linear_focused_graph_is_unchanged_by_opposite_tip_exclusion() {
+        let repo = temp_repo_with_branches();
+        assert_linear_exclusions_render_identically(repo.path(), "feature-a");
     }
 
     #[test]
@@ -842,8 +1269,8 @@ mod tests {
         );
 
         // The base-graph gather path issues exactly:
-        //   1 `git log` for main_commits + 1 `git log` per branch (branch_after_base).
-        // No default-context or default-after-base logs should be present.
+        //   1 `git log` for main_commits + 1 `git log` per branch (branch_unique).
+        // No default-context or default-unique logs should be present.
         let log_count = count_matching(&calls, |args| {
             args.first().map(String::as_str) == Some("log")
         });
@@ -902,23 +1329,15 @@ mod tests {
     }
 
     /// Build a repo where both lines exceed the 5-commit window:
-    /// `feature` has 7 commits since the fork, `main` has 6.
+    /// `feature` has 7 tip-only commits and `main` has 6.
     fn temp_repo_over_window() -> tempfile::TempDir {
         let dir = tempfile::tempdir().expect("create temp dir");
         let path = dir.path();
 
-        run_git(path, &["init", "-b", "main"]);
-        run_git(path, &["config", "user.email", "test@example.com"]);
-        run_git(path, &["config", "user.name", "Test User"]);
-        run_git(path, &["config", "commit.gpgsign", "false"]);
-        run_git(path, &["config", "gc.auto", "0"]);
-        run_git(path, &["config", "core.fsmonitor", "false"]);
-        run_git(path, &["config", "core.commitGraph", "false"]);
+        init_test_repo(path);
 
         let commit = |n: &str| {
-            fs::write(path.join(format!("{n}.txt")), format!("{n}\n")).unwrap();
-            run_git(path, &["add", "."]);
-            run_git(path, &["commit", "-m", n]);
+            commit_file(path, &format!("{n}.txt"), &format!("{n}\n"), n);
         };
 
         commit("root");
@@ -944,8 +1363,12 @@ mod tests {
         let _guard = DirGuard::enter(repo.path());
 
         let data = gather_branch(DEFAULT_BRANCH, "feature", false).expect("gather should succeed");
-        assert_eq!(data.branch_hidden, 2, "7 ahead − 5 shown = 2 elided on feature");
-        assert_eq!(data.default_hidden, 1, "6 ahead − 5 shown = 1 elided on main");
+        let branch_expected = unique_commit_count("feature", DEFAULT_BRANCH) - 5;
+        let default_expected = unique_commit_count(DEFAULT_BRANCH, "feature") - 5;
+        assert_eq!(branch_expected, 2, "7 ahead − 5 shown = 2 elided on feature");
+        assert_eq!(default_expected, 1, "6 ahead − 5 shown = 1 elided on main");
+        assert_eq!(data.branch_hidden, branch_expected);
+        assert_eq!(data.default_hidden, default_expected);
 
         let graph = worktree_graph(&data).expect("graph should render");
         let lines: Vec<&str> = graph.lines().collect();
@@ -975,6 +1398,20 @@ mod tests {
             branch_elide,
             "elision marker must be the first node on the branch line:\n{graph}"
         );
+
+        let branch_nodes = branch_segment(&graph, "feature", DEFAULT_BRANCH);
+        let default_nodes = focused_default_segment(&graph, DEFAULT_BRANCH);
+        assert_eq!(branch_nodes.first(), Some(&MermaidNode::Elision(branch_expected)));
+        assert_eq!(default_nodes.first(), Some(&MermaidNode::Elision(default_expected)));
+        assert_eq!(branch_nodes.len(), 6, "one elision plus five feature commits");
+        assert_eq!(default_nodes.len(), 6, "one elision plus five main commits");
+    }
+
+    #[test]
+    #[serial_test::serial]
+    fn over_window_focused_graph_is_unchanged_by_opposite_tip_exclusion() {
+        let repo = temp_repo_over_window();
+        assert_linear_exclusions_render_identically(repo.path(), "feature");
     }
 
     /// A line that fits within the window draws no elision marker.
