@@ -41,6 +41,18 @@ do not belong here.
   staged set.
 - Before committing an assigned path, check `git diff -- <path>`. A nonempty
   result means the working tree differs from the staged snapshot.
+- **`Cargo.lock` is coupled to its declaring `Cargo.toml`.** A staged
+  `Cargo.lock` adding a dep that is not yet declared by any `Cargo.toml` in
+  the same commit is an orphan lock entry. Detect before committing:
+  `git show :Cargo.lock | grep '"<dep-name>"'` then `git show :<cargo-toml>`
+  to confirm the dep is declared in the manifest. If your sibling group
+  owns the matching `Cargo.toml` change, expand your pathspec to include
+  the manifest (and any other manifest in the dep closure) rather than
+  committing `Cargo.lock` alone. Lockfile-without-manifest is orphan;
+  manifest-without-lockfile produces a tree that does not match the new
+  manifests until a `cargo metadata` regenerates it. In a parallel batch,
+  commit the producer's `Cargo.toml` before any sibling commits the
+  matching `Cargo.lock` line.
 - Do not commit unresolved conflict markers. If staged content contains them,
   leave that group staged and report it.
 - Scan staged blobs for all diff3 conflict-marker forms, including the base
