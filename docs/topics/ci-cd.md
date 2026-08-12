@@ -89,27 +89,13 @@ not correctness. `build-integrations.yml` stays release-triggered.
 ### Layer 4 — Nightly and advisory
 
 Each scheduled workflow owns its own name, schedule slot, artifacts, and summary so none can be
-mistaken for required validation: bench 00:00, fuzz 02:00, sniff-performance 04:00, coverage 05:00
-UTC, maintenance audit Mondays 07:00.
+mistaken for required validation: fuzz 02:00, sniff-performance 04:00 UTC, maintenance audit
+Mondays 07:00.
 
-#### `coverage.yml` — 05:00 UTC daily and manual, report-only
-
-Runs one `cargo llvm-cov --workspace` command and uploads the aggregated LCOV artifact
-(`lcov-workspace`). Coverage **does not gate merges**; PRs already receive an affected-scope report
-from `ci.yml`.
-
-#### `bench-nightly.yml` — 00:00 UTC daily and manual
-
-Runs darkmatter's Criterion suite and uploads results to
-[Bencher.dev](https://bencher.dev) (`BENCHER_PROJECT` repo variable). There is deliberately **no
-push trigger**: a benchmark that runs long is a measurement, not a test regression, and it must not
-appear beside required validation.
-
-Execution and upload are separate steps. The benchmark run gates the job — a bench that fails to
-compile or panics is a real failure — while the Bencher upload is best-effort and reads the captured
-Criterion output, so an unprovisioned project or a regression alert can never erase a successful
-measurement. The run records its measured duration, runner image, and toolchain in the run summary
-so later comparisons stay valid.
+Coverage and workspace benchmarking left CI on 2026-08-12: coverage is a local tool (`just
+coverage` per package), and `bench-nightly`'s Bencher.dev upload had been failing silently for
+weeks — performance testing returns as the opt-in, package-owned design in
+`features/2026-08-12-perf-opt-in/spec.md`.
 
 The 90-minute budget is provisional: warm scheduled runs measured 14–18 minutes, but every
 cold-cache run was truncated by the previous 30-minute ceiling, so the cold duration has never

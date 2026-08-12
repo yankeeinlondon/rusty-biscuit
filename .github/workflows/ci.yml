@@ -248,56 +248,6 @@ jobs:
       wsl: ${{ matrix.wsl }}
     secrets: inherit
 
-  affected-coverage:
-    name: Coverage for affected packages
-    needs: [scope, preflight]
-    if: >-
-      !cancelled() &&
-      github.event_name == 'pull_request' &&
-      needs.scope.outputs.has_packages == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      AFFECTED_PACKAGES: ${{ needs.scope.outputs.packages }}
-      FULL_SCOPE: ${{ needs.scope.outputs.full_scope }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: extractions/setup-just@v2
-      - name: Install native prerequisites
-        shell: bash
-        run: just _ensure-native-libs
-      - name: Set up the pinned toolchain with coverage components
-        run: |
-          rustc --version
-          rustup component add llvm-tools-preview
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
-          shared-key: coverage-affected
-      - uses: taiki-e/install-action@cargo-llvm-cov
-      - name: Generate one affected-scope LCOV report
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "$FULL_SCOPE" == "true" ]]; then
-            selection=(--workspace)
-          else
-            selection=()
-            mapfile -t packages < <(jq -r '.[]' <<<"$AFFECTED_PACKAGES")
-            for package in "${packages[@]}"; do
-              selection+=(-p "$package")
-            done
-          fi
-          cargo llvm-cov "${selection[@]}" --lcov --output-path lcov-affected.info
-      - uses: actions/upload-artifact@v4
-        with:
-          name: lcov-affected
-          path: lcov-affected.info
-
   claudine-generator-signals:
     name: Claudine generator and signals drift
     needs: [scope, preflight]
@@ -427,7 +377,6 @@ jobs:
       - scope
       - preflight
       - package-ci
-      - affected-coverage
       - claudine-generator-signals
       - darkmatter-no-color
       - biscuit-tui-captured-stdout
@@ -551,7 +500,6 @@ jobs:
     needs:
       - scope
       - preflight
-      - affected-coverage
       - claudine-generator-signals
       - darkmatter-no-color
       - biscuit-tui-captured-stdout
@@ -576,7 +524,6 @@ jobs:
             biscuit-tui Windows captured stdout:${{ needs.biscuit-tui-captured-stdout.result }}
             playa native Windows build:${{ needs.playa-windows.result }}
             ci tooling (rollup and scope):${{ needs.ci-tooling.result }}
-            coverage:${{ needs.affected-coverage.result }}
         run: |
           set -euo pipefail
           {

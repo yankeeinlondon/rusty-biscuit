@@ -229,14 +229,6 @@ reason = "synthetic identity (the Claudine generator drift check), not a Cargo p
 source_run = "30323254931"
 expiry = "2026-10-31"
 
-[[failure]]
-package = "coverage"
-environment = "ubuntu-latest"
-tier = "lint"
-owner = "@yankeeinlondon"
-reason = "synthetic identity (coverage for affected packages), not a Cargo package; carried forward from the area-keyed baseline, ignored by the verdict until its producer emits package-keyed results"
-source_run = "30323254931"
-expiry = "2026-10-31"
 
 # ---------------------------------------------------------------------------
 # Approved skip budget
