@@ -222,6 +222,36 @@ impl ComposeContext {
         Self::from_values(values, diagnostics, timings, environment)
     }
 
+    /// Adds supplied runtime groups without replacing previously captured state.
+    ///
+    /// `requirements` should contain only groups absent from this context. Any
+    /// overlapping values keep their original value, so the capture-time clock,
+    /// environment snapshot, and caller-applied environment overrides remain
+    /// immutable while a demand-driven caller adds newly required groups.
+    pub fn extend_with_evidence(
+        &mut self,
+        base_dir: &std::path::Path,
+        requirements: &super::capture::ContextRequirements,
+        evidence: &super::capture::ContextCaptureEvidence,
+    ) {
+        if requirements.is_empty() {
+            return;
+        }
+
+        let extension = Self::capture_with_evidence(base_dir, requirements, evidence);
+        let inner = std::sync::Arc::make_mut(&mut self.inner);
+        for (key, value) in &extension.inner.values {
+            inner.values.entry(key.clone()).or_insert_with(|| value.clone());
+        }
+        inner
+            .capture_diagnostics
+            .extend(extension.inner.capture_diagnostics.iter().cloned());
+        inner
+            .capture_timings
+            .extend(extension.inner.capture_timings.iter().cloned());
+        inner.overrides = std::sync::OnceLock::new();
+    }
+
     /// Demand-driven supplied capture for one content fragment.
     pub fn capture_for_content_with_evidence(
         base_dir: &std::path::Path,

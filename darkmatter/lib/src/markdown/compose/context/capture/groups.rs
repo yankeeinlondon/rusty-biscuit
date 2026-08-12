@@ -92,6 +92,27 @@ impl ContextRequirements {
         self.groups.iter().copied()
     }
 
+    /// Returns the groups required by `self` that `captured` does not contain.
+    pub fn missing_from(&self, captured: &Self) -> Self {
+        Self {
+            groups: self
+                .groups
+                .difference(&captured.groups)
+                .copied()
+                .collect(),
+        }
+    }
+
+    /// Adds every group in `other` to this requirement set.
+    pub fn extend(&mut self, other: &Self) {
+        self.groups.extend(other.groups.iter().copied());
+    }
+
+    /// Whether this requirement set contains no groups.
+    pub fn is_empty(&self) -> bool {
+        self.groups.is_empty()
+    }
+
     pub(crate) fn from_groups(groups: impl IntoIterator<Item = ContextGroup>) -> Self {
         Self {
             groups: groups.into_iter().collect(),
