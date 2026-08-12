@@ -482,8 +482,8 @@ fn a_missing_required_property_is_typed_on_the_harness_route() {
 
 /// Invalid-**optional** drop-and-retry is the other half of what the schema
 /// layer adds, and it is a behavior change on the harness route rather than
-/// only a typing change: preparation now *succeeds*, dropping the bad value,
-/// where it previously failed outright.
+/// only a typing change: preparation now succeeds, removes the bad value, and
+/// lets composition replace the document-declared optional binding with null.
 #[test]
 fn an_invalid_optional_is_dropped_and_recorded_on_the_harness_route() {
     let dir = TempDir::new().unwrap();
@@ -514,9 +514,10 @@ fn an_invalid_optional_is_dropped_and_recorded_on_the_harness_route() {
          about a silently dropped value even in principle; got {:?}",
         prepared.dropped_optionals
     );
-    assert!(
-        prepared.effective_frontmatter.get("count").is_none(),
-        "the dropped property must not survive into the effective frontmatter"
+    assert_eq!(
+        prepared.effective_frontmatter.get("count"),
+        Some(&serde_json::Value::Null),
+        "the invalid value must be dropped before the document-owned optional binding is materialized",
     );
 }
 
