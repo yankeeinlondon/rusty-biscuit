@@ -594,30 +594,33 @@ fn the_l1_suite_runs_no_fail_fast() {
 
 /// Each surviving specialized runtime workflow the primary orchestrator calls,
 /// paired with its unique runtime evidence and scope selector.
-const ORCHESTRATED: [(&str, &str, &str); 2] = [
-    (
-        "biscuit-tui-windows-captured-stdout.yml",
-        "captured_stdout_receives_only_value_no_tui_bytes",
-        "needs.scope.outputs.biscuit_tui == 'true'",
-    ),
-    (
-        "playa-windows.yml",
-        "--features audio-ducking-windows",
-        "needs.scope.outputs.playa == 'true'",
-    ),
-];
+const ORCHESTRATED: [(&str, &str, &str); 1] = [(
+    "biscuit-tui-windows-captured-stdout.yml",
+    "captured_stdout_receives_only_value_no_tui_bytes",
+    "needs.scope.outputs.biscuit_tui == 'true'",
+)];
 
 #[test]
 fn retired_specialized_workflows_and_jobs_are_absent() {
     let mut live = Vec::new();
-    for name in ["messenger-desktop-tests.yml", "rendezvous-tests.yml"] {
+    for name in [
+        "messenger-desktop-tests.yml",
+        "rendezvous-tests.yml",
+        "playa-windows.yml",
+    ] {
         if repo_root().join(".github/workflows").join(name).exists() {
             live.push(format!("workflow file {name}"));
         }
     }
 
     let ci = workflow("ci.yml");
-    for header in ["  messenger-desktop:", "  rendezvous:"] {
+    for header in [
+        "  messenger-desktop:",
+        "  rendezvous:",
+        "  playa-windows:",
+        "  claudine-generator-signals:",
+        "  darkmatter-no-color:",
+    ] {
         if jobs(&ci).iter().any(|job| job.starts_with(header)) {
             live.push(format!("ci.yml job {}", header.trim_end_matches(':').trim()));
         }
@@ -635,10 +638,7 @@ fn specialized_inventory_contains_only_surviving_workflows() {
     let names: Vec<&str> = ORCHESTRATED.iter().map(|(name, _, _)| *name).collect();
     assert_eq!(
         names,
-        [
-            "biscuit-tui-windows-captured-stdout.yml",
-            "playa-windows.yml",
-        ],
+        ["biscuit-tui-windows-captured-stdout.yml"],
         "the specialized inventory must contain only workflows that remain specialized"
     );
 }
@@ -659,7 +659,11 @@ fn active_ci_authority_matches_the_retirement_contract() {
         .collect::<Vec<_>>()
         .join("\n");
 
-    for retired in ["messenger-desktop-tests.yml", "rendezvous-tests.yml"] {
+    for retired in [
+        "messenger-desktop-tests.yml",
+        "rendezvous-tests.yml",
+        "playa-windows.yml",
+    ] {
         assert!(
             !corpus.contains(retired),
             "active CI authority must not assign coverage to retired {retired}"
@@ -675,10 +679,7 @@ fn active_ci_authority_matches_the_retirement_contract() {
     );
 
     let ci_topic = read("docs/topics/ci-cd.md");
-    for survivor in [
-        "biscuit-tui-windows-captured-stdout.yml",
-        "playa-windows.yml",
-    ] {
+    for survivor in ["biscuit-tui-windows-captured-stdout.yml"] {
         assert!(
             ci_topic.contains(survivor),
             "the active specialized inventory must retain {survivor}"
@@ -1568,10 +1569,7 @@ fn ci_verdict_is_the_single_required_check() {
         "preflight",
         "package-ci",
         "affected-coverage",
-        "claudine-generator-signals",
-        "darkmatter-no-color",
         "biscuit-tui-captured-stdout",
-        "playa-windows",
         "ci-tooling",
     ] {
         assert!(
