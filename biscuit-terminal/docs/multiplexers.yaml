@@ -1,0 +1,43 @@
+kind: sequence
+template:
+    intro: "{{ name }} ({{url}})"
+    slug: "{{dasherize(name)}}"
+    file: "{{slug}}.md"
+list:
+    - name: Wezterm
+      url: ""
+      os:
+          - linux
+          - macos
+          - windows
+    - name: Ghostty
+      url: ""
+    - name: iTerm2
+      url: ""
+    - name: cmux
+      url: ""
+    - name: kitty
+      url: ""
+      os:
+          - macos
+          - windows
+          - linux
+    - name: konsole
+      url: ""
+    - name: AppleTerminal
+      url: ""
+      os:
+          - macos
+    - name: Alacritty
+      url: ""
+      os:
+          - macos
+          - windows
+          - linux
+    - name: Contour
+      url: ""
+    - name: Foot
+      url: ""
+    - name: GNOME Terminal
+      url: ""
+    -
