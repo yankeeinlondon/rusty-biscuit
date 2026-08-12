@@ -1,12 +1,12 @@
-#![cfg(unix)]
-
 //! Real CLI regression coverage for launch-context anchoring.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 mod common;
-use common::{TestWorkspace, augmented_path, strip_ansi, write, write_executable};
+use common::{TestWorkspace, augmented_path, strip_ansi, write};
+#[cfg(unix)]
+use common::write_executable;
 
 #[derive(Debug)]
 struct Observation {
@@ -80,6 +80,7 @@ baseline.preflight.area=[{{{{ preflight_area }}}}]
     )
 }
 
+#[cfg(unix)]
 fn stage_codex(bin_dir: &Path) {
     fs::create_dir_all(bin_dir).unwrap();
     write_executable(
@@ -91,6 +92,12 @@ exit 0
     );
 }
 
+#[cfg(windows)]
+fn stage_codex(bin_dir: &Path) {
+    stage_windows_provider(bin_dir, "codex", "codex");
+}
+
+#[cfg(unix)]
 fn stage_goose(bin_dir: &Path) {
     fs::create_dir_all(bin_dir).unwrap();
     write_executable(
@@ -106,6 +113,12 @@ exit 0
     );
 }
 
+#[cfg(windows)]
+fn stage_goose(bin_dir: &Path) {
+    stage_windows_provider(bin_dir, "goose", "goose");
+}
+
+#[cfg(unix)]
 fn stage_counting_codex(bin_dir: &Path) {
     fs::create_dir_all(bin_dir).unwrap();
     write_executable(
@@ -121,6 +134,66 @@ printf '%s' "$count" > "$CLAUDINE_COUNT_FILE"
 exit 0
 "#,
     );
+}
+
+#[cfg(windows)]
+fn stage_counting_codex(bin_dir: &Path) {
+    stage_windows_provider(bin_dir, "codex", "counting-codex");
+}
+
+#[cfg(windows)]
+fn stage_printf(bin_dir: &Path) {
+    write(
+        &bin_dir.join("printf.cmd"),
+        "@echo off\r\n<nul set /p \"=%~1\"\r\n",
+    );
+}
+
+#[cfg(windows)]
+fn stage_windows_provider(bin_dir: &Path, provider: &str, mode: &str) {
+    fs::create_dir_all(bin_dir).unwrap();
+    write(
+        &bin_dir.join("claudine-provider-fixture.ps1"),
+        r#"$Mode = $args[0]
+$ProviderArgs = @($args | Select-Object -Skip 1)
+$Encoding = New-Object System.Text.UTF8Encoding($false)
+$Stdin = [Console]::In.ReadToEnd()
+
+switch ($Mode) {
+    'codex' {
+        [IO.File]::WriteAllText($env:CLAUDINE_STDIN_FILE, $Stdin, $Encoding)
+    }
+    'goose' {
+        $Prompt = [string]::Join([Environment]::NewLine, $ProviderArgs)
+        if ($Prompt.Length -gt 0 -and $Stdin.Length -gt 0) {
+            $Prompt += [Environment]::NewLine
+        }
+        [IO.File]::WriteAllText($env:CLAUDINE_STDIN_FILE, $Prompt + $Stdin, $Encoding)
+        [Console]::Out.WriteLine('Generated body')
+    }
+    'counting-codex' {
+        $Count = 0
+        if ([IO.File]::Exists($env:CLAUDINE_COUNT_FILE)) {
+            $Count = [int][IO.File]::ReadAllText($env:CLAUDINE_COUNT_FILE)
+        }
+        $Count += 1
+        [IO.File]::WriteAllText($env:CLAUDINE_COUNT_FILE, [string]$Count, $Encoding)
+        [IO.File]::WriteAllText($env:CLAUDINE_STDIN_FILE, $Stdin, $Encoding)
+    }
+    default {
+        [Console]::Error.WriteLine("unknown fixture mode: $Mode")
+        exit 2
+    }
+}
+"#,
+    );
+    write(
+        &bin_dir.join(format!("{provider}.cmd")),
+        &format!(
+            "@echo off\r\npowershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"%~dp0claudine-provider-fixture.ps1\" {mode} %*\r\nexit /b %errorlevel%\r\n"
+        ),
+    );
+    stage_printf(bin_dir);
 }
 
 fn loop_document(expected_repo: &Path) -> String {
@@ -171,6 +244,22 @@ Original body.
     )
 }
 
+fn cli_command(launch_dir: &Path, home: &Path, bin_dir: &Path) -> assert_cmd::Command {
+    let mut command = assert_cmd::Command::cargo_bin("claudine").unwrap();
+    command
+        .current_dir(launch_dir)
+        .env("HOME", home)
+        .env("USERPROFILE", home)
+        .env("APPDATA", home)
+        .env("LOCALAPPDATA", home)
+        .env("PATH", augmented_path(bin_dir))
+        .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+        .env("NO_COLOR", "1")
+        .env("COLUMNS", "240")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false");
+    command
+}
+
 fn run_document(
     launch_dir: &Path,
     home: &Path,
@@ -178,14 +267,7 @@ fn run_document(
     document: &Path,
     capture: &Path,
 ) -> Observation {
-    let assertion = assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
-        .current_dir(launch_dir)
-        .env("HOME", home)
-        .env("PATH", augmented_path(bin_dir))
-        .env("NO_COLOR", "1")
-        .env("COLUMNS", "240")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+    let assertion = cli_command(launch_dir, home, bin_dir)
         .env("CLAUDINE_STDIN_FILE", capture)
         .args(["compose", "--codex"])
         .arg(document)
@@ -205,14 +287,7 @@ fn run_inline_document(
     document: &Path,
     capture: &Path,
 ) -> Observation {
-    let assertion = assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
-        .current_dir(launch_dir)
-        .env("HOME", home)
-        .env("PATH", augmented_path(bin_dir))
-        .env("NO_COLOR", "1")
-        .env("COLUMNS", "240")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+    let assertion = cli_command(launch_dir, home, bin_dir)
         .env("CLAUDINE_STDIN_FILE", capture)
         .args(["inline-compose", "--goose"])
         .arg(document)
@@ -461,14 +536,7 @@ fn cli_loop_reuses_launch_context_for_root_and_package_prompt_copies() {
         write(&document, &loop_document(&launch_repo));
         let capture = workspace_root.join(format!("loop-{name}-prompt.txt"));
         let count = workspace_root.join(format!("loop-{name}-count.txt"));
-        let assertion = assert_cmd::Command::cargo_bin("claudine")
-            .unwrap()
-            .current_dir(&launch_area)
-            .env("HOME", &home)
-            .env("PATH", augmented_path(&bin_dir))
-            .env("NO_COLOR", "1")
-            .env("COLUMNS", "240")
-            .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+        let assertion = cli_command(&launch_area, &home, &bin_dir)
             .env("CLAUDINE_STDIN_FILE", &capture)
             .env("CLAUDINE_COUNT_FILE", &count)
             .args(["compose", "--codex"])
