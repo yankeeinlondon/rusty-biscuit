@@ -181,14 +181,22 @@ struct LifecyclePhase {
     context: darkmatter::markdown::compose::ComposeContext,
 }
 
-pub(super) fn prepared_lifecycle_context(
+pub(crate) fn prepared_lifecycle_context(
     prepared: Option<&darkmatter::markdown::compose::ComposeContext>,
     invocation: Option<&claudine::invocation_context::InvocationContext>,
     launch_cwd: &Path,
     content: &str,
 ) -> darkmatter::markdown::compose::ComposeContext {
     match prepared {
-        Some(prepared) => prepared.clone(),
+        Some(prepared) => {
+            if let Some(invocation) = invocation {
+                invocation.record_prepared_context_observation(
+                    claudine::invocation_context::PreparedContextConsumer::Lifecycle,
+                    prepared,
+                );
+            }
+            prepared.clone()
+        }
         None => {
             if let Some(invocation) = invocation {
                 invocation.record_ambient_fallback();

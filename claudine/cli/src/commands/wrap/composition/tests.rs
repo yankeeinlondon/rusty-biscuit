@@ -76,7 +76,9 @@ fn lifecycle_context_consumes_prepared_snapshot_and_accounts_for_a_missing_one()
         "{{ ctx.area }}",
     );
     assert!(supplied.get("area").is_some());
-    assert_eq!(invocation.work_snapshot().ambient_fallbacks, 0);
+    let supplied_work = invocation.work_snapshot();
+    assert_eq!(supplied_work.ambient_fallbacks, 0);
+    assert_eq!(supplied_work.prepared_context_lifecycle_observations, 1);
 
     let fallback = prepared_lifecycle_context(
         None,
@@ -85,7 +87,9 @@ fn lifecycle_context_consumes_prepared_snapshot_and_accounts_for_a_missing_one()
         "{{ ctx.area }}",
     );
     assert!(fallback.get("area").is_some());
-    assert_eq!(invocation.work_snapshot().ambient_fallbacks, 1);
+    let fallback_work = invocation.work_snapshot();
+    assert_eq!(fallback_work.ambient_fallbacks, 1);
+    assert_eq!(fallback_work.prepared_context_lifecycle_observations, 1);
 }
 
 #[test]

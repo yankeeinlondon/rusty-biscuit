@@ -28,7 +28,9 @@ use claudine::composition::{
     resolve_loop_config,
 };
 use claudine::diagnostics::DiagnosticSnapshot;
-use claudine::invocation_context::{InvocationContext, SourceContext};
+use claudine::invocation_context::{
+    InvocationContext, PreparedContextConsumer, SourceContext,
+};
 use claudine::system_prompt::SystemPromptArgs;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use tracing::info_span;
@@ -104,6 +106,57 @@ fn capture_document_epoch_context(
         context.env_mut().insert(key.clone(), value.clone());
     }
     (context, requirements)
+}
+
+fn resolve_epoch_shell_approvals(
+    invocation: &InvocationContext,
+    prepared_context: &darkmatter::markdown::compose::ComposeContext,
+    markdown: &darkmatter::markdown::Markdown,
+    compose_options: &darkmatter::markdown::compose::ComposeOptions,
+    approval_options: &claudine::harness::ShellApprovalOptions,
+) -> std::result::Result<claudine::composition::PreFlightResult, CompositionError> {
+    invocation.record_prepared_context_observation(
+        PreparedContextConsumer::Preflight,
+        prepared_context,
+    );
+    claudine::composition::resolve_shell_approvals(
+        Some(markdown),
+        Some(compose_options),
+        approval_options,
+        None,
+        None,
+    )
+}
+
+fn prepare_staged_for_epoch(
+    kind: CompositionKind,
+    invocation: &InvocationContext,
+    prepared_context: &darkmatter::markdown::compose::ComposeContext,
+    source: &ResolvedCompositionSource,
+    options: PrepareOptions,
+    entry: claudine::composition::DocumentEntryReason,
+    schema: claudine::composition::SchemaStage,
+) -> std::result::Result<PreparedComposition, CompositionError> {
+    invocation.record_prepared_context_observation(
+        PreparedContextConsumer::BodyAndFrontmatter,
+        prepared_context,
+    );
+    kind.prepare_staged(source, options, entry, schema)
+}
+
+fn resolve_epoch_loop_config(
+    invocation: &InvocationContext,
+    prepared_context: &darkmatter::markdown::compose::ComposeContext,
+    source: &ResolvedCompositionSource,
+) -> std::result::Result<Option<claudine::composition::LoopConfig>, CompositionError> {
+    let config = resolve_loop_config(source)?;
+    if config.is_some() {
+        invocation.record_prepared_context_observation(
+            PreparedContextConsumer::Loop,
+            prepared_context,
+        );
+    }
+    Ok(config)
 }
 
 /// What running one active document produced.
@@ -602,12 +655,12 @@ pub(crate) fn prepare_and_run_active_document(
     let shell_approval_t = std::time::Instant::now();
     let preflight = {
         let _span = info_span!("compose_prep.shell_preflight").entered();
-        claudine::composition::resolve_shell_approvals(
-            Some(&source.markdown),
-            Some(&compose_options),
+        resolve_epoch_shell_approvals(
+            &prep_context.invocation,
+            &prepared_context,
+            &source.markdown,
+            &compose_options,
             &approval_options,
-            None,
-            None,
         )?
     };
     record_prep_substage(
@@ -789,10 +842,18 @@ fn build_and_run_loop(
     proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
     handoff_ledger: &SharedRunLedger,
 ) -> std::result::Result<Option<LoopExecutionResult>, CompositionError> {
-    let config = resolve_loop_config(source)?;
+    let config = resolve_epoch_loop_config(
+        &prep_context.invocation,
+        prepared_context,
+        source,
+    )?;
     let Some(config) = config else {
         return Ok(None);
     };
+    prep_context.invocation.record_prepared_context_observation(
+        PreparedContextConsumer::BodyAndFrontmatter,
+        prepared_context,
+    );
 
     // Build the seed AND parse lifecycle from the document's full composed
     // frontmatter. The seed lifts only iteration-control variables, so parsing
@@ -834,6 +895,12 @@ fn build_and_run_loop(
     };
 
     let term = wrap_terminal();
+    prep_context
+        .invocation
+        .record_prepared_context_observation(
+            PreparedContextConsumer::Lifecycle,
+            prepared_context,
+        );
     let lifecycle_ctx = LifecycleRuntimeContext {
         settings: &lifecycle_settings,
         messaging: &lifecycle_messaging,
@@ -1235,7 +1302,10 @@ fn execute_loop_or_single(
             CompositionKind::Direct => info_span!("compose_prep.prepare_direct").entered(),
             CompositionKind::Inline => info_span!("compose_prep.prepare_inline").entered(),
         };
-        kind.prepare_staged(
+        prepare_staged_for_epoch(
+            kind,
+            &prep_context.invocation,
+            &prepared_context,
             &source,
             PrepareOptions {
                 invocation_context: Some(prep_context.invocation.clone()),

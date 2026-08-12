@@ -56,6 +56,7 @@ pub(crate) mod target;
 pub(crate) mod timeouts;
 
 pub(crate) use prep_context::CompositionPrepContext;
+pub(crate) use pipeline::prepared_lifecycle_context;
 pub(crate) use selection::{
     SelectionConfig, load_selection_config, load_selection_config_for_repo,
 };

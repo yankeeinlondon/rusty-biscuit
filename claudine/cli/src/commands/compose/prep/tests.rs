@@ -107,7 +107,7 @@ fn document_epoch_reuses_one_target_adjusted_launch_snapshot() {
     let source_path = dir.path().join("prompt.md");
     fs::write(
         &source_path,
-        "---\nidentity: '{{ ctx.agent }}/{{ ctx.model }}'\nsuccess:\n  warn: '{{ ctx.agent }}/{{ ctx.model }}'\n---\n{{ ctx.agent }}/{{ ctx.model }}\n",
+        "---\nidentity: '{{ ctx.agent }}/{{ ctx.model }}'\nloop:\n  until: \"identity == 'codex/gpt-epoch'\"\nsuccess:\n  warn: '{{ ctx.agent }}/{{ ctx.model }}'\n---\n{{ ctx.agent }}/{{ ctx.model }}\n",
     )
     .unwrap();
     let source = claudine::composition::resolve_composition_source(
@@ -119,16 +119,29 @@ fn document_epoch_reuses_one_target_adjusted_launch_snapshot() {
     overrides.insert("AGENT".to_string(), "codex".to_string());
     overrides.insert("MODEL".to_string(), "gpt-epoch".to_string());
 
-    let (epoch, requirements) =
+    let (mut epoch, mut requirements) =
         capture_document_epoch_context(&invocation, &source, &overrides);
     assert!(!requirements.is_empty());
     assert_eq!(invocation.work_snapshot().launch_context_constructions, 1);
 
-    let preflight = epoch.as_object();
-    assert_eq!(preflight.get("agent").and_then(|v| v.as_str()), Some("codex"));
-    assert_eq!(preflight.get("model").and_then(|v| v.as_str()), Some("gpt-epoch"));
+    let compose_options = darkmatter::markdown::compose::ComposeOptions::new_with_context(
+        epoch.clone(),
+    )
+    .with_source_file(&source_path);
+    let preflight = resolve_epoch_shell_approvals(
+        &invocation,
+        &epoch,
+        &source.markdown,
+        &compose_options,
+        &claudine::harness::ShellApprovalOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(preflight.total_discovered, 0);
 
-    let prepared = claudine::composition::prepare_direct_with_schema(
+    let prepared = prepare_staged_for_epoch(
+        CompositionKind::Direct,
+        &invocation,
+        &epoch,
         &source,
         PrepareOptions {
             invocation_context: Some(invocation.clone()),
@@ -143,6 +156,8 @@ fn document_epoch_reuses_one_target_adjusted_launch_snapshot() {
             ),
             ..PrepareOptions::default()
         },
+        claudine::composition::DocumentEntryReason::Direct,
+        claudine::composition::SchemaStage::Validate,
     )
     .unwrap();
     assert_eq!(prepared.prompt.trim(), "codex/gpt-epoch");
@@ -153,28 +168,37 @@ fn document_epoch_reuses_one_target_adjusted_launch_snapshot() {
             .and_then(|v| v.as_str()),
         Some("codex/gpt-epoch")
     );
-    let lifecycle = prepared.compose_context.as_object();
-    assert_eq!(lifecycle.get("agent").and_then(|v| v.as_str()), Some("codex"));
-    assert_eq!(lifecycle.get("model").and_then(|v| v.as_str()), Some("gpt-epoch"));
 
-    let loop_iteration = claudine::composition::prepare_direct_with_schema(
-        &source,
-        PrepareOptions {
-            invocation_context: Some(invocation.clone()),
-            env_overrides: BTreeMap::from([
-                ("AGENT".to_string(), "codex".to_string()),
-                ("MODEL".to_string(), "gpt-epoch".to_string()),
-            ]),
-            prepared_context: Some(epoch),
-            file_resolution_context: prepared.input_layers.file_resolution_context.clone(),
-            ..PrepareOptions::default()
-        },
-    )
-    .unwrap();
-    assert_eq!(loop_iteration.prompt.trim(), "codex/gpt-epoch");
+    let expanded = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.os }}",
+    );
+    invocation.extend_launch_context(&mut epoch, &mut requirements, &expanded);
+    assert!(epoch.as_object().get("os").is_some());
+
+    let loop_config = resolve_epoch_loop_config(&invocation, &epoch, &source).unwrap();
+    assert!(loop_config.is_some());
+
+    let lifecycle = crate::commands::wrap::composition::prepared_lifecycle_context(
+        Some(&epoch),
+        Some(&invocation),
+        dir.path(),
+        "",
+    );
+    assert_eq!(
+        lifecycle.as_object().get("agent").and_then(|v| v.as_str()),
+        Some("codex")
+    );
+    assert_eq!(
+        lifecycle.as_object().get("model").and_then(|v| v.as_str()),
+        Some("gpt-epoch")
+    );
 
     let work = invocation.work_snapshot();
     assert_eq!(work.launch_context_constructions, 1);
-    assert_eq!(work.launch_context_extensions, 0);
+    assert_eq!(work.launch_context_extensions, 1);
     assert_eq!(work.ambient_fallbacks, 0);
+    assert_eq!(work.prepared_context_preflight_observations, 1);
+    assert_eq!(work.prepared_context_body_frontmatter_observations, 1);
+    assert_eq!(work.prepared_context_loop_observations, 1);
+    assert_eq!(work.prepared_context_lifecycle_observations, 1);
 }

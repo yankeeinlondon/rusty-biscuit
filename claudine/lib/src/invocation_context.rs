@@ -38,6 +38,23 @@ pub enum InvocationContextError {
     SourceWithoutParent(PathBuf),
 }
 
+/// A canonical consumer of one document epoch's prepared context.
+///
+/// These observations stay in Claudine's request-local work accounting. They
+/// deliberately do not add snapshot identity or instrumentation fields to
+/// Darkmatter's [`darkmatter::markdown::compose::ComposeContext`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PreparedContextConsumer {
+    /// Narrow and full shell-command preflight.
+    Preflight,
+    /// Body and non-lifecycle frontmatter preparation.
+    BodyAndFrontmatter,
+    /// The document loop boundary.
+    Loop,
+    /// Lifecycle evaluation for the prepared document.
+    Lifecycle,
+}
+
 /// Request-local accounting for discovery and preparation work.
 ///
 /// `runtime_evidence_captures` counts, per group, the calls that ran the
@@ -45,6 +62,11 @@ pub enum InvocationContextError {
 /// already-retained evidence answered. A group requested `n` times therefore
 /// sums to `n` across the two maps, and a second capture is a duplicate
 /// computation rather than an invisible repeat.
+///
+/// The prepared-context observation counters record only canonical consumer
+/// boundaries that received the epoch snapshot. Ambient compatibility capture
+/// remains separate in `ambient_fallbacks`, so a missing snapshot cannot count
+/// as successful consumption.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct InvocationWorkSnapshot {
     pub git_root_discoveries: usize,
@@ -57,6 +79,10 @@ pub struct InvocationWorkSnapshot {
     pub ambient_fallbacks: usize,
     pub launch_context_constructions: usize,
     pub launch_context_extensions: usize,
+    pub prepared_context_preflight_observations: usize,
+    pub prepared_context_body_frontmatter_observations: usize,
+    pub prepared_context_loop_observations: usize,
+    pub prepared_context_lifecycle_observations: usize,
     pub runtime_evidence_captures: BTreeMap<String, usize>,
     pub runtime_evidence_reuses: BTreeMap<String, usize>,
     pub system_prompt_timings: BTreeMap<String, std::time::Duration>,
@@ -74,6 +100,10 @@ struct InvocationWork {
     ambient_fallbacks: AtomicUsize,
     launch_context_constructions: AtomicUsize,
     launch_context_extensions: AtomicUsize,
+    prepared_context_preflight_observations: AtomicUsize,
+    prepared_context_body_frontmatter_observations: AtomicUsize,
+    prepared_context_loop_observations: AtomicUsize,
+    prepared_context_lifecycle_observations: AtomicUsize,
     runtime_evidence_captures: Mutex<BTreeMap<String, usize>>,
     runtime_evidence_reuses: Mutex<BTreeMap<String, usize>>,
     system_prompt_timings: Mutex<BTreeMap<String, std::time::Duration>>,
@@ -96,6 +126,18 @@ impl InvocationWork {
                 .launch_context_constructions
                 .load(Ordering::Relaxed),
             launch_context_extensions: self.launch_context_extensions.load(Ordering::Relaxed),
+            prepared_context_preflight_observations: self
+                .prepared_context_preflight_observations
+                .load(Ordering::Relaxed),
+            prepared_context_body_frontmatter_observations: self
+                .prepared_context_body_frontmatter_observations
+                .load(Ordering::Relaxed),
+            prepared_context_loop_observations: self
+                .prepared_context_loop_observations
+                .load(Ordering::Relaxed),
+            prepared_context_lifecycle_observations: self
+                .prepared_context_lifecycle_observations
+                .load(Ordering::Relaxed),
             runtime_evidence_captures: self
                 .runtime_evidence_captures
                 .lock()
@@ -1009,6 +1051,38 @@ impl InvocationContext {
             .work
             .ambient_fallbacks
             .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record that a canonical consumer received a populated epoch context.
+    pub fn record_prepared_context_observation(
+        &self,
+        consumer: PreparedContextConsumer,
+        context: &darkmatter::markdown::compose::ComposeContext,
+    ) {
+        let serde_json::Value::Object(values) = context.as_object() else {
+            return;
+        };
+        if values.is_empty() {
+            return;
+        }
+        let counter = match consumer {
+            PreparedContextConsumer::Preflight => {
+                &self.inner.work.prepared_context_preflight_observations
+            }
+            PreparedContextConsumer::BodyAndFrontmatter => {
+                &self
+                    .inner
+                    .work
+                    .prepared_context_body_frontmatter_observations
+            }
+            PreparedContextConsumer::Loop => {
+                &self.inner.work.prepared_context_loop_observations
+            }
+            PreparedContextConsumer::Lifecycle => {
+                &self.inner.work.prepared_context_lifecycle_observations
+            }
+        };
+        counter.fetch_add(1, Ordering::Relaxed);
     }
 }
 
