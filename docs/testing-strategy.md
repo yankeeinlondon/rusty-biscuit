@@ -319,8 +319,7 @@ The bespoke single-behavior workflows (`playa-windows`,
 shared area matrix cannot host — but they are **reusable workflows called by
 `ci.yml`** and selected from affected scope, so one commit produces one CI run.
 
-Standalone by design: `bench-nightly`
-and `fuzz-nightly` (nightly, advisory), `maintenance-audit` (weekly, advisory),
+Standalone by design: `fuzz-nightly` (nightly, advisory), `maintenance-audit` (weekly, advisory),
 `sniff-performance` (its own measurement contract), and `build-integrations`
 (on release). Each owns a distinct name, schedule slot, artifacts, and summary
 so a scheduled failure is never read as an L1 regression.
