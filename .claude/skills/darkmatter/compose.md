@@ -196,6 +196,14 @@ Version: VERSION
 
 Expressions between `{{ }}` are evaluated and replaced with values. To render `{{ ... }}` literally instead of evaluating it, use the interpolation-literal syntax `{{{ ... }}}`; the content is never evaluated and composes down to `{{ ... }}`. See `darkmatter/docs/inline/interpolation.md`.
 
+Body prose uses literal-text semantics: the serialized Markdown is escaped as
+needed so CommonMark parses back to the exact scalar value, including Windows
+drive and UNC paths. Intentional Markdown generation must opt in with
+`raw_markdown(value)`, for example
+`{{ raw_markdown(as_unordered_list(ctx.current_packages)) }}`. Frontmatter
+retains typed/raw values, and directive arguments plus opted-in code blocks
+retain raw bytes.
+
 ### Variable Resolution
 
 | Pattern | Description |
@@ -355,7 +363,10 @@ templating pattern `` `var_{{ phase }}` `` works without any opt-in.
 Fenced and indented code blocks are skipped by default to preserve
 literal code samples. Set `interpolate_code_blocks: true` (frontmatter)
 or call `ComposeOptions::with_interpolate_code_blocks(true)` to opt
-fenced blocks back into the scan.
+fenced blocks back into the scan. Inline code and opted-in block replacements
+preserve code bytes rather than prose escaping. Darkmatter `::` directives,
+including `::shell` and shell-block bodies, likewise preserve raw command bytes
+so preflight collection and execution agree.
 
 ```markdown
 Inline: `{{ evaluated }}`             # always interpolated

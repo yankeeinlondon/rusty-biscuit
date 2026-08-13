@@ -92,8 +92,8 @@ pub(crate) use path_projection::{
 };
 pub use resolve_ctx::ResolutionContext;
 pub use lexer::{
-    ComparisonOp, ExpressionFinder, ExpressionLocation, ExpressionScanResult, InterpolationLiteral,
-    Lexer, LexerError, ParseMode, Token, lex_spanned,
+    ComparisonOp, ExpressionFinder, ExpressionLocation, ExpressionScanResult, InlineCodeSpan,
+    InterpolationContext, InterpolationLiteral, Lexer, LexerError, ParseMode, Token, lex_spanned,
 };
 pub use parser::{
     ParseError, Parser, parse, parse_condition, parse_condition_spanned, parse_spanned,

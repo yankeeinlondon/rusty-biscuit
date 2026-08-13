@@ -1627,3 +1627,20 @@ functions:
                 result: "[CI job #456 — test](https://provider/job/456) · failed"
                 verification: display-only
                 reason: Requires an allowlisted remote-provider fixture.
+    - name: raw_markdown
+      category: Rendering
+      order: 97
+      description:
+          Opts a body interpolation value into Markdown syntax instead of the
+          default literal-text projection.
+      overloads:
+          - parameters:
+                - name: value
+                  type: any
+            returns:
+                type: any
+                fallible: true
+            example:
+                expression: raw_markdown("**important**")
+                result: "**important**"
+                verification: executable

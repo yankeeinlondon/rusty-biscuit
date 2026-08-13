@@ -424,6 +424,15 @@ class PackagePolicyTests(unittest.TestCase):
             today=TODAY,
         )
 
+    def test_claudine_provider_fixture_runner_tool_is_accepted(self) -> None:
+        validate_package_ci(
+            "claudine-cli",
+            ci_policy(tests={"runner-tools": ["claudine-provider-fixture"]}),
+            self.RUNNER_LABELS,
+            root=Path("/"),
+            today=TODAY,
+        )
+
     def test_unknown_companion_suite_is_rejected(self) -> None:
         with self.assertRaises(RuntimeError):
             validate_package_ci(

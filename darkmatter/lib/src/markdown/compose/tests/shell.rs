@@ -6,11 +6,23 @@ mod frontmatter_shell_expansion_integration {
         ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest, ShellExpansionError,
         ShellExpansionOptions,
     };
+    use pulldown_cmark::{Event, Parser};
     use std::sync::Arc;
     use std::time::Duration;
     use tempfile::TempDir;
 
     struct MockApproval;
+
+    fn parsed_body_text(markdown: &Markdown) -> String {
+        Parser::new(markdown.content())
+            .filter_map(|event| match event {
+                Event::Text(text) | Event::Code(text) => Some(text.into_string()),
+                Event::SoftBreak | Event::HardBreak => Some("\n".to_string()),
+                _ => None,
+            })
+            .collect()
+    }
+
     impl ShellApprovalHandler for MockApproval {
         fn approve(
             &self,
@@ -68,7 +80,7 @@ mod frontmatter_shell_expansion_integration {
         let (composed, report) = md.compose_with(options).unwrap();
         // dirname README.md returns "."
         assert!(
-            composed.content().contains("Dir: ."),
+            parsed_body_text(&composed).contains("Dir: ."),
             "Expected 'Dir: .' in:\n{}",
             composed.content()
         );
@@ -235,7 +247,7 @@ mod frontmatter_shell_expansion_integration {
             Some(&serde_json::json!("example-spec.md"))
         );
         assert!(
-            composed.content().contains("Spec: example-spec.md"),
+            parsed_body_text(&composed).contains("Spec: example-spec.md"),
             "Expected body to interpolate spec_file, got:\n{}",
             composed.content()
         );
@@ -455,5 +467,4 @@ mod infix_logic_conditions {
         );
     }
 }
-
 

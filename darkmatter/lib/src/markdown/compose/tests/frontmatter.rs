@@ -1,4 +1,15 @@
 use super::*;
+use pulldown_cmark::{Event, Parser};
+
+fn parsed_body_text(markdown: &Markdown) -> String {
+    Parser::new(markdown.content())
+        .filter_map(|event| match event {
+            Event::Text(text) | Event::Code(text) => Some(text.into_string()),
+            Event::SoftBreak | Event::HardBreak => Some("\n".to_string()),
+            _ => None,
+        })
+        .collect()
+}
 
 // ── Frontmatter Interpolation Integration Tests ─────────────────
 
@@ -14,16 +25,9 @@ fn test_frontmatter_interpolation_spec_example() {
         .unwrap();
 
     assert_eq!(report.frontmatter_interpolations_applied, 2);
-    assert!(
-        composed
-            .content()
-            .contains("The spec is located at: /path/to/something/spec.md")
-    );
-    assert!(
-        composed
-            .content()
-            .contains("The plan is located at: /path/to/something/plan.md")
-    );
+    let body = parsed_body_text(&composed);
+    assert!(body.contains("The spec is located at: /path/to/something/spec.md"));
+    assert!(body.contains("The plan is located at: /path/to/something/plan.md"));
 }
 
 #[test]
@@ -42,7 +46,7 @@ fn test_frontmatter_interpolation_with_set_overrides() {
         .unwrap();
 
     assert_eq!(report.frontmatter_interpolations_applied, 1);
-    assert!(composed.content().contains("Spec: /override/spec.md"));
+    assert!(parsed_body_text(&composed).contains("Spec: /override/spec.md"));
 }
 
 #[test]
@@ -131,7 +135,7 @@ fn test_frontmatter_interpolation_disabled() {
     assert_eq!(report.frontmatter_interpolations_applied, 0);
     // body interpolation resolves {{spec}} to {{base}}/spec.md and then
     // recursively resolves {{base}} in the same pass.
-    assert!(composed.content().contains("/path/spec.md"));
+    assert!(parsed_body_text(&composed).contains("/path/spec.md"));
 }
 
 #[test]
@@ -645,7 +649,7 @@ fn test_frontmatter_interpolation_nested_external_state() {
 
     // meta.base from external state should be deep-merged in
     assert!(
-        composed.content().contains("/root/spec.md"),
+        parsed_body_text(&composed).contains("/root/spec.md"),
         "Expected /root/spec.md but got: {}",
         composed.content()
     );
@@ -857,7 +861,7 @@ fn name_coercion_is_opt_in_body_renders_json_without_keys() {
         composed.content()
     );
     assert!(
-        composed.content().contains("\"name\":\"alpha\""),
+        parsed_body_text(&composed).contains("\"name\":\"alpha\""),
         "without coercion keys the object renders as JSON, got: {}",
         composed.content()
     );
@@ -906,4 +910,3 @@ fn name_coercion_inline_frontmatter_value_coerces() {
         "inline frontmatter value must coerce to the name"
     );
 }
-

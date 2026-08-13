@@ -60,11 +60,11 @@ install *args="":
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
-sanity:
+sanity: _ensure-ctx-launch-anchor-provider-fixture
     @just _sanity_all "claudine-catalog-types claudine claudine-contract claudine-cli claudine-gen"
 
 # test just the CLI in Claudine
-test-cli *args="": _ensure-md
+test-cli *args="": _ensure-md _ensure-ctx-launch-anchor-provider-fixture
     @just _test claudine-cli {{ args }}
 
 # test just the Claudine Library
@@ -104,8 +104,17 @@ _ensure-md:
         fi; \
     fi
 
+_ensure-ctx-launch-anchor-provider-fixture:
+    @if command -v cargo >/dev/null 2>&1; then \
+        cargo build -q -p claudine-cli --example ctx_launch_anchor_provider_fixture; \
+    elif [ -n "${CLAUDINE_PROVIDER_FIXTURE_EXE:-}" ] && [ -f "$CLAUDINE_PROVIDER_FIXTURE_EXE" ]; then \
+        :; \
+    else \
+        echo "warning: native provider fixture is unavailable without Cargo; Windows ctx launch-anchor tests require CLAUDINE_PROVIDER_FIXTURE_EXE" >&2; \
+    fi
+
 # Test the catalog types, library, contract adapter, CLI, and generator.
-test *args="": _ensure-md
+test *args="": _ensure-md _ensure-ctx-launch-anchor-provider-fixture
     @just _test_all "claudine-catalog-types claudine claudine-contract claudine-cli claudine-gen" {{ args }}
 
 # test just the contract adapter library

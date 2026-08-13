@@ -124,11 +124,15 @@ All wrapper and composition commands support an opt-in `--perf` flag that emits 
 - `claudine inline-compose --perf ...`
 - `claudine sequence --perf ...`
 
-The report is divided into three sections:
+The report is a reconciled timing tree with these major branches:
 
 1. **CLI Overhead** — time spent on arg parsing, config loading, tracing init, and environment setup.
-2. **Composition Report** — when document composition occurred, shows Darkmatter pipeline timings (transclusion, interpolation, shell expansion, etc.).
-3. **Agent Execution** — number of launches, first-response latency, total execution time, and provider-reported API duration when available.
+2. **Source Context Timing** — overlapping diagnostic timings for invocation
+   capture, repository observation, topology initialization, launch-context
+   capture, and system-prompt preparation. Stable Git/topology work counts are
+   reported alongside the tree.
+3. **Composition Report** — when document composition occurred, shows Darkmatter pipeline timings (transclusion, interpolation, shell expansion, etc.).
+4. **Agent Execution** — provider handoff, number of launches, first-response latency, total execution time, and provider-reported API duration when available.
 
 For `sequence`, a single aggregated report is printed at the very end, averaging first-response latencies across all steps and summing launches and total time. The report is emitted unconditionally when `--perf` is passed, even if `--silent` or `--quiet` are also present — perf is an explicit opt-in that overrides silence settings.
 

@@ -7,9 +7,9 @@ use sniff::request::*;
 
 /// Filesystem roots resolved from the directory the user launched Claudine in.
 ///
-/// All paths are canonical when possible. Fields are `None` when the
-/// corresponding scope is not detected (e.g. not inside a git repo,
-/// not inside a monorepo package).
+/// Existing paths are canonicalized and projected without Windows verbatim
+/// prefixes. Fields are `None` when the corresponding scope is not detected
+/// (e.g. not inside a git repo or monorepo package).
 #[derive(Debug, Clone)]
 pub struct LaunchContext {
     /// The working directory Claudine was launched from.
@@ -83,10 +83,10 @@ impl LaunchContext {
         };
 
         LaunchContext {
-            cwd: canonical_or_self(cwd),
-            repo_root: git_root.map(|p| canonical_or_self(&p)),
-            package_area_root: package_area_root.map(|p| canonical_or_self(&p)),
-            package_root: package_root.map(|p| canonical_or_self(&p)),
+            cwd: projected_path(cwd),
+            repo_root: git_root.map(|p| projected_path(&p)),
+            package_area_root: package_area_root.map(|p| projected_path(&p)),
+            package_root: package_root.map(|p| projected_path(&p)),
             agent: None,
         }
     }
@@ -113,12 +113,12 @@ impl LaunchContext {
 
 /// Select the deepest matching package root for the given cwd.
 fn select_package_root(cwd: &Path, packages: &[Package]) -> Option<PathBuf> {
-    let cwd_normalized = canonical_or_self(cwd);
+    let cwd_normalized = projected_path(cwd);
 
     packages
         .iter()
         .filter_map(|package| {
-            let package_path = canonical_or_self(&package.path);
+            let package_path = projected_path(&package.path);
             if cwd_normalized.starts_with(&package_path) {
                 Some((package_path.components().count(), package_path))
             } else {
@@ -131,8 +131,8 @@ fn select_package_root(cwd: &Path, packages: &[Package]) -> Option<PathBuf> {
 
 /// Select the deepest matching package-area root for the given cwd.
 fn select_package_area_root(cwd: &Path, repo_root: &Path, packages: &[Package]) -> Option<PathBuf> {
-    let cwd_normalized = canonical_or_self(cwd);
-    let repo_root_normalized = canonical_or_self(repo_root);
+    let cwd_normalized = projected_path(cwd);
+    let repo_root_normalized = projected_path(repo_root);
 
     packages
         .iter()
@@ -147,8 +147,9 @@ fn select_package_area_root(cwd: &Path, repo_root: &Path, packages: &[Package]) 
         .max_by_key(|area_root| area_root.components().count())
 }
 
-fn canonical_or_self(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+/// Path form safe for authored comparisons and public projections.
+pub(crate) fn projected_path(path: &Path) -> PathBuf {
+    dunce::canonicalize(path).unwrap_or_else(|_| dunce::simplified(path).to_path_buf())
 }
 
 #[cfg(test)]
@@ -157,6 +158,29 @@ mod tests {
     use std::fs;
     use std::process::Command;
     use tempfile::TempDir;
+
+    #[cfg(windows)]
+    fn assert_not_verbatim(path: &Path) {
+        assert!(
+            !path.to_string_lossy().starts_with(r"\\?\"),
+            "projected path retained a Windows verbatim prefix: {}",
+            path.display()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn projected_paths_simplify_existing_drive_and_authored_unc_forms() {
+        let existing = TempDir::new().unwrap();
+        let drive_projection = projected_path(existing.path());
+        assert_not_verbatim(&drive_projection);
+        assert_eq!(drive_projection, dunce::canonicalize(existing.path()).unwrap());
+
+        let unc = Path::new(r"\\server\share\.hidden\missing");
+        let unc_projection = projected_path(unc);
+        assert_not_verbatim(&unc_projection);
+        assert_eq!(unc_projection, dunce::simplified(unc));
+    }
 
     /// Initialize a real git repository in the given directory.
     fn init_git_repo(dir: &Path) {

@@ -6,10 +6,12 @@
 //! (skipping code regions) and plain-text scanning.
 
 use super::{EvalResult, Evaluator, ExpressionFinder, ExpressionLocation, parse};
+use crate::markdown::compose::expression::{Expr, InlineCodeSpan, InterpolationContext};
 use crate::markdown::compose::expression::{EvaluationLookup, ExpressionError};
 use crate::markdown::compose::ComposeWarning;
 use crate::markdown::types::{MarkdownError, SourceRef};
 use serde_json::Value;
+use std::collections::HashMap;
 
 /// Wraps a typed evaluation `cause` in [`MarkdownError::Interpolation`], the
 /// single construction point for the live compose interpolation path.
@@ -33,17 +35,16 @@ fn interpolation_error(expression: &str, cause: ExpressionError) -> MarkdownErro
 }
 
 /// Controls how `interpolate_text` scans for `{{ }}` expressions.
+#[derive(Clone, Copy)]
 pub(crate) enum ScanMode {
-    /// Skip expressions inside fenced and indented code blocks.
-    ///
-    /// Inline code spans (single backticks) are still scanned —
-    /// the common templating pattern `` `var_{{ phase }}` `` is supported
-    /// by default. Used by body interpolation.
-    MarkdownAware,
     /// Scan the entire string with no exclusions.
-    /// Used by frontmatter interpolation, and by body interpolation when
-    /// `interpolate_code_blocks` is enabled.
+    /// Used by frontmatter interpolation and other non-Markdown surfaces.
     Plain,
+    /// Scan a Markdown body and retain the syntax position of each replacement.
+    Body {
+        /// Whether opted-in fenced and indented code blocks are scanned.
+        include_code_blocks: bool,
+    },
 }
 
 /// Result of rewriting interpolation expressions in a string.
@@ -68,8 +69,14 @@ const MAX_INTERPOLATION_DEPTH: usize = 10;
 /// literals are also converted.
 pub(crate) fn convert_literals(input: &str, scan_mode: ScanMode) -> String {
     let scan = match scan_mode {
-        ScanMode::MarkdownAware => ExpressionFinder::new(input).scan(),
         ScanMode::Plain => ExpressionFinder::scan_plain(input),
+        ScanMode::Body { include_code_blocks } => {
+            if include_code_blocks {
+                ExpressionFinder::new_including_code_blocks(input).scan()
+            } else {
+                ExpressionFinder::new(input).scan()
+            }
+        }
     };
     let mut output = input.to_string();
     for lit in scan.literals.iter().rev() {
@@ -103,8 +110,8 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
 ) -> Result<InterpolationRewrite, MarkdownError> {
     // Fast path (F14): a `{{ … }}` expression and a `{{{ … }}}` literal both
     // require the `{{` sequence. When the input contains none, no expression or
-    // literal can be present, so the whole scan pipeline — the MarkdownAware
-    // pulldown-cmark code-region parse in `ExpressionFinder::new`, every rescan
+    // literal can be present, so the whole scan pipeline — including any
+    // pulldown-cmark code-region parse, every rescan
     // pass, and `convert_literals` — is provably a no-op. Skip it and return the
     // input verbatim. Byte-identical: the scan would find zero locations and
     // `convert_literals` zero literals either way.
@@ -122,8 +129,14 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
 
     for depth in 0..MAX_INTERPOLATION_DEPTH {
         let locations: Vec<ExpressionLocation> = match scan_mode {
-            ScanMode::MarkdownAware => ExpressionFinder::new(&output).find_all(),
             ScanMode::Plain => ExpressionFinder::find_all_plain(&output),
+            ScanMode::Body { include_code_blocks } => {
+                if include_code_blocks {
+                    ExpressionFinder::new_including_code_blocks(&output).find_all()
+                } else {
+                    ExpressionFinder::new(&output).find_all()
+                }
+            }
         };
 
         if locations.is_empty() {
@@ -132,6 +145,7 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
 
         let mut count = 0;
         let mut warnings = Vec::new();
+        let mut spans = CodeSpanRefencer::new(&locations);
 
         for loc in locations.into_iter().rev() {
             match parse(&loc.expression) {
@@ -143,6 +157,12 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
                     warnings.append(&mut ctx_warnings);
                     match evaluator.eval(&expr) {
                     EvalResult::Value(replacement) => {
+                        let replacement = project_body_replacement(
+                            replacement,
+                            &expr,
+                            loc.context,
+                            scan_mode,
+                        );
                         // Inherit line indentation for multiline replacements
                         let replacement = if replacement.contains('\n') {
                             let line_start =
@@ -159,7 +179,9 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
                         } else {
                             replacement
                         };
+                        let replaced = loc.end - loc.start;
                         output.replace_range(loc.start..loc.end, &replacement);
+                        spans.record(&loc, replacement.len(), replaced, &mut output);
                         count += 1;
                     }
                     EvalResult::Error { error, .. }
@@ -210,7 +232,7 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
     }
 
     // `convert_literals` runs a full expression scan (a pulldown-cmark parse in
-    // MarkdownAware mode) plus a copy. A `{{{ … }}}` literal is impossible
+    // Markdown body mode) plus a copy. A `{{{ … }}}` literal is impossible
     // without the `{{{` sequence, so skip that work entirely when it's absent
     // (F14) — byte-identical: the scan would find no literals either way.
     let output = if output.contains("{{{") {
@@ -224,6 +246,229 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
         replacements: total_count,
         warnings: all_warnings,
     })
+}
+
+/// Serializes `replacement` for the Markdown syntax position it lands in.
+///
+/// Only body scanning is syntax-aware. Frontmatter, directive arguments, and
+/// opted-in code blocks keep the raw evaluated bytes so their own parser or
+/// executor observes exactly what the expression produced.
+fn project_body_replacement(
+    replacement: String,
+    expression: &Expr,
+    context: InterpolationContext,
+    scan_mode: ScanMode,
+) -> String {
+    if !matches!(scan_mode, ScanMode::Body { .. }) {
+        return replacement;
+    }
+    match context {
+        InterpolationContext::Prose => {
+            if matches!(expression, Expr::FunctionCall { name, .. } if name == "raw_markdown") {
+                replacement
+            } else {
+                escape_prose_literal(&replacement)
+            }
+        }
+        // A code span's content is literal by construction, but its line
+        // structure is not: a blank line ends the enclosing paragraph and
+        // strands both delimiters. `CodeSpanRefencer` handles the delimiters.
+        InterpolationContext::InlineCode => flatten_code_span_lines(&replacement),
+        InterpolationContext::Raw
+        | InterpolationContext::CodeBlock
+        | InterpolationContext::Directive => replacement,
+    }
+}
+
+/// Serializes `value` as CommonMark inline text.
+///
+/// Two hazard classes are neutralized. ASCII punctuation is backslash-escaped
+/// so no inline construct — emphasis, a link, a code span, an autolink — can be
+/// spelled by data. Line structure is flattened to single `&#10;` references so
+/// no value can close the enclosing paragraph, open an indented code block, or
+/// leave trailing spaces that CommonMark reads as a hard break. The numeric
+/// reference keeps the break as text rather than source line structure, so the
+/// parsed value is identical whether or not the cleanup pass runs.
+fn escape_prose_literal(value: &str) -> String {
+    let flattened = flatten_prose_lines(value);
+    let contains_nested_expression = flattened.contains("{{");
+    let content = flattened.trim_matches(|character| matches!(character, ' ' | '\t'));
+    let edge_start = flattened.len() - flattened.trim_start_matches([' ', '\t']).len();
+    let edge_end = edge_start + content.len();
+
+    let mut escaped = String::with_capacity(flattened.len() + 8);
+    for (offset, character) in flattened.char_indices() {
+        match character {
+            '\n' => escaped.push_str("&#10;"),
+            // Horizontal whitespace at either edge of the value abuts document
+            // text, where a leading run can open an indented code block and a
+            // trailing run can become a hard break.
+            ' ' if offset < edge_start || offset >= edge_end => escaped.push_str("&#32;"),
+            '\t' if offset < edge_start || offset >= edge_end => escaped.push_str("&#9;"),
+            // Nested replacements must remain visible to the fixpoint rescan;
+            // the braces themselves are literal CommonMark text after it.
+            character
+                if character.is_ascii_punctuation()
+                    && !(contains_nested_expression && matches!(character, '{' | '}')) =>
+            {
+                escaped.push('\\');
+                escaped.push(character);
+            }
+            character => escaped.push(character),
+        }
+    }
+    escaped
+}
+
+/// Collapses every line-break run — with the horizontal whitespace that
+/// surrounds it — to a single `\n`.
+fn flatten_prose_lines(value: &str) -> String {
+    let mut flattened = String::with_capacity(value.len());
+    let mut pending_break = false;
+    let mut pending_spaces = String::new();
+    for character in value.chars() {
+        match character {
+            '\n' | '\r' => {
+                pending_break = true;
+                pending_spaces.clear();
+            }
+            ' ' | '\t' if pending_break => {}
+            ' ' | '\t' => pending_spaces.push(character),
+            character => {
+                if pending_break {
+                    flattened.push('\n');
+                    pending_break = false;
+                } else {
+                    flattened.push_str(&pending_spaces);
+                }
+                pending_spaces.clear();
+                flattened.push(character);
+            }
+        }
+    }
+    if pending_break {
+        flattened.push('\n');
+    } else {
+        flattened.push_str(&pending_spaces);
+    }
+    flattened
+}
+
+/// Collapses every line-break run in a code-span value to the single space
+/// CommonMark itself substitutes for a line ending inside a code span.
+fn flatten_code_span_lines(value: &str) -> String {
+    let mut flattened = String::with_capacity(value.len());
+    let mut pending_break = false;
+    for character in value.chars() {
+        match character {
+            '\n' | '\r' => pending_break = true,
+            character => {
+                if std::mem::take(&mut pending_break) {
+                    flattened.push(' ');
+                }
+                flattened.push(character);
+            }
+        }
+    }
+    if pending_break {
+        flattened.push(' ');
+    }
+    flattened
+}
+
+/// Re-delimits every inline code span that received a replacement.
+///
+/// CommonMark closes a code span on the first backtick run whose length equals
+/// the opening run, and strips one space from each end of the content. Neither
+/// rule is expressible as a replacement string, so the span's own delimiters
+/// must be rewritten once all of its replacements have landed.
+struct CodeSpanRefencer {
+    /// Lowest expression start inside each span. Replacements are applied from
+    /// the end of the document backwards, so reaching this offset means every
+    /// replacement inside the span is already in place.
+    heads: HashMap<InlineCodeSpan, usize>,
+    /// Net length change applied inside each span so far.
+    deltas: HashMap<InlineCodeSpan, isize>,
+}
+
+impl CodeSpanRefencer {
+    fn new(locations: &[ExpressionLocation]) -> Self {
+        let mut heads: HashMap<InlineCodeSpan, usize> = HashMap::new();
+        for location in locations {
+            if let Some(span) = location.code_span {
+                heads
+                    .entry(span)
+                    .and_modify(|head| *head = (*head).min(location.start))
+                    .or_insert(location.start);
+            }
+        }
+        Self { heads, deltas: HashMap::new() }
+    }
+
+    fn record(
+        &mut self,
+        location: &ExpressionLocation,
+        inserted: usize,
+        replaced: usize,
+        output: &mut String,
+    ) {
+        let Some(span) = location.code_span else {
+            return;
+        };
+        let delta = self.deltas.entry(span).or_insert(0);
+        *delta += inserted as isize - replaced as isize;
+        if self.heads.get(&span) != Some(&location.start) {
+            return;
+        }
+        let Ok(end) = usize::try_from(span.end as isize + *delta) else {
+            return;
+        };
+        if span.fence == 0 || end > output.len() || span.start + 2 * span.fence > end {
+            return;
+        }
+        let (open, close) = (span.start + span.fence, end - span.fence);
+        if !output.is_char_boundary(open) || !output.is_char_boundary(close) {
+            return;
+        }
+        let content = &output[open..close];
+        let refenced = fence_code_span(strip_code_span_padding(content));
+        output.replace_range(span.start..end, &refenced);
+    }
+}
+
+/// Undoes CommonMark's code-span padding rule to recover the content the
+/// authored span denoted.
+fn strip_code_span_padding(content: &str) -> &str {
+    if content.starts_with(' ')
+        && content.ends_with(' ')
+        && content.chars().any(|character| character != ' ')
+    {
+        &content[1..content.len() - 1]
+    } else {
+        content
+    }
+}
+
+/// Spells `content` as a code span whose delimiters cannot be closed early and
+/// whose padding rule cannot consume the content's own spaces.
+fn fence_code_span(content: &str) -> String {
+    let mut longest_run = 0;
+    let mut run = 0;
+    for character in content.chars() {
+        run = if character == '`' { run + 1 } else { 0 };
+        longest_run = longest_run.max(run);
+    }
+    let fence = "`".repeat(longest_run + 1);
+    let padded = content.starts_with('`')
+        || content.ends_with('`')
+        || (content.starts_with(' ')
+            && content.ends_with(' ')
+            && content.chars().any(|character| character != ' '));
+    if padded {
+        format!("{fence} {content} {fence}")
+    } else {
+        format!("{fence}{content}{fence}")
+    }
 }
 
 /// Interpolates a single frontmatter value.
@@ -346,14 +591,14 @@ mod tests {
 
     #[test]
     fn markdown_aware_scans_inline_code_spans() {
-        // Inline code spans are scanned in MarkdownAware mode — only
+        // Inline code spans are scanned in body mode — only
         // fenced/indented code blocks are skipped.
         let state = make_state(json!({"name": "Alice"}));
         let evaluator = Evaluator::new(&state);
         let result = interpolate_text(
             "`{{ name }}`",
             &evaluator,
-            ScanMode::MarkdownAware,
+            ScanMode::Body { include_code_blocks: false },
             false,
             "test",
         )
@@ -368,7 +613,7 @@ mod tests {
         let evaluator = Evaluator::new(&state);
         let input = "before {{ name }}\n\n```\n{{ name }}\n```\nafter";
         let result =
-            interpolate_text(input, &evaluator, ScanMode::MarkdownAware, false, "test").unwrap();
+            interpolate_text(input, &evaluator, ScanMode::Body { include_code_blocks: false }, false, "test").unwrap();
         assert!(result.output.contains("before Alice"));
         assert!(result.output.contains("```\n{{ name }}\n```"));
         assert_eq!(result.replacements, 1);
@@ -464,7 +709,7 @@ mod tests {
         // Contains `{` and `}` but never `{{` — the JSON-ish body must survive
         // untouched under both scan modes.
         let input = "config { key: value } and a lone } brace";
-        for mode in [ScanMode::Plain, ScanMode::MarkdownAware] {
+        for mode in [ScanMode::Plain, ScanMode::Body { include_code_blocks: false }] {
             let result = interpolate_text(input, &evaluator, mode, false, "test").unwrap();
             assert_eq!(result.output, input);
             assert_eq!(result.replacements, 0);
@@ -684,7 +929,7 @@ mod tests {
             let result = interpolate_text(
                 "{{{ name }}}",
                 &evaluator,
-                ScanMode::MarkdownAware,
+                ScanMode::Body { include_code_blocks: false },
                 false,
                 "test",
             )
@@ -701,7 +946,7 @@ mod tests {
             let result = interpolate_text(
                 "`{{{ name }}}`",
                 &evaluator,
-                ScanMode::MarkdownAware,
+                ScanMode::Body { include_code_blocks: false },
                 false,
                 "test",
             )
@@ -715,7 +960,7 @@ mod tests {
             let state = make_state(json!({}));
             let evaluator = Evaluator::new(&state);
             let input = "```\n{{{ name }}}\n```";
-            let result = interpolate_text(input, &evaluator, ScanMode::MarkdownAware, false, "test").unwrap();
+            let result = interpolate_text(input, &evaluator, ScanMode::Body { include_code_blocks: false }, false, "test").unwrap();
             assert_eq!(result.output, input);
             assert_eq!(result.replacements, 0);
         }

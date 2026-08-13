@@ -1,10 +1,19 @@
 # Claudine Dependencies
 
-## Native Path Test Fixtures
+## Projected Paths
 
-- The `claudine` library uses `dunce` as a dev dependency so tests that need a
-  canonical filesystem identity can remove safely reducible Windows verbatim
-  prefixes without converting paths through display text.
+- The `claudine` library uses `dunce` in production when projecting launch and
+  system-prompt paths. Existing paths are canonicalized without leaking a
+  Windows `\\?\` verbatim prefix; missing authored paths are simplified without
+  changing their filesystem meaning. Internal invocation cache keys retain
+  `std::fs::canonicalize` because they are compared only with other keys.
+- `claudine-cli` carries `pulldown-cmark` as a **dev-dependency** at the version
+  Darkmatter composes with. A path interpolated into body prose reaches the
+  provider with the CommonMark escaping its literal text requires, so
+  `ctx_launch_anchor_baseline.rs` parses the captured prompt before comparing
+  values and reserves the raw bytes for spelling assertions. Comparing the
+  serialized source against a path is the defect that produced the Windows
+  `\.` regression, so the test must not repeat it.
 
 ## Executable Lookup
 

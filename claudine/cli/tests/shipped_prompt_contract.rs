@@ -158,6 +158,84 @@ fn shipped_prompts_have_parseable_schemas_and_expressions() {
     );
 }
 
+#[test]
+fn shipped_markdown_generators_use_the_explicit_raw_markdown_boundary() {
+    let mut markdown_generators = Vec::new();
+    let root = repository_root();
+    for prompt in shipped_prompt_paths() {
+        let markdown = Markdown::try_from(prompt.as_path()).unwrap();
+        for expression in ExpressionFinder::new(markdown.content()).find_all() {
+            if expression.expression.contains("as_unordered_list(") {
+                markdown_generators.push((
+                    prompt.strip_prefix(&root).unwrap().to_path_buf(),
+                    expression.expression,
+                ));
+            }
+        }
+    }
+
+    assert_eq!(
+        markdown_generators,
+        [
+            (
+                PathBuf::from("prompts/code-comment-quality.md"),
+                "raw_markdown(as_unordered_list(ctx.current_packages))".to_string(),
+            ),
+            (
+                PathBuf::from("prompts/context.md"),
+                "raw_markdown(as_unordered_list(ctx.package_areas))".to_string(),
+            ),
+            (
+                PathBuf::from("prompts/faster-builds-and-tests.md"),
+                "raw_markdown(as_unordered_list(ctx.current_packages))".to_string(),
+            ),
+        ],
+        "the shipped prompt corpus must opt Markdown-producing expressions into raw syntax"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn shipped_context_prompt_renders_its_package_area_list_through_the_cli() {
+    use std::fs;
+
+    use common::wrap::seed_minimal_config;
+    use common::write_executable;
+
+    let repo = repository_root();
+    let workspace = tempfile::tempdir().unwrap();
+    let bin_dir = workspace.path().join("bin");
+    let captured_prompt = workspace.path().join("stdin.txt");
+    fs::create_dir_all(&bin_dir).unwrap();
+    seed_minimal_config(workspace.path());
+    write_executable(
+        &bin_dir.join("codex"),
+        "#!/bin/sh\n/bin/cat > \"$CLAUDINE_STDIN_FILE\"\nexit 0\n",
+    );
+
+    assert_cmd::Command::cargo_bin("claudine")
+        .unwrap()
+        .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+        .env("HOME", workspace.path())
+        .env("PATH", &bin_dir)
+        .env("CLAUDINE_STDIN_FILE", &captured_prompt)
+        .current_dir(&repo)
+        .arg("compose")
+        .arg(repo.join("prompts/context.md"))
+        .args(["-y", "--codex"])
+        .assert()
+        .success();
+
+    let captured = fs::read_to_string(captured_prompt).unwrap();
+    assert!(captured.contains("this repo is a monorepo, with the following package areas:"));
+    assert!(
+        captured.contains("- claudine"),
+        "the shipped context prompt did not render the Claudine package-area list: {captured}"
+    );
+    assert!(!captured.contains("raw_markdown(as_unordered_list"));
+}
+
 #[cfg(unix)]
 #[test]
 fn feature_review_cli_preserves_numeric_iteration_and_dependent_paths() {

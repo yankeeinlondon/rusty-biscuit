@@ -308,7 +308,9 @@ async fn pr_renders_identically_in_frontmatter_and_body() {
     fixture.mount_json(PR_PATH, pr_body(123, "Fix the parser")).await;
 
     let composed = fixture
-        .compose("---\nstatus: \"{{ pr(123) }}\"\n---\nPR: {{ pr(123) }}\n")
+        .compose(
+            "---\nstatus: \"{{ pr(123) }}\"\n---\nPR: {{ raw_markdown(pr(123)) }}\n",
+        )
         .expect("compose succeeds");
 
     let expected = "[PR #123 — Fix the parser](https://127.0.0.1/acme/widgets/pulls/123) \
@@ -326,7 +328,9 @@ async fn pr_list_renders_identically_in_frontmatter_and_body() {
         .await;
 
     let composed = fixture
-        .compose("---\nlist: \"{{ pr_list(5) }}\"\n---\nPRs: {{ pr_list(5) }}\n")
+        .compose(
+            "---\nlist: \"{{ pr_list(5) }}\"\n---\nPRs: {{ raw_markdown(pr_list(5)) }}\n",
+        )
         .expect("compose succeeds");
 
     let body = composed.content().to_string();
@@ -350,7 +354,9 @@ async fn cicd_renders_identically_in_frontmatter_and_body() {
     fixture.mount_json(JOB_PATH, job_body(456, "build")).await;
 
     let composed = fixture
-        .compose("---\njob: \"{{ cicd(456) }}\"\n---\nJob: {{ cicd(456) }}\n")
+        .compose(
+            "---\njob: \"{{ cicd(456) }}\"\n---\nJob: {{ raw_markdown(cicd(456)) }}\n",
+        )
         .expect("compose succeeds");
 
     let front = frontmatter_string(&composed, "job");
@@ -367,7 +373,9 @@ async fn cicd_list_renders_identically_in_frontmatter_and_body() {
         .await;
 
     let composed = fixture
-        .compose("---\njobs: \"{{ cicd_list(5) }}\"\n---\nJobs: {{ cicd_list(5) }}\n")
+        .compose(
+            "---\njobs: \"{{ cicd_list(5) }}\"\n---\nJobs: {{ raw_markdown(cicd_list(5)) }}\n",
+        )
         .expect("compose succeeds");
 
     let body = composed.content().to_string();
@@ -399,7 +407,7 @@ async fn provider_functions_are_available_in_frontmatter_shell_ternary() {
         ["echo found".to_string(), "echo missing".to_string()].into_iter().collect();
     let composed = fixture
         .compose_with_commands(
-            "---\nresolved: $(pr(123) ? echo found : echo missing)\n---\nPR: {{ pr(123) }}\n",
+            "---\nresolved: $(pr(123) ? echo found : echo missing)\n---\nPR: {{ raw_markdown(pr(123)) }}\n",
             approved,
         )
         .expect("compose succeeds");
@@ -424,7 +432,9 @@ async fn neutral_host_self_managed_server_composes_through_the_production_path()
     let fixture = Fixture::start_production().await;
     fixture.mount_json(PR_PATH, pr_body(123, "Fix the parser")).await;
 
-    let composed = fixture.compose("PR: {{ pr(123) }}\n").expect("compose succeeds");
+    let composed = fixture
+        .compose("PR: {{ raw_markdown(pr(123)) }}\n")
+        .expect("compose succeeds");
     assert!(
         composed.content().contains("PR #123 — Fix the parser"),
         "{}",
@@ -1029,7 +1039,9 @@ async fn hostile_provider_titles_stay_literal_in_the_composed_document() {
         .mount_json(PR_PATH, pr_body(123, "**urgent** `code` [click](https://evil.example)"))
         .await;
 
-    let composed = fixture.compose("PR: {{ pr(123) }}\n").expect("compose succeeds");
+    let composed = fixture
+        .compose("PR: {{ raw_markdown(pr(123)) }}\n")
+        .expect("compose succeeds");
     let text = composed.content().to_string();
 
     // The hostile destination survives as *characters* — that is the point of

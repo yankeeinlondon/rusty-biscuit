@@ -31,7 +31,7 @@
 
 - this repo is a monorepo, with the following package areas:
 
-    {{ as_unordered_list(ctx.package_areas) }}
+    {{ raw_markdown(as_unordered_list(ctx.package_areas)) }}
 
 - the programming language(s) found in this monorepo are: {{ as_csv(ctx.programming_languages_in_repo) }}
 
@@ -47,4 +47,3 @@
 - The host also has the following GPU resources: **{{ctx.gpu}}**
 
 ::end-block
-

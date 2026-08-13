@@ -997,6 +997,12 @@ pub fn replace_last(args: &[Value]) -> Result<Value, String> {
     }
 }
 
+/// Marks one value as authored Markdown at the body interpolation boundary.
+pub fn raw_markdown(args: &[Value]) -> Result<Value, String> {
+    require_args("raw_markdown", args, 1)?;
+    Ok(args[0].clone())
+}
+
 /// `terminal(string)` — renders Prose markup to a terminal string with
 /// deterministic, non-interactive terminal settings.
 pub fn terminal(args: &[Value]) -> Result<Value, String> {

@@ -11,6 +11,7 @@ use git2::{
     IndexAddOption, Oid, Repository, RepositoryInitOptions, ResetType,
     build::CheckoutBuilder,
 };
+use pulldown_cmark::{Event, Parser};
 use serde_json::{Value, json};
 use tempfile::TempDir;
 
@@ -476,8 +477,15 @@ Shell: {{ shell_result }}
         composed.frontmatter().as_map().get("shell_result"),
         Some(&json!("conflicts"))
     );
-    assert_eq!(composed.content().matches("shared.txt").count(), 2);
-    assert!(composed.content().contains("Shell: conflicts"));
+    let parsed_text = Parser::new(composed.content())
+        .filter_map(|event| match event {
+            Event::Text(text) | Event::Code(text) => Some(text.into_string()),
+            Event::SoftBreak | Event::HardBreak => Some("\n".to_string()),
+            _ => None,
+        })
+        .collect::<String>();
+    assert_eq!(parsed_text.matches("shared.txt").count(), 2);
+    assert!(parsed_text.contains("Shell: conflicts"));
 }
 
 #[derive(Debug, PartialEq, Eq)]

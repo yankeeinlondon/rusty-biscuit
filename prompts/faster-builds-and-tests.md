@@ -14,7 +14,7 @@ Your responsibility is to perform a review on the "{{area}}" package area and:
 
 ### Packages found in the **`{{area}}`** Package Area
 
-{{ as_unordered_list(ctx.current_packages) }}
+{{ raw_markdown(as_unordered_list(ctx.current_packages)) }}
 
 And in this monorepo it may be helpful to understand the general dependency relationships which
 exist between this package area's package and the rest of the monorepo:

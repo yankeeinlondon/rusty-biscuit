@@ -320,6 +320,11 @@ projected through `expression_function_descriptors()`. Do not edit the generated
 table directly; run `just darkmatter regen-expr-doc` from the repository root to
 refresh it after changing the catalog.
 
+Body expression results are inserted as literal text by default. Wrap a value
+in `raw_markdown(value)` when it intentionally produces Markdown structure,
+such as a list, emphasis, or link. Frontmatter, code, and directive surfaces
+retain their typed/raw contracts; see [Interpolation](../inline/interpolation.md).
+
 <!-- BEGIN GENERATED FUNCTION TABLE -->
 
 | Category | Function | Description | Example |
@@ -425,6 +430,7 @@ refresh it after changing the catalog.
 | CI/CD | `cicd(id)` | Returns one provider-addressable CI/CD job in canonical Markdown form. |  |
 | CI/CD | `cicd_list(query)` | Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
 | CI/CD | `cicd_list(count)` | Queries CI/CD jobs with bounded direct listing or parent-execution traversal. See the [provider query vocabulary](darkmatter-expressions.md#provider-query-vocabulary) for keys, enum values, defaults, and bounds. |  |
+| Rendering | `raw_markdown(value)` | Opts a body interpolation value into Markdown syntax instead of the default literal-text projection. | `raw_markdown("**important**")` ⇒ `**important**` |
 <!-- END GENERATED FUNCTION TABLE -->
 
 ### `date()` format tokens

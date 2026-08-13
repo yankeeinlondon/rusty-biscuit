@@ -188,6 +188,10 @@ impl SequencePerfAccumulator {
                 environment_setup: self.env_setup_elapsed,
                 substages: self.substages,
                 prep_substages: self.startup.prep_substages,
+                source_context_timings: self
+                    .invocation_work
+                    .map(InvocationWorkCounts::stage_timings)
+                    .unwrap_or_default(),
             },
             composition,
             agent: if self.dry_run { None } else { agent },
@@ -342,6 +346,10 @@ impl CommandPerfCollector {
                 environment_setup: self.env_setup_elapsed,
                 substages: self.substages,
                 prep_substages: self.startup.prep_substages,
+                source_context_timings: self
+                    .invocation_work
+                    .map(InvocationWorkCounts::stage_timings)
+                    .unwrap_or_default(),
             },
             composition: self.composition_perf,
             agent: if self.dry_run { None } else { self.agent_perf },
@@ -357,6 +365,7 @@ struct InvocationWorkCounts {
     git_root_discoveries: usize,
     topology_probes: usize,
     topology_reuses: usize,
+    stage_timings: claudine::invocation_context::InvocationStageTimings,
 }
 
 impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationWorkCounts {
@@ -365,11 +374,29 @@ impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationW
             git_root_discoveries: work.git_root_discoveries,
             topology_probes: work.topology_probes,
             topology_reuses: work.topology_reuses,
+            stage_timings: work.stage_timings,
         }
     }
 }
 
 impl InvocationWorkCounts {
+    fn stage_timings(self) -> Vec<SubstageTiming> {
+        let timings = self.stage_timings;
+        [
+            ("invocation capture", timings.invocation_capture),
+            ("repository observation", timings.repository_observation),
+            ("topology initialization", timings.topology_initialization),
+            ("launch context capture", timings.launch_context_capture),
+            (
+                "system prompt preparation",
+                timings.system_prompt_preparation,
+            ),
+        ]
+        .into_iter()
+        .filter_map(|(name, elapsed)| elapsed.map(|elapsed| SubstageTiming::new(name, elapsed)))
+        .collect()
+    }
+
     fn note(self) -> String {
         format!(
             "source context work: Git discoveries {}, topology probes {}, topology reuses {}",

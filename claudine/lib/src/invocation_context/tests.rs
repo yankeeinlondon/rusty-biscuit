@@ -64,14 +64,28 @@ fn one_launch_observation_projects_every_existing_context() {
     let after = invocation.work_snapshot();
 
     assert_eq!(file_resolution.base_dir(), fixture.path());
-    // `LaunchContext` canonicalizes every path it projects so search-dir
-    // dedup compares one form; the authored roots below are unaffected.
-    let canonical_fixture = fixture.path().canonicalize().unwrap();
+    // `LaunchContext` projects one canonical, non-verbatim spelling so search
+    // directory deduplication never exposes an internal cache-key form.
+    let canonical_fixture = crate::system_prompt::context::projected_path(fixture.path());
     assert_eq!(launch.repo_root.as_deref(), Some(canonical_fixture.as_path()));
     assert_eq!(workspace.repo_root.as_deref(), Some(fixture.path()));
     assert_eq!(environment.git.as_ref().map(|git| git.repo_root.as_path()), Some(fixture.path()));
     assert_eq!(after.git_root_discoveries, before.git_root_discoveries);
     assert_eq!(after.topology_probes, before.topology_probes);
+}
+
+#[test]
+fn cache_keys_remain_canonical_while_launch_paths_use_projected_spelling() {
+    let fixture = TempDir::new().unwrap();
+    let authored = fixture.path().join(".");
+    let key = canonical_key(&authored);
+    let projected = crate::system_prompt::context::projected_path(&authored);
+
+    assert_eq!(key, canonical_key(fixture.path()));
+    assert_eq!(projected, dunce::canonicalize(fixture.path()).unwrap());
+    #[cfg(windows)]
+    assert!(key.to_string_lossy().starts_with(r"\\?\"));
+    assert!(!projected.to_string_lossy().starts_with(r"\\?\"));
 }
 
 #[test]
@@ -130,14 +144,30 @@ fn launch_and_same_repository_source_share_one_topology_probe() {
 
     let invocation = InvocationContext::capture_at(fixture.path());
     let source_context = invocation.derive_source(&source).unwrap();
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.repo_root }}",
+    );
+    let prepared = invocation.capture_launch_context(&requirements);
 
     assert_eq!(source_context.repository_root(), Some(fixture.path()));
+    assert_eq!(
+        prepared
+            .as_object()
+            .get("repo_root")
+            .and_then(serde_json::Value::as_str),
+        Some(fixture.path().to_string_lossy().as_ref())
+    );
     let expected_area = fixture.path().join("area");
     assert_eq!(source_context.package_area_root(), Some(expected_area.as_path()));
     let work = invocation.work_snapshot();
     assert_eq!(work.git_root_discoveries, 1);
     assert_eq!(work.topology_probes, 1);
     assert!(work.topology_reuses >= 1);
+    assert_eq!(work.launch_context_constructions, 1);
+    assert!(work.stage_timings.invocation_capture.is_some());
+    assert!(work.stage_timings.repository_observation.is_some());
+    assert!(work.stage_timings.topology_initialization.is_some());
+    assert!(work.stage_timings.launch_context_capture.is_some());
 }
 
 #[test]
@@ -640,12 +670,22 @@ fn non_repository_sources_cache_exact_absence_without_topology() {
     let invocation = InvocationContext::capture_at(fixture.path());
     let first = invocation.derive_source(&source).unwrap();
     let second = invocation.derive_source(&source).unwrap();
+    let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.repo_root }}",
+    );
+    let prepared = invocation.capture_launch_context(&requirements);
 
     assert!(first.repository().is_absent());
     assert!(second.repository().is_absent());
+    assert_eq!(prepared.as_object().get("repo_root"), Some(&serde_json::Value::Null));
     let work = invocation.work_snapshot();
     assert_eq!(work.git_root_discoveries, 1);
     assert_eq!(work.topology_probes, 0);
+    assert_eq!(work.launch_context_constructions, 1);
+    assert!(work.stage_timings.invocation_capture.is_some());
+    assert!(work.stage_timings.repository_observation.is_some());
+    assert_eq!(work.stage_timings.topology_initialization, None);
+    assert!(work.stage_timings.launch_context_capture.is_some());
 }
 
 #[test]

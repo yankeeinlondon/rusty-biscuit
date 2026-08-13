@@ -284,8 +284,7 @@ fn composition_setup_and_provider_handoff_order_matches_phase_1_baseline() {
 }
 
 #[cfg(unix)]
-#[test]
-fn compose_perf_stdout_matches_non_perf() {
+fn run_compose_stdout_fixture(perf: bool) -> std::process::Output {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
@@ -299,29 +298,53 @@ fn compose_perf_stdout_matches_non_perf() {
         "#!/bin/sh\necho 'Agent response'\nexit 0\n",
     );
 
-    let perf_assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+    let mut args = vec!["compose", "--goose"];
+    if perf {
+        args.push("--perf");
+    }
+    args.push(md_file.to_str().unwrap());
+
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
-        .args(["compose", "--goose", "--perf", md_file.to_str().unwrap()])
-        .assert()
-        .success();
+        .args(args)
+        .output()
+        .unwrap()
+}
 
-    let plain_assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .args(["compose", "--goose", md_file.to_str().unwrap()])
-        .assert()
-        .success();
+#[cfg(unix)]
+#[test]
+fn slow_compose_perf_stdout_matches_shared_fixture() {
+    let output = run_compose_stdout_fixture(true);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "Agent response\n");
 
-    let perf_stdout = String::from_utf8_lossy(&perf_assert.get_output().stdout);
-    let plain_stdout = String::from_utf8_lossy(&plain_assert.get_output().stdout);
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    for stage in [
+        "source context timing",
+        "invocation capture",
+        "repository observation",
+        "topology initialization",
+        "launch context capture",
+        "system prompt preparation",
+        "composition",
+        "agent execution",
+        "provider handoff",
+    ] {
+        assert!(stderr.contains(stage), "missing {stage}:\n{stderr}");
+    }
+    assert!(stderr.contains("Git discoveries 2"), "{stderr}");
+    assert!(stderr.contains("topology probes 1"), "{stderr}");
+}
 
-    assert_eq!(
-        perf_stdout, plain_stdout,
-        "stdout must be identical between --perf and non-perf runs"
-    );
+#[cfg(unix)]
+#[test]
+fn slow_compose_non_perf_stdout_matches_shared_fixture() {
+    let output = run_compose_stdout_fixture(false);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "Agent response\n");
 }
 
 #[cfg(unix)]
@@ -377,52 +400,68 @@ fn inline_compose_perf_emits_report_to_stderr() {
 }
 
 #[cfg(unix)]
-#[test]
-fn inline_compose_perf_stdout_matches_non_perf() {
+fn run_inline_compose_stdout_fixture(perf: bool) -> std::process::Output {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
     seed_minimal_config(workspace.path());
 
-    let md_file_perf = workspace.path().join("test-perf.md");
-    let md_file_plain = workspace.path().join("test-plain.md");
+    let md_file = workspace.path().join("test.md");
     let content = "---\ntitle: inline perf\nprompt: say hello\n---\n# Body\n";
-    fs::write(&md_file_perf, content).unwrap();
-    fs::write(&md_file_plain, content).unwrap();
+    fs::write(&md_file, content).unwrap();
 
     write_executable(
         &path_dir.join("goose"),
         "#!/bin/sh\necho 'Replacement body'\nexit 0\n",
     );
 
-    let perf_assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+    let mut args = vec!["inline-compose", "--goose"];
+    if perf {
+        args.push("--perf");
+    }
+    args.push(md_file.to_str().unwrap());
+
+    assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
         .env("PATH", augmented_path(&path_dir))
-        .args([
-            "inline-compose",
-            "--goose",
-            "--perf",
-            md_file_perf.to_str().unwrap(),
-        ])
-        .assert()
-        .success();
+        .args(args)
+        .output()
+        .unwrap()
+}
 
-    let plain_assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .args(["inline-compose", "--goose", md_file_plain.to_str().unwrap()])
-        .assert()
-        .success();
+#[cfg(unix)]
+#[test]
+fn slow_inline_compose_perf_stdout_matches_shared_fixture() {
+    let output = run_inline_compose_stdout_fixture(true);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "Replacement body\n");
 
-    let perf_stdout = String::from_utf8_lossy(&perf_assert.get_output().stdout);
-    let plain_stdout = String::from_utf8_lossy(&plain_assert.get_output().stdout);
+    let stderr = strip_ansi(&String::from_utf8_lossy(&output.stderr));
+    for stage in [
+        "source context timing",
+        "invocation capture",
+        "repository observation",
+        "topology initialization",
+        "launch context capture",
+        "system prompt preparation",
+        "composition",
+        "agent execution",
+        "provider handoff",
+    ] {
+        assert!(stderr.contains(stage), "missing {stage}:\n{stderr}");
+    }
+    assert!(stderr.contains("Git discoveries 2"), "{stderr}");
+    assert!(stderr.contains("topology probes 1"), "{stderr}");
+}
 
-    assert_eq!(
-        perf_stdout, plain_stdout,
-        "stdout must be identical between --perf and non-perf runs"
-    );
+#[cfg(unix)]
+#[test]
+fn slow_inline_compose_non_perf_stdout_matches_shared_fixture() {
+    let output = run_inline_compose_stdout_fixture(false);
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "Replacement body\n");
 }
 
 #[cfg(unix)]

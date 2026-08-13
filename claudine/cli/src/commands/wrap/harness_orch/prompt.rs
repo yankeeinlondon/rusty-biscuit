@@ -439,8 +439,10 @@ mod tests {
 
         let first = harness_prepare_options(&mut state, &source, &launch_root);
         let first_context = first.prepared_context.expect("prepared epoch context");
+        let first_effective = first_context.as_object();
         assert_eq!(first_context.get("area").and_then(|v| v.as_str()), Some("alpha-lib"));
-        assert_eq!(first_context.get("agent").and_then(|v| v.as_str()), Some("codex"));
+        assert_eq!(first_effective.get("agent").and_then(|v| v.as_str()), Some("codex"));
+        assert_eq!(first_effective.get("model").and_then(|v| v.as_str()), Some("gpt-test"));
         assert_eq!(invocation.work_snapshot().launch_context_constructions, 1);
         assert_eq!(invocation.work_snapshot().launch_context_extensions, 0);
 

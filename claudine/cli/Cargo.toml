@@ -76,10 +76,16 @@ windows = { version = "0.62", features = [
 ] }
 
 [dev-dependencies]
+dunce = "1"
 # Enable darkmatter's test-only effect instrumentation for tests only. Cargo
 # applies dev-dependency features when building tests/benches but not the
 # release binary, so the `claudine` binary carries none of the counter state.
 darkmatter = { path = "../../darkmatter/lib", features = ["effects-instrumentation"] }
+# The launch-anchor baseline asserts what a provider *means*, not how Darkmatter
+# spelled it: an interpolated Windows path is serialized with CommonMark
+# escaping, so the captured prompt must be parsed before its values are
+# compared. Same parser and version Darkmatter composes with.
+pulldown-cmark = "0.13"
 assert_cmd = "2"
 predicates = "3"
 insta = { version = "1.34", features = ["json"] }
@@ -122,4 +128,4 @@ rendezvous-daemon = { path = "../rendezvous/daemon" }
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]
 l2-backends = ["tmux", "wezterm"]
-runner-tools = ["ai-provider-stubs", "darkmatter-md-fixture", "l2-parallel-self-spawn"]
+runner-tools = ["ai-provider-stubs", "claudine-provider-fixture", "darkmatter-md-fixture", "l2-parallel-self-spawn"]

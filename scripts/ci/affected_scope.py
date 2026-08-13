@@ -68,6 +68,7 @@ EXCLUSION_CLASSES = {"capability", "promotion-pending", "time-bounded"}
 # not an arbitrary command surface.
 KNOWN_RUNNER_TOOLS = {
     "ai-provider-stubs",
+    "claudine-provider-fixture",
     "darkmatter-md-fixture",
     "messenger-desktop-stubs",
     "node-22",

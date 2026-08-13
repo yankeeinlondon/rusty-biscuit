@@ -71,7 +71,7 @@ on:
         type: string
         default: '[]'
       runner-tools:
-        description: "JSON array from the closed runner-tool vocabulary: ai-provider-stubs, darkmatter-md-fixture, messenger-desktop-stubs, node-22, pnpm-10, l2-parallel-self-spawn, neovim."
+        description: "JSON array from the closed runner-tool vocabulary: ai-provider-stubs, claudine-provider-fixture, darkmatter-md-fixture, messenger-desktop-stubs, node-22, pnpm-10, l2-parallel-self-spawn, neovim."
         type: string
         default: '[]'
       companion-suites:
@@ -304,6 +304,22 @@ jobs:
             fi
           done
           echo "$stubdir" >>"$GITHUB_PATH"
+      - name: Build the Claudine provider fixture
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'claudine-provider-fixture') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -q -p claudine-cli --example ctx_launch_anchor_provider_fixture
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            fixture="$(pwd -W)/target/debug/examples/ctx_launch_anchor_provider_fixture.exe"
+          else
+            fixture="$PWD/target/debug/examples/ctx_launch_anchor_provider_fixture"
+          fi
+          [ -x "$fixture" ] || {
+            echo "Claudine provider fixture missing after prebuild: $fixture" >&2
+            exit 1
+          }
+          echo "CLAUDINE_PROVIDER_FIXTURE_EXE=$fixture" >>"$GITHUB_ENV"
       # claudine-cli's `inline_compose_hash` test shells out to darkmatter's
       # `md`, resolved from the workspace target dir before PATH. CI builds only
       # the package's own crates, so the fixture is built explicitly here —

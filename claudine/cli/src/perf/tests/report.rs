@@ -23,6 +23,7 @@ fn render_perf_report_includes_all_sections() {
                 SubstageTiming::new("stream + prompt delivery", Duration::from_millis(12)),
             ],
             prep_substages: vec![],
+            source_context_timings: vec![],
         },
         composition: Some(darkmatter::markdown::compose::ComposePerfReport {
             total: Duration::from_millis(280),
@@ -63,6 +64,7 @@ fn render_perf_report_includes_all_sections() {
         "interpolation",
         "environment setup",
         "agent execution",
+        "provider handoff",
         "first response",
         "provider api duration",
     ] {
@@ -87,6 +89,7 @@ fn render_perf_report_omits_composition_when_none() {
             environment_setup: Duration::ZERO,
             substages: vec![],
             prep_substages: vec![],
+            source_context_timings: vec![],
         },
         composition: None,
         agent: None,
@@ -125,6 +128,7 @@ fn render_perf_report_omits_agent_breakdown_when_latency_missing() {
             environment_setup: Duration::ZERO,
             substages: vec![],
             prep_substages: vec![],
+            source_context_timings: vec![],
         },
         composition: None,
         agent: Some(AgentExecutionPerf {
@@ -391,6 +395,13 @@ fn command_perf_collector_renders_request_owned_discovery_counts() {
         git_root_discoveries: 1,
         topology_probes: 2,
         topology_reuses: 3,
+        stage_timings: claudine::invocation_context::InvocationStageTimings {
+            invocation_capture: Some(Duration::from_millis(11)),
+            repository_observation: Some(Duration::from_millis(7)),
+            topology_initialization: Some(Duration::from_millis(5)),
+            launch_context_capture: Some(Duration::from_millis(3)),
+            system_prompt_preparation: Some(Duration::from_millis(13)),
+        },
         ..Default::default()
     };
     let mut collector = CommandPerfCollector::new("Test", startup);
@@ -407,6 +418,38 @@ fn command_perf_collector_renders_request_owned_discovery_counts() {
     assert!(rendered.contains("source context work"), "{rendered}");
     assert!(rendered.contains("topology probes 2"), "{rendered}");
     assert!(rendered.contains("topology reuses 3"), "{rendered}");
+    for stage in [
+        "invocation capture",
+        "repository observation",
+        "topology initialization",
+        "launch context capture",
+        "system prompt preparation",
+    ] {
+        assert!(rendered.contains(stage), "missing {stage}:\n{rendered}");
+    }
+
+    let tree = build_perf_tree(&report, CompositionPlacement::UnderPrep);
+    let prep = tree
+        .children
+        .iter()
+        .find(|node| node.label == "prep phase")
+        .expect("prep phase");
+    assert!(
+        prep.children
+            .iter()
+            .any(|node| node.label == "source context timing")
+    );
+    let environment = tree
+        .children
+        .iter()
+        .find(|node| node.label == "environment setup")
+        .expect("environment setup");
+    assert!(
+        environment
+            .children
+            .iter()
+            .any(|node| node.label == "system prompt preparation")
+    );
 }
 
 #[test]
@@ -502,6 +545,7 @@ fn render_perf_report_snapshot_locks_tree_layout() {
                 SubstageTiming::new("stream + prompt delivery", Duration::from_micros(19)),
             ],
             prep_substages: vec![],
+            source_context_timings: vec![],
         },
         composition: Some(darkmatter::markdown::compose::ComposePerfReport {
             // `compose.total` is the source of truth — it is NOT the sum

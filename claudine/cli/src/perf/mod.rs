@@ -39,6 +39,8 @@ pub(crate) struct CliOverheadReport {
     /// remainder lands in `prep → unattributed`. Empty for wrapper and
     /// sequence paths, which never stamp `prep_phase`.
     pub prep_substages: Vec<SubstageTiming>,
+    /// Overlapping request-owned timing detail attached beneath prep.
+    pub source_context_timings: Vec<SubstageTiming>,
 }
 
 /// A single named sub-stage timing within environment setup.

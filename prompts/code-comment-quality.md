@@ -15,7 +15,7 @@ You will be evaluating code commenting in the "{{ ctx.area }}" package area's co
 ::block when="ctx.area == ctx.package || null"
 - this package area has the following Rust packages in it which should be analyzed:
 
-    {{ as_unordered_list(ctx.current_packages) }}
+    {{ raw_markdown(as_unordered_list(ctx.current_packages)) }}
 ::end-block
 
 ## Best Practices

@@ -8,6 +8,7 @@
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeOptions;
+use pulldown_cmark::{Event, Parser};
 use std::path::PathBuf;
 
 fn fixture_text(stem: &str) -> String {
@@ -32,12 +33,19 @@ fn compose(stem: &str) -> String {
 #[test]
 fn interpolation_heavy_fixture_composes_expected_output() {
     let out = compose("compose_interpolation_heavy");
+    let parsed_text = Parser::new(&out)
+        .filter_map(|event| match event {
+            Event::Text(text) | Event::Code(text) => Some(text.into_string()),
+            Event::SoftBreak | Event::HardBreak => Some("\n".to_string()),
+            _ => None,
+        })
+        .collect::<String>();
 
     // Body interpolation of a frontmatter-resolved title.
-    assert!(out.contains("# Darkmatter Interpolation Fixture"), "title:\n{out}");
+    assert!(parsed_text.contains("Darkmatter Interpolation Fixture"), "title:\n{out}");
     // Nested interpolation: the outer ternary yields a string still holding
     // `{{proj}}`, which the rescan pass then resolves.
-    assert!(out.contains("Nested: inside Darkmatter now"), "nested:\n{out}");
+    assert!(parsed_text.contains("Nested: inside Darkmatter now"), "nested:\n{out}");
     // A `{{{ … }}}` literal is converted to literal `{{ … }}` text, never
     // evaluated.
     assert!(
@@ -46,10 +54,10 @@ fn interpolation_heavy_fixture_composes_expected_output() {
     );
     // The full 15-link deep dependency chain resolved in order.
     assert!(
-        out.contains(
+        parsed_text.contains(
             "/root/project/level-01/level-02/level-03/level-04/level-05/level-06/\
              level-07/level-08/level-09/level-10/level-11/level-12/level-13/level-14/level-15"
-        ) || out.contains("level-15"),
+        ) || parsed_text.contains("level-15"),
         "deep chain:\n{out}"
     );
     // A `{{ … }}` inside a fenced code block is NOT interpolated (MarkdownAware).
@@ -59,14 +67,23 @@ fn interpolation_heavy_fixture_composes_expected_output() {
     );
     // Text replacement applied (runs before interpolation in the pipeline).
     assert!(
-        out.contains("Darkmatter ships 1.0.0; status resolved."),
+        parsed_text.contains("Darkmatter ships 1.0.0; status resolved."),
         "replacements:\n{out}"
     );
     // The wide fan-out resolved every key (first and last).
-    assert!(out.contains("/root/project/section-01/Darkmatter"), "wide first:\n{out}");
-    assert!(out.contains("/root/project/section-30/Darkmatter"), "wide last:\n{out}");
+    assert!(
+        parsed_text.contains("/root/project/section-01/Darkmatter"),
+        "wide first:\n{out}"
+    );
+    assert!(
+        parsed_text.contains("/root/project/section-30/Darkmatter"),
+        "wide last:\n{out}"
+    );
     // Unicode prose is preserved through interpolation.
-    assert!(out.contains("Unicode prose: café Darkmatter 日本語 🎉"), "unicode:\n{out}");
+    assert!(
+        parsed_text.contains("Unicode prose: café Darkmatter 日本語 🎉"),
+        "unicode:\n{out}"
+    );
     // No raw template markers leaked out (other than the intended literal above).
     assert!(!out.contains("{{ base }}"), "unresolved base leaked:\n{out}");
     assert!(!out.contains("{{ proj }}"), "unresolved proj leaked:\n{out}");

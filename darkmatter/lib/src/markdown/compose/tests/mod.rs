@@ -10,6 +10,7 @@ use biscuit_terminal::utils::UnicodeWidthStr;
 mod caching;
 mod fixtures;
 mod frontmatter;
+mod literal_interpolation;
 mod preflight;
 mod provider_network;
 mod rendering;

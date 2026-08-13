@@ -69,6 +69,27 @@ pub(super) fn build_perf_tree(
         prep.children
             .push(PerfNode::leaf(unit.name, unit.elapsed, NodeRole::Structural));
     }
+    let prep_context_timings = cli
+        .source_context_timings
+        .iter()
+        .filter(|timing| timing.name != "system prompt preparation")
+        .collect::<Vec<_>>();
+    if !prep_context_timings.is_empty() {
+        let total = prep_context_timings
+            .iter()
+            .map(|timing| timing.elapsed)
+            .max()
+            .unwrap_or_default();
+        prep.children.push(PerfNode::branch(
+            "source context timing",
+            total,
+            NodeRole::Breakdown,
+            prep_context_timings
+                .into_iter()
+                .map(substage_breakdown_node)
+                .collect(),
+        ));
+    }
     if placement == CompositionPlacement::UnderPrep
         && let Some((total, children)) = &composition
     {
@@ -99,7 +120,7 @@ pub(super) fn build_perf_tree(
     // that substage's time went and nests as `Breakdown` at every depth so it is
     // displayed and percentaged without entering the substage's reconciliation
     // (TR-1).
-    let env_children: Vec<PerfNode> = cli
+    let mut env_children: Vec<PerfNode> = cli
         .substages
         .iter()
         .map(|s| {
@@ -111,6 +132,13 @@ pub(super) fn build_perf_tree(
             )
         })
         .collect();
+    if let Some(timing) = cli
+        .source_context_timings
+        .iter()
+        .find(|timing| timing.name == "system prompt preparation")
+    {
+        env_children.push(substage_breakdown_node(timing));
+    }
     let env_setup_node = PerfNode::branch(
         "environment setup",
         cli.environment_setup,
@@ -132,7 +160,11 @@ pub(super) fn build_perf_tree(
     } else if let Some(agent) = &report.agent {
         // agent execution — Structural when the agent ran (omitted on dry runs;
         // the P-5 `—` leaf is a Phase 5 rendering concern).
-        let mut children = Vec::new();
+        let mut children = vec![PerfNode::leaf(
+            "provider handoff",
+            agent.total_elapsed,
+            NodeRole::Breakdown,
+        )];
         if let Some(latency) = agent.first_response_latency {
             children.push(PerfNode::leaf("first response", latency, NodeRole::Breakdown));
         }

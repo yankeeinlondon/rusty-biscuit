@@ -154,7 +154,7 @@ fn classify(input: &str, surface: Surface, fail_fast: bool) -> (Outcome, String)
             match interpolate_text(
                 input,
                 &evaluator,
-                ScanMode::MarkdownAware,
+                ScanMode::Body { include_code_blocks: false },
                 fail_fast,
                 "characterization",
             ) {

@@ -233,10 +233,20 @@ fn template_preflight_combines_launch_facts_with_the_selected_target() {
         .and_then(serde_json::Value::as_str)
         .unwrap();
     assert_eq!(launch_root, launch_repo.to_string_lossy());
+    let expected_args = [
+        launch_root.to_string(),
+        "claude".to_string(),
+        "claude-sonnet-4-6".to_string(),
+        "claude".to_string(),
+        "claude-sonnet-4-6".to_string(),
+    ];
+    let expected_command =
+        darkmatter::markdown::compose::shell_expansion::policy::normalize_command(
+            "echo",
+            &expected_args,
+        );
     assert!(
-        result.approved_commands.contains(&format!(
-            "echo {launch_root} claude claude-sonnet-4-6 claude claude-sonnet-4-6"
-        )),
+        result.approved_commands.contains(&expected_command),
         "target-adjusted command was not approved: {:?}",
         result.approved_commands
     );

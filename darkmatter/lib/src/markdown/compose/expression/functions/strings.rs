@@ -17,4 +17,5 @@ pub(super) const BINDINGS: &[FunctionBinding] = &[
     FunctionBinding { canonical: "replace", aliases: &[], evaluation: EvaluationMode::Pure, handler: Some(FunctionHandler::Pure(super::replace)) },
     FunctionBinding { canonical: "replace_first", aliases: &["replacefirst"], evaluation: EvaluationMode::Pure, handler: Some(FunctionHandler::Pure(super::replace_first)) },
     FunctionBinding { canonical: "replace_last", aliases: &["replacelast"], evaluation: EvaluationMode::Pure, handler: Some(FunctionHandler::Pure(super::replace_last)) },
+    FunctionBinding { canonical: "raw_markdown", aliases: &[], evaluation: EvaluationMode::Pure, handler: Some(FunctionHandler::Pure(super::raw_markdown)) },
 ];

@@ -36,6 +36,7 @@ impl ResolvedPromptInput {
         invocation: &crate::invocation_context::InvocationContext,
     ) -> Result<Self, crate::error::ClaudineError> {
         let (source, raw_text) = resolved;
+        let source = source.into_projected();
         let source_context = source_path(&source)
             .map(|path| invocation.derive_source(path).map_err(invocation_context_error))
             .transpose()?;
@@ -231,6 +232,7 @@ fn prepare_system_prompt_with_ctx(
         raw_text,
         source_context,
     } = input;
+    let source = source.into_projected();
     let composed_md = compose_prompt_markdown(
         &source,
         &raw_text,
@@ -265,6 +267,7 @@ fn prepare_non_interactive_appendix_from(
             raw_text,
             source_context,
         } = input;
+        let source = source.into_projected();
         let composed_md = compose_prompt_markdown(
             &source,
             &raw_text,
@@ -294,6 +297,7 @@ pub fn prepare_system_prompt(
     source: SystemPromptSource,
     raw_text: &str,
 ) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
+    let source = source.into_projected();
     // No launch context here, so shell directives fall back to Darkmatter's
     // source-relative default. The session-aware path supplies a working
     // directory via `resolve_and_prepare_for_session`.
@@ -336,6 +340,23 @@ pub fn resolve_and_prepare_for_session(
 
 /// Resolve and compose session prompts using request-owned discovery evidence.
 pub fn resolve_and_prepare_for_session_with_context(
+    args: &SystemPromptArgs,
+    context: &crate::system_prompt::context::LaunchContext,
+    non_interactive: bool,
+    invocation: &crate::invocation_context::InvocationContext,
+) -> Result<ResolvedSystemPrompt, crate::error::ClaudineError> {
+    let preparation_started = std::time::Instant::now();
+    let result = resolve_and_prepare_for_session_with_context_inner(
+        args,
+        context,
+        non_interactive,
+        invocation,
+    );
+    invocation.record_system_prompt_preparation(preparation_started.elapsed());
+    result
+}
+
+fn resolve_and_prepare_for_session_with_context_inner(
     args: &SystemPromptArgs,
     context: &crate::system_prompt::context::LaunchContext,
     non_interactive: bool,

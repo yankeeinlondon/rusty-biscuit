@@ -210,6 +210,26 @@ fn normal_session_composes_the_shipped_root_system_prompt_from_launch_context() 
 
     let shipped = root.join("system-prompt.md");
     assert_eq!(source_path(&prepared.source), Some(shipped.as_path()));
+    assert!(
+        source_path(&prepared.source)
+            .is_none_or(|path| !path.to_string_lossy().starts_with(r"\\?\")),
+        "prepared system-prompt sources are authored projections, not cache keys"
+    );
+    for projected in [
+        Some(context.cwd.as_path()),
+        context.repo_root.as_deref(),
+        context.package_area_root.as_deref(),
+        context.package_root.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        assert!(
+            !projected.to_string_lossy().starts_with(r"\\?\"),
+            "launch/system-prompt projection retained a verbatim prefix: {}",
+            projected.display()
+        );
+    }
     assert!(prepared.composed_markdown.contains("rusty-biscuit"));
     assert!(!prepared.composed_markdown.contains("{{ ctx."));
     assert_eq!(invocation.work_snapshot().launch_context_constructions, 1);
@@ -900,6 +920,7 @@ fn non_interactive_session_preserves_discovered_replace_mode() {
     ] {
         assert!(work.system_prompt_timings.contains_key(stage));
     }
+    assert!(work.stage_timings.system_prompt_preparation.is_some());
 
     match result {
         ResolvedSystemPrompt::Ready(prepared) => {

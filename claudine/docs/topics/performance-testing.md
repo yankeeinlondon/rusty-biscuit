@@ -86,8 +86,13 @@ claudine opencode "explain this" --perf
 The report includes:
 
 - **CLI Overhead** — arg parsing, config loading, tracing init, environment setup
+- **Source Context Timing** — invocation capture, repository observation,
+  topology initialization when required, and launch-context capture; these are
+  overlapping diagnostic timings, while the adjacent work note reports stable
+  Git discovery and topology counts
 - **Composition Report** — interpolation, shell expansion, transclusion stages
-- **Agent Execution** — launches, first-response latency, total execution, provider API time
+- **Agent Execution** — provider handoff, launches, first-response latency,
+  total execution, and provider API time
 
 This is the primary tool for diagnosing performance in real workflows.
 

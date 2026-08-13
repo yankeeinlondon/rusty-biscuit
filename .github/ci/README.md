@@ -97,7 +97,7 @@ l2-backends = ["tmux", "wezterm"]
 features = ["playa"]
 all-features = false
 l1-include-slow = false
-runner-tools = ["ai-provider-stubs", "darkmatter-md-fixture"]
+runner-tools = ["ai-provider-stubs", "claudine-provider-fixture", "darkmatter-md-fixture"]
 companion-suites = ["homelab-frontend"]
 ```
 
@@ -124,7 +124,7 @@ would silently exempt a package and miss its first test.
 | `features` | string[] | `[]` | forwarded to check, archive, and the canonical recipe consistently. Conflicts with `all-features` |
 | `all-features` | bool | `false` | run with `--all-features`. Conflicts with `features` |
 | `l1-include-slow` | bool | `false` | keep `slow_` tests inside the L1 selection (darkmatter's contract) |
-| `runner-tools` | string[] | `[]` | closed vocabulary: `ai-provider-stubs`, `darkmatter-md-fixture`, `messenger-desktop-stubs`, `node-22`, `pnpm-10`, `l2-parallel-self-spawn`, `neovim` |
+| `runner-tools` | string[] | `[]` | closed vocabulary: `ai-provider-stubs`, `claudine-provider-fixture`, `darkmatter-md-fixture`, `messenger-desktop-stubs`, `node-22`, `pnpm-10`, `l2-parallel-self-spawn`, `neovim` |
 | `companion-suites` | string[] | `[]` | non-Cargo suites this package owns; closed vocabulary: `homelab-frontend` |
 
 `[package.metadata.ci.native]`: a map of runner OS (`ubuntu-latest`,
@@ -146,6 +146,11 @@ command surface:
 
 - **`ai-provider-stubs`** — inert AI-provider CLI stubs for tests that require
   provider discovery (claudine-cli).
+- **`claudine-provider-fixture`** — builds Claudine's non-production native
+  provider example once before L1 and exports its deterministic path through
+  `CLAUDINE_PROVIDER_FIXTURE_EXE`. Windows launch-anchor tests copy that
+  executable under provider names, so multiline argv never crosses a batch
+  trampoline and the test process never invokes Cargo or rustc.
 - **`darkmatter-md-fixture`** — builds darkmatter's `md` binary into the
   workspace target dir, preserving Claudine's clean-checkout fixture that a
   direct `_test claudine-cli` would otherwise lose.

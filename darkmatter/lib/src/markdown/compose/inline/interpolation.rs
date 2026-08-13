@@ -27,10 +27,8 @@ pub(crate) fn run_stage(
 ) -> MarkdownResult<usize> {
     use interpolation::{Evaluator, ScanMode, interpolate_text};
 
-    let scan_mode = if resolve_interpolate_code_blocks(markdown, options) {
-        ScanMode::Plain
-    } else {
-        ScanMode::MarkdownAware
+    let scan_mode = ScanMode::Body {
+        include_code_blocks: resolve_interpolate_code_blocks(markdown, options),
     };
 
     // Wrap the effective state with a resolution context so read-side

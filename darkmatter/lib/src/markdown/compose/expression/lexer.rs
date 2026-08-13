@@ -35,6 +35,42 @@ use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use std::fmt;
 use tracing::debug;
 
+type ByteRange = (usize, usize);
+type MarkdownRegions = (Vec<InlineCodeSpan>, Vec<ByteRange>);
+
+/// Markdown syntax position occupied by an interpolation expression.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InterpolationContext {
+    /// Plain strings and other non-Markdown scanner consumers.
+    Raw,
+    /// Markdown prose parsed as ordinary inline text.
+    Prose,
+    /// An inline code span.
+    InlineCode,
+    /// A fenced or indented code block.
+    CodeBlock,
+    /// A Darkmatter `::` directive or shell-block command body.
+    Directive,
+}
+
+/// The inline code span that encloses an interpolation expression.
+///
+/// A code span's backtick delimiters are part of the replacement problem: a
+/// value containing a backtick run as long as `fence` would terminate the span
+/// early. Carrying the span lets a rewriter re-delimit the whole span instead
+/// of only substituting text inside it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct InlineCodeSpan {
+    /// Byte offset of the first backtick.
+    pub start: usize,
+
+    /// Byte offset after the last backtick.
+    pub end: usize,
+
+    /// Length of the opening (and closing) backtick run.
+    pub fence: usize,
+}
+
 /// Location of an interpolation expression in markdown content.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExpressionLocation {
@@ -46,6 +82,13 @@ pub struct ExpressionLocation {
 
     /// The expression content between `{{` and `}}`, trimmed.
     pub expression: String,
+
+    /// The syntax position that owns the replacement bytes.
+    pub context: InterpolationContext,
+
+    /// The enclosing inline code span, when `context` is
+    /// [`InterpolationContext::InlineCode`].
+    pub code_span: Option<InlineCodeSpan>,
 }
 
 /// Location of an interpolation literal (`{{{ ... }}}`) in content.
@@ -94,7 +137,11 @@ pub struct ExpressionScanResult {
 /// ```
 pub struct ExpressionFinder<'a> {
     content: &'a str,
-    code_regions: Vec<(usize, usize)>,
+    default_context: InterpolationContext,
+    excluded_regions: Vec<ByteRange>,
+    inline_code_regions: Vec<InlineCodeSpan>,
+    code_block_regions: Vec<ByteRange>,
+    directive_regions: Vec<ByteRange>,
 }
 
 impl<'a> ExpressionFinder<'a> {
@@ -104,10 +151,27 @@ impl<'a> ExpressionFinder<'a> {
     /// excluded from expression scanning. Inline code spans (single backticks)
     /// are intentionally NOT skipped — `{{ }}` inside `` ` ` `` is interpolated.
     pub fn new(content: &'a str) -> Self {
-        let code_regions = Self::find_code_regions(content);
+        let (inline_code_regions, code_block_regions) = Self::find_markdown_regions(content);
         Self {
             content,
-            code_regions,
+            default_context: InterpolationContext::Prose,
+            excluded_regions: code_block_regions.clone(),
+            inline_code_regions,
+            code_block_regions,
+            directive_regions: Self::find_directive_regions(content),
+        }
+    }
+
+    /// Creates a Markdown-aware finder that also scans fenced and indented code.
+    pub fn new_including_code_blocks(content: &'a str) -> Self {
+        let (inline_code_regions, code_block_regions) = Self::find_markdown_regions(content);
+        Self {
+            content,
+            default_context: InterpolationContext::Prose,
+            excluded_regions: Vec::new(),
+            inline_code_regions,
+            code_block_regions,
+            directive_regions: Self::find_directive_regions(content),
         }
     }
 
@@ -142,7 +206,7 @@ impl<'a> ExpressionFinder<'a> {
                 && bytes[pos + 2] == b'{'
                 && (pos + 3 >= len || bytes[pos + 3] != b'{')
             {
-                if self.is_in_code_region(pos) {
+                if self.is_excluded(pos) {
                     pos += 1;
                     continue;
                 }
@@ -180,7 +244,7 @@ impl<'a> ExpressionFinder<'a> {
 
             // Look for opening {{
             if bytes[pos] == b'{' && pos + 1 < len && bytes[pos + 1] == b'{' {
-                if self.is_in_code_region(pos) {
+                if self.is_excluded(pos) {
                     pos += 2;
                     continue;
                 }
@@ -228,11 +292,17 @@ impl<'a> ExpressionFinder<'a> {
                     if expr_start < expr_end {
                         let expression = self.content[expr_start..expr_end].trim();
                         if !expression.is_empty() {
+                            let context = self.context_at(start);
+                            let code_span = (context == InterpolationContext::InlineCode)
+                                .then(|| self.enclosing_code_span(start))
+                                .flatten();
                             return (
                                 Some(ExpressionLocation {
                                     start,
                                     end,
                                     expression: expression.to_string(),
+                                    context,
+                                    code_span,
                                 }),
                                 end,
                             );
@@ -251,8 +321,33 @@ impl<'a> ExpressionFinder<'a> {
     }
 
     /// Checks if a position is within a code region.
-    fn is_in_code_region(&self, pos: usize) -> bool {
-        self.code_regions
+    fn is_excluded(&self, pos: usize) -> bool {
+        self.excluded_regions
+            .iter()
+            .any(|(start, end)| pos >= *start && pos < *end)
+    }
+
+    fn context_at(&self, pos: usize) -> InterpolationContext {
+        if Self::contains(&self.code_block_regions, pos) {
+            InterpolationContext::CodeBlock
+        } else if self.enclosing_code_span(pos).is_some() {
+            InterpolationContext::InlineCode
+        } else if Self::contains(&self.directive_regions, pos) {
+            InterpolationContext::Directive
+        } else {
+            self.default_context
+        }
+    }
+
+    fn enclosing_code_span(&self, pos: usize) -> Option<InlineCodeSpan> {
+        self.inline_code_regions
+            .iter()
+            .copied()
+            .find(|span| pos >= span.start && pos < span.end)
+    }
+
+    fn contains(regions: &[ByteRange], pos: usize) -> bool {
+        regions
             .iter()
             .any(|(start, end)| pos >= *start && pos < *end)
     }
@@ -261,7 +356,11 @@ impl<'a> ExpressionFinder<'a> {
     pub fn find_all_plain(input: &'a str) -> Vec<ExpressionLocation> {
         let finder = Self {
             content: input,
-            code_regions: vec![],
+            default_context: InterpolationContext::Raw,
+            excluded_regions: vec![],
+            inline_code_regions: vec![],
+            code_block_regions: vec![],
+            directive_regions: vec![],
         };
         finder.find_all()
     }
@@ -271,7 +370,11 @@ impl<'a> ExpressionFinder<'a> {
     pub fn scan_plain(input: &'a str) -> ExpressionScanResult {
         let finder = Self {
             content: input,
-            code_regions: vec![],
+            default_context: InterpolationContext::Raw,
+            excluded_regions: vec![],
+            inline_code_regions: vec![],
+            code_block_regions: vec![],
+            directive_regions: vec![],
         };
         finder.scan()
     }
@@ -281,8 +384,9 @@ impl<'a> ExpressionFinder<'a> {
     /// Inline code spans (single backticks) are intentionally NOT collected
     /// here — interpolation runs inside them so that templated identifiers
     /// like `` `var_{{ phase }}` `` expand as expected.
-    fn find_code_regions(content: &str) -> Vec<(usize, usize)> {
-        let mut regions = Vec::new();
+    fn find_markdown_regions(content: &str) -> MarkdownRegions {
+        let mut inline = Vec::new();
+        let mut blocks = Vec::new();
         let parser = Parser::new_ext(content, Options::all()).into_offset_iter();
 
         let mut in_code_block = false;
@@ -297,13 +401,44 @@ impl<'a> ExpressionFinder<'a> {
                 }
                 // End of code block
                 Event::End(TagEnd::CodeBlock) if in_code_block => {
-                    regions.push((code_block_start, range.end));
+                    blocks.push((code_block_start, range.end));
                     in_code_block = false;
+                }
+                Event::Code(_) => {
+                    let fence = content[range.clone()]
+                        .bytes()
+                        .take_while(|byte| *byte == b'`')
+                        .count();
+                    inline.push(InlineCodeSpan { start: range.start, end: range.end, fence });
                 }
                 _ => {}
             }
         }
 
+        (inline, blocks)
+    }
+
+    fn find_directive_regions(content: &str) -> Vec<ByteRange> {
+        let mut regions = Vec::new();
+        let mut offset = 0;
+        let mut in_shell_block = false;
+        for line in content.split_inclusive('\n') {
+            let end = offset + line.len();
+            let mut candidate = line.trim_start();
+            while let Some(rest) = candidate.strip_prefix('>') {
+                candidate = rest.trim_start();
+            }
+            let is_directive = candidate.starts_with("::");
+            if is_directive || in_shell_block {
+                regions.push((offset, end));
+            }
+            if candidate.starts_with("::shell-block") {
+                in_shell_block = true;
+            } else if in_shell_block && candidate.starts_with("::end-block") {
+                in_shell_block = false;
+            }
+            offset = end;
+        }
         regions
     }
 }
@@ -965,6 +1100,22 @@ mod tests {
 
     mod expression_finder {
         use super::*;
+
+        #[test]
+        fn scan_metadata_distinguishes_body_syntax_positions() {
+            let content = "prose {{ prose }}\n\n`{{ inline }}`\n\n```text\n{{ fenced }}\n```\n\n::shell echo {{ directive }}\n";
+            let locations = ExpressionFinder::new_including_code_blocks(content).find_all();
+            let contexts: Vec<_> = locations.iter().map(|location| location.context).collect();
+            assert_eq!(
+                contexts,
+                [
+                    InterpolationContext::Prose,
+                    InterpolationContext::InlineCode,
+                    InterpolationContext::CodeBlock,
+                    InterpolationContext::Directive,
+                ]
+            );
+        }
 
         #[test]
         fn finds_simple_expression() {

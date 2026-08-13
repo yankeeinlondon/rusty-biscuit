@@ -57,6 +57,28 @@ pub enum SystemPromptSource {
     BuiltInNonInteractive,
 }
 
+impl SystemPromptSource {
+    pub(crate) fn into_projected(self) -> Self {
+        use crate::system_prompt::context::projected_path;
+
+        match self {
+            Self::StandardDiscovered { path, scope } => Self::StandardDiscovered {
+                path: projected_path(&path),
+                scope,
+            },
+            Self::ExplicitFile { path, mode } => Self::ExplicitFile {
+                path: projected_path(&path),
+                mode,
+            },
+            Self::NonInteractiveFile { path, scope } => Self::NonInteractiveFile {
+                path: projected_path(&path),
+                scope,
+            },
+            Self::BuiltInNonInteractive => Self::BuiltInNonInteractive,
+        }
+    }
+}
+
 /// Prepared metadata for the non-interactive safety appendix.
 #[derive(Debug, Clone)]
 pub struct PreparedNonInteractiveAppendix {

@@ -10,6 +10,39 @@ Interpolation happens in two stages during the compose pipeline (see the [pipeli
 Both stages also expose the [read-side functions](../topics/darkmatter-expressions.md#read-side-functions) (`file_exists`, `frontmatter`, `absolute`, `relative`, …) and the `doc.*` namespace — the same grammar resolves identically across every surface.
 
 Body interpolation runs after text replacement and page blocks have been applied. Within the body, all handlebar placeholders like `{{foo}}` or `{{bar}}` are replaced with their resolved values.
+
+### Literal text and authored Markdown
+
+Body values are literal text by default. Darkmatter escapes the serialized
+Markdown source as needed so parsing the composed document yields the exact
+scalar value. This includes Windows drive and UNC paths whose backslashes would
+otherwise be consumed by CommonMark.
+
+Use `raw_markdown(value)` only when a value intentionally generates Markdown
+structure:
+
+```md
+{{ raw_markdown(as_unordered_list(ctx.current_packages)) }}
+{{ raw_markdown("**important** and [documentation](https://example.com)") }}
+```
+
+The opt-in applies to body prose. Frontmatter values, Darkmatter directive
+arguments, inline code, and opted-in fenced or indented code retain their own
+raw/typed contracts; `raw_markdown` does not change those surfaces.
+
+### Code and directive regions
+
+- Inline code is interpolated by default and replacement bytes remain code
+  content rather than escaped prose.
+- Fenced and indented code are skipped unless `interpolate_code_blocks: true`
+  or `ComposeOptions::with_interpolate_code_blocks(true)` enables them. Once
+  enabled, replacements preserve raw code bytes.
+- Darkmatter directives, including `::shell` and shell-block command bodies,
+  preserve raw argument bytes. Preflight collection and execution therefore
+  observe the same command.
+- Frontmatter keeps its existing whole-value typed behavior: native booleans,
+  numbers, nulls, arrays, and objects do not become Markdown strings.
+
 - **Fallback Values**
     - if a template placeholder in the document refers to a frontmatter property that has no value then the default value of an empty string will be used.
     - this default is suitable for some situations but not others so you are allowed to express a fallback you'd like to use instead with the following syntax:
@@ -137,13 +170,23 @@ A literal in a frontmatter value is always text. `key: "{{{ x }}}"` resolves to 
 
 ## Implementation
 
-The current implementation uses a source-first scanner approach (single-pass rewrite):
+The interpolation scanner records each replacement's Markdown syntax position
+before rewriting:
 
-- A scanner finds `{{{ ... }}}` spans in the document body, and also recognizes `{{{ ... }}}` interpolation literals. Inline code spans (single backticks) are interpolated by default, since the templating pattern `` `var_{{ phase }}` `` is a common use case, and literals inside inline code convert to literal `{{{ ... }}}` text. Fenced and indented code blocks are skipped.
+- A scanner finds `{{ ... }}` expressions and `{{{ ... }}}` interpolation
+  literals, classifying body locations as prose, inline code, code block, or
+  directive. Fenced and indented code blocks are skipped unless opted in.
 - Each expression is parsed with a dedicated tokenizer and evaluator
 - The interpolation context is built from the effective state (frontmatter + external state), `ctx.*` runtime values, and `env.*` environment variables
-- Replacements are applied from the end of the string backward to preserve offsets
-- Literal conversion (`{{{ ... }}}` → `{{{ ... }}}`) happens after the final scan pass over a surface, so a literal introduced by a replacement value is also converted exactly once
+- Replacements are applied from the end of the string backward to preserve
+  source offsets. Prose values are projected as CommonMark literal text unless
+  the top-level expression is `raw_markdown(...)`; code and directive values
+  keep raw bytes.
+- Replacement output is rescanned up to the bounded interpolation-depth limit,
+  allowing deliberate nested interpolation while preventing infinite loops.
+- Literal conversion (`{{{ ... }}}` → `{{ ... }}`) happens after the final scan
+  pass over a surface, so a literal introduced by a replacement value is also
+  converted exactly once.
 
 See the source modules:
 

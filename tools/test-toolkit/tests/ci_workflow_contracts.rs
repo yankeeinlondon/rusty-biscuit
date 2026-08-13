@@ -680,12 +680,11 @@ fn active_ci_authority_matches_the_retirement_contract() {
     );
 
     let ci_topic = read("docs/topics/ci-cd.md");
-    for survivor in ["biscuit-tui-windows-captured-stdout.yml"] {
-        assert!(
-            ci_topic.contains(survivor),
-            "the active specialized inventory must retain {survivor}"
-        );
-    }
+    let survivor = "biscuit-tui-windows-captured-stdout.yml";
+    assert!(
+        ci_topic.contains(survivor),
+        "the active specialized inventory must retain {survivor}"
+    );
     assert!(
         !ci_topic.contains("claudine-windows-ctrl-c.yml"),
         "the active specialized inventory must contain only executable survivors"
@@ -742,6 +741,50 @@ fn messenger_stub_runner_tool_reaches_native_and_wsl2_execution() {
     assert!(
         missing.is_empty(),
         "messenger runner tooling is not end-to-end: {}",
+        missing.join(", ")
+    );
+}
+
+#[test]
+fn claudine_provider_fixture_runner_tool_reaches_native_l1_execution() {
+    let native_test = job_block("_package-ci.yml", "  test:");
+    let manifest = read("claudine/cli/Cargo.toml");
+    let docs = read(".github/ci/README.md");
+    let mut missing = Vec::new();
+
+    if !manifest.contains("claudine-provider-fixture") {
+        missing.push("claudine-cli runner-tool declaration");
+    }
+    if native_test
+        .matches("name: Build the Claudine provider fixture")
+        .count()
+        != 1
+        || !native_test.contains(
+            "cargo build -q -p claudine-cli --example ctx_launch_anchor_provider_fixture",
+        )
+        || !native_test.contains("CLAUDINE_PROVIDER_FIXTURE_EXE")
+        || !native_test.contains("GITHUB_ENV")
+        || !native_test.contains("pwd -W")
+    {
+        missing.push("one native example prebuild exported through GITHUB_ENV");
+    }
+    let native_l1 = native_test
+        .split("- name: L1 tests")
+        .nth(1)
+        .and_then(|tail| tail.split("- name: Companion suite").next())
+        .unwrap_or_default();
+    if native_l1.contains("cargo build") || native_l1.contains("rustc") {
+        missing.push("native L1 step free of nested fixture compilation");
+    }
+    if !docs.contains("`claudine-provider-fixture`")
+        || !docs.contains("CLAUDINE_PROVIDER_FIXTURE_EXE")
+    {
+        missing.push("closed-vocabulary documentation and exported path");
+    }
+
+    assert!(
+        missing.is_empty(),
+        "Claudine provider runner tooling is not end-to-end: {}",
         missing.join(", ")
     );
 }

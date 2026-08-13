@@ -55,6 +55,27 @@ pub enum PreparedContextConsumer {
     Lifecycle,
 }
 
+/// Wall-clock attribution for the bounded discovery and preparation stages
+/// owned by one invocation.
+///
+/// These timings are diagnostic breakdowns and may overlap: invocation capture
+/// contains repository observation and initial topology work, while system
+/// prompt preparation contains its existing per-stage timings.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct InvocationStageTimings {
+    pub invocation_capture: Option<std::time::Duration>,
+    pub repository_observation: Option<std::time::Duration>,
+    pub topology_initialization: Option<std::time::Duration>,
+    pub launch_context_capture: Option<std::time::Duration>,
+    pub system_prompt_preparation: Option<std::time::Duration>,
+}
+
+impl InvocationStageTimings {
+    fn add(target: &mut Option<std::time::Duration>, elapsed: std::time::Duration) {
+        *target = Some(target.unwrap_or_default() + elapsed);
+    }
+}
+
 /// Request-local accounting for discovery and preparation work.
 ///
 /// `runtime_evidence_captures` counts, per group, the calls that ran the
@@ -86,6 +107,7 @@ pub struct InvocationWorkSnapshot {
     pub runtime_evidence_captures: BTreeMap<String, usize>,
     pub runtime_evidence_reuses: BTreeMap<String, usize>,
     pub system_prompt_timings: BTreeMap<String, std::time::Duration>,
+    pub stage_timings: InvocationStageTimings,
 }
 
 #[derive(Debug, Default)]
@@ -107,6 +129,7 @@ struct InvocationWork {
     runtime_evidence_captures: Mutex<BTreeMap<String, usize>>,
     runtime_evidence_reuses: Mutex<BTreeMap<String, usize>>,
     system_prompt_timings: Mutex<BTreeMap<String, std::time::Duration>>,
+    stage_timings: Mutex<InvocationStageTimings>,
 }
 
 impl InvocationWork {
@@ -153,7 +176,23 @@ impl InvocationWork {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .clone(),
+            stage_timings: *self
+                .stage_timings
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
         }
+    }
+
+    fn record_stage(
+        &self,
+        select: impl FnOnce(&mut InvocationStageTimings) -> &mut Option<std::time::Duration>,
+        elapsed: std::time::Duration,
+    ) {
+        let mut timings = self
+            .stage_timings
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        InvocationStageTimings::add(select(&mut timings), elapsed);
     }
 }
 
@@ -418,26 +457,52 @@ impl InvocationContext {
     /// source that needs package evidence initializes the same entry's
     /// topology cell instead of discovering Git again.
     pub fn capture_for_wrapper(cwd: &Path, capture_git_status: bool) -> Self {
+        let capture_started = std::time::Instant::now();
         let cwd = absolutize(cwd);
         let request = if capture_git_status {
             GitRequest::summary()
         } else {
             GitRequest::identity()
         };
+        let observation_started = std::time::Instant::now();
         let observation = FilesystemObservation::discover(&cwd);
+        let observation_elapsed = observation_started.elapsed();
         let promptless_at_repo_root = !capture_git_status
             && observation
                 .repository_identity()
                 .ok()
                 .flatten()
                 .is_some_and(|identity| paths_equivalent(identity.repo_root(), &cwd));
-        Self::capture_with_observation(&cwd, request, !promptless_at_repo_root, observation)
+        let invocation =
+            Self::capture_with_observation(&cwd, request, !promptless_at_repo_root, observation);
+        invocation.inner.work.record_stage(
+            |timings| &mut timings.repository_observation,
+            observation_elapsed,
+        );
+        invocation.inner.work.record_stage(
+            |timings| &mut timings.invocation_capture,
+            capture_started.elapsed(),
+        );
+        invocation
     }
 
     fn capture_inner(cwd: &Path, git_request: GitRequest, include_topology: bool) -> Self {
+        let capture_started = std::time::Instant::now();
         let cwd = absolutize(cwd);
+        let observation_started = std::time::Instant::now();
         let observation = FilesystemObservation::discover(&cwd);
-        Self::capture_with_observation(&cwd, git_request, include_topology, observation)
+        let observation_elapsed = observation_started.elapsed();
+        let invocation =
+            Self::capture_with_observation(&cwd, git_request, include_topology, observation);
+        invocation.inner.work.record_stage(
+            |timings| &mut timings.repository_observation,
+            observation_elapsed,
+        );
+        invocation.inner.work.record_stage(
+            |timings| &mut timings.invocation_capture,
+            capture_started.elapsed(),
+        );
+        invocation
     }
 
     fn capture_with_observation(
@@ -645,6 +710,7 @@ impl InvocationContext {
         &self,
         requirements: &darkmatter::markdown::compose::ContextRequirements,
     ) -> darkmatter::markdown::compose::ComposeContext {
+        let started = std::time::Instant::now();
         self.ensure_launch_topology_for(requirements);
         let evidence = self.runtime_evidence_for(
             &self.inner.launch_repository,
@@ -656,11 +722,16 @@ impl InvocationContext {
             .work
             .launch_context_constructions
             .fetch_add(1, Ordering::Relaxed);
-        darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
+        let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
             &self.inner.launch_cwd,
             requirements,
             &evidence,
-        )
+        );
+        self.inner.work.record_stage(
+            |timings| &mut timings.launch_context_capture,
+            started.elapsed(),
+        );
+        context
     }
 
     /// Extend one launch snapshot with groups newly required inside its epoch.
@@ -926,7 +997,12 @@ impl InvocationContext {
             .work
             .git_root_discoveries
             .fetch_add(1, Ordering::Relaxed);
+        let observation_started = std::time::Instant::now();
         let observation = FilesystemObservation::discover(base_dir);
+        self.inner.work.record_stage(
+            |timings| &mut timings.repository_observation,
+            observation_started.elapsed(),
+        );
         let identity = match observation.repository_identity() {
             Ok(Some(identity)) => identity.clone(),
             Ok(None) => {
@@ -980,7 +1056,13 @@ impl InvocationContext {
                 .work
                 .topology_probes
                 .fetch_add(1, Ordering::Relaxed);
-            topology_with_observation(&entry.observation).map_err(Arc::new)
+            let started = std::time::Instant::now();
+            let result = topology_with_observation(&entry.observation).map_err(Arc::new);
+            self.inner.work.record_stage(
+                |timings| &mut timings.topology_initialization,
+                started.elapsed(),
+            );
+            result
         });
         if !initialized_here {
             self.inner
@@ -1023,6 +1105,13 @@ impl InvocationContext {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         *timings.entry(stage.into()).or_default() += elapsed;
+    }
+
+    pub fn record_system_prompt_preparation(&self, elapsed: std::time::Duration) {
+        self.inner.work.record_stage(
+            |timings| &mut timings.system_prompt_preparation,
+            elapsed,
+        );
     }
 
     pub fn record_compose_operation(&self) {
@@ -1127,7 +1216,15 @@ fn observe_repository(
         .without_network()
         .filesystem(filesystem);
 
-    match sniff::detect_with_plan_and_filesystem_observation(plan, observation.clone()) {
+    let topology_started = include_topology.then(std::time::Instant::now);
+    let result = sniff::detect_with_plan_and_filesystem_observation(plan, observation.clone());
+    if let Some(started) = topology_started {
+        work.record_stage(
+            |timings| &mut timings.topology_initialization,
+            started.elapsed(),
+        );
+    }
+    match result {
         Ok(observed) => {
             let git_info = observed
                 .result
