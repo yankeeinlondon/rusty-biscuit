@@ -193,7 +193,8 @@ Step area=[{{ ctx.area }}] root=[{{ ctx.repo_root }}] agent=[{{ ctx.agent }}] mo
     assert!(text.contains("area=[alpha-lib]"), "stdout:\n{stdout}");
     assert!(
         text.contains(&format!("root=[{}]", repos.launch_repo.display())),
-        "stdout:\n{stdout}"
+        "expected root=[{}]\nparsed:\n{text}\nraw stdout:\n{stdout}",
+        repos.launch_repo.display()
     );
     for expected in [
         "agent=[claude]",
@@ -298,7 +299,8 @@ Unused body.
         text.matches(&format!("root=[{}]", repos.launch_repo.display()))
             .count(),
         4,
-        "launch root changed in a task; stdout:\n{stdout}"
+        "launch root changed in a task; expected root=[{}]\nparsed:\n{text}\nraw stdout:\n{stdout}",
+        repos.launch_repo.display()
     );
     // The leak check reads the parsed text too: an escaped separator would hide
     // a source-repository path from a raw substring search on Windows.
