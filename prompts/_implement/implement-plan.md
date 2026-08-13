@@ -11,7 +11,7 @@ description: |-
     prompt will detect the number of phases in the plan and then implement
     the project phase by phase.
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
-phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || 1 : null }}"
+phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}"
 area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
 total_phases: "{{ file_exists(plan) ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') || 0 : 0 }}"
@@ -50,8 +50,8 @@ success:
             - shell: gitnexus analyze --force
         - when: "!ctx.dirty_files"
           action:
-              - message: phase {{iteration}} of the plan made no file changes!
-              - warn: phase {{iteration}} of the plan made no file changes!
+              - message: phase {{phase}} of the plan made no file changes!
+              - warn: phase {{phase}} of the plan made no file changes!
 blocked:
     message: "💥  phase **{{phase}}** (_of {{total_phases}}_) was **blocked** because it has shell commands which were not approved for execution!"
 failure:

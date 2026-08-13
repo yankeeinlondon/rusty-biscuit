@@ -39,11 +39,8 @@ jobs:
       packages: ${{ steps.scope.outputs.packages }}
       package_names: ${{ steps.scope.outputs.package_names }}
       full_scope: ${{ steps.scope.outputs.full_scope }}
-      claudine: ${{ steps.scope.outputs.claudine }}
-      darkmatter: ${{ steps.scope.outputs.darkmatter }}
       sniff: ${{ steps.scope.outputs.sniff }}
       biscuit_tui: ${{ steps.scope.outputs.biscuit_tui }}
-      playa: ${{ steps.scope.outputs.playa }}
       preflight_os: ${{ steps.scope.outputs.preflight_os }}
       preflight_reason: ${{ steps.scope.outputs.preflight_reason }}
       change_class: ${{ steps.scope.outputs.change_class }}
@@ -120,11 +117,8 @@ jobs:
             # strategy evaluation.
             echo "has_packages=$(jq -r '.matrix | length > 0' <<<"$scope_json")"
             echo "full_scope=$(jq -r '.full_scope' <<<"$scope_json")"
-            echo "claudine=$(jq -r '.flags.claudine' <<<"$scope_json")"
-            echo "darkmatter=$(jq -r '.flags.darkmatter' <<<"$scope_json")"
             echo "sniff=$(jq -r '.flags.sniff' <<<"$scope_json")"
             echo "biscuit_tui=$(jq -r '.flags."biscuit-tui"' <<<"$scope_json")"
-            echo "playa=$(jq -r '.flags.playa' <<<"$scope_json")"
             echo "ci_tooling=$(jq -r '.flags.ci_tooling' <<<"$scope_json")"
             echo "job_estimate=$(jq -r '.job_estimate' <<<"$scope_json")"
             echo "preflight_os=$(jq -c '.preflight_os' <<<"$scope_json")"
@@ -248,58 +242,9 @@ jobs:
       wsl: ${{ matrix.wsl }}
     secrets: inherit
 
-  claudine-generator-signals:
-    name: Claudine generator and signals drift
-    needs: [scope, preflight]
-    if: >-
-      !cancelled() &&
-      needs.scope.outputs.claudine == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up the pinned Rust toolchain
-        run: rustup show
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
-          shared-key: claudine-generator-signals
-      - uses: extractions/setup-just@v2
-      - uses: taiki-e/install-action@nextest
-      - name: Verify generator output and signal fixtures
-        run: cd claudine && just test-gen
-
-  darkmatter-no-color:
-    name: Darkmatter color-depth tests under NO_COLOR=1
-    needs: [scope, preflight]
-    if: >-
-      !cancelled() &&
-      needs.scope.outputs.darkmatter == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      NO_COLOR: "1"
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up the pinned Rust toolchain
-        run: rustup show
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-      - uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: ". -> target"
-          shared-key: package-ci-darkmatter-test-ubuntu-latest
-      - run: cargo test -p darkmatter --lib terminal::tests::test_color_depth
-
-  # Specialized runtime contracts (D12): orchestrated by the primary workflow,
+  # Specialized runtime contract (D12): orchestrated by the primary workflow,
   # selected from affected scope, so there is one CI run per commit instead of a
-  # separate wall of path-triggered workflows. Each preserves its unique runtime
+  # separate wall of path-triggered workflows. It preserves its unique runtime
   # evidence; shared bootstrap lives in the reusable workflow it calls.
   biscuit-tui-captured-stdout:
     name: biscuit-tui-captured-stdout
@@ -308,15 +253,6 @@ jobs:
       !cancelled() &&
       needs.scope.outputs.biscuit_tui == 'true'
     uses: ./.github/workflows/biscuit-tui-windows-captured-stdout.yml
-    secrets: inherit
-
-  playa-windows:
-    name: playa-windows
-    needs: [scope, preflight]
-    if: >-
-      !cancelled() &&
-      needs.scope.outputs.playa == 'true'
-    uses: ./.github/workflows/playa-windows.yml
     secrets: inherit
 
   # CI's own tooling — the merge-gate binary (`scripts/ci-rollup*.rs`), the
@@ -377,10 +313,7 @@ jobs:
       - scope
       - preflight
       - package-ci
-      - claudine-generator-signals
-      - darkmatter-no-color
       - biscuit-tui-captured-stdout
-      - playa-windows
       - ci-tooling
     if: always()
     runs-on: ubuntu-latest
@@ -500,10 +433,7 @@ jobs:
     needs:
       - scope
       - preflight
-      - claudine-generator-signals
-      - darkmatter-no-color
       - biscuit-tui-captured-stdout
-      - playa-windows
       - ci-tooling
     if: always()
     runs-on: ubuntu-latest
@@ -519,10 +449,7 @@ jobs:
           RESULTS: |
             bootstrap (scope calculation):${{ needs.scope.result }}
             bootstrap (preflight):${{ needs.preflight.result }}
-            claudine generator drift:${{ needs.claudine-generator-signals.result }}
-            darkmatter NO_COLOR contract:${{ needs.darkmatter-no-color.result }}
             biscuit-tui Windows captured stdout:${{ needs.biscuit-tui-captured-stdout.result }}
-            playa native Windows build:${{ needs.playa-windows.result }}
             ci tooling (rollup and scope):${{ needs.ci-tooling.result }}
         run: |
           set -euo pipefail

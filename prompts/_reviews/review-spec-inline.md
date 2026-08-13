@@ -9,8 +9,11 @@ dir: "{{ dirname(spec) }}"
 start:
     message: "👀 reviewing the specification file: `{{spec}}`"
 success:
-    say: "The review of the draft specification file in {{ctx.area}} has completed"
-    message: "✅  review of the draft specification `{{spec}}` has completed"
+    say: |-
+        ctx.area
+            ? "The review of the draft specification file in {{ctx.area}} has completed"
+            : "The review of the draft specification file in the {{ctx.repo.name}} repo has completed"
+    message: "✅  review of the draft specification `{{ link(spec) }}` has completed"
 failure:
     say: "The inline review of the draft specification in {{ctx.area}} failed to complete!"
     message: "💥  failed to complete the inline review of `{{parent_dir(spec)}}` spec in **{{ctx.area}}**!"

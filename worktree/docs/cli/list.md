@@ -18,8 +18,8 @@ When the terminal supports inline images (Kitty, iTerm2, Ghostty, WezTerm, Warp,
 
 The graph varies based on which worktree is current:
 
-- **On a feature branch**: shows the 2-branch view -- up to 2 context commits before the merge-base, up to 5 commits on the feature branch since divergence, and up to 5 commits on the default branch since divergence.
-- **On the base/main branch**: shows up to 10 recent commits on main with all active worktree branches forking off at their divergence points, each showing up to 10 commits.
+- **On a feature branch**: shows the 2-branch view -- up to 2 shared context commits ending at the selected merge-base, up to 5 commits unique to the feature tip (not reachable from the default tip), and up to 5 commits unique to the default tip (not reachable from the feature tip).
+- **On the base/main branch**: shows up to 10 recent commits on main with all active worktree branches anchored at their selected merge-base, each showing up to 10 commits unique to that branch tip (not reachable from the default tip).
 
 The graph is suppressed when the terminal width is less than **80 characters**.
 
@@ -41,8 +41,8 @@ The `-w` / `--width` flag overrides this automatic sizing. It accepts character 
 
 With `-v` / `--verbose`, additional detail is shown below the graph (only when on a feature branch):
 
-- **Default branch section** -- the merge-base commit formatted with SHA, conventional commit type/scope, timestamp, and any refs
-- **Feature branch section** -- all commits since the branch point, in oldest-first order, using the same format
+- **Default branch section** -- the selected merge-base commit formatted with SHA, conventional commit type/scope, timestamp, and any refs
+- **Feature branch section** -- the full sequence of commits unique to the feature tip (not reachable from the default tip), in oldest-first order, using the same format
 
 Commits are formatted as conventional commits when possible (e.g. `feat(scope): description`), with fallback to a truncated first line for non-conventional messages.
 
