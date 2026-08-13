@@ -38,9 +38,11 @@
 # recorded *example failing test* names (every JUnit-backed failing test carries
 # a `<package>::<module>::test` identity), with the shard dimension collapsed.
 #
-# The two SYNTHETIC identities carried through the re-key (`claudine-gen-drift`
-# and `coverage`) were both retired with their producers; no entry below is
-# synthetic.
+# The v1 baseline also carried two SYNTHETIC identities that were not Cargo
+# packages (`claudine-gen-drift` and `coverage`). Both are retired: the
+# generator drift suite runs as the ordinary `claudine-gen` package cell, and
+# coverage left CI entirely (decided 2026-08-12; `just coverage` is the local
+# tool).
 #
 # Every entry below is a CANDIDATE pending the Phase 4 bridging run — the first
 # full-scope run that produces package-keyed results. `ci-rollup verdict` will
@@ -207,16 +209,6 @@ owner = "@yankeeinlondon"
 reason = "red on main at the time of sync; 2 failing tests, e.g. claudine-cli::prompt_reporting::compose_frontmatter_verbose_shows_full_system_prompt"
 source_run = "30791562395"
 expiry = "2026-11-30"
-
-# ---------------------------------------------------------------------------
-# Specialized workflows — SYNTHETIC identities, NOT Cargo packages
-#
-# No synthetic entries remain. `claudine-gen-drift` was retired with its
-# standalone job (the generator drift suite runs as the ordinary `claudine-gen`
-# package cell) and `coverage` was retired with the coverage job. `ci-rollup
-# verdict` still reports any synthetic entry `baseline-out-of-scope` — it
-# neither blocks nor passes — should one be added back.
-# ---------------------------------------------------------------------------
 
 # ---------------------------------------------------------------------------
 # Approved skip budget
