@@ -145,7 +145,7 @@ pub(crate) fn interpolate_text<L: EvaluationLookup>(
 
         let mut count = 0;
         let mut warnings = Vec::new();
-        let mut spans = CodeSpanRefencer::new(&locations);
+        let mut spans = CodeSpanRefencer::new(&locations, &output);
 
         for loc in locations.into_iter().rev() {
             match parse(&loc.expression) {
@@ -389,20 +389,30 @@ struct CodeSpanRefencer {
     heads: HashMap<InlineCodeSpan, usize>,
     /// Net length change applied inside each span so far.
     deltas: HashMap<InlineCodeSpan, isize>,
+    /// Whether the span *as authored* carried CommonMark's optional padding.
+    ///
+    /// Decided before any replacement lands, because afterwards a value's own
+    /// edge spaces are indistinguishable from the author's — and stripping them
+    /// deletes data the span was asked to carry.
+    padded: HashMap<InlineCodeSpan, bool>,
 }
 
 impl CodeSpanRefencer {
-    fn new(locations: &[ExpressionLocation]) -> Self {
+    fn new(locations: &[ExpressionLocation], source: &str) -> Self {
         let mut heads: HashMap<InlineCodeSpan, usize> = HashMap::new();
+        let mut padded: HashMap<InlineCodeSpan, bool> = HashMap::new();
         for location in locations {
             if let Some(span) = location.code_span {
                 heads
                     .entry(span)
                     .and_modify(|head| *head = (*head).min(location.start))
                     .or_insert(location.start);
+                padded
+                    .entry(span)
+                    .or_insert_with(|| authored_span_is_padded(source, span));
             }
         }
-        Self { heads, deltas: HashMap::new() }
+        Self { heads, deltas: HashMap::new(), padded }
     }
 
     fn record(
@@ -431,22 +441,47 @@ impl CodeSpanRefencer {
             return;
         }
         let content = &output[open..close];
-        let refenced = fence_code_span(strip_code_span_padding(content));
+        let denoted = if self.padded.get(&span).copied().unwrap_or(false) {
+            strip_one_padding_space(content)
+        } else {
+            content
+        };
+        let refenced = fence_code_span(denoted);
         output.replace_range(span.start..end, &refenced);
     }
 }
 
-/// Undoes CommonMark's code-span padding rule to recover the content the
-/// authored span denoted.
-fn strip_code_span_padding(content: &str) -> &str {
-    if content.starts_with(' ')
+/// Whether the span at `span` was authored with CommonMark's optional padding.
+///
+/// Bounds are checked rather than assumed: the span offsets come from a scan of
+/// `source`, but a caller that ever passed a different string must degrade to
+/// "unpadded" instead of slicing mid-character.
+fn authored_span_is_padded(source: &str, span: InlineCodeSpan) -> bool {
+    let open = span.start + span.fence;
+    let Some(close) = span.end.checked_sub(span.fence) else {
+        return false;
+    };
+    open <= close
+        && close <= source.len()
+        && source.is_char_boundary(open)
+        && source.is_char_boundary(close)
+        && is_code_span_padded(&source[open..close])
+}
+
+/// CommonMark strips one space from each end of a code span only when both ends
+/// carry one and the content is not all spaces.
+fn is_code_span_padded(content: &str) -> bool {
+    content.starts_with(' ')
         && content.ends_with(' ')
         && content.chars().any(|character| character != ' ')
-    {
-        &content[1..content.len() - 1]
-    } else {
-        content
-    }
+}
+
+/// Undoes the one space CommonMark strips from each end of a padded span.
+fn strip_one_padding_space(content: &str) -> &str {
+    content
+        .strip_prefix(' ')
+        .and_then(|rest| rest.strip_suffix(' '))
+        .unwrap_or(content)
 }
 
 /// Spells `content` as a code span whose delimiters cannot be closed early and
@@ -459,11 +494,8 @@ fn fence_code_span(content: &str) -> String {
         longest_run = longest_run.max(run);
     }
     let fence = "`".repeat(longest_run + 1);
-    let padded = content.starts_with('`')
-        || content.ends_with('`')
-        || (content.starts_with(' ')
-            && content.ends_with(' ')
-            && content.chars().any(|character| character != ' '));
+    let padded =
+        content.starts_with('`') || content.ends_with('`') || is_code_span_padded(content);
     if padded {
         format!("{fence} {content} {fence}")
     } else {

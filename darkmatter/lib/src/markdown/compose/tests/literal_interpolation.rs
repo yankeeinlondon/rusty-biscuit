@@ -177,17 +177,80 @@ fn transcluded_child_path_parses_as_exact_literal_text() {
     assert_eq!(paragraph_text(composed.content()), format!("child={UNC_HIDDEN_PATH}"));
 }
 
+/// Content of the one code span in `markdown`, as CommonMark parses it.
+fn code_span_text(markdown: &str) -> String {
+    let mut spans = Parser::new_ext(markdown, Options::all()).filter_map(|event| match event {
+        Event::Code(code) => Some(code.into_string()),
+        _ => None,
+    });
+    let span = spans
+        .next()
+        .unwrap_or_else(|| panic!("composed output must retain an inline code span: {markdown:?}"));
+    assert!(
+        spans.next().is_none(),
+        "an interpolated value split its span into several: {markdown:?}"
+    );
+    span
+}
+
+/// Compose `value` into an inline code span and return both what the composer
+/// wrote and what CommonMark reads back from it.
+fn code_span_round_trip(value: &str) -> (String, String) {
+    let composed = compose_body("Path: `{{ value }}` end\n", json!({"value": value}));
+    let source = composed.content().to_string();
+    let parsed = code_span_text(&source);
+    (source, parsed)
+}
+
 #[test]
-fn zzz_probe_roundtrip() {
-    for value in ["a`b","a``b","a```b","```","`","` `"," x ","  ","x"] {
-        let composed = compose_body("Path: `{{ value }}` end\n", json!({"value": value}));
-        let code = Parser::new_ext(composed.content(), Options::all())
-            .find_map(|e| match e { Event::Code(c) => Some(c.into_string()), _ => None });
-        eprintln!("CODE {value:?} => src={:?} parsed={code:?}", composed.content());
+fn inline_code_widens_its_fence_past_the_longest_backtick_run() {
+    // A one-backtick delimiter closes on the value's own backtick, so each of
+    // these values needs a strictly longer fence than the run it contains.
+    for (value, expected_fence) in [("a`b", "``"), ("a``b", "```"), ("a```b", "````")] {
+        let (source, parsed) = code_span_round_trip(value);
+        assert_eq!(parsed, value, "source was {source:?}");
+        assert_eq!(
+            source,
+            format!("Path: {expected_fence}{value}{expected_fence} end\n"),
+            "the fence must be exactly one backtick longer than the value's longest run"
+        );
     }
-    for value in ["a\nb","a\n\nb","a\n    b","a\n\tb","    x","x  ","C:\\Users\\x\\.tmpZZZ\\repo"] {
-        let composed = compose_body("before {{ value }} after\n", json!({"value": value}));
-        let events: Vec<_> = Parser::new_ext(composed.content(), Options::all()).collect();
-        eprintln!("PROSE {value:?} => src={:?}\n   ev={events:?}", composed.content());
+}
+
+#[test]
+fn inline_code_pads_values_that_touch_a_backtick_at_either_edge() {
+    // Widening alone is not enough here: without the padding spaces the value's
+    // leading or trailing backtick would fuse with the delimiter and change the
+    // fence length CommonMark sees.
+    for (value, expected_source) in [
+        ("`", "Path: `` ` `` end\n"),
+        ("```", "Path: ```` ``` ```` end\n"),
+        ("` `", "Path: `` ` ` `` end\n"),
+    ] {
+        let (source, parsed) = code_span_round_trip(value);
+        assert_eq!(parsed, value, "source was {source:?}");
+        assert_eq!(source, expected_source);
     }
+}
+
+#[test]
+fn inline_code_keeps_the_values_own_edge_spaces() {
+    // CommonMark strips one space from each end of a code span whose content is
+    // padded at both ends, so a value that is itself padded has to be padded
+    // again to survive the round trip. Its all-space sibling is exempt from the
+    // stripping rule and must therefore NOT be padded.
+    for (value, expected_source) in [(" x ", "Path: `  x  ` end\n"), ("  ", "Path: `  ` end\n")] {
+        let (source, parsed) = code_span_round_trip(value);
+        assert_eq!(parsed, value, "source was {source:?}");
+        assert_eq!(source, expected_source);
+    }
+}
+
+#[test]
+fn authored_code_span_padding_is_syntax_rather_than_content() {
+    // The mirror of the test above: spaces the *author* wrote around the
+    // expression are CommonMark's optional padding and denote nothing, so they
+    // must not reappear in the value.
+    let composed = compose_body("Path: ` {{ value }} ` end\n", json!({"value": "x"}));
+    assert_eq!(code_span_text(composed.content()), "x");
 }

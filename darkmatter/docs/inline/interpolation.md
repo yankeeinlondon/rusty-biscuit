@@ -33,7 +33,13 @@ raw/typed contracts; `raw_markdown` does not change those surfaces.
 ### Code and directive regions
 
 - Inline code is interpolated by default and replacement bytes remain code
-  content rather than escaped prose.
+  content rather than escaped prose. The span's own delimiters are rewritten
+  once its replacements land, because neither of CommonMark's code-span rules
+  is expressible as replacement text: the fence grows one backtick longer than
+  the longest run in the value, and a value that begins or ends with a backtick
+  or with a space gains the padding space CommonMark strips back off. Padding
+  the *author* wrote around the expression is syntax, so it is not carried into
+  the value.
 - Fenced and indented code are skipped unless `interpolate_code_blocks: true`
   or `ComposeOptions::with_interpolate_code_blocks(true)` enables them. Once
   enabled, replacements preserve raw code bytes.

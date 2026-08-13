@@ -3,10 +3,62 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use pulldown_cmark::{Event, Options, Parser, TagEnd};
 use tempfile::TempDir;
 
 mod common;
 use common::strip_ansi;
+
+/// Real directory the launch repository is created beneath.
+///
+/// The leading `.` is the point of the fixture: it puts a path separator
+/// immediately before a `.` in every composed `ctx.repo_root`, which on Windows
+/// is the `\.` sequence CommonMark consumes as an escape unless interpolation
+/// is literal. The backtick pair earns the same coverage on Unix, where the
+/// separator is `/` and nothing else in a temporary path is Markdown syntax —
+/// without it a lost literal-interpolation guard could only be caught on
+/// Windows.
+const HIDDEN_LAUNCH_PARENT: &str = ".tmp`ZZZ`";
+
+/// Path of the launch repository for a fixture rooted at `workspace_root`.
+///
+/// Fails loudly rather than degrading quietly: a fixture that stopped crossing
+/// the separator-then-`.` boundary would still pass every assertion below while
+/// no longer reproducing the regression.
+fn launch_repository(workspace_root: &Path) -> PathBuf {
+    let repo = workspace_root
+        .join(HIDDEN_LAUNCH_PARENT)
+        .join("launch-repository");
+    let boundary = format!("{}{HIDDEN_LAUNCH_PARENT}", std::path::MAIN_SEPARATOR);
+    assert!(
+        repo.to_string_lossy().contains(boundary.as_str()),
+        "the launch repository must sit behind a `{boundary}` boundary: {}",
+        repo.display()
+    );
+    repo
+}
+
+/// Literal text of a composed Markdown document.
+///
+/// An interpolated scalar is serialized with whatever escaping its literal text
+/// requires, so the bytes the CLI prints and the values they denote are two
+/// different strings. Inline code contributes its content without its
+/// delimiters, so a value that escaped into a code span is reported as the text
+/// it is *not*, rather than being reassembled back into a passing comparison.
+fn parsed_text(markdown: &str) -> String {
+    let mut text = String::new();
+    for event in Parser::new_ext(markdown, Options::all() - Options::ENABLE_SMART_PUNCTUATION) {
+        match event {
+            Event::Text(chunk) => text.push_str(&chunk),
+            Event::Code(code) => text.push_str(&code),
+            Event::SoftBreak | Event::HardBreak | Event::End(TagEnd::Paragraph) => {
+                text.push('\n');
+            }
+            _ => {}
+        }
+    }
+    text
+}
 
 struct Repositories {
     _root: TempDir,
@@ -19,7 +71,7 @@ struct Repositories {
 impl Repositories {
     fn new() -> Self {
         let root = TempDir::new().unwrap();
-        let launch_repo = root.path().join("launch-repository");
+        let launch_repo = launch_repository(root.path());
         let launch_area = launch_repo.join("alpha/lib");
         let source_repo = root.path().join("source-repository");
         let home = root.path().join("home");
@@ -135,11 +187,12 @@ Step area=[{{ ctx.area }}] root=[{{ ctx.repo_root }}] agent=[{{ ctx.agent }}] mo
 
     let output = repos.run(&sequence, &[]);
     let stdout = plain(&output.stdout);
+    let text = parsed_text(&stdout);
     let stderr = plain(&output.stderr);
     assert!(output.status.success(), "stderr:\n{stderr}");
-    assert!(stdout.contains("area=[alpha-lib]"), "stdout:\n{stdout}");
+    assert!(text.contains("area=[alpha-lib]"), "stdout:\n{stdout}");
     assert!(
-        stdout.contains(&format!("root=[{}]", repos.launch_repo.display())),
+        text.contains(&format!("root=[{}]", repos.launch_repo.display())),
         "stdout:\n{stdout}"
     );
     for expected in [
@@ -149,9 +202,9 @@ Step area=[{{ ctx.area }}] root=[{{ ctx.repo_root }}] agent=[{{ ctx.agent }}] mo
         "env-model=[claude-sonnet-4-6]",
         "file=[source-marker]",
     ] {
-        assert!(stdout.contains(expected), "missing `{expected}`; stdout:\n{stdout}");
+        assert!(text.contains(expected), "missing `{expected}`; stdout:\n{stdout}");
     }
-    assert!(!stdout.contains("launch-marker"), "stdout:\n{stdout}");
+    assert!(!text.contains("launch-marker"), "stdout:\n{stdout}");
 }
 
 #[test]
@@ -222,10 +275,11 @@ Unused body.
 
     let output = repos.run(&sequence, &[]);
     let stdout = plain(&output.stdout);
+    let text = parsed_text(&stdout);
     let stderr = plain(&output.stderr);
     assert!(output.status.success(), "stderr:\n{stderr}");
     for name in ["serial-a", "serial-b", "parallel-a", "parallel-b"] {
-        assert!(stdout.contains(&format!("Task {name}")), "stdout:\n{stdout}");
+        assert!(text.contains(&format!("Task {name}")), "stdout:\n{stdout}");
     }
     for expected in [
         "area=[alpha-lib]",
@@ -235,17 +289,18 @@ Unused body.
         " env-model=[claude-sonnet-4-6]",
     ] {
         assert_eq!(
-            stdout.matches(expected).count(),
+            text.matches(expected).count(),
             4,
             "`{expected}` did not reach every task; stdout:\n{stdout}"
         );
     }
     assert_eq!(
-        stdout
-            .matches(&format!("root=[{}]", repos.launch_repo.display()))
+        text.matches(&format!("root=[{}]", repos.launch_repo.display()))
             .count(),
         4,
         "launch root changed in a task; stdout:\n{stdout}"
     );
-    assert!(!stdout.contains(&repos.source_repo.display().to_string()));
+    // The leak check reads the parsed text too: an escaped separator would hide
+    // a source-repository path from a raw substring search on Windows.
+    assert!(!text.contains(&repos.source_repo.display().to_string()));
 }
