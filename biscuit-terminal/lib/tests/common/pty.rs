@@ -128,6 +128,8 @@ pub fn spawn_with_env(envs: &[(&str, &str)]) -> OsSession {
         cmd.env(k, v);
     }
 
+    // `mut` is only consumed by the Windows-only ConPTY resize below.
+    #[cfg_attr(not(windows), allow(unused_mut))]
     let mut session =
         expectrl::Session::spawn(cmd).expect("failed to spawn discovery_probe in PTY");
     #[cfg(windows)]
