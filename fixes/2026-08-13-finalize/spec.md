@@ -4,6 +4,7 @@ created: 2026-08-13
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-08-13
+review_iterations: 1
 depends-on: ../../claudine/fixes/_completed/2026-08-12-ctx-launch-anchor/spec.md
 area: claudine
 packages:
@@ -360,9 +361,26 @@ package harness without focusing a host window.
 7. Relevant comments and public interpolation documentation agree with the
    implemented behavior.
 
-## Open Questions
+## Ratified Decisions
 
-### 1. What are body-interpolation values: Markdown syntax or literal text?
+### 1. Body-interpolation values are literal text by default
+
+**Decision (ratified 2026-08-13): Option A.** Body-prose interpolation treats
+evaluated values as literal text. Intentional Markdown structure requires the
+explicit `raw_markdown(value)` escape hatch.
+
+The corpus audit found a bounded migration surface. Three shipped prompt body
+expressions intentionally generate Markdown lists and must use the escape
+hatch when F3 lands:
+
+- `prompts/faster-builds-and-tests.md:17`
+- `prompts/code-comment-quality.md:18`
+- `prompts/context.md:34`
+
+All three call `as_unordered_list`. Representative downstream Claudine research
+fleet documents use scalar/path interpolation in their bodies and require no
+migration. Frontmatter render helpers retain their parser-specific raw values,
+and fenced documentation examples are not body-prose interpolation sites.
 
 This is a major Darkmatter contract decision. The current string-first
 pipeline lets a value inject Markdown syntax accidentally, then cleanup parses
@@ -402,16 +420,17 @@ the helper.
   interpolation non-portable, and pushes a platform trap onto every document
   author.
 
-**Recommendation:** Option A. Darkmatter should treat computed data as text
-unless the author explicitly asks for syntax. This is the only option that
-defines a general contract instead of recognizing one observed path spelling.
-Before implementation, audit the shipped prompt corpus for values that
-intentionally inject Markdown and migrate those sites to the explicit escape
-hatch. If that audit reveals a prohibitive compatibility surface, return to
-Option B with the complete Windows path grammar documented and tested; do not
-silently fall back to a global backslash rewrite.
+The audit did not reveal a prohibitive compatibility surface. F3 therefore
+proceeds with Option A and the three migrations above; it must not fall back to
+a path heuristic or global backslash rewrite.
 
-### 2. May this branch add cell-wide CI baseline entries for unrelated main drift?
+### 2. This branch may add evidence-backed, short-lived CI baselines
+
+**Decision (ratified 2026-08-13): Option A.** Eligible main-drift cells may be
+baselined through `2026-09-30` only when their exact failing identities have
+been diffed against the source and branch runs. A cell without identity-level
+diff evidence must follow Option B and receive its main-side fix before this
+branch proceeds.
 
 **Option A — Add short-lived entries and file main-side follow-ups
 (recommended).** Use exact source-run evidence, set expiration to 2026-09-30,
@@ -431,8 +450,6 @@ new baseline entries here.
 - **Cons:** delays the launch-anchor fix behind several unrelated packages,
   including Windows-only issues that need their own CI iterations.
 
-**Recommendation:** Option A, with the shorter 2026-09-30 expiration rather
-than copying the existing November migration horizon. The source failures are
-verified and unrelated, while the required identity diff mitigates the broad
-cell key. If identity-level diff evidence cannot be produced for a cell, use
-Option B for that cell rather than baselining it on inference.
+The shorter expiration avoids inheriting the existing November migration
+horizon. Phase 5 remains responsible for exact source-run metadata, ownership,
+and per-cell identity evidence.
