@@ -4,8 +4,8 @@ description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 1acc7c1c76b11142-d49b2c8a09aa1287
-last_updated: 2026-08-06
+hash: 1acc7c1c76b11142-074f2fcc0f68fad2
+last_updated: 2026-08-12
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -224,9 +224,8 @@ to save ~2.4 minutes — see `fixes/2026-08-06-cicd/spec.md` § Sharding). L1
 runs with `--no-fail-fast`, and CI selects the `ci` nextest profile
 explicitly.
 
-Pull requests generate one LCOV report for the same affected package closure.
-The standalone `coverage.yml` performs one full-workspace pass nightly or on
-manual dispatch; pushes to `main` do not repeat PR coverage.
+Coverage is a local tool, not a CI producer (decided 2026-08-12): run a
+package's `just coverage` recipe for an LCOV report. CI generates none.
 
 Do not use `cargo build --workspace`, `cargo check --workspace`, a bare root
 `cargo build`/`cargo check`/`cargo test`, or an unscoped root `just` lifecycle

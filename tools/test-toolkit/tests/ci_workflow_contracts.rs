@@ -569,10 +569,11 @@ fn native_prerequisites_are_installed_before_anything_is_built() {
             }
         }
     }
-    // check, test, lint, l2, browser in the reusable package workflow, plus the
-    // workspace-wide affected-coverage job in ci.yml.
+    // check, test, lint, l2, browser in the reusable package workflow.
+    // (Coverage left CI entirely — decided 2026-08-12; `just coverage` is the
+    // local tool.)
     assert_eq!(
-        provisioning_jobs, 6,
+        provisioning_jobs, 5,
         "every building CI job must provision native prerequisites"
     );
 }
@@ -853,7 +854,6 @@ fn ci_summarizes_the_first_actionable_failure_class() {
     for stage in [
         "bootstrap (scope calculation)",
         "bootstrap (preflight)",
-        "coverage",
     ] {
         assert!(
             ci.contains(stage),
@@ -974,59 +974,9 @@ fn release_calculation_asserts_a_clean_tracked_worktree() {
 // --- D14: scheduled automation is separate and bounded ------------------------
 
 #[test]
-fn benchmarks_are_scheduled_only_and_carry_a_measured_budget() {
-    let bench = workflow("bench-nightly.yml");
-    assert!(
-        bench.contains("schedule:") && bench.contains("workflow_dispatch"),
-        "bench-nightly must be a scheduled/manual performance workflow"
-    );
-    assert!(
-        !bench.contains("\n  push:\n") && !bench.contains("\n  pull_request:\n"),
-        "bench-nightly must not run on push — a slow benchmark is not a test regression (D14)"
-    );
-    assert!(
-        bench.contains("timeout-minutes: 90") && bench.contains("Timeout budget"),
-        "the benchmark job must document the measurement its timeout budget came from (AC30)"
-    );
-    assert!(
-        bench.contains("runner image") && bench.contains("toolchain"),
-        "benchmark results must record runner class and toolchain so comparisons stay valid"
-    );
-}
-
-#[test]
-fn benchmark_upload_failure_cannot_erase_a_successful_measurement() {
-    let bench = workflow("bench-nightly.yml");
-    let run_at = bench
-        .find("- name: Run benchmarks")
-        .expect("bench-nightly must have a benchmark execution step");
-    let upload_at = bench
-        .find("- name: Upload results to Bencher.dev")
-        .expect("bench-nightly must have a separate upload step");
-    assert!(run_at < upload_at, "execution must precede upload");
-
-    let rest = &bench[upload_at + 1..];
-    let upload = &rest[..rest.find("- name: ").unwrap_or(rest.len())];
-    assert!(
-        upload.contains("continue-on-error: true"),
-        "the upload step must be best-effort so it cannot fail an otherwise good measurement"
-    );
-    assert!(
-        !bench[..upload_at].contains("continue-on-error: true"),
-        "benchmark EXECUTION must not be continue-on-error — a broken bench must be visible"
-    );
-    assert!(
-        upload.contains("steps.bench.outcome == 'success'"),
-        "the upload must be tied to a successful measurement, not run unconditionally"
-    );
-}
-
-#[test]
 fn scheduled_workflows_are_operationally_distinct() {
-    const SCHEDULED: [&str; 5] = [
-        "bench-nightly.yml",
+    const SCHEDULED: [&str; 3] = [
         "fuzz-nightly.yml",
-        "coverage.yml",
         "sniff-performance.yml",
         "maintenance-audit.yml",
     ];
@@ -1568,7 +1518,6 @@ fn ci_verdict_is_the_single_required_check() {
         "scope",
         "preflight",
         "package-ci",
-        "affected-coverage",
         "biscuit-tui-captured-stdout",
         "ci-tooling",
     ] {

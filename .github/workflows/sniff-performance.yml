@@ -37,7 +37,7 @@ on:
       - "Cargo.lock"
       - ".github/workflows/sniff-performance.yml"
   schedule:
-    # Nightly, offset from bench-nightly (00:00) to avoid contending for runners.
+    # Nightly, in its own schedule slot to avoid contending with other scheduled runs.
     - cron: "0 4 * * *"
   workflow_dispatch: {}
 

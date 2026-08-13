@@ -38,9 +38,11 @@
 # recorded *example failing test* names (every JUnit-backed failing test carries
 # a `<package>::<module>::test` identity), with the shard dimension collapsed.
 #
-# One entry is a SYNTHETIC identity, not a Cargo package (`coverage`): it stays
-# here, never in any package scope, reported `baseline-out-of-scope` until its
-# specialized producer joins the result contract.
+# The v1 baseline also carried two SYNTHETIC identities that were not Cargo
+# packages (`claudine-gen-drift` and `coverage`). Both are retired: the
+# generator drift suite runs as the ordinary `claudine-gen` package cell, and
+# coverage left CI entirely (decided 2026-08-12; `just coverage` is the local
+# tool).
 #
 # Every entry below is a CANDIDATE pending the Phase 4 bridging run — the first
 # full-scope run that produces package-keyed results. `ci-rollup verdict` will
@@ -207,27 +209,6 @@ owner = "@yankeeinlondon"
 reason = "red on main at the time of sync; 2 failing tests, e.g. claudine-cli::prompt_reporting::compose_frontmatter_verbose_shows_full_system_prompt"
 source_run = "30791562395"
 expiry = "2026-11-30"
-
-# ---------------------------------------------------------------------------
-# Specialized workflows — SYNTHETIC identities, NOT Cargo packages
-#
-# `coverage` is not a package. It is recorded here so the migration from the
-# area-keyed baseline is lossless, but it is never in any package scope, so
-# `ci-rollup verdict` reports it `baseline-out-of-scope` and IGNORES it — it
-# neither blocks nor passes. It moves into the package-keyed result contract
-# only when its specialized producer emits the same schema (plan §3.5, out of
-# scope here). `claudine-gen-drift` was retired with its standalone job: the
-# generator drift suite runs as the ordinary `claudine-gen` package cell.
-# ---------------------------------------------------------------------------
-
-[[failure]]
-package = "coverage"
-environment = "ubuntu-latest"
-tier = "lint"
-owner = "@yankeeinlondon"
-reason = "synthetic identity (coverage for affected packages), not a Cargo package; carried forward from the area-keyed baseline, ignored by the verdict until its producer emits package-keyed results"
-source_run = "30323254931"
-expiry = "2026-10-31"
 
 # ---------------------------------------------------------------------------
 # Approved skip budget
