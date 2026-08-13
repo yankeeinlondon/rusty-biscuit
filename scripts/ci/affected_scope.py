@@ -549,11 +549,16 @@ def package_directories(
     return sorted(directories, key=lambda item: len(item[0].parts), reverse=True)
 
 
-def dependent_closure(
+def direct_dependents(
     seeds: set[str], metadata: dict[str, Any], packages: dict[str, dict[str, Any]]
 ) -> set[str]:
-    """Reverse-dependency closure: the changed packages plus everything that
-    depends on them, transitively. Narrowing the fan-out must never narrow this.
+    """The changed packages plus their DIRECT reverse Cargo dependencies.
+
+    Deliberately not transitive (decided 2026-08-13, cost): a change two hops
+    away is not re-tested here. The accepted trade-off is that a regression
+    observable only through an intermediate package lands silently and
+    surfaces the next time the intermediate itself is touched (or on a
+    `workflow_dispatch` full run).
     """
     reverse_dependencies: dict[str, set[str]] = {
         package_id: set() for package_id in packages
@@ -567,13 +572,8 @@ def dependent_closure(
                 reverse_dependencies[dependency_id].add(node["id"])
 
     affected = set(seeds)
-    pending = list(seeds)
-    while pending:
-        package_id = pending.pop()
-        for dependent in reverse_dependencies.get(package_id, set()):
-            if dependent not in affected:
-                affected.add(dependent)
-                pending.append(dependent)
+    for package_id in seeds:
+        affected.update(reverse_dependencies.get(package_id, set()))
     return affected
 
 
@@ -979,7 +979,7 @@ def calculate_scope(
             )
 
         seeds, full_scope = changed_package_ids(files, root, packages, lock_impacted)
-        affected_ids = dependent_closure(seeds, metadata, packages)
+        affected_ids = direct_dependents(seeds, metadata, packages)
 
     impacted = sorted(packages[package_id]["name"] for package_id in affected_ids)
 

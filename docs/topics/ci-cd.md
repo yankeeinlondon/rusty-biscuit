@@ -48,7 +48,10 @@ The hook itself is regression-tested in CI by `hooks-tests.yml`, so changes to `
 surface, obtains the changed file set from the event's exact base and head SHAs, and calculates:
 
 - workspace packages containing those files,
-- all transitive reverse Cargo dependencies,
+- their direct reverse Cargo dependencies (transitive dependents are
+  deliberately not selected — decided 2026-08-13 to cap run cost; a
+  regression observable only through an intermediate package surfaces when
+  that intermediate is next touched or on a manual full run),
 - curated package areas owning those packages.
 
 The selected package matrix calls `_package-ci.yml`, which compile-checks

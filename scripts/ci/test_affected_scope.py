@@ -91,15 +91,15 @@ class AffectedScopeTests(unittest.TestCase):
             **kwargs,  # type: ignore[arg-type]
         )
 
-    def test_source_change_includes_transitive_downstream_packages(self) -> None:
+    def test_source_change_includes_direct_downstream_packages(self) -> None:
         scope = self.scope(["alpha/lib/src/lib.rs"])
         self.assertEqual(["alpha-core", "beta-app"], scope["packages"])
 
-    def test_shared_dependency_change_includes_its_consumers(self) -> None:
+    def test_shared_dependency_change_selects_direct_consumers_only(self) -> None:
+        # beta-app reaches shared-tests only through alpha-core; direct-only
+        # scoping (2026-08-13) deliberately leaves it out.
         scope = self.scope(["tools/shared-tests/src/lib.rs"])
-        self.assertEqual(
-            ["alpha-core", "beta-app", "shared-tests"], scope["packages"]
-        )
+        self.assertEqual(["alpha-core", "shared-tests"], scope["packages"])
 
     def test_unrelated_documentation_change_has_empty_scope(self) -> None:
         scope = self.scope(["docs/architecture.md"])
@@ -148,7 +148,7 @@ class AffectedScopeTests(unittest.TestCase):
 
 
 class ClosureTests(unittest.TestCase):
-    """R2: narrowing the fan-out must never narrow the dependency closure."""
+    """R2 (amended 2026-08-13): a seed selects its DIRECT dependents only."""
 
     def setUp(self) -> None:
         self.temporary_directory = tempfile.TemporaryDirectory()
@@ -207,7 +207,7 @@ class ClosureTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.temporary_directory.cleanup()
 
-    def test_biscuit_speaks_closure_is_exact(self) -> None:
+    def test_biscuit_speaks_selects_direct_dependents_only(self) -> None:
         scope = calculate_scope(
             ["biscuit-speaks/lib/src/lib.rs"],
             self.root,
@@ -215,15 +215,14 @@ class ClosureTests(unittest.TestCase):
             environments_for_tests(),
             self.policy,
         )
+        # claudine-cli, claudine-contract, and research-cli reach the seed
+        # only through an intermediate package and are deliberately excluded.
         self.assertEqual(
             [
                 "biscuit-speaks",
                 "biscuit-speaks-cli",
                 "claudine",
-                "claudine-cli",
-                "claudine-contract",
                 "research",
-                "research-cli",
             ],
             scope["packages"],
         )
@@ -1216,38 +1215,28 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
             [entry["package"] for entry in scope["matrix"]],
         )
 
-    def test_sniff_change_selects_exact_reverse_dependency_closure(self) -> None:
+    def test_sniff_change_selects_exact_direct_dependents(self) -> None:
         scope = self.scope("sniff/lib/src/lib.rs")
         self.assertEqual(
             [
-                "biscuit-icon-cli",
                 "biscuit-speaks",
                 "biscuit-speaks-cli",
                 "biscuit-terminal-cli",
                 "claudine",
                 "claudine-cli",
-                "claudine-contract",
-                "claudine-gen",
                 "darkmatter",
                 "darkmatter-cli",
-                "dmls",
                 "messenger",
                 "messenger-cli",
                 "model-citizen",
-                "model-citizen-cli",
                 "playa",
                 "playa-cli",
-                "rendezvous-client",
                 "rendezvous-core",
                 "rendezvous-daemon",
                 "research",
-                "research-cli",
                 "sniff",
                 "sniff-cli",
                 "unchained-ai",
-                "unchained-ai-cli",
-                "unchained-ai-contract",
-                "unchained-ai-gen",
                 "worktree",
                 "worktree-cli",
             ],
