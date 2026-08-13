@@ -1,9 +1,9 @@
 use super::*;
 use serial_test::serial;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
-use crate::system_prompt::context::LaunchContext;
+use crate::system_prompt::context::{LaunchContext, projected_path};
 
 fn init_repo(root: &std::path::Path) {
     std::fs::create_dir_all(root).unwrap();
@@ -67,6 +67,122 @@ fn write_temp_file(dir: &std::path::Path, name: &str, content: &str) -> PathBuf 
     }
     std::fs::write(&path, content).unwrap();
     path
+}
+
+/// Directory the relocation fixtures create their launch repository beneath.
+///
+/// The leading `.` is the point of the fixture: it puts a path separator
+/// immediately before a `.` in every composed `ctx.repo_root`, which on Windows
+/// is the `\.` sequence CommonMark consumes as an escape unless interpolation
+/// is literal. The backtick pair earns the same coverage on Unix, where the
+/// separator is `/` and nothing else in a temporary path is Markdown syntax.
+const HIDDEN_LAUNCH_PARENT: &str = ".tmp`ZZZ`";
+
+/// Launch repository for a fixture rooted at `fixture_root`.
+///
+/// Fails loudly rather than degrading quietly: a fixture that stopped crossing
+/// the separator-then-`.` boundary would still pass every assertion below while
+/// no longer reproducing the regression.
+fn launch_repository(fixture_root: &Path) -> PathBuf {
+    let repo = fixture_root
+        .join(HIDDEN_LAUNCH_PARENT)
+        .join("launch-repository");
+    let boundary = format!("{}{HIDDEN_LAUNCH_PARENT}", std::path::MAIN_SEPARATOR);
+    assert!(
+        repo.to_string_lossy().contains(boundary.as_str()),
+        "the launch repository must sit behind a `{boundary}` boundary: {}",
+        repo.display()
+    );
+    repo
+}
+
+/// Literal text of a composed Markdown document.
+///
+/// An interpolated scalar is serialized with whatever escaping its literal text
+/// requires, so the composed bytes and the value they denote are two different
+/// strings. Value assertions read this; spelling assertions read the composed
+/// source. Darkmatter's own render tree does the parsing, so a test cannot
+/// disagree with the composer about what the source means.
+fn parsed_text(markdown: &str) -> String {
+    let document = darkmatter::markdown::Markdown::new(markdown.to_string())
+        .as_document()
+        .expect("composed markdown must parse");
+    let mut text = String::new();
+    push_literal_text(&document.root, &mut text);
+    text
+}
+
+/// Inline code contributes its content without its delimiters, so a value that
+/// escaped into a code span is reported as the text it is *not*, rather than
+/// being reassembled back into a passing comparison.
+fn push_literal_text(node: &renderable::tree::RenderNode, text: &mut String) {
+    use renderable::tree::NodeKind;
+
+    match &node.kind {
+        NodeKind::Text { value } | NodeKind::InlineCode { value } => text.push_str(value),
+        NodeKind::SoftBreak | NodeKind::HardBreak => text.push('\n'),
+        _ => {}
+    }
+    for child in node.children() {
+        push_literal_text(child, text);
+    }
+    if matches!(node.kind, NodeKind::Paragraph { .. }) {
+        text.push('\n');
+    }
+}
+
+/// CommonMark source spelling of a scalar that must survive as literal text.
+///
+/// Derived from the value so one expectation covers every platform: on Windows
+/// each separator doubles, on Unix only the fixture's backtick pair is escaped.
+fn commonmark_source_spelling(value: &str) -> String {
+    value.replace('\\', r"\\").replace('`', r"\`")
+}
+
+/// Value of a `label=[…]` marker.
+fn field<'a>(text: &'a str, label: &str) -> &'a str {
+    let prefix = format!("{label}=[");
+    let start = text
+        .find(&prefix)
+        .unwrap_or_else(|| panic!("missing `{label}` marker in:\n{text}"))
+        + prefix.len();
+    let rest = &text[start..];
+    let end = rest
+        .find(']')
+        .unwrap_or_else(|| panic!("unterminated `{label}` marker in:\n{text}"));
+    &rest[..end]
+}
+
+/// Assert that a relocated prompt still reports the launch repository, in both
+/// the value the provider parses and the source spelling Darkmatter emits.
+///
+/// The two assertions answer different questions. The first is the test's
+/// subject: relocation must not move `ctx.repo_root`. The second pins the
+/// serialization contract — the source is exactly the escaped form of the value
+/// it denotes, so escaping can be neither dropped (a lost separator) nor
+/// applied twice.
+fn assert_launch_repo_survives_composition(
+    composed_markdown: &str,
+    label: &str,
+    launch_repo: &Path,
+    source: &Path,
+) {
+    let text = parsed_text(composed_markdown);
+    let value = field(&text, label);
+
+    assert_eq!(
+        projected_path(Path::new(value)),
+        projected_path(launch_repo),
+        "relocation changed ctx.repo_root for {}: {composed_markdown}",
+        source.display()
+    );
+    assert_eq!(
+        field(composed_markdown, label),
+        commonmark_source_spelling(value),
+        "the composed source must escape exactly what CommonMark would otherwise \
+         consume for {}",
+        source.display()
+    );
 }
 
 /// Build an executable in `dir` that prints its working directory, and return
@@ -238,7 +354,7 @@ fn normal_session_composes_the_shipped_root_system_prompt_from_launch_context() 
 #[test]
 fn primary_prompt_relocation_keeps_launch_context_and_source_local_files() {
     let fixture = TempDir::new().unwrap();
-    let launch_repo = fixture.path().join("launch-repository");
+    let launch_repo = launch_repository(fixture.path());
     let external_repo = fixture.path().join("external-repository");
     init_repo(&launch_repo);
     init_repo(&external_repo);
@@ -261,7 +377,7 @@ fn primary_prompt_relocation_keeps_launch_context_and_source_local_files() {
         std::fs::write(parent.join("fragment.md"), &fragment).unwrap();
         std::fs::write(
             source,
-            "launch.area={{ ctx.area }}\nlaunch.repo={{ ctx.repo_root }}\n\n::file ./fragment.md\n",
+            "launch.area=[{{ ctx.area }}] launch.repo=[{{ ctx.repo_root }}]\n\n::file ./fragment.md\n",
         )
         .unwrap();
         let args = SystemPromptArgs {
@@ -279,22 +395,22 @@ fn primary_prompt_relocation_keeps_launch_context_and_source_local_files() {
         let ResolvedSystemPrompt::Ready(prepared) = result else {
             panic!("expected a prepared system prompt for {}", source.display());
         };
-        assert!(
-            prepared.composed_markdown.contains("launch.area=alpha-lib"),
+        let text = parsed_text(&prepared.composed_markdown);
+        assert_eq!(
+            field(&text, "launch.area"),
+            "alpha-lib",
             "source relocation changed ctx.area for {}: {}",
             source.display(),
             prepared.composed_markdown
         );
-        assert!(
-            prepared
-                .composed_markdown
-                .contains(launch_repo.to_string_lossy().as_ref()),
-            "source relocation changed ctx.repo_root for {}: {}",
-            source.display(),
-            prepared.composed_markdown
+        assert_launch_repo_survives_composition(
+            &prepared.composed_markdown,
+            "launch.repo",
+            &launch_repo,
+            source,
         );
         assert!(
-            prepared.composed_markdown.contains(&fragment),
+            text.contains(&fragment),
             "source-local transclusion did not follow {}: {}",
             source.display(),
             prepared.composed_markdown
@@ -309,7 +425,7 @@ fn primary_prompt_relocation_keeps_launch_context_and_source_local_files() {
 #[test]
 fn appendix_relocation_keeps_launch_context_and_source_local_files() {
     let fixture = TempDir::new().unwrap();
-    let launch_repo = fixture.path().join("launch-repository");
+    let launch_repo = launch_repository(fixture.path());
     let external_repo = fixture.path().join("external-repository");
     init_repo(&launch_repo);
     init_repo(&external_repo);
@@ -330,7 +446,7 @@ fn appendix_relocation_keeps_launch_context_and_source_local_files() {
         std::fs::create_dir_all(parent).unwrap();
         let fragment = format!("appendix-source-fragment-{index}");
         std::fs::write(parent.join("appendix-fragment.md"), &fragment).unwrap();
-        let raw = "appendix.area={{ ctx.area }}\nappendix.repo={{ ctx.repo_root }}\n\n::file ./appendix-fragment.md\n";
+        let raw = "appendix.area=[{{ ctx.area }}] appendix.repo=[{{ ctx.repo_root }}]\n\n::file ./appendix-fragment.md\n";
         std::fs::write(source, raw).unwrap();
         let input = ResolvedPromptInput::capture(
             (
@@ -354,21 +470,21 @@ fn appendix_relocation_keeps_launch_context_and_source_local_files() {
         let appendix =
             prepare_non_interactive_appendix_from(candidates, Some(&shared), None).unwrap();
 
-        assert!(
-            appendix.composed_markdown.contains("appendix.area=alpha-lib"),
+        let text = parsed_text(&appendix.composed_markdown);
+        assert_eq!(
+            field(&text, "appendix.area"),
+            "alpha-lib",
             "appendix relocation changed ctx.area for {}: {}",
             source.display(),
             appendix.composed_markdown
         );
-        assert!(
-            appendix
-                .composed_markdown
-                .contains(launch_repo.to_string_lossy().as_ref()),
-            "appendix relocation changed ctx.repo_root for {}: {}",
-            source.display(),
-            appendix.composed_markdown
+        assert_launch_repo_survives_composition(
+            &appendix.composed_markdown,
+            "appendix.repo",
+            &launch_repo,
+            source,
         );
-        assert!(appendix.composed_markdown.contains(&fragment));
+        assert!(text.contains(&fragment));
     }
 
     let work = invocation.work_snapshot();

@@ -297,12 +297,16 @@ fn native_provider_fixture_preserves_argv_and_stdin_without_a_runtime_toolchain(
     let empty_path = workspace.path().join("runtime-path");
     fs::create_dir_all(&empty_path).unwrap();
 
-    for tool in ["cargo", "rustc"] {
-        let unavailable = std::process::Command::new(tool)
-            .env("PATH", &empty_path)
-            .output()
-            .expect_err("the fixture contract must not have a runtime Rust toolchain");
-        assert_eq!(unavailable.kind(), std::io::ErrorKind::NotFound);
+    // The toolchain-free contract is proved by handing every spawn below a PATH
+    // containing nothing, not by probing for `cargo` here. Windows resolves a
+    // child's program name against the PARENT's PATH, so `Command::new("cargo")
+    // .env("PATH", empty)` still finds an installed cargo and the probe asserts
+    // the host's setup rather than the fixture's independence.
+    for tool in ["cargo.exe", "rustc.exe", "cargo", "rustc"] {
+        assert!(
+            !empty_path.join(tool).exists(),
+            "the runtime PATH handed to the fixture must expose no Rust toolchain, found {tool}"
+        );
     }
 
     let capture = workspace.path().join("goose-capture.bin");
