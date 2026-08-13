@@ -45,6 +45,15 @@ fn launch_repository(workspace_root: &Path) -> PathBuf {
 /// different strings. Inline code contributes its content without its
 /// delimiters, so a value that escaped into a code span is reported as the text
 /// it is *not*, rather than being reassembled back into a passing comparison.
+/// Path as the product projects it, never as `std::fs::canonicalize` spells it.
+///
+/// On Windows `canonicalize` returns the verbatim `\\?\` form, which is a
+/// comparison/cache-key shape that never reaches a composed `ctx.*` value. A
+/// fixture that expected it would demand output the product must not produce.
+fn projected_path(path: &Path) -> PathBuf {
+    dunce::canonicalize(path).unwrap_or_else(|_| dunce::simplified(path).to_path_buf())
+}
+
 fn parsed_text(markdown: &str) -> String {
     let mut text = String::new();
     for event in Parser::new_ext(markdown, Options::all() - Options::ENABLE_SMART_PUNCTUATION) {
@@ -98,10 +107,10 @@ impl Repositories {
         )
         .unwrap();
         fs::write(launch_repo.join("beta/lib/src/lib.rs"), "").unwrap();
-        let launch_repo = fs::canonicalize(launch_repo).unwrap();
-        let launch_area = fs::canonicalize(launch_area).unwrap();
-        let source_repo = fs::canonicalize(source_repo).unwrap();
-        let home = fs::canonicalize(home).unwrap();
+        let launch_repo = projected_path(&launch_repo);
+        let launch_area = projected_path(&launch_area);
+        let source_repo = projected_path(&source_repo);
+        let home = projected_path(&home);
         Self {
             _root: root,
             launch_repo,
