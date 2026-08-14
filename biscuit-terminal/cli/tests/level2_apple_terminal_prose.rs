@@ -95,7 +95,11 @@ fn level2_apple_terminal_link_fallback_visible() {
     // shell level: bash sees `bt prose '<a href="https://example.com">click here</a>'`.
     harness
         .send_text(
-            b"printf '__BT_START__\\n'; bt prose '<a href=\"https://example.com\">click here</a>'; printf '\\n__BT_END__\\n'\n",
+            format!(
+                "printf '__BT_START__\\n'; {} prose '<a href=\"https://example.com\">click here</a>'; printf '\\n__BT_END__\\n'\n",
+                common::bt_shell_path()
+            )
+            .as_bytes(),
         )
         .expect("send_text failed");
     harness.settle();
@@ -172,7 +176,11 @@ fn level2_apple_terminal_styled_link_fallback_escapes_bracket() {
 
     harness
         .send_text(
-            b"printf '__BT_START__\\n'; bt prose '<a href=\"https://example.com\"><b>x</b>[1]</a>'; printf '\\n__BT_END__\\n'\n",
+            format!(
+                "printf '__BT_START__\\n'; {} prose '<a href=\"https://example.com\"><b>x</b>[1]</a>'; printf '\\n__BT_END__\\n'\n",
+                common::bt_shell_path()
+            )
+            .as_bytes(),
         )
         .expect("send_text failed");
     harness.settle();
@@ -257,7 +265,11 @@ fn level2_apple_terminal_double_underline_plain_text_visible() {
     // shell (zsh/bash on macOS) where `printf` and `;` are available.
     harness
         .send_text(
-            b"printf '__BT_START__\\n'; bt prose '<double-underline>important text</double-underline>'; printf '\\n__BT_END__\\n'\n",
+            format!(
+                "printf '__BT_START__\\n'; {} prose '<double-underline>important text</double-underline>'; printf '\\n__BT_END__\\n'\n",
+                common::bt_shell_path()
+            )
+            .as_bytes(),
         )
         .expect("send_text failed");
     harness.settle();

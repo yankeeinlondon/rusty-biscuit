@@ -624,16 +624,26 @@ jobs:
       # `neovim` runner tool: dmls's L2 suite runs a real Neovim (headless and
       # inside tmux). Without the binary every gate skips, and backend-proof
       # then rightly fails the tier for producing no tmux evidence.
+      #
+      # The suite targets the Neovim 0.10+ LSP client API
+      # (`vim.lsp.get_clients`, utf-8 default offset encoding), but
+      # ubuntu-latest's apt archive ships 0.9.x — so the Ubuntu leg installs a
+      # pinned release tarball instead of the distro package. The direct
+      # release-asset URL avoids the anonymous GitHub API (rate-limit 403s).
       - name: Provision neovim
         if: contains(fromJSON(inputs.runner-tools), 'neovim')
         shell: bash
         env:
           ENVIRONMENT: ${{ matrix.environment }}
+          NVIM_VERSION: v0.11.2
         run: |
           set -euo pipefail
           case "$ENVIRONMENT" in
             ubuntu-latest)
-              sudo apt-get update && sudo apt-get install -y neovim
+              curl -fsSL --retry 3 -o "$RUNNER_TEMP/nvim.tar.gz" \
+                "https://github.com/neovim/neovim/releases/download/${NVIM_VERSION}/nvim-linux-x86_64.tar.gz"
+              sudo tar -C /opt -xzf "$RUNNER_TEMP/nvim.tar.gz"
+              sudo ln -sf /opt/nvim-linux-x86_64/bin/nvim /usr/local/bin/nvim
               ;;
             macos-latest)
               brew list neovim >/dev/null 2>&1 || brew install neovim
@@ -644,6 +654,11 @@ jobs:
               ;;
           esac
           nvim --version | head -1
+          # Runtime reachability at the API level the dmls probe needs: a
+          # provisioned Neovim older than 0.10 lacks `vim.lsp.get_clients`
+          # and must fail this named step, not the test tier.
+          nvim --clean --headless \
+            "+lua assert(vim.lsp.get_clients, 'Neovim >= 0.10 required')" +q
       - name: Report L2 backend coverage
         shell: bash
         env:

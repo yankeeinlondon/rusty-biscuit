@@ -22,12 +22,45 @@ pub use biscuit_test_harness::{CapturedFrame, TerminalHarness, skip_with_reason}
 
 pub mod pane_geometry;
 
+/// Absolute path to the Cargo-built `bt` binary, shaped for a POSIX shell.
+///
+/// Typing a bare `bt` into the pane resolves through the login shell's
+/// `PATH`, which lacks the built binary on CI runners (`bt: command not
+/// found`) and, worse, silently exercises a stale host-installed `bt` on
+/// developer machines while the code under review still fails. Resolving via
+/// [`biscuit_test_harness::bin_exe!`] also works when the suite runs from a
+/// relocated nextest archive (no local `target/` build).
+///
+/// Only the parent directory is single-quoted (`'/…/debug/'bt`): the trailing
+/// `bt` stays bare so the pane's command echo still ends in `bt <args>`, which
+/// several tests anchor on (e.g. `find_row_of(plain, "bt image --debug")` and
+/// the `contains("bt ")` echo filters). Full quoting would rewrite the echo to
+/// `…/bt' <args>` and silently break those anchors.
+pub fn bt_shell_path() -> &'static str {
+    static BIN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    BIN.get_or_init(|| {
+        let path = biscuit_test_harness::bin_exe!("bt");
+        let parent = path
+            .parent()
+            .expect("built bt binary has a parent directory")
+            .display()
+            .to_string();
+        let name = path
+            .file_name()
+            .expect("built bt binary has a file name")
+            .to_string_lossy()
+            .into_owned();
+        format!("'{}/'{name}", parent.replace('\'', "'\\''"))
+    })
+}
+
 /// Sends a `bt` command to the harness and waits for the terminal to
 /// settle.
 ///
 /// `args` is the full argument string after `bt` — e.g. `"prose \"<red>x</red>\""`.
+/// The command runs the freshly built binary via [`bt_shell_path`].
 pub fn send_bt_command(harness: &mut impl TerminalHarness, args: &str) {
-    let cmd = format!("bt {}\n", args);
+    let cmd = format!("{} {}\n", bt_shell_path(), args);
     harness.send_text(cmd.as_bytes()).expect("send_text failed");
     harness.settle();
 }

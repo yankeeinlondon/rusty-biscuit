@@ -70,7 +70,7 @@ use std::time::Duration;
 use test_toolkit::{Backend, Level, require_level};
 
 mod common;
-use common::clear_no_color;
+use common::{TestWorkspace, clear_no_color};
 
 /// Captures a `claudine context <args>` run inside a freshly spawned tmux
 /// session of `cols` × `rows` cells, then tears the session down.
@@ -115,6 +115,15 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
     // ambient `NO_COLOR` out-votes — see `common::clear_no_color`.
     clear_no_color(&mut harness);
 
+    // An isolated HOME with a config already present: on a host whose real
+    // HOME carries no Claudine config (CI runners), the CLI front-runs every
+    // command with the first-run wizard, so `context` never reaches the table
+    // renderer. Seeding `.claudine/config.json` marks first-run complete —
+    // the same hermetic pattern the other L2 fixtures use (`seed_user_config`).
+    let home = TestWorkspace::named("claudine-ctx-l2-home");
+    common::wrap::seed_minimal_config(home.path());
+    let home_q = format!("'{}'", home.path().display());
+
     let claudine = cargo_bin("claudine").display().to_string();
     let cols_s = cols.to_string();
     // The environment is bound through `env` rather than the harness' inline
@@ -122,7 +131,7 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
     // print — see `report_plain_slice` for why the sentinel has to precede
     // claudine's first byte of output.
     let cmd = format!(
-        "printf '{REPORT_SENTINEL}\\n'; env FORCE_COLOR=1 COLUMNS={cols_s} {claudine} context {}",
+        "printf '{REPORT_SENTINEL}\\n'; env FORCE_COLOR=1 COLUMNS={cols_s} HOME={home_q} {claudine} context {}",
         args.join(" ")
     );
     let send = harness.send_command_with_env(&cmd, &[]);

@@ -44,7 +44,8 @@ fn osc_color_name(code: u8) -> &'static str {
 /// This function tries multiple detection methods in order:
 /// 1. Actual OSC query (if supported and not in CI/multiplexer)
 /// 2. `COLORFGBG` environment variable
-/// 3. Terminal application defaults
+/// 3. Terminal application defaults (skipped on CI, where no real terminal
+///    exists to have a default — CI without `COLORFGBG` yields `None`)
 ///
 /// The fallback chain ensures we always return a reasonable result
 /// when possible, while preferring actual terminal queries for accuracy.
@@ -57,19 +58,20 @@ pub(super) fn query_osc_color_with_timeout(code: u8, timeout: Duration) -> Optio
     // Silence unused warning on non-Unix platforms; used inside #[cfg(unix)] below.
     let _ = timeout;
 
-    // Skip if not a TTY or in CI
+    // Skip if not a TTY
     if !is_tty() {
         tracing::debug!(code, "OSC{} query skipped: not a TTY", code);
         return None;
     }
-    if is_ci() {
-        tracing::debug!(code, "OSC{} query skipped: CI environment", code);
-        return None;
-    }
 
-    // Try actual OSC query first (if terminal supports it)
+    // Try actual OSC query first (if terminal supports it). CI gates only
+    // this round-trip — no real emulator answers behind a hosted runner's
+    // PTY — while an explicitly declared `COLORFGBG` below stays honored,
+    // so a CI harness can still simulate a light/dark terminal.
     #[cfg(unix)]
-    {
+    if is_ci() {
+        tracing::debug!(code, "OSC{} actual query skipped: CI environment", code);
+    } else {
         let term_app = get_terminal_app();
         let supports_osc = matches!(
             term_app,
@@ -132,6 +134,14 @@ pub(super) fn query_osc_color_with_timeout(code: u8, timeout: Duration) -> Optio
             code
         );
         return Some(color);
+    }
+
+    // On CI without COLORFGBG, report nothing rather than guessing terminal
+    // defaults: there is no real terminal behind the runner's PTY, and the
+    // pre-existing contract for hosted runners is `None`.
+    if is_ci() {
+        tracing::debug!(code, "OSC{} default fallback skipped: CI environment", code);
+        return None;
     }
 
     // Fallback 2: Terminal app defaults
