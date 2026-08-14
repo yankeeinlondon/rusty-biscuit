@@ -4,8 +4,9 @@
 //! Common on Linux systems, also available on macOS and Windows.
 
 use std::process::Stdio;
+use std::time::Duration;
 
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 use crate::errors::TtsError;
 use crate::traits::{TtsExecutor, TtsVoiceInventory};
@@ -16,6 +17,12 @@ use crate::types::{
 
 /// Default speaking rate for eSpeak in words per minute.
 const DEFAULT_RATE_WPM: f32 = 175.0;
+
+/// Characters spoken per second at the default rate (~5 chars/word).
+const DEFAULT_CHARS_PER_SEC: f32 = DEFAULT_RATE_WPM * 5.0 / 60.0;
+
+/// Fixed floor added to every speech deadline.
+const SPEECH_DEADLINE_FLOOR: Duration = Duration::from_secs(10);
 
 /// eSpeak/eSpeak-NG TTS provider.
 ///
@@ -99,6 +106,15 @@ impl ESpeakProvider {
         format!("{}{}", lang, gender_suffix)
     }
 
+    /// Deadline for one espeak run: double the estimated speech time plus a
+    /// fixed floor. Legitimate speech always finishes well inside it; only a
+    /// run making no audio progress (wedged audio daemon) can exceed it.
+    fn speech_deadline(text: &str, speed: SpeedLevel) -> Duration {
+        let chars_per_sec = DEFAULT_CHARS_PER_SEC * speed.value();
+        let estimated_secs = text.len() as f32 / chars_per_sec;
+        SPEECH_DEADLINE_FLOOR + Duration::from_secs_f32(estimated_secs * 2.0)
+    }
+
     /// Resolve voice to a Voice struct with full metadata.
     fn resolve_voice_full(&self, config: &TtsConfig) -> Voice {
         let voice_arg = self.build_voice_arg(config);
@@ -113,8 +129,14 @@ impl ESpeakProvider {
     }
 }
 
-impl TtsExecutor for ESpeakProvider {
-    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+impl ESpeakProvider {
+    /// Run espeak with an explicit deadline (see [`TtsExecutor::speak`]).
+    async fn speak_bounded(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+        deadline: Duration,
+    ) -> Result<(), TtsError> {
         let mut cmd = tokio::process::Command::new(&self.binary);
 
         // Voice selection
@@ -151,20 +173,47 @@ impl TtsExecutor for ESpeakProvider {
         // CRITICAL: Drop stdin to send EOF signal
         drop(stdin);
 
-        // Wait for completion
-        let output = child
-            .wait_with_output()
-            .await
-            .map_err(|e| TtsError::IoError { source: e })?;
+        // espeak plays through the host audio daemon itself. A daemon socket
+        // that accepts connections but never services them (e.g. the WSLg
+        // PulseServer in a headless CI guest) blocks espeak indefinitely, so
+        // the wait is bounded and the child killed on expiry.
+        let mut stderr_pipe = child.stderr.take();
+        let mut stderr_buf = Vec::new();
+        let wait_result = tokio::time::timeout(deadline, async {
+            if let Some(stderr) = stderr_pipe.as_mut() {
+                let _ = stderr.read_to_end(&mut stderr_buf).await;
+            }
+            child.wait().await
+        })
+        .await;
 
-        if output.status.success() {
+        let status = match wait_result {
+            Ok(waited) => waited.map_err(|e| TtsError::IoError { source: e })?,
+            Err(_elapsed) => {
+                let _ = child.start_kill();
+                let _ = child.wait().await;
+                return Err(TtsError::ProcessTimeout {
+                    provider: self.binary.clone(),
+                    timeout_secs: deadline.as_secs(),
+                });
+            }
+        };
+
+        if status.success() {
             Ok(())
         } else {
             Err(TtsError::ProcessFailed {
                 provider: self.binary.clone(),
-                stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+                stderr: String::from_utf8_lossy(&stderr_buf).to_string(),
             })
         }
+    }
+}
+
+impl TtsExecutor for ESpeakProvider {
+    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
+        self.speak_bounded(text, config, Self::speech_deadline(text, config.speed))
+            .await
     }
 
     async fn is_ready(&self) -> bool {
@@ -457,6 +506,67 @@ mod tests {
         let info = provider.info();
         assert!(info.contains("eSpeak"));
         assert!(info.contains("formant"));
+    }
+
+    // ========================================================================
+    // Speech deadline tests
+    // ========================================================================
+
+    #[test]
+    fn test_speech_deadline_has_floor() {
+        let deadline = ESpeakProvider::speech_deadline("", SpeedLevel::Normal);
+        assert_eq!(deadline, SPEECH_DEADLINE_FLOOR);
+    }
+
+    #[test]
+    fn test_speech_deadline_scales_with_text_length() {
+        let short = ESpeakProvider::speech_deadline("test", SpeedLevel::Normal);
+        let long = ESpeakProvider::speech_deadline(&"word ".repeat(500), SpeedLevel::Normal);
+        assert!(long > short);
+        // 2500 chars at ~14.6 chars/sec is ~171s of speech; the deadline must
+        // comfortably cover it.
+        assert!(long > Duration::from_secs(300));
+    }
+
+    #[test]
+    fn test_speech_deadline_faster_speech_shortens_deadline() {
+        let text = "some reasonably long sentence to speak aloud";
+        let normal = ESpeakProvider::speech_deadline(text, SpeedLevel::Normal);
+        let fast = ESpeakProvider::speech_deadline(text, SpeedLevel::Fast);
+        assert!(fast < normal);
+    }
+
+    /// A child that never exits (wedged audio daemon) must be killed at the
+    /// deadline and reported as `ProcessTimeout`, not awaited forever.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn test_speak_bounded_kills_wedged_child() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let script = std::env::temp_dir().join(format!(
+            "biscuit-speaks-fake-espeak-{}.sh",
+            std::process::id()
+        ));
+        std::fs::write(&script, "#!/bin/sh\nsleep 30\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let provider = ESpeakProvider::with_binary(script.to_string_lossy());
+        let started = std::time::Instant::now();
+        let result = provider
+            .speak_bounded("test", &TtsConfig::default(), Duration::from_millis(200))
+            .await;
+        let elapsed = started.elapsed();
+
+        std::fs::remove_file(&script).ok();
+
+        assert!(
+            matches!(result, Err(TtsError::ProcessTimeout { .. })),
+            "expected ProcessTimeout, got {result:?}"
+        );
+        assert!(
+            elapsed < Duration::from_secs(5),
+            "bounded wait took {elapsed:?}"
+        );
     }
 
     // ========================================================================

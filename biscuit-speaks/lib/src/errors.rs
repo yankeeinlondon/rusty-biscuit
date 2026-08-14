@@ -45,6 +45,24 @@ pub enum TtsError {
         stderr: String,
     },
 
+    /// The TTS subprocess was killed after exceeding its speech deadline.
+    ///
+    /// Providers that play through the host audio daemon can block forever
+    /// when the daemon's socket accepts connections but never services them
+    /// (e.g. a dead WSLg PulseAudio server in a headless guest). The deadline
+    /// is generous relative to the expected speech duration, so hitting it
+    /// means the audio backend is unreachable or wedged.
+    #[error(
+        "TTS process '{provider}' did not finish within {timeout_secs}s; \
+         the audio backend is likely unreachable or wedged"
+    )]
+    ProcessTimeout {
+        /// The provider that was killed.
+        provider: String,
+        /// The deadline that was exceeded, in seconds.
+        timeout_secs: u64,
+    },
+
     /// Failed to write to the subprocess stdin.
     #[error("Failed to write to stdin for '{provider}'")]
     StdinWriteError {

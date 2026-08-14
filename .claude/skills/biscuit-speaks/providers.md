@@ -45,6 +45,9 @@ provider.speak("Hello", &TtsConfig::default()).await?;
 **Binary**: `espeak-ng` (preferred) or `espeak`
 
 **Implementation**: Subprocess-based with language codes and gender suffixes.
+The subprocess wait is bounded (fixed floor plus double the estimated speech
+time); a wedged audio daemon yields `TtsError::ProcessTimeout` instead of
+hanging the caller.
 
 ```rust
 use biscuit_speaks::ESpeakProvider;
