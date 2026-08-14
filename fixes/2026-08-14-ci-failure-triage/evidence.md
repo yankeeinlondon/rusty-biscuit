@@ -3,7 +3,8 @@ created: 2026-08-14
 phase: 5
 branch_run: 31753281913
 main_run: 31588186544
-status: blocked
+authoritative_run: 31779808759
+status: awaiting-authoritative-ci
 ---
 
 # Phase 1 evidence integrity
@@ -255,6 +256,25 @@ setup—and the relevant CI frame is retained in
 No identity is classified as flaky, so Task 2.7's repeat protocol is not
 invoked.
 
+**Branch capture reaching the assertions (closed 2026-08-14).** Focused
+branch-revision runs of
+`level2_apple_terminal_double_underline_plain_text_visible` on the same macOS
+host subsequently executed the full capture path without focus acquisition.
+Three consecutive invocations: the first failed with an empty
+sentinel-bounded capture while Terminal.app itself was cold-launching (the
+command echo and `__BT_START__` are present in the retained frame; the `bt`
+output had not rendered when the capture fired); the second and third, with
+Terminal.app already resident, passed in 1.76s each, reaching both the
+positive visible-text assertion and the negative unsupported-SGR assertions,
+alongside the three sibling Apple Terminal identities. The identity therefore
+has a branch capture that reaches its assertions and passes; the residual
+cold-launch race is the same harness-setup environment class the hosted cells
+exhibit on both branch and `main`. One caveat is recorded for the main-side
+harness handoff: the test types the bare `bt` name into the login shell, so
+locally it exercises the host-installed binary rather than the branch build —
+the known bare-command fixture-path defect class this document already assigns
+to the Ubuntu diagram cell.
+
 ### Linux matched controls
 
 The selected completed branch and main workflows are the matched Ubuntu host
@@ -277,14 +297,71 @@ The current-run aggregate proves those identities remain equal; the preceding
 same-branch capture supplies the raw frame because the non-interactive host
 could not authenticate to download the expired per-cell archives.
 
-### Windows track: unresolved host prerequisite
+#### Same-host Linux execution (closed 2026-08-14)
 
-This macOS host has no native Windows runtime, Windows VM, or reachable Windows
-test host. Docker is not running, and the local Podman VM is unavailable. The
-required focused branch and main commands therefore cannot be executed on the
-same native Windows 11 host that produced the recorded 655-test aggregate.
-Tasks 2.1, 2.2, and Validation checkpoint 2 remain open; an aggregate green
-count is deliberately not treated as proof that the identity executed.
+The F3 same-host requirement was subsequently satisfied on the real Linux host
+`build-linux` (Linux 7.0.14-6-pve x86_64, 16 cores, tmux 3.5a, repository at
+`~/coding/rusty-biscuit`). Both revisions ran from clean detached checkouts of
+the identical commits used everywhere else in this document — branch
+`a00ea7c08` and main control `e03bafee9` — through the canonical CI recipe and
+environment:
+
+```console
+BISCUIT_TEST_REQUIRED_BACKENDS=tmux BISCUIT_L2_THREADS=8 \
+    just _test_l2 <package> --no-fail-fast
+```
+
+| Suite | Branch `a00ea7c08` | Main `e03bafee9` | Phase 2 identities |
+| --- | --- | --- | --- |
+| `claudine-cli` | 229 passed, 1 failed (230) | 229 passed, 1 failed (230) | All four `level2_context_capture` identities passed on both revisions (1.2–1.5s each). |
+| `darkmatter-cli` | 69/69 passed | 69/69 passed | `level2_code_block_clears_inherited_dim_before_theme_colors` and `level2_schema_about_light_terminal_uses_dark_code_theme` passed on both revisions. |
+| `biscuit-terminal-cli` | 76/76 passed | 76/76 passed | `level2_diagram_fallback_when_no_image_protocol` and all four Apple-named tmux-skip siblings passed on both revisions. |
+
+The single `claudine-cli` failure is identical on both revisions:
+`level2_lifecycle_control::level2_lifecycle_retry_to_an_unavailable_provider_matches_direct_selection`
+fails its own fixture precondition after 82s because the host login shell's
+completion loaders (`md`, `bt`, `sniff`, `playa`, `so-you-say`, `bh`) flood the
+pane before the direct arm renders. Equal on branch and main, host-environment
+class, not present in any CI cell, not branch-caused.
+
+This confirms the hosted-runner attribution at parity: every Ubuntu CI-red
+identity passes on a real Linux host on both revisions, so the hosted failures
+are CI-runner fixture/harness defects (unseeded `HOME` wizard, bare `bt`
+outside the login-shell `PATH`, simulated-light-terminal color mode), exactly
+as the byte/frame evidence above records. Main-side handoff dispositions are
+unchanged.
+
+### Windows track: same-host focused execution (closed 2026-08-14)
+
+The native Windows 11 host is reachable over SSH as `build-win-native`
+(Windows NT 10.0.26200.0, PowerShell 5.1, user `ken`, repository at
+`C:\Users\ken\rusty-biscuit`). Its checkout was already at `a00ea7c08` — the
+exact branch commit of run 31753281913. Both required focused runs executed
+there with the identical command:
+
+```console
+cargo nextest run -p darkmatter-cli --test schema_validate_baseline --color never
+```
+
+| Revision | Result | Run ID |
+| --- | --- | --- |
+| Branch `a00ea7c08` | 2/2 passed, including `schema_validate_legacy_pretty_output_is_byte_identical` (1.304s) | `d92a8e36-c19d-47e1-a512-80106b52a90b` |
+| Main control `e03bafee9` (detached, then restored) | 2/2 passed, including the pretty identity (1.293s) | `e6b8bab1-6da9-44cf-b689-9b81349b6f30` |
+
+Environment on both runs: `USERNAME=ken`, `TEMP=C:\Users\ken\AppData\Local\Temp`
+(no 8.3 short-name component), `NO_COLOR` unset, default nextest profile, no
+extra filters or features. Nextest per-test output proves the focused identity
+executed rather than being inferred from an aggregate count.
+
+**Byte-level cause, closed.** The identity passes on native Windows on both
+revisions because the native `%TEMP%` spelling contains no short-name segment,
+so the emitted document URL and the `fs::canonicalize`-rebuilt expectation
+agree. On GitHub's `windows-latest` runner, `%TEMP%` carries the 8.3-mangled
+`RUNNER~1` segment while canonicalization expands to `runneradmin`, producing
+the recorded byte delta on branch and `main` alike. Disposition: documented
+environmental difference between native Windows and the GitHub runner; not
+branch-caused; the equal, already-baselined hosted cell dispositions through
+F5. Tasks 2.1 and 2.2 are complete.
 
 The available `windows-latest` evidence does preserve the original failing
 input and byte delta. For `property_union_invalid`, both branch job
@@ -312,8 +389,13 @@ CLI emits a canonical path has drifted from the observed code behavior; Phase
 
 No source code, fixture, expected-output snapshot, agent skill, or
 `.github/ci/ci-baseline.toml` file changed during this phase. The only Phase 2
-changes are this evidence section and plan progress/frontmatter. Phase 2 is
-blocked solely on the unavailable native Windows matched-host execution.
+changes are this evidence section and plan progress/frontmatter. The native
+Windows and same-host Linux executions recorded above ran against the
+pre-Phase-4 revisions `a00ea7c08` and `e03bafee9`, so their attribution is
+unaffected by the later test-fixture commits. Validation checkpoint 2 is
+complete: the Windows identity has a byte-level environmental explanation, and
+every macOS/Linux Level-2 identity has a matched-host branch-versus-main
+disposition.
 
 ## Phase 3 branch-owned repair checkpoint
 
@@ -598,6 +680,26 @@ known Claudine CLI WSL2 superset. Recovery requires the Phase 4 source and
 documentation changes to be committed and pushed by the separate authorized
 process, followed by a fresh full CI run. Phase 5 can then resume at Task 5.1
 using that run and a current completed `main` control.
+
+**Recovery dispatched (2026-08-14).** With an authenticated session and Ken's
+explicit approval, the five local commits through `02fabba16` — including the
+split launch-context tests and the shipped-prompt `PATH` restoration — were
+pushed to `origin/fix/ctx-launch-anchor`. The authoritative full `ci` workflow
+run [`31779808759`](https://github.com/yankeeinlondon/rusty-biscuit/actions/runs/31779808759)
+dispatched at head `02fabba160a73520fbb69a736b55504da7d3c8b6`. Task 5.1's
+branch-run prerequisite is now in flight; the WSL2 no-superset check
+(validation checkpoint 4), the baseline comparison, `ci-rollup verdict`, and
+`just ci-diff` all wait on its completion and a comparable current `main`
+control.
+
+**Review-chain note.** Review 2's `previous` frontmatter references
+`fixes/2026-08-14-ci-failure-triage/review-1.md`, but that artifact was never
+written to the worktree and has no blob anywhere in repository history or the
+sibling worktrees. There is no authoritative source to restore it from, and
+reconstructing its findings from later notes is prohibited, so the dangling
+reference is recorded here as a process defect: the first review cycle's
+outcome survives only through this plan's cycle-1 close-out commit
+(`9da3c7c4c`) and the spec's `review_iterations: 2` frontmatter.
 
 ### Phase 5 behavior-to-test map and local verification
 

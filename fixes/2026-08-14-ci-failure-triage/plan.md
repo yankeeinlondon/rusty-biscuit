@@ -184,7 +184,7 @@ all completed failed producer jobs before making attribution or policy changes.
 **Objective:** obtain matched-host branch-versus-main evidence for every
 currently unattributed identity without changing code or baseline policy.
 
-- [ ] **Task 2.1 — Reproduce the Windows identity on the branch.** On the same
+- [x] **Task 2.1 — Reproduce the Windows identity on the branch.** On the same
   native Windows host used for the recorded 655-test result, run
   `cargo nextest run -p darkmatter-cli --test schema_validate_baseline --color never`
   from a clean checkout of `a00ea7c08` or the current branch revision. Prove
@@ -194,7 +194,7 @@ currently unattributed identity without changing code or baseline policy.
   state, working-directory spelling, fixture inputs, and actual-versus-expected
   bytes for every differing case.
 
-- [ ] **Task 2.2 — Run the matched Windows control (parallelizable with the L2
+- [x] **Task 2.2 — Run the matched Windows control (parallelizable with the L2
   tracks).** On that same Windows host and with identical command and
   environment inputs, run the focused test from the comparable `main` revision.
   Compare both native results with the `windows-latest` job evidence and assign
@@ -235,7 +235,7 @@ currently unattributed identity without changing code or baseline policy.
   Record the pass/fail sequence and observed state transition; otherwise
   classify the identity as unresolved rather than flaky.
 
-- [ ] **Validation checkpoint 2 — Close attribution before edits.** Require a
+- [x] **Validation checkpoint 2 — Close attribution before edits.** Require a
   byte- or screen-level explanation for the Windows identity and a matched-host
   disposition for every macOS/Linux Level-2 identity. Verify that neither code
   nor `.github/ci/ci-baseline.toml` changed during this phase.
