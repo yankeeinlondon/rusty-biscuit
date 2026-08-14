@@ -141,11 +141,14 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # it replaced cost nearly as much, because the capture dominates regardless of
 # how many variables are read.
 #
-# The ceiling is the generous 90s leash, not the earlier 30s: hosted
-# `windows-latest` (run 31779808759) and `wsl2-ubuntu` (run 31753281913) both
-# terminated the test at exactly 30s — cold-cache working-tree walks and WMI
-# hardware probes push the two captures past that on shared runners while the
-# test remains bounded.
+# The ceiling is the generous 90s leash, not the earlier 30s, on measured
+# grounds: isolated, the test finishes in 1.5s (WSL2 ext4 guest), 2.2s
+# (macOS M4), and 7.7s (native Windows 11) — bounded everywhere. Hosted
+# `windows-latest` (run 31779808759) and `wsl2-ubuntu` (run 31753281913)
+# nevertheless terminated it at exactly 30s: under full-suite parallelism on
+# shared runners its two tree-walking captures contend with the rest of the
+# suite for cold I/O and WMI. Same contended-not-hung shape as the other
+# overrides here; 90s still trips on a genuine hang.
 [[profile.default.overrides]]
 filter = 'test(=every_catalog_variable_survives_ambient_options)'
 slow-timeout = { period = "30s", terminate-after = 3 }
