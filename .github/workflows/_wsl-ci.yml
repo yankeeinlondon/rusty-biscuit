@@ -713,14 +713,18 @@ jobs:
           #
           # The model_id `ui` binary is trybuild: it compiles its cases with
           # the host toolchain at runtime, and this guest intentionally has no
-          # cargo or rustc (archive-only contract, see the header). Excluding
-          # it here keeps the exclusion visible in the cell's config instead
-          # of a silent in-test early return, which nextest would record as a
-          # pass.
+          # cargo or rustc (archive-only contract, see the header). The
+          # exclusion goes through BISCUIT_TEST_EXCLUDE, which `_test`
+          # intersects into its single tier filterset — filterset parentheses
+          # cannot survive the recipe's raw `{{ args }}` splice, and a second
+          # `-E` would union with (widen) the tier filter rather than narrow
+          # it. Keeping it here in the cell's config keeps the exclusion
+          # visible instead of a silent in-test early return, which nextest
+          # would record as a pass.
+          export BISCUIT_TEST_EXCLUDE='package(model_id) & binary(ui)'
           just _test "${{ inputs.package }}" \
             --no-fail-fast \
             --test-threads 2 \
-            -E 'not (package(model_id) and binary(ui))' \
             --archive-file "$archive" \
             --workspace-remap "${{ env.GUEST_ROOT }}" \
             ${{ inputs.test-args }}

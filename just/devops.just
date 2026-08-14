@@ -746,6 +746,15 @@ _test pkg *args="": _storage_preflight
                 run_args+=("${kept_arg}")
             done < <(just _archive_drop_build_flags ${forwarded[@]+"${forwarded[@]}"})
         fi
+        # Environment-scoped exclusion, composed INTO the single tier
+        # filterset. It cannot ride in as a second `-E` through `{{ args }}`:
+        # the raw splice makes filterset parentheses a bash syntax error here,
+        # and nextest UNIONS multiple -E expressions, which would widen the
+        # tier instead of narrowing it. The WSL2 guest leg uses this to keep
+        # toolchain-requiring tests (trybuild) out of an archive-only run.
+        if [[ -n "${BISCUIT_TEST_EXCLUDE:-}" ]]; then
+            filter="(${filter}) - (${BISCUIT_TEST_EXCLUDE})"
+        fi
         "${nextest_bin[@]}" run ${selection[@]+"${selection[@]}"} -E "$filter" --no-tests=pass ${run_args[@]+"${run_args[@]}"} || exit_code=$?
     else
         echo -e "ℹ️ using {{ green }}cargo test{{ reset }}"
