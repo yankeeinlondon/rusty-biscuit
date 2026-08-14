@@ -198,6 +198,58 @@ fn an_existing_group_readable_directory_is_rejected() {
     );
 }
 
+/// The spelling `ConvertSecurityDescriptorToStringSecurityDescriptorW` uses
+/// for `sid` when it renders a descriptor.
+///
+/// The renderer abbreviates well-known SIDs to their two-letter SDDL aliases:
+/// the built-in Administrator account — which GitHub's Windows runners execute
+/// as — comes back as `LA`, never as its literal `S-1-5-21-…-500` string. An
+/// assertion built from the literal string would therefore reject a descriptor
+/// that names exactly this user. Round-tripping the SID through the same
+/// converter keeps both sides of the comparison in one spelling.
+#[cfg(windows)]
+fn canonical_sddl_token(sid: &str) -> String {
+    use windows::Win32::Foundation::{HLOCAL, LocalFree};
+    use windows::Win32::Security::Authorization::{
+        ConvertSecurityDescriptorToStringSecurityDescriptorW,
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    };
+    use windows::Win32::Security::{OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR};
+    use windows::core::{PCWSTR, PWSTR};
+
+    let owner_only: Vec<u16> = format!("O:{sid}").encode_utf16().chain(Some(0)).collect();
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: `owner_only` is NUL-terminated and outlives the call; the
+    // allocations Win32 hands back are freed below.
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            PCWSTR(owner_only.as_ptr()),
+            SDDL_REVISION_1,
+            &raw mut descriptor,
+            None,
+        )
+        .expect("parse owner-only sddl");
+    }
+    let mut text = PWSTR::null();
+    unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor,
+            SDDL_REVISION_1,
+            OWNER_SECURITY_INFORMATION,
+            &raw mut text,
+            None,
+        )
+        .expect("render owner-only sddl");
+    }
+    let rendered = unsafe { text.to_string() }.expect("sddl is valid UTF-16");
+    let _ = unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
+    let _ = unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
+    rendered
+        .strip_prefix("O:")
+        .expect("an owner-only descriptor renders as O:<token>")
+        .to_string()
+}
+
 /// Windows has no mode bits, so "private" is a DACL naming one principal. The
 /// descriptor is asserted through its SDDL rendering, which is the only way to
 /// see its contents rather than merely that a pointer is non-null.
@@ -233,9 +285,10 @@ fn the_current_user_descriptor_names_this_account_and_nobody_else() {
     else {
         panic!("a Windows host must report a SID");
     };
+    let user = canonical_sddl_token(&sid);
 
-    assert!(sddl.contains(&format!("O:{sid}")), "got: {sddl}");
-    assert!(sddl.contains(&format!("(A;;GA;;;{sid})")), "got: {sddl}");
+    assert!(sddl.contains(&format!("O:{user}")), "got: {sddl}");
+    assert!(sddl.contains(&format!("(A;;GA;;;{user})")), "got: {sddl}");
     assert!(
         sddl.contains("D:P"),
         "the DACL must be protected, so no inherited ACE can widen it; got: {sddl}"

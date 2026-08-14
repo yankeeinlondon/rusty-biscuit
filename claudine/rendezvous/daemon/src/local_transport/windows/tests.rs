@@ -13,12 +13,13 @@ use tempfile::TempDir;
 use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient};
 use windows::Win32::Foundation::{ERROR_PIPE_BUSY, HLOCAL, LocalFree};
 use windows::Win32::Security::Authorization::{
-    ConvertSecurityDescriptorToStringSecurityDescriptorW, SDDL_REVISION_1,
+    ConvertSecurityDescriptorToStringSecurityDescriptorW,
+    ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
 };
 use windows::Win32::Security::{
-    DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+    DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR,
 };
-use windows::core::PWSTR;
+use windows::core::{PCWSTR, PWSTR};
 
 use crate::local_transport::spawn_local_server;
 use crate::private_dir::current_user_descriptor;
@@ -100,19 +101,62 @@ fn descriptor_sddl() -> String {
     rendered
 }
 
+/// The spelling `ConvertSecurityDescriptorToStringSecurityDescriptorW` uses
+/// for `sid` when it renders a descriptor.
+///
+/// The renderer abbreviates well-known SIDs to their two-letter SDDL aliases:
+/// the built-in Administrator account — which GitHub's Windows runners execute
+/// as — comes back as `LA`, never as its literal `S-1-5-21-…-500` string. An
+/// assertion built from the literal string would therefore reject a descriptor
+/// that names exactly this user. Round-tripping the SID through the same
+/// converter keeps both sides of the comparison in one spelling.
+fn canonical_sddl_token(sid: &str) -> String {
+    let owner_only: Vec<u16> = format!("O:{sid}").encode_utf16().chain(Some(0)).collect();
+    let mut descriptor = PSECURITY_DESCRIPTOR::default();
+    // SAFETY: `owner_only` is NUL-terminated and outlives the call; the
+    // allocations Win32 hands back are freed below.
+    unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            PCWSTR(owner_only.as_ptr()),
+            SDDL_REVISION_1,
+            &raw mut descriptor,
+            None,
+        )
+        .expect("parse owner-only sddl");
+    }
+    let mut text = PWSTR::null();
+    unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            descriptor,
+            SDDL_REVISION_1,
+            OWNER_SECURITY_INFORMATION,
+            &raw mut text,
+            None,
+        )
+        .expect("render owner-only sddl");
+    }
+    let rendered = unsafe { text.to_string() }.expect("sddl is valid UTF-16");
+    let _ = unsafe { LocalFree(Some(HLOCAL(text.0.cast()))) };
+    let _ = unsafe { LocalFree(Some(HLOCAL(descriptor.0))) };
+    rendered
+        .strip_prefix("O:")
+        .expect("an owner-only descriptor renders as O:<token>")
+        .to_string()
+}
+
 /// The DACL is the whole boundary on this target: there is no mode bit and no
 /// owning directory to fall back on.
 #[test]
 fn the_pipe_dacl_names_this_user_and_nobody_else() {
     let sddl = descriptor_sddl();
-    let sid = my_sid();
+    let user = canonical_sddl_token(&my_sid());
 
     assert!(
-        sddl.contains(&format!("O:{sid}")),
+        sddl.contains(&format!("O:{user}")),
         "the current user must own the descriptor; got: {sddl}"
     );
     assert!(
-        sddl.contains(&format!("(A;;GA;;;{sid})")),
+        sddl.contains(&format!("(A;;GA;;;{user})")),
         "the current user must be granted access explicitly; got: {sddl}"
     );
     assert!(
