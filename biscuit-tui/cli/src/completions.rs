@@ -434,6 +434,42 @@ mod tests {
         }
     }
 
+    /// Locate a `bash` that can actually run scripts.
+    ///
+    /// On Windows, plain `bash` on `PATH` resolves to the WSL stub in
+    /// `System32` (which precedes Git's directories), and the stub *spawns*
+    /// successfully even with no WSL distribution installed — it then fails
+    /// every invocation, printing its error as UTF-16 to stdout. A
+    /// spawn-error check therefore passes while `bash -n` fails with empty
+    /// stderr. On Windows, probe only Git Bash's well-known install
+    /// locations (present on GitHub's Windows runners): a real WSL bash on
+    /// `PATH` would pass a version probe yet still fail `bash -n C:\...`
+    /// because it needs `/mnt/c`-translated paths. Every candidate must
+    /// print the `GNU bash` banner and exit 0.
+    fn find_bash() -> Option<std::path::PathBuf> {
+        let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+        if cfg!(windows) {
+            for var in ["ProgramFiles", "ProgramFiles(x86)"] {
+                if let Some(root) = std::env::var_os(var) {
+                    let git = std::path::PathBuf::from(root).join("Git");
+                    candidates.push(git.join("bin").join("bash.exe"));
+                    candidates.push(git.join("usr").join("bin").join("bash.exe"));
+                }
+            }
+        } else {
+            candidates.push(std::path::PathBuf::from("bash"));
+        }
+        candidates.into_iter().find(|bash| {
+            std::process::Command::new(bash)
+                .arg("--version")
+                .output()
+                .is_ok_and(|probe| {
+                    probe.status.success()
+                        && String::from_utf8_lossy(&probe.stdout).contains("GNU bash")
+                })
+        })
+    }
+
     #[test]
     fn bash_script_passes_syntax_check() {
         // Regression guard: an earlier line-only filter for the hidden
@@ -442,14 +478,10 @@ mod tests {
         // strip routine drops the entire case clause and scrubs the
         // legacy tokens out of the per-subcommand `opts` string, so the
         // resulting script must parse cleanly.
-        if std::process::Command::new("bash")
-            .arg("--version")
-            .output()
-            .is_err()
-        {
-            eprintln!("skipping: bash not available");
+        let Some(bash) = find_bash() else {
+            eprintln!("SKIP: no usable bash found (all candidates failed the GNU bash probe)");
             return;
-        }
+        };
         let mut buf = Vec::new();
         write_completions::<TestCli, _>(Shell::Bash, "question", &mut buf).unwrap();
         let dir = std::env::temp_dir().join(format!(
@@ -463,7 +495,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("question.bash");
         std::fs::write(&path, &buf).unwrap();
-        let output = std::process::Command::new("bash")
+        let output = std::process::Command::new(&bash)
             .arg("-n")
             .arg(&path)
             .output()
