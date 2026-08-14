@@ -85,9 +85,12 @@ fn compose_shell_expansion_failure_renders_rich_block() {
 
 /// Real `ExecutionFailed` shell-expansion failure during `claudine compose`.
 ///
-/// Uses a portable failing command (`rustc --edition=invalid`) so the test
+/// Uses a portable failing command (`git --edition=invalid`) so the test
 /// exercises the full boundary from Markdown composition through the CLI's
-/// top-level error walker, not just the preflight `Blacklisted` path.
+/// top-level error walker, not just the preflight `Blacklisted` path. `git`
+/// rather than a compiler: the toolchain-free WSL2 CI guest carries Git but no
+/// rustc, and an unknown top-level option makes git print `unknown option: ...`
+/// to stderr and exit non-zero on every platform.
 #[test]
 fn compose_shell_execution_failure_renders_rich_block() {
     let workspace = tempdir().unwrap();
@@ -96,7 +99,7 @@ fn compose_shell_execution_failure_renders_rich_block() {
     let md_file = workspace.path().join("compose.md");
     fs::write(
         &md_file,
-        "---\ntitle: Shell demo\n---\n\nPre.\n\n::shell rustc --edition=invalid\n\nPost.\n",
+        "---\ntitle: Shell demo\n---\n\nPre.\n\n::shell git --edition=invalid\n\nPost.\n",
     )
     .unwrap();
 
@@ -131,8 +134,8 @@ fn compose_shell_execution_failure_renders_rich_block() {
         "expected file-relative line in diagnostic; got:\n{plain}"
     );
     assert!(
-        plain.contains("error:"),
-        "expected captured rustc stderr text in diagnostic; got:\n{plain}"
+        plain.contains("unknown option"),
+        "expected captured git stderr text in diagnostic; got:\n{plain}"
     );
     assert!(
         plain.contains("::shell"),

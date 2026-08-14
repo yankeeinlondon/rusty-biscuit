@@ -185,35 +185,32 @@ fn assert_launch_repo_survives_composition(
     );
 }
 
-/// Build an executable in `dir` that prints its working directory, and return
-/// its portable path text for use as both a `::shell` command and a whitelist
-/// `prefix` rule.
+/// Re-exec target for [`non_repository_session_runs_shell_in_launch_cwd`]:
+/// invoking this unit-test binary with `--exact <this test> --nocapture`
+/// turns it into a cwd probe.
 ///
 /// The probe reports the portable spelling because its output lands in a
 /// Markdown document: a native Windows path would lose the separator of any
 /// segment beginning with punctuation to CommonMark backslash escaping.
-fn compile_cwd_probe(dir: &std::path::Path) -> String {
-    std::fs::create_dir_all(dir).unwrap();
-    let source = write_temp_file(
-        dir,
-        "cwd_probe.rs",
-        "fn main() {\n    let cwd = std::env::current_dir().unwrap();\n    \
-         println!(\"{}\", cwd.display().to_string().replace('\\\\', \"/\"));\n}\n",
+#[test]
+fn cwd_probe_prints_the_launch_directory() {
+    println!(
+        "{}",
+        biscuit_file::to_portable_string(&std::env::current_dir().unwrap())
     );
-    let executable = dir.join(format!("cwd-probe{}", std::env::consts::EXE_SUFFIX));
-    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-    let compilation = std::process::Command::new(compiler)
-        .arg(&source)
-        .arg("-o")
-        .arg(&executable)
-        .output()
-        .unwrap();
-    assert!(
-        compilation.status.success(),
-        "failed to compile cwd probe: {}",
-        String::from_utf8_lossy(&compilation.stderr)
-    );
-    biscuit_file::to_portable_string(&executable)
+}
+
+/// Portable path of this test binary, for use as a `::shell` executable and a
+/// whitelist `prefix` rule.
+///
+/// The nextest archive carries the test binary itself, so the probe needs no
+/// toolchain at runtime (its rustc-compiled predecessor failed in the
+/// toolchain-free WSL2 CI guest), while the built-in shell blacklist still
+/// rejects every shell that could report a working directory instead.
+fn cwd_probe_executable() -> String {
+    biscuit_file::to_portable_string(
+        &std::env::current_exe().expect("resolve current test executable"),
+    )
 }
 
 struct ScopedHome {
@@ -1103,10 +1100,12 @@ fn non_repository_session_runs_shell_in_launch_cwd() {
         .status()
         .unwrap();
     assert!(status.success());
-    // A compiled probe rather than `pwd`: the built-in shell blacklist rejects
+    // A re-exec probe rather than `pwd`: the built-in shell blacklist rejects
     // every Windows shell that could report a working directory, and no
     // whitelist can override it.
-    let probe = compile_cwd_probe(&tmp.path().join("probe"));
+    let probe = cwd_probe_executable();
+    let probe_args =
+        "--exact system_prompt::prepare::tests::cwd_probe_prints_the_launch_directory --nocapture";
     write_temp_file(
         &source_repo,
         ".darkmatter-shell-whitelist",
@@ -1115,7 +1114,7 @@ fn non_repository_session_runs_shell_in_launch_cwd() {
     let prompt = write_temp_file(
         &source_repo,
         "prompt.md",
-        &format!("Before.\n\n::shell \"{probe}\"\n\nAfter."),
+        &format!("Before.\n\n::shell \"{probe}\" {probe_args}\n\nAfter."),
     );
 
     let invocation = crate::invocation_context::InvocationContext::capture_at(&launch);

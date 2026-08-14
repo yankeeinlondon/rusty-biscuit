@@ -38,8 +38,13 @@ fn compose_options(dir: &TempDir) -> ComposeOptions {
 
 /// A portable failing command that prints to stderr and exits non-zero on
 /// macOS, Windows, and Linux.
+///
+/// `git` rather than a compiler or shell: the toolchain-free WSL2 CI guest
+/// carries Git but no rustc, and darkmatter's built-in blacklist rejects every
+/// shell that could fabricate a failure. An unknown top-level option makes git
+/// print `unknown option: ...` to stderr and exit non-zero everywhere.
 fn failing_command() -> &'static str {
-    "rustc --edition=invalid"
+    "git --edition=invalid"
 }
 
 #[test]
@@ -187,7 +192,7 @@ fn shell_block_execution_failed_renders_inner_diagnostic() {
         .nth(1)
         .expect("stderr section should be present");
     assert!(
-        after_stderr.contains("error:"),
+        after_stderr.contains("unknown option"),
         "captured stderr text should appear after the stderr label; got: {rendered}"
     );
 }
@@ -222,7 +227,7 @@ fn frontmatter_shell_origin_is_file_relative() {
 
 #[test]
 fn frontmatter_line_count_counts_source_lines_with_crlf() {
-    let content = "---\r\ntitle: Test\r\n---\r\n# Body\r\n::shell rustc --edition=invalid\r\n";
+    let content = "---\r\ntitle: Test\r\n---\r\n# Body\r\n::shell git --edition=invalid\r\n";
     let md: Markdown = content.into();
     // 3 frontmatter source lines (---, title, ---); body starts at line 4.
     assert_eq!(md.frontmatter_line_count(), 3);
@@ -231,7 +236,7 @@ fn frontmatter_line_count_counts_source_lines_with_crlf() {
 #[test]
 fn body_shell_origin_counts_lines_not_bytes_with_crlf() {
     let dir = TempDir::new().unwrap();
-    let content = "---\r\ntitle: Test\r\ncmd: placeholder\r\n---\r\n# Heading\r\n\r\n::shell rustc --edition=invalid\r\n";
+    let content = "---\r\ntitle: Test\r\ncmd: placeholder\r\n---\r\n# Heading\r\n\r\n::shell git --edition=invalid\r\n";
     std::fs::write(dir.path().join("doc.md"), content).unwrap();
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();

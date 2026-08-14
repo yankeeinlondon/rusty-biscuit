@@ -968,13 +968,16 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
 
     let temp_dir = tempfile::TempDir::new().unwrap();
     let file_path = temp_dir.path().join("test.md");
-    let content = "---\ntitle: Shell demo\n---\n\nPre.\n\n::shell rustc --edition=invalid\n\nPost.\n";
+    // `git --edition=invalid` is the portable controlled failure: git exists
+    // on every host including the toolchain-free WSL2 CI guest (which has no
+    // rustc), prints `unknown option: ...` to stderr, and exits non-zero.
+    let content = "---\ntitle: Shell demo\n---\n\nPre.\n\n::shell git --edition=invalid\n\nPost.\n";
     std::fs::write(&file_path, content).unwrap();
 
     let source = resolve_composition_source(file_path.to_str().unwrap()).unwrap();
 
     let mut approved = HashSet::new();
-    approved.insert("rustc --edition=invalid".to_string());
+    approved.insert("git --edition=invalid".to_string());
     let options = PrepareOptions {
         defer_schema_verdict: false,
         set_overrides: None,
@@ -1000,8 +1003,8 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
         "expected file-relative line in diagnostic: {rendered}"
     );
     assert!(
-        rendered.contains("error:"),
-        "expected captured rustc stderr text in diagnostic: {rendered}"
+        rendered.contains("unknown option"),
+        "expected captured git stderr text in diagnostic: {rendered}"
     );
     assert!(
         rendered.contains("::shell"),

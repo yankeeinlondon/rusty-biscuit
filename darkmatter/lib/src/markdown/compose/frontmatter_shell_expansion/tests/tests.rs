@@ -140,19 +140,25 @@
         assert!(result.is_err());
     }
 
+    // The `./fixture-command` token below is deliberately path-bearing: the
+    // token-resolution ladder classifies a lone bare name by consulting
+    // `PATH`, so a bare token would change parse class on hosts missing that
+    // executable (the toolchain-free WSL2 CI guest). A path-bearing token is
+    // always a command, and these parser-only tests never execute it, so the
+    // file does not need to exist.
     #[test]
     fn detects_no_cache_suffix() {
-        let directive = parse_shell_value("$(rustc)::no-cache", "key", None)
+        let directive = parse_shell_value("$(./fixture-command)::no-cache", "key", None)
             .unwrap()
             .unwrap();
-        assert_eq!(directive.executable, "rustc");
+        assert_eq!(directive.executable, "./fixture-command");
         assert!(directive.no_cache);
         assert!(directive.timeout_override.is_none());
     }
 
     #[test]
     fn no_cache_defaults_false_without_suffix() {
-        let directive = parse_shell_value("$(rustc)", "key", None)
+        let directive = parse_shell_value("$(./fixture-command)", "key", None)
             .unwrap()
             .unwrap();
         assert!(!directive.no_cache);
@@ -160,13 +166,13 @@
 
     #[test]
     fn no_cache_combines_with_timeout_either_order() {
-        let a = parse_shell_value("$(rustc)::no-cache::timeout:5", "key", None)
+        let a = parse_shell_value("$(./fixture-command)::no-cache::timeout:5", "key", None)
             .unwrap()
             .unwrap();
         assert!(a.no_cache);
         assert_eq!(a.timeout_override, Some(std::time::Duration::from_secs(5)));
 
-        let b = parse_shell_value("$(rustc)::timeout:5::no-cache", "key", None)
+        let b = parse_shell_value("$(./fixture-command)::timeout:5::no-cache", "key", None)
             .unwrap()
             .unwrap();
         assert!(b.no_cache);

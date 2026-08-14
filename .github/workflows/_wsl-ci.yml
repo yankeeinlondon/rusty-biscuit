@@ -62,7 +62,7 @@ on:
         type: boolean
         default: false
       runner-tools:
-        description: "JSON array from the closed runner-tool vocabulary; messenger-desktop-stubs is delivered as a Linux sidecar."
+        description: "JSON array from the closed runner-tool vocabulary; messenger-desktop-stubs and darkmatter-md-fixture are delivered as Linux sidecars."
         type: string
         default: '[]'
       native:
@@ -229,11 +229,35 @@ jobs:
             [ -x "$source" ] || { echo "Linux messenger stub missing: $source" >&2; exit 1; }
             cp "$source" "$sidecar/$stub"
           done
+      # claudine-cli's `inline_compose_hash` test shells out to darkmatter's
+      # `md` binary, resolved from `PATH` as its last resort. The native legs
+      # build it in `_package-ci.yml`'s "Build the darkmatter md fixture" step,
+      # but the guest cannot build anything, so the archive host builds the
+      # Linux binary and ships it beside the archive.
+      - name: Build the darkmatter md sidecar
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'darkmatter-md-fixture') }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build -q -p darkmatter-cli --bin md --target x86_64-unknown-linux-gnu
+          sidecar="$RUNNER_TEMP/darkmatter-md"
+          mkdir -p "$sidecar"
+          source="target/x86_64-unknown-linux-gnu/debug/md"
+          [ -x "$source" ] || { echo "darkmatter md sidecar missing: $source" >&2; exit 1; }
+          cp "$source" "$sidecar/md"
       - name: Upload the nextest archive
         uses: actions/upload-artifact@v4
         with:
           name: nextest-archive-${{ inputs.package }}-wsl2-ubuntu
           path: ${{ runner.temp }}/${{ env.ARCHIVE_NAME }}
+          retention-days: 1
+          if-no-files-found: error
+      - name: Upload the darkmatter md sidecar
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'darkmatter-md-fixture') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: darkmatter-md-${{ inputs.package }}-wsl2-ubuntu
+          path: ${{ runner.temp }}/darkmatter-md
           retention-days: 1
           if-no-files-found: error
       - name: Upload the messenger desktop stub sidecar
@@ -296,6 +320,12 @@ jobs:
         with:
           name: messenger-desktop-stubs-${{ inputs.package }}-wsl2-ubuntu
           path: ${{ github.workspace }}/messenger-desktop-stubs
+      - name: Download the darkmatter md sidecar
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'darkmatter-md-fixture') }}
+        uses: actions/download-artifact@v4
+        with:
+          name: darkmatter-md-${{ inputs.package }}-wsl2-ubuntu
+          path: ${{ github.workspace }}/darkmatter-md
       # No `wsl-version:` pin — the action already defaults to 2, and pinning 1
       # would be an explicit downgrade to an environment without WSLg.
       #
@@ -426,6 +456,19 @@ jobs:
             cp "$source" "$sidecar/$stub"
             chmod 0755 "$sidecar/$stub"
           done
+          chown -R biscuit:biscuit "$sidecar"
+      - name: Copy the darkmatter md sidecar onto ext4
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'darkmatter-md-fixture') }}
+        shell: wsl-bash {0}
+        run: |
+          set -euo pipefail
+          workspace="$(pwd)"
+          sidecar=/home/runner/darkmatter-md
+          mkdir -p "$sidecar"
+          source="$workspace/darkmatter-md/md"
+          [ -f "$source" ] || { echo "darkmatter md sidecar missing: $source" >&2; exit 1; }
+          cp "$source" "$sidecar/md"
+          chmod 0755 "$sidecar/md"
           chown -R biscuit:biscuit "$sidecar"
       - name: Install just and cargo-nextest in the guest
         shell: wsl-bash {0}
@@ -599,6 +642,17 @@ jobs:
               exit 1
             fi
           fi
+          # The `md` sidecar is delivered on `PATH`: the consuming test's
+          # resolution ladder ends with a `PATH` lookup, so no env var or code
+          # seam is needed — but its absence must fail here, loudly, rather
+          # than as a confusing in-test resolution panic.
+          if [ "$(jq -r 'contains(["darkmatter-md-fixture"])' <<<'${{ inputs.runner-tools }}')" = "true" ]; then
+            [ -x /home/runner/darkmatter-md/md ] || {
+              echo "darkmatter md sidecar unavailable in guest: /home/runner/darkmatter-md/md" >&2
+              exit 1
+            }
+            export PATH="/home/runner/darkmatter-md:$PATH"
+          fi
           # No Cargo in the guest, so the canonical recipe must reach nextest as
           # a standalone binary and stage its JUnit report without shelling out
           # to `cargo metadata`. See fixes/2026-07-27-refactor/wsl-archive-requirements.md.
@@ -648,8 +702,25 @@ jobs:
           # Declared feature flags are passed along and dropped by
           # `_archive_drop_build_flags` — they were baked into the archive.
           cd "${{ env.GUEST_ROOT }}"
+          # --test-threads 2, not nextest's CPU-count default: the guest is
+          # nested virtualization on a 4-vCPU runner, and run 31753281913
+          # showed what full parallelism does there — eleven 90s terminations,
+          # `timeout`-wrapped CLIs dying at their inner deadlines (exit 124),
+          # and parallel-overlap assertions observing zero overlap because
+          # process spawns crawled under contention. Halving the schedule keeps
+          # real concurrency for the tests that assert it while leaving them
+          # vCPU headroom to actually exhibit it.
+          #
+          # The model_id `ui` binary is trybuild: it compiles its cases with
+          # the host toolchain at runtime, and this guest intentionally has no
+          # cargo or rustc (archive-only contract, see the header). Excluding
+          # it here keeps the exclusion visible in the cell's config instead
+          # of a silent in-test early return, which nextest would record as a
+          # pass.
           just _test "${{ inputs.package }}" \
             --no-fail-fast \
+            --test-threads 2 \
+            -E 'not (package(model_id) and binary(ui))' \
             --archive-file "$archive" \
             --workspace-remap "${{ env.GUEST_ROOT }}" \
             ${{ inputs.test-args }}

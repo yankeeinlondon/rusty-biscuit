@@ -803,37 +803,31 @@ fn direct_composition_block_strips_everything_returns_composed_body_empty() {
 /// `shell_working_directory` set, `::shell` directives must run there,
 /// not next to the template file — otherwise `sniff repo packages` and
 /// friends execute in the wrong repo.
+/// Re-exec target for
+/// [`direct_composition_runs_shell_in_configured_working_directory`]: invoking
+/// this unit-test binary with `--exact <this test> --nocapture` turns it into
+/// a cwd probe. The nextest archive carries the test binary itself, so no
+/// toolchain is needed at test runtime (the previous rustc-compiled probe
+/// failed in the toolchain-free WSL2 CI guest), and the built-in shell
+/// blacklist still rejects every shell that could report a cwd instead.
+#[test]
+fn cwd_probe_prints_the_working_directory() {
+    println!(
+        "{}",
+        biscuit_file::to_portable_string(&std::env::current_dir().unwrap())
+    );
+}
+
 #[test]
 fn direct_composition_runs_shell_in_configured_working_directory() {
     let source_dir = TempDir::new().unwrap();
     let work_dir = TempDir::new().unwrap();
-    let probe_source = work_dir.path().join("cwd_probe.rs");
-    let probe_executable = work_dir
-        .path()
-        .join(format!("cwd-probe{}", std::env::consts::EXE_SUFFIX));
-    fs::write(
-        &probe_source,
-        r#"fn main() {
-    println!("{}", std::env::current_dir().unwrap().display());
-}
-"#,
-    )
-    .unwrap();
-    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
-    let compilation = std::process::Command::new(compiler)
-        .arg(&probe_source)
-        .arg("-o")
-        .arg(&probe_executable)
-        .output()
-        .unwrap();
-    assert!(
-        compilation.status.success(),
-        "failed to compile cwd probe: {}",
-        String::from_utf8_lossy(&compilation.stderr)
+    let executable = biscuit_file::to_portable_string(
+        &std::env::current_exe().expect("resolve current test executable"),
     );
-
-    let executable = biscuit_file::to_portable_string(&probe_executable);
-    let command = format!("\"{executable}\"");
+    let probe_args =
+        "--exact composition::prepare::tests::cwd_probe_prints_the_working_directory --nocapture";
+    let command = format!("\"{executable}\" {probe_args}");
     let source = make_source(
         &source_dir,
         &[("title", json!("T"))],
@@ -841,7 +835,7 @@ fn direct_composition_runs_shell_in_configured_working_directory() {
     );
 
     let mut approved = std::collections::HashSet::new();
-    approved.insert(executable);
+    approved.insert(format!("{executable} {probe_args}"));
     let options = PrepareOptions {
         pre_approved_commands: Some(approved),
         shell_working_directory: Some(work_dir.path().to_path_buf()),
