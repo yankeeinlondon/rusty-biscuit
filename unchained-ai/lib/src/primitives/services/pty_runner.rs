@@ -9,8 +9,20 @@ use super::error::AgentStatusError;
 /// Default timeout for PTY operations.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// ConPTY may need its cursor-inheritance timeout to expire during shutdown.
+/// ConPTY flushes remaining output asynchronously after the child exits, so
+/// the reader may reach EOF noticeably later than `child.wait()` returns.
 const OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// Cursor-position report answering ConPTY's startup query.
+///
+/// portable-pty creates every Windows pseudoconsole with
+/// `PSEUDOCONSOLE_INHERIT_CURSOR`, which makes ConPTY emit `CSI 6 n` and stall
+/// the child's startup until a cursor-position report arrives on the input
+/// pipe. Nothing else here writes to the PTY at startup, so we must answer or
+/// short-lived commands never run before the command timeout. ConPTY consumes
+/// the report during initialization; it is never delivered to the child.
+#[cfg(windows)]
+const CONPTY_CURSOR_REPORT: &[u8] = b"\x1b[1;1R";
 
 /// A step in an interactive PTY session.
 #[derive(Debug, Clone)]
@@ -27,6 +39,8 @@ pub enum InteractiveStep {
 ///
 /// Returns `AgentStatusError::PtySpawnError` if the PTY or command fails to spawn.
 /// Returns `AgentStatusError::PtyReadError` if reading from the PTY fails.
+/// Returns `AgentStatusError::PtyWriteError` if answering ConPTY's startup
+/// cursor query fails (Windows only).
 /// Returns `AgentStatusError::TimeoutError` if the command exceeds the timeout.
 pub async fn run_pty_command(
     program: &str,
@@ -77,6 +91,27 @@ fn run_pty_blocking(
         .map_err(|e| AgentStatusError::PtyReadError(format!("Failed to clone reader: {}", e)))?;
 
     drop(pair.slave);
+
+    // Held until the session ends: `take_writer` removes the sole input-pipe
+    // handle from the master, so dropping it here would signal EOF-on-input
+    // to ConPTY while the child is still running.
+    #[cfg(windows)]
+    let _conpty_input = {
+        let mut writer = pair
+            .master
+            .take_writer()
+            .map_err(|e| AgentStatusError::PtyWriteError(format!("Failed to get writer: {}", e)))?;
+        writer
+            .write_all(CONPTY_CURSOR_REPORT)
+            .and_then(|()| writer.flush())
+            .map_err(|e| {
+                AgentStatusError::PtyWriteError(format!(
+                    "Failed to answer ConPTY cursor query: {}",
+                    e
+                ))
+            })?;
+        writer
+    };
 
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
@@ -188,6 +223,14 @@ fn run_pty_interactive_blocking(
         .map_err(|e| AgentStatusError::PtyWriteError(format!("Failed to get writer: {}", e)))?;
 
     drop(pair.slave);
+
+    #[cfg(windows)]
+    writer
+        .write_all(CONPTY_CURSOR_REPORT)
+        .and_then(|()| writer.flush())
+        .map_err(|e| {
+            AgentStatusError::PtyWriteError(format!("Failed to answer ConPTY cursor query: {}", e))
+        })?;
 
     let (tx, rx) = mpsc::channel();
     thread::spawn(move || {
