@@ -569,6 +569,10 @@ scope, and produce the evidence needed for merge.
   for the F7 router/perf family and attach the final per-stage timing/work-count
   comparison.
 
+- [ ] Run the canonical Claudine and Darkmatter package-area Level-2 suites
+  through `just test-l2`, without focusing a host terminal window, and resolve
+  or disposition every failure before accepting the parent fix.
+
 - [ ] Run full CI/`ci-verdict`, followed by `just ci-diff`; require no
   unapproved blocking cell, no new red identity relative to run `31651014023`,
   and no baseline that is passing, expired, missing, or unsupported by source
@@ -589,6 +593,10 @@ scope, and produce the evidence needed for merge.
   merge gate can be independently audited.
 
 ### Phase 6 local acceptance record
+
+- The pre-CI local acceptance record covered Level 1 and lint only. No Level-2
+  suite ran before CI run `31753281913`; the affected-package Level-2 task above
+  is now part of acceptance under the triage fix's ratified Option A.
 
 - `cd darkmatter && just test` passed the `darkmatter`, `darkmatter-cli`, and
   `dmls` L1 gates; `just lint` passed all three package lint gates.

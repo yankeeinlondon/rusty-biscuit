@@ -197,18 +197,20 @@ The WSL2 guest runs nextest archives only — no rustup, no toolchain, no
 sibling-package binaries, no usable desktop D-Bus, and heavy process-spawn/IO
 latency. Every WSL2 failure in this run reduces to one of four assumptions:
 
-1. **A Rust toolchain on PATH** (`rustc`/`cargo` invoked at runtime):
+1. **A Rust toolchain on PATH** (`rustc`/`cargo` assumed by fixtures):
    - BLOCKING: claudine `shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic`,
      `direct_composition_runs_shell_in_configured_working_directory`,
      `non_repository_session_runs_shell_in_launch_cwd`.
-   - Baseline-covered: darkmatter ×6 (`$(rustc)` §2-ladder parse fixtures,
-     rustc-stderr diagnostics), claudine-cli `contextual_errors`, model_id
+   - Baseline-covered: darkmatter ×6 (three parser-only `$(rustc)` §2-ladder
+     fixtures that consult `PATH`, plus three fixtures that execute rustc),
+     claudine-cli `contextual_errors`, model_id
      `ui::ui` (trybuild needs cargo), sniff-cli `repo_aggregate_json_snapshot`
      (cargo binary resolves to null).
-   - Fix direction: gate on toolchain discoverability or swap fixtures to a
-     guaranteed-present command (`echo` / PATH-injected stub); the cwd-probe
-     tests already honor `$RUSTC`, so skip when neither `$RUSTC` nor `rustc`
-     resolves, or pre-build the probe into the archive.
+   - Fix direction: do not turn an ordinary test into an early-return pass.
+     Parser-only cases should use an unambiguous path-bearing dummy token.
+     Runtime cases should execute a repository-owned cross-platform fixture
+     binary carried in the nextest archive; the cwd tests should run a prebuilt
+     probe rather than compiling one in the guest.
 2. **Native-host timing budgets**:
    - BLOCKING: sniff `test_detect_completes_in_reasonable_time` (29.5s vs 20s
      cap here; 40.1s on main — WSL PATH scanning crosses /mnt/c drvfs).
@@ -231,6 +233,18 @@ Because the blocking five reproduce identically on main, the choice is:
 fix the tests' environment assumptions on main, or add baseline entries for
 claudine/wsl2-ubuntu, sniff/wsl2-ubuntu, and messenger/wsl2-ubuntu until the
 guest carries a toolchain.
+
+### Phase 4 update — current branch WSL2 cell
+
+Run 31753281913 recovered the previously omitted
+`claudine-cli/wsl2-ubuntu/L1` producer: 21 failures, with 17 shared with main,
+four branch-only identities, and nine main-only identities. The additions were
+three aggregate ctx-launch-anchor tests containing 2–4 real CLI invocations
+under one timeout and the shipped-context-prompt end-to-end test with a
+provider-only `PATH`. Phase 4 splits the aggregate cases and restores the
+system path behind the fake provider. A fresh canonical WSL2 run is required
+before the cell can be accepted; the historical mixed result must not be
+hidden by its existing baseline.
 
 ## P6 — Main-drift blocking cells in unrelated packages (non-hermetic tests, lints, provisioning)
 

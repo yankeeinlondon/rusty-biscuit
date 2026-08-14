@@ -397,6 +397,34 @@ source_run = "31588186544"
 expiry = "2026-09-30"
 ```
 
+## Phase 4 WSL2 reason corrections
+
+Run 31753281913 supersedes the older branch comparison for the WSL2 handoff.
+It proves exact equality for Claudine (3/3) and Darkmatter (7/7) against main
+run 31588186544. It also recovers the omitted Claudine CLI cell as mixed (17
+shared, four branch-only, nine main-only), so no Claudine CLI baseline is
+eligible until a post-fix WSL2 artifact removes the branch additions.
+
+Phase 5 should replace the existing Darkmatter reason without changing its
+`2026-11-30` expiry:
+
+```toml
+reason = "Main-identical archive-fixture assumptions on branch run 31753281913 versus main run 31588186544: three parser-only no-cache fixtures use an ambiguous bare rustc token and consult PATH, three subprocess fixtures require rustc, and the ambient catalog sweep exceeds its 30-second WSL2 budget (7 exact identities)"
+source_run = "31588186544"
+expiry = "2026-11-30"
+```
+
+The parent-ratified Claudine entry remains short-lived, but its reason should
+name the fixture contract rather than propose a nominal skip:
+
+```toml
+reason = "The toolchain-free archive guest has no rustc; three main-identical tests use it as a diagnostic or cwd-probe fixture and take the command-not-found path. Exact 3-identity equality on branch run 31753281913 and main run 31588186544"
+source_run = "31588186544"
+expiry = "2026-09-30"
+```
+
+Neither draft is applied in Phase 4.
+
 ## Remaining Phase 5 work (not done here)
 
 1. Land P1-P4 and get a CI run in which every branch-owned identity is green.

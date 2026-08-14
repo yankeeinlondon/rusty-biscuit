@@ -336,12 +336,18 @@ or browser windows.
 - Native `windows-latest` L1 cells for `darkmatter`, `claudine`, and
   `claudine-cli`.
 - Two consecutive `ubuntu-latest` `claudine-cli` L1 runs for F7.
+- Canonical Level 2 in the Claudine and Darkmatter package areas because this
+  fix changes terminal-visible composed values, context descriptors, and
+  rendering inputs. Run through each package area's `just test-l2` recipe
+  without focusing a host window.
 - Full `ci-verdict` plus exact `just ci-diff` review for F8. A green verdict
   alone is insufficient because a cell-wide baseline can hide new identities.
 
-No L2 or browser behavior is changed by this spec. Do not add terminal/browser
-tests unless implementation expands into those surfaces; if it does, use the
-package harness without focusing a host window.
+The pre-CI local acceptance record was Level 1 only. CI run `31753281913`
+subsequently exposed failures in terminal-visible surfaces, so the affected-
+package Level-2 gate above supersedes the earlier Level-1-only judgment. No
+browser behavior is changed; browser tests remain unnecessary unless the
+implementation expands into that surface.
 
 ## Success criteria
 
