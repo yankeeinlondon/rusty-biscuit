@@ -458,7 +458,12 @@ impl AppleTerminalHarness {
         if !cfg!(target_os = "macos") {
             return false;
         }
-        if env::var("CI").as_deref() == Ok("1") {
+        // GitHub Actions sets `CI=true`, not `CI=1`; matching only "1" let
+        // hosted macOS runners attempt a Terminal.app spawn in a GUI-less
+        // session, which hangs in attach/spawn instead of skipping.
+        if env::var("CI").is_ok_and(|v| {
+            !v.is_empty() && v != "0" && !v.eq_ignore_ascii_case("false")
+        }) {
             return false;
         }
         Command::new("osascript")
@@ -1597,20 +1602,24 @@ mod tests {
         // serially (the cfg below already gates it to macOS, where the
         // serial cost is acceptable).
         let prev = env::var_os("CI");
-        // SAFETY: single-threaded test process; no other threads
-        // observe the env var while we toggle it. set_var is unsafe in
-        // 2024 edition.
-        unsafe {
-            env::set_var("CI", "1");
+        // "true" is what GitHub Actions actually exports; "1" is the other
+        // common CI convention. Both must disable the harness.
+        for value in ["1", "true"] {
+            // SAFETY: single-threaded test process; no other threads
+            // observe the env var while we toggle it. set_var is unsafe in
+            // 2024 edition.
+            unsafe {
+                env::set_var("CI", value);
+            }
+            let avail = AppleTerminalHarness::available();
+            assert!(!avail, "expected CI={value} to disable AppleTerminalHarness");
         }
-        let avail = AppleTerminalHarness::available();
         unsafe {
             match prev {
                 Some(v) => env::set_var("CI", v),
                 None => env::remove_var("CI"),
             }
         }
-        assert!(!avail, "expected CI=1 to disable AppleTerminalHarness");
     }
 
     /// Phase-5 static verification: the spawn AppleScript must never call

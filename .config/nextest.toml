@@ -282,11 +282,13 @@ filter = 'test(=markdown::compose::preflight::acceptance_tests::execution_subset
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # See the default-profile note: this test's cost is two complete runtime
-# captures, which is the comparison it performs. CI hosts walk the tree more
-# slowly still, so the same leash applies.
+# captures, which is the comparison it performs. Hosted `windows-latest` and
+# `wsl2-ubuntu` both terminated it at exactly the former 30s ceiling under
+# full-suite contention (isolated it runs 1.5–7.7s on every OS), so it gets
+# the same 90s leash as the other contended-not-hung tests.
 [[profile.ci.overrides]]
 filter = 'test(=every_catalog_variable_survives_ambient_options)'
-slow-timeout = { period = "15s", terminate-after = 2 }
+slow-timeout = { period = "30s", terminate-after = 3 }
 
 # See the default-profile note: WezTerm CLI capture round trips make this
 # command-dense real-terminal test exceed CI's 30s termination ceiling on
