@@ -704,7 +704,16 @@ mod tests {
                 if provider == ProviderKind::Desktop
                     && message.contains("D-Bus notification failed")
                     && (message.contains("org.freedesktop.Notifications")
-                        || message.to_ascii_lowercase().contains("service")) =>
+                        || message.to_ascii_lowercase().contains("service")
+                        // Bus-connection failures, not just a missing
+                        // notification daemon: the WSL2 CI guest runs as an
+                        // unprivileged user whose session-bus socket is
+                        // absent or unreadable (EACCES/ENOENT/ECONNREFUSED),
+                        // which fails one layer below service resolution but
+                        // is the same no-usable-bus environment.
+                        || message.contains("Permission denied")
+                        || message.contains("No such file")
+                        || message.contains("Connection refused")) =>
             {
                 // Environment skip: the runner has no D-Bus notification
                 // daemon, which is expected on some Linux CI images.
