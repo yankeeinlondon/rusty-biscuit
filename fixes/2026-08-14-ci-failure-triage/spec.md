@@ -1,7 +1,10 @@
 ---
 status: draft
 created: 2026-08-14
-reviewed: false
+reviewed: true
+reviewed_by: codex/default
+reviewed_on: 2026-08-14
+review_iterations: 2
 area: claudine
 depends-on: ../2026-08-13-finalize/spec.md
 evidence: ../2026-08-13-finalize/failing.md
@@ -12,113 +15,137 @@ packages:
     - biscuit-terminal-cli
 ---
 
-# Attribute and clear the 24 failing cells of run 31753281913
+# Attribute and clear the failed producer cells of run 31753281913
 
 ## Summary
 
-CI run `31753281913` on `fix/ctx-launch-anchor` at commit `a00ea7c08` failed 24
-of 601 jobs, carrying 51 distinct failing test identities. The full catalog is
-[`failing.md`](../2026-08-13-finalize/failing.md).
+CI run `31753281913` on `fix/ctx-launch-anchor` at commit `a00ea7c08` exposed
+three populations that require different treatment:
 
-The launch-anchor branch is otherwise finished: its own Level-1 suites pass on a
-native Windows 11 host (6050/6050 for Claudine, 7542/7542 for Darkmatter), on
-macOS, and on a local WSL2 host, and the composition latency work has two
-consecutive two-core Linux proofs. That evidence is **Level 1 only**, and six of
-the failing jobs are Level 2. The gap between "green locally" and this run is
-the subject of this fix.
-
-Three populations are mixed together in those 24 cells:
-
-- **P1 — branch-owned regressions.** Darkmatter on `wsl2-ubuntu` fails six
-  tests clustered on interpolation and frontmatter shell expansion, including
-  one this branch introduced. Darkmatter-cli on `windows-latest` fails a
-  byte-identical output baseline. Both subsystems were changed by the
-  launch-anchor work.
-- **P2 — unattributed Level-2 rendering failures.** Eight identities across
+- **P1 — unattributed, branch-relevant failures.** One Darkmatter CLI Level-1
+  identity on Windows, eight Level-2 rendering identities across
   `claudine-cli`, `darkmatter-cli`, and `biscuit-terminal-cli` on macOS and
-  Ubuntu. Terminal rendering is out of scope for the launch-anchor fix and the
-  code-block colour-mode contract on CI tmux is already a recorded main-side
-  follow-up, but neither claim has been checked against this run.
-- **P3 — verified main drift.** `sniff`, `sniff-cli`, `rendezvous-daemon`,
-  `unchained-ai`, `biscuit-tui-cli`, `dmls`, `messenger`, `model_id`,
-  `biscuit-speaks-cli`, and `claudine` on `wsl2-ubuntu`.
+  Ubuntu, and the failed `claudine-cli/wsl2-ubuntu` producer cell omitted from
+  the provisional catalog. These must be compared with `main` on the same
+  environment before either code or policy changes are made.
+- **P2 — known WSL2 archive assumptions.** Six Darkmatter identities and three
+  Claudine identities depend on `rustc` being discoverable at test runtime.
+  The CI WSL2 guest deliberately runs a prebuilt nextest archive without Cargo
+  or rustc. Prior evidence records these identities on `main`; a real WSL2
+  development host with a toolchain is a different environment and is expected
+  to pass them.
+- **P3 — previously verified main drift.** The remaining `sniff`, `sniff-cli`,
+  `rendezvous-daemon`, `unchained-ai`, `biscuit-tui-cli`, `dmls`, `messenger`,
+  `model_id`, and `biscuit-speaks-cli` failures already have main-side
+  attribution or handoffs. Their disposition still needs fresh identity
+  evidence because the parent spec's comparison predates this run.
 
-> **Reader's note.** An earlier analysis in `ci-baseline-evidence.md` concluded
-> that no proposed baseline cell hid a branch regression. That analysis diffed
-> run `31651014023`, which predates every fix on this branch, and
-> `darkmatter/wsl2-ubuntu` was never among its candidate cells. Its conclusion
-> must not be reused without re-running the diff against `a00ea7c08` or later.
+The checked-in [`failing.md`](../2026-08-13-finalize/failing.md) was captured
+while the workflow was still running. It reports 601 jobs, 24 failures, one
+running job, and 51 identities; the job API later exposed 603 completed jobs.
+The catalog is therefore provisional and must not be treated as the final
+denominator or complete cell inventory.
+
+> **Reader's note — corrections made during review.** The draft attributed the
+> WSL2 group to an inability to spawn shells, described a July 10 Darkmatter
+> test as branch-added, stated that `darkmatter/wsl2-ubuntu` was green and
+> unbaselined on `main`, and proposed using `.github/ci/environments.json` to
+> govern arbitrary shell-dependent Level-1 tests. The repository evidence
+> contradicts each claim. The guest has Bash but intentionally has no Rust
+> toolchain; three of the six Darkmatter failures are parser-only tests whose
+> classification happens to consult `PATH`; the cited interpolation test and
+> the existing Darkmatter WSL2 baseline both predate this branch; and the
+> environment table governs the repository's known CI tier/backend
+> capabilities, not per-test executable prerequisites. This specification
+> retains the established full-Level-1 WSL2 contract and addresses fixture
+> assumptions separately.
 
 ## Scope
 
 **In scope:**
 
-1. Attribute every P1 and P2 identity to a cause, on evidence rather than on
-   the argument that a subsystem is out of scope.
-2. Fix the P1 regressions this branch caused.
-3. For P2, either fix, or demonstrate the identity is red on `main` and record
-   the main-side handoff.
+1. Reconcile the completed producer-job inventory with `failing.md` before
+   relying on its counts or classifications.
+2. Attribute and, when branch-caused, fix the Darkmatter CLI Windows Level-1
+   failure.
+3. Attribute every currently unattributed Level-2 identity against `main` on
+   the same host and fix any branch-caused failure.
+4. Correct the WSL2 attribution and prove that this branch adds no failing
+   identity to an already-baselined WSL2 cell.
+5. Re-run the identity-aware comparison before applying the parent spec's
+   ratified baseline changes or accepting any existing cell-wide baseline.
+6. Correct the parent fix's verification record and gate based on the outcome
+   of Open Question 1.
 
-**Out of scope:** implementing P3 product fixes. `sniff` hermeticity and lints,
-Neovim provisioning, the daemon security-descriptor assertions, the ConPTY
-shutdown ordering, and the WSL2 environment assumptions remain main-side work.
-This fix may record handoffs and may disposition those cells through the
-baseline, but must not absorb their implementations.
+**Out of scope:** implementing main-drift product fixes for `sniff`, Neovim
+provisioning, messenger D-Bus handling, daemon security descriptors, ConPTY
+shutdown, or other unrelated packages. Redesigning the WSL2 workflow from a
+canonical Level-1 environment into a targeted interop suite is also out of
+scope; that would be a repository-wide CI contract change requiring its own
+specification and migration plan.
 
 ## Fix specification
 
-### F1 — Reproduce and attribute the Darkmatter WSL2 cluster
+### F1 — Reconcile the run inventory before disposition
 
-Six identities on `darkmatter/wsl2-ubuntu`:
+Refresh [`failing.md`](../2026-08-13-finalize/failing.md) from all completed
+producer jobs in run `31753281913`. Count producer failures separately from the
+expected downstream `ci-verdict` failure so the gate is not mistaken for an
+additional product defect.
 
-- `interpolation_literal_pipeline::frontmatter_literal_survives_shell_bracketed_interpolation_passes`
-- `markdown::compose::frontmatter_shell_expansion::tests::detects_no_cache_suffix`
-- `markdown::compose::frontmatter_shell_expansion::tests::no_cache_combines_with_timeout_either_order`
-- `markdown::compose::frontmatter_shell_expansion::tests::no_cache_defaults_false_without_suffix`
-- `shell_expansion_coordinates::shell_block_execution_failed_renders_inner_diagnostic`
-- `shell_expansion_coordinates::shell_block_origin_counts_lines_not_bytes_with_crlf`
+For each failed producer cell, record:
 
-The first is a test this branch added. This cell has **no prior evidence of
-being red on main**, and Darkmatter was never run on the WSL2 host during the
-launch-anchor work — only Claudine was.
+- `{package, environment, tier}` and the job identifier;
+- the complete JUnit failing-identity set, when JUnit exists;
+- the exact log-derived diagnostic set for lint or other zero-identity cells;
+- whether the cell was already baselined at `a00ea7c08`;
+- whether its identity set is equal to, a subset of, or a superset of the
+  comparable `main` cell; and
+- a link to its attribution evidence or main-side handoff.
 
-Reproduce on the `build-win` WSL2 host, which reaches this configuration in
-minutes rather than through a CI round trip. Then establish attribution by
-running the same suite at `origin/main` on that host. A cluster that reproduces
-on main is drift; one that does not is a regression this branch owns.
+Correct the catalog's WSL2 claims while refreshing it: the six Darkmatter
+identities are not branch-owned, and
+`interpolation_literal_pipeline::frontmatter_literal_survives_shell_bracketed_interpolation_passes`
+was introduced before this branch. Recover the complete identity set for the
+failed `claudine-cli/wsl2-ubuntu` producer, which is present in the completed
+job inventory but absent from the provisional catalog. Preserve any newly
+discovered identity rather than forcing the final catalog back to the
+provisional count of 51.
 
-Three of the six concern `no_cache` suffix parsing and two concern shell-block
-source coordinates including CRLF handling. Determine whether they share a
-cause with the interpolation test or are independent before fixing anything.
+**Acceptance.** The catalog accounts for every completed failed producer job,
+its cell and identity totals reconcile with the source artifacts, and no
+classification rests only on package ownership or subsystem scope.
 
-**Acceptance.** Every identity is attributed with a recorded main-versus-branch
-result. Branch-owned failures pass on the WSL2 host, and the fix does not
-regress the native Windows, macOS, or Linux Level-1 suites.
-
-### F2 — Resolve the Darkmatter-CLI Windows baseline contradiction
+### F2 — Resolve the Darkmatter CLI Windows contradiction
 
 `schema_validate_baseline::schema_validate_legacy_pretty_output_is_byte_identical`
-fails on `windows-latest`, while the same package passed 655/655 on a native
-Windows 11 host at this commit.
+failed in `darkmatter-cli/windows-latest`, while the recorded native Windows 11
+run reports all 655 Darkmatter CLI Level-1 tests passing at the same commit.
+This identity was omitted from the later draft even though no evidence closed
+it.
 
-One of those two observations does not mean what it appears to. Resolve the
-contradiction before changing any code: confirm whether the local run actually
-executed this test, whether the CI job differs in tier, feature flags, or
-environment, and whether the baseline is environment-sensitive.
+Reproduce the exact test on the branch and `main` using the same native Windows
+host and test command. Record whether each run executed the identity and
+compare the relevant inputs: feature flags, nextest profile and filters,
+`NO_COLOR`/terminal and hyperlink state, working-directory spelling, and the
+actual-versus-expected bytes for each fixture case. Do not infer equivalence
+from an aggregate package count.
 
-A byte-identical output baseline is precisely what a change to interpolation
-escaping would move, so treat a genuine regression as the leading hypothesis
-until the evidence rules it out.
+If the failure is branch-caused, repair the owning rendering or path-projection
+layer and add the narrowest OS-independent regression coverage possible. If
+the expected output legitimately changes, re-derive it through the baseline's
+documented review workflow; never update it merely to match CI. If it is
+main-red or environment-specific, record the handoff and disposition it only
+through F5.
 
-**Acceptance.** The contradiction is explained in writing. If the baseline
-legitimately changed, it is re-derived through its documented review workflow
-rather than blessed. If the local run did not cover the test, the gap in local
-verification is recorded so it is not repeated.
+**Acceptance.** The contradiction has a byte-level explanation, the identity
+passes on the branch when branch-caused, and the native Windows and
+`windows-latest` results no longer disagree without a documented environmental
+reason.
 
 ### F3 — Attribute the Level-2 rendering failures
 
-Eight identities, none exercised by any local run because `just test` is
-Level 1 only:
+The currently known unattributed identities are:
 
 | Cell | Identity |
 | --- | --- |
@@ -131,85 +158,177 @@ Level 1 only:
 | `biscuit-terminal-cli` Ubuntu | `level2_diagrams::level2_diagram_fallback_when_no_image_protocol` |
 | `biscuit-terminal-cli` macOS | `level2_apple_terminal_prose::level2_apple_terminal_double_underline_plain_text_visible` |
 
-The context-capture group failing on **both** operating systems is a weak fit
-for flake and must not be dismissed as one. Run the Level-2 suites locally for
-the affected packages, then attribute each identity against `main`.
+Run the canonical Level-2 suites with `--no-fail-fast` for the affected package
+areas on macOS and Linux. Compare branch and `main` on the same host, terminal
+backend, dimensions, color environment, and fixture binaries. A green
+expectation from another host is not attribution.
 
-Level 2 must never focus or open a host terminal window.
+For each identity, capture the rendered-byte or screen-state delta and classify
+it as branch regression, main drift, harness/environment defect, or confirmed
+flake. A flake classification requires repeated evidence and a stated trigger;
+one passing rerun is insufficient. Fix branch regressions without weakening
+the terminal assertions. Record main-side handoffs for the other classes.
 
-**Acceptance.** Each identity is either fixed or shown red on `main` with a
-recorded handoff. The reason Level 2 was not run during the launch-anchor work
-is recorded, and the verification matrix of the parent fix is corrected so a
-future branch does not repeat the omission.
+All Level-2 runs must use the repository harness and must never open or focus a
+host terminal window.
 
-### F4 — Re-run the identity diff before any baseline entry
+**Acceptance.** Every listed identity, plus any added by F1, has same-host
+branch-versus-main evidence and a disposition. All branch-caused identities
+pass through the canonical Level-2 recipe, and the parent fix's verification
+record is corrected to state that Level 2 was not run before this CI result.
 
-The drafted baseline entries in `ci-baseline-evidence.md` rest on run
-`31651014023`. Every failure that run recorded for the branch has since been
-fixed, so the entries are stale.
+### F4 — Preserve the WSL2 contract and record the fixture handoff
 
-Re-run the exact identity diff against the newest completed branch run at or
-after `a00ea7c08` and the current `main` baseline run. Re-verify that each
-proposed cell carries identical failing identities on both sides, and that no
-new branch identity has appeared inside a cell that is already baselined.
+The established WSL2 contract in `.github/workflows/_wsl-ci.yml` is a package's
+canonical Level-1 suite executed from a Linux-built nextest archive inside a
+real WSL2 guest. The guest intentionally has Bash and Git but no Cargo or
+rustc. Its value is precisely that it reveals runtime environmental differences
+from `ubuntu-latest`; passing on a development WSL2 host with a toolchain does
+not invalidate that signal.
 
-The two lint cells remain a special case: a lint cell carries zero test
-identities, so once baselined, a new lint error there is invisible to the gate
-forever. Their main-side fixes are small.
+The six Darkmatter identities divide into two fixture classes:
 
-**Acceptance.** No baseline entry is written from evidence predating
-`a00ea7c08`. Every entry is paired with a fresh identity diff, and no cell is
-accepted whose branch identities are a superset of main's.
+- the three `no_cache` parser tests use the bare token `rustc`, although they
+  test suffix parsing. Darkmatter's token-resolution ladder consults `PATH` for
+  an ambiguous lone bare name, so absence of rustc changes the parse class even
+  though no process is launched; and
+- the interpolation-pipeline and two coordinate/diagnostic tests genuinely
+  execute `rustc` to obtain output or a controlled nonzero exit.
+
+The three Claudine identities likewise compile or execute a rustc-based probe.
+Prior WSL evidence records all nine as main drift. The Darkmatter cell already
+has a WSL2 Level-1 baseline, and the dependency spec ratified a short-lived
+entry for the Claudine cell subject to exact identity evidence.
+
+For the main-side handoff, parser tests must use syntax that is unambiguously a
+command without consulting host `PATH`, such as a path-bearing dummy token.
+Runtime tests must use a repository-owned, cross-platform fixture executable
+that is carried in the nextest archive, or another hermetic mechanism that
+still exercises the intended subprocess result. Do not silently return early
+from an ordinary Rust test and call that a visible skip; nextest records such a
+test as passed. Do not add a generic `shell` capability to
+`.github/ci/environments.json`, because that table does not select individual
+Level-1 tests and the guest can spawn available processes.
+
+**Acceptance.** A fresh per-cell comparison, including the omitted
+`claudine-cli` producer, shows no branch WSL2 identity set is a superset of
+`main`; existing and ratified baseline entries name the actual environmental
+assumption; and the durable fixture cleanup is recorded as a main-side
+handoff. No WSL2 cell is narrowed or removed by this fix.
+
+### F5 — Re-run identity comparison before using any baseline
+
+The dependency spec ratified evidence-backed, short-lived baseline entries, but
+its drafted entries compare branch run `31651014023`, which predates the fixes
+and failures under review here. Re-run the comparison against the newest
+completed branch run at or after `a00ea7c08` and a comparable current `main`
+run for each environment.
+
+Apply these rules to both newly proposed entries and already-baselined cells
+that are red in the branch run:
+
+1. A branch identity set that is a superset of `main` blocks; a cell-wide
+   baseline must not hide the added identity.
+2. Equality or subset status must be supported by exact JUnit identities. For
+   lint and other zero-identity cells, compare normalized log diagnostics
+   instead of treating two empty identity sets as evidence.
+3. Every new entry must retain the owner, reason, exact source run, and
+   `2026-09-30` expiration ratified by the dependency spec. Do not extend an
+   existing entry's expiration as part of this triage.
+4. Passing, missing, or expired baselines must continue to block according to
+   `.github/ci/README.md`.
+
+**Acceptance.** `ci-rollup` reports neither `baseline-no-result` nor
+`baseline-now-passing`; every accepted failed cell has current comparison
+evidence; no branch-superset cell is accepted; and the final `just ci-diff`
+review covers existing as well as newly added baseline entries.
 
 ## Phases
 
-1. **Phase 1 — Attribution.** F1 and F3 reproduction on the WSL2 and Linux
-   hosts, plus the F2 contradiction. Fix nothing yet; produce the
-   main-versus-branch result for every P1 and P2 identity.
-2. **Phase 2 — Branch-owned fixes.** Repair whatever Phase 1 attributes to this
-   branch, re-verifying the parent fix's suites on native Windows, macOS,
-   Linux, and WSL2 so a repair does not reopen a closed regression.
-3. **Phase 3 — Handoffs.** Record a main-side handoff for every identity shown
-   red on `main`.
-4. **Phase 4 — Gate policy.** F4, then the full verdict and identity-aware diff.
+1. **Phase 1 — Evidence integrity.** F1, including the final producer-cell and
+   identity inventory.
+2. **Phase 2 — Branch attribution.** F2 and F3 on matched Windows, macOS, and
+   Linux hosts. Make no baseline change during attribution.
+3. **Phase 3 — Branch-owned fixes.** Repair only failures attributed to this
+   branch and run the relevant Level-1 or Level-2 package gates.
+4. **Phase 4 — WSL2 and main-side handoffs.** F4, including corrections to the
+   catalog and baseline reasons; do not redesign the WSL2 tier here.
+5. **Phase 5 — Gate policy.** F5, followed by one authoritative full CI run and
+   an identity-aware comparison.
 
 ## Verification matrix
 
-- `build-win` (WSL2) — Darkmatter Level 1, at branch and at `main`.
-- `build-win-native` (Windows 11) — Darkmatter and Claudine Level 1.
-- `build-linux` — Level 1 and Level 2 for the affected packages. Note this host
-  has at least two pre-existing terminal-rendering failures unrelated to any
-  branch (`horizontal_rule_integration::test_custom_weight_thick_differs_from_thin`
-  and the `group_framing` group), both confirmed red on `main`; attribute
-  against `main` on the same host rather than against a green expectation.
-- macOS — Level 2 for `claudine-cli`, `darkmatter-cli`, `biscuit-terminal-cli`.
-- One full CI run, used as authoritative proof rather than as an iteration loop.
+- Native Windows 11 and `windows-latest` — the focused
+  `schema_validate_baseline` identity, then Darkmatter CLI Level 1.
+- Linux — canonical Level 2 for `claudine-cli`, `darkmatter-cli`, and
+  `biscuit-terminal-cli`, with same-host `main` comparisons for red identities.
+- macOS — the same three canonical Level-2 package suites and same-host `main`
+  comparisons.
+- `wsl2-ubuntu` — Darkmatter, Claudine, and Claudine CLI Level 1 from the
+  canonical archive workflow; compare identities with `main`, not with a
+  toolchain-equipped local WSL2 host.
+- A full CI run as authoritative proof after local attribution and fixes, then
+  `just ci-diff` plus raw diagnostic comparison for zero-identity cells.
+
+The Level-2 harness must remain headless with respect to host terminal windows.
 
 ## Success criteria
 
-1. Every one of the 51 identities in [`failing.md`](../2026-08-13-finalize/failing.md)
-   is attributed to this branch or to `main`, with the evidence recorded.
-2. No identity this branch owns remains red on any host.
-3. The Level-1-only gap in the parent fix's verification is documented and its
-   matrix corrected.
-4. Any baseline entry rests on an identity diff at or after `a00ea7c08`.
-5. No new red identity appears relative to `main`, including inside cells
-   accepted by a baseline entry.
+1. Every completed failed producer cell in run `31753281913` has a complete,
+   evidence-backed disposition; the provisional count of 51 is corrected if
+   necessary.
+2. No branch-caused Level-1 or Level-2 identity remains red on any applicable
+   host.
+3. The Darkmatter CLI Windows contradiction is explained at byte level.
+4. WSL2 failures are described as concrete missing-toolchain, timing, service,
+   or fixture assumptions rather than a generic inability to execute shells.
+5. The established full-Level-1 WSL2 contract remains intact.
+6. The parent fix records its Level-1-only verification gap and adopts the
+   Level-2 decision selected below.
+7. No baseline accepts a branch identity set that is a superset of `main`,
+   including cells that were already baselined before this fix.
 
-## Open questions
+## Ratified decisions
 
-### 1. Does the Darkmatter WSL2 cluster share one cause?
+### 1. What Level-2 coverage should join the parent fix's acceptance gate?
 
-Three `no_cache` suffix tests, two shell-block coordinate tests, and one
-frontmatter-literal interpolation test fail together. They may share a root
-cause in frontmatter shell expansion, or the interpolation test may be
-independent and merely adjacent. Phase 1 must answer this before Phase 2 begins,
-because a single shared fix and six separate ones carry very different risk.
+**Decision (ratified 2026-08-14): Option A.** Canonical Level-2 coverage is
+required for package areas whose terminal-rendered behavior, descriptor
+catalogs, or rendering inputs changed. For the parent branch, that means the
+Claudine and Darkmatter package areas. The pre-CI local acceptance record was
+Level 1 only; run `31753281913` demonstrated that leaving these suites until CI
+creates a late attribution gap.
 
-### 2. Should Level 2 join the parent fix's acceptance gate?
+The parent specification concluded that Level 2 added no relevant assurance,
+but this branch changes context descriptors and terminal-visible composed
+values, and the subsequent CI run contains failures in both surfaces.
 
-The launch-anchor specification argued Level 2 adds no relevant assurance
-because no requirement depends on terminal rendering. This run shows Level-2
-cells failing on a branch that changed how values are escaped for display. If
-the F3 attribution finds any Level-2 failure is branch-caused, that argument was
-wrong and the gate should be widened.
+**Option A — Require affected-package Level 2 (selected).** Run canonical
+Level-2 suites for package areas whose terminal-rendered behavior, descriptor
+catalogs, or rendering inputs changed; for this branch that includes Claudine
+and Darkmatter.
+
+- **Pros:** exercises the behavior the branch can plausibly move; catches
+  layout and escape-sequence regressions before full CI; keeps the gate bounded
+  by impact.
+- **Cons:** requires an explicit impact judgment and same-host attribution when
+  a package's existing Level-2 suite is already red.
+
+**Option B — Require all repository Level 2 for every cross-package fix.** Make
+the complete Level-2 matrix a universal acceptance gate.
+
+- **Pros:** simple rule; maximizes regression detection across downstream
+  renderers.
+- **Cons:** expensive, absorbs unrelated environmental debt, and conflicts with
+  surgical package-area verification.
+
+**Option C — Keep Level 1 only and attribute Level 2 after CI.** Leave the
+parent gate unchanged.
+
+- **Pros:** lowest local cost and no new dependency on real-terminal harnesses.
+- **Cons:** repeats the exact late-discovery gap that opened this fix and gives
+  no pre-CI evidence for terminal-visible changes.
+
+Option A aligns the verification level with the changed behavior without
+turning every fix into a workspace-wide terminal test run. The parent
+verification matrix now records the selected gate.
