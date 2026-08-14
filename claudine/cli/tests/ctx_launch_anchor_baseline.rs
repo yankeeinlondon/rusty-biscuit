@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use pulldown_cmark::{Event, Options, Parser, TagEnd};
+use rstest::rstest;
 
 mod common;
 use common::{TestWorkspace, augmented_path, strip_ansi, write};
@@ -553,8 +554,12 @@ fn assert_launch_anchored(
     }
 }
 
-#[test]
-fn cli_uses_launch_context_across_launch_source_matrix() {
+#[rstest]
+#[case::launch_area("launch-area")]
+#[case::opposing_area("opposing-area")]
+#[case::external_repository("external-repo")]
+#[case::repository_root("repo-root")]
+fn cli_uses_launch_context_across_launch_source_matrix(#[case] source: &str) {
     let workspace = TestWorkspace::named("ctx-launch-anchor-matrix");
     // macOS spells its temporary root through both `/var` and `/private/var`.
     // Use one concrete spelling throughout this baseline so the only variable
@@ -573,31 +578,21 @@ fn cli_uses_launch_context_across_launch_source_matrix() {
     write(&home.join(".claudine/config.json"), "{}");
     stage_codex(&bin_dir);
 
-    let cases = [
-        (
-            "launch-area",
-            launch_area.join("prompt.md"),
-        ),
-        (
-            "opposing-area",
-            opposing_area.join("prompt.md"),
-        ),
-        (
-            "external-repo",
-            external_repo.join("prompt.md"),
-        ),
-        ("repo-root", launch_repo.join("prompt.md")),
-    ];
+    let document = match source {
+        "launch-area" => launch_area.join("prompt.md"),
+        "opposing-area" => opposing_area.join("prompt.md"),
+        "external-repo" => external_repo.join("prompt.md"),
+        "repo-root" => launch_repo.join("prompt.md"),
+        _ => panic!("unsupported launch-source fixture: {source}"),
+    };
 
-    for (name, document) in cases {
-        write(
-            &document,
-            &baseline_document(Some("alpha-lib"), Some(&launch_repo)),
-        );
-        let capture = workspace_root.join(format!("{name}-prompt.txt"));
-        let observation = run_document(&launch_area, &home, &bin_dir, &document, &capture);
-        assert_launch_anchored(name, &observation, "alpha-lib", Some(&launch_repo));
-    }
+    write(
+        &document,
+        &baseline_document(Some("alpha-lib"), Some(&launch_repo)),
+    );
+    let capture = workspace_root.join(format!("{source}-prompt.txt"));
+    let observation = run_document(&launch_area, &home, &bin_dir, &document, &capture);
+    assert_launch_anchored(source, &observation, "alpha-lib", Some(&launch_repo));
 }
 
 #[test]
@@ -692,8 +687,12 @@ fn cli_provider_receives_exact_projected_ctx_repo_root_text() {
     );
 }
 
-#[test]
-fn inline_cli_uses_launch_context_across_launch_source_matrix() {
+#[rstest]
+#[case::launch_area("launch-area")]
+#[case::opposing_area("opposing-area")]
+#[case::external_repository("external-repo")]
+#[case::repository_root("repo-root")]
+fn inline_cli_uses_launch_context_across_launch_source_matrix(#[case] source: &str) {
     let workspace = TestWorkspace::named("ctx-launch-anchor-inline-matrix");
     let workspace_root = projected_path(workspace.path());
     let launch_repo = launch_repository(&workspace_root);
@@ -709,21 +708,24 @@ fn inline_cli_uses_launch_context_across_launch_source_matrix() {
     write(&home.join(".claudine/config.json"), "{}");
     stage_goose(&bin_dir);
 
-    for (name, document) in [
-        ("launch-area", launch_area.join("inline.md")),
-        ("opposing-area", opposing_area.join("inline.md")),
-        ("repo-root", launch_repo.join("inline.md")),
-        ("external-repo", external_repo.join("inline.md")),
-    ] {
-        write(&document, &inline_document(&launch_repo));
-        let capture = workspace_root.join(format!("inline-{name}-prompt.txt"));
-        let observation = run_inline_document(&launch_area, &home, &bin_dir, &document, &capture);
-        assert_launch_anchored(name, &observation, "alpha-lib", Some(&launch_repo));
-    }
+    let document = match source {
+        "launch-area" => launch_area.join("inline.md"),
+        "opposing-area" => opposing_area.join("inline.md"),
+        "repo-root" => launch_repo.join("inline.md"),
+        "external-repo" => external_repo.join("inline.md"),
+        _ => panic!("unsupported inline launch-source fixture: {source}"),
+    };
+
+    write(&document, &inline_document(&launch_repo));
+    let capture = workspace_root.join(format!("inline-{source}-prompt.txt"));
+    let observation = run_inline_document(&launch_area, &home, &bin_dir, &document, &capture);
+    assert_launch_anchored(source, &observation, "alpha-lib", Some(&launch_repo));
 }
 
-#[test]
-fn cli_loop_reuses_launch_context_for_root_and_package_prompt_copies() {
+#[rstest]
+#[case::repository_root("repo-root")]
+#[case::package_area("launch-area")]
+fn cli_loop_reuses_launch_context_for_root_and_package_prompt_copies(#[case] source: &str) {
     let workspace = TestWorkspace::named("ctx-launch-anchor-loop-pair");
     let workspace_root = projected_path(workspace.path());
     let launch_repo = launch_repository(&workspace_root);
@@ -736,27 +738,32 @@ fn cli_loop_reuses_launch_context_for_root_and_package_prompt_copies() {
     write(&home.join(".claudine/config.json"), "{}");
     stage_counting_codex(&bin_dir);
 
-    for (name, document) in [
-        ("repo-root", launch_repo.join("loop.md")),
-        ("launch-area", launch_area.join("loop.md")),
-    ] {
-        write(&document, &loop_document(&launch_repo));
-        let capture = workspace_root.join(format!("loop-{name}-prompt.txt"));
-        let count = workspace_root.join(format!("loop-{name}-count.txt"));
-        let assertion = cli_command(&launch_area, &home, &bin_dir)
-            .env("CLAUDINE_STDIN_FILE", &capture)
-            .env("CLAUDINE_COUNT_FILE", &count)
-            .env("CLAUDINE_PROVIDER_FIXTURE_MODE", "counting-codex")
-            .args(["compose", "--codex"])
-            .arg(&document)
-            .assert()
-            .success();
-        let observation = Observation::new(
-            fs::read_to_string(&capture).expect("fake Codex received loop prompt"),
-            strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr)),
-        );
+    let document = match source {
+        "repo-root" => launch_repo.join("loop.md"),
+        "launch-area" => launch_area.join("loop.md"),
+        _ => panic!("unsupported loop launch-source fixture: {source}"),
+    };
 
-        assert_launch_anchored(name, &observation, "alpha-lib", Some(&launch_repo));
-        assert_eq!(fs::read_to_string(count).unwrap(), "2", "wrong loop count for {name}");
-    }
+    write(&document, &loop_document(&launch_repo));
+    let capture = workspace_root.join(format!("loop-{source}-prompt.txt"));
+    let count = workspace_root.join(format!("loop-{source}-count.txt"));
+    let assertion = cli_command(&launch_area, &home, &bin_dir)
+        .env("CLAUDINE_STDIN_FILE", &capture)
+        .env("CLAUDINE_COUNT_FILE", &count)
+        .env("CLAUDINE_PROVIDER_FIXTURE_MODE", "counting-codex")
+        .args(["compose", "--codex"])
+        .arg(&document)
+        .assert()
+        .success();
+    let observation = Observation::new(
+        fs::read_to_string(&capture).expect("fake Codex received loop prompt"),
+        strip_ansi(&String::from_utf8_lossy(&assertion.get_output().stderr)),
+    );
+
+    assert_launch_anchored(source, &observation, "alpha-lib", Some(&launch_repo));
+    assert_eq!(
+        fs::read_to_string(count).unwrap(),
+        "2",
+        "wrong loop count for {source}"
+    );
 }

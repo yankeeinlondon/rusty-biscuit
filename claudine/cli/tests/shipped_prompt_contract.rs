@@ -8,6 +8,8 @@ use serde_json::Value;
 use std::path::{Path, PathBuf};
 
 mod common;
+#[cfg(unix)]
+use common::augmented_path;
 
 fn repository_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
@@ -218,7 +220,7 @@ fn shipped_context_prompt_renders_its_package_area_list_through_the_cli() {
         .env("NO_COLOR", "1")
         .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .env("HOME", workspace.path())
-        .env("PATH", &bin_dir)
+        .env("PATH", augmented_path(&bin_dir))
         .env("CLAUDINE_STDIN_FILE", &captured_prompt)
         .current_dir(&repo)
         .arg("compose")
