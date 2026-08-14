@@ -10,14 +10,21 @@ const MAX_BACKUPS: usize = 10;
 
 /// Create a timestamped backup of a config file before modification.
 ///
-/// Backups are stored at `~/.claudine/backups/<provider>/<timestamp>.bak`.
+/// Backups are stored at
+/// `~/.claudine/backups/<provider>/<timestamp>_<nanos>_<pid>.bak`.
 /// After creating the backup, old backups beyond [`MAX_BACKUPS`] are pruned.
 pub fn create_backup(path: &Path, provider: Provider) -> Result<PathBuf> {
     let backup_dir = backup_base_dir()?.join(provider.as_slug());
     fs::create_dir_all(&backup_dir)?;
 
-    let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
-    let backup_path = backup_dir.join(format!("{timestamp}.bak"));
+    // The name must be unique across concurrent processes: this directory is
+    // global, and two processes backing up the same provider within the same
+    // second used to produce the same destination — on Windows the second
+    // `fs::copy` then fails with a sharing violation against the copy in
+    // flight. Nanoseconds disambiguate within a process, the pid across
+    // processes.
+    let timestamp = Utc::now().format("%Y%m%d_%H%M%S_%f");
+    let backup_path = backup_dir.join(format!("{timestamp}_{}.bak", std::process::id()));
 
     fs::copy(path, &backup_path)?;
 
@@ -31,8 +38,10 @@ pub fn create_backup(path: &Path, provider: Provider) -> Result<PathBuf> {
 
 /// Remove old backups beyond [`MAX_BACKUPS`], keeping the most recent.
 ///
-/// Files are sorted lexicographically by name (format `YYYYMMDD_HHMMSS.bak`),
-/// so alphabetical order equals chronological order.
+/// Files are sorted lexicographically by name (format
+/// `YYYYMMDD_HHMMSS_<nanos>_<pid>.bak`), so alphabetical order equals
+/// chronological order down to the nanosecond; same-instant names from
+/// different processes order arbitrarily by pid, which pruning tolerates.
 ///
 /// ## Returns
 ///
@@ -102,6 +111,22 @@ mod tests {
         assert!(backup_path.exists());
         assert!(backup_path.to_string_lossy().contains("claude"));
         assert!(backup_path.extension().unwrap() == "bak");
+    }
+
+    #[test]
+    fn rapid_backups_of_same_provider_never_collide() {
+        let tmp = TempDir::new().unwrap();
+        let source = tmp.path().join("hooks.json");
+        fs::write(&source, "{}\n").unwrap();
+
+        // Two backups inside the same wall-clock second must land on distinct
+        // paths; a shared destination is the Windows sharing-violation race
+        // this name format exists to prevent.
+        let first = create_backup(&source, Provider::Antigravity).unwrap();
+        let second = create_backup(&source, Provider::Antigravity).unwrap();
+        assert_ne!(first, second);
+        assert!(first.exists());
+        assert!(second.exists());
     }
 
     #[test]
