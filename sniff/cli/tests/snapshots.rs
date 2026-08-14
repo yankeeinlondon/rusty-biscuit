@@ -669,10 +669,10 @@ fn stable_aggregate_json(json: &Value) -> Value {
             .iter()
             .map(|s| {
                 let mut entry = s.clone();
-                if let Some(binary) = entry.get_mut("binary") {
-                    if binary.get("path").is_some_and(Value::is_string) {
-                        binary["path"] = json!("<normalized>");
-                    }
+                if let Some(binary) = entry.get_mut("binary")
+                    && binary.get("path").is_some_and(Value::is_string)
+                {
+                    binary["path"] = json!("<normalized>");
                 }
                 entry
             })
@@ -740,6 +740,15 @@ fn redact_base_paths(value: &Value, base: &std::path::Path) -> Value {
     let mut redacted = value.clone();
     let mut roots = vec![base.to_path_buf()];
     if let Ok(canonical) = std::fs::canonicalize(base) {
+        // On Windows, canonicalize returns the `\\?\`-prefixed long-name form
+        // while gix-derived output reports the long-name form WITHOUT the
+        // prefix (and the tempdir hands out the 8.3 short form) — redact all
+        // three spellings.
+        if let Some(text) = canonical.to_str()
+            && let Some(stripped) = text.strip_prefix(r"\\?\")
+        {
+            roots.push(std::path::PathBuf::from(stripped));
+        }
         roots.push(canonical);
     }
     // Longest first: a prefix would otherwise mask the form that contains it.
@@ -773,11 +782,43 @@ fn redact_base_paths(value: &Value, base: &std::path::Path) -> Value {
     redacted
 }
 
+/// Write a `cargo` shim the executable resolvers will find.
+#[cfg(unix)]
+fn write_cargo_shim(dir: &std::path::Path) {
+    use std::os::unix::fs::PermissionsExt;
+    let shim = dir.join("cargo");
+    std::fs::write(&shim, "#!/bin/sh\nexit 0\n").unwrap();
+    std::fs::set_permissions(&shim, std::fs::Permissions::from_mode(0o755)).unwrap();
+}
+
+/// Write a `cargo` shim the executable resolvers will find (`.cmd` is on the
+/// default PATHEXT probe list).
+#[cfg(windows)]
+fn write_cargo_shim(dir: &std::path::Path) {
+    std::fs::write(dir.join("cargo.cmd"), "@echo off\r\nexit /b 0\r\n").unwrap();
+}
+
 fn run_repo_aggregate_json(base: &std::path::Path) -> Value {
+    // `monorepo_standards[].binary` resolves the acting `cargo` through the
+    // process PATH, so whether the host has cargo installed would otherwise
+    // leak into the golden — exactly the host-assertion this snapshot must
+    // avoid (the wsl2 CI guest has no `cargo` on the test process PATH).
+    // Prepending a fixture shim makes resolution deterministic everywhere;
+    // the resolved path itself is normalized to `<normalized>` either way.
+    let fixture_bin = tempfile::tempdir().expect("fixture cargo bin dir");
+    write_cargo_shim(fixture_bin.path());
+    let existing_path = std::env::var_os("PATH").unwrap_or_default();
+    let combined_path = std::env::join_paths(
+        std::iter::once(fixture_bin.path().to_path_buf())
+            .chain(std::env::split_paths(&existing_path)),
+    )
+    .expect("PATH dirs should join without inner separators");
+
     let output = assert_cmd::Command::cargo_bin("sniff")
         .unwrap()
         .args(["--base", base.to_str().unwrap(), "repo", "--json"])
         .env("NO_COLOR", "1")
+        .env("PATH", &combined_path)
         .output()
         .expect("run sniff repo --json");
 

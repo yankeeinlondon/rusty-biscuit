@@ -1910,7 +1910,20 @@ mod tests {
 
     #[test]
     fn resolve_acting_binary_returns_none_when_binary_missing() {
+        use crate::test_helpers::{ENV_MUTEX, ScopedEnv};
+
+        let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
+        // An empty synthetic index is not enough: on an eager-map miss,
+        // `find_with_source` still falls back to `which`, which walks the real
+        // process PATH — and CI runners preinstall `gradle`. Point PATH at an
+        // empty directory so the binary is missing by construction.
+        let empty_path_dir = tempfile::tempdir().unwrap();
+        let mut env = ScopedEnv::new();
+        env.set_os(
+            "PATH",
+            &std::env::join_paths([empty_path_dir.path()]).expect("join PATH dirs"),
+        );
         let index = ExecutableIndex::for_test(HashMap::new());
         let resolved = resolve_acting_binary_with_version(
             MonorepoStandard::GradleMultiProject,

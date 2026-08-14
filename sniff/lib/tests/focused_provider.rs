@@ -2078,7 +2078,7 @@ async fn private_gitea_and_forgejo_queries_use_host_bound_api_key_authentication
     ];
     let _clean_host_variables = host_variables
         .iter()
-        .map(|variable| EnvGuard::remove_safe(variable))
+        .map(EnvGuard::remove_safe)
         .collect::<Vec<_>>();
 
     for (flavor, variable, version) in [

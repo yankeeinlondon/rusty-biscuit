@@ -465,7 +465,7 @@ async fn unsigned_authentication_challenges_use_only_one_host_bound_provider_cre
     ];
     let _clean_host_variables = host_variables
         .iter()
-        .map(|variable| EnvGuard::remove_safe(variable))
+        .map(EnvGuard::remove_safe)
         .collect::<Vec<_>>();
     let global_tokens = [
         ("GH_TOKEN", "unsigned-global-github-secret"),
@@ -677,7 +677,7 @@ async fn host_bound_discovery_uses_each_providers_exact_authentication_header() 
     let host_variables = cases.iter().map(|case| case.0).collect::<Vec<_>>();
     let _clean_host_variables = host_variables
         .iter()
-        .map(|variable| EnvGuard::remove_safe(variable))
+        .map(EnvGuard::remove_safe)
         .collect::<Vec<_>>();
     let global_tokens = [
         ("GH_TOKEN", "matrix-global-github-secret"),

@@ -370,12 +370,37 @@ mod tests {
         assert_eq!(infer_vendor("Unknown GPU"), None);
     }
 
+    /// Whether this process runs inside a hypervisor guest.
+    ///
+    /// `kern.hv_vmm_present` is the canonical macOS "am I virtualized" probe;
+    /// it reads 1 on Apple Virtualization guests (GitHub macOS CI runners).
+    #[cfg(target_os = "macos")]
+    fn running_in_vm() -> bool {
+        let name = std::ffi::CString::new("kern.hv_vmm_present").expect("static sysctl name");
+        let mut value: i32 = 0;
+        let mut size = std::mem::size_of::<i32>();
+        let rc = unsafe {
+            libc::sysctlbyname(
+                name.as_ptr(),
+                (&raw mut value).cast(),
+                &raw mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        rc == 0 && value != 0
+    }
+
     #[cfg(target_os = "macos")]
     #[test]
     fn test_detect_gpus_on_macos() {
         let gpus = detect_gpus();
-        // On macOS, we should detect at least one GPU
-        assert!(!gpus.is_empty(), "Expected at least one GPU on macOS");
+        // Virtualized macOS guests expose a paravirtual display with no
+        // `IOAccelerator` service, so zero GPUs is a truthful answer there.
+        // Real hardware keeps the non-empty requirement.
+        if !running_in_vm() {
+            assert!(!gpus.is_empty(), "Expected at least one GPU on macOS");
+        }
 
         for gpu in &gpus {
             // Every GPU should have a name

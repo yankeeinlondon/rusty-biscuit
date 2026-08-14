@@ -165,9 +165,9 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(target_os = "linux"))]
     fn test_default_active_daemon_is_none_on_non_linux() {
         let helpers = InstalledNotificationHelpers::default();
-        #[cfg(not(target_os = "linux"))]
         assert!(helpers.active_daemon.is_none());
     }
 

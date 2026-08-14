@@ -7935,7 +7935,11 @@ fn test_repo_worktree_verbose_includes_path() {
     let trimmed = stdout.trim();
     assert!(trimmed.starts_with("my-worktree ["));
     assert!(trimmed.ends_with("]"));
-    assert!(trimmed.contains(worktree_path.to_str().unwrap()));
+    // The CLI prints the canonicalized worktree path; compare against the same
+    // canonical spelling (on Windows the tempdir arrives 8.3-short and
+    // unprefixed while canonicalize returns `\\?\`-long form).
+    let canonical_worktree = std::fs::canonicalize(&worktree_path).unwrap();
+    assert!(trimmed.contains(canonical_worktree.to_str().unwrap()));
 }
 
 #[test]
@@ -8102,8 +8106,12 @@ fn test_repo_worktrees_verbose_output() {
         stdout.contains("located at"),
         "verbose should include path: {stdout}"
     );
+    // The CLI prints the canonicalized worktree path; compare against the same
+    // canonical spelling (on Windows the tempdir arrives 8.3-short and
+    // unprefixed while canonicalize returns `\\?\`-long form).
+    let canonical_worktree = std::fs::canonicalize(&worktree_path).unwrap();
     assert!(
-        stdout.contains(worktree_path.to_str().unwrap()),
+        stdout.contains(canonical_worktree.to_str().unwrap()),
         "verbose should contain worktree path: {stdout}"
     );
 }

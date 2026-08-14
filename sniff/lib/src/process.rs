@@ -839,6 +839,11 @@ mod tests {
 
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    // The descendant outliving this process is the regression under test, so it
+    // must not be waited on. No zombie can result: this fixture exits
+    // immediately after spawning, and a zombie needs a live parent — on exit
+    // the descendant is reparented and reaped by init.
+    #[allow(clippy::zombie_processes)]
     fn child_spawns_pipe_holding_descendant() {
         let executable = std::env::current_exe().expect("current test executable should resolve");
         let args = test_child_args(PIPE_HOLDING_DESCENDANT);
@@ -860,7 +865,7 @@ mod tests {
     fn child_spawns_detached_pipe_holding_descendant() {
         let executable = std::env::current_exe().expect("current test executable should resolve");
         let args = test_child_args(DETACHED_PIPE_HOLDING_DESCENDANT);
-        let descendant = std::process::Command::new(executable)
+        let mut descendant = std::process::Command::new(executable)
             .args(args)
             .spawn()
             .expect("detached pipe-holding descendant should spawn");
@@ -872,10 +877,17 @@ mod tests {
             // leader's process-group ID equals its PID.
             if unsafe { libc::getpgid(descendant_pid) } == descendant_pid {
                 std::thread::sleep(Duration::from_secs(30));
+                // The scenario under test ends with the sleep (in practice the
+                // test SIGKILLs this fixture long before); reap the descendant
+                // so no path leaves it running or zombied.
+                let _ = descendant.kill();
+                let _ = descendant.wait();
                 return;
             }
             std::thread::sleep(POLL_INTERVAL);
         }
+        let _ = descendant.kill();
+        let _ = descendant.wait();
         panic!("descendant did not establish its own session");
     }
 
@@ -904,11 +916,16 @@ mod tests {
     fn child_spawns_quiet_detached_descendant() {
         let executable = std::env::current_exe().expect("current test executable should resolve");
         let args = test_child_args(QUIET_DETACHED_DESCENDANT);
-        std::process::Command::new(executable)
+        let mut descendant = std::process::Command::new(executable)
             .args(args)
             .spawn()
             .expect("quiet detached descendant should spawn");
         std::thread::sleep(Duration::from_secs(30));
+        // The scenario under test ends with the sleep (in practice the test
+        // SIGKILLs this fixture long before); reap the descendant so no path
+        // leaves it running or zombied.
+        let _ = descendant.kill();
+        let _ = descendant.wait();
     }
 
     #[cfg(unix)]
@@ -931,6 +948,12 @@ mod tests {
     #[cfg(unix)]
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    // Waiting on the descendant would defeat the fixture: the reparented
+    // survivor IS the regression. No zombie can result: every path out of this
+    // function (return or panic) terminates the fixture process while the
+    // 30-second descendant is still alive, and a zombie needs a live parent —
+    // init reaps the descendant after reparenting.
+    #[allow(clippy::zombie_processes)]
     fn child_detaches_descendant_then_exits() {
         let executable = std::env::current_exe().expect("current test executable should resolve");
         let args = test_child_args(QUIET_DETACHED_DESCENDANT);
@@ -967,6 +990,13 @@ mod tests {
     #[cfg(unix)]
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    // Waiting on the descendant would defeat the fixture: the parent must exit
+    // the instant the descendant's `setsid` lands, leaving it escaped between
+    // two sampler intervals. No zombie can result: every path out of this
+    // function terminates the fixture process while the descendant is still
+    // alive, and a zombie needs a live parent — init reaps it after
+    // reparenting.
+    #[allow(clippy::zombie_processes)]
     fn child_detaches_between_samples() {
         let go_file = std::path::PathBuf::from(
             std::env::var_os(BETWEEN_SAMPLES_GO_FILE)
