@@ -42,7 +42,7 @@ fn assert_container_renders_fenced_code<H: TerminalHarness>(harness: &mut H, sub
     harness.settle();
     harness
         .send_command_with_env(
-            &format!("bt {subcommand} \"{FENCED_PROSE}\""),
+            &common::bt_cmd(&format!("bt {subcommand} \"{FENCED_PROSE}\"")),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");

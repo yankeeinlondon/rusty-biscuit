@@ -103,9 +103,14 @@ fn level2_apple_terminal_link_fallback_visible() {
         )
         .expect("send_text failed");
     harness.settle();
-    std::thread::sleep(Duration::from_millis(400));
-
-    let frame = harness.capture().expect("capture failed");
+    // Poll for the closing sentinel instead of a fixed sleep: a cold-started
+    // debug `bt` (first spawn after a rebuild) can take longer than any fixed
+    // pause, and the capture racing it produces an empty bounded region. The
+    // predicate requires the sentinel on its own line — the command echo also
+    // carries the literal `__BT_END__` text, which must not satisfy the poll.
+    let frame = common::capture_until(harness, Duration::from_secs(10), |f| {
+        f.plain.lines().any(|line| line.trim() == "__BT_END__")
+    });
 
     let bounded = frame
         .plain
@@ -273,9 +278,14 @@ fn level2_apple_terminal_double_underline_plain_text_visible() {
         )
         .expect("send_text failed");
     harness.settle();
-    std::thread::sleep(Duration::from_millis(400));
-
-    let frame = harness.capture().expect("capture failed");
+    // Poll for the closing sentinel instead of a fixed sleep: a cold-started
+    // debug `bt` (first spawn after a rebuild) can take longer than any fixed
+    // pause, and the capture racing it produces an empty bounded region. The
+    // predicate requires the sentinel on its own line — the command echo also
+    // carries the literal `__BT_END__` text, which must not satisfy the poll.
+    let frame = common::capture_until(harness, Duration::from_secs(10), |f| {
+        f.plain.lines().any(|line| line.trim() == "__BT_END__")
+    });
 
     let bounded = frame
         .plain

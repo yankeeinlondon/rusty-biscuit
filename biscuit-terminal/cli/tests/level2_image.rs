@@ -265,7 +265,7 @@ fn level2_warp_uses_floor_rounding() {
     let path = fixture_path("13x13.png");
     harness
         .send_command_with_env(
-            &format!("bt image --debug --width 41 {path}"),
+            &common::bt_cmd(&format!("bt image --debug --width 41 {path}")),
             &[("TERM_PROGRAM", "WarpTerminal")],
         )
         .expect("send_command_with_env failed");
@@ -325,7 +325,7 @@ fn level2_image_default_uses_ceil_rounding() {
     // inherit a polluted parent env).
     let path = fixture_path("13x13.png");
     harness
-        .send_command_with_env(&format!("bt image --debug {path}"), &[])
+        .send_command_with_env(&common::bt_cmd(&format!("bt image --debug {path}")), &[])
         .expect("send_command_with_env failed");
 
     let frame = harness.capture().expect("capture failed");

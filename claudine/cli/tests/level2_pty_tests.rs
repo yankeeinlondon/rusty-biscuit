@@ -19,11 +19,18 @@ fn level2_pty_wrapper_summary_shows_badges() {
     let bin_dir = workspace.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
     write_executable(&bin_dir.join("goose"), "#!/bin/sh\necho 'child-output'\n");
+    // The PTY is a real TTY: without a seeded config the first-run wizard
+    // intercepts the wrapper before any banner appears. These tests relied on
+    // an earlier test having created config in the runner's real HOME — an
+    // ordering side effect, not a contract.
+    let home = workspace.path().join("home");
+    common::wrap::seed_minimal_config(&home);
 
     let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args(["goose", "-y", "-n", "--", "hi"]);
     cmd.env("NO_COLOR", "1");
     cmd.env("TERM_WIDTH", "80");
+    cmd.env("HOME", &home);
     cmd.env("PATH", bin_dir);
 
     let mut p = Session::spawn(cmd).expect("failed to spawn PTY");
@@ -45,11 +52,15 @@ fn level2_pty_non_interactive_detection() {
     let bin_dir = workspace.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
     write_executable(&bin_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+    // Isolated HOME for the same first-run-wizard reason as the badges test.
+    let home = workspace.path().join("home");
+    common::wrap::seed_minimal_config(&home);
 
     let mut cmd = Command::new(cargo_bin("claudine"));
     cmd.args(["goose", "--", "hi"]);
     cmd.env("NO_COLOR", "1");
     cmd.env("TERM_WIDTH", "80");
+    cmd.env("HOME", &home);
     cmd.env("PATH", bin_dir);
 
     let mut p = Session::spawn(cmd).expect("failed to spawn PTY");

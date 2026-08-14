@@ -20,6 +20,8 @@ use biscuit_test_harness::TerminalHarness;
 use serial_test::serial;
 use test_toolkit::{Backend, Level, require_level};
 
+mod common;
+
 static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 
@@ -38,9 +40,9 @@ const HINT_NEEDLE: &str = "endpoint";
 fn capture_status_block<H: TerminalHarness>(harness: &mut H) -> biscuit_test_harness::CapturedFrame {
     harness
         .send_command_with_env(
-            &format!(
+            &common::bt_cmd(&format!(
                 "bt status-block --severity error --hint \"{HINT_TEXT}\" \"{BODY_TEXT}\""
-            ),
+            )),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");

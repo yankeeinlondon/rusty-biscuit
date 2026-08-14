@@ -51,7 +51,7 @@ fn level2_prose_emits_sgr_in_real_terminal() {
     // spawned shell's environment AND from `bt`'s TTY detection.
     harness
         .send_command_with_env(
-            "bt prose --force-color \"<red>x</red>\"",
+            &common::bt_cmd("bt prose --force-color \"<red>x</red>\""),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
@@ -115,7 +115,7 @@ fn level2_no_color_strips_sgr_in_real_terminal() {
     // (portable inline-env syntax; works regardless of the developer's
     // login shell).
     harness
-        .send_command_with_env("bt prose \"<red>x</red>\"", &[("NO_COLOR", "1")])
+        .send_command_with_env(&common::bt_cmd("bt prose \"<red>x</red>\""), &[("NO_COLOR", "1")])
         .expect("send_command_with_env failed");
 
     let frame = harness.capture().expect("capture failed");
@@ -143,7 +143,7 @@ fn level2_prose_emits_sgr_in_kitty() {
     // symmetry with the WezTerm test.
     harness
         .send_command_with_env(
-            "bt prose --force-color \"<red>x</red>\"",
+            &common::bt_cmd("bt prose --force-color \"<red>x</red>\""),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
@@ -387,7 +387,7 @@ const RICH_EXPECTED_SGR: &[Sgr] = &[
 fn assert_rich_prose_sgr<H: TerminalHarness>(harness: &mut H) {
     harness
         .send_command_with_env(
-            &format!("bt prose --force-color \"{RICH_PROSE_INPUT}\""),
+            &common::bt_cmd(&format!("bt prose --force-color \"{RICH_PROSE_INPUT}\"")),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
@@ -461,7 +461,7 @@ const NESTED_CODE_BLOCK_INPUT: &str =
 fn assert_code_block_restores_parent_style<H: TerminalHarness>(harness: &mut H) {
     harness
         .send_command_with_env(
-            &format!("bt prose --force-color \"{NESTED_CODE_BLOCK_INPUT}\""),
+            &common::bt_cmd(&format!("bt prose --force-color \"{NESTED_CODE_BLOCK_INPUT}\"")),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
@@ -593,7 +593,7 @@ fn level2_prose_nested_emphasis_visible_text_in_wezterm() {
 fn assert_prose_inverse_sgr<H: TerminalHarness>(harness: &mut H) {
     harness
         .send_command_with_env(
-            "bt prose --force-color \"<inverse>x</inverse>\"",
+            &common::bt_cmd("bt prose --force-color \"<inverse>x</inverse>\""),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");

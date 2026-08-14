@@ -54,6 +54,21 @@ pub fn bt_shell_path() -> &'static str {
     })
 }
 
+/// Rewrites a leading `bt ` in a typed shell command to the freshly built
+/// binary's path (see [`bt_shell_path`]); other commands pass through.
+///
+/// For test files whose command strings embed `bt` inline (rather than
+/// passing bare args to [`send_bt_command`]) — the bare name resolves
+/// against the pane's login-shell `PATH`, which lacks the built binary on
+/// CI and silently tests a stale host install on dev machines.
+#[allow(dead_code)]
+pub fn bt_cmd(cmd: &str) -> String {
+    match cmd.strip_prefix("bt ") {
+        Some(rest) => format!("{} {}", bt_shell_path(), rest),
+        None => cmd.to_string(),
+    }
+}
+
 /// Sends a `bt` command to the harness and waits for the terminal to
 /// settle.
 ///

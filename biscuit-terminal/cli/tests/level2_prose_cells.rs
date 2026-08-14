@@ -21,6 +21,8 @@ use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use test_toolkit::{Backend, Level, require_level};
 
+mod common;
+
 static SHARED_WEZTERM: SharedHarness<WezTermHarness> = SharedHarness::new();
 static SHARED_KITTY: SharedHarness<KittyHarness> = SharedHarness::new();
 static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
@@ -28,7 +30,7 @@ static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 /// Runs a `bt` command with color forced on and returns the captured frame.
 fn capture_bt<H: TerminalHarness>(harness: &mut H, cmd: &str) -> CapturedFrame {
     harness
-        .send_command_with_env(cmd, &[("FORCE_COLOR", "1")])
+        .send_command_with_env(&common::bt_cmd(cmd), &[("FORCE_COLOR", "1")])
         .expect("send_command_with_env failed");
     biscuit_test_harness::capture_settled(harness).expect("capture failed")
 }
