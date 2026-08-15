@@ -992,14 +992,21 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             } else {
                                 entry.branch.clone().unwrap_or_else(|| "unknown".to_string())
                             };
+                            // Detection reports worktree paths canonicalized,
+                            // which on Windows carries the `\\?\` verbatim
+                            // prefix. That spelling is never user-facing:
+                            // simplify before display and before the href, or
+                            // the home strip misses and the OSC8 target is a
+                            // path no opener understands.
+                            let entry_path = dunce::simplified(&entry.path);
                             let display_path = match home {
-                                Some(ref home) => match entry.path.strip_prefix(home) {
+                                Some(ref home) => match entry_path.strip_prefix(home) {
                                     Ok(stripped) => format!("~/{}", stripped.display()),
-                                    Err(_) => entry.path.display().to_string(),
+                                    Err(_) => entry_path.display().to_string(),
                                 },
-                                None => entry.path.display().to_string(),
+                                None => entry_path.display().to_string(),
                             };
-                            let absolute_path = entry.path.display().to_string();
+                            let absolute_path = entry_path.display().to_string();
                             let body = format!(
                                 "<b>{}</b> (on <green>{branch_text}</green> branch, located at <a href=\"{absolute_path}\">{display_path}</a>)",
                                 entry.name

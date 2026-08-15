@@ -68,3 +68,10 @@ does not make Sniff responsible for building a security descriptor. See
   a consumer that only needs local detection — such as `rendezvous-core`, which
   depends on Sniff with `default-features = false` — pulls in neither an async
   runtime nor an HTTP stack.
+
+## Path Presentation
+
+- **`dunce` (CLI).** Detection reports worktree paths canonicalized, which on
+  Windows carries the `\\?\` verbatim prefix. `dunce::simplified` removes it
+  before the verbose worktree listing renders a display label and OSC8 href —
+  the verbatim spelling is never user-facing and breaks `file://` targets.

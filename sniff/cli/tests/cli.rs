@@ -8106,10 +8106,10 @@ fn test_repo_worktrees_verbose_output() {
         stdout.contains("located at"),
         "verbose should include path: {stdout}"
     );
-    // The CLI prints the canonicalized worktree path; compare against the same
-    // canonical spelling (on Windows the tempdir arrives 8.3-short and
-    // unprefixed while canonicalize returns `\\?\`-long form).
-    let canonical_worktree = std::fs::canonicalize(&worktree_path).unwrap();
+    // The CLI prints the canonicalized worktree path with the Windows `\\?\`
+    // verbatim prefix simplified away; `dunce::canonicalize` produces exactly
+    // that spelling (the tempdir itself arrives 8.3-short on runners).
+    let canonical_worktree = dunce::canonicalize(&worktree_path).unwrap();
     assert!(
         stdout.contains(canonical_worktree.to_str().unwrap()),
         "verbose should contain worktree path: {stdout}"
