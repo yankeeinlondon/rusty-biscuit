@@ -341,14 +341,17 @@ fn strip_pointer_prefix(pointer: &str) -> &str {
 
 /// Builds the styled, OSC8-hyperlinked Prose markup for a document. The
 /// visible label is the path the user passed on the CLI; the underlying
-/// `file://` href is the absolute form so terminal-launched openers can
-/// resolve it regardless of the user's current directory.
+/// `file://` href is the canonical absolute form — symlink- and Windows
+/// 8.3-short-name-resolved, without a `\\?\` verbatim prefix — so the same
+/// document yields one stable href however its path was spelled on the CLI.
 fn document_link(file: &Path) -> String {
-    let absolute = std::path::absolute(file).unwrap_or_else(|_| file.to_path_buf());
+    let href = dunce::canonicalize(file)
+        .or_else(|_| std::path::absolute(file))
+        .unwrap_or_else(|_| file.to_path_buf());
     format!(
         "<blue>[{label}](file://{href})</blue>",
         label = file.display(),
-        href = absolute.display(),
+        href = href.display(),
     )
 }
 

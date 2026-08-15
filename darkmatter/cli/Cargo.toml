@@ -26,6 +26,7 @@ biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash"] }
 sniff = { path = "../../sniff/lib" }
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 clap = { version = "4.5", features = ["derive", "wrap_help"] }
+dunce = "1"
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
 color-eyre = "0.6"
 rayon = "1.11.0"

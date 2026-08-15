@@ -90,3 +90,8 @@ protocol-focused:
   per-diagnostic body is `biscuit_file::YamlDiagnostic`'s own `Serialize`, so
   the wire format stays pinned to the shared diagnostic vocabulary; the derive
   is only needed for the CLI-local envelope and stage tag that wrap it.
+- `dunce` — canonicalizes the `md schema validate` document-link href without
+  Windows `\\?\` verbatim prefixes, so one document yields one stable
+  `file://` URL whether its CLI path was spelled with symlinks or 8.3 short
+  names. Same crate the workspace already uses in `biscuit-file` and
+  `claudine` for this exact boundary.
