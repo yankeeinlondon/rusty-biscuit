@@ -135,7 +135,27 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
         args.join(" ")
     );
     let send = harness.send_command_with_env(&cmd, &[]);
+    // `wait_for_prompt` gives up silently after 5s, which `context --values`
+    // can outlive on a contended shared runner: it performs a real host
+    // capture (the same discovery cost measured at 10-30s for the ambient
+    // catalog test there). Poll for the rendered table instead — fast runs
+    // exit on the first glyph, slow real work gets a bounded 60s.
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
+    let deadline = std::time::Instant::now() + Duration::from_secs(60);
+    let mut frame = harness.capture();
+    while std::time::Instant::now() < deadline {
+        if let Ok(f) = &frame {
+            let after_sentinel = f
+                .plain
+                .rfind(REPORT_SENTINEL)
+                .map_or(f.plain.as_str(), |idx| &f.plain[idx..]);
+            if after_sentinel.contains('│') {
+                break;
+            }
+        }
+        std::thread::sleep(Duration::from_millis(250));
+        frame = harness.capture();
+    }
     std::thread::sleep(Duration::from_millis(250));
     let frame = harness.capture();
     kill_session_by_name(&session);

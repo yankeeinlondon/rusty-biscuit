@@ -25,6 +25,8 @@ use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use test_toolkit::{Backend, Level, require_level};
 
+mod common;
+
 /// Process-shared WezTerm pane reused across the WezTerm tests in this
 /// file. A `clear` is sent before each test's first interaction so
 /// prior renders cannot leak into the capture window.
@@ -53,7 +55,7 @@ const BORDER_GLYPH: char = '│';
 fn capture_styled_quote<H: TerminalHarness>(harness: &mut H) -> CapturedFrame {
     harness
         .send_command_with_env(
-            &format!("bt quote \"{QUOTE_TEXT}\""),
+            &common::bt_cmd(&format!("bt quote \"{QUOTE_TEXT}\"")),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");

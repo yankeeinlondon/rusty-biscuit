@@ -65,7 +65,8 @@ impl ColorMode {
 ///    de-facto convention used by clap, supports-color, chalk, etc.
 /// 2. Check `COLORTERM` environment variable for "truecolor" or "24bit"
 /// 3. Query terminfo `MaxColors` capability
-/// 4. Default to `ColorDepth::None` if detection fails
+/// 4. Default to `ColorDepth::None` if detection fails — unless a force
+///    override is set, which floors the result at [`ColorDepth::Basic`]
 ///
 /// ## Examples
 ///
@@ -115,7 +116,7 @@ pub fn color_depth() -> ColorDepth {
     }
 
     // Fallback to terminfo
-    match TermInfo::from_env() {
+    let detected = match TermInfo::from_env() {
         Ok(term_info) => {
             // Query the MaxColors capability
             let depth = term_info
@@ -147,7 +148,22 @@ pub fn color_depth() -> ColorDepth {
             );
             ColorDepth::None
         }
+    };
+
+    // A force override that only neutralized NO_COLOR is not a force: per the
+    // supports-color/chalk convention the docblock cites, FORCE_COLOR must
+    // yield color even when nothing is detectable — an environment with no
+    // COLORTERM and an unresolvable TERM (hosted macOS lacks brew tmux's
+    // `tmux-256color` terminfo entry) otherwise silently drops to None.
+    if detected == ColorDepth::None && force_color {
+        tracing::debug!(
+            color_depth = ?ColorDepth::Basic,
+            source = "FORCE_COLOR",
+            "detection found no color support; FORCE_COLOR mandates basic ANSI"
+        );
+        return ColorDepth::Basic;
     }
+    detected
 }
 
 /// Whether the terminal is in "light" or "dark" mode.
@@ -304,6 +320,22 @@ mod tests {
     fn test_color_depth_eq() {
         assert_eq!(ColorDepth::TrueColor, ColorDepth::TrueColor);
         assert_ne!(ColorDepth::None, ColorDepth::TrueColor);
+    }
+
+    /// FORCE_COLOR must yield color even when nothing is detectable — the
+    /// hosted-macOS shape: no COLORTERM, a TERM terminfo cannot resolve.
+    #[test]
+    fn force_color_mandates_basic_when_nothing_is_detectable() {
+        // SAFETY: nextest runs each test in its own process; no other thread
+        // observes these process-wide vars. set_var is unsafe in 2024 edition.
+        unsafe {
+            std::env::remove_var("COLORTERM");
+            std::env::remove_var("NO_COLOR");
+            std::env::remove_var("CLICOLOR_FORCE");
+            std::env::set_var("TERM", "definitely-not-a-terminfo-entry");
+            std::env::set_var("FORCE_COLOR", "1");
+        }
+        assert_ne!(color_depth(), ColorDepth::None);
     }
 
     #[test]
