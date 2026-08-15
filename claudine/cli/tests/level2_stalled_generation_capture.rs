@@ -239,6 +239,22 @@ done
         std::thread::sleep(Duration::from_millis(100));
     }
 
+    // Hosted runners have produced fully colorless captures here that no
+    // local simulation (fresh tmux server, ambient NO_COLOR, stripped
+    // COLORTERM, bogus TERM) reproduces. When the styling is absent, probe
+    // the live pane's effective environment before the session dies so the
+    // failure itself carries the discriminating evidence.
+    let color_probe = if has_3bit_red(&last_raw) {
+        String::new()
+    } else {
+        let _ = harness.send_text(
+            b"echo __PROBE__ NO_COLOR=$NO_COLOR FORCE_COLOR=$FORCE_COLOR \
+              COLORTERM=$COLORTERM TERM=$TERM; tmux -V\n",
+        );
+        std::thread::sleep(Duration::from_millis(600));
+        harness.capture().map(|f| f.plain).unwrap_or_default()
+    };
+
     kill_session_by_name(&session);
 
     assert!(
@@ -316,6 +332,6 @@ done
     assert!(
         has_3bit_red(&last_raw),
         "the AgentNative stalled-generation block must render with the 3-bit \
-         red foreground SGR.\nraw:\n{last_raw}",
+         red foreground SGR.\nraw:\n{last_raw}\npane env probe:\n{color_probe}",
     );
 }

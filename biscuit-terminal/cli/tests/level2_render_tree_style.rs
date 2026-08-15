@@ -199,7 +199,7 @@ const STYLED_QUOTE_INPUT: &str = "<red>alpha</red> bravo";
 fn assert_styled_inline_content<H: TerminalHarness>(harness: &mut H) {
     harness
         .send_command_with_env(
-            &format!("bt quote \"{STYLED_QUOTE_INPUT}\""),
+            &common::bt_cmd(&format!("bt quote \"{STYLED_QUOTE_INPUT}\"")),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
@@ -281,7 +281,7 @@ fn level2_block_quote_styled_inline_content_in_kitty() {
 /// Runs a `bt` command with color forced on and returns the captured frame.
 fn capture_bt<H: TerminalHarness>(harness: &mut H, cmd: &str) -> CapturedFrame {
     harness
-        .send_command_with_env(cmd, &[("FORCE_COLOR", "1")])
+        .send_command_with_env(&common::bt_cmd(cmd), &[("FORCE_COLOR", "1")])
         .expect("send_command_with_env failed");
     biscuit_test_harness::capture_settled(harness).expect("capture failed")
 }
@@ -519,7 +519,10 @@ fn assert_table_striped<H: TerminalHarness>(harness: &mut H) {
 fn assert_table_example_striped_without_force_color<H: TerminalHarness>(harness: &mut H) {
     harness
         .send_command_with_env(
-            "env -u NO_COLOR -u FORCE_COLOR -u CLICOLOR_FORCE bt table --example",
+            &format!(
+                "env -u NO_COLOR -u FORCE_COLOR -u CLICOLOR_FORCE {} table --example",
+                common::bt_shell_path()
+            ),
             &[],
         )
         .expect("send_command_with_env failed");

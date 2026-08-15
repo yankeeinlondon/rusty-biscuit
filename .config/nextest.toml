@@ -30,6 +30,14 @@ tts-audio = { max-threads = 4 }
 # victim changes between runs, while the same suite is stable at four threads.
 claudine-windows-l1 = { max-threads = 4 }
 
+# claudine-cli's heaviest end-to-end tests each run the real CLI through full
+# composition — repository discovery, prompt/system-prompt resolution, a fake
+# provider launch — and several of them at once starve each other on 4-vCPU
+# hosted runners: the WSL2 cell showed eleven 90s terminations at full
+# parallelism, and ubuntu-latest has terminated shipped_implement at 90s twice
+# since. Two at a time keeps the pipeline full without the mutual starvation.
+heavy-cli-compose = { max-threads = 2 }
+
 [profile.default]
 # A test that passes only on retry is still a failed test run. Keep retries
 # disabled so timing and resource-contention defects remain visible locally.
@@ -307,3 +315,9 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 [[profile.ci.overrides]]
 filter = 'package(biscuit-speaks-cli)'
 test-group = 'tts-audio'
+
+# The heavy end-to-end compose tests (see [test-groups]) — the exact set the
+# WSL2 and ubuntu cells have terminated at 90s under full parallelism.
+[[profile.ci.overrides]]
+filter = 'package(claudine-cli) & (test(=shipped_implement_prompt_runs_real_router_target) | test(=shipped_context_prompt_renders_its_package_area_list_through_the_cli) | binary(wrap_compose_validation) | test(=inline_compose_dry_run_quiet_and_silent_are_no_op) | test(=agents_and_commands_route_to_empty_state_messages) | test(=context_reports_preserve_all_columns_at_minimum_supported_width) | test(=compose_fail_fast_deprecated_env_emits_warning) | test(=compose_loop_rate_limit_pause_waits_then_continues) | test(=handle_flushes_blocking_payload_before_nonzero_exit))'
+test-group = 'heavy-cli-compose'
