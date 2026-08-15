@@ -1,0 +1,121 @@
+---
+total_phases: 5
+created: 2026-08-15
+phase: 1
+agent: codex/default
+yolo: true
+---
+
+# CI/CD on Self-Hosted Remote Runners Execution Plan
+
+This plan implements the trusted remote-runner design without registering a
+self-hosted runner until the public-repository security boundary, bounded
+post-probe recovery, and bootstrap-preflight behavior are ratified and proven.
+The specification's prerequisite “Phase 0” is Phase 1 here so execution starts
+with the standard phase number.
+
+## Phase 1 — Ratify the Boundaries and Build the Safe Foundation
+
+**Depends on:** nothing. Tasks explicitly marked parallel may proceed together;
+all other tasks are ordered by dependency.
+
+- [ ] Ratify Open Question 1 and record the selected external trust boundary in `measurement.md`, including the organization/repository owner, runner-group ID, selected trusted workflow path and `refs/heads/main` restriction, public-repository access setting, and the GitHub plan capability used to enforce it; if the organization transfer is rejected, replace the remaining runner-group tasks in this plan with an approved private-broker design before continuing.
+- [ ] Audit the organization-transfer impact, if selected, across repository URLs, local remotes, Actions permissions, apps, environments, branch protection, required checks, packages, badges, and automation, then complete the transfer and verify ordinary hosted CI still reports the existing required checks before creating any runner registration.
+- [ ] Ratify Open Question 2 and record a measurable post-probe recovery contract in `measurement.md`; for the recommended controller, fix the queue-age bound at 10 minutes, require exact-SHA replacement, cancellation/re-dispatch idempotency keyed by original run ID, narrowly scoped permissions, and no mutation of `CI_LOCAL_RUNNERS_ENABLED`.
+- [ ] Prototype the selected recovery flow on a disposable branch using hosted labels only, then record original/replacement run IDs and prove that canceling a stalled run and dispatching an exact-base/head forced-hosted replacement leaves the commit's required `ci-verdict` satisfiable; stop the rollout and revise the availability requirement or broker design if that proof fails.
+- [ ] Ratify Open Question 8 and record the bootstrap-preflight contract in `measurement.md`; implement the recommended model in which hosted `preflight` runs in parallel with package jobs but remains a `ci-verdict` gate, and update affected workflow-contract tests and `.claude/skills/rust-testing/SKILL.md` so they no longer claim package fan-out depends on preflight. **Parallelizable after the decision:** yes, with baseline collection and infrastructure preparation.
+- [ ] Collect at least five representative full-scope runs of the current package-based hosted CI through the Actions API and create `measurement.md` with run/job IDs, timestamps, exclusions, job-to-platform classification, workflow creation-to-verdict latency, first-eligible-job-to-verdict execution span, eligibility-based queue time, execution time, queue:run ratios, critical-path contribution, and reproducible formulas. **Parallelizable after trust/recovery decisions:** yes.
+- [ ] Record Monster's static, non-overcommitted Linux and Windows VM allocations, other-tenant/Proxmox reserve, provisional slot counts, per-platform serial floors, per-slot CPU/thread caps, memory and disk budgets, target eviction thresholds, and the go/no-go scope for each platform in `measurement.md`; do not enable a platform whose proposed serial floor exceeds its current contribution unless job classes are narrowed.
+- [ ] Choose and document the runner-update mode for each image; if updates are automatic, define version-drift health alerts, and if `--disableupdate` is selected, define a 14-day image-update SLA plus immediate security-update handling.
+- [ ] Create versioned Linux and Windows runner image/provisioning manifests with every required native package and runner-tool vocabulary entry, unique unprivileged non-login service accounts per slot, separate runner application/`_work`/temp/tool-cache/target directories, and no sudo, Docker socket, hypervisor API, network mounts, or homelab credentials. **Parallelizable after capacity is recorded:** yes.
+- [ ] Apply the selected dedicated VLAN plus Proxmox VM-NIC firewall policy, or the ratified Proxmox-only fallback, and append a deny/allow transcript to `measurement.md` proving runner-initiated denial to RFC1918, link-local, metadata, admin-workstation, and Proxmox-management targets while GitHub Actions, artifact storage, package registries, rustup, OS updates, designated DNS, designated NTP, established SSH replies, and outbound HTTPS still work. **Parallelizable after the boundary is selected:** yes.
+- [ ] Smoke-test every declared native package and runner-tool vocabulary item on each image, verify cloud-init or equivalent seed data contains no retained secret, and record image revisions and results in `measurement.md`; do not advertise labels for a failing image.
+- [ ] Add `.env.example` with non-secret placeholders and comments for `CI_TRUSTED_ACTOR_IDS`, `CI_TRUSTED_AUTHORS`, `CI_LOCAL_RUNNERS_ENABLED`, and `CI_RUNNER_GROUP_ID`, and add a non-interactive `just ci-sync-trust` recipe that reads the gitignored `.env`, validates numeric actor/group IDs, and synchronizes repository variables without treating author email as authentication. **Parallelizable:** yes.
+- [ ] Coordinate the remote-kache trust contract so it consumes `CI_TRUSTED_ACTOR_IDS` and the same server-enforced trust boundary, removing or explicitly superseding `CI_TRUSTED_ACTORS`; add a contract test that fails if the two features drift to different trust variables.
+- [ ] Implement a checked-in routing/trust script that derives repository, event, actor ID, fork status, checkout SHA, and commit range from trusted event context; normalizes comma-separated author email policy; validates push/PR/measurement ranges; treats empty, missing, zero, force-pushed, forged, or unverified ranges as hosted-only; and never accepts a caller-provided trust verdict, runner map, checkout SHA, package command, repository identity, or author list as authority.
+- [ ] Add L1 tests in `tools/test-toolkit` that invoke the production routing/trust script for trusted/untrusted numeric actor IDs, renamed-login irrelevance, same-repository/fork PRs, malformed/empty author lists, zero/missing/unfetchable push bases, ordinary dispatch, valid/forged measurement ranges, and `force_hosted`; include exact all-hosted behavior for every failure.
+- [ ] Pin every third-party action reachable from a future routed job to a reviewed full commit SHA, record the tag-to-SHA review source, and add a workflow contract that rejects mutable tag references on the trusted execution path. **Parallelizable:** yes.
+- [ ] Change `_ensure-native-libs` so `CI_SELF_HOSTED=true` is verify-only and reports all missing dependencies without installing or elevating, while preserving hosted installation behavior; cover Linux, native Windows, and WSL detection with unit/contract tests.
+- [ ] Move JUnit staging for both hosted and future routed jobs to a job-local absolute directory under `runner.temp`, keyed by run ID, run attempt, package, canonical environment, and tier; fail if the path already exists, upload only that path with `if-no-files-found: error`, and keep it outside persistent `CARGO_TARGET_DIR`.
+- [ ] Extend workflow contracts to prove transient evidence uses `runner.temp`, the staging path is absent before creation, upload failure is strict, and result/JUnit identities remain `{package, environment, tier}` regardless of physical runner.
+- [ ] Update `docs/topics/ci-cd.md`, `docs/testing-strategy.md`, and `.github/ci/README.md` for the ratified trust boundary, parallel verdict-gating preflight, shared trust variables, hosted-safe staging contract, and the fact that no runner is registered yet.
+- [ ] **Validation checkpoint:** run `actionlint`, `just check-canonical`, affected-scope tests, and the canonical `tools/test-toolkit` `just test` and `just lint` recipes; verify hosted CI and normalized result identities are unchanged, every Phase 1 decision/evidence item is present in `measurement.md`, and no self-hosted runner registration exists before advancing.
+
+## Phase 2 — Enable Trusted Linux Routing and Bounded Recovery
+
+**Depends on:** Phase 1 exit. Runner registration is intentionally late in this
+phase, after the trusted workflow and runner-group restrictions are observable.
+
+- [ ] Add the trusted workflow at the exact Phase 1 selected-workflow path on `refs/heads/main`; have it derive scope, trust, canonical package matrices, checkout revisions, and routing internally, directly define routed jobs, and reject any caller-supplied authoritative map or command fragment while preserving package-based result identity.
+- [ ] Refactor the current package job definitions into the trusted workflow or generated trusted matrices without changing `affected_scope.py`, `environments.json`, rollup keys, artifact names, JUnit manifest identity, or required-check semantics; candidate workflow changes must execute hosted-only until merged to `main`.
+- [ ] Implement the hosted `runner-routing` job with bounded connect/overall timeouts, an explicit GitHub API version, response-shape validation, pagination handling, expected runner identity/OS/architecture checks, and organization runner-group/repository/workflow-policy verification using a read-only GitHub App token or the time-boxed bootstrap PAT selected in Phase 1.
+- [ ] Emit the exact nested `standard`/`exclusive` JSON map keyed by canonical environment, using global all-hosted fallback for failed trust, missing probe credential, API/timeout/rate-limit failure, kill switch values other than exact `true`, or `force_hosted`, and per-route hosted fallback for absent/offline/busy runners; retain canonical environment values in all result-producing fields.
+- [ ] Add a three-day machine-readable routing artifact and job-summary rows for every execution-class/platform decision, including trust outcome, fallback reason, observed runner IDs, API failure class, timestamp, and selected physical runner identity without exposing credentials.
+- [ ] Extend `tools/test-toolkit` contracts for malformed and paginated API responses, unknown runner identities, OS/architecture mismatch, group-policy mismatch, every global fail-safe, per-route offline/busy fallback, exact standard/exclusive map shape, and the invariant that routed `runs-on` expressions read only the trusted job's `needs.runner-routing.outputs.runner_map`.
+- [ ] Implement the ratified recovery controller with queue-age monitoring, exact base/head validation, idempotent cancel-and-replace behavior, forced-hosted dispatch, narrowly scoped cancellation/dispatch authority, and recovery evidence containing stalled job ID, queue age, cancellation result, and replacement run ID.
+- [ ] Add non-interactive `just runner-health` and recovery-audit recipes that use the normal `gh` environment, query the organization runner-group endpoint read-only, display runner label/version/status/busy state, and never initiate authentication.
+- [ ] Configure the organization runner group to deny unrestricted public-repository use, allow only this repository and the pinned trusted workflow, then independently query and record the effective group/repository/workflow policy before registering a runner.
+- [ ] Provision the ratified Linux slots with unique runner names, unprivileged service accounts, runner directories, `_work`, temp, tool cache, `CARGO_TARGET_DIR`, and `TMUX_TMPDIR`; export `CI_SELF_HOSTED=true`, `CARGO_BUILD_JOBS`, and `NEXTEST_TEST_THREADS` from the recorded capacity; assign `rb-linux` to every slot and `rb-linux-exclusive` to exactly one slot.
+- [ ] Register Linux slots only after the previous group-policy verification passes, then use `just runner-health` to prove expected label, version, OS, architecture, online state, and runner-group membership.
+- [ ] Route Linux `check`, L1 `test`, and `lint` through the standard map, leave reporting/scope/tooling/verdict/summary jobs on literal hosted labels, gate every reachable `Swatinem/rust-cache` and kache site so only GitHub-hosted legs use them, and keep each warm target outside `_work` and private to one slot.
+- [ ] Wire each Linux slot target into the existing sweep mechanism with the Phase 1 threshold and prove sweep/build mutual exclusion for that slot; do not introduce a shared target or a new eviction service.
+- [ ] Prove the real routing behaviors with one trusted Linux route, one fork or synthetic untrusted route, one busy/offline Linux fallback, one missing-probe/global API failure, the global kill switch, and a post-probe runner-loss recovery drill; capture run/job/replacement IDs in `measurement.md`.
+- [ ] Run two different package/tier jobs successively on the same Linux slot and prove the second JUnit artifact contains only its own expected manifest and reports.
+- [ ] Update CI, testing, kache, operations, and rollback documentation for Linux routing, cache gating, per-slot environment/targets, health checks, Tier 1/2/3 rollback, recovery operation, and rebuild-after-compromise procedure.
+- [ ] **Linux measurement checkpoint:** run five paired full-scope trials at identical commits, each pairing trusted routed and `force_hosted` runs without moving the branch; record latency, execution span, queue:run ratio, critical-path contribution, normalized result diff, disk growth, CPU/memory/I/O high-water marks, timeouts, runner version, and image revision. Advance only if normalized results are identical, no timeout regresses, routed median end-to-end latency is lower, and recovery meets the ratified bound; otherwise keep the losing job class hosted.
+- [ ] **Validation checkpoint:** run `actionlint`, `just check-canonical`, affected-scope tests, `tools/test-toolkit` `just test`/`just lint`, and the applicable package gates; verify Tier 1 routes the next run hosted and recovery handles an already queued run without softening any check.
+
+## Phase 3 — Add Windows, WSL, L2, and Browser Capacity
+
+**Depends on:** Phase 2 exit. Native Windows provisioning and WSL workflow work
+may proceed in parallel until their integration checkpoint.
+
+- [ ] Provision the ratified Windows slots with unique unprivileged service accounts and isolated runner/`_work`/temp/tool-cache/target directories, `CI_SELF_HOSTED=true`, measured build/test thread caps, and NTFS for the OS and worktree; use a ReFS Dev Drive only for per-slot `CARGO_TARGET_DIR` after the complete tool smoke passes, otherwise retain NTFS. **Parallelizable:** yes.
+- [ ] Assign `rb-windows` to every Windows slot and `rb-windows-exclusive` to exactly one, register them only in the restricted organization runner group, then verify their policy, label, version, OS, architecture, online, and busy state through `just runner-health`.
+- [ ] Route native Windows `check`, L1 `test`, and applicable `lint` work through the standard map with hosted-only cache wiring, per-slot targets, and existing sweep mutual exclusion; preserve canonical `windows-latest` result identity.
+- [ ] Make the WSL archive-build job use the standard Linux route and emit a small layout artifact containing its actual absolute `GITHUB_WORKSPACE`; validate its schema before upload. **Parallelizable with native Windows routing:** yes.
+- [ ] Update the WSL guest job to validate that layout path as absolute and allowlisted before writing, create the disposable guest checkout at that exact embedded Linux path, derive `BISCUIT_JUNIT_WORKSPACE_ROOT` from it, and remove hardcoded `/home/runner/work/...` assumptions.
+- [ ] Route WSL guest execution through `rb-windows-exclusive`, retain a fresh per-run `Vampire/setup-wsl` distribution, and prove the resident `build-win` administration distribution is never used as CI state.
+- [ ] Replace `biscuit-icon/cli/tests/level2_terminal.rs`'s root-relative `../../target/debug/icon` lookup with the repository executable-resolution helper and add a regression test that passes under an external `CARGO_TARGET_DIR`.
+- [ ] Inventory every L2 package/resource contract and encode a reviewed route classification: tmux-only work uses the standard route with slot-local `TMUX_TMPDIR`; browser, WSL guest execution, audio/device, and other genuine host-global resources use the exclusive route.
+- [ ] Route eligible L2 jobs through the classified standard/exclusive map using the canonical headless harness, then route browser jobs through exclusive capacity with no OS input injection, window activation, or focus acquisition.
+- [ ] Add contracts proving Linux/Windows exclusive labels exist on exactly one slot per host, standard jobs cannot request caller-controlled labels, WSL layout validation rejects malformed/relative/non-allowlisted paths, cache actions remain hosted-only, and physical routing never alters environment/tier identity.
+- [ ] Exercise simultaneous standard slots plus exclusive L2/browser/WSL work and record backend-execution evidence showing no cross-slot host-global resource overlap, tmux namespaces remain isolated, browsers remain headless, and stale evidence is absent.
+- [ ] Update CI, testing, kache, WSL, and runner-operations documentation with dynamic workspace transport, disposable-guest isolation, exclusive-resource classifications, Windows target filesystem choice, and sweep policy.
+- [ ] **Windows/advanced-tier measurement checkpoint:** run five paired full-scope routed/forced-hosted trials at fixed commits and record the complete milestone dataset for Windows, WSL, L2, and browser classes; advance only with zero normalized result diff, no timeout regression, lower routed median latency for each enabled class, no stale evidence, and no resource overlap. Keep any failing or neutral class hosted.
+- [ ] **Validation checkpoint:** run `actionlint`, `just check-canonical`, affected-scope tests, `tools/test-toolkit` `just test`/`just lint`, biscuit-icon canonical unit/L2/lint gates, and headless canonical L2/browser/WSL proofs on their actual routes.
+
+## Phase 4 — Ratify and Optionally Enable `bolt` for Canonical macOS
+
+**Depends on:** Phase 3 exit. This phase may conclude with macOS deliberately
+remaining hosted; an Intel or uncontainable host must not impersonate the
+canonical ARM environment.
+
+- [ ] Use `sniff` host discovery on `bolt` to record CPU architecture, cores, RAM, disks/filesystems, macOS version, installed tool vocabulary, network routes, and reachability from the administration source in `measurement.md`; confirm whether it is Apple Silicon before considering `rb-macos`.
+- [ ] Design and apply a containment boundary appropriate to `bolt` at `192.168.10.157`, then capture the same deny/allow transcript required for Monster, including denial of lateral movement toward Venice/private networks and permitted GitHub/package/DNS/NTP/admin flows.
+- [ ] Make and record the macOS go/no-go decision: if `bolt` is Intel or cannot satisfy containment, keep `macos-latest` hosted and close Phase 4 without adding an alias; define any Intel advisory coverage only in a separate specification.
+- [ ] If approved, derive static slot count, `CARGO_BUILD_JOBS`, `NEXTEST_TEST_THREADS`, disk budget, eviction threshold, and serial floor from measured Apple Silicon capacity rather than copying Linux values.
+- [ ] Build and smoke-test a versioned macOS runner image/provisioning manifest with unique unprivileged per-slot accounts and runner/`_work`/temp/tool-cache/target/`TMUX_TMPDIR` paths, verify-only native prerequisites, no homelab credentials, and the selected runner-update contract.
+- [ ] Register approved macOS slots only in the restricted group, assign `rb-macos` to every slot and `rb-macos-exclusive` to exactly one, verify effective policy and health, and wire targets into the existing sweep with per-slot mutual exclusion.
+- [ ] Route approved canonical macOS jobs through standard/exclusive maps while retaining the `macos-latest` ARM result identity and hosted-only cache behavior; leave unsupported or neutral job classes hosted.
+- [ ] Run trusted, untrusted, busy/offline, kill-switch, stale-evidence, exclusive-resource, and post-probe recovery drills on macOS and append the run/job IDs and evidence to `measurement.md`.
+- [ ] Update runner, CI, testing, and containment documentation with the macOS decision and, when enabled, capacity and rollback details.
+- [ ] **macOS measurement checkpoint:** for an enabled route, run five paired fixed-commit routed/forced-hosted full-scope trials and require the complete milestone acceptance criteria; if any criterion fails, remove `rb-macos` from the selected map and document canonical macOS as hosted.
+- [ ] **Validation checkpoint:** run `actionlint`, `just check-canonical`, affected-scope tests, `tools/test-toolkit` `just test`/`just lint`, applicable macOS package gates, and headless routed L2/browser proofs without activating or focusing a host window.
+
+## Phase 5 — Tune Capacity, Close Contracts, and Complete Rollout
+
+**Depends on:** all enabled platform milestones. Tuning is evidence-driven and
+must not weaken deterministic test settings or result identity.
+
+- [ ] Compare Phase 1 hosted baselines with every paired milestone and choose the final enabled job classes, slot counts, and per-slot build/test thread caps; retain static VM reservations initially and consider bounded CPU overcommit only when simultaneous full-scope high-water data supports it.
+- [ ] Re-run serial-floor calculations after every slot-count change and keep any platform/job class hosted when its routed floor or median end-to-end latency is neutral or worse.
+- [ ] Tune browser or other exclusive work toward wider concurrency only after CPU, memory, teardown, focus, and cross-slot resource evidence proves it safe; otherwise preserve exclusive serialization.
+- [ ] Set final per-slot eviction thresholds from observed five-run disk growth, verify all target roots are covered by the existing scheduled sweep, and re-prove that eviction cannot overlap an active job.
+- [ ] Verify `retries = 0` remains unchanged, hosted fallbacks do not inherit host-derived nextest thread increases, no shared target directory exists, and every enabled slot continues to expose only its intended standard/exclusive labels.
+- [ ] Perform Tier 1, Tier 2, and Tier 3 rollback rehearsals without deleting evidence: prove the kill switch affects new routes within seconds, service drain/removal completes within minutes using an operator-issued removal token, and trusted-workflow reversion restores all-hosted execution.
+- [ ] Audit the final workflow and scripts for least privilege, full-SHA action pins, exact trusted repository/ref constants, no caller-controlled runner labels or checkout revisions, no runner-held homelab credentials, and no release/publish/secret-bearing jobs on self-hosted hardware.
+- [ ] Reconcile `docs/topics/ci-cd.md`, `docs/testing-strategy.md`, `docs/kache-strategy.md`, `.github/ci/README.md`, `.claude/skills/rust-testing/SKILL.md`, `.env.example`, and the remote-kache spec/plan with the implemented architecture, variables, evidence staging, sweep, health, recovery, and rollback contracts.
+- [ ] **Final validation checkpoint:** run `actionlint`, `just check-canonical`, all affected-scope and workflow-contract tests, `tools/test-toolkit` `just test`/`just lint`, and every affected package area's canonical unit/L2/lint gates; verify L2/browser runs stayed headless and produced backend evidence.
+- [ ] **Acceptance checkpoint:** confirm `measurement.md` contains reproducible baseline and paired-trial data, normalized result diff is zero for every enabled class, no existing timeout regressed, each routed median is lower than its paired hosted median, recovery meets its ratified bound, runner images/versions and containment evidence are current, and all non-qualifying routes reliably fall back to hosted compute.
+- [ ] Move the feature directory to the repository's `_completed` lifecycle location only after the acceptance checkpoint passes and all documentation/contracts reflect the final enabled platform set.
