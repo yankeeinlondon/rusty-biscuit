@@ -546,7 +546,13 @@ impl BrowserHarness for ChromeHarness {
         let profile = tempfile::tempdir()?;
         let mut builder = BrowserConfig::builder()
             .chrome_executable(chrome)
-            .user_data_dir(profile.path());
+            .user_data_dir(profile.path())
+            // chromiumoxide's default launch window is 20s, and a cold Chrome
+            // start on a contended CI runner has been observed to exceed it
+            // (run 31872137190: websocket-URL resolution timed out at 20.7s).
+            // 60s tolerates the slow cold start while a genuinely broken
+            // launch still fails the test well inside its tier budget.
+            .launch_timeout(std::time::Duration::from_secs(60));
         for arg in &self.extra_args {
             builder = builder.arg(arg);
         }
