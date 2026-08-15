@@ -1,7 +1,9 @@
 ---
 status: draft
 created: 2026-08-15
-reviewed: false
+reviewed: true
+reviewed_by: "codex/default"
+reviewed_on: "2026-08-15"
 related:
     - ../2026-07-27-local-runners/spec.md
     - ../2026-08-15-cicd-remote-runners/spec.md
@@ -9,6 +11,9 @@ related:
 evidence:
     - docs/kache-strategy.md
     - fixes/2026-07-30-ci-cd-stabilization/plan.md
+    - https://github.com/kunobi-ninja/kache-action/tree/a257c055543c2840700a9bbca8f9c3094a421b1b
+    - https://developers.cloudflare.com/r2/api/tokens/
+    - https://developers.cloudflare.com/r2/buckets/object-lifecycles/
 ---
 
 # Remote (S3/R2) kache Backend for CI
@@ -19,27 +24,32 @@ kache was removed from CI on 2026-07-30 after a measured trial returned 0–6%
 hit rates (0.4–2.3% weighted by compile cost, ~2–15 s saved per leg). The
 removal was not a verdict against kache; it was a verdict against the backend
 the trial accidentally ran on. `kache-action@v1`, configured without
-`s3-bucket`, fell back to the GitHub Actions cache — whose entries are
-immutable, branch-scoped, and capped at 10 GB per repository — so a store
-shared by all same-platform jobs could never accumulate. `docs/kache-strategy.md`
-records the exact re-entry condition:
+`s3-bucket`, fell back to the GitHub Actions cache. All same-platform jobs at
+the same kache version and `Cargo.lock` competed for one immutable entry, so
+the first successful save won and later jobs could not add their disjoint
+stores. Branch scoping and the 10 GB repository quota further constrained the
+backend, although pull-request runs can restore a default-branch cache and the
+old WSL cache error was never proven to be quota-caused.
+`docs/kache-strategy.md` records the exact re-entry condition:
 
 > Revisit only with an S3/R2 backend and a measured comparison against a
 > no-kache control.
 
 This specification is that revisit. It puts kache in CI backed by S3-compatible
-object storage, where entries are mutable, shared across branches and machines,
-and not bound by the 10 GB quota — the three properties whose absence sank the
-first trial.
+object storage, where independently addressed artifacts can accumulate across
+jobs, branches, and machines without a GitHub cache entry's immutability or
+repository quota. Mutable build manifests and shard indexes select which
+content-addressed artifacts to prefetch; artifact blobs remain keyed by their
+content and compiler inputs.
 
-One number frames the size of the prize. Compilation is ~85% of every test job
-(`fixes/2026-08-06-cicd/spec.md` § Sharding — the same measurement that removed
-sharding). The test binaries themselves are a large share of that 85%, and
-**kache skips user-facing binaries and test harnesses by default**
-(`cache-executables: false`). A dependency-only cache therefore attacks well
-under half of the compile cost. This spec makes `cache-executables: true` a
-first-class measurement arm rather than an afterthought, because it is the
-difference between caching the cheap 40% and the expensive 85%.
+One number frames the size of the prize. Compilation was ~85% of the measured
+test-shard jobs (`fixes/2026-08-06-cicd/spec.md` § Sharding — the same evidence
+that removed sharding). **kache skips user-facing binaries and test harnesses
+by default** (`cache-executables: false`), but the repository has not measured
+what fraction of that compile time belongs to those outputs. This spec makes
+`cache-executables: true` a first-class measurement arm so the decision is
+based on that missing evidence rather than an assumed dependency/test-binary
+split.
 
 ## Goals
 
@@ -49,13 +59,16 @@ difference between caching the cheap 40% and the expensive 85%.
    judged by compile-cost-weighted hit rate and job wall time — not by
    `kache doctor`, and not by trusting hosted-runner wall-clock alone (see
    Measurement Discipline).
-3. Restore the multi-machine path kache was designed for: CI populates the
-   bucket, developer machines and (later) self-hosted runners warm from it.
+3. Restore the multi-machine path kache was designed for across hosted CI;
+   developer and self-host bootstrap reads remain a gated Phase 4 extension.
 4. Keep the failure mode benign: a bucket outage, a credential problem, or a
    kache bug degrades to an uncached compile, never to a red run.
 5. Keep the repository's no-tracked-wrapper policy intact
    (`docs/kache-strategy.md` — "Wiring: none tracked"): activation stays a
    property of CI job configuration, not of `.cargo/config.toml`.
+6. Bound the operational cost: the pilot records stored bytes and R2 Class A/B
+   operations, and rollout requires a projected bill of no more than $10/month
+   at the observed CI volume.
 
 ## Non-Goals
 
@@ -77,18 +90,20 @@ difference between caching the cheap 40% and the expensive 85%.
 
 ## Why the first trial failed, precisely
 
-`kache-action@v1` with no `s3-bucket` persists the store through the GitHub
-Actions cache. Three properties of that backend are fatal for this repository's
-job shape:
+The action revision used by the old trial, with no `s3-bucket`, persisted the
+store through the GitHub Actions cache. Its exact key contained kache version,
+OS, architecture, and the `Cargo.lock` hash, but not package or job kind. Three
+properties made that backend a poor fit for this repository's job shape:
 
 | Property | Effect here |
 |---|---|
-| Entries are immutable | A store populated by 20 same-platform package jobs writes 20 disjoint stores; a hit requires a byte-identical prior invocation, which per-package keying almost never produces twice |
-| Branch scoping | `main`'s store is invisible to PR legs, where most runs happen |
-| 10 GB repo quota | Even a partial workspace store (a clean full build+test is ~71 G) cannot persist |
+| Exact entries are immutable | The first same-platform job to save the shared key wins; later jobs cannot merge their disjoint stores into it |
+| Branch scoping | PR runs may restore from their base/default branch, but caches created by a PR remain scoped to that PR merge ref and do not become a repository-wide accumulating store |
+| 10 GB repo quota | The repository's clean full build+test is ~71 G, so quota pressure and eviction are expected; the old WSL 400 response was consistent with pressure but did not prove it |
 
-An S3 backend removes all three: objects are overwrite-in-place, one bucket is
-visible to every branch, and capacity is a lifecycle policy instead of a quota.
+An S3 backend removes the immutable aggregate-entry collision and repository
+quota. One bucket can be visible to every authorized branch, while lifecycle
+and cost policy replace opportunistic GitHub cache eviction.
 
 ## Backend Decision
 
@@ -100,7 +115,7 @@ visible to every branch, and capacity is a lifecycle policy instead of a quota.
 | Egress cost | Zero (R2 has no egress fees) | Zero (LAN) |
 | Reachable from hosted CI | Yes, over the internet | No — GitHub-hosted runners cannot reach a private 192.168.100.0/24 address |
 | Reachable from homelab | Over the home uplink | At LAN speed |
-| Ops surface | None | Versioning, backups, capacity, certs for the endpoint |
+| Ops surface | Managed bucket, credentials, lifecycle, and cost monitoring | Service upgrades, capacity, TLS, and secure hosted-runner reachability |
 
 ### Decision: R2 first, MinIO as a measured follow-up
 
@@ -118,22 +133,34 @@ backend-independent, so the bucket can be repopulated rather than migrated.
 
 ### Bucket layout and credentials
 
-- One bucket (e.g. `rusty-biscuit-kache`), `s3-prefix` scoped per repository
-  (default `artifacts`).
-- **Scoped credentials**: an R2 token limited to this bucket and prefix — the
-  cache is a build-artifact store, not a place to grant broad object-store
-  access.
+- One dedicated bucket (e.g. `rusty-biscuit-kache`). Do not share it with
+  source, release, backup, or another repository's artifacts. R2 long-lived API
+  tokens can be bucket-scoped, but not prefix-scoped; the bucket is therefore
+  the credential boundary.
+- `s3-prefix` begins with a generation owned by repository variable
+  `KACHE_CACHE_GENERATION` (initially `v1`). Incrementing the generation is the
+  instant, non-destructive invalidation path for a poisoned or incompatible
+  remote. The retired generation is deleted only after healthy replacement
+  runs exist.
+- **Scoped credentials**: an R2 token limited to Object Read & Write on this
+  bucket — the cache is a build-artifact store, not a place to grant account or
+  bucket-administration access. Lifecycle configuration is performed out of
+  band with an administrator credential and never exposed to CI.
 - Two token classes, because a shared cache is a supply-chain surface — anyone
   who can write to the bucket can serve artifacts to everyone who reads it:
   - `KACHE_S3_ACCESS_KEY_ID` / `KACHE_S3_SECRET_ACCESS_KEY` (read-write) —
     used only by trusted runs (see Trust and Write Access).
   - A read-only token for developer-machine warming (Phase 4). Read-mostly for
     humans, write only for CI.
-- Lifecycle policy: expire objects untouched for 30 days. The store's working
-  set turns over with `Cargo.lock`; a month of staleness is well past any
-  useful entry. Cost is expected to be single-digit dollars per month at R2's
-  storage pricing for a multi-GiB store, but the lifecycle rule is the guard,
-  not the price.
+- Non-secret repository variables hold bucket name, the full account endpoint
+  (`https://<ACCOUNT_ID>.r2.cloudflarestorage.com` or its jurisdiction-specific
+  form), and `s3-region: auto`. Secrets hold only the access-key ID and secret.
+- Lifecycle policy: expire artifact, manifest, and shard objects 30 days after
+  upload. R2 lifecycle age is not reset by a read, so this is deliberate
+  periodic rotation, not "30 days since last access." Keep R2's incomplete
+  multipart-upload cleanup enabled. The pilot records actual stored bytes and
+  operation counts; the lifecycle rule is a capacity guard, not a substitute
+  for the rollout cost gate.
 
 ## Trust and Write Access
 
@@ -143,17 +170,25 @@ fork legs cannot reach the bucket at all — they keep today's
 containment and it costs nothing.
 
 Within same-repo runs, only runs whose actor and commit authors are trusted may
-**write** to the bucket. The trust definition, the repository variables that
-carry it (`CI_TRUSTED_ACTORS`, `CI_TRUSTED_AUTHORS`), and the gate that
-evaluates them are specified once — in the companion remote-runners spec — and
-reused here. If the remote-runners spec is not yet landed, this spec stands up
-the same two variables and the same gate logic on its own; they are designed to
-be shared, not duplicated forever.
+**write** to or read from the bucket. The trust definition, the repository
+variables that carry it (`CI_TRUSTED_ACTORS`, `CI_TRUSTED_AUTHORS`), and the
+hosted preflight gate that evaluates them are shared with the companion
+remote-runners spec. Whichever feature lands first creates one
+`trusted_ci_run` output; the second consumes it. There must not be two gate
+implementations. The gate fails closed when the event has no auditable commit
+range, any author is outside the allowlist, the actor is outside the allowlist,
+or the pull request comes from a fork.
 
-Read access for untrusted same-repo runs is deliberately **not** granted in
-Phase 1: it would hand the read token to any same-repo actor, and the marginal
-win (warming runs that are rare in practice) does not justify a second
-credential path to audit. Revisit after Phase 2 measurements.
+`CI_KACHE_ENABLED` is a separate repository-variable kill switch and defaults
+to `false`. Kache activates only when both `CI_KACHE_ENABLED == 'true'` and
+`trusted_ci_run == 'true'`. This keeps compute routing and remote-cache rollout
+independently reversible even though they share a trust decision.
+
+Read access for untrusted same-repo runs is deliberately **not** granted. It
+would expose a reusable credential to code controlled by that actor. Fork and
+other untrusted legs keep the existing `Swatinem/rust-cache` path. Revisiting
+this requires short-lived, run-bound R2 credentials or a read proxy; pilot hit
+rate alone is not sufficient to weaken the trust boundary.
 
 ## Integration Points
 
@@ -174,18 +209,64 @@ wrapper-free — it exists to prove the clean-checkout path, which remains true.
 
 Reuse `.github/actions/enable-kache`? It does not exist anymore — it was
 removed with kache itself. Create a new local composite action
-`.github/actions/kache-s3` wrapping `kunobi-ninja/kache-action@v1`, owning:
+`.github/actions/kache-s3`. It wraps the reviewed upstream action revision
+`kunobi-ninja/kache-action@a257c055543c2840700a9bbca8f9c3094a421b1b`, not the
+mutable `@v1` tag. This revision supports the required version, S3,
+manifest/namespace, reporting, size, and Windows inputs. The composite owns:
 
 1. Version pinning: a setup step reads `.github/kache-version` (today
    **0.12.0**, the single authority shared with `just install-kache` at
-   `justfile:48-51`) into the action's `version` input. Never "latest".
-2. Backend wiring: `s3-bucket`, `s3-region: auto`, `s3-endpoint`, `s3-prefix`,
-   credentials from repo secrets.
-3. An `enabled:` input gating activation — the same pattern the retired action
+   `justfile:48-51`) into the action's `version` input. The upstream action's
+   `version` input resolves that exact release and verifies the downloaded
+   archive against its published SHA-256 file. Never use "latest."
+2. Backend wiring: `s3-bucket`, `s3-region: auto`, full `s3-endpoint`,
+   generated `s3-prefix`, manifest key, namespace, and credentials from
+   repository variables/secrets. Pass `github-cache: false` explicitly so a
+   missing S3 value cannot silently reproduce the old backend. Keep
+   `sync: false` and `warm: true`; selective manifest/shard prefetch is the
+   default experiment, while pulling the entire remote is a separately measured
+   diagnostic only.
+3. Pre-activation validation: when enabled, all bucket, endpoint, generation,
+   and credential inputs must be non-empty. Incomplete configuration skips
+   kache, leaves `RUSTC_WRAPPER` empty, retains `rust-cache`, and writes the
+   reason to the job summary. It never invokes the upstream action in its
+   GitHub-cache fallback shape.
+4. An `enabled:` input gating activation — the same pattern the retired action
    used, because a step-level `if:` on a local composite `uses:` fails to load
    ("Unrecognized named-value: 'inputs'", recorded in the old action's header).
    Trust-gate failures, fork legs, and the measurement control all pass
    `enabled: false` and take today's path.
+5. A non-failing post-install verification of the exact pinned kache version.
+   The action exposes `active` and `inactive-reason` outputs. A missing or
+   mismatched binary clears `RUSTC_WRAPPER`, reports inactive, and lets the
+   ordinary build proceed. Consumers gate kache reports and removal of
+   `rust-cache` on `active == 'true'`, not merely on the requested input.
+6. `pr-comment: false`. Dozens of matrix jobs must not race to update sticky PR
+   comments; per-job summaries and uploaded machine-readable reports are the
+   evidence surface.
+
+The upstream action SHA and kache version are separate authorities: the SHA
+pins installer behavior, while `.github/kache-version` pins the installed
+binary. `ci_workflow_contracts.rs` enforces both and rejects a floating
+`kunobi-ninja/kache-action@v1` reference.
+
+### Remote identity and prefetch isolation
+
+The remote blob population is shared, but its mutable prefetch metadata must
+not be. Without explicit keys, every build for a host target triple overwrites
+the same default manifest, reproducing near-zero prefetch in a different form.
+Use these identities:
+
+| Value | Identity | Purpose |
+|---|---|---|
+| `s3-prefix` | `artifacts/<generation>/<experiment-arm-or-rollout>` | Instant generation rollback and strict A/B isolation; never includes branch or package during rollout |
+| `manifest-key` | `<package>/<build-family>/<environment>` | Exact prior build intent; `test`, `l2`, and `browser` deliberately use family `test`, while `check`, `lint`, and `wsl-archive` are distinct |
+| `namespace` | `<build-family>/<runner-os>/<runner-arch>` | Shares dependency shards across packages with compatible invocation shapes without allowing `lint`, `check`, and `test` manifests to clobber one another |
+
+Compiler version, target, features, and normalized flags remain part of
+kache's artifact key. Do not add branch names to these identities: cross-branch
+reuse is a goal. During the pilot the two kache arms use separate prefixes, so
+the executable arm cannot warm or change the dependency-only arm.
 
 ### Job classes in scope
 
@@ -198,15 +279,15 @@ removed with kache itself. Create a new local composite action
 | `_wsl-ci.yml` archive build | Phase 3 | Builds `x86_64-unknown-linux-gnu` test binaries on `ubuntu-latest` — the single compile the WSL path performs |
 | `_wsl-ci.yml` guest | Never | Compiles nothing |
 | `ci.yml` `scope`, `preflight`, `ci-verdict`, `summary` | Never | Compile nothing of the workspace (`ci-verdict` builds one small `--no-default-features` binary, ~8 s) |
-| Windows legs | Phase 3, Option B | See Windows below |
+| Windows legs | Phase 3 | Same pinned action, separate copy-mode acceptance result; see Windows below |
 
 ### Interplay with `Swatinem/rust-cache`
 
-During measurement both run; kache does not read `target/` state that
-`rust-cache` restored, it reads its own store, so they compose without
-corruption — but `rust-cache`'s post-step prune/upload is pure overhead once
-kache's hit rate is real, and its restored `target/` can *mask* kache misses in
-the measurements. **The A/B design therefore compares three arms, not two:**
+kache does not read the `target/` state restored by `rust-cache`, so the two can
+coexist without corrupting one another. They must not coexist in an experiment
+arm, however: a restored `target/` can prevent rustc from running and therefore
+mask kache misses, while both tools' setup/post costs distort wall time. **The
+A/B design therefore compares three mutually exclusive arms:**
 
 1. Control — today's `rust-cache`-only path (the status quo).
 2. kache-only — kache S3 with `rust-cache` removed on the pilot legs.
@@ -214,36 +295,38 @@ the measurements. **The A/B design therefore compares three arms, not two:**
 
 Arm 2 vs 1 answers "does the S3 backend beat the GitHub cache it replaces".
 Arm 3 vs 2 answers "is the test-binary share of the 85% worth the extra store
-bytes". `rust-cache` is removed per leg only when that leg's arm-2-or-3 numbers
-clear the acceptance bar; every leg that keeps `rust-cache` keeps it keyed
-exactly as today (`shared-key: package-ci-<pkg>-<job>-<env>`).
+bytes". `rust-cache` is removed only when the local action reports active and
+that leg's arm-2-or-3 numbers clear the acceptance bar. A
+requested-but-inactive kache step must retain the control path for that job.
+Every leg that keeps `rust-cache` keeps it keyed exactly as today
+(`shared-key: package-ci-<pkg>-<job>-<env>`).
 
 ## Windows
 
-`kache-action@v1` rejects `win32-x64` — the reason the old CI carried a Windows
-carve-out at every `enable-kache` site. kache itself ships Windows prebuilt
-binaries; only the action is the blocker. `docs/kache-strategy.md` → Future
-ambitions already names the path as **Option B**:
+The mutable `@v1` revision used by the old trial rejected `win32-x64`; that was
+a property of that action revision, not kache or permanent architecture. The
+reviewed action SHA selected above supports Windows x64/arm64, uses `.zip`
+release assets, and kache 0.12.0 publishes the matching Windows archives.
+Windows therefore uses the same composite and version authority as Linux and
+macOS. Manual `cargo binstall` plumbing is the fallback only if the pinned
+action fails its Phase 0 Windows smoke test.
 
-1. Install `kache.exe` in the composite action via `cargo binstall` at the
-   `.github/kache-version` pin (mirroring `just install-kache`).
-2. Set `RUSTC_WRAPPER` and the S3 config through the daemon or environment.
-3. Persist nothing locally — hosted Windows runners are ephemeral, so every
-   run warms from S3 and pushes new entries.
-
-Watch-points, inherited from the strategy doc and still true:
+Hosted Windows persists nothing locally: every run selectively warms from S3
+and pushes new entries. Watch-points inherited from the strategy doc remain:
 
 - NTFS restores by copy. A hit costs a real file copy per artifact; measure
   restore time against the compile time it replaces, per crate size class.
-- The daemon is the least-proven part of kache on Windows; prefer explicit
-  `kache sync` steps over daemon-managed sync if the daemon proves flaky.
-- If `kache-action` ships win32 support, this collapses to deleting the
-  carve-out.
+- The daemon is the least-proven part of kache on Windows. If selective warm
+  prefetch is unreliable, measure explicit `kache sync --pull` rather than
+  silently changing the Windows path; a full pull may cost more than compiling.
+- A Windows cache hit is valuable only when copy time plus download time is
+  lower than the compile time it replaces. Windows has its own acceptance
+  result and cannot inherit the Linux/macOS decision.
 
-Windows is Phase 3 because it is the only platform needing hand-rolled plumbing,
-and because the companion remote-runners spec may move Windows legs onto
-self-hosted hardware with warm targets first, which would shrink the hosted
-Windows population this serves.
+Windows is Phase 3 because its copy-mode economics and daemon behavior need
+separate evidence, and because the companion remote-runners spec may move
+Windows legs onto self-hosted hardware with warm targets first, shrinking the
+hosted Windows population this serves.
 
 ## Measurement Discipline
 
@@ -259,6 +342,51 @@ Two repo-specific rules govern the numbers, both earned the hard way:
    runner-minutes and the cache's own hit/miss counters, and only over enough
    runs to see the hosted noise floor.
 
+### Pilot protocol
+
+The pilot runs through a temporary, push-triggered experiment workflow on one
+trusted pilot branch. Do not use `workflow_dispatch`: the shared trust contract
+deliberately rejects events with no auditable commit range. Select the pilot
+package from the slowest representative `test` compile in the current baseline
+and record the choice before seeing kache results.
+
+One push schedules all three arms against the same commit, pinned toolchain,
+package inputs, commands, and runner OSes. The two kache arms use separate
+`s3-prefix` values; neither runs `rust-cache`. Prime each kache prefix once,
+exclude that cold run, then re-run the same workflow run at least five times so
+every measured sample has byte-identical source and configuration. Arms may run
+in parallel, but no arm may consume another arm's local target or remote
+prefix. Record hosted runner image identifiers so image drift can be identified
+rather than mistaken for a cache effect.
+
+The experiment must exercise the canonical `_package-ci.yml` setup and commands,
+not a shortened benchmark that omits native prerequisites, fixtures, or
+`cargo-nextest`. An experiment-only input may select the cache arm, but its
+default is the current `rust-cache` behavior and production callers remain
+unchanged until rollout.
+
+### Evidence contract
+
+Every measured kache job runs an `if: always()` evidence step before action post
+cleanup and uploads a uniquely named artifact containing:
+
+- `kache report --format json --since 24h` and the Markdown report;
+- requested and effective cache mode, `cache-executables`, prefix generation,
+  manifest key, namespace, kache version, and upstream action SHA;
+- local/remote hits, misses, errors, compile-cost-weighted hit rate, time saved,
+  bytes pulled/pushed, and setup/build/post durations when reported;
+- commit SHA, `Cargo.lock` hash, Rust toolchain, runner OS/architecture/image,
+  package, job family, exact command, run ID, and run attempt.
+
+Artifact names include arm, package, job family, OS, run ID, and
+`${{ github.run_attempt }}` so repeated attempts cannot collide.
+
+The control records the same identity and timing fields without a kache report.
+`measurement.md` links every raw run/artifact, states exclusions before
+aggregation, shows every sample (not only medians), and records R2 stored bytes,
+Class A/B operations, and the projected monthly bill. Missing or unparsable
+evidence invalidates that sample; it never becomes a zero or a hit.
+
 ### Acceptance bar (Phase 2 → rollout gate)
 
 Over the pilot's runs, on Linux or macOS pilot legs:
@@ -267,9 +395,24 @@ Over the pilot's runs, on Linux or macOS pilot legs:
   same package, toolchain, and lockfile as a prior run — the case the backend
   exists for).
 - Median warm-run wall time reduced ≥ **20%** vs the control arm, with the
-  distribution (not just the median) clear of the hosted noise floor.
+   distribution (not just the median) clear of the hosted noise floor.
 - Zero red runs attributable to kache across the pilot, including one
-  deliberate bucket-outage rehearsal (see Fail-Safe).
+   deliberate bucket-outage rehearsal (see Fail-Safe).
+- No setup silently selected the GitHub Actions cache backend, every measured
+  sample produced its required report, and the projected R2 bill is
+  ≤ **$10/month** at observed CI volume.
+
+Choose `cache-executables: true` for a cleared job family only when it improves
+median wall time by at least another 10% over dependency-only kache and still
+meets the cost cap. Otherwise choose the simpler default (`false`). Acceptance
+is per OS and job family; a Linux `test` win does not authorize macOS `lint` or
+Windows rollout.
+
+Phase 2 initially enables only the `check` and `test` families proven by the
+pilot. `lint`, `l2`, and `browser` each require the same mutually exclusive
+control comparison and per-family acceptance result before activation; sharing
+dependencies or today's `rust-cache` key is not evidence that their economics
+match.
 
 Below the bar, the feature stops at the pilot and the bucket is deleted. That
 is a legitimate outcome, recorded either way.
@@ -280,10 +423,11 @@ is a legitimate outcome, recorded either way.
   (`_package-ci.yml:452`); `test` does not. Flags are in the blake3 key, so
   lint and test never share entries — expected, not a defect, but it halves
   the apparent hit rate if arms are compared carelessly.
-- **Store-size thrash.** `local_max_size` on ephemeral runners bounds the
-  per-job store; the action's `max-size` default (50 GiB) is adequate for a
-  per-job working set but must be re-checked with `cache-executables: true`,
-  which multiplies stored bytes.
+- **Store-size thrash.** `max-size` on ephemeral runners bounds the per-job
+  store. Do not assume the action's 50 GiB default is adequate; record peak
+  local usage in the prime run and choose the smallest cap with at least 20%
+  headroom. Re-measure with `cache-executables: true`, which can multiply
+  stored bytes.
 - **Uplink economics.** Hosted runners egress to R2 over the internet; a
   multi-GiB warm prefetch must save more compile minutes than it spends in
   transfer. `min-compile-ms` (default 1000) is the tuning knob; raise it if
@@ -291,14 +435,24 @@ is a legitimate outcome, recorded either way.
 
 ## Fail-Safe
 
-The wrapper must fail open. If the bucket is unreachable, credentials are
-rejected, or the store corrupts, the build proceeds as an ordinary uncached
-compile and the run goes green slower. The pilot includes one deliberate
-outage rehearsal (bad credentials on a scratch branch) to prove this. A kache
-that can red a run is worse than no kache, and the kill switch is structural:
-`enabled: false` on the composite action's call sites, plus rotating the R2
-token, plus (last resort) the bucket lifecycle expiring everything inside 30
-days.
+The wrapper must fail open. Missing configuration skips activation and retains
+`rust-cache`; an unreachable remote after activation degrades to kache's local
+miss/pass-through path and a slower non-incremental compile. No cache failure
+may turn a correct build red or serve an unchecked artifact.
+
+The pilot proves three isolated cases: a missing credential, an unreachable
+endpoint with valid-looking credentials, and a deliberately corrupted object
+in the pilot-only generation. It records the effective cache path and build
+result for each. If corruption is not rejected as a miss/error or any case reds
+the build, rollout stops.
+
+Rollback has three distinct controls:
+
+1. Set `CI_KACHE_ENABLED=false` to disable new activations immediately.
+2. Increment `KACHE_CACHE_GENERATION` to abandon remote contents while retaining
+   them for diagnosis; this is the corruption/incompatibility recovery path.
+3. Rotate/revoke the R2 token for credential compromise. Lifecycle expiration
+   is retention policy, not a kill switch.
 
 ## Interaction with Self-Hosted Runners
 
@@ -309,41 +463,87 @@ warm target that is the entire point of self-hosting.
 
 The S3 store still earns its keep in that world:
 
-- Hosted legs remain for every untrusted run, fork PR, `workflow_dispatch`,
-  and fail-safe fallback — that population keeps the bucket warm and keeps
-  benefiting from it.
+- Trusted runs that fall back to hosted runners because no self-hosted slot is
+  available can use the bucket. Untrusted, fork, and `workflow_dispatch` runs
+  cannot read it and retain `rust-cache`; they neither warm nor benefit from R2.
 - A fresh self-hosted slot (new host, evicted target, post-upgrade rebuild)
   can warm from the bucket once instead of compiling cold. That is an
   opt-in, run-by-hand step in the runner bootstrap, not CI wiring.
 - Developer machines (Phase 4) pull read-only.
 
-If remote-runners lands first and shrinks the hosted population to
-untrusted-only runs, the Phase 2 rollout decision should be re-taken against
-whatever hosted volume remains; the pilot-to-rollout gate applies to the
-population that actually runs.
+If remote-runners lands first and leaves no material trusted hosted population,
+routine CI no longer populates this bucket. Phase 2 then stops unless measured
+hosted fallback plus developer/bootstrap demand still justifies the cost and
+staleness. The pilot-to-rollout gate applies to the population that actually
+runs, not to the pre-routing baseline.
 
 ## Phasing
 
 | Phase | Content | Exit |
 |---|---|---|
-| 0 | Bucket + scoped tokens + lifecycle; secrets `KACHE_S3_*`; composite action with `enabled` gate and version pin | A scratch `workflow_dispatch` run warms, hits, and reports via `kache report` |
-| 1 | Pilot: one package's `check`+`test` on Linux and macOS, three-arm A/B, 5+ repeat runs per arm | Acceptance bar evaluated; numbers recorded in `measurement.md` here |
+| 0 | Bucket + scoped tokens + lifecycle; trust output; `CI_KACHE_ENABLED=false`; generation; secrets `KACHE_S3_*`; pinned composite action; contract tests | Trusted push smoke tests on Linux, macOS, and Windows install exactly 0.12.0; incomplete config selects `rust-cache`; no job uses GitHub cache through kache |
+| 1 | Pilot: one pre-recorded package's `check`+`test` on Linux and macOS, isolated three-arm A/B, one prime + 5+ identical-commit repeats per arm | Acceptance bar evaluated; raw artifacts and decision recorded in `measurement.md` here |
 | 2 | Rollout to Linux/macOS legs that clear the bar; `rust-cache` removed per cleared leg | Repeat-run wall time down ≥ 20% on cleared legs; no kache-attributed reds |
-| 3 | Windows via Option B; `_wsl-ci.yml` archive build | Same bar, Windows-tolerant (copy-mode restores) |
-| 4 | Read-only dev-machine warming (`just` recipe wrapping `kache sync --pull`, documented in `docs/kache-strategy.md`) | Opt-in per host, per existing policy |
+| 3 | Windows through the same pinned action; `_wsl-ci.yml` archive build | Same bar evaluated separately for Windows copy-mode restores and the Linux archive builder |
+| 4 | Read-only dev-machine warming (`just` recipe wrapping `kache sync --pull`, documented in `docs/kache-strategy.md`) | Open Question 1 resolved; opt-in per host, per existing policy |
+
+## Repository Contract and Documentation Updates
+
+The old `ci_does_not_wire_the_kache_wrapper` test expresses the deliberately
+temporary K2 policy. This feature intentionally supersedes that policy; leaving
+the assertion in place would make correct implementation fail. Replace it with
+contracts that prove:
+
+- no tracked Cargo config or general initialization activates kache;
+- CI reaches kache only through `.github/actions/kache-s3` at the reviewed
+  upstream SHA and `.github/kache-version` remains the binary authority;
+- the composite passes `github-cache: false`, validates all S3 inputs, disables
+  PR comments, and exposes effective activation;
+- call sites require both the shared trust output and `CI_KACHE_ENABLED`, keep
+  `rust-cache` for inactive/untrusted legs, and never activate in the WSL guest;
+- manifest/namespace identities are explicit and the experiment prefixes are
+  isolated; and
+- enabled jobs emit uniquely named machine-readable reports.
+
+Update `docs/kache-strategy.md`, `.github/ci/README.md`, the relevant workflow
+header comments, and `.claude/skills/kache/remote-cache.md` in the rollout
+change. The old action/Windows caveat must be rewritten as historical evidence,
+not left as current behavior. Add the upstream action SHA to the maintenance
+audit so upgrades are deliberate and reviewed separately from kache binary
+upgrades. Workflow permissions remain `contents: read`; `pr-comment: false`
+means this feature does not add `pull-requests: write`.
 
 ## Open Questions
 
-1. Does `kache-action@v1` honor a `version` input precisely enough to pin
-   0.12.0, or does the composite need to install the pinned binary itself
-   (as Windows Option B already must)? Resolve in Phase 0.
-2. R2's `s3-region` semantics with `s3-endpoint` set (`auto` vs a specific
-   region string) — confirm against the action's S3 client in Phase 0.
-3. Should untrusted same-repo runs get read access in Phase 2, or does the
-   single-credential-path simplicity keep winning? Decide from the pilot's
-   data on how often untrusted same-repo runs repeat configurations.
-4. Is `cache-executables: true` worth its store bytes on legs whose test
-   binaries dominate (arm 3)? This is the highest-variance unknown in the
-   spec.
-5. If `kache-action` ships win32 support, Phase 3's hand-rolled plumbing is
-   dead on arrival — check before building it.
+1. **What provenance boundary is sufficient for executable artifacts shared
+   with developer machines?** Content-derived identities and checksum
+   validation can detect accidental corruption when verified, but they do not
+   prove that an actor holding the authorized write credential produced a
+   benign artifact.
+
+   - **A — Keep the trusted-writer bucket model for CI and Phase 4.**
+     - Pros: supported by kache today; one shared population; no additional
+       service; bucket-scoped credentials and generation rollback limit blast
+       radius.
+     - Cons: compromise of the long-lived CI write token can poison artifacts
+       consumed by trusted CI and read-only developer clients; there is no
+       independent build provenance.
+   - **B — Keep R2 for trusted CI but remove Phase 4 developer reads.**
+     - Pros: contains the consumer population to ephemeral CI; no developer
+       credential distribution; simplest conservative boundary.
+     - Cons: gives up a stated multi-machine benefit and makes the bucket less
+       valuable if self-hosted routing removes most trusted hosted jobs.
+   - **C — Require short-lived credentials plus signed manifests/artifacts.**
+     - Pros: strongest provenance and revocation story; a stolen per-run token
+       has a narrow lifetime and signatures can separate artifact authority
+       from object-store authority.
+     - Cons: kache does not currently define this verification contract; it
+       requires an OIDC/credential broker and upstream or local kache work,
+       materially expanding the feature.
+
+   **Recommendation: A for the bounded CI pilot and rollout, B for Phase 4
+   until a separate security review accepts A for persistent developer
+   consumption or scopes C as its own feature.** This preserves the measurable
+   CI goal without treating possession of a read-only token as proof of
+   artifact provenance. The decision must be recorded before Phase 4; pilot
+   performance data cannot answer it.
