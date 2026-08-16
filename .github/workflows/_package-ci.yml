@@ -363,6 +363,19 @@ jobs:
           set -euo pipefail
           node --version
           pnpm --version
+      - name: Prewarm spawned binaries
+        shell: bash
+        run: |
+          # Real-CLI tests spawn the freshly built production binaries
+          # (claudine is a 244MB debug image, md 152MB, bt 64MB). When the
+          # rust-cache restore supplies them, they sit cold on the runner's
+          # disk and the FIRST spawn pages the image in at cold-IOPS speed —
+          # observed as 10-150s startup stalls that read as test hangs
+          # (run 31944322558: PTY expects, inner timeout wrappers, and a 150s
+          # termination, all at claudine's first output byte). One sequential
+          # read warms the page cache for every subsequent spawn.
+          find target/debug -maxdepth 1 -type f -perm -111 2>/dev/null \
+            | xargs -r cat > /dev/null || true
       - name: L1 tests
         id: l1
         shell: bash
@@ -692,6 +705,14 @@ jobs:
           shared-key: package-ci-${{ inputs.package }}-test-${{ matrix.environment }}
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
+      - name: Prewarm spawned binaries
+        shell: bash
+        run: |
+          # Same rationale as the L1 leg: L2 harnesses type the freshly built
+          # CLIs (bt, md, claudine) into panes, and a cache-restored binary's
+          # first spawn pages a 100-250MB debug image in from cold disk.
+          find target/debug -maxdepth 1 -type f -perm -111 2>/dev/null \
+            | xargs -r cat > /dev/null || true
       - name: L2 tests
         shell: bash
         env:

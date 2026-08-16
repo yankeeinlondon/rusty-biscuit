@@ -1350,9 +1350,20 @@ mod tests {
             .expect("detached descendant should report its PID")
             .parse::<libc::pid_t>()
             .expect("reported descendant PID should be numeric");
+        // SIGKILL delivery and init's reap of the re-parented descendant are
+        // asynchronous, and signal-0 answers "exists" for a killed-but-unreaped
+        // zombie — a single sample races init under CI load. Poll for
+        // disappearance: milliseconds normally, bounded so a genuinely
+        // surviving process still fails.
+        //
         // SAFETY: signal zero performs existence and permission checks without
         // delivering a signal to the reported process.
-        let exists = unsafe { libc::kill(pid, 0) } == 0;
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut exists = unsafe { libc::kill(pid, 0) } == 0;
+        while exists && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+            exists = unsafe { libc::kill(pid, 0) } == 0;
+        }
         assert!(!exists, "quiet detached descendant {pid} survived cleanup");
         assert_eq!(
             std::io::Error::last_os_error().raw_os_error(),

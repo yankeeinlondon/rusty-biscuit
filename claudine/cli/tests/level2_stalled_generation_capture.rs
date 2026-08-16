@@ -180,7 +180,11 @@ done
     clear_no_color(&mut harness);
 
     let claudine = common::claudine_bin();
-    let env_pairs: [(&str, String); 7] = [
+    let env_pairs: [(&str, String); 8] = [
+        // Surfaces compute_terminal's branch inputs in the captured pane —
+        // hosted runners render this wrap plain while every probed input
+        // says forced-optimistic.
+        ("CLAUDINE_DEBUG_TERMINAL", "1".to_string()),
         ("FORCE_COLOR", "1".to_string()),
         ("HOME", workspace.path().display().to_string()),
         (
