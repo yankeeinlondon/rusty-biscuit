@@ -387,6 +387,9 @@ jobs:
           # real-CLI test without altering the binary under test.
           if [[ "${{ inputs.package }}" == "claudine-cli" \
             && "${{ matrix.environment }}" == "ubuntu-latest" ]]; then
+            if [ ! -x target/debug/claudine ]; then
+              cargo build -q -p claudine-cli --bin claudine
+            fi
             ram_claudine=/dev/shm/biscuit-ci-claudine
             install -m 0755 target/debug/claudine "$ram_claudine"
             "$ram_claudine" --version
