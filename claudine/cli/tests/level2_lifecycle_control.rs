@@ -653,15 +653,16 @@ fn run_compose_await_exit_on_path(staged: &Staged, extra_args: &str, path: &str)
     run_compose_await_exit_redirected(staged, extra_args, path, "")
 }
 
-/// `2>&1 | cat`: run compose with **stderr on a pipe** rather than the pane's
-/// TTY, while still showing everything it writes.
+/// `2>&1 | /bin/cat`: run compose with **stderr on a pipe** rather than the
+/// pane's TTY, while still showing everything it writes. The absolute path
+/// prevents an interactive shell alias from substituting a pager such as bat.
 ///
 /// Provider selection is TTY-gated — with a terminal on stderr an unresolvable
 /// `agent:` opens the interactive picker instead of aborting — so a row
 /// comparing the *no-operator* diagnostic has to take the operator away. A
 /// retry has none by construction; this is how the direct arm is put in the
 /// same position.
-const NON_TTY_STDERR: &str = " 2>&1 | cat";
+const NON_TTY_STDERR: &str = " 2>&1 | /bin/cat";
 
 /// [`run_compose_await_exit_on_path`] with a shell redirection appended to the
 /// compose command.
