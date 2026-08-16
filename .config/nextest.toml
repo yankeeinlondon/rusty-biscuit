@@ -45,6 +45,11 @@ claudine-windows-l1 = { max-threads = 4 }
 # overlap itself; the rest of the suite still fills the other threads.
 heavy-cli-compose = { max-threads = 1 }
 
+# Sniff's real-resource tier opens live crates.io and npm connections. On
+# native Windows, eight simultaneous probes reproducibly abort one client with
+# 0xc0000409; the same eight probes complete in 2.3s when serialized.
+sniff-live-registries = { max-threads = 1 }
+
 [profile.default]
 # A test that passes only on retry is still a failed test run. Keep retries
 # disabled so timing and resource-contention defects remain visible locally.
@@ -91,6 +96,11 @@ archive.include = [
 platform = { host = "cfg(windows)" }
 filter = 'package(claudine) + package(claudine-cli)'
 test-group = 'claudine-windows-l1'
+
+[[profile.default.overrides]]
+platform = { host = "cfg(windows)" }
+filter = 'package(sniff) & test(/(^|::)real_/)'
+test-group = 'sniff-live-registries'
 
 # Tests that intentionally wait on a real clock (e.g. rate-limit pause policies)
 # need an even longer leash than the default termination window.
@@ -331,6 +341,11 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 [[profile.ci.overrides]]
 filter = 'package(biscuit-speaks-cli)'
 test-group = 'tts-audio'
+
+[[profile.ci.overrides]]
+platform = { host = "cfg(windows)" }
+filter = 'package(sniff) & test(/(^|::)real_/)'
+test-group = 'sniff-live-registries'
 
 # The heavy end-to-end compose tests (see [test-groups]) — the exact set the
 # WSL2 and ubuntu cells have terminated at 90s under full parallelism.

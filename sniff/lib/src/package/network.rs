@@ -573,8 +573,10 @@ mod tests {
     use super::*;
     use crate::package::dependency::DependencyKind;
 
+    // These probes depend on public registries. The `real_` prefix keeps them
+    // out of the hermetic L1 tier and routes them through `just test-real`.
     #[tokio::test]
-    async fn test_enrich_dependency_cargo() {
+    async fn real_enrich_dependency_cargo() {
         let entry = DependencyEntry {
             name: "serde".to_string(),
             kind: DependencyKind::Normal,
@@ -595,7 +597,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_enrich_dependency_npm() {
+    async fn real_enrich_dependency_npm() {
         let entry = DependencyEntry {
             name: "lodash".to_string(),
             kind: DependencyKind::Normal,
@@ -636,7 +638,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cargo_network_find_package() {
+    async fn real_cargo_network_find_package() {
         let cargo = CargoNetwork::new();
         let result = cargo.find_package("serde").await;
         assert!(result.is_ok());
@@ -647,7 +649,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cargo_network_latest_version() {
+    async fn real_cargo_network_latest_version() {
         let cargo = CargoNetwork::new();
         let result = cargo.latest_version("serde").await;
         assert!(result.is_ok());
@@ -658,7 +660,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cargo_network_nonexistent_package() {
+    async fn real_cargo_network_nonexistent_package() {
         let cargo = CargoNetwork::new();
         let result = cargo
             .find_package("this-crate-definitely-does-not-exist-xyz123")
@@ -668,7 +670,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_npm_network_find_package() {
+    async fn real_npm_network_find_package() {
         let npm = NpmNetwork::new();
         let result = npm.find_package("lodash").await;
         assert!(result.is_ok());
@@ -679,7 +681,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_npm_network_latest_version() {
+    async fn real_npm_network_latest_version() {
         let npm = NpmNetwork::new();
         let result = npm.latest_version("lodash").await;
         assert!(result.is_ok());
@@ -690,7 +692,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_npm_network_nonexistent_package() {
+    async fn real_npm_network_nonexistent_package() {
         let npm = NpmNetwork::new();
         let result = npm
             .find_package("this-package-definitely-does-not-exist-xyz123")
