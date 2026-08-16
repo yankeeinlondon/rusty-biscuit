@@ -247,12 +247,26 @@ done
     let color_probe = if has_3bit_red(&last_raw) {
         String::new()
     } else {
-        let _ = harness.send_text(
-            b"echo __PROBE__ NO_COLOR=$NO_COLOR FORCE_COLOR=$FORCE_COLOR \
-              COLORTERM=$COLORTERM TERM=$TERM; tmux -V\n",
+        // Three-layer discriminator for the colorless hosted captures. The
+        // prior probe proved the pane env is correct (FORCE_COLOR=1,
+        // COLORTERM=truecolor, NO_COLOR unset, TERM=tmux-256color), yet the
+        // capture carries zero escapes. Layer 1: a shell printf of raw red —
+        // if capture raw lacks even this, tmux cell storage or `capture -e`
+        // strips in this session. Layer 2: claudine --help piped through
+        // `od`, counting ESC bytes — whether claudine itself emits escapes on
+        // this host, capture path excluded. Layer 3: env, for the record.
+        let probe_cmd = format!(
+            "printf '\\033[31mSGRPROBE\\033[0m\\n'; \
+             FORCE_COLOR=1 {claudine} --help 2>&1 | od -An -c | grep -c 033; \
+             echo __PROBE__ NO_COLOR=$NO_COLOR FORCE_COLOR=$FORCE_COLOR \
+             COLORTERM=$COLORTERM TERM=$TERM; tmux -V\n",
         );
-        std::thread::sleep(Duration::from_millis(600));
-        harness.capture().map(|f| f.plain).unwrap_or_default()
+        let _ = harness.send_text(probe_cmd.as_bytes());
+        std::thread::sleep(Duration::from_millis(1500));
+        harness
+            .capture()
+            .map(|f| format!("plain:\n{}\nraw:\n{}", f.plain, f.raw))
+            .unwrap_or_default()
     };
 
     kill_session_by_name(&session);
