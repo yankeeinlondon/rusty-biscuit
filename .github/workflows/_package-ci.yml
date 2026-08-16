@@ -367,7 +367,7 @@ jobs:
         shell: bash
         run: |
           # Real-CLI tests spawn the freshly built production binaries
-          # (claudine is a 244MB debug image, md 152MB, bt 64MB). When the
+          # (claudine is a 373MB debug image, md 152MB, bt 64MB). When the
           # rust-cache restore supplies them, they sit cold on the runner's
           # disk and the FIRST spawn pages the image in at cold-IOPS speed —
           # observed as 10-150s startup stalls that read as test hangs
@@ -381,6 +381,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Prewarming fixes the first cold launch, but Linux memory pressure
+          # can evict Claudine's 373MB debug image between repeated launches.
+          # Keeping the spawned image in tmpfs removes disk page-in from every
+          # real-CLI test without altering the binary under test.
+          if [[ "${{ inputs.package }}" == "claudine-cli" \
+            && "${{ matrix.environment }}" == "ubuntu-latest" ]]; then
+            ram_claudine=/dev/shm/biscuit-ci-claudine
+            install -m 0755 target/debug/claudine "$ram_claudine"
+            "$ram_claudine" --version
+            export BISCUIT_CLAUDINE_TEST_BIN="$ram_claudine"
+          fi
           # --no-fail-fast: run ALL of the package's tests so one slow or
           # failing test cannot suppress the rest of the suite's evidence.
           just _test "${{ inputs.package }}" --no-fail-fast ${{ inputs.test-args }}

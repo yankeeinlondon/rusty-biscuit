@@ -703,14 +703,16 @@ _test pkg *args="": _storage_preflight
     archive_mode=0
     for arg in ${forwarded[@]+"${forwarded[@]}"}; do
         case "${arg}" in
-            --archive-file|--archive-file=*) archive_mode=1 ;;
+            # Extracted archive metadata has the same no-build contract as the
+            # archive itself, but avoids a second extraction before execution.
+            --archive-file|--archive-file=*|--binaries-metadata|--binaries-metadata=*) archive_mode=1 ;;
         esac
     done
 
     if (( archive_mode == 1 )) && ! "${nextest_bin[@]}" --version >/dev/null 2>&1; then
-        echo -e "❌ {{ red }}--archive-file requires cargo-nextest{{ reset }}" >&2
+        echo -e "❌ {{ red }}prebuilt nextest inputs require cargo-nextest{{ reset }}" >&2
         echo "   '${nextest_bin[*]} --version' failed, and the cargo test fallback cannot" >&2
-        echo "   consume an archive — it recompiles, which is the whole thing an archive avoids." >&2
+        echo "   consume prebuilt inputs — it would recompile the tests instead." >&2
         echo -e "   Set {{ bold }}BISCUIT_NEXTEST_BIN{{ reset }} (the WSL leg uses \"cargo-nextest nextest\")." >&2
         exit 1
     fi

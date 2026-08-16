@@ -717,11 +717,38 @@ jobs:
           # visible instead of a silent in-test early return, which nextest
           # would record as a pass.
           export BISCUIT_TEST_EXCLUDE='package(model_id) & binary(ui)'
+          nextest_reuse_args=(
+            --archive-file "$archive"
+            --workspace-remap "${{ env.GUEST_ROOT }}"
+          )
+          if [[ "${{ inputs.package }}" == "claudine-cli" ]]; then
+            # Run 31956960890's 1.63GB archive took 55s merely to extract, then
+            # repeated 12-25s Claudine launches as guest pressure evicted the
+            # 373MB image. Reusing the extracted metadata lets the wrapper
+            # point every nested launch at one tmpfs-resident copy.
+            extract_root="$HOME/nextest-extract"
+            mkdir -p "$extract_root"
+            cargo-nextest nextest list \
+              --archive-file "$archive" \
+              --extract-to "$extract_root" \
+              --workspace-remap "${{ env.GUEST_ROOT }}" >/dev/null
+
+            extracted_claudine="$extract_root/target/x86_64-unknown-linux-gnu/debug/claudine"
+            ram_claudine=/dev/shm/biscuit-ci-claudine
+            install -m 0755 "$extracted_claudine" "$ram_claudine"
+            "$ram_claudine" --version
+            export BISCUIT_CLAUDINE_TEST_BIN="$ram_claudine"
+            nextest_reuse_args=(
+              --cargo-metadata "$extract_root/target/nextest/cargo-metadata.json"
+              --binaries-metadata "$extract_root/target/nextest/binaries-metadata.json"
+              --target-dir-remap "$extract_root/target"
+              --workspace-remap "${{ env.GUEST_ROOT }}"
+            )
+          fi
           just _test "${{ inputs.package }}" \
             --no-fail-fast \
             --test-threads 2 \
-            --archive-file "$archive" \
-            --workspace-remap "${{ env.GUEST_ROOT }}" \
+            "${nextest_reuse_args[@]}" \
             ${{ inputs.test-args }}
       - name: Stage the JUnit reports for upload
         id: stage_junit

@@ -14,6 +14,11 @@
 #
 # `just sanity` uses `!(...slow...)` to exclude every non-default tier in one shot.
 
+experimental = ["wrapper-scripts"]
+
+[scripts.wrapper.claudine-spawn-bin]
+command = { command-line = ".github/scripts/nextest-claudine-wrapper.sh", relative-to = "workspace-root" }
+
 [test-groups]
 # biscuit-speaks-cli integration tests spawn the `so-you-say` binary, which
 # drives real OS TTS/audio (`say`, audio playback). Running a dozen of those
@@ -251,6 +256,15 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 leak-timeout = { period = "5s", result = "fail" }
 # JUnit XML for CI dashboards.
 junit = { path = "test-results.xml" }
+
+# Claudine's integration tests spawn the production CLI through nextest's
+# archive-aware binary variables. The wrapper is the only boundary after
+# nextest publishes those variables, so it can redirect every nested launch to
+# the RAM-backed copy prepared by Linux CI without changing test semantics.
+[[profile.ci.scripts]]
+filter = 'package(claudine-cli)'
+platform = { host = 'cfg(unix)' }
+run-wrapper = 'claudine-spawn-bin'
 
 # Keep the resource-sensitive real-terminal tier retry-free too: transient PTY
 # or remote-control failures must remain visible to the CI gate.
