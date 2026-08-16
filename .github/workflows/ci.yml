@@ -145,7 +145,7 @@ jobs:
       # The policy artifact the rollup reads. Small, and retention is short:
       # it describes one run's scope, nothing else.
       - name: Upload the resolved package policy
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: ci-scope
           path: scope.json
@@ -382,7 +382,7 @@ jobs:
             --run-id '${{ github.run_id }}'
       - name: Upload the machine-readable rollup
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: ci-results
           path: ci-results.json

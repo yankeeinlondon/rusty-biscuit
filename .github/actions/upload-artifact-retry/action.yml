@@ -1,0 +1,46 @@
+name: upload-artifact-retry
+description: >-
+  actions/upload-artifact@v4 with one retry. Uploads land in Azure blob
+  storage, which intermittently times out ("Operation could not be completed
+  within the specified time") and fails an otherwise-green job; a single
+  spaced retry absorbs that transient. The retry passes overwrite: true so a
+  partially-committed first attempt cannot fail it with "already exists".
+inputs:
+  name:
+    description: Artifact name.
+    required: true
+  path:
+    description: File/directory/glob path(s) to upload.
+    required: true
+  if-no-files-found:
+    description: warn | error | ignore (upload-artifact's own default).
+    required: false
+    default: warn
+  retention-days:
+    description: Days to retain; 0 uses the repository default.
+    required: false
+    default: "0"
+runs:
+  using: composite
+  steps:
+    - id: first
+      continue-on-error: true
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ inputs.path }}
+        if-no-files-found: ${{ inputs.if-no-files-found }}
+        retention-days: ${{ inputs.retention-days }}
+    - name: Pause before retry
+      if: steps.first.outcome == 'failure'
+      shell: bash
+      run: sleep 20
+    - name: Upload (retry)
+      if: steps.first.outcome == 'failure'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.name }}
+        path: ${{ inputs.path }}
+        if-no-files-found: ${{ inputs.if-no-files-found }}
+        retention-days: ${{ inputs.retention-days }}
+        overwrite: true

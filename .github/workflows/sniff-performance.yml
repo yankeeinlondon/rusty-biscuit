@@ -111,7 +111,7 @@ jobs:
 
       - name: Upload Criterion report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: sniff-criterion-report
           path: target/criterion
@@ -169,7 +169,7 @@ jobs:
       # run on the same runner class is.
       - name: Upload work-count table
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: sniff-work-counts-${{ matrix.os }}
           path: work-counts

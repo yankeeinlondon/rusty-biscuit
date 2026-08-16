@@ -188,7 +188,7 @@ jobs:
             >"$RUNNER_TEMP/status/status.json"
       - name: Upload producer status
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: status-${{ inputs.package }}-check-${{ matrix.os }}
           path: ${{ runner.temp }}/status
@@ -393,7 +393,7 @@ jobs:
       # its {package, environment, tier} identity.
       - name: Upload L1 JUnit
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: junit-${{ inputs.package }}-L1-${{ matrix.environment }}
           path: target/nextest/ci-reports
@@ -436,7 +436,7 @@ jobs:
           fi
       - name: Upload producer status
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: status-${{ inputs.package }}-L1-${{ matrix.environment }}
           path: ${{ runner.temp }}/status
@@ -540,7 +540,7 @@ jobs:
           fi
       - name: Upload producer status
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: status-${{ inputs.package }}-lint
           path: ${{ runner.temp }}/status
@@ -726,7 +726,7 @@ jobs:
       # the L1 upload for why the single overwritten file is not enough.
       - name: Upload L2 JUnit
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: junit-${{ inputs.package }}-L2-${{ matrix.environment }}
           path: target/nextest/ci-reports
@@ -747,7 +747,7 @@ jobs:
             >"$RUNNER_TEMP/status/status.json"
       - name: Upload producer status
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: status-${{ inputs.package }}-L2-${{ matrix.environment }}
           path: ${{ runner.temp }}/status
@@ -803,7 +803,7 @@ jobs:
       # the L1 upload for why the single overwritten file is not enough.
       - name: Upload browser JUnit
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: junit-${{ inputs.package }}-browser-${{ matrix.environment }}
           path: target/nextest/ci-reports
@@ -824,7 +824,7 @@ jobs:
             >"$RUNNER_TEMP/status/status.json"
       - name: Upload producer status
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: status-${{ inputs.package }}-browser-${{ matrix.environment }}
           path: ${{ runner.temp }}/status

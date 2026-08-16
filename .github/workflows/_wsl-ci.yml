@@ -246,7 +246,7 @@ jobs:
           [ -x "$source" ] || { echo "darkmatter md sidecar missing: $source" >&2; exit 1; }
           cp "$source" "$sidecar/md"
       - name: Upload the nextest archive
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: nextest-archive-${{ inputs.package }}-wsl2-ubuntu
           path: ${{ runner.temp }}/${{ env.ARCHIVE_NAME }}
@@ -254,7 +254,7 @@ jobs:
           if-no-files-found: error
       - name: Upload the darkmatter md sidecar
         if: ${{ contains(fromJSON(inputs.runner-tools), 'darkmatter-md-fixture') }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: darkmatter-md-${{ inputs.package }}-wsl2-ubuntu
           path: ${{ runner.temp }}/darkmatter-md
@@ -262,7 +262,7 @@ jobs:
           if-no-files-found: error
       - name: Upload the messenger desktop stub sidecar
         if: ${{ contains(fromJSON(inputs.runner-tools), 'messenger-desktop-stubs') }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: messenger-desktop-stubs-${{ inputs.package }}-wsl2-ubuntu
           path: ${{ runner.temp }}/messenger-desktop-stubs
@@ -747,7 +747,7 @@ jobs:
           exit 0
       - name: Upload wsl2-ubuntu L1 JUnit
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: junit-${{ inputs.package }}-L1-wsl2-ubuntu
           path: wsl-junit
@@ -816,7 +816,7 @@ jobs:
           $report | Tee-Object -FilePath wsl-diag/host-postmortem.txt
       - name: Upload WSL2 diagnostics
         if: ${{ steps.l1.outcome == 'failure' }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           # A prefix `ci-rollup` does not walk: this is evidence for a human
           # reading a failure, never an input to a cell's verdict.
@@ -872,7 +872,7 @@ jobs:
           fi
       - name: Upload producer status
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/upload-artifact-retry
         with:
           name: status-${{ inputs.package }}-L1-wsl2-ubuntu
           path: ${{ runner.temp }}/status
