@@ -141,7 +141,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: ./.github/actions/setup-just-retry
       - name: Install native prerequisites
         shell: bash
         env:
@@ -156,7 +156,7 @@ jobs:
             just _ensure-native-libs $packages
           fi
       - name: Set up the pinned Rust toolchain
-        run: rustup show
+        uses: ./.github/actions/setup-rust-toolchain-retry
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -234,7 +234,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: ./.github/actions/setup-just-retry
       - name: Install native prerequisites
         shell: bash
         env:
@@ -247,7 +247,7 @@ jobs:
             just _ensure-native-libs $packages
           fi
       - name: Set up the pinned Rust toolchain
-        run: rustup show
+        uses: ./.github/actions/setup-rust-toolchain-retry
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -470,7 +470,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: ./.github/actions/setup-just-retry
       - name: Install native prerequisites
         shell: bash
         env:
@@ -484,7 +484,7 @@ jobs:
           fi
       # clippy + rustfmt come from rust-toolchain.toml (the single authority).
       - name: Set up the pinned Rust toolchain
-        run: rustup show
+        uses: ./.github/actions/setup-rust-toolchain-retry
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -593,7 +593,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: ./.github/actions/setup-just-retry
       - name: Install native prerequisites
         shell: bash
         env:
@@ -606,7 +606,7 @@ jobs:
             just _ensure-native-libs $packages
           fi
       - name: Set up the pinned Rust toolchain
-        run: rustup show
+        uses: ./.github/actions/setup-rust-toolchain-retry
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -794,7 +794,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: ./.github/actions/setup-just-retry
       - name: Install native prerequisites
         shell: bash
         env:
@@ -807,7 +807,7 @@ jobs:
             just _ensure-native-libs $packages
           fi
       - name: Set up the pinned Rust toolchain
-        run: rustup show
+        uses: ./.github/actions/setup-rust-toolchain-retry
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:

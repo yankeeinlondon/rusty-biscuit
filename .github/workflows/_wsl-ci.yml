@@ -134,7 +134,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: ./.github/actions/setup-just-retry
         with:
           just-version: ${{ env.JUST_VERSION }}
       # Every test binary in the archive carries this job's workspace path baked
@@ -189,7 +189,7 @@ jobs:
             just _ensure-native-libs $packages
           fi
       - name: Set up the pinned Rust toolchain
-        run: rustup show
+        uses: ./.github/actions/setup-rust-toolchain-retry
       - name: Install protoc
         uses: arduino/setup-protoc@v3
         with:
@@ -478,46 +478,41 @@ jobs:
           # from the archive, so a Rust toolchain would add minutes and buy
           # nothing. cargo-nextest executes an archive without Cargo or rustc.
           #
-          # THE 403, AND WHY IT LANDS ONLY HERE
-          #
-          # Every other environment installs `just` with `extractions/setup-just`,
-          # which passes `${{ github.token }}` by default. Its API calls are
-          # therefore authenticated: 5,000/hour against this repository.
-          #
           # A GitHub Action cannot run inside the guest — actions execute on the
           # runner, and the guest is a separate VM reached through a bash
-          # wrapper. So this is the one place tools are installed by shell
-          # script, and the one place the request is anonymous: 60/hour shared
-          # across every job on the runner's IP. `biscuit-terminal` was
-          # lost that way in run 30755610413, and `unchained-ai` in 31041986681.
+          # wrapper. Download the pinned just archive directly: piping the
+          # installer script left its second, internal archive transfer outside
+          # our retry boundary, and run 31956960890 received a truncated gzip
+          # after that transfer reset.
           #
-          # `--retry-all-errors` was the previous attempt and could never have
-          # worked. It does retry a 403 — verified, six attempts over 25s — but
-          # the failing request is not this curl. `just.systems/install.sh`
-          # downloads fine; the SCRIPT then calls
-          # `api.github.com/repos/casey/just/releases/latest` using its own curl,
-          # which carries no retry flags. Run 31041986681 failed in 0.9s, which
-          # is the proof: a real retry cycle takes 25.
-          #
-          # Two fixes, both supported by the installer itself. `--tag` skips that
-          # API call entirely (it only asks when it has no version), and
-          # GITHUB_TOKEN authenticates anything that still reaches the API.
-          # Exported by interpolation rather than left to WSLENV, for the reason
-          # given on the L1 step below.
-          export GITHUB_TOKEN='${{ secrets.GITHUB_TOKEN }}'
-          #
-          # `get.nexte.st` is a plain 302 to a release asset, not an API call, so
-          # it is not subject to that limit — but a single 403 anywhere here is
-          # fatal twice over: `-f` makes curl exit non-zero and `pipefail`
-          # propagates it from upstream of a pipe. The retry stays.
-          curl_get() {
-            curl --proto '=https' --tlsv1.2 -sSfL \
-              --retry 5 --retry-delay 5 --retry-all-errors \
-              --connect-timeout 15 "$@"
+          # Each attempt writes a fresh file before extraction. Retrying a
+          # streaming `curl | tar` can concatenate a partial response with the
+          # next response and still produce a corrupt archive.
+          download() {
+            url="$1"
+            destination="$2"
+            for attempt in 1 2 3 4 5 6; do
+              rm -f "${destination}.part"
+              if curl --proto '=https' --tlsv1.2 -sSfL \
+                --connect-timeout 15 \
+                --output "${destination}.part" "$url"; then
+                mv "${destination}.part" "$destination"
+                return 0
+              fi
+              sleep 5
+            done
+            echo "download failed after 6 attempts: $url" >&2
+            return 1
           }
-          curl_get https://just.systems/install.sh |
-            bash -s -- --tag '${{ env.JUST_VERSION }}' --to /usr/local/bin
-          curl_get https://get.nexte.st/latest/linux | tar zxf - -C /usr/local/bin
+          tool_downloads="$(mktemp -d)"
+          trap 'rm -rf "$tool_downloads"' EXIT
+          download \
+            'https://github.com/casey/just/releases/download/${{ env.JUST_VERSION }}/just-${{ env.JUST_VERSION }}-x86_64-unknown-linux-musl.tar.gz' \
+            "$tool_downloads/just.tar.gz"
+          download https://get.nexte.st/latest/linux \
+            "$tool_downloads/cargo-nextest.tar.gz"
+          tar zxf "$tool_downloads/just.tar.gz" -C /usr/local/bin just
+          tar zxf "$tool_downloads/cargo-nextest.tar.gz" -C /usr/local/bin
           just --version
           cargo-nextest nextest --version
       - name: Install native prerequisites in the guest

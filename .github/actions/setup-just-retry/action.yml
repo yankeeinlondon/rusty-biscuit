@@ -1,0 +1,30 @@
+name: setup-just-retry
+description: >-
+  Installs the pinned just release with one fresh action-level attempt after
+  setup-just exhausts its transfer retries. A fresh invocation is required
+  because setup-just cannot resume after its release download ends in
+  ECONNRESET (run 31956960890).
+inputs:
+  just-version:
+    description: Pinned just release.
+    required: false
+    default: "1.58.0"
+runs:
+  using: composite
+  steps:
+    - id: first
+      continue-on-error: true
+      uses: extractions/setup-just@v2
+      with:
+        just-version: ${{ inputs.just-version }}
+        github-token: ${{ github.token }}
+    - name: Pause before fresh download
+      if: steps.first.outcome == 'failure'
+      shell: bash
+      run: sleep 20
+    - name: Install just (fresh attempt)
+      if: steps.first.outcome == 'failure'
+      uses: extractions/setup-just@v2
+      with:
+        just-version: ${{ inputs.just-version }}
+        github-token: ${{ github.token }}

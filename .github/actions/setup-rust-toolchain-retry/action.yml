@@ -1,0 +1,23 @@
+name: setup-rust-toolchain-retry
+description: >-
+  Activates the rust-toolchain.toml toolchain with bounded fresh attempts.
+  rustup cleans its failed temporary transfer, so each rustup show restarts a
+  release sync that ended in a connection reset (run 31956960890).
+runs:
+  using: composite
+  steps:
+    - name: Set up the pinned Rust toolchain
+      shell: bash
+      run: |
+        set -euo pipefail
+        for attempt in 1 2 3; do
+          if rustup show; then
+            exit 0
+          fi
+          if [ "$attempt" -eq 3 ]; then
+            break
+          fi
+          sleep "$((attempt * 20))"
+        done
+        echo "rustup could not activate the pinned toolchain after 3 attempts" >&2
+        exit 1
