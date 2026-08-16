@@ -67,10 +67,6 @@ pub(crate) mod timeouts {
     /// Service-manager listing and enrichment commands.
     pub(crate) const SERVICE_COMMAND: Duration = Duration::from_secs(3);
 
-    /// Windows `powershell` locale fallback.
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-    pub(crate) const WINDOWS_LOCALE: Duration = Duration::from_secs(3);
-
     /// Windows PowerShell audio-device probe.
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub(crate) const WINDOWS_AUDIO: Duration = Duration::from_secs(5);

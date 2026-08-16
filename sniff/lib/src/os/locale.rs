@@ -117,16 +117,19 @@ pub fn detect_locale() -> LocaleInfo {
 
 #[cfg(target_os = "windows")]
 fn detect_windows_locale() -> Option<String> {
-    let name = crate::process::run_for_stdout(
-        "powershell",
-        &["-NoProfile", "-Command", "(Get-Culture).Name"],
-        crate::process::timeouts::WINDOWS_LOCALE,
-    )?;
-    let name = name.trim();
-    if name.is_empty() {
+    use windows::Win32::Globalization::GetUserDefaultLocaleName;
+    use windows::Win32::System::SystemServices::LOCALE_NAME_MAX_LENGTH;
+
+    let mut buffer = [0_u16; LOCALE_NAME_MAX_LENGTH as usize];
+    // The Win32 length includes the terminating NUL.
+    let written = usize::try_from(unsafe { GetUserDefaultLocaleName(&mut buffer) }).ok()?;
+    let value_length = written.checked_sub(1)?;
+    if value_length == 0 || written > buffer.len() {
         return None;
     }
-    Some(name.replace('-', "_"))
+    String::from_utf16(&buffer[..value_length])
+        .ok()
+        .map(|name| name.replace('-', "_"))
 }
 
 #[cfg(not(target_os = "windows"))]
