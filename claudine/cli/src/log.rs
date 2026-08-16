@@ -56,19 +56,6 @@ fn with_locale_unicode(mut term: Terminal) -> Terminal {
 }
 
 fn compute_terminal() -> Terminal {
-    // Hosted CI has produced wrap output that renders plain while every
-    // observable input says forced-optimistic; this surfaces the actual
-    // branch inputs at the moment the process-wide terminal is chosen.
-    if std::env::var_os("CLAUDINE_DEBUG_TERMINAL").is_some() {
-        eprintln!(
-            "terminal-debug: plain={} no_color={:?} force_color={:?} colorterm={:?} tty={}",
-            is_plain(),
-            std::env::var_os("NO_COLOR"),
-            std::env::var_os("FORCE_COLOR"),
-            std::env::var_os("COLORTERM"),
-            std::io::IsTerminal::is_terminal(&std::io::stdout()),
-        );
-    }
     if colors_disabled() {
         plain_terminal(forced_width(80))
     } else if force_color_enabled() {

@@ -250,16 +250,6 @@ impl StatusBlock {
         strip_ansi_codes(&Prose::new(prose_src).render(&term))
     }
 
-    /// Flatten the body into a single plain-text blob with `\n\n` between
-    /// items.
-    fn body_plain_text(&self) -> String {
-        self.body
-            .iter()
-            .map(|p| Self::prose_plain_text(p.content()))
-            .collect::<Vec<_>>()
-            .join("\n\n")
-    }
-
     /// Builds the canonical projection of this status block.
     ///
     /// This is the **single private projection helper**. The
@@ -268,9 +258,9 @@ impl StatusBlock {
     /// projection emits a `Root` with one optional header `Paragraph` plus a
     /// body surface that is one of:
     ///
-    /// - a `BlockQuote` carrying `leading blank, body, [blank, hint]` when
-    ///   body content is present — the trailing `blank, hint` pair is only
-    ///   emitted for a non-blank hint;
+    /// - a `BlockQuote` carrying a leading blank, each body item's structured
+    ///   Prose nodes separated by a blank, and an optional trailing
+    ///   `blank, hint` pair;
     /// - a standalone `Paragraph` hint when the body is empty and a
     ///   non-blank hint is configured;
     /// - nothing beyond the optional header when both body and hint are
@@ -300,13 +290,23 @@ impl StatusBlock {
         }
 
         if !self.body.is_empty() {
-            let body_text = self.body_plain_text();
             let mut block_children: Vec<RenderNode> = Vec::new();
 
             block_children.push(RenderNode::paragraph(vec![RenderNode::text(
                 String::new(),
             )]));
-            block_children.push(RenderNode::paragraph(vec![RenderNode::text(body_text)]));
+            for (index, prose) in self.body.iter().enumerate() {
+                if index > 0 {
+                    block_children.push(RenderNode::paragraph(vec![RenderNode::text(
+                        String::new(),
+                    )]));
+                }
+                block_children.extend(
+                    crate::render_tree::projection::fold_prose_nodes_into_blocks(
+                        prose.to_render_nodes(),
+                    ),
+                );
+            }
 
             if let Some(hint_text) = self.non_blank_hint() {
                 block_children.push(RenderNode::paragraph(vec![RenderNode::text(
@@ -892,7 +892,7 @@ mod tests {
         );
     }
 
-    // ── Prose flattening ──────────────────────────────────────────────
+    // ── Prose projection ──────────────────────────────────────────────
 
     #[test]
     fn header_prose_tags_are_flattened() {
@@ -906,22 +906,37 @@ mod tests {
     }
 
     #[test]
-    fn body_prose_tags_are_flattened() {
+    fn body_prose_tags_project_semantically() {
         let block = StatusBlock::new(StatusState::Info).body(Prose::new("<b>bold</b> text"));
         let md = block.render_markdown();
         assert!(!md.contains("<b>"));
-        assert!(md.contains("bold"));
+        assert!(md.contains("**bold**"));
         assert!(md.contains("text"));
     }
 
     #[test]
-    fn multiple_body_items_join_with_blank_line() {
+    fn multiple_body_items_project_with_blank_line() {
         let block = StatusBlock::new(StatusState::Info)
             .body(vec![Prose::new("first"), Prose::new("second")]);
-        let body_text = block.body_plain_text();
-        assert!(body_text.contains("first"));
-        assert!(body_text.contains("second"));
-        assert!(body_text.contains("\n\n"));
+        let md = block.render_markdown();
+        assert!(md.contains("first"));
+        assert!(md.contains("second"));
+        assert!(md.contains(">\n>"), "expected a blank quoted line: {md:?}");
+    }
+
+    #[test]
+    fn body_prose_color_survives_the_default_terminal_tree_path() {
+        let term = Terminal::new_optimistic(80);
+        let block = StatusBlock::new(StatusState::Error)
+            .body(Prose::new("<red>Agent Error</red> detail"));
+        let rendered = block.render(&term);
+        let label = rendered
+            .find("Agent Error")
+            .expect("rendered status-block label");
+        assert!(
+            rendered[..label].ends_with("\x1b[31m"),
+            "the label's own span must open the basic-red foreground: {rendered:?}"
+        );
     }
 
     // ── Terminal rendering: default border (tree path) ────────────────

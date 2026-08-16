@@ -81,17 +81,18 @@ use std::time::{Duration, Instant};
 use tempfile::tempdir;
 use test_toolkit::{Backend, Level, require_level};
 
-/// Whether `raw` selects the basic or bright red foreground (`31`/`91`),
-/// matching both the bare `\x1b[31m` form and the combined `\x1b[1;31m`
-/// (bold+red) the bold label can emit. Per the "<red> emits 3-bit `\x1b[31m`"
-/// note the prose `<red>` label always lands on the 3-bit code, so this
-/// deliberately carries **no** broad `38;2` truecolor branch (which would
-/// false-match an unrelated truecolor span).
-fn has_3bit_red(raw: &str) -> bool {
-    raw.contains("\x1b[31m")
-        || raw.contains("\x1b[91m")
-        || raw.contains(";31m")
-        || raw.contains(";91m")
+/// Whether an `Agent Error` label's own line prefix selects the basic or bright
+/// red foreground (`31`/`91`). Scoping the match to the label rejects unrelated
+/// red spans from a shell prompt or another component in the captured pane.
+fn agent_error_label_has_3bit_red(raw: &str) -> bool {
+    raw.match_indices("Agent Error").any(|(label, _)| {
+        let line_start = raw[..label].rfind('\n').map_or(0, |newline| newline + 1);
+        let prefix = &raw[line_start..label];
+        prefix.contains("\x1b[31m")
+            || prefix.contains("\x1b[91m")
+            || prefix.contains(";31m")
+            || prefix.contains(";91m")
+    })
 }
 
 /// Drive a wrapped OpenCode run whose fake provider emits the stalled-generation
@@ -180,11 +181,7 @@ done
     clear_no_color(&mut harness);
 
     let claudine = common::claudine_bin();
-    let env_pairs: [(&str, String); 8] = [
-        // Surfaces compute_terminal's branch inputs in the captured pane —
-        // hosted runners render this wrap plain while every probed input
-        // says forced-optimistic.
-        ("CLAUDINE_DEBUG_TERMINAL", "1".to_string()),
+    let env_pairs: [(&str, String); 7] = [
         ("FORCE_COLOR", "1".to_string()),
         ("HOME", workspace.path().display().to_string()),
         (
@@ -242,36 +239,6 @@ done
         }
         std::thread::sleep(Duration::from_millis(100));
     }
-
-    // Hosted runners have produced fully colorless captures here that no
-    // local simulation (fresh tmux server, ambient NO_COLOR, stripped
-    // COLORTERM, bogus TERM) reproduces. When the styling is absent, probe
-    // the live pane's effective environment before the session dies so the
-    // failure itself carries the discriminating evidence.
-    let color_probe = if has_3bit_red(&last_raw) {
-        String::new()
-    } else {
-        // Three-layer discriminator for the colorless hosted captures. The
-        // prior probe proved the pane env is correct (FORCE_COLOR=1,
-        // COLORTERM=truecolor, NO_COLOR unset, TERM=tmux-256color), yet the
-        // capture carries zero escapes. Layer 1: a shell printf of raw red —
-        // if capture raw lacks even this, tmux cell storage or `capture -e`
-        // strips in this session. Layer 2: claudine --help piped through
-        // `od`, counting ESC bytes — whether claudine itself emits escapes on
-        // this host, capture path excluded. Layer 3: env, for the record.
-        let probe_cmd = format!(
-            "printf '\\033[31mSGRPROBE\\033[0m\\n'; \
-             FORCE_COLOR=1 {claudine} --help 2>&1 | od -An -c | grep -c 033; \
-             echo __PROBE__ NO_COLOR=$NO_COLOR FORCE_COLOR=$FORCE_COLOR \
-             COLORTERM=$COLORTERM TERM=$TERM; tmux -V\n",
-        );
-        let _ = harness.send_text(probe_cmd.as_bytes());
-        std::thread::sleep(Duration::from_millis(1500));
-        harness
-            .capture()
-            .map(|f| format!("plain:\n{}\nraw:\n{}", f.plain, f.raw))
-            .unwrap_or_default()
-    };
 
     kill_session_by_name(&session);
 
@@ -348,8 +315,8 @@ done
     // AgentNative styling: the `<red>` label lands on the 3-bit red foreground
     // (`\x1b[31m`), asserted semantically from the captured escape bytes.
     assert!(
-        has_3bit_red(&last_raw),
+        agent_error_label_has_3bit_red(&last_raw),
         "the AgentNative stalled-generation block must render with the 3-bit \
-         red foreground SGR.\nraw:\n{last_raw}\npane env probe:\n{color_probe}",
+         red foreground SGR on its own label.\nraw:\n{last_raw}",
     );
 }

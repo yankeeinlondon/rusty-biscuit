@@ -161,8 +161,7 @@ fn body_only_token_parity() {
 
 #[test]
 fn body_with_styled_prose_token_parity() {
-    // Prose styling is documented as flattened in the tree projection; this
-    // test asserts that the visible *words* still match across both paths.
+    // Styling differs between renderers, so parity here concerns visible words.
     let block = StatusBlock::new(StatusState::Info).body(Prose::new("<b>bold</b> body text"));
     assert_token_parity(&block, 80);
 }
@@ -695,18 +694,26 @@ fn multiple_body_items_keep_blank_line_separation_in_block_quote() {
     let block = StatusBlock::new(StatusState::Info)
         .body(vec![Prose::new("first item"), Prose::new("second item")]);
     let bq = body_block_quote_children(&block);
-    assert_eq!(bq.len(), 2, "expected leading blank + single body paragraph");
-    let body_text = match &bq[1].kind {
-        NodeKind::Paragraph { children } => match &children.first().unwrap().kind {
-            NodeKind::Text { value } => value.clone(),
-            other => panic!("expected Text node, got {other:?}"),
-        },
-        other => panic!("expected Paragraph, got {other:?}"),
-    };
-    assert!(
-        body_text.contains("first item\n\nsecond item"),
-        "body items must be separated by blank line: {body_text:?}"
+    assert_eq!(
+        bq.len(),
+        4,
+        "expected leading blank, first item, blank separator, and second item"
     );
+    assert!(matches!(
+        &bq[1].kind,
+        NodeKind::Paragraph { children }
+            if matches!(&children[0].kind, NodeKind::Text { value } if value == "first item")
+    ));
+    assert!(matches!(
+        &bq[2].kind,
+        NodeKind::Paragraph { children }
+            if children.iter().all(|child| matches!(&child.kind, NodeKind::Text { value } if value.is_empty()))
+    ));
+    assert!(matches!(
+        &bq[3].kind,
+        NodeKind::Paragraph { children }
+            if matches!(&children[0].kind, NodeKind::Text { value } if value == "second item")
+    ));
 }
 
 /// The render-tree contract requires the body-plus-hint body block quote to
