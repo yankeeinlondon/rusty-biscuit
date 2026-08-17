@@ -391,9 +391,20 @@ jobs:
             "$ram_claudine" --version
             export BISCUIT_CLAUDINE_TEST_BIN="$ram_claudine"
           fi
+          l1_runtime_args=()
+          if [[ "${{ inputs.package }}" == "claudine-cli" \
+            && "${{ matrix.environment }}" == "ubuntu-latest" ]]; then
+            # The 4-vCPU hosted run 31990417448 took 711s at the default
+            # concurrency: one real-CLI test hit 150s and the next hit its 15s
+            # inner deadline. With two threads on four pinned build-host CPUs,
+            # the full available suite passed 2389/2389 in 94s; the isolated
+            # victims took 3.5s and 0.2s. WSL2 uses the same measured cap.
+            l1_runtime_args=(--test-threads 2)
+          fi
           # --no-fail-fast: run ALL of the package's tests so one slow or
           # failing test cannot suppress the rest of the suite's evidence.
-          just _test "${{ inputs.package }}" --no-fail-fast ${{ inputs.test-args }}
+          just _test "${{ inputs.package }}" --no-fail-fast ${{ inputs.test-args }} \
+            ${l1_runtime_args[@]+"${l1_runtime_args[@]}"}
       # Companion suites are non-Cargo suites OWNED by this package. The step
       # runs even when the Rust suite failed — one red crate cannot hide a red
       # frontend, exactly as the old area recipe's combined status worked —
