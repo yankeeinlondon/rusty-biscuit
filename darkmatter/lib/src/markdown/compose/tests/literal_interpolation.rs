@@ -1,3 +1,4 @@
+#[cfg(unix)]
 use std::collections::HashSet;
 
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
