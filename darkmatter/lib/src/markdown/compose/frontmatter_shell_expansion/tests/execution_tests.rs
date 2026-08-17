@@ -319,25 +319,24 @@
             return;
         };
 
-        // Each command records a wall-clock start timestamp, then sleeps briefly.
-        // Concurrent execution => both commands start within startup jitter of
-        // each other. Serial execution => the second start is delayed by the
-        // first command's full sleep. Comparing start offsets (rather than total
-        // wall-clock time) keeps the test fast and immune to interpreter startup
-        // variance.
+        // Each command waits for the other's marker. Serial execution cannot
+        // create the peer marker before the shell deadline; concurrent execution
+        // completes as soon as both children start.
         let temp_dir = TempDir::new().unwrap();
-        let stamp_cmd = || {
+        let rendezvous_cmd = |own: &str, peer: &str| {
             format!(
-                "$({} -c \"import time; print(time.time(), end=''); time.sleep(0.3)\")",
-                python.display()
+                "$({} -c \"import pathlib,time; own=pathlib.Path('{own}'); \
+                 peer=pathlib.Path('{peer}'); own.touch(); \
+                 exec('while not peer.exists(): time.sleep(0.01)'); \
+                 print('ready', end='')\")",
+                python.display(),
             )
         };
         let mut fm = fm_from_json(json!({
-            "one": stamp_cmd(),
-            "two": stamp_cmd()
+            "one": rendezvous_cmd("one.ready", "two.ready"),
+            "two": rendezvous_cmd("two.ready", "one.ready")
         }));
         let options = ComposeOptions::new().with_shell(ShellExpansionOptions {
-            timeout: Duration::from_secs(2),
             policy_root: Some(temp_dir.path().to_path_buf()),
             approval_handler: Some(Arc::new(MockApproval)),
             ..Default::default()
@@ -348,20 +347,8 @@
             execute_frontmatter_shell_expansion(&mut fm, &options, &mut runtime, None).unwrap();
 
         assert_eq!(report.replacements, 2);
-        let start_time = |key: &str| -> f64 {
-            fm.as_map()
-                .get(key)
-                .and_then(|value| value.as_str())
-                .unwrap_or_default()
-                .parse()
-                .unwrap_or_else(|_| panic!("expected numeric start timestamp for `{key}`"))
-        };
-        let start_skew = (start_time("one") - start_time("two")).abs();
-        assert!(
-            start_skew < 0.2,
-            "expected commands to start concurrently (skew < 0.2s), got {start_skew}s \
-             — commands appear to have run serially"
-        );
+        assert_eq!(fm.as_map().get("one"), Some(&json!("ready")));
+        assert_eq!(fm.as_map().get("two"), Some(&json!("ready")));
     }
 
     #[test]
