@@ -45,6 +45,15 @@ claudine-windows-l1 = { max-threads = 4 }
 # overlap itself; the rest of the suite still fills the other threads.
 heavy-cli-compose = { max-threads = 1 }
 
+# These real-tmux Ctrl+C tests share one tmux server and intentionally leave
+# their foreground process groups blocked while they inject signals. The
+# `serial_test` lock is process-local, but nextest runs the two integration
+# binaries as separate processes, so the three tests otherwise overlap. On a
+# hosted 4-vCPU runner that overlap inflated all three from 3–5s to ~30s and
+# one fixture missed its 30s readiness barrier. A nextest group is the
+# cross-binary serialization boundary the tests require.
+claudine-tmux-ctrlc = { max-threads = 1 }
+
 # Sniff's real-resource tier opens live crates.io and npm connections. On
 # native Windows, eight simultaneous probes reproducibly abort one client with
 # 0xc0000409; the same eight probes complete in 2.3s when serialized.
@@ -96,6 +105,10 @@ archive.include = [
 platform = { host = "cfg(windows)" }
 filter = 'package(claudine) + package(claudine-cli)'
 test-group = 'claudine-windows-l1'
+
+[[profile.default.overrides]]
+filter = 'package(claudine-cli) & (binary(level2_wrap_ctrl_c_tmux) | binary(level2_wrap_ctrl_c_loop_wedge_tmux))'
+test-group = 'claudine-tmux-ctrlc'
 
 [[profile.default.overrides]]
 platform = { host = "cfg(windows)" }
@@ -281,6 +294,10 @@ run-wrapper = 'claudine-spawn-bin'
 [[profile.ci.overrides]]
 filter = 'test(/level2_/)'
 retries = 0
+
+[[profile.ci.overrides]]
+filter = 'package(claudine-cli) & (binary(level2_wrap_ctrl_c_tmux) | binary(level2_wrap_ctrl_c_loop_wedge_tmux))'
+test-group = 'claudine-tmux-ctrlc'
 
 # The browser tier runs serially (see `_test_browser`) but does not retry.
 [[profile.ci.overrides]]
