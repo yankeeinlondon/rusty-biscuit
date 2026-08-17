@@ -1,0 +1,28 @@
+name: setup-protoc-retry
+description: >-
+  Installs the pinned protoc release with one fresh action-level attempt when
+  setup-protoc's GitHub release request fails transiently (run 31989620592).
+inputs:
+  version:
+    description: Pinned protoc release range.
+    required: false
+    default: "23.x"
+runs:
+  using: composite
+  steps:
+    - id: first
+      continue-on-error: true
+      uses: arduino/setup-protoc@v3
+      with:
+        version: ${{ inputs.version }}
+        repo-token: ${{ github.token }}
+    - name: Pause before fresh release request
+      if: steps.first.outcome == 'failure'
+      shell: bash
+      run: sleep 20
+    - name: Install protoc (fresh attempt)
+      if: steps.first.outcome == 'failure'
+      uses: arduino/setup-protoc@v3
+      with:
+        version: ${{ inputs.version }}
+        repo-token: ${{ github.token }}

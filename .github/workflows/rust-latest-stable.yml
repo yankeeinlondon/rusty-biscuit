@@ -37,9 +37,7 @@ jobs:
         with:
           components: clippy, rustfmt
       - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+        uses: ./.github/actions/setup-protoc-retry
       - name: Install just
         uses: extractions/setup-just@v2
       - name: Install cargo-nextest

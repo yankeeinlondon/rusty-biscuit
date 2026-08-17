@@ -70,9 +70,7 @@ jobs:
       # Backstop for the vendored protoc in rendezvous-core's build.rs:
       # a system protoc if the vendored binary is ever unavailable.
       - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+        uses: ./.github/actions/setup-protoc-retry
 
       - name: Assert clean tracked worktree before release calculation
         shell: bash
@@ -129,9 +127,7 @@ jobs:
       # Backstop for the vendored protoc in rendezvous-core's build.rs:
       # a system protoc if the vendored binary is ever unavailable.
       - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
+        uses: ./.github/actions/setup-protoc-retry
 
       - name: Assert clean tracked worktree before publication
         shell: bash
