@@ -44,7 +44,7 @@ mod common;
 use common::{augmented_path, write_executable};
 
 use biscuit_test_harness::TerminalHarness;
-use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name};
+use biscuit_test_harness::tmux::TmuxHarness;
 use serial_test::serial;
 use std::fs;
 use std::path::Path;
@@ -148,57 +148,40 @@ fn double_ctrl_c_force_exits(deadline: Duration) -> (bool, String) {
     )
     .unwrap();
 
-    let session = format!("biscuit_l2_loopwedge_{}_{}", std::process::id(), seq);
-    // POSIX shell, not `$SHELL`: a custom login prompt would never match
-    // `wait_for_prompt` and would burn its full timeout.
+    // Start the command as the pane's initial program. Typing it into a login
+    // shell leaves readiness dependent on prompt detection, whose timeout is
+    // intentionally non-fatal in the shared harness. Under runner contention
+    // that can consume the input before the shell is ready and never exercise
+    // the behavior this test owns.
     let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            "120",
-            "-y",
-            "50",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
-
-    let mut harness = TmuxHarness::attach(&session);
-    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
-
     let claudine = common::claudine_bin();
-    // The sentinel carries claudine's exit code (`$?` after the `;`), so a
-    // match proves not just "control returned" but "returned with exit 130" —
-    // the force-exit code. `;` (not `&&`) runs the echo regardless of code.
+    // The sentinel carries claudine's captured exit status, so a match proves
+    // not just "control returned" but "returned with exit 130".
     let sentinel = format!("L2WEDGE_{seq}");
-    let env_pairs: Vec<(&str, String)> = vec![
-        ("NO_COLOR", "1".to_string()),
-        ("HOME", workspace.path().display().to_string()),
-        (
-            "PATH",
-            augmented_path(&path_dir).to_string_lossy().into_owned(),
-        ),
-        ("OPENCODE_MODEL", "test-model".to_string()),
+    let env_args = [
+        "NO_COLOR=1".to_string(),
+        format!("HOME={}", workspace.path().display()),
+        format!("PATH={}", augmented_path(&path_dir).to_string_lossy()),
+        "OPENCODE_MODEL=test-model".to_string(),
         // Auto-approve the `::shell` wedge without an interactive handler.
-        ("CLAUDINE_YOLO", "true".to_string()),
+        "CLAUDINE_YOLO=true".to_string(),
     ];
-    let env_prefix: String = env_pairs
-        .iter()
-        .map(|(k, v)| format!("{k}='{}' ", v.replace('\'', "'\\''")))
-        .collect();
-    let cmd = format!(
-        "{env_prefix}{claudine} compose --opencode {md} ; echo {sentinel}_$?",
-        md = md_file.display(),
-    );
+    let command = r#""$1" compose --opencode "$2"; status=$?; printf '%s_%s\n' "$3" "$status"; while :; do sleep 1; done"#;
+    let mut args = env_args.to_vec();
+    args.extend([
+        shell,
+        "-c".to_string(),
+        command.to_string(),
+        "claudine-l2-wedge".to_string(),
+        claudine.to_string(),
+        md_file.display().to_string(),
+        sentinel.clone(),
+    ]);
+    let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    let mut harness = TmuxHarness::new();
     harness
-        .send_command_with_env(&cmd, &[])
-        .expect("send wrapper command");
+        .spawn_program("/usr/bin/env", &arg_refs)
+        .expect("spawn wrapper command");
 
     // Poll for the `wedged` marker: it is created by the wedge script the
     // instant iteration 2's prep enters the hang, which is strictly *after*
@@ -207,8 +190,11 @@ fn double_ctrl_c_force_exits(deadline: Duration) -> (bool, String) {
     let wedge_deadline = Instant::now() + Duration::from_secs(30);
     while !wedged.exists() {
         if Instant::now() >= wedge_deadline {
-            kill_session_by_name(&session);
-            panic!("compose never wedged in iteration-2 prep within 30s");
+            let pane = harness
+                .capture()
+                .map(|frame| frame.plain)
+                .unwrap_or_else(|error| format!("<capture failed: {error}>"));
+            panic!("compose never wedged in iteration-2 prep within 30s\npane:\n{pane}");
         }
         std::thread::sleep(Duration::from_millis(25));
     }
@@ -240,7 +226,6 @@ fn double_ctrl_c_force_exits(deadline: Duration) -> (bool, String) {
         std::thread::sleep(Duration::from_millis(100));
     }
 
-    kill_session_by_name(&session);
     (returned, last_plain)
 }
 
