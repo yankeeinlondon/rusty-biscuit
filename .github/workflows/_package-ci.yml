@@ -395,11 +395,11 @@ jobs:
           if [[ "${{ inputs.package }}" == "claudine-cli" \
             && "${{ matrix.environment }}" == "ubuntu-latest" ]]; then
             # The 4-vCPU hosted run 31990417448 took 711s at the default
-            # concurrency: one real-CLI test hit 150s and the next hit its 15s
-            # inner deadline. With two threads on four pinned build-host CPUs,
-            # the full available suite passed 2389/2389 in 94s; the isolated
-            # victims took 3.5s and 0.2s. WSL2 uses the same measured cap.
-            l1_runtime_args=(--test-threads 2)
+            # concurrency. Two threads passed but still stretched real-CLI
+            # tests to 95s and 64s in run 31993991343. With one thread on four
+            # pinned build-host CPUs, the suite passed 2389/2389 in 182s and
+            # those tests took 4.2s and 3.0s; the inner-deadline test took 0.2s.
+            l1_runtime_args=(--test-threads 1)
           fi
           # --no-fail-fast: run ALL of the package's tests so one slow or
           # failing test cannot suppress the rest of the suite's evidence.
