@@ -13,11 +13,16 @@
 //! They are gated behind `RUN_PTY_TESTS=1` so default `cargo test` stays fast.
 
 use std::env;
+#[cfg(unix)]
 use std::io::Write;
+#[cfg(unix)]
 use std::path::PathBuf;
+#[cfg(unix)]
 use std::process::Command;
+#[cfg(unix)]
 use std::time::Duration;
 
+#[cfg(unix)]
 #[path = "common/mod.rs"]
 mod common;
 
@@ -33,10 +38,12 @@ fn skip_if_not_enabled() -> bool {
     false
 }
 
+#[cfg(unix)]
 fn question_binary() -> PathBuf {
     assert_cmd::cargo::cargo_bin("question").to_path_buf()
 }
 
+#[cfg(unix)]
 fn read_all_available(session: &mut expectrl::session::OsSession) -> String {
     let mut buf = Vec::new();
     let mut scratch = [0u8; 4096];

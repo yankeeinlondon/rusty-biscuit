@@ -12,10 +12,15 @@
 //!     RUN_SHELL_TESTS=1 cargo test -p biscuit-tui-cli --test completions_shell
 
 use std::env;
+#[cfg(unix)]
 use std::io::Write;
-use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::path::Path;
+use std::path::PathBuf;
+#[cfg(unix)]
 use std::process::Command;
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(unix)]
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -51,10 +56,12 @@ fn skip_if_not_enabled() -> bool {
     false
 }
 
+#[cfg(unix)]
 fn question_binary() -> PathBuf {
     assert_cmd::cargo::cargo_bin("question").to_path_buf()
 }
 
+#[cfg(unix)]
 fn generate_completion_script(shell: &str) -> String {
     let binary = question_binary();
     let output = std::process::Command::new(&binary)
