@@ -12,43 +12,62 @@ fn cli() -> Command {
     Command::new(bin_exe!("so-you-say"))
 }
 
+/// Invoke the CLI with no host programs discoverable.
+///
+/// The binary path is absolute, so replacing `PATH` affects only provider
+/// discovery and any subprocesses the CLI might otherwise launch.
+fn cli_without_host_programs() -> Command {
+    let mut command = cli();
+    command.env(
+        "PATH",
+        std::env::temp_dir().join(format!(
+            "biscuit-speaks-cli-empty-path-{}",
+            std::process::id()
+        )),
+    );
+    command
+}
+
+/// Invoke the CLI with a provider that the isolated environment cannot supply.
+fn cli_without_tts() -> Command {
+    let mut command = cli_without_host_programs();
+    command.args(["--provider", "say"]);
+    command
+}
+
 /// Assert the CLI accepted an invocation and carried it through to the TTS stack.
 ///
-/// Argument handling can only be exercised by a command that then tries to
-/// speak, and exit 0 requires a TTS engine — macOS has `say`, a stock Linux or
-/// Windows CI runner has nothing. Acceptance is observable without one, because
-/// everything the CLI rejects it rejects *before* consulting a provider: clap
-/// exits 2 on an unknown flag, an invalid value, or a conflicting pair, and the
-/// pre-flight checks name the input or provider slug they turned down. A run
-/// that reaches the provider stack has therefore parsed its arguments and built
-/// its config, which is all argument handling promises.
+/// These tests select `say` while hiding all host programs, so a valid invocation
+/// deterministically reaches the provider stack and returns without producing
+/// audio. Everything the CLI rejects does so earlier: clap exits 2 on an unknown
+/// flag, invalid value, or conflict, and pre-flight failures name the input or
+/// provider slug they rejected.
 ///
 /// That speech actually comes out is a separate requirement needing a real
 /// engine; `real_cli_speaks_with_default_provider` covers it.
 fn assert_reached_tts_stack(output: &Output, what: &str) {
-    if output.status.success() {
-        return;
-    }
-
     let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success(),
+        "{what}: isolated provider unexpectedly succeeded"
+    );
     assert_ne!(
         output.status.code(),
         Some(2),
         "{what}: rejected by argument parsing\n{stderr}"
     );
     assert!(
-        !stderr.contains("No input provided"),
-        "{what}: the text never reached the TTS stack\n{stderr}"
-    );
-    assert!(
-        !stderr.contains("Unknown provider"),
-        "{what}: provider selection rejected the invocation\n{stderr}"
+        stderr.contains("NoProvidersAvailable"),
+        "{what}: invocation did not reach the expected provider-stack failure\n{stderr}"
     );
 }
 
 #[test]
 fn test_cli_with_arguments() {
-    let output = cli().arg("test").output().expect("Failed to execute");
+    let output = cli_without_tts()
+        .arg("test")
+        .output()
+        .expect("Failed to execute");
 
     assert_reached_tts_stack(&output, "CLI should accept a positional argument");
 }
@@ -88,7 +107,7 @@ fn test_cli_version_flag() {
 
 #[test]
 fn test_cli_stdin_input() {
-    let mut child = cli()
+    let mut child = cli_without_tts()
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -132,7 +151,7 @@ fn test_cli_no_args_closes_gracefully() {
 
 #[test]
 fn test_cli_multi_word_args() {
-    let output = cli()
+    let output = cli_without_tts()
         .args(["Hello", "world", "from", "tests"])
         .output()
         .expect("Failed to execute");
@@ -168,7 +187,7 @@ fn test_cli_empty_stdin() {
 
 #[test]
 fn test_cli_unicode_args() {
-    let output = cli()
+    let output = cli_without_tts()
         .args(["Hello", "世界", "🚀"])
         .output()
         .expect("Failed to execute");
@@ -178,7 +197,7 @@ fn test_cli_unicode_args() {
 
 #[test]
 fn test_cli_special_chars_args() {
-    let output = cli()
+    let output = cli_without_tts()
         .args(["Hello,", "world!", "How's", "it", "going?"])
         .output()
         .expect("Failed to execute");
@@ -188,7 +207,7 @@ fn test_cli_special_chars_args() {
 
 #[test]
 fn test_cli_gender_flag_male() {
-    let output = cli()
+    let output = cli_without_tts()
         .args(["--gender", "male", "test"])
         .output()
         .expect("Failed to execute");
@@ -198,7 +217,7 @@ fn test_cli_gender_flag_male() {
 
 #[test]
 fn test_cli_gender_flag_female() {
-    let output = cli()
+    let output = cli_without_tts()
         .args(["--gender", "female", "test"])
         .output()
         .expect("Failed to execute");
@@ -208,7 +227,7 @@ fn test_cli_gender_flag_female() {
 
 #[test]
 fn test_cli_gender_flag_short() {
-    let output = cli()
+    let output = cli_without_tts()
         .args(["-g", "male", "test"])
         .output()
         .expect("Failed to execute");
@@ -282,20 +301,12 @@ fn test_cli_help_shows_list_providers_subcommand() {
 
 #[test]
 fn test_cli_voice_option() {
-    let output = cli()
+    let output = cli_without_tts()
         .args(["--voice", "Samantha", "test"])
         .output()
         .expect("Failed to execute");
 
-    // "Samantha" is a macOS-only voice; on platforms whose providers do not
-    // offer it, every provider fails and the CLI exits non-zero. We only verify
-    // the flag is accepted (parsed without a usage error), not that playback of
-    // an OS-specific voice succeeds.
-    let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        !stderr.contains("unexpected argument") && !stderr.contains("Usage:"),
-        "CLI should accept --voice option without a parse error"
-    );
+    assert_reached_tts_stack(&output, "CLI should accept --voice Samantha");
 }
 
 #[test]
@@ -311,14 +322,12 @@ fn test_cli_help_shows_voice_option() {
 
 #[test]
 fn test_cli_provider_option() {
-    let output = cli()
+    let output = cli_without_host_programs()
         .args(["--provider", "say", "test"])
         .output()
         .expect("Failed to execute");
 
-    // This may or may not succeed depending on whether Say is available
-    // We just verify it doesn't crash
-    let _ = output.status;
+    assert_reached_tts_stack(&output, "CLI should accept --provider say");
 }
 
 #[test]
@@ -353,7 +362,7 @@ fn test_cli_help_shows_provider_option() {
 
 #[test]
 fn test_cli_loud_flag() {
-    let output = cli()
+    let output = cli_without_tts()
         .args(["--loud", "test"])
         .output()
         .expect("Failed to execute");
@@ -363,7 +372,7 @@ fn test_cli_loud_flag() {
 
 #[test]
 fn test_cli_soft_flag() {
-    let output = cli()
+    let output = cli_without_tts()
         .args(["--soft", "test"])
         .output()
         .expect("Failed to execute");
@@ -407,7 +416,7 @@ fn test_cli_help_shows_volume_options() {
 
 #[test]
 fn test_cli_fast_flag() {
-    let output = cli()
+    let output = cli_without_tts()
         .args(["--fast", "test"])
         .output()
         .expect("Failed to execute");
@@ -415,13 +424,9 @@ fn test_cli_fast_flag() {
     assert_reached_tts_stack(&output, "CLI should accept --fast flag");
 }
 
-// The next two names end at `slow` rather than reading `..._slow_flag` /
-// `..._and_slow_conflict`: the L1 tier filter excludes `test(/slow_/)`, which is
-// a substring match, so any name containing `slow_` is silently dropped from
-// `just test` and from CI. Both spent their whole lives unrun that way.
 #[test]
 fn test_cli_speed_flag_slow() {
-    let output = cli()
+    let output = cli_without_tts()
         .args(["--slow", "test"])
         .output()
         .expect("Failed to execute");
@@ -465,7 +470,7 @@ fn test_cli_help_shows_speed_options() {
 
 #[test]
 fn test_cli_background_flag() {
-    let output = cli()
+    let output = cli_without_tts()
         .args(["--background", "background test"])
         .output()
         .expect("Failed to execute");
@@ -554,7 +559,7 @@ fn test_cli_background_with_refresh_cache_is_allowed() {
     // a vanished directory is the intended outcome, not a missed assertion.
     let cache_dir = tempfile::TempDir::new().expect("Failed to create temp dir");
 
-    let output = cli()
+    let output = cli_without_tts()
         .env("BISCUIT_SPEAKS_CACHE", cache_dir.path().join("cache.json"))
         .args(["--background", "--refresh-cache", "test"])
         .output()

@@ -6,24 +6,15 @@
 # expression to `nextest run -E '...'` directly. Treat the expressions below as
 # the authoritative source for shared lifecycle recipes:
 #
-#   level2  = test(/level2_/)
-#   level3  = test(/level3_/)
-#   browser = test(/browser_/)
-#   real    = test(/real_/)
-#   slow    = test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/)
+#   level2  = test(/(^|::)level2_/)
+#   level3  = test(/(^|::)level3_/)
+#   browser = test(/(^|::)browser_/)
+#   real    = test(/(^|::)real_/)
+#   slow    = test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/)
 #
 # `just sanity` uses `!(...slow...)` to exclude every non-default tier in one shot.
 
 [test-groups]
-# biscuit-speaks-cli integration tests spawn the `so-you-say` binary, which
-# drives real OS TTS/audio (`say`, audio playback). Running a dozen of those
-# concurrently saturates the shared audio subsystem: process teardown lags, which
-# both inflates "slow" markers and trips nextest's post-test pipe-drain LEAK check
-# on whichever fast test loses the race. Capping concurrency keeps only a few
-# audio children alive at once — same philosophy as the browser tier's `-j 1`.
-# 4 was the empirical sweet spot here: zero flakes, far fewer spurious slow marks.
-tts-audio = { max-threads = 4 }
-
 # Claudine's L1 library and CLI tests repeatedly perform repository discovery
 # and spawn nested processes. Unrestricted concurrency on high-core Windows
 # hosts starves otherwise bounded tests past the 30s termination ceiling; the
@@ -176,15 +167,6 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # other exemptions; `result = "fail"` still catches a genuinely runaway
 # browser.
 
-# The `tts-audio` group caps how many audio-spawning tests run at once (see
-# [test-groups] above): biscuit-speaks-cli's integration tests spawn the
-# `so-you-say` binary, which in turn spawns OS TTS/audio children (`say`,
-# audio playback), and a dozen of those concurrently saturate the shared
-# audio subsystem.
-[[profile.default.overrides]]
-filter = 'package(biscuit-speaks-cli)'
-test-group = 'tts-audio'
-
 # claudine-cli's L2 tier runs in parallel self-spawn mode (see
 # `claudine/justfile`'s `test-l2` and `just/devops.just`'s `BISCUIT_L2_THREADS`
 # path): these tests own an internal ~40s wait-for-marker deadline (the
@@ -289,10 +271,3 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # See the default-profile note: Chrome teardown fits the global 5s window,
 # so the historical 5s browser override was removed with the other
 # exemptions; `result = "fail"` still catches a genuinely runaway browser.
-
-# The `tts-audio` group caps how many audio-spawning tests run at once (see
-# [test-groups]); the leak grace that used to ride along is now the global
-# default.
-[[profile.ci.overrides]]
-filter = 'package(biscuit-speaks-cli)'
-test-group = 'tts-audio'
