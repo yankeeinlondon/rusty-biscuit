@@ -79,9 +79,9 @@ pub struct ExecutableIndex {
     path_dir_count: usize,
     /// Optional eager PATH index built by [`ExecutableIndex::build_eager_path`].
     ///
-    /// When present, lookups consult this map before delegating to `which`,
-    /// turning bulk PATH scans (one per program name) into a single up-front
-    /// PATH traversal followed by O(1) HashMap probes.
+    /// When present, this map replaces per-program `which` lookups, turning
+    /// bulk PATH scans into a single up-front traversal followed by O(1)
+    /// `HashMap` probes.
     eager_path: Option<HashMap<OsString, PathBuf>>,
     /// Maps binary name to app bundle path (macOS only).
     #[cfg(target_os = "macos")]
@@ -198,8 +198,8 @@ impl ExecutableIndex {
 
     /// Look up a program - checks PATH first, then macOS bundles / Windows fallbacks.
     ///
-    /// PATH lookups are performed on demand via the `which` crate rather than
-    /// using a pre-built cache.
+    /// Lazy indexes perform PATH lookups on demand via the `which` crate. Eager
+    /// indexes answer exclusively from their captured PATH map.
     ///
     /// ## Returns
     ///
@@ -207,11 +207,13 @@ impl ExecutableIndex {
     /// - `None` - Program not found anywhere
     pub fn find_with_source(&self, program: &str) -> Option<(PathBuf, ExecutableSource)> {
         // Layer 1: PATH (authoritative).
-        // Use the eager PATH index when present; fall back to `which`.
-        if let Some(path) = self.eager_lookup(program) {
-            return Some((path.clone(), ExecutableSource::Path));
-        }
-        if let Ok(path) = which(program) {
+        // An eager map is a complete captured view, so a miss must not trigger
+        // another live PATH traversal.
+        if self.eager_path.is_some() {
+            if let Some(path) = self.eager_lookup(program) {
+                return Some((path.clone(), ExecutableSource::Path));
+            }
+        } else if let Ok(path) = which(program) {
             return Some((path, ExecutableSource::Path));
         }
 
@@ -246,8 +248,8 @@ impl ExecutableIndex {
     /// - `Some(PathBuf)` - Path to the executable if found in PATH
     /// - `None` - Program not found in PATH
     pub fn find(&self, program: &str) -> Option<PathBuf> {
-        if let Some(path) = self.eager_lookup(program) {
-            return Some(path.clone());
+        if self.eager_path.is_some() {
+            return self.eager_lookup(program).cloned();
         }
         which(program).ok()
     }
