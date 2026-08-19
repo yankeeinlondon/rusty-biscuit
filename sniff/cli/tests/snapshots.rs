@@ -669,10 +669,10 @@ fn stable_aggregate_json(json: &Value) -> Value {
             .iter()
             .map(|s| {
                 let mut entry = s.clone();
-                if let Some(binary) = entry.get_mut("binary") {
-                    if binary.get("path").is_some_and(Value::is_string) {
-                        binary["path"] = json!("<normalized>");
-                    }
+                if let Some(binary) = entry.get_mut("binary")
+                    && binary.get("path").is_some_and(Value::is_string)
+                {
+                    binary["path"] = json!("<normalized>");
                 }
                 entry
             })
