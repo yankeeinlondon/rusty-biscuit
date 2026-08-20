@@ -214,33 +214,6 @@ fn parse_diskutil_info_output(stdout: &[u8]) -> StorageKind {
     StorageKind::Unknown
 }
 
-#[cfg(test)]
-mod tests {
-    // These exercise the macOS `diskutil info` text parser only. They run on
-    // every platform purely to keep the parser coverage portable — they assert
-    // nothing about Linux (`/sys/block/.../rotational`) or Windows storage
-    // detection, which use entirely separate code paths.
-    use super::*;
-
-    #[test]
-    fn parse_diskutil_info_output_detects_ssd() {
-        let output = b"Device Identifier: disk0s1\nSolid State: Yes\n";
-        assert_eq!(parse_diskutil_info_output(output), StorageKind::Ssd);
-    }
-
-    #[test]
-    fn parse_diskutil_info_output_detects_hdd() {
-        let output = b"Device Identifier: disk1s1\nSolid State: No\n";
-        assert_eq!(parse_diskutil_info_output(output), StorageKind::Hdd);
-    }
-
-    #[test]
-    fn parse_diskutil_info_output_returns_unknown_when_missing() {
-        let output = b"Device Identifier: disk0s1\n";
-        assert_eq!(parse_diskutil_info_output(output), StorageKind::Unknown);
-    }
-}
-
 #[cfg(target_os = "linux")]
 fn detect_storage_impl() -> Vec<StorageInfo> {
     use std::ffi::CString;
@@ -366,4 +339,31 @@ fn detect_storage_impl() -> Vec<StorageInfo> {
             is_removable: d.is_removable(),
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    // These exercise the macOS `diskutil info` text parser only. They run on
+    // every platform purely to keep the parser coverage portable — they assert
+    // nothing about Linux (`/sys/block/.../rotational`) or Windows storage
+    // detection, which use entirely separate code paths.
+    use super::*;
+
+    #[test]
+    fn parse_diskutil_info_output_detects_ssd() {
+        let output = b"Device Identifier: disk0s1\nSolid State: Yes\n";
+        assert_eq!(parse_diskutil_info_output(output), StorageKind::Ssd);
+    }
+
+    #[test]
+    fn parse_diskutil_info_output_detects_hdd() {
+        let output = b"Device Identifier: disk1s1\nSolid State: No\n";
+        assert_eq!(parse_diskutil_info_output(output), StorageKind::Hdd);
+    }
+
+    #[test]
+    fn parse_diskutil_info_output_returns_unknown_when_missing() {
+        let output = b"Device Identifier: disk0s1\n";
+        assert_eq!(parse_diskutil_info_output(output), StorageKind::Unknown);
+    }
 }

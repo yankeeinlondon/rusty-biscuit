@@ -839,6 +839,7 @@ mod tests {
 
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    #[allow(clippy::zombie_processes)]
     fn child_spawns_pipe_holding_descendant() {
         let executable = std::env::current_exe().expect("current test executable should resolve");
         let args = test_child_args(PIPE_HOLDING_DESCENDANT);
@@ -857,6 +858,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    #[allow(clippy::zombie_processes)]
     fn child_spawns_detached_pipe_holding_descendant() {
         let executable = std::env::current_exe().expect("current test executable should resolve");
         let args = test_child_args(DETACHED_PIPE_HOLDING_DESCENDANT);
@@ -901,6 +903,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    #[allow(clippy::zombie_processes)]
     fn child_spawns_quiet_detached_descendant() {
         let executable = std::env::current_exe().expect("current test executable should resolve");
         let args = test_child_args(QUIET_DETACHED_DESCENDANT);
@@ -931,6 +934,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    #[allow(clippy::zombie_processes)]
     fn child_detaches_descendant_then_exits() {
         let executable = std::env::current_exe().expect("current test executable should resolve");
         let args = test_child_args(QUIET_DETACHED_DESCENDANT);
@@ -967,6 +971,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    #[allow(clippy::zombie_processes)]
     fn child_detaches_between_samples() {
         let go_file = std::path::PathBuf::from(
             std::env::var_os(BETWEEN_SAMPLES_GO_FILE)

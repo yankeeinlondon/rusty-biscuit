@@ -477,6 +477,12 @@ fn prediction_preconditions_are_errors() {
     let mut permissions = fs::metadata(&object_path)
         .expect("incoming object metadata")
         .permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        permissions.set_mode(permissions.mode() | 0o200);
+    }
+    #[cfg(windows)]
     permissions.set_readonly(false);
     fs::set_permissions(&object_path, permissions).expect("make incoming object writable");
     fs::write(object_path, b"corrupt").expect("corrupt incoming commit");
@@ -877,4 +883,3 @@ fn prediction_is_read_only_for_criss_cross_virtual_merge_base() {
     );
     assert_eq!(snapshot(&fixture), before);
 }
-
