@@ -378,7 +378,7 @@ fn level2_image_meta_to_stderr() {
     // Tighten: ensure --meta did not suppress image rendering. Either
     // the image protocol bytes survive in `raw`, OR the pane has
     // additional rows after the meta JSON line — never both absent.
-    let bt_row = find_row_of(&frame.plain, "bt image --meta").unwrap_or(0);
+    let bt_row = find_row_of(&frame.plain, "image --meta").unwrap_or(0);
     let post_rows = occupied_row_count(&frame.plain);
     let bytes_present = has_image_protocol_bytes(&frame.raw);
     assert!(
@@ -435,7 +435,7 @@ fn level2_image_kitty_row_advance() {
     let cursor_before = parse_debug_cursor_before(&frame.plain);
 
     // Sentinel must be present and below the bt invocation row.
-    let bt_row = find_row_of(&frame.plain, "bt image --debug").unwrap_or_else(|| {
+    let bt_row = find_row_of(&frame.plain, "image --debug").unwrap_or_else(|| {
         panic!(
             "could not locate `bt image` invocation row. plain:\n{}",
             frame.plain

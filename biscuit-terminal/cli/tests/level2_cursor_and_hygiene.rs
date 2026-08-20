@@ -108,8 +108,8 @@ fn level2_cursor_lands_below_rendered_image() {
     // rendering). `cursor BEFORE` reports R+1 in absolute pane terms
     // because it is queried after the command-line newline; the image
     // therefore begins on the line directly below the bt invocation.
-    let bt_invocation_row = find_row_of(plain, "bt image --debug").unwrap_or_else(|| {
-        panic!("could not locate `bt image --debug` invocation row. plain:\n{plain}")
+    let bt_invocation_row = find_row_of(plain, "image --debug").unwrap_or_else(|| {
+        panic!("could not locate the `image --debug` invocation row. plain:\n{plain}")
     });
     let image_top_row = bt_invocation_row + 1;
     let expected_min_row = image_top_row + image_rows as usize;

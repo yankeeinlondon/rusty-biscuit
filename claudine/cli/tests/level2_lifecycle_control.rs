@@ -661,7 +661,9 @@ fn run_compose_await_exit_on_path(staged: &Staged, extra_args: &str, path: &str)
 /// comparing the *no-operator* diagnostic has to take the operator away. A
 /// retry has none by construction; this is how the direct arm is put in the
 /// same position.
-const NON_TTY_STDERR: &str = " 2>&1 | cat";
+// Use the system binary directly because an interactive login shell may alias
+// `cat` to a pager-backed viewer, which would block this unattended fixture.
+const NON_TTY_STDERR: &str = " 2>&1 | /bin/cat";
 
 /// [`run_compose_await_exit_on_path`] with a shell redirection appended to the
 /// compose command.
@@ -5188,7 +5190,7 @@ fn run_shipped_optional_commit_message(commit_message: Option<&str>) -> (Vec<Str
         &params,
         5,
         SettlePacing {
-            stable_for: Duration::from_secs(4),
+            stable_for: Duration::from_secs(15),
             ..SettlePacing::default()
         },
         &[("TTS_PROVIDER", "say")],

@@ -215,7 +215,7 @@ Legend: ✅ full · ⚠️ supported with a caveat (see notes) · ❌ not availa
 | Folding | ✅ | ✅ | ⚠️ | ⚠️ |
 | Rename-preview change annotations | ✅ | ⚠️ | ✅ | ⚠️ |
 | Client-side file watching | ✅ | ✅ | ⚠️ | ✅ |
-| Position encoding | UTF-16 | UTF-16 | UTF-8 | UTF-8 |
+| Position encoding | UTF-16 | UTF-16 | UTF-8/UTF-16 | UTF-8 |
 | Hover Markdown fidelity | Richest | Text-first | Text-first | Text-first |
 
 ### Notes on the caveats

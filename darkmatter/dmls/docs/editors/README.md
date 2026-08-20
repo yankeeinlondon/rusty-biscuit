@@ -87,8 +87,9 @@ degrades safely otherwise. The full capability matrix and its sources are in
 [r7-editor-capability-matrix.md](../../design/research/r7-editor-capability-matrix.md).
 Highlights that affect setup:
 
-- **Position encoding.** VS Code and Zed offer UTF-16 only; Neovim and Helix
-  advertise UTF-8. `dmls` negotiates automatically and defaults to UTF-16 when
+- **Position encoding.** VS Code and Zed offer UTF-16 only. Helix advertises
+  UTF-8 first; Neovim 0.10 may offer only UTF-16 while newer releases offer
+  UTF-8 first. `dmls` negotiates automatically and defaults to UTF-16 when
   negotiation is absent.
 - **File watching on Linux + Neovim.** Client-side watching is limited on Linux;
   `dmls` keeps a server-side rescan fallback so unopened-file changes still

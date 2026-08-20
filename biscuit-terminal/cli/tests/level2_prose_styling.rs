@@ -272,7 +272,7 @@ fn level2_columns_word_wrap_in_pane() {
     // line which contains literal `bt prose`.
     let is_wrap_row = |line: &str| -> bool {
         let trimmed = line.trim_end();
-        if trimmed.is_empty() || trimmed.contains("bt ") {
+        if trimmed.is_empty() || is_bt_prose_command(trimmed) {
             return false;
         }
         // Strip an optional trailing soft-break hyphen the prose
@@ -786,10 +786,18 @@ fn decode_sgr_params(params: &[i64], out: &mut Vec<Sgr>) {
 /// (which contains the literal markup, not rendered cells) is skipped.
 /// Isolating the output row keeps a colored shell prompt from
 /// satisfying SGR assertions.
+fn is_bt_prose_command(line: &str) -> bool {
+    line.contains("bt prose")
+        || line.contains("bt' prose")
+        || line.contains("bt.exe' prose")
+}
+
 fn find_bt_output_line<'a>(frame: &'a CapturedFrame, compact_plain: &str) -> Option<&'a str> {
     let raw_lines: Vec<&str> = frame.raw.lines().collect();
     let plain_lines: Vec<&str> = frame.plain.lines().collect();
-    let cmd_idx = plain_lines.iter().position(|l| l.contains("bt prose"))?;
+    let cmd_idx = plain_lines
+        .iter()
+        .position(|line| is_bt_prose_command(line))?;
     for (i, plain) in plain_lines.iter().enumerate().skip(cmd_idx + 1) {
         let compact: String = plain.chars().filter(|c| !c.is_whitespace()).collect();
         if compact == compact_plain {
@@ -811,7 +819,10 @@ fn find_bt_output_line<'a>(frame: &'a CapturedFrame, compact_plain: &str) -> Opt
 fn rendered_region_effects(frame: &CapturedFrame) -> Vec<Sgr> {
     let raw_lines: Vec<&str> = frame.raw.lines().collect();
     let plain_lines: Vec<&str> = frame.plain.lines().collect();
-    let Some(cmd_idx) = plain_lines.iter().position(|l| l.contains("bt prose")) else {
+    let Some(cmd_idx) = plain_lines
+        .iter()
+        .position(|line| is_bt_prose_command(line))
+    else {
         return Vec::new();
     };
     let mut effects = Vec::new();
@@ -883,7 +894,7 @@ fn assert_no_sgr_red(frame: &CapturedFrame) {
     // single-quote-escaped `NO_COLOR='1'` produced by the harness.
     let cmd_idx = plain_lines
         .iter()
-        .position(|l| l.contains("NO_COLOR=") && l.contains("bt prose"));
+        .position(|line| line.contains("NO_COLOR=") && is_bt_prose_command(line));
 
     let Some(cmd_idx) = cmd_idx else {
         // We could not locate the command line; the test plainly cannot

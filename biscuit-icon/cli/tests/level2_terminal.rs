@@ -38,12 +38,12 @@ fn path_with_icon_bin() -> String {
     format!("{existing}:{}", bin_dir.display())
 }
 
-/// Runs an `icon` command with an isolated `$HOME` and a dead Iconify endpoint
-/// so tests never trigger live network searches.
+/// Runs an `icon` command with an isolated `$HOME` and an invalid Iconify base
+/// URL so tests never trigger live network searches.
 fn run_icon(harness: &mut TmuxHarness, args: &str) -> CapturedFrame {
     let home = tempfile::tempdir().unwrap();
     let cmd = format!(
-        "HOME='{}' PATH='{}' ICONIFY_BASE_URL='http://127.0.0.1:1' icon {}\n",
+        "HOME='{}' PATH='{}' ICONIFY_BASE_URL='offline' icon {}\n",
         home.path().display(),
         path_with_icon_bin(),
         args
@@ -373,7 +373,7 @@ fn run_sets(
     // Invoke the freshly-built binary by absolute path: a globally-installed
     // `icon` earlier on `$PATH` would otherwise shadow it and run stale code.
     let cmd = format!(
-        "HOME='{}' ICONIFY_BASE_URL='http://127.0.0.1:1' \
+        "HOME='{}' ICONIFY_BASE_URL='offline' \
          BISCUIT_TERM_WIDTH={width} BISCUIT_TERM_HEIGHT={height} '{}' sets {filter}\n",
         home.display(),
         icon_bin().display(),
@@ -517,7 +517,7 @@ fn run_sets_live(
     harness.send_text(b"clear\n").expect("clear failed");
     harness.settle();
     let cmd = format!(
-        "HOME='{}' ICONIFY_BASE_URL='http://127.0.0.1:1' '{}' sets {filter}\n",
+        "HOME='{}' ICONIFY_BASE_URL='offline' '{}' sets {filter}\n",
         home.display(),
         icon_bin().display(),
     );
