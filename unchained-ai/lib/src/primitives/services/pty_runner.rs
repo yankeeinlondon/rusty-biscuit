@@ -87,6 +87,8 @@ fn run_pty_blocking(
         .master
         .take_writer()
         .map_err(|e| AgentStatusError::PtyWriteError(format!("Failed to get writer: {}", e)))?;
+    #[cfg(windows)]
+    let mut writer = writer;
 
     drop(pair.slave);
 
@@ -100,10 +102,21 @@ fn run_pty_blocking(
     // portable-pty requires callers to take and close the master writer even
     // when the command receives no input; otherwise Windows ConPTY may keep
     // the child waiting indefinitely for stdin.
-    // On macOS, closing it immediately can race a short-lived child attaching
-    // to the PTY and discard that child's output.
-    #[cfg(target_os = "macos")]
+    // Closing it immediately can race a short-lived child attaching to the PTY
+    // and discard that child's output on macOS and Windows.
+    #[cfg(any(target_os = "macos", windows))]
     thread::sleep(Duration::from_millis(20));
+    #[cfg(windows)]
+    {
+        // Closing a ConPTY input pipe does not synthesize console EOF. Send the
+        // cooked-mode Windows EOF sequence before releasing the pipe.
+        writer
+            .write_all(b"\x1a\r\n")
+            .map_err(|e| AgentStatusError::PtyWriteError(format!("Failed to send EOF: {}", e)))?;
+        writer
+            .flush()
+            .map_err(|e| AgentStatusError::PtyWriteError(format!("Failed to flush EOF: {}", e)))?;
+    }
     drop(writer);
 
     let start = Instant::now();

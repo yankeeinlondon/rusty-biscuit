@@ -761,6 +761,10 @@ fn redact_base_paths(value: &Value, base: &std::path::Path) -> Value {
                 for root in roots {
                     *text = text.replace(root.to_str().expect("temp path is utf8"), "[BASE]");
                 }
+                if text.contains("[BASE]") {
+                    *text = text.replace('\\', "/");
+                    return;
+                }
                 if !text.contains("[BASE]") {
                     let mut portable = biscuit_file::to_portable_string(std::path::Path::new(text));
                     for root in portable_roots {
@@ -787,6 +791,16 @@ fn redact_base_paths(value: &Value, base: &std::path::Path) -> Value {
 
     redact_strings(&mut redacted, &roots, &portable_roots);
     redacted
+}
+
+#[test]
+fn redact_base_paths_normalizes_windows_separators() {
+    let value = Value::String("[BASE]\\Cargo.toml".to_string());
+
+    assert_eq!(
+        redact_base_paths(&value, std::path::Path::new("unused")),
+        Value::String("[BASE]/Cargo.toml".to_string())
+    );
 }
 
 fn run_repo_aggregate_json(base: &std::path::Path) -> Value {

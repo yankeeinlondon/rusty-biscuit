@@ -332,83 +332,76 @@ fn detect_with_plan_inner(
     });
 
     let mut result = performance::with_current_collector(collector.clone(), || {
-        // Run all four domains concurrently using scoped threads.
-        // Each domain is independent, so there is no ordering constraint.
+        let detect_os = |req: &OsRequest| {
+            performance::with_current_collector(collector.clone(), || {
+                let _span = tracing::info_span!("detect_os").entered();
+                let started = Instant::now();
+                let result = os::detect_os_with_request(req);
+                performance::record_logged_stage("detect.os", started.elapsed(), Level::INFO);
+                result
+            })
+        };
+        let detect_hardware = |req: &HardwareRequest| {
+            performance::with_current_collector(collector.clone(), || {
+                let _span = tracing::info_span!("detect_hardware").entered();
+                let started = Instant::now();
+                let result = hardware::detect_hardware_with_request(req);
+                performance::record_logged_stage("detect.hardware", started.elapsed(), Level::INFO);
+                result
+            })
+        };
+        let detect_network = |req: &NetworkRequest| {
+            performance::with_current_collector(collector.clone(), || {
+                let _span = tracing::info_span!("detect_network").entered();
+                let started = Instant::now();
+                let result = network::detect_network_with_request(req);
+                performance::record_logged_stage("detect.network", started.elapsed(), Level::INFO);
+                result
+            })
+        };
+        let detect_filesystem = |req: &FilesystemRequest| {
+            performance::with_current_collector(collector.clone(), || {
+                let _span = tracing::info_span!("detect_filesystem").entered();
+                let started = Instant::now();
+                let result = match filesystem_observation {
+                    Some(observation) => {
+                        filesystem::detect_filesystem_with_observation(&base, req, observation)
+                    }
+                    None => filesystem::detect_filesystem_with_request(&base, req),
+                };
+                performance::record_logged_stage(
+                    "detect.filesystem",
+                    started.elapsed(),
+                    Level::INFO,
+                );
+                result
+            })
+        };
+
+        #[cfg(windows)]
+        let (os, hardware, network, filesystem) = (
+            plan.os.as_ref().map(detect_os).transpose(),
+            plan.hardware.as_ref().map(detect_hardware).transpose(),
+            plan.network.as_ref().map(detect_network).transpose(),
+            plan.filesystem.as_ref().map(detect_filesystem).transpose(),
+        );
+
+        // Full Windows domains use overlapping host APIs that may fail-fast the
+        // process when invoked concurrently. Other platforms retain parallel
+        // detection because their system interfaces are safe to overlap.
+        #[cfg(not(windows))]
         let (os, hardware, network, filesystem) = std::thread::scope(|s| {
-            let os_collector = collector.clone();
             let os_handle = plan.os.as_ref().map(|req| {
-                s.spawn(move || {
-                    performance::with_current_collector(os_collector, || {
-                        let _span = tracing::info_span!("detect_os").entered();
-                        let started = Instant::now();
-                        let result = os::detect_os_with_request(req);
-                        performance::record_logged_stage(
-                            "detect.os",
-                            started.elapsed(),
-                            Level::INFO,
-                        );
-                        result
-                    })
-                })
+                s.spawn(move || detect_os(req))
             });
-
-            let hw_collector = collector.clone();
             let hw_handle = plan.hardware.as_ref().map(|req| {
-                s.spawn(move || {
-                    performance::with_current_collector(hw_collector, || {
-                        let _span = tracing::info_span!("detect_hardware").entered();
-                        let started = Instant::now();
-                        let result = hardware::detect_hardware_with_request(req);
-                        performance::record_logged_stage(
-                            "detect.hardware",
-                            started.elapsed(),
-                            Level::INFO,
-                        );
-                        result
-                    })
-                })
+                s.spawn(move || detect_hardware(req))
             });
-
-            let net_collector = collector.clone();
             let net_handle = plan.network.as_ref().map(|req| {
-                s.spawn(move || {
-                    performance::with_current_collector(net_collector, || {
-                        let _span = tracing::info_span!("detect_network").entered();
-                        let started = Instant::now();
-                        let result = network::detect_network_with_request(req);
-                        performance::record_logged_stage(
-                            "detect.network",
-                            started.elapsed(),
-                            Level::INFO,
-                        );
-                        result
-                    })
-                })
+                s.spawn(move || detect_network(req))
             });
-
-            let fs_collector = collector.clone();
             let fs_handle = plan.filesystem.as_ref().map(|req| {
-                let filesystem_observation = filesystem_observation.cloned();
-                s.spawn(move || {
-                    performance::with_current_collector(fs_collector, || {
-                        let _span = tracing::info_span!("detect_filesystem").entered();
-                        let started = Instant::now();
-                        let result = match filesystem_observation.as_ref() {
-                            Some(observation) => filesystem::detect_filesystem_with_observation(
-                                &base,
-                                req,
-                                observation,
-                            ),
-                            None => filesystem::detect_filesystem_with_request(&base, req),
-                        };
-                        performance::record_logged_stage(
-                            "detect.filesystem",
-                            started.elapsed(),
-                            Level::INFO,
-                        );
-                        result
-                    })
-                })
+                s.spawn(move || detect_filesystem(req))
             });
 
             let os = os_handle.map(|h| h.join().unwrap()).transpose();
