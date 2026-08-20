@@ -106,8 +106,9 @@ pub async fn run_pty_command(
 - Wraps blocking PTY ops in `tokio::task::spawn_blocking`
 - Uses `portable-pty` with 24x80 terminal size
 - Drops the slave PTY immediately after spawning
-- Gives short-lived children time to attach before closing PTY input on macOS and Windows
-- Sends the cooked-mode console EOF sequence on Windows before closing PTY input
+- Gives short-lived children time to attach before closing PTY input on macOS
+- Lets Windows commands exit during a bounded ConPTY attachment grace before synthesizing EOF
+- Sends cooked-mode console EOF to Windows commands still running after that grace
 - Waits for the child before closing the master PTY so ConPTY readers receive EOF
 - Reads output via `mpsc::channel` in separate thread
 - Default timeout is 5 seconds on Unix and 10 seconds on Windows (configurable)

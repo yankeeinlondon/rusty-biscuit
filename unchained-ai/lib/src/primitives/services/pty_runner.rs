@@ -18,6 +18,12 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 /// ConPTY may need its cursor-inheritance timeout to expire during shutdown.
 const OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// ConPTY does not expose an event for completion of child attachment. Give a
+/// child a bounded opportunity to exit before synthesizing console EOF so a
+/// fast command cannot lose its output when the input pipe closes.
+#[cfg(windows)]
+const CONPTY_ATTACH_GRACE: Duration = Duration::from_millis(250);
+
 /// A step in an interactive PTY session.
 #[derive(Debug, Clone)]
 pub enum InteractiveStep {
@@ -99,15 +105,40 @@ fn run_pty_blocking(
         tx.send((raw_output, result)).ok();
     });
 
-    // portable-pty requires callers to take and close the master writer even
-    // when the command receives no input; otherwise Windows ConPTY may keep
-    // the child waiting indefinitely for stdin.
-    // Closing it immediately can race a short-lived child attaching to the PTY
-    // and discard that child's output on macOS and Windows.
-    #[cfg(any(target_os = "macos", windows))]
+    let start = Instant::now();
+
+    // Closing PTY input immediately can race a short-lived child attaching and
+    // discard its output on macOS.
+    #[cfg(target_os = "macos")]
     thread::sleep(Duration::from_millis(20));
+
+    // portable-pty requires callers to close the master writer even when the
+    // command receives no input; otherwise ConPTY may keep a child waiting for
+    // stdin indefinitely. A child that exits during the attachment grace needs
+    // no synthesized EOF, which avoids closing its console before output lands.
     #[cfg(windows)]
-    {
+    let child_exited = loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break true,
+            Ok(None) => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(AgentStatusError::PtyReadError(format!(
+                    "Failed to query child status: {}",
+                    error
+                )));
+            }
+        }
+
+        if start.elapsed() >= CONPTY_ATTACH_GRACE.min(timeout_dur) {
+            break false;
+        }
+
+        thread::sleep(Duration::from_millis(10));
+    };
+    #[cfg(windows)]
+    if !child_exited {
         // Closing a ConPTY input pipe does not synthesize console EOF. Send the
         // cooked-mode Windows EOF sequence before releasing the pipe.
         writer
@@ -119,8 +150,12 @@ fn run_pty_blocking(
     }
     drop(writer);
 
-    let start = Instant::now();
     loop {
+        #[cfg(windows)]
+        if child_exited {
+            break;
+        }
+
         match child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) => {}
