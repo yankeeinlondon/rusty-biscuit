@@ -33,6 +33,7 @@ pub enum InteractiveStep {
 ///
 /// Returns `AgentStatusError::PtySpawnError` if the PTY or command fails to spawn.
 /// Returns `AgentStatusError::PtyReadError` if reading from the PTY fails.
+/// Returns `AgentStatusError::PtyWriteError` if PTY stdin cannot be acquired.
 /// Returns `AgentStatusError::TimeoutError` if the command exceeds the timeout.
 pub async fn run_pty_command(
     program: &str,
@@ -82,6 +83,11 @@ fn run_pty_blocking(
         .try_clone_reader()
         .map_err(|e| AgentStatusError::PtyReadError(format!("Failed to clone reader: {}", e)))?;
 
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|e| AgentStatusError::PtyWriteError(format!("Failed to get writer: {}", e)))?;
+
     drop(pair.slave);
 
     let (tx, rx) = mpsc::channel();
@@ -90,6 +96,15 @@ fn run_pty_blocking(
         let result = reader.read_to_end(&mut raw_output);
         tx.send((raw_output, result)).ok();
     });
+
+    // portable-pty requires callers to take and close the master writer even
+    // when the command receives no input; otherwise Windows ConPTY may keep
+    // the child waiting indefinitely for stdin.
+    // On macOS, closing it immediately can race a short-lived child attaching
+    // to the PTY and discard that child's output.
+    #[cfg(target_os = "macos")]
+    thread::sleep(Duration::from_millis(20));
+    drop(writer);
 
     let start = Instant::now();
     loop {
@@ -256,6 +271,10 @@ fn run_pty_interactive_blocking(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
+
+    const STDIN_EOF_CHILD: &str =
+        "primitives::services::pty_runner::tests::child_waits_for_stdin_eof";
 
     #[cfg(unix)]
     const ECHO_PROGRAM: &str = "echo";
@@ -292,6 +311,31 @@ mod tests {
             .expect("ANSI-producing command should succeed");
         assert!(output.trim().contains("red"));
         assert!(!output.contains("\x1b["));
+    }
+
+    #[test]
+    #[ignore = "subprocess fixture invoked by the PTY lifecycle test"]
+    fn child_waits_for_stdin_eof() {
+        let mut input = String::new();
+        std::io::stdin()
+            .read_to_string(&mut input)
+            .expect("stdin should be readable");
+        println!("stdin closed");
+    }
+
+    #[tokio::test]
+    async fn test_noninteractive_command_closes_stdin() {
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let output = run_pty_command(
+            executable
+                .to_str()
+                .expect("the test executable path should be valid UTF-8"),
+            &[STDIN_EOF_CHILD, "--exact", "--ignored", "--nocapture"],
+            Some(Duration::from_secs(15)),
+        )
+        .await
+        .expect("command waiting for stdin EOF should exit");
+        assert!(output.contains("stdin closed"));
     }
 
     #[tokio::test]

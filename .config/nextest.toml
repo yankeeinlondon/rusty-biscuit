@@ -21,12 +21,6 @@
 # victim changes between runs, while the same suite is stable at four threads.
 claudine-windows-l1 = { max-threads = 4 }
 
-# ConPTY setup is a host-global Windows console operation. Running the PTY
-# command tests in separate nextest processes at the same time can leave both
-# children waiting until their command deadline even though each test is stable
-# alone. A nextest group serializes across those process boundaries.
-unchained-ai-windows-pty = { max-threads = 1 }
-
 [profile.default]
 # A test that passes only on retry is still a failed test run. Keep retries
 # disabled so timing and resource-contention defects remain visible locally.
@@ -73,11 +67,6 @@ archive.include = [
 platform = { host = "cfg(windows)" }
 filter = 'package(claudine) + package(claudine-cli)'
 test-group = 'claudine-windows-l1'
-
-[[profile.default.overrides]]
-platform = { host = "cfg(windows)" }
-filter = 'package(unchained-ai) & test(/primitives::services::pty_runner::tests::/)'
-test-group = 'unchained-ai-windows-pty'
 
 # Tests that intentionally wait on a real clock (e.g. rate-limit pause policies)
 # need an even longer leash than the default termination window.
