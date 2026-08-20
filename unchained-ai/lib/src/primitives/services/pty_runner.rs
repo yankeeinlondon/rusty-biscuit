@@ -6,8 +6,14 @@ use strip_ansi_escapes::strip;
 
 use super::error::AgentStatusError;
 
-/// Default timeout for PTY operations.
+/// Default timeout for PTY operations on Unix.
+#[cfg(not(windows))]
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// ConPTY can consume five seconds establishing cursor inheritance before the
+/// child starts, so Windows needs a separate command-execution allowance.
+#[cfg(windows)]
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// ConPTY may need its cursor-inheritance timeout to expire during shutdown.
 const OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);

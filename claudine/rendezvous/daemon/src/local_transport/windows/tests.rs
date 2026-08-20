@@ -80,6 +80,12 @@ fn my_sid() -> String {
     sid
 }
 
+fn sddl_principal(sid: &str) -> &str {
+    // Windows renders the built-in local Administrator account by its SDDL
+    // alias instead of the equivalent machine SID ending in RID 500.
+    if sid.ends_with("-500") { "LA" } else { sid }
+}
+
 /// Render the descriptor the daemon builds back to SDDL, which is the only way
 /// to assert its *contents* rather than merely that a pointer is non-null.
 fn descriptor_sddl() -> String {
@@ -106,13 +112,14 @@ fn descriptor_sddl() -> String {
 fn the_pipe_dacl_names_this_user_and_nobody_else() {
     let sddl = descriptor_sddl();
     let sid = my_sid();
+    let principal = sddl_principal(&sid);
 
     assert!(
-        sddl.contains(&format!("O:{sid}")),
+        sddl.contains(&format!("O:{principal}")),
         "the current user must own the descriptor; got: {sddl}"
     );
     assert!(
-        sddl.contains(&format!("(A;;GA;;;{sid})")),
+        sddl.contains(&format!("(A;;GA;;;{principal})")),
         "the current user must be granted access explicitly; got: {sddl}"
     );
     assert!(

@@ -75,10 +75,18 @@ fn test_detect_completes_in_reasonable_time() {
     let start = Instant::now();
     let _ = detect();
     let elapsed = start.elapsed();
+    let max_millis = if std::env::var("BISCUIT_CI_ENVIRONMENT").as_deref()
+        == Ok("wsl2-ubuntu")
+    {
+        60_000
+    } else {
+        20_000
+    };
     // Allow slack for CI environments, package manager detection (PATH scanning),
-    // and boundary-aware mixed-workspace package discovery.
+    // and boundary-aware mixed-workspace package discovery. WSL's archive runs
+    // cold discovery across a virtualized filesystem, but remains bounded.
     assert!(
-        elapsed.as_millis() < 20000,
+        elapsed.as_millis() < max_millis,
         "Detection took too long: {:?}",
         elapsed
     );

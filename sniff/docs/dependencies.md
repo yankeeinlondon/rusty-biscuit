@@ -61,6 +61,13 @@ does not make Sniff responsible for building a security descriptor. See
   Pinned to the same major as `claudine` and `claudine-cli` so provider and tool
   discovery behave consistently across the workspace.
 
+## Portable Path Text
+
+- **`biscuit-file` (default features off).** The CLI uses the workspace path-text
+  policy when filesystem paths cross into terminal text, JSON snapshots, and
+  file hyperlinks. This removes safely reducible Windows verbatim-disk prefixes
+  without changing the native `PathBuf` values used for filesystem access.
+
 ## Optional Features
 
 - `network` (`reqwest` + `tokio` + `futures`, rustls) gates remote lookups; `remote`

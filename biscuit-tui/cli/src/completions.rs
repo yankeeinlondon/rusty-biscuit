@@ -442,12 +442,11 @@ mod tests {
         // strip routine drops the entire case clause and scrubs the
         // legacy tokens out of the per-subcommand `opts` string, so the
         // resulting script must parse cleanly.
-        if std::process::Command::new("bash")
+        let bash_probe = std::process::Command::new("bash")
             .arg("--version")
-            .output()
-            .is_err()
-        {
-            eprintln!("skipping: bash not available");
+            .output();
+        if !matches!(bash_probe, Ok(output) if output.status.success()) {
+            eprintln!("skipping: a working bash is not available");
             return;
         }
         let mut buf = Vec::new();

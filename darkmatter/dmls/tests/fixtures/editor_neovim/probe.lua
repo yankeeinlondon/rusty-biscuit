@@ -20,6 +20,15 @@ vim.o.swapfile = false
 
 local out = { mode = mode, probes = vim.empty_dict() }
 
+-- `vim.lsp.get_clients` was added in Neovim 0.10. Ubuntu 24.04 ships
+-- Neovim 0.9, whose filtered predecessor has the same contract needed here.
+local function lsp_clients(filter)
+  if vim.lsp.get_clients then
+    return vim.lsp.get_clients(filter)
+  end
+  return vim.lsp.get_active_clients(filter)
+end
+
 local function fail(msg)
   out.errors = out.errors or {}
   out.errors[#out.errors + 1] = msg
@@ -36,13 +45,13 @@ local client_id = vim.lsp.start({
 
 local attached = client_id ~= nil
   and vim.wait(15000, function()
-    return next(vim.lsp.get_clients({ bufnr = buf, id = client_id })) ~= nil
+    return next(lsp_clients({ bufnr = buf, id = client_id })) ~= nil
   end, 50)
 if not attached then
   fail('dmls did not attach within 15s')
 end
 
-local client = client_id and vim.lsp.get_clients({ id = client_id })[1] or nil
+local client = client_id and lsp_clients({ id = client_id })[1] or nil
 out.offset_encoding = client and client.offset_encoding or nil
 
 -- `client:notify` on 0.11+, dot-call on 0.10 (where methods took no self).
@@ -187,7 +196,7 @@ if client then
     vim.lsp.stop_client(client_id)
   end
   vim.wait(3000, function()
-    return next(vim.lsp.get_clients({ id = client_id })) == nil
+    return next(lsp_clients({ id = client_id })) == nil
   end, 50)
 end
 

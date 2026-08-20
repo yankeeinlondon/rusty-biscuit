@@ -79,7 +79,7 @@ via `skip_with_reason("<X>")` when it returns `false`. No `#[ignore]`.
 | `TmuxHarness` | `tmux` on `$PATH`. Nothing else. |
 | `WezTermHarness` | `wezterm` on `$PATH` **and** `WEZTERM_UNIX_SOCKET` set. |
 | `KittyHarness` | `kitty` on `$PATH` **and** `KITTY_LISTEN_ON` set. |
-| `AppleTerminalHarness` | macOS, `CI != 1`, `osascript` can reach Terminal.app. |
+| `AppleTerminalHarness` | macOS, `CI` not truthy, `osascript` can reach Terminal.app. |
 | `cliclick` (L3, macOS) | `cliclick` on `$PATH` — checks neither platform nor permission. Gate *additionally* on `cliclick::accessibility_trusted()`, which covers both. |
 | `xdotool` (L3, Linux) | Linux, `xdotool` on `$PATH`, **and** `DISPLAY` set. Wayland reports unavailable and skips. |
 | `win_input` (L3, Windows) | Windows and a working `powershell`. |

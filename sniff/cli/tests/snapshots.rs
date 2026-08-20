@@ -735,7 +735,8 @@ fn stable_aggregate_json(json: &Value) -> Value {
 /// Both the given and the canonicalized form are replaced: on macOS a temp dir
 /// handed out as `/var/...` is reported back through its `/private/var/...`
 /// realpath, so replacing only one leaves absolute paths in the snapshot. Path
-/// separators after the replacement are normalized for cross-platform output.
+/// Portable and native forms are both recognized so Windows verbatim-path
+/// simplification cannot leave an absolute fixture path in the snapshot.
 fn redact_base_paths(value: &Value, base: &std::path::Path) -> Value {
     let mut redacted = value.clone();
     let mut roots = vec![base.to_path_buf()];
@@ -743,33 +744,48 @@ fn redact_base_paths(value: &Value, base: &std::path::Path) -> Value {
         roots.push(canonical);
     }
     // Longest first: a prefix would otherwise mask the form that contains it.
-    roots.sort_by_key(|p| std::cmp::Reverse(p.as_os_str().len()));
+    let mut portable_roots = roots
+        .iter()
+        .map(|root| biscuit_file::to_portable_string(root))
+        .collect::<Vec<_>>();
+    portable_roots.sort_by_key(|root| std::cmp::Reverse(root.len()));
+    roots.sort_by_key(|root| std::cmp::Reverse(root.as_os_str().len()));
 
-    fn redact_strings(value: &mut Value, roots: &[std::path::PathBuf]) {
+    fn redact_strings(
+        value: &mut Value,
+        roots: &[std::path::PathBuf],
+        portable_roots: &[String],
+    ) {
         match value {
             Value::String(text) => {
                 for root in roots {
                     *text = text.replace(root.to_str().expect("temp path is utf8"), "[BASE]");
                 }
-                if text.contains("[BASE]") {
-                    *text = text.replace('\\', "/");
+                if !text.contains("[BASE]") {
+                    let mut portable = biscuit_file::to_portable_string(std::path::Path::new(text));
+                    for root in portable_roots {
+                        portable = portable.replace(root, "[BASE]");
+                    }
+                    if portable.contains("[BASE]") {
+                        *text = portable;
+                    }
                 }
             }
             Value::Array(values) => {
                 for value in values {
-                    redact_strings(value, roots);
+                    redact_strings(value, roots, portable_roots);
                 }
             }
             Value::Object(values) => {
                 for value in values.values_mut() {
-                    redact_strings(value, roots);
+                    redact_strings(value, roots, portable_roots);
                 }
             }
             _ => {}
         }
     }
 
-    redact_strings(&mut redacted, &roots);
+    redact_strings(&mut redacted, &roots, &portable_roots);
     redacted
 }
 

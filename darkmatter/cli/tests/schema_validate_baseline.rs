@@ -7,9 +7,9 @@
 //! snapshots: `expected.json` (the `--format json` line) and `expected.pretty`
 //! (the default pretty rendering with color disabled). The host-specific
 //! `file://` document URL in the pretty snapshot is stored as the `{DOC_URL}`
-//! placeholder and substituted at run time, so the remaining bytes — wording,
-//! ordering, indentation, arm prefixes, line annotations, and the additive
-//! `description` sub-line — are compared exactly.
+//! placeholder and the rendered URL is normalized back to it, so the remaining
+//! bytes — wording, ordering, indentation, arm prefixes, line annotations, and
+//! the additive `description` sub-line — are compared exactly.
 
 use std::fs;
 use std::path::Path;
@@ -54,6 +54,16 @@ fn read_snapshot(case: &str, name: &str) -> String {
     fs::read_to_string(Path::new(FIXTURES).join(case).join(name)).unwrap()
 }
 
+fn normalize_document_url(mut output: String) -> String {
+    let href_start = output.find("(file://").expect("document link should exist") + 1;
+    let href_end = href_start
+        + output[href_start..]
+            .find(')')
+            .expect("document link should be closed");
+    output.replace_range(href_start..href_end, "{DOC_URL}");
+    output
+}
+
 #[test]
 fn schema_validate_legacy_json_output_is_byte_identical() {
     for case in CASES {
@@ -88,15 +98,6 @@ fn schema_validate_legacy_pretty_output_is_byte_identical() {
         let expects_success =
             read_snapshot(case, "expected.json").contains("\"valid\":true");
 
-        // The rendered pretty output links to the document by its canonical
-        // (symlink-resolved) absolute path, which is host-specific. Rebuild the
-        // exact URL the CLI emits and substitute it into the snapshot.
-        let canonical = fs::canonicalize(work.path().join("doc.md")).unwrap();
-        let canonical = canonical.to_string_lossy();
-        #[cfg(windows)]
-        let canonical = canonical.strip_prefix(r"\\?\").unwrap_or(&canonical);
-        let expected = template.replace("{DOC_URL}", &format!("file://{canonical}"));
-
         let output = assert_cmd::Command::cargo_bin("md").unwrap()
             .current_dir(work.path())
             .env("NO_COLOR", "1")
@@ -104,9 +105,9 @@ fn schema_validate_legacy_pretty_output_is_byte_identical() {
             .output()
             .unwrap();
 
-        let stdout = String::from_utf8(output.stdout).unwrap();
+        let stdout = normalize_document_url(String::from_utf8(output.stdout).unwrap());
         assert_eq!(
-            stdout, expected,
+            stdout, template,
             "pretty output drifted for legacy case `{case}`"
         );
         assert_eq!(

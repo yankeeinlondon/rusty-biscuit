@@ -619,14 +619,13 @@ fn render_header(title: &str, terminal: &Terminal) -> String {
 /// the current worktree directory so sibling or parent layouts read as `..`,
 /// `../project`, or `.` instead of a home-abbreviated absolute path.
 fn worktree_path_link(path: &std::path::Path, current_worktree: &std::path::Path) -> String {
-    let absolute = path.display().to_string();
     // Both sides must share one canonical form before prefix math: detection
     // reports repo roots canonicalized (UNC-prefixed on Windows) while the
     // current directory arrives verbatim, and the two forms share no
     // components, which would degenerate the label to the absolute path.
     let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let label = relative_path_between(&canon(current_worktree), &canon(path));
-    format!("<blue><a href=\"{absolute}\">{label}</a></blue>")
+    worktree_link_markup(path, &label)
 }
 
 /// Formats a worktree directory path as a blue OSC8 hyperlink whose href is the
@@ -636,9 +635,22 @@ fn worktree_path_link(path: &std::path::Path, current_worktree: &std::path::Path
 /// Used for the current worktree's own "located at" line, where a label
 /// relative to itself would degenerate to `.` and tell the reader nothing.
 fn worktree_path_link_absolute(path: &std::path::Path) -> String {
-    let absolute = path.display().to_string();
     let label = alias_path(path);
-    format!("<blue><a href=\"{absolute}\">{label}</a></blue>")
+    worktree_link_markup(path, &label)
+}
+
+fn worktree_link_markup(path: &Path, label: &str) -> String {
+    let label = if label == path.to_string_lossy() {
+        biscuit_file::to_portable_string(path)
+    } else {
+        label.to_string()
+    };
+    match biscuit_file::try_portable_string(path)
+        .and_then(|path| url::Url::from_file_path(path).ok())
+    {
+        Some(href) => format!("<blue><a href=\"{href}\">{label}</a></blue>"),
+        None => format!("<blue>{label}</blue>"),
+    }
 }
 
 /// Computes a compact display label for an absolute path by offsetting it

@@ -785,6 +785,16 @@ fn direct_composition_block_strips_everything_returns_composed_body_empty() {
 /// friends execute in the wrong repo.
 #[test]
 fn direct_composition_runs_shell_in_configured_working_directory() {
+    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    if !std::process::Command::new(&compiler)
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
+    {
+        eprintln!("skipping cwd probe test because rustc is unavailable");
+        return;
+    }
+
     let source_dir = TempDir::new().unwrap();
     let work_dir = TempDir::new().unwrap();
     let probe_source = work_dir.path().join("cwd_probe.rs");
@@ -799,7 +809,6 @@ fn direct_composition_runs_shell_in_configured_working_directory() {
 "#,
     )
     .unwrap();
-    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
     let compilation = std::process::Command::new(compiler)
         .arg(&probe_source)
         .arg("-o")

@@ -18,7 +18,7 @@ use windows::Win32::Foundation::{
 };
 
 #[cfg(windows)]
-const PERSIST_ATTEMPTS: usize = 8;
+const PERSIST_ATTEMPTS: usize = 11;
 #[cfg(windows)]
 const INITIAL_PERSIST_RETRY_DELAY: Duration = Duration::from_millis(1);
 
@@ -337,9 +337,12 @@ mod tests {
         assert_eq!(attempts, PERSIST_ATTEMPTS);
         assert_eq!(
             delays,
-            [1, 2, 4, 8, 16, 32, 64].map(Duration::from_millis)
+            [1, 2, 4, 8, 16, 32, 64, 128, 256, 512].map(Duration::from_millis)
         );
-        assert_eq!(delays.iter().sum::<Duration>(), Duration::from_millis(127));
+        assert_eq!(
+            delays.iter().sum::<Duration>(),
+            Duration::from_millis(1_023)
+        );
         assert_eq!(error.raw_os_error(), Some(ERROR_ACCESS_DENIED.0 as i32));
     }
 

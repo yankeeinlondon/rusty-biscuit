@@ -82,6 +82,7 @@ exit 0
         .env("HOME", fixture.path())
         .env("PATH", augmented_path(&bin_dir))
         .env("CLAUDINE_PROMPT_CAPTURE", &capture)
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
         .current_dir(&root)
         .args([
             "compose",

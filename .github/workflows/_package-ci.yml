@@ -649,7 +649,7 @@ jobs:
               if [ "$backend" = "tmux" ]; then
                 echo "| tmux | provisioned — its tests MUST execute |"
               elif [ "$backend" = "apple-terminal" ] && [ "$ENVIRONMENT" = "macos-latest" ]; then
-                echo "| apple-terminal | unavailable — \`available()\` returns false when CI=1; its tests skip |"
+                echo "| apple-terminal | unavailable — \`available()\` returns false when CI is truthy; its tests skip |"
               else
                 echo "| ${backend} | unavailable — needs a live GUI session; its tests skip |"
               fi

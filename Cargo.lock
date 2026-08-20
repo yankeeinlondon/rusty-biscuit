@@ -12306,6 +12306,7 @@ name = "sniff-cli"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "biscuit-file",
  "biscuit-terminal",
  "biscuit-test-harness",
  "chrono",

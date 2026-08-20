@@ -717,6 +717,16 @@ fn session_reuses_resolved_external_source_context() {
 
 #[test]
 fn non_repository_session_runs_shell_in_launch_cwd() {
+    let compiler = std::env::var_os("RUSTC").unwrap_or_else(|| "rustc".into());
+    if !std::process::Command::new(compiler)
+        .arg("--version")
+        .output()
+        .is_ok_and(|output| output.status.success())
+    {
+        eprintln!("skipping cwd probe test because rustc is unavailable");
+        return;
+    }
+
     let tmp = TempDir::new().unwrap();
     let launch = tmp.path().join("launch");
     let source_repo = tmp.path().join("source");

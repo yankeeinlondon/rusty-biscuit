@@ -26,8 +26,12 @@ pub mod pane_geometry;
 /// settle.
 ///
 /// `args` is the full argument string after `bt` — e.g. `"prose \"<red>x</red>\""`.
+/// The binary path comes from nextest rather than the spawned login shell's
+/// `PATH`, which keeps clean and archived test runs equivalent.
 pub fn send_bt_command(harness: &mut impl TerminalHarness, args: &str) {
-    let cmd = format!("bt {}\n", args);
+    let bin = biscuit_test_harness::bin_exe!("bt");
+    let escaped = bin.to_string_lossy().replace('\'', "'\\''");
+    let cmd = format!("'{escaped}' {args}\n");
     harness.send_text(cmd.as_bytes()).expect("send_text failed");
     harness.settle();
 }

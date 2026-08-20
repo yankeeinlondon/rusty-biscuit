@@ -108,7 +108,7 @@ pub async fn run_pty_command(
 - Drops the slave PTY immediately after spawning
 - Waits for the child before closing the master PTY so ConPTY readers receive EOF
 - Reads output via `mpsc::channel` in separate thread
-- Default 5-second timeout (configurable)
+- Default timeout is 5 seconds on Unix and 10 seconds on Windows (configurable)
 - Strips ANSI escape codes via `strip-ansi-escapes`
 - Validates UTF-8 encoding
 
