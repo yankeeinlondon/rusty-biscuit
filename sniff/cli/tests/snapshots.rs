@@ -662,17 +662,16 @@ fn stable_aggregate_json(json: &Value) -> Value {
         })
         .unwrap_or_default();
 
-    // The detected standard binary resolves through the host's PATH, so its
-    // path asserts the host, not the projection.
+    // The detected standard binary resolves through the host's PATH, and the
+    // toolchain-free WSL archive deliberately has no Cargo. Its presence and
+    // path assert the host, not the projection.
     let monorepo_standards = match json["structure"]["monorepo_standards"].as_array() {
         Some(entries) => entries
             .iter()
             .map(|s| {
                 let mut entry = s.clone();
-                if let Some(binary) = entry.get_mut("binary")
-                    && binary.get("path").is_some_and(Value::is_string)
-                {
-                    binary["path"] = json!("<normalized>");
+                if entry.get("binary").is_some() {
+                    entry["binary"] = json!("<normalized>");
                 }
                 entry
             })

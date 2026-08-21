@@ -109,6 +109,7 @@ pub async fn run_pty_command(
 - Gives short-lived children time to attach before closing PTY input on macOS
 - Lets Windows commands exit during a bounded ConPTY attachment grace before synthesizing EOF
 - Sends cooked-mode console EOF to Windows commands still running after that grace
+- Lets ConPTY's asynchronous output pump become quiet after child exit before closing the master
 - Waits for the child before closing the master PTY so ConPTY readers receive EOF
 - Reads output via `mpsc::channel` in separate thread
 - Default timeout is 5 seconds on Unix and 10 seconds on Windows (configurable)

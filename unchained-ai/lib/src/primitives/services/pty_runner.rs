@@ -24,6 +24,14 @@ const OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(windows)]
 const CONPTY_ATTACH_GRACE: Duration = Duration::from_millis(250);
 
+/// ConPTY delivers child output through a separate pump after process exit.
+#[cfg(windows)]
+const CONPTY_OUTPUT_START_GRACE: Duration = Duration::from_secs(1);
+
+/// Once output is visible, a short quiet period lets the pump finish its tail.
+#[cfg(windows)]
+const CONPTY_OUTPUT_QUIET: Duration = Duration::from_millis(50);
+
 /// A step in an interactive PTY session.
 #[derive(Debug, Clone)]
 pub enum InteractiveStep {
@@ -61,6 +69,11 @@ fn run_pty_blocking(
     timeout_dur: Duration,
 ) -> Result<String, AgentStatusError> {
     use std::sync::mpsc;
+    #[cfg(windows)]
+    use std::sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    };
     use std::thread;
     use std::time::Instant;
 
@@ -99,9 +112,24 @@ fn run_pty_blocking(
     drop(pair.slave);
 
     let (tx, rx) = mpsc::channel();
+    #[cfg(windows)]
+    let observed_bytes = Arc::new(AtomicUsize::new(0));
+    #[cfg(windows)]
+    let reader_observed_bytes = Arc::clone(&observed_bytes);
     thread::spawn(move || {
         let mut raw_output = Vec::new();
-        let result = reader.read_to_end(&mut raw_output);
+        let mut buffer = [0u8; 4096];
+        let result = loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break Ok(()),
+                Ok(read) => {
+                    raw_output.extend_from_slice(&buffer[..read]);
+                    #[cfg(windows)]
+                    reader_observed_bytes.store(raw_output.len(), Ordering::Release);
+                }
+                Err(error) => break Err(error),
+            }
+        };
         tx.send((raw_output, result)).ok();
     });
 
@@ -182,6 +210,37 @@ fn run_pty_blocking(
     }
 
     let _ = child.wait();
+
+    // Closing the pseudo console can discard output still queued in ConPTY's
+    // asynchronous pump. Reader progress is the only completion signal exposed
+    // by portable-pty, so wait for output to start and then become quiet.
+    #[cfg(windows)]
+    {
+        let settle_start = Instant::now();
+        let mut last_observed = observed_bytes.load(Ordering::Acquire);
+        let mut last_change = Instant::now();
+
+        loop {
+            let observed = observed_bytes.load(Ordering::Acquire);
+            if observed != last_observed {
+                last_observed = observed;
+                last_change = Instant::now();
+            }
+
+            if observed > 0 && last_change.elapsed() >= CONPTY_OUTPUT_QUIET {
+                break;
+            }
+            if observed == 0 && settle_start.elapsed() >= CONPTY_OUTPUT_START_GRACE {
+                break;
+            }
+            if settle_start.elapsed() >= OUTPUT_DRAIN_TIMEOUT {
+                break;
+            }
+
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     drop(pair.master);
 
     let (raw_output, read_result) = rx.recv_timeout(OUTPUT_DRAIN_TIMEOUT).map_err(|_| {

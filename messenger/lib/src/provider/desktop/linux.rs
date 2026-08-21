@@ -689,7 +689,7 @@ mod tests {
     async fn native_fallback_delivers_when_no_helpers_installed() {
         // On a real Linux host, the D-Bus native path must succeed when no
         // helpers are registered. Headless CI runners often lack an
-        // org.freedesktop.Notifications service; that clear D-Bus transport
+        // usable org.freedesktop.Notifications service; a D-Bus transport
         // failure is accepted as an environment skip because it occurs after
         // the backend has selected the native fallback.
         let backend = LinuxBackend::with_helpers(LinuxDesktopConfig::default(), Vec::new());
@@ -704,10 +704,11 @@ mod tests {
                 if provider == ProviderKind::Desktop
                     && message.contains("D-Bus notification failed")
                     && (message.contains("org.freedesktop.Notifications")
-                        || message.to_ascii_lowercase().contains("service")) =>
+                        || message.to_ascii_lowercase().contains("service")
+                        || message.contains("Permission denied (os error 13)")) =>
             {
-                // Environment skip: the runner has no D-Bus notification
-                // daemon, which is expected on some Linux CI images.
+                // Environment skip: the runner has no usable D-Bus notification
+                // service, which is expected on some Linux and WSL CI images.
             }
             Err(other) => {
                 panic!("expected native receipt or notification-service skip, got {other:?}")

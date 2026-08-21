@@ -70,7 +70,7 @@ use std::time::Duration;
 use test_toolkit::{Backend, Level, require_level};
 
 mod common;
-use common::clear_no_color;
+use common::{CliProcessFixture, clear_no_color};
 
 /// Captures a `claudine context <args>` run inside a freshly spawned tmux
 /// session of `cols` × `rows` cells, then tears the session down.
@@ -81,6 +81,8 @@ use common::clear_no_color;
 /// emulator's capture, not claudine's raw stream; `COLUMNS` fixes the logical
 /// width.
 fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
+    let fixture = CliProcessFixture::named("claudine-context-l2");
+    fixture.seed_user_config();
     static SEQ: AtomicU32 = AtomicU32::new(0);
     let session = format!(
         "biscuit_ctx_l2_{}_{}",
@@ -116,13 +118,14 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
     clear_no_color(&mut harness);
 
     let claudine = cargo_bin("claudine").display().to_string();
+    let home = fixture.home().display().to_string().replace('\'', "'\\''");
     let cols_s = cols.to_string();
     // The environment is bound through `env` rather than the harness' inline
     // `KEY='v' cmd` prefix so the line can open with the `REPORT_SENTINEL`
     // print — see `report_plain_slice` for why the sentinel has to precede
     // claudine's first byte of output.
     let cmd = format!(
-        "printf '{REPORT_SENTINEL}\\n'; env FORCE_COLOR=1 COLUMNS={cols_s} {claudine} context {}",
+        "printf '{REPORT_SENTINEL}\\n'; env HOME='{home}' CLAUDINE_RENDEZVOUS_REPORT=false FORCE_COLOR=1 COLUMNS={cols_s} {claudine} context {}",
         args.join(" ")
     );
     let send = harness.send_command_with_env(&cmd, &[]);

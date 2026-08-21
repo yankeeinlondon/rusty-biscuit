@@ -16,10 +16,10 @@
 
 [test-groups]
 # Claudine's L1 library and CLI tests repeatedly perform repository discovery
-# and spawn nested processes. Unrestricted concurrency on high-core Windows
-# hosts starves otherwise bounded tests past the 30s termination ceiling; the
-# victim changes between runs, while the same suite is stable at four threads.
-claudine-windows-l1 = { max-threads = 4 }
+# and spawn nested processes. Unrestricted concurrency on contended hosts
+# starves otherwise bounded tests past the termination ceiling; the victim
+# changes between runs, while the same suite is stable at four threads.
+claudine-l1 = { max-threads = 4 }
 # Sniff exercises shared Windows host-network APIs from both direct tests and
 # spawned CLI processes. Windows may fail-fast a changing test process when
 # full network detections overlap, so these tests run one process at a time.
@@ -68,9 +68,8 @@ archive.include = [
 ]
 
 [[profile.default.overrides]]
-platform = { host = "cfg(windows)" }
-filter = 'package(claudine) + package(claudine-cli)'
-test-group = 'claudine-windows-l1'
+filter = '(package(claudine) + package(claudine-cli)) & !test(/level2_/) & !test(/level3_/) & !test(/browser_/) & !test(/real_/) & !test(/slow_/)'
+test-group = 'claudine-l1'
 
 [[profile.default.overrides]]
 platform = { host = "cfg(windows)" }
@@ -230,6 +229,10 @@ junit = { path = "test-results.xml" }
 [[profile.ci.overrides]]
 filter = 'test(/level2_/)'
 retries = 0
+
+[[profile.ci.overrides]]
+filter = '(package(claudine) + package(claudine-cli)) & !test(/level2_/) & !test(/level3_/) & !test(/browser_/) & !test(/real_/) & !test(/slow_/)'
+test-group = 'claudine-l1'
 
 [[profile.ci.overrides]]
 platform = { host = "cfg(windows)" }

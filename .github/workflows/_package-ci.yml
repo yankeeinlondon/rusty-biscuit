@@ -157,10 +157,6 @@ jobs:
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -248,10 +244,6 @@ jobs:
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -456,10 +448,6 @@ jobs:
       # clippy + rustfmt come from rust-toolchain.toml (the single authority).
       - name: Set up the pinned Rust toolchain
         run: rustup show
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -578,10 +566,6 @@ jobs:
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Provision and verify the tmux backend
         shell: bash
         env:
@@ -756,10 +740,6 @@ jobs:
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"

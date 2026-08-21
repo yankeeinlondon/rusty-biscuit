@@ -190,10 +190,6 @@ jobs:
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
