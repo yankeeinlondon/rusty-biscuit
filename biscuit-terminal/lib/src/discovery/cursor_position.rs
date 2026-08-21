@@ -32,7 +32,7 @@ pub struct CursorPosition {
 ///
 /// `Some(CursorPosition)` on success, `None` if the query fails or times out.
 pub fn cursor_position() -> Option<CursorPosition> {
-    cursor_position_with_timeout(Duration::from_millis(100))
+    cursor_position_with_timeout(Duration::from_secs(1))
 }
 
 /// Query cursor position with a custom timeout.
@@ -64,6 +64,13 @@ fn query_cursor_position(timeout: Duration) -> Result<CursorPosition, String> {
     if is_ci() {
         tracing::trace!("DSR cursor position query skipped: CI environment");
         return Err("CI environment".into());
+    }
+    if let Some(multiplexer) = super::osc_queries::query::detect_multiplexer() {
+        tracing::trace!(
+            multiplexer,
+            "DSR cursor position query skipped: terminal multiplexer"
+        );
+        return Err(format!("terminal multiplexer: {multiplexer}"));
     }
 
     let mut tty = std::fs::OpenOptions::new()

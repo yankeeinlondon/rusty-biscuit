@@ -64,7 +64,8 @@ pub(super) fn escalation_signal(interactive: bool, count: u8) -> i32 {
     }
 }
 
-/// Wait for the child, forwarding SIGINT/SIGTERM on repeated Ctrl-C.
+/// Wait for the child, acknowledging and forwarding SIGINT/SIGTERM on
+/// repeated Ctrl-C.
 ///
 /// When `child_in_own_pgroup` is true, the child was spawned with
 /// `process_group(0)` and the installed SIGINT handler manually forwards
@@ -99,6 +100,7 @@ pub(crate) fn wait_with_signal_handling(
                 return;
             }
             let count = counter.fetch_add(1, Ordering::SeqCst) + 1;
+            emit_interrupt_feedback(count);
             if !child_in_own_pgroup {
                 // Child shares our process group; the terminal already
                 // delivered SIGINT to it. Just track the count so the

@@ -200,7 +200,7 @@ fn get_terminal_default_color(app: &TerminalApp, code: u8) -> Option<RgbValue> {
 }
 
 /// Check if running inside a terminal multiplexer.
-pub(super) fn detect_multiplexer() -> Option<&'static str> {
+pub(crate) fn detect_multiplexer() -> Option<&'static str> {
     if std::env::var("TMUX").is_ok() {
         Some("tmux")
     } else if std::env::var("ZELLIJ").is_ok() {

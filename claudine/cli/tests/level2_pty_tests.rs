@@ -21,6 +21,7 @@ fn level2_pty_wrapper_summary_shows_badges() {
     write_executable(&bin_dir.join("goose"), "#!/bin/sh\necho 'child-output'\n");
 
     let mut cmd = Command::new(cargo_bin("claudine"));
+    cmd.current_dir(workspace.path());
     cmd.args(["goose", "-y", "-n", "--", "hi"]);
     cmd.env("NO_COLOR", "1");
     cmd.env("TERM_WIDTH", "80");
@@ -47,6 +48,7 @@ fn level2_pty_non_interactive_detection() {
     write_executable(&bin_dir.join("goose"), "#!/bin/sh\nexit 0\n");
 
     let mut cmd = Command::new(cargo_bin("claudine"));
+    cmd.current_dir(workspace.path());
     cmd.args(["goose", "--", "hi"]);
     cmd.env("NO_COLOR", "1");
     cmd.env("TERM_WIDTH", "80");

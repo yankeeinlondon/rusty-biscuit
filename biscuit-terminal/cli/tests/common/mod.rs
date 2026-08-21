@@ -22,6 +22,13 @@ pub use biscuit_test_harness::{CapturedFrame, TerminalHarness, skip_with_reason}
 
 pub mod pane_geometry;
 
+/// Builds a shell-safe command for the nextest-provided bt binary.
+pub fn bt_command(args: &str) -> String {
+    let bin = biscuit_test_harness::bin_exe!("bt");
+    let escaped = bin.to_string_lossy().replace('\'', "'\\''");
+    format!("'{escaped}' {args}")
+}
+
 /// Sends a `bt` command to the harness and waits for the terminal to
 /// settle.
 ///
@@ -29,11 +36,9 @@ pub mod pane_geometry;
 /// The binary path comes from nextest rather than the spawned login shell's
 /// `PATH`, which keeps clean and archived test runs equivalent.
 pub fn send_bt_command(harness: &mut impl TerminalHarness, args: &str) {
-    let bin = biscuit_test_harness::bin_exe!("bt");
-    let escaped = bin.to_string_lossy().replace('\'', "'\\''");
-    let cmd = format!("'{escaped}' {args}\n");
+    let cmd = format!("{}\n", bt_command(args));
     harness.send_text(cmd.as_bytes()).expect("send_text failed");
-    harness.settle();
+    biscuit_test_harness::capture_settled(harness).expect("bt command did not settle");
 }
 
 /// Polls [`TerminalHarness::capture`] until `predicate` accepts a frame

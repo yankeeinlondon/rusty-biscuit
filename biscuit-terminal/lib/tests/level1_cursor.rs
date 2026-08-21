@@ -29,7 +29,7 @@ const PROBE_DEADLINE: Duration = Duration::from_secs(5);
 /// probe has printed `marker`.
 ///
 /// Replying on observation rather than after a fixed sleep is load-bearing.
-/// `cursor_position` allows the terminal 100ms to respond, and
+/// `cursor_position` allows the terminal one second to respond, and
 /// `Session::spawn` returns long before the probe emits its query, so a timed
 /// reply spends most of that budget on process startup and lands with only a
 /// few tens of milliseconds to spare — enough on an idle host, not enough on a

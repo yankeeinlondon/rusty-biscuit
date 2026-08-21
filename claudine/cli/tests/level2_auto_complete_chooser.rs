@@ -209,16 +209,29 @@ fn drive_chooser(
         frame.plain
     );
 
+    let mut chooser_frame = harness.capture().expect("capture chooser before input");
     for key in pre_submit_keys {
+        let before = chooser_frame.raw.clone();
         match key {
             Key::Space => harness.send_space().expect("send pre-submit Space"),
             Key::Down => harness.send_down().expect("send pre-submit Down"),
         }
-        std::thread::sleep(Duration::from_millis(100));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut changed = false;
+        while Instant::now() < deadline {
+            chooser_frame = harness.capture().expect("capture chooser after input");
+            if chooser_frame.raw != before {
+                changed = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        assert!(
+            changed,
+            "chooser did not visibly respond to injected input; plain:\n{}",
+            chooser_frame.plain
+        );
     }
-
-    // Capture the chooser while it is still visible.
-    let chooser_frame = harness.capture().expect("capture chooser");
 
     harness.send_enter().expect("send Enter");
 

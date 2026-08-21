@@ -15,11 +15,13 @@
 # `just sanity` uses `!(...slow...)` to exclude every non-default tier in one shot.
 
 [test-groups]
-# Claudine's L1 library and CLI tests repeatedly perform repository discovery
-# and spawn nested processes. Unrestricted concurrency on contended hosts
-# starves otherwise bounded tests past the termination ceiling; the victim
-# changes between runs, while the same suite is stable at four threads.
+# Claudine's L1 library tests repeatedly perform repository discovery, so keep
+# their concurrency bounded on contended hosts.
 claudine-l1 = { max-threads = 4 }
+# Claudine's CLI integration tests spawn nested debug binaries. Even four-way
+# concurrency can starve those children on two-core CI runners long enough to
+# trip both their internal deadlines and nextest's termination ceiling.
+claudine-cli-l1 = { max-threads = 1 }
 # Sniff exercises shared Windows host-network APIs from both direct tests and
 # spawned CLI processes. Windows may fail-fast a changing test process when
 # full network detections overlap, so these tests run one process at a time.
@@ -68,8 +70,12 @@ archive.include = [
 ]
 
 [[profile.default.overrides]]
-filter = '(package(claudine) + package(claudine-cli)) & !test(/level2_/) & !test(/level3_/) & !test(/browser_/) & !test(/real_/) & !test(/slow_/)'
+filter = 'package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)'
 test-group = 'claudine-l1'
+
+[[profile.default.overrides]]
+filter = 'package(claudine-cli) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)'
+test-group = 'claudine-cli-l1'
 
 [[profile.default.overrides]]
 platform = { host = "cfg(windows)" }
@@ -231,8 +237,12 @@ filter = 'test(/level2_/)'
 retries = 0
 
 [[profile.ci.overrides]]
-filter = '(package(claudine) + package(claudine-cli)) & !test(/level2_/) & !test(/level3_/) & !test(/browser_/) & !test(/real_/) & !test(/slow_/)'
+filter = 'package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)'
 test-group = 'claudine-l1'
+
+[[profile.ci.overrides]]
+filter = 'package(claudine-cli) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)'
+test-group = 'claudine-cli-l1'
 
 [[profile.ci.overrides]]
 platform = { host = "cfg(windows)" }

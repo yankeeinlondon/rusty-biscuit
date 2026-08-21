@@ -989,7 +989,12 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
         perf_enabled: false,
         source_repo_root: None,
         shell_working_directory: None,
-        prepared_context: None,
+        prepared_context: Some(
+            darkmatter::markdown::compose::ComposeContext::capture_for_content(
+                temp_dir.path(),
+                "",
+            ),
+        ),
         file_ref_fallback_dir: None,
         file_resolution_context: None,
         name_coercion_keys: Vec::new(),

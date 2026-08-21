@@ -487,7 +487,8 @@ fn capture_env_only_leaves_ctx_empty() {
 
 #[test]
 fn capture_at_event_populates_ctx_and_env() {
-    let current = LifecycleCurrent::capture_at_event(std::path::Path::new("."));
+    let base = tempfile::TempDir::new().unwrap();
+    let current = LifecycleCurrent::capture_at_event(base.path());
     // `ctx.today` is always captured (date/time group, zero I/O).
     assert!(
         current.ctx.get("today").and_then(|v| v.as_str()).is_some(),

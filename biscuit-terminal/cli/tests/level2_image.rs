@@ -33,7 +33,7 @@ use biscuit_test_harness::wezterm::WezTermHarness;
 use common::pane_geometry::{
     find_row_of, parse_debug_cursor_before, parse_debug_cursor_rows, parse_debug_image_height,
 };
-use common::send_bt_command;
+use common::{bt_command, send_bt_command};
 use serial_test::serial;
 use std::time::Duration;
 use test_toolkit::{Backend, Level, require_level};
@@ -263,14 +263,15 @@ fn level2_warp_uses_floor_rounding() {
     // cells is almost always non-integer, ensuring ceil != floor and
     // the test actually distinguishes the rounding branches.
     let path = fixture_path("13x13.png");
+    let cmd = bt_command(&format!("image --debug --width 41 {path}"));
     harness
         .send_command_with_env(
-            &format!("bt image --debug --width 41 {path}"),
+            &cmd,
             &[("TERM_PROGRAM", "WarpTerminal")],
         )
         .expect("send_command_with_env failed");
 
-    let frame = harness.capture().expect("capture failed");
+    let frame = biscuit_test_harness::capture_settled(harness).expect("capture failed");
 
     let (_raw, ceil, floor) = parse_debug_image_height(&frame.plain).unwrap_or_else(|| {
         panic!(
@@ -324,11 +325,12 @@ fn level2_image_default_uses_ceil_rounding() {
     // (each command runs in a freshly forked subshell that does not
     // inherit a polluted parent env).
     let path = fixture_path("13x13.png");
+    let cmd = bt_command(&format!("image --debug {path}"));
     harness
-        .send_command_with_env(&format!("bt image --debug {path}"), &[])
+        .send_command_with_env(&cmd, &[])
         .expect("send_command_with_env failed");
 
-    let frame = harness.capture().expect("capture failed");
+    let frame = biscuit_test_harness::capture_settled(harness).expect("capture failed");
     let (_raw, ceil, floor) = parse_debug_image_height(&frame.plain).unwrap_or_else(|| {
         panic!(
             "could not parse `image height:` from debug output. plain:\n{}",

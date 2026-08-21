@@ -16,6 +16,7 @@ mod common;
 use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
+use common::{bt_command, capture_until};
 use common::pane_geometry::{find_row_of, parse_debug_cursor_before, parse_debug_cursor_rows};
 use common::send_bt_command;
 use serial_test::serial;
@@ -71,16 +72,16 @@ fn level2_cursor_lands_below_rendered_image() {
     // a single pane height and prevents post-image scrolling from
     // shifting absolute row indices.
     let path = fixture_path("tiny.png");
-    send_bt_command(harness, &format!("image --debug --width 2 {path}"));
-
-    // Append a sentinel that must land *below* the rendered image area.
+    let command = format!(
+        "{}; printf '%s%s\\n' 'SENTINEL_BELOW_' 'IMAGE'\n",
+        bt_command(&format!("image --debug --width 2 {path}"))
+    );
     harness
-        .send_text(b"printf 'SENTINEL_BELOW_IMAGE\\n'\n")
+        .send_text(command.as_bytes())
         .expect("send_text failed");
-    harness.settle();
-    std::thread::sleep(Duration::from_millis(300));
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = capture_until(harness, Duration::from_secs(5), |frame| {
+        frame.plain.contains("SENTINEL_BELOW_IMAGE")
+    });
     let plain = &frame.plain;
 
     // Parse the renderer's reported geometry from `--debug` output.

@@ -49,11 +49,19 @@ const QUOTE_NEEDLE: &str = "kingfisher";
 /// (`renderable::style::BorderSides::Sides { left: true, .. }`).
 const BORDER_GLYPH: char = '│';
 
+/// Resolves the archived test binary instead of relying on the terminal
+/// shell's PATH, which does not include nextest's archive layout.
+fn bt_command(args: &str) -> String {
+    let bin = biscuit_test_harness::bin_exe!("bt");
+    let escaped = bin.to_string_lossy().replace('\'', "'\\''");
+    format!("'{escaped}' {args}")
+}
+
 /// Sends a `bt quote` with color forced on and returns the captured frame.
 fn capture_styled_quote<H: TerminalHarness>(harness: &mut H) -> CapturedFrame {
     harness
         .send_command_with_env(
-            &format!("bt quote \"{QUOTE_TEXT}\""),
+            &bt_command(&format!("quote \"{QUOTE_TEXT}\"")),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
@@ -197,7 +205,7 @@ const STYLED_QUOTE_INPUT: &str = "<red>alpha</red> bravo";
 fn assert_styled_inline_content<H: TerminalHarness>(harness: &mut H) {
     harness
         .send_command_with_env(
-            &format!("bt quote \"{STYLED_QUOTE_INPUT}\""),
+            &bt_command(&format!("quote \"{STYLED_QUOTE_INPUT}\"")),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
@@ -278,9 +286,12 @@ fn level2_block_quote_styled_inline_content_in_kitty() {
 
 /// Runs a `bt` command with color forced on and returns the captured frame.
 fn capture_bt<H: TerminalHarness>(harness: &mut H, cmd: &str) -> CapturedFrame {
+    let args = cmd
+        .strip_prefix("bt ")
+        .expect("capture_bt command must start with bt");
     harness
-        .send_command_with_env(cmd, &[("FORCE_COLOR", "1")])
-        .expect("send_command_with_env failed");
+        .send_command_with_env(&bt_command(args), &[("FORCE_COLOR", "1")])
+        .unwrap_or_else(|error| panic!("failed to send {cmd:?}: {error}"));
     biscuit_test_harness::capture_settled(harness).expect("capture failed")
 }
 
@@ -289,7 +300,9 @@ fn capture_bt<H: TerminalHarness>(harness: &mut H, cmd: &str) -> CapturedFrame {
 /// invocation `echo_marker`.
 fn output_row(frame: &CapturedFrame, echo_marker: &str, needle: &str) -> Option<String> {
     let raw_lines: Vec<&str> = frame.raw.lines().collect();
-    for (i, plain) in frame.plain.lines().enumerate() {
+    let plain_lines: Vec<&str> = frame.plain.lines().collect();
+    for i in (0..plain_lines.len()).rev() {
+        let plain = plain_lines[i];
         if plain.contains(echo_marker) {
             continue;
         }
@@ -515,11 +528,12 @@ fn assert_table_striped<H: TerminalHarness>(harness: &mut H) {
 /// FORCE_COLOR. This mirrors the public example path printed in the command
 /// trailer and exercises ordinary biscuit-terminal color detection.
 fn assert_table_example_striped_without_force_color<H: TerminalHarness>(harness: &mut H) {
+    let cmd = format!(
+        "env -u NO_COLOR -u FORCE_COLOR -u CLICOLOR_FORCE {}",
+        bt_command("table --example")
+    );
     harness
-        .send_command_with_env(
-            "env -u NO_COLOR -u FORCE_COLOR -u CLICOLOR_FORCE bt table --example",
-            &[],
-        )
+        .send_command_with_env(&cmd, &[])
         .expect("send_command_with_env failed");
     let frame = biscuit_test_harness::capture_settled(harness).expect("capture failed");
 
@@ -612,17 +626,18 @@ fn assert_table_styled<H: TerminalHarness>(harness: &mut H) {
 // terminal. The cell geometry and SGR are pinned by Level-1 tests in
 // `render_tree::render`; these confirm the user-visible result on the screen.
 
-/// The first plain capture row carrying `needle` (skipping the command echo
+/// The last plain capture row carrying `needle` (skipping the command echo
 /// `echo_marker`), paired with its leading-space count.
 fn row_leading_spaces(frame: &CapturedFrame, echo_marker: &str, needle: &str) -> Option<usize> {
     frame
         .plain
         .lines()
+        .rev()
         .find(|plain| !plain.contains(echo_marker) && plain.contains(needle))
         .map(|line| line.len() - line.trim_start().len())
 }
 
-/// The leading-space count and trimmed visible width of the first plain
+/// The leading-space count and trimmed visible width of the last plain
 /// capture row carrying `needle` (skipping the command echo `echo_marker`).
 ///
 /// For a borderless, unpadded `FitContent` box the trimmed width *is* the drawn
@@ -635,6 +650,7 @@ fn row_lead_and_width(
     frame
         .plain
         .lines()
+        .rev()
         .find(|plain| !plain.contains(echo_marker) && plain.contains(needle))
         .map(|line| {
             let lead = line.len() - line.trim_start().len();
@@ -670,6 +686,7 @@ fn box_width_for(frame: &CapturedFrame, needle: &str) -> usize {
     frame
         .plain
         .lines()
+        .rev()
         .find(|l| !l.contains("bt block") && l.contains('│') && l.contains(needle))
         .and_then(boxed_row_width)
         .unwrap_or_else(|| {
@@ -1023,6 +1040,7 @@ fn assert_block_painted_padding_and_transparent_margin<H: TerminalHarness>(harne
     let row = frame
         .raw
         .lines()
+        .rev()
         .find(|l| !l.contains("bt block") && l.contains("padword"))
         .unwrap_or_else(|| panic!("no painted content row.\nraw:\n{}", frame.raw))
         .to_string();

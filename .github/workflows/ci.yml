@@ -186,7 +186,6 @@ jobs:
           cargo -V
           just --version
           cargo nextest --version
-          protoc --version
       # Proves a fresh checkout runs Cargo with no rustc wrapper at all. The
       # repository tracks none; RUSTC_WRAPPER is cleared explicitly so a stray
       # environment value cannot mask a broken clean-checkout path.
