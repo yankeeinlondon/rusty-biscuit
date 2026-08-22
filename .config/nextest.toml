@@ -82,6 +82,13 @@ platform = { host = "cfg(windows)" }
 filter = 'package(sniff) + package(sniff-cli)'
 test-group = 'sniff-windows-l1'
 
+# This assertion measures a complete host discovery against a wall-clock
+# ceiling. Reserve the runner while it executes so concurrent filesystem-heavy
+# Sniff tests cannot turn scheduler contention into a false performance failure.
+[[profile.default.overrides]]
+filter = 'test(=test_detect_completes_in_reasonable_time)'
+threads-required = "num-cpus"
+
 # Tests that intentionally wait on a real clock (e.g. rate-limit pause policies)
 # need an even longer leash than the default termination window.
 [[profile.default.overrides]]
@@ -248,6 +255,10 @@ test-group = 'claudine-cli-l1'
 platform = { host = "cfg(windows)" }
 filter = 'package(sniff) + package(sniff-cli)'
 test-group = 'sniff-windows-l1'
+
+[[profile.ci.overrides]]
+filter = 'test(=test_detect_completes_in_reasonable_time)'
+threads-required = "num-cpus"
 
 # The browser tier runs serially (see `_test_browser`) but does not retry.
 [[profile.ci.overrides]]

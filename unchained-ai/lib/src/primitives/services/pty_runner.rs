@@ -28,9 +28,9 @@ const CONPTY_ATTACH_GRACE: Duration = Duration::from_millis(250);
 #[cfg(windows)]
 const CONPTY_OUTPUT_START_GRACE: Duration = Duration::from_secs(1);
 
-/// Once output is visible, a short quiet period lets the pump finish its tail.
+/// Once output is visible, a quiet period lets the pump finish its tail under load.
 #[cfg(windows)]
-const CONPTY_OUTPUT_QUIET: Duration = Duration::from_millis(50);
+const CONPTY_OUTPUT_QUIET: Duration = Duration::from_millis(500);
 
 /// A step in an interactive PTY session.
 #[derive(Debug, Clone)]

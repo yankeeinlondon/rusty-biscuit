@@ -29,6 +29,38 @@ pub fn bt_command(args: &str) -> String {
     format!("'{escaped}' {args}")
 }
 
+/// Finds the newest command-echo row where a `bt` subcommand marker finishes.
+///
+/// Real terminals can wrap the archived binary's absolute path at any byte,
+/// including inside the `bt` filename. Joining a bounded number of preceding
+/// rows keeps command-region assertions stable without selecting stale
+/// scrollback from an earlier test.
+pub fn find_bt_command_end(lines: &[&str], subcommand: &str) -> Option<usize> {
+    let markers = [
+        format!("bt {subcommand}"),
+        format!("bt' {subcommand}"),
+        format!("bt.exe' {subcommand}"),
+    ];
+
+    for end in (0..lines.len()).rev() {
+        let start = end.saturating_sub(3);
+        let prefix = lines[start..end]
+            .iter()
+            .map(|line| line.trim())
+            .collect::<String>();
+        let prefix_len = prefix.len();
+        let joined = format!("{prefix}{}", lines[end].trim());
+        if markers.iter().any(|marker| {
+            joined
+                .match_indices(marker)
+                .any(|(index, value)| index + value.len() > prefix_len)
+        }) {
+            return Some(end);
+        }
+    }
+    None
+}
+
 /// Sends a `bt` command to the harness and waits for the terminal to
 /// settle.
 ///

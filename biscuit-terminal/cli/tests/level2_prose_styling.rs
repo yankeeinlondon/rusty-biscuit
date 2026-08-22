@@ -16,7 +16,7 @@ use biscuit_test_harness::kitty::KittyHarness;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
-use common::send_bt_command;
+use common::{bt_command, send_bt_command};
 use serial_test::serial;
 use test_toolkit::{Backend, Level, require_level};
 use unicode_width::UnicodeWidthStr;
@@ -51,7 +51,7 @@ fn level2_prose_emits_sgr_in_real_terminal() {
     // spawned shell's environment AND from `bt`'s TTY detection.
     harness
         .send_command_with_env(
-            "bt prose --force-color \"<red>x</red>\"",
+            &bt_command("prose --force-color \"<red>x</red>\""),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
@@ -115,7 +115,7 @@ fn level2_no_color_strips_sgr_in_real_terminal() {
     // (portable inline-env syntax; works regardless of the developer's
     // login shell).
     harness
-        .send_command_with_env("bt prose \"<red>x</red>\"", &[("NO_COLOR", "1")])
+        .send_command_with_env(&bt_command("prose \"<red>x</red>\""), &[("NO_COLOR", "1")])
         .expect("send_command_with_env failed");
 
     let frame = harness.capture().expect("capture failed");
@@ -143,7 +143,7 @@ fn level2_prose_emits_sgr_in_kitty() {
     // symmetry with the WezTerm test.
     harness
         .send_command_with_env(
-            "bt prose --force-color \"<red>x</red>\"",
+            &bt_command("prose --force-color \"<red>x</red>\""),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
@@ -387,7 +387,7 @@ const RICH_EXPECTED_SGR: &[Sgr] = &[
 fn assert_rich_prose_sgr<H: TerminalHarness>(harness: &mut H) {
     harness
         .send_command_with_env(
-            &format!("bt prose --force-color \"{RICH_PROSE_INPUT}\""),
+            &bt_command(&format!("prose --force-color \"{RICH_PROSE_INPUT}\"")),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
@@ -461,7 +461,9 @@ const NESTED_CODE_BLOCK_INPUT: &str =
 fn assert_code_block_restores_parent_style<H: TerminalHarness>(harness: &mut H) {
     harness
         .send_command_with_env(
-            &format!("bt prose --force-color \"{NESTED_CODE_BLOCK_INPUT}\""),
+            &bt_command(&format!(
+                "prose --force-color \"{NESTED_CODE_BLOCK_INPUT}\""
+            )),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
@@ -593,7 +595,7 @@ fn level2_prose_nested_emphasis_visible_text_in_wezterm() {
 fn assert_prose_inverse_sgr<H: TerminalHarness>(harness: &mut H) {
     harness
         .send_command_with_env(
-            "bt prose --force-color \"<inverse>x</inverse>\"",
+            &bt_command("prose --force-color \"<inverse>x</inverse>\""),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
@@ -778,14 +780,6 @@ fn decode_sgr_params(params: &[i64], out: &mut Vec<Sgr>) {
     }
 }
 
-/// Return the raw (escape-bearing) capture line for the `bt prose`
-/// output row whose visible text, with all whitespace removed, equals
-/// `compact_plain`.
-///
-/// The search starts after the command-echo line so the echoed input
-/// (which contains the literal markup, not rendered cells) is skipped.
-/// Isolating the output row keeps a colored shell prompt from
-/// satisfying SGR assertions.
 fn is_bt_prose_command(line: &str) -> bool {
     line.contains("bt prose")
         || line.contains("bt' prose")
@@ -795,9 +789,7 @@ fn is_bt_prose_command(line: &str) -> bool {
 fn find_bt_output_line<'a>(frame: &'a CapturedFrame, compact_plain: &str) -> Option<&'a str> {
     let raw_lines: Vec<&str> = frame.raw.lines().collect();
     let plain_lines: Vec<&str> = frame.plain.lines().collect();
-    let cmd_idx = plain_lines
-        .iter()
-        .position(|line| is_bt_prose_command(line))?;
+    let cmd_idx = common::find_bt_command_end(&plain_lines, "prose")?;
     for (i, plain) in plain_lines.iter().enumerate().skip(cmd_idx + 1) {
         let compact: String = plain.chars().filter(|c| !c.is_whitespace()).collect();
         if compact == compact_plain {
@@ -819,10 +811,7 @@ fn find_bt_output_line<'a>(frame: &'a CapturedFrame, compact_plain: &str) -> Opt
 fn rendered_region_effects(frame: &CapturedFrame) -> Vec<Sgr> {
     let raw_lines: Vec<&str> = frame.raw.lines().collect();
     let plain_lines: Vec<&str> = frame.plain.lines().collect();
-    let Some(cmd_idx) = plain_lines
-        .iter()
-        .position(|line| is_bt_prose_command(line))
-    else {
+    let Some(cmd_idx) = common::find_bt_command_end(&plain_lines, "prose") else {
         return Vec::new();
     };
     let mut effects = Vec::new();
@@ -873,28 +862,14 @@ fn assert_osc8_link_present(frame: &CapturedFrame, url: &str, label: &str) {
 /// Asserts that the `bt` output region of `frame` contains no SGR red
 /// sequences (`\x1b[31m`, `\x1b[91m`).
 ///
-/// The bt output region is defined as: starting from the line whose
-/// *plain* form contains a `NO_COLOR=` prefix and `bt prose`, up to
-/// but not including the next shell-prompt line (lines whose plain
-/// form ends in `$ `, `% `, or `# `). We pair the raw and plain
-/// forms by line index so we can reason about prompts (which may
-/// themselves carry SGR from a colored prompt theme like starship)
-/// without false-positiving on the shell's own colors.
-///
-/// The predicate matches both the bare `NO_COLOR=1` form and the
-/// shell-quoted `NO_COLOR='1'` form emitted by
-/// [`TerminalHarness::send_command_with_env`].
+/// The bt output region starts after the most recent, potentially wrapped,
+/// `bt prose` command echo and ends before the next shell prompt. Raw and plain
+/// rows are paired by index so prompt styling cannot satisfy the assertion.
 fn assert_no_sgr_red(frame: &CapturedFrame) {
     let raw_lines: Vec<&str> = frame.raw.lines().collect();
     let plain_lines: Vec<&str> = frame.plain.lines().collect();
 
-    // Locate the command-issue line. We match on plain form so SGR
-    // bytes within the captured prompt don't break the search. The
-    // `NO_COLOR=` prefix matches both `NO_COLOR=1` and the
-    // single-quote-escaped `NO_COLOR='1'` produced by the harness.
-    let cmd_idx = plain_lines
-        .iter()
-        .position(|line| line.contains("NO_COLOR=") && is_bt_prose_command(line));
+    let cmd_idx = common::find_bt_command_end(&plain_lines, "prose");
 
     let Some(cmd_idx) = cmd_idx else {
         // We could not locate the command line; the test plainly cannot

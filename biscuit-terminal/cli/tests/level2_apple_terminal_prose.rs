@@ -93,9 +93,15 @@ fn level2_apple_terminal_link_fallback_visible() {
     //
     // The inner double-quotes in the bt argument are escaped at the
     // shell level: bash sees `bt prose '<a href="https://example.com">click here</a>'`.
+    let bt = common::bt_command(
+        "prose '<a href=\"https://example.com\">click here</a>'",
+    );
     harness
         .send_text(
-            b"printf '__BT_START__\\n'; bt prose '<a href=\"https://example.com\">click here</a>'; printf '\\n__BT_END__\\n'\n",
+            format!(
+                "printf '__BT_START__\\n'; {bt}; printf '\\n__BT_END__\\n'\n"
+            )
+            .as_bytes(),
         )
         .expect("send_text failed");
     harness.settle();
@@ -170,9 +176,15 @@ fn level2_apple_terminal_styled_link_fallback_escapes_bracket() {
     harness.send_text(b"clear\n").expect("send_text failed");
     harness.settle();
 
+    let bt = common::bt_command(
+        "prose '<a href=\"https://example.com\"><b>x</b>[1]</a>'",
+    );
     harness
         .send_text(
-            b"printf '__BT_START__\\n'; bt prose '<a href=\"https://example.com\"><b>x</b>[1]</a>'; printf '\\n__BT_END__\\n'\n",
+            format!(
+                "printf '__BT_START__\\n'; {bt}; printf '\\n__BT_END__\\n'\n"
+            )
+            .as_bytes(),
         )
         .expect("send_text failed");
     harness.settle();
@@ -255,9 +267,15 @@ fn level2_apple_terminal_double_underline_plain_text_visible() {
     // window excludes shell prompts, command echoes, and other chrome
     // that varies with the user's login shell. Assumes a POSIX-ish
     // shell (zsh/bash on macOS) where `printf` and `;` are available.
+    let bt = common::bt_command(
+        "prose '<double-underline>important text</double-underline>'",
+    );
     harness
         .send_text(
-            b"printf '__BT_START__\\n'; bt prose '<double-underline>important text</double-underline>'; printf '\\n__BT_END__\\n'\n",
+            format!(
+                "printf '__BT_START__\\n'; {bt}; printf '\\n__BT_END__\\n'\n"
+            )
+            .as_bytes(),
         )
         .expect("send_text failed");
     harness.settle();
