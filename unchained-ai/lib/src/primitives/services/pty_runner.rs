@@ -22,7 +22,7 @@ const OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 /// child a bounded opportunity to exit before synthesizing console EOF so a
 /// fast command cannot lose its output when the input pipe closes.
 #[cfg(windows)]
-const CONPTY_ATTACH_GRACE: Duration = Duration::from_millis(250);
+const CONPTY_ATTACH_GRACE: Duration = Duration::from_secs(5);
 
 /// ConPTY delivers child output through a separate pump after process exit.
 #[cfg(windows)]
