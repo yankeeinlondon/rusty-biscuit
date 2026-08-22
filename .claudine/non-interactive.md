@@ -11,11 +11,21 @@ You are running in a non-interactive session — the user cannot answer prompts 
 
 - Git commits with GPG/SSH signing enabled will block waiting for a passphrase
   via `gpg-agent` / `ssh-agent` / `pinentry`. Before running `git commit` in a
-  non-interactive session, assume the passphrase is NOT cached. If a commit
-  appears to hang, abort the command, report it, and do not retry.
+  non-interactive session, assume the passphrase is NOT cached unless an
+  included host-specific system prompt explicitly provides a non-interactive,
+  agent-backed signing procedure. If a commit appears to hang, abort the
+  command, report it, and do not retry.
 - Never run `gpg`, `ssh`, `ssh-add`, `sudo`, `op signin`, `aws sso login`,
   `gh auth login`, `docker login`, `npm login`, or any credential helper that
   may prompt — even if stdin is closed, many of these open `/dev/tty` directly.
+  An included host-specific system prompt may authorize exact non-interactive
+  `git commit` and signature-verification commands when the host agent handles
+  signing without a prompt; that exception does not authorize interactive key
+  management or credential setup.
+- An included host-specific system prompt may authorize exact SSH aliases for
+  unattended local build environments when every invocation uses
+  `BatchMode=yes`. This does not authorize interactive SSH authentication or
+  unknown hosts.
 
 ### Sub-agent propagation
 
