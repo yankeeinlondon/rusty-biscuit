@@ -50,12 +50,9 @@
 //! ## Styling (L2 styling-capture pattern)
 //!
 //! `FORCE_COLOR=1` routes claudine through an optimistic terminal so the
-//! capture reflects production styling. The `AgentNative` error block renders
-//! its `Agent Error` label as `<red>` prose, which emits the 3-bit red
-//! foreground (`\x1b[31m`) — asserted from `frame.raw`. Per the L2 capture
-//! caveats, the assertion targets stable visible substrings on `frame.plain`
-//! and the semantic 3-bit red SGR on `frame.raw`, never byte-equality across
-//! captures or a broad truecolor (`38;2`) matcher.
+//! capture reflects production styling. The `AgentNative` error block uses its
+//! red semantic border color; the assertion is anchored on the row carrying
+//! `Agent Error` and accepts the terminal-depth encodings of that color.
 //!
 //! ## Pane height (no scrollback)
 //!
@@ -70,7 +67,7 @@
 #![cfg(unix)]
 
 mod common;
-use common::{augmented_path, clear_no_color, write_executable};
+use common::{augmented_path, clear_no_color, strip_ansi, write_executable};
 
 use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name};
@@ -81,17 +78,24 @@ use std::time::{Duration, Instant};
 use tempfile::tempdir;
 use test_toolkit::{Backend, Level, require_level};
 
-/// Whether `raw` selects the basic or bright red foreground (`31`/`91`),
-/// matching both the bare `\x1b[31m` form and the combined `\x1b[1;31m`
-/// (bold+red) the bold label can emit. Per the "<red> emits 3-bit `\x1b[31m`"
-/// note the prose `<red>` label always lands on the 3-bit code, so this
-/// deliberately carries **no** broad `38;2` truecolor branch (which would
-/// false-match an unrelated truecolor span).
-fn has_3bit_red(raw: &str) -> bool {
-    raw.contains("\x1b[31m")
-        || raw.contains("\x1b[91m")
-        || raw.contains(";31m")
-        || raw.contains(";91m")
+const AGENT_ERROR_RED_SGR_FORMS: [&str; 7] = [
+    "38;2;193;0;7",
+    "38:2::193:0:7",
+    "38:2:193:0:7",
+    "38;5;160",
+    "38:5:160",
+    "\x1b[31m",
+    "\x1b[91m",
+];
+
+fn agent_error_row_has_red(raw: &str) -> bool {
+    let row = raw
+        .lines()
+        .find(|line| strip_ansi(line).contains("Agent Error"))
+        .unwrap_or_else(|| panic!("no captured row contains `Agent Error`.\nraw:\n{raw}"));
+    AGENT_ERROR_RED_SGR_FORMS
+        .iter()
+        .any(|form| row.contains(form))
 }
 
 /// Drive a wrapped OpenCode run whose fake provider emits the stalled-generation
@@ -311,11 +315,11 @@ done
         );
     }
 
-    // AgentNative styling: the `<red>` label lands on the 3-bit red foreground
-    // (`\x1b[31m`), asserted semantically from the captured escape bytes.
+    // Anchor the color assertion on the block label row so unrelated colored
+    // output in the pane cannot satisfy it.
     assert!(
-        has_3bit_red(&last_raw),
-        "the AgentNative stalled-generation block must render with the 3-bit \
-         red foreground SGR.\nraw:\n{last_raw}",
+        agent_error_row_has_red(&last_raw),
+        "the AgentNative stalled-generation block must render with its red \
+         semantic border.\nraw:\n{last_raw}",
     );
 }
