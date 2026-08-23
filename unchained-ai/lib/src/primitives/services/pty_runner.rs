@@ -1,7 +1,7 @@
 use std::io::{Read, Write};
 use std::time::Duration;
 
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use portable_pty::{CommandBuilder, PtySize, PtySystem, native_pty_system};
 use strip_ansi_escapes::strip;
 
 use super::error::AgentStatusError;
@@ -10,27 +10,12 @@ use super::error::AgentStatusError;
 #[cfg(not(windows))]
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// ConPTY can consume five seconds establishing cursor inheritance before the
-/// child starts, so Windows needs a separate command-execution allowance.
+/// Windows commands may need more time to initialize than Unix commands.
 #[cfg(windows)]
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// ConPTY may need its cursor-inheritance timeout to expire during shutdown.
+/// Maximum time to wait for the PTY reader to observe shutdown.
 const OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
-
-/// ConPTY does not expose an event for completion of child attachment. Give a
-/// child a bounded opportunity to exit before synthesizing console EOF so a
-/// fast command cannot lose its output when the input pipe closes.
-#[cfg(windows)]
-const CONPTY_ATTACH_GRACE: Duration = Duration::from_secs(5);
-
-/// ConPTY delivers child output through a separate pump after process exit.
-#[cfg(windows)]
-const CONPTY_OUTPUT_START_GRACE: Duration = Duration::from_secs(1);
-
-/// Once output is visible, a quiet period lets the pump finish its tail under load.
-#[cfg(windows)]
-const CONPTY_OUTPUT_QUIET: Duration = Duration::from_millis(500);
 
 /// A step in an interactive PTY session.
 #[derive(Debug, Clone)]
@@ -69,11 +54,6 @@ fn run_pty_blocking(
     timeout_dur: Duration,
 ) -> Result<String, AgentStatusError> {
     use std::sync::mpsc;
-    #[cfg(windows)]
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
     use std::thread;
     use std::time::Instant;
 
@@ -112,10 +92,6 @@ fn run_pty_blocking(
     drop(pair.slave);
 
     let (tx, rx) = mpsc::channel();
-    #[cfg(windows)]
-    let observed_bytes = Arc::new(AtomicUsize::new(0));
-    #[cfg(windows)]
-    let reader_observed_bytes = Arc::clone(&observed_bytes);
     thread::spawn(move || {
         let mut raw_output = Vec::new();
         let mut buffer = [0u8; 4096];
@@ -124,8 +100,6 @@ fn run_pty_blocking(
                 Ok(0) => break Ok(()),
                 Ok(read) => {
                     raw_output.extend_from_slice(&buffer[..read]);
-                    #[cfg(windows)]
-                    reader_observed_bytes.store(raw_output.len(), Ordering::Release);
                 }
                 Err(error) => break Err(error),
             }
@@ -133,42 +107,14 @@ fn run_pty_blocking(
         tx.send((raw_output, result)).ok();
     });
 
-    let start = Instant::now();
-
     // Closing PTY input immediately can race a short-lived child attaching and
     // discard its output on macOS.
     #[cfg(target_os = "macos")]
     thread::sleep(Duration::from_millis(20));
 
-    // portable-pty requires callers to close the master writer even when the
-    // command receives no input; otherwise ConPTY may keep a child waiting for
-    // stdin indefinitely. A child that exits during the attachment grace needs
-    // no synthesized EOF, which avoids closing its console before output lands.
     #[cfg(windows)]
-    let child_exited = loop {
-        match child.try_wait() {
-            Ok(Some(_)) => break true,
-            Ok(None) => {}
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(AgentStatusError::PtyReadError(format!(
-                    "Failed to query child status: {}",
-                    error
-                )));
-            }
-        }
-
-        if start.elapsed() >= CONPTY_ATTACH_GRACE.min(timeout_dur) {
-            break false;
-        }
-
-        thread::sleep(Duration::from_millis(10));
-    };
-    #[cfg(windows)]
-    if !child_exited {
-        // Closing a ConPTY input pipe does not synthesize console EOF. Send the
-        // cooked-mode Windows EOF sequence before releasing the pipe.
+    {
+        // Closing a ConPTY input pipe does not synthesize console EOF.
         writer
             .write_all(b"\x1a\r\n")
             .map_err(|e| AgentStatusError::PtyWriteError(format!("Failed to send EOF: {}", e)))?;
@@ -178,12 +124,9 @@ fn run_pty_blocking(
     }
     drop(writer);
 
-    loop {
-        #[cfg(windows)]
-        if child_exited {
-            break;
-        }
+    let start = Instant::now();
 
+    loop {
         match child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) => {}
@@ -210,37 +153,6 @@ fn run_pty_blocking(
     }
 
     let _ = child.wait();
-
-    // Closing the pseudo console can discard output still queued in ConPTY's
-    // asynchronous pump. Reader progress is the only completion signal exposed
-    // by portable-pty, so wait for output to start and then become quiet.
-    #[cfg(windows)]
-    {
-        let settle_start = Instant::now();
-        let mut last_observed = observed_bytes.load(Ordering::Acquire);
-        let mut last_change = Instant::now();
-
-        loop {
-            let observed = observed_bytes.load(Ordering::Acquire);
-            if observed != last_observed {
-                last_observed = observed;
-                last_change = Instant::now();
-            }
-
-            if observed > 0 && last_change.elapsed() >= CONPTY_OUTPUT_QUIET {
-                break;
-            }
-            if observed == 0 && settle_start.elapsed() >= CONPTY_OUTPUT_START_GRACE {
-                break;
-            }
-            if settle_start.elapsed() >= OUTPUT_DRAIN_TIMEOUT {
-                break;
-            }
-
-            thread::sleep(Duration::from_millis(10));
-        }
-    }
-
     drop(pair.master);
 
     let (raw_output, read_result) = rx.recv_timeout(OUTPUT_DRAIN_TIMEOUT).map_err(|_| {

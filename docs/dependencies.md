@@ -2,6 +2,10 @@
 
 ## Recent Dependency Notes
 
+- `unchained-ai/lib` aliases `xpty` as `portable-pty` so the existing
+  cross-platform PTY API remains stable while Windows ConPTY sessions avoid
+  cursor inheritance, whose open-time handshake cannot be answered through
+  `portable-pty` before its pipe handles are returned.
 - `messenger/lib` uses `test-toolkit` only as a development dependency so its
   desktop-stub resolver tests restore `MESSENGER_STUB_BIN_DIR` safely while
   serializing process-environment mutation.
