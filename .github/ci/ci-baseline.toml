@@ -64,44 +64,6 @@
 
 schema_version = 2
 
-# ---------------------------------------------------------------------------
-# Windows L1 failures
-# ---------------------------------------------------------------------------
-
-# Candidate from the area-keyed baseline (run 30323254931, unverified). The
-# biscuit-tui area ran biscuit-tui + biscuit-tui-cli; the CLI carries the
-# integration tests, so it is the candidate. Confirm or split on the bridging
-# run.
-[[failure]]
-package = "biscuit-tui-cli"
-environment = "windows-latest"
-tier = "L1"
-owner = "@yankeeinlondon"
-reason = "migrated from the area-keyed baseline (run 30323254931), unverified; attributed to biscuit-tui-cli as the integration-test package. Candidate pending the Phase 4 bridging run"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-[[failure]]
-package = "darkmatter-cli"
-environment = "windows-latest"
-tier = "L1"
-owner = "@yankeeinlondon"
-reason = "migrated from the area-keyed baseline (run 30323254931), unverified; four Windows shards collapsed into one darkmatter-cli candidate. Confirm or split on the Phase 4 bridging run"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
-# Candidate (run 30323254931, unverified). sniff's Windows L1 failure, with no
-# recorded example test; attributed to sniff-cli (the snapshots suite that
-# fails on WSL). Confirm on the bridging run.
-[[failure]]
-package = "sniff-cli"
-environment = "windows-latest"
-tier = "L1"
-owner = "@yankeeinlondon"
-reason = "migrated from the area-keyed baseline (run 30323254931), unverified; attributed to sniff-cli (the snapshots suite). Candidate pending the Phase 4 bridging run"
-source_run = "30323254931"
-expiry = "2026-10-31"
-
 # Candidate (run 30323254931, unverified). The unchained-ai area's Windows L1
 # failure; the WSL evidence names model_id, so it is the candidate.
 [[failure]]
