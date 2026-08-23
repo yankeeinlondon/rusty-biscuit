@@ -13,7 +13,8 @@ use darkmatter::markdown::compose::expression::{
 use darkmatter::markdown::compose::ComposeContext;
 
 use crate::commands::context_render::{
-    context_column_widths, inline_code_text, middle_elide, render_context_section, MAX_REPORT_WIDTH,
+    context_column_widths, inline_code_text, middle_elide, render_context_section,
+    value_column_budget, MAX_REPORT_WIDTH,
 };
 use crate::log;
 
@@ -177,15 +178,12 @@ fn render_values_report_with(capture: impl FnOnce() -> ComposeContext) {
     let type_labels: Vec<&str> = all_types.iter().map(|s| s.as_str()).collect();
     let (property_width, type_width) = context_column_widths(&property_labels, &type_labels);
 
-    // Budget for the trailing `Value` column at the resolved render width. The
-    // report-content column keeps path-separator break characters (so tables
-    // render at the minimum supported width), but wrapping a path at `/` yields
-    // a line ending in `/` that reads as a complete parent directory. Pre-eliding
-    // a single-token value (a path) that would otherwise wrap keeps it whole and
-    // unambiguous. Chrome = leading space + four `│` borders + per-cell padding.
-    const TABLE_CHROME: usize = 12;
+    // Budget for the trailing `Value` column at the resolved render width.
+    // Pre-eliding a path that would otherwise wrap keeps it whole and
+    // unambiguous. The helper switches to the wrapped-column budget when the
+    // shared alignment pins cannot fit.
     let render_width = term.width().min(MAX_REPORT_WIDTH) as usize;
-    let value_budget = render_width.saturating_sub(property_width + type_width + TABLE_CHROME);
+    let value_budget = value_column_budget(render_width, property_width, type_width);
 
     for ((category, subsection), descriptors) in &groups {
         if subsection.is_empty() {
@@ -207,8 +205,8 @@ fn render_values_report_with(capture: impl FnOnce() -> ComposeContext) {
                     let value = values.get(desc.name).unwrap_or(&serde_json::Value::Null);
                     // Single-token string values (filesystem paths) are
                     // middle-elided to the column budget so they never wrap at a
-                    // `/` into a deceptively-complete parent path. Values with
-                    // whitespace (CSVs, prose, lists) keep normal wrapping.
+                    // path separator into a deceptively-complete parent path.
+                    // Values with whitespace (CSVs, prose, lists) keep normal wrapping.
                     let value_str = if value.is_null() {
                         Prose::new("<dim>null</dim>").render(&term)
                     } else if let Some(s) =

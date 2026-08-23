@@ -153,8 +153,17 @@ fn ctrl_c_terminates(extra_env: &[(&str, &str)], deadline: Duration) -> (bool, S
         .iter()
         .map(|(k, v)| format!("{k}='{}' ", v.replace('\'', "'\\''")))
         .collect();
+    // Run from the isolated fixture workspace. Repository discovery in the
+    // ambient monorepo delays the wrapped child without exercising the signal
+    // path and can exhaust the readiness budget under CI contention.
+    let workspace_shell = workspace
+        .path()
+        .display()
+        .to_string()
+        .replace('\'', "'\\''");
     let cmd = format!(
-        "{env_prefix}{claudine} compose --opencode {md} ; echo {sentinel}",
+        "cd '{workspace}' && {env_prefix}{claudine} compose --opencode {md} ; echo {sentinel}",
+        workspace = workspace_shell,
         md = md_file.display(),
     );
     harness

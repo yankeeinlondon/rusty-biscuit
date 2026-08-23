@@ -49,7 +49,7 @@ pub const EXAMPLE_COLUMN_MIN_WIDTH: u32 = 70;
 /// signature punctuation lets long tokens wrap at meaningful boundaries
 /// (`ctx.current` ⇒ `package` ⇒ …) instead of failing to render.
 #[allow(dead_code)]
-const REPORT_BREAK_CHARS: &[char] = &['-', '_', '.', '(', ')', ',', '/', ':', '[', ']'];
+const REPORT_BREAK_CHARS: &[char] = &['-', '_', '.', '(', ')', ',', '/', '\\', ':', '[', ']'];
 
 /// The wrap policy applied to every report table column: prose wrapping plus the
 /// identifier/signature break characters in [`REPORT_BREAK_CHARS`].
@@ -91,6 +91,24 @@ pub fn middle_elide(value: &str, budget: usize) -> String {
     let head: String = chars[..head_len].iter().collect();
     let tail: String = chars[chars.len() - tail_len..].iter().collect();
     format!("{head}…{tail}")
+}
+
+/// Returns the value-column budget for the pinned layout when it fits, or for
+/// the documented minimum-width wrapping layout otherwise.
+#[allow(dead_code)]
+pub fn value_column_budget(render_width: usize, property_width: usize, type_width: usize) -> usize {
+    const TABLE_CHROME: usize = 12;
+    const WRAPPED_PROPERTY_WIDTH: usize = 8;
+    const WRAPPED_TYPE_WIDTH: usize = 18;
+    const VALUE_HEADER_WIDTH: usize = 5;
+
+    let pinned = render_width.saturating_sub(property_width + type_width + TABLE_CHROME);
+    if pinned >= VALUE_HEADER_WIDTH {
+        pinned
+    } else {
+        render_width
+            .saturating_sub(WRAPPED_PROPERTY_WIDTH + WRAPPED_TYPE_WIDTH + TABLE_CHROME)
+    }
 }
 
 /// Inline-code helper: convert backtick-delimited spans in `input` to

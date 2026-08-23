@@ -192,8 +192,17 @@ fn double_ctrl_c_force_exits(deadline: Duration) -> (bool, String) {
         .iter()
         .map(|(k, v)| format!("{k}='{}' ", v.replace('\'', "'\\''")))
         .collect();
+    // Run from the isolated fixture workspace. The ambient monorepo makes
+    // compose perform unrelated repository discovery, which can consume this
+    // test's readiness budget on a contended CI runner before the wedge arms.
+    let workspace_shell = workspace
+        .path()
+        .display()
+        .to_string()
+        .replace('\'', "'\\''");
     let cmd = format!(
-        "{env_prefix}{claudine} compose --opencode {md} ; echo {sentinel}_$?",
+        "cd '{workspace}' && {env_prefix}{claudine} compose --opencode {md} ; echo {sentinel}_$?",
+        workspace = workspace_shell,
         md = md_file.display(),
     );
     harness
