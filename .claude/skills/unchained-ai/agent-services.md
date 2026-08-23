@@ -107,7 +107,8 @@ pub async fn run_pty_command(
 - Uses `xpty` through its `portable_pty`-compatible API with 24x80 terminal size
 - Drops the slave PTY immediately after spawning
 - Gives short-lived children time to attach before closing PTY input on macOS
-- Sends cooked-mode console EOF before closing noninteractive Windows input
+- Lets fast Windows commands exit during a bounded ConPTY attachment grace
+- Sends cooked-mode console EOF to Windows commands still running after that grace
 - Waits for the child before closing the master PTY so ConPTY readers receive EOF
 - Reads output via `mpsc::channel` in separate thread
 - Default timeout is 5 seconds on Unix and 10 seconds on Windows (configurable)

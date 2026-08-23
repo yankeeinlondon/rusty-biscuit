@@ -17,6 +17,11 @@ const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 /// Maximum time to wait for the PTY reader to observe shutdown.
 const OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// ConPTY exposes no child-attachment event, so fast commands get a bounded
+/// opportunity to exit before their input pipe is closed.
+#[cfg(windows)]
+const CONPTY_CHILD_EXIT_GRACE: Duration = Duration::from_secs(1);
+
 /// A step in an interactive PTY session.
 #[derive(Debug, Clone)]
 pub enum InteractiveStep {
@@ -107,13 +112,38 @@ fn run_pty_blocking(
         tx.send((raw_output, result)).ok();
     });
 
+    #[cfg(windows)]
+    let start = Instant::now();
+
     // Closing PTY input immediately can race a short-lived child attaching and
     // discard its output on macOS.
     #[cfg(target_os = "macos")]
     thread::sleep(Duration::from_millis(20));
 
     #[cfg(windows)]
-    {
+    let child_exited = loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break true,
+            Ok(None) => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(AgentStatusError::PtyReadError(format!(
+                    "Failed to query child status: {}",
+                    error
+                )));
+            }
+        }
+
+        if start.elapsed() >= CONPTY_CHILD_EXIT_GRACE.min(timeout_dur) {
+            break false;
+        }
+
+        thread::sleep(Duration::from_millis(10));
+    };
+
+    #[cfg(windows)]
+    if !child_exited {
         // Closing a ConPTY input pipe does not synthesize console EOF.
         writer
             .write_all(b"\x1a\r\n")
@@ -124,9 +154,15 @@ fn run_pty_blocking(
     }
     drop(writer);
 
+    #[cfg(not(windows))]
     let start = Instant::now();
 
     loop {
+        #[cfg(windows)]
+        if child_exited {
+            break;
+        }
+
         match child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) => {}
