@@ -10,11 +10,14 @@
 //! `cache_cold_path.rs` integration tests. Their ratified targets are documented
 //! in `worktree/docs/performance-testing.md` under "Ratified SLA Targets".
 
+mod perf_support;
+
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
-use assert_cmd::cargo::cargo_bin;
 use serial_test::serial;
+
+use perf_support::MixedFixture;
 
 /// Full non-image `wt list` must meet the repo-wide 1-second SLA on a warm
 /// cache.
@@ -33,10 +36,12 @@ use serial_test::serial;
 #[test]
 #[serial]
 fn perf_full_command_non_image_meets_sla() {
-    let bin = cargo_bin("wt").display().to_string();
+    let fixture = MixedFixture::new();
+    fixture.warm_untracked_cache();
 
     let run = || {
-        std::process::Command::new(bin.as_str())
+        fixture
+            .wt_command()
             .env_remove("TERM_PROGRAM")
             .env_remove("KITTY_WINDOW_ID")
             .stdout(Stdio::null())
