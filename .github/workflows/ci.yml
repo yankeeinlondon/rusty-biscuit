@@ -339,12 +339,18 @@ jobs:
             if [ -n "$scope" ]; then echo "has_scope=true"; else echo "has_scope=false"; fi
           } >>"$GITHUB_OUTPUT"
       # Omitting `name:` downloads EVERY artifact in the run into one directory
-      # per artifact — exactly the layout `--artifacts` expects.
+      # per artifact — exactly the layout `--artifacts` expects. Supplying the
+      # token and run ID selects the public, newest-first listing path. That is
+      # load-bearing on a rerun: the internal listing is capped at 1,000 and can
+      # otherwise spend that entire budget on retained artifacts from earlier
+      # attempts before it reaches the current attempt's evidence.
       - name: Download every result and status artifact
         uses: actions/download-artifact@v4
         with:
           path: ci-artifacts
           merge-multiple: false
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
       # `--no-default-features` deselects biscuit-terminal, sniff, and
       # cargo_metadata, which the other two bins in `scripts/` need and this one
       # does not. Measured: ~8s versus 40s+. Do not drop the flag.
