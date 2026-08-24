@@ -669,6 +669,25 @@ _archive_drop_build_flags *args="":
 #
 # A `cargo test` fallback cannot consume an archive at all — it would recompile —
 # so a missing nextest in archive mode is a hard error, never a fallback.
+_build_messenger_desktop_stubs:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    # CI and archive runners supply a verified fixture directory. In local
+    # builds, compile every fixture in one Cargo process before nextest starts
+    # its isolated per-test processes.
+    if [[ -n "${MESSENGER_STUB_BIN_DIR:-}" ]]; then
+        exit 0
+    fi
+
+    cargo build --features desktop -p messenger \
+        --bin stub_dunstify \
+        --bin stub_notify_send \
+        --bin stub_snoretoast \
+        --bin stub_burnttoast \
+        --bin stub_terminal_notifier \
+        --bin stub_alerter
+
 _test pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
@@ -706,6 +725,10 @@ _test pkg *args="": _storage_preflight
             --archive-file|--archive-file=*) archive_mode=1 ;;
         esac
     done
+
+    if (( archive_mode == 0 )) && [[ "{{ pkg }}" == "messenger" ]]; then
+        just _build_messenger_desktop_stubs
+    fi
 
     if (( archive_mode == 1 )) && ! "${nextest_bin[@]}" --version >/dev/null 2>&1; then
         echo -e "❌ {{ red }}--archive-file requires cargo-nextest{{ reset }}" >&2
@@ -1289,6 +1312,9 @@ _check_tier_coverage *args="":
 _sanity pkg *args="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
+    if [[ "{{ pkg }}" == "messenger" ]]; then
+        just _build_messenger_desktop_stubs
+    fi
     echo
     echo -e "🩺 Sanity check {{ bold }}{{ pkg }}{{ reset }} {{ dim }}(lib + bins, !slow){{ reset }}"
     echo
