@@ -110,6 +110,7 @@ pub async fn run_pty_command(
 - Lets fast Windows commands exit during a bounded ConPTY attachment grace
 - Sends cooked-mode console EOF to Windows commands still running after that grace
 - Waits for the child before closing the master PTY so ConPTY readers receive EOF
+- Lets ConPTY's asynchronous output pump become quiet before closing the master
 - Reads output via `mpsc::channel` in separate thread
 - Default timeout is 5 seconds on Unix and 10 seconds on Windows (configurable)
 - Strips ANSI escape codes via `strip-ansi-escapes`
