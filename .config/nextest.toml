@@ -40,7 +40,7 @@ slow-timeout = { period = "5s", terminate-after = 6 }
 # it exits (nextest's `LEAK` status). `result = "fail"` stays: a genuinely
 # leaked child is a hard failure everywhere.
 #
-# The window is 5s, not the 100ms stock default. Under full-workspace parallel
+# The window is 30s, not the 100ms stock default. Under full-workspace parallel
 # load, nextest's post-test pipe-drain observation is scheduler-starved on this
 # host and the spurious LEAK-FAIL lands on a RANDOM fast test each run — every
 # victim exits code 0 with assertions green and provably holds no pipe (pure
@@ -52,11 +52,13 @@ slow-timeout = { period = "5s", terminate-after = 6 }
 # biscuit-speaks-cli, claudine-cli L2, characterization, biscuit-terminal,
 # browser-tier Chrome teardown, and more); that many exceptions — plus victims
 # observed lagging even a 1s window — is evidence the global default was the
-# thing that was wrong, so a 5s window (the value the browser tier had already
-# validated) is now the default and those blocks are removed. Clean tests pay
-# nothing (their pipes reach EOF immediately); only an actual leak waits the
-# window out, and it still fails.
-leak-timeout = { period = "5s", result = "fail" }
+# thing that was wrong, so one shared window replaced those blocks. A 5s window
+# still produced a false LEAK-FAIL on a pure parser test in a loaded macOS CI
+# run; its assertions finished successfully and 26 immediate local CI-profile
+# reruns were clean. The 30s window covers transient pipe inheritance without
+# slowing clean tests (their pipes reach EOF immediately); an actual leak still
+# waits out the window and fails.
+leak-timeout = { period = "30s", result = "fail" }
 # `cargo nextest archive` carries test binaries and non-test *bin* targets;
 # examples are built but never archived. biscuit-terminal's PTY tests spawn the
 # `discovery_probe` example, so without this they fail in the only environment
@@ -229,11 +231,11 @@ retries = 0
 # `retries = 0` deliberately stays. A timeout must not be retried into looking
 # healthy — it should either fit the ceiling or be reported.
 slow-timeout = { period = "30s", terminate-after = 3 }
-# Leaked child processes are a hard failure in CI as well. 5s window (see
-# the default-profile note: sub-second windows produced random spurious
-# LEAK-FAILs under full-suite load; `result = "fail"` keeps genuine leaks
-# fatal).
-leak-timeout = { period = "5s", result = "fail" }
+# Leaked child processes are a hard failure in CI as well. The 30s observation
+# window matches the default-profile policy above; `result = "fail"` keeps
+# genuine leaks fatal without turning timing-sensitive pipe drainage into a
+# nondeterministic gate.
+leak-timeout = { period = "30s", result = "fail" }
 # JUnit XML for CI dashboards.
 junit = { path = "test-results.xml" }
 
