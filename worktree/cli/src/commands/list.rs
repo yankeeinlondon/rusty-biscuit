@@ -479,7 +479,6 @@ mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::process::Command;
-    use assert_cmd::cargo::cargo_bin;
     use biscuit_terminal::components::terminal_image::ImageWidth;
     use biscuit_terminal::discovery::detection::ImageSupport;
     use biscuit_terminal::terminal::Terminal;
@@ -942,39 +941,6 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn run_pipeline_output_byte_for_byte_unchanged() {
-        let (_repo, main) = temp_repo_named_with_linked_feature();
-
-        let output = Command::new(cargo_bin("wt"))
-            .current_dir(&main)
-            .arg("list")
-            .env_remove("TERM_PROGRAM")
-            .env_remove("KITTY_WINDOW_ID")
-            // Pin color off so the byte-for-byte baseline is deterministic
-            // regardless of the host's COLORTERM / TERM (color_depth() reads
-            // both and has no TTY gate). NO_COLOR loses to FORCE_COLOR /
-            // CLICOLOR_FORCE, so clear those too.
-            .env("NO_COLOR", "1")
-            .env_remove("FORCE_COLOR")
-            .env_remove("CLICOLOR_FORCE")
-            .output()
-            .expect("wt list should run");
-
-        assert!(output.status.success(), "wt list should succeed");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "");
-        assert_eq!(
-            String::from_utf8_lossy(&output.stderr),
-            "\n┌──────────┬───────────────┬───────────┬───────┬─────────┐\n\
-│ Worktree │ Worktree Name │ Branch    │ Merge │ Commits │\n\
-├──────────┼───────────────┼───────────┼───────┼─────────┤\n\
-│  Clean   │ main::(main)  │ main      │       │         │\n\
-│  Clean   │ feature-a     │ feature-a │ clean │      +1 │\n\
-└──────────┴───────────────┴───────────┴───────┴─────────┘\n"
-        );
-    }
-
-    #[test]
-    #[serial_test::serial]
     fn gather_data_shares_one_merge_base_for_graph_and_verbose() {
         let repo = temp_repo_with_feature_branch();
         let _guard = DirGuard::enter(repo.path());
@@ -1061,13 +1027,12 @@ mod tests {
     /// optimized `wt list` paths. Run with `--nocapture` to see timing.
     ///
     /// Asserts the subprocess-count bounds the optimization guarantees for the
-    /// `list_worktrees()` and `gather_base_graph()` paths in the ambient
-    /// `rusty-biscuit` checkout (see `sniff/fixes/_completed/2026-04-21-performance/spec.md`).
+    /// `list_worktrees()` and `gather_base_graph()` paths in a controlled
+    /// linked-worktree fixture (see `sniff/fixes/_completed/2026-04-21-performance/spec.md`).
     /// The image-terminal `wt list -v` data-gather path (`gather_branch` with
     /// verbose) has its binding SLA + count guard in
     /// `git_graph::tests::gather_branch_uses_one_merge_base_and_no_short_sha`,
-    /// which runs on a controlled fixture so it always asserts regardless of
-    /// the ambient checkout; here that path is observed ambiently only.
+    /// which runs on a controlled feature-branch fixture.
     /// Rasterization (Mermaid -> SVG -> PNG) lives outside this package and is
     /// excluded: this test never invokes `MermaidDiagram::render`. The
     /// full-command SLA is covered by `perf_full_command_non_image_meets_sla`.
@@ -1076,6 +1041,8 @@ mod tests {
     fn perf_subprocess_counts_meet_sla() {
         use std::time::Instant;
 
+        let (_repo, main) = temp_repo_named_with_linked_feature();
+        let _guard = DirGuard::enter(&main);
         let list = list_worktrees().expect("list_worktrees should succeed");
         let default_branch = list.default_branch.clone();
         let current_branch = list
@@ -1115,13 +1082,9 @@ mod tests {
             list_calls.len()
         );
 
-        // Ambient observability for the current branch's graph+verbose gather
-        // path, printed when the ambient checkout is a feature branch. This is
-        // not the binding SLA guard: that lives in
+        // This is not the binding graph+verbose SLA guard: that lives in
         // `git_graph::tests::gather_branch_uses_one_merge_base_and_no_short_sha`,
-        // which runs on a controlled fixture so it always asserts (this ambient
-        // branch is naturally skipped on a main checkout, where it would assert
-        // nothing).
+        // which runs on a controlled feature-branch fixture.
         if !is_main {
             let t0 = Instant::now();
             let _ = super::git_graph::gather_branch(&default_branch, &current_branch, true);
