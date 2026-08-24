@@ -20,13 +20,9 @@ use test_toolkit::{Backend, Level, require_level};
 
 static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 
-/// Returns the absolute path to the `icon` binary under test.
+/// Returns the runner-provided path to the `icon` binary under test.
 fn icon_bin() -> PathBuf {
-    let manifest = env!("CARGO_MANIFEST_DIR");
-    PathBuf::from(manifest)
-        .join("../../target/debug/icon")
-        .canonicalize()
-        .expect("icon binary should be built by cargo test")
+    biscuit_test_harness::bin_exe!("icon")
 }
 
 /// Returns a `PATH` value that includes the directory containing the `icon`
