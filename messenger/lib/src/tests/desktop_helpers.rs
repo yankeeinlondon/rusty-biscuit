@@ -20,7 +20,7 @@
 //! `MESSENGER_STUB_BIN_DIR` is authoritative when set, allowing CI to build
 //! the six fixtures once and deliver them to test processes. Local runs first
 //! inspect the target directory beside the test executable, then build a
-//! missing or stale fixture on demand.
+//! missing fixture on demand.
 
 #![cfg(feature = "desktop")]
 
@@ -169,26 +169,11 @@ fn stub_resolution(name: &str, target_dir: &Path) -> Result<StubResolution, Stri
     }
 
     let path = target_dir.join(file_name);
-    if path.is_file() && !stub_source_is_newer(name, &path) {
+    if path.is_file() {
         Ok(StubResolution::Ready(path))
     } else {
         Ok(StubResolution::BuildRequired(path))
     }
-}
-
-fn stub_source_is_newer(name: &str, path: &Path) -> bool {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("bin")
-        .join(name)
-        .join("main.rs");
-    let Ok(source_modified) = source.metadata().and_then(|metadata| metadata.modified()) else {
-        return false;
-    };
-    let Ok(binary_modified) = path.metadata().and_then(|metadata| metadata.modified()) else {
-        return true;
-    };
-    source_modified > binary_modified
 }
 
 #[cfg(test)]
@@ -258,6 +243,22 @@ mod stub_resolution_tests {
         assert_eq!(
             stub_resolution("stub_notify_send", target.path()).expect("fallback remains valid"),
             StubResolution::BuildRequired(expected)
+        );
+    }
+
+    #[test]
+    #[serial(stub_resolution_env)]
+    fn existing_target_fixture_never_starts_a_nested_build() {
+        let target = tempfile::tempdir().expect("target stub directory");
+        let _env = TestEnvGuard::remove_safe("MESSENGER_STUB_BIN_DIR");
+        let expected = target
+            .path()
+            .join(stub_executable_name("stub_notify_send", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&expected, []).expect("target stub fixture");
+
+        assert_eq!(
+            stub_resolution("stub_notify_send", target.path()).expect("fixture resolves"),
+            StubResolution::Ready(expected)
         );
     }
 }
