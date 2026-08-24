@@ -1247,15 +1247,22 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
 class WorkflowContractTests(unittest.TestCase):
     """Contracts in workflow YAML that are not represented by scope data."""
 
-    def test_verdict_download_uses_newest_first_public_artifact_listing(self) -> None:
+    def test_verdict_download_unions_current_and_run_wide_artifacts(self) -> None:
         ci = (ROOT / ".github/workflows/ci.yml").read_text()
-        download_step = ci.split(
-            "- name: Download every result and status artifact", 1
+        verdict_downloads = ci.split(
+            "- name: Download the resolved package policy", 1
         )[1].split("- name: Build ci-rollup", 1)[0]
+        policy, current, newest = verdict_downloads.split(
+            "uses: actions/download-artifact@v4"
+        )[1:]
 
-        self.assertIn("uses: actions/download-artifact@v4", download_step)
-        self.assertIn("github-token: ${{ github.token }}", download_step)
-        self.assertIn("run-id: ${{ github.run_id }}", download_step)
+        self.assertIn("name: ci-scope", policy)
+        self.assertIn("path: ci-artifacts/ci-scope", policy)
+        self.assertNotIn("github-token:", current)
+        self.assertIn("pattern: '{junit-*,status-*}'", current)
+        self.assertIn("github-token: ${{ github.token }}", newest)
+        self.assertIn("run-id: ${{ github.run_id }}", newest)
+        self.assertIn("pattern: '{junit-*,status-*}'", newest)
 
 
 # --- helpers ---------------------------------------------------------------

@@ -338,15 +338,34 @@ jobs:
             echo "scope=${scope}"
             if [ -n "$scope" ]; then echo "has_scope=true"; else echo "has_scope=false"; fi
           } >>"$GITHUB_OUTPUT"
-      # Omitting `name:` downloads EVERY artifact in the run into one directory
-      # per artifact — exactly the layout `--artifacts` expects. Supplying the
-      # token and run ID selects the public, newest-first listing path. That is
-      # load-bearing on a rerun: the internal listing is capped at 1,000 and can
-      # otherwise spend that entire budget on retained artifacts from earlier
-      # attempts before it reaches the current attempt's evidence.
-      - name: Download every result and status artifact
+      # A named lookup does not share the paginated bulk listing. Keep the
+      # rollup's policy available even when a high-fan-out run is still making
+      # older artifacts visible through that listing.
+      - name: Download the resolved package policy
         uses: actions/download-artifact@v4
         with:
+          name: ci-scope
+          path: ci-artifacts/ci-scope
+          github-token: ${{ github.token }}
+          run-id: ${{ github.run_id }}
+      # The in-run artifact service sees the current attempt atomically. Filter
+      # out build archives and diagnostics: only status and JUnit artifacts are
+      # inputs to ci-rollup.
+      - name: Download current-attempt result and status artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '{junit-*,status-*}'
+          path: ci-artifacts
+          merge-multiple: false
+      # A rerun retains artifacts from earlier attempts. Overlay the public,
+      # newest-first view so a current result wins when an artifact name was
+      # produced more than once. The preceding in-run download also preserves
+      # older evidence if the public paginated listing is incomplete while the
+      # workflow is active.
+      - name: Overlay newest run-wide result and status artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '{junit-*,status-*}'
           path: ci-artifacts
           merge-multiple: false
           github-token: ${{ github.token }}

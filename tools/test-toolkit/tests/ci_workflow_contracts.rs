@@ -1568,8 +1568,10 @@ fn ci_verdict_is_the_single_required_check() {
     );
 
     assert!(
-        verdict.contains("uses: actions/download-artifact@v4") && !verdict.contains("name: junit-"),
-        "ci-verdict must download every artifact in the run, not a named subset"
+        verdict.contains("name: ci-scope")
+            && verdict.matches("pattern: '{junit-*,status-*}'").count() == 2
+            && verdict.matches("github-token: ${{ github.token }}").count() == 2,
+        "ci-verdict must combine exact policy, current-attempt evidence, and the newest run-wide evidence"
     );
     assert!(
         !ci.contains("baseline-failures.txt"),
