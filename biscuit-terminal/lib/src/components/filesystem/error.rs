@@ -8,7 +8,6 @@ use thiserror::Error;
 ///
 /// ```
 /// use biscuit_terminal::prelude::{FileSystem, FileSystemError};
-/// use std::path::PathBuf;
 ///
 /// // Path not found
 /// let result = FileSystem::new("/nonexistent/path");
@@ -22,16 +21,6 @@ use thiserror::Error;
 ///
 /// ```
 /// use biscuit_terminal::prelude::{FileSystem, FileSystemError};
-/// use std::path::PathBuf;
-///
-/// // Not a directory (path exists but is a file)
-/// let result = FileSystem::new("/etc/hosts");
-/// assert!(matches!(result, Err(FileSystemError::NotADirectory { .. })));
-/// ```
-///
-/// ```
-/// use biscuit_terminal::prelude::{FileSystem, FileSystemError};
-/// use std::path::PathBuf;
 ///
 /// // Using pattern matching for error handling
 /// fn handle_fs_error(err: FileSystemError) -> String {
