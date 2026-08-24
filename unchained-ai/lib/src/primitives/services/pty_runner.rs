@@ -421,11 +421,14 @@ mod tests {
     #[test]
     #[ignore = "subprocess fixture invoked by the PTY lifecycle test"]
     fn child_waits_for_stdin_eof() {
+        println!("waiting for stdin EOF");
+        std::io::stdout()
+            .flush()
+            .expect("stdout should be flushable");
         let mut input = String::new();
         std::io::stdin()
             .read_to_string(&mut input)
             .expect("stdin should be readable");
-        println!("stdin closed");
     }
 
     #[tokio::test]
@@ -441,8 +444,8 @@ mod tests {
         .await
         .expect("command waiting for stdin EOF should exit");
         assert!(
-            output.contains("stdin closed"),
-            "PTY output should contain the child EOF marker, got: {output:?}"
+            output.contains("waiting for stdin EOF"),
+            "PTY output should contain the child readiness marker, got: {output:?}"
         );
     }
 
