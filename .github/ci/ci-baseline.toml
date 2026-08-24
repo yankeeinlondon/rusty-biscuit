@@ -160,19 +160,6 @@ source_run = "30791562395"
 expiry = "2026-11-30"
 
 # ---------------------------------------------------------------------------
-# L1 failures recorded against the claudine CLI on ubuntu
-# ---------------------------------------------------------------------------
-
-[[failure]]
-package = "claudine-cli"
-environment = "ubuntu-latest"
-tier = "L1"
-owner = "@yankeeinlondon"
-reason = "red on main at the time of sync; 2 failing tests, e.g. claudine-cli::prompt_reporting::compose_frontmatter_verbose_shows_full_system_prompt"
-source_run = "30791562395"
-expiry = "2026-11-30"
-
-# ---------------------------------------------------------------------------
 # Approved skip budget
 #
 # Keyed by package, environment, tier, and backend. `tests` carries EXACT test
