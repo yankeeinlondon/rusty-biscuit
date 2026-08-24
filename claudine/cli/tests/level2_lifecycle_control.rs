@@ -5364,8 +5364,8 @@ fn write_prompt_recording_goose(bin_dir: &Path, events_log: &Path) {
     write_executable(
         &bin_dir.join("goose"),
         &format!(
-            "#!/bin/sh\nstdin=$(cat)\nprintf 'prompt:%s %s\\n' \"$stdin\" \"$*\" >> {log}\n\
-             printf 'provider-ran\\n' >> {log}\nexit 0\n",
+            "#!/bin/sh\nstdin=$(cat)\nprintf 'prompt:' >> {log}\nprintf '%s %s' \"$stdin\" \"$*\" | tr '\\n' ' ' >> {log}\n\
+             printf '\\nprovider-ran\\n' >> {log}\nexit 0\n",
             log = events_log.display(),
         ),
     );
