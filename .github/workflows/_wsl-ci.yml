@@ -114,14 +114,8 @@ env:
   COLORTERM: truecolor
   NEXTEST_PROFILE: ci
   ARCHIVE_NAME: nextest-archive.tar.zst
-  # Pinned so the guest's installer never has to ASK which version is newest.
-  # That question is `GET https://api.github.com/repos/casey/just/releases/latest`
-  # — an authenticated-or-60-per-hour-per-IP endpoint — and the guest is the one
-  # place in this repository that reaches it unauthenticated. See the guest
-  # install step for the full account.
-  #
-  # Used for BOTH the host and the guest so the two run the same `just` against
-  # the same recipes. Bump them together.
+  # Used for both the host and guest so they run the same recipes. The guest
+  # downloads this exact release without querying GitHub's latest-release API.
   JUST_VERSION: "1.58.0"
 
 jobs:
@@ -430,47 +424,21 @@ jobs:
           # Deliberately NOT rustup: the guest only RUNS prebuilt test binaries
           # from the archive, so a Rust toolchain would add minutes and buy
           # nothing. cargo-nextest executes an archive without Cargo or rustc.
-          #
-          # THE 403, AND WHY IT LANDS ONLY HERE
-          #
-          # Every other environment installs `just` with `extractions/setup-just`,
-          # which passes `${{ github.token }}` by default. Its API calls are
-          # therefore authenticated: 5,000/hour against this repository.
-          #
-          # A GitHub Action cannot run inside the guest — actions execute on the
-          # runner, and the guest is a separate VM reached through a bash
-          # wrapper. So this is the one place tools are installed by shell
-          # script, and the one place the request is anonymous: 60/hour shared
-          # across every job on the runner's IP. `biscuit-terminal` was
-          # lost that way in run 30755610413, and `unchained-ai` in 31041986681.
-          #
-          # `--retry-all-errors` was the previous attempt and could never have
-          # worked. It does retry a 403 — verified, six attempts over 25s — but
-          # the failing request is not this curl. `just.systems/install.sh`
-          # downloads fine; the SCRIPT then calls
-          # `api.github.com/repos/casey/just/releases/latest` using its own curl,
-          # which carries no retry flags. Run 31041986681 failed in 0.9s, which
-          # is the proof: a real retry cycle takes 25.
-          #
-          # Two fixes, both supported by the installer itself. `--tag` skips that
-          # API call entirely (it only asks when it has no version), and
-          # GITHUB_TOKEN authenticates anything that still reaches the API.
-          # Exported by interpolation rather than left to WSLENV, for the reason
-          # given on the L1 step below.
-          export GITHUB_TOKEN='${{ secrets.GITHUB_TOKEN }}'
-          #
-          # `get.nexte.st` is a plain 302 to a release asset, not an API call, so
-          # it is not subject to that limit — but a single 403 anywhere here is
-          # fatal twice over: `-f` makes curl exit non-zero and `pipefail`
-          # propagates it from upstream of a pipe. The retry stays.
           curl_get() {
             curl --proto '=https' --tlsv1.2 -sSfL \
               --retry 5 --retry-delay 5 --retry-all-errors \
               --connect-timeout 15 "$@"
           }
-          curl_get https://just.systems/install.sh |
-            bash -s -- --tag '${{ env.JUST_VERSION }}' --to /usr/local/bin
-          curl_get https://get.nexte.st/latest/linux | tar zxf - -C /usr/local/bin
+          # A retried download must target a file: stdout cannot be rewound, so
+          # streaming a partial response into tar would preserve corrupt bytes.
+          download_dir="$(mktemp -d)"
+          trap 'rm -rf "$download_dir"' EXIT
+          curl_get --output "$download_dir/just.tar.gz" \
+            'https://github.com/casey/just/releases/download/${{ env.JUST_VERSION }}/just-${{ env.JUST_VERSION }}-x86_64-unknown-linux-musl.tar.gz'
+          tar xzf "$download_dir/just.tar.gz" -C /usr/local/bin just
+          curl_get --output "$download_dir/nextest.tar.gz" \
+            https://get.nexte.st/latest/linux
+          tar xzf "$download_dir/nextest.tar.gz" -C /usr/local/bin
           just --version
           cargo-nextest nextest --version
       - name: Install native prerequisites in the guest
