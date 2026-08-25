@@ -582,6 +582,14 @@ jobs:
           export NEXTEST_PROFILE='${{ env.NEXTEST_PROFILE }}'
           export COLORTERM='${{ env.COLORTERM }}'
           export BISCUIT_L1_INCLUDE_SLOW='${{ env.BISCUIT_L1_INCLUDE_SLOW }}'
+          # WSL appends the Windows host PATH by default. On hosted runners that
+          # adds dozens of /mnt/c entries, so every intentionally missing binary
+          # probe crosses the 9p boundary dozens of times. Claudine performs many
+          # such discovery probes; the inherited PATH turned sub-second tests
+          # into 20-second tests and made this serial, archive-only lane take
+          # hours. The guest is intentionally self-contained and installs every
+          # required executable under the standard Linux prefixes above.
+          export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
           if [ "$(jq -r 'contains(["messenger-desktop-stubs"])' <<<'${{ inputs.runner-tools }}')" = "true" ]; then
             export MESSENGER_STUB_BIN_DIR=/home/runner/messenger-desktop-stubs
             for stub in stub_dunstify stub_notify_send stub_snoretoast stub_burnttoast stub_terminal_notifier stub_alerter; do

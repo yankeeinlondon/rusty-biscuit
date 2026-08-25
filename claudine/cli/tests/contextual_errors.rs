@@ -33,6 +33,16 @@ fn successful_provider_shim() -> &'static str {
     "#!/bin/sh\nexit 0\n"
 }
 
+#[cfg(windows)]
+fn failing_rustc_shim() -> &'static str {
+    "@echo off\r\necho error: invalid value for --edition 1>&2\r\nexit /b 1\r\n"
+}
+
+#[cfg(not(windows))]
+fn failing_rustc_shim() -> &'static str {
+    "#!/bin/sh\nprintf '%s\\n' 'error: invalid value for --edition' >&2\nexit 1\n"
+}
+
 /// Shell-expansion failure during `claudine compose`.
 ///
 /// Uses a blacklisted command (`rm -rf /`) so the test works deterministically
@@ -85,9 +95,9 @@ fn compose_shell_expansion_failure_renders_rich_block() {
 
 /// Real `ExecutionFailed` shell-expansion failure during `claudine compose`.
 ///
-/// Uses a portable failing command (`rustc --edition=invalid`) so the test
-/// exercises the full boundary from Markdown composition through the CLI's
-/// top-level error walker, not just the preflight `Blacklisted` path.
+/// Uses a deterministic failing `rustc` fixture so the test exercises the full
+/// boundary from Markdown composition through the CLI's top-level error walker,
+/// including in archive-only environments without a Rust toolchain.
 #[test]
 fn compose_shell_execution_failure_renders_rich_block() {
     let workspace = tempdir().unwrap();
@@ -105,6 +115,10 @@ fn compose_shell_execution_failure_renders_rich_block() {
     write_executable(
         &path_dir.join(shim_name("claude")),
         successful_provider_shim(),
+    );
+    write_executable(
+        &path_dir.join(shim_name("rustc")),
+        failing_rustc_shim(),
     );
 
     // `--silent` suppresses the execution header so the only stderr output

@@ -418,11 +418,9 @@ Body.
     );
 }
 
-/// A parallel group really overlaps its members: two tasks that each sleep
-/// longer than half the group's wall clock cannot both finish in time under
-/// serial execution.
-///
-/// The margin is generous — this asserts "concurrent", not a latency budget.
+/// A parallel group really overlaps its members: each task waits until every
+/// sibling has started before any of them can finish. Serial execution cannot
+/// satisfy that barrier.
 #[test]
 fn a_parallel_group_overlaps_its_members() {
     let workspace = tempdir().unwrap();
@@ -438,11 +436,11 @@ sequence:
       execution: parallel
       tasks:
         - name: slow-one
-          shell: "sleep 1 && printf 'one\n' >> trace.txt"
+          shell: "touch started-one; attempts=0; while [ ! -f started-two ] || [ ! -f started-three ]; do attempts=$((attempts + 1)); [ $attempts -lt 500 ] || exit 90; sleep 0.01; done; printf 'one\n' >> trace.txt"
         - name: slow-two
-          shell: "sleep 1 && printf 'two\n' >> trace.txt"
+          shell: "touch started-two; attempts=0; while [ ! -f started-one ] || [ ! -f started-three ]; do attempts=$((attempts + 1)); [ $attempts -lt 500 ] || exit 90; sleep 0.01; done; printf 'two\n' >> trace.txt"
         - name: slow-three
-          shell: "sleep 1 && printf 'three\n' >> trace.txt"
+          shell: "touch started-three; attempts=0; while [ ! -f started-one ] || [ ! -f started-two ]; do attempts=$((attempts + 1)); [ $attempts -lt 500 ] || exit 90; sleep 0.01; done; printf 'three\n' >> trace.txt"
 ---
 
 Body.
@@ -450,26 +448,20 @@ Body.
     )
     .unwrap();
 
-    let started = std::time::Instant::now();
     let (_, stderr, code) = run(
         workspace.path(),
         &path_dir,
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
-    let elapsed = started.elapsed();
-
     assert_eq!(code, 0, "stderr:\n{stderr}");
     let mut lines = trace(workspace.path());
     lines.sort();
     assert_eq!(lines, vec!["one", "three", "two"], "every member must run");
-    assert!(
-        elapsed < std::time::Duration::from_millis(2500),
-        "three 1s tasks took {elapsed:?}; serial execution would need ~3s",
-    );
 }
 
-/// `max_parallel` bounds the overlap: four 1-second tasks capped at two take
-/// about two seconds, not one and not four.
+/// `max_parallel` bounds the overlap: the first pair holds its slots briefly
+/// and records a violation if either second-wave task starts before those slots
+/// are released.
 #[test]
 fn max_parallel_bounds_the_overlap() {
     let workspace = tempdir().unwrap();
@@ -486,13 +478,13 @@ sequence:
       max_parallel: 2
       tasks:
         - name: a
-          shell: "sleep 1 && printf 'a\n' >> trace.txt"
+          shell: "touch started-a; attempts=0; while [ ! -f started-b ]; do attempts=$((attempts + 1)); [ $attempts -lt 500 ] || exit 90; sleep 0.01; done; sleep 0.5; if [ -f started-c ] || [ -f started-d ]; then touch cap-exceeded; fi; printf 'a\n' >> trace.txt"
         - name: b
-          shell: "sleep 1 && printf 'b\n' >> trace.txt"
+          shell: "touch started-b; attempts=0; while [ ! -f started-a ]; do attempts=$((attempts + 1)); [ $attempts -lt 500 ] || exit 90; sleep 0.01; done; sleep 0.5; if [ -f started-c ] || [ -f started-d ]; then touch cap-exceeded; fi; printf 'b\n' >> trace.txt"
         - name: c
-          shell: "sleep 1 && printf 'c\n' >> trace.txt"
+          shell: "touch started-c; attempts=0; while [ ! -f started-d ]; do attempts=$((attempts + 1)); [ $attempts -lt 500 ] || exit 90; sleep 0.01; done; printf 'c\n' >> trace.txt"
         - name: d
-          shell: "sleep 1 && printf 'd\n' >> trace.txt"
+          shell: "touch started-d; attempts=0; while [ ! -f started-c ]; do attempts=$((attempts + 1)); [ $attempts -lt 500 ] || exit 90; sleep 0.01; done; printf 'd\n' >> trace.txt"
 ---
 
 Body.
@@ -500,23 +492,16 @@ Body.
     )
     .unwrap();
 
-    let started = std::time::Instant::now();
     let (_, stderr, code) = run(
         workspace.path(),
         &path_dir,
         &["sequence", "--goose", "--yolo", md.to_str().unwrap()],
     );
-    let elapsed = started.elapsed();
-
     assert_eq!(code, 0, "stderr:\n{stderr}");
     assert_eq!(trace(workspace.path()).len(), 4);
     assert!(
-        elapsed >= std::time::Duration::from_millis(1900),
-        "four 1s tasks capped at 2 cannot finish in {elapsed:?}; the cap was exceeded",
-    );
-    assert!(
-        elapsed < std::time::Duration::from_millis(3500),
-        "four 1s tasks capped at 2 took {elapsed:?}; nothing overlapped",
+        !workspace.path().join("cap-exceeded").exists(),
+        "max_parallel allowed a second-wave task to overlap the first pair",
     );
 }
 
