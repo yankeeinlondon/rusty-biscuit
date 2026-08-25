@@ -459,13 +459,41 @@ Body.
     assert_eq!(lines, vec!["one", "three", "two"], "every member must run");
 }
 
-/// `max_parallel` bounds the overlap: the first pair holds its slots briefly
-/// and records a violation if either second-wave task starts before those slots
-/// are released.
+/// `max_parallel` bounds the overlap: every task increments one lock-protected
+/// active-task counter, records a violation if it exceeds two, then decrements
+/// the counter before exiting.
 #[test]
 fn max_parallel_bounds_the_overlap() {
     let workspace = tempdir().unwrap();
     let path_dir = fake_goose(workspace.path());
+    fs::write(
+        workspace.path().join("count-active.sh"),
+        r#"set -eu
+name="$1"
+lock() {
+  attempts=0
+  until mkdir active.lock 2>/dev/null; do
+    attempts=$((attempts + 1))
+    [ "$attempts" -lt 500 ] || exit 90
+    sleep 0.01
+  done
+}
+lock
+active=0
+[ ! -f active-count ] || read active < active-count
+active=$((active + 1))
+printf '%s\n' "$active" > active-count
+[ "$active" -le 2 ] || touch cap-exceeded
+rmdir active.lock
+sleep 0.2
+lock
+read active < active-count
+printf '%s\n' "$((active - 1))" > active-count
+rmdir active.lock
+printf '%s\n' "$name" >> trace.txt
+"#,
+    )
+    .unwrap();
     let md = workspace.path().join("seq.md");
     fs::write(
         &md,
@@ -478,13 +506,13 @@ sequence:
       max_parallel: 2
       tasks:
         - name: a
-          shell: "touch started-a; attempts=0; while [ ! -f started-b ]; do attempts=$((attempts + 1)); [ $attempts -lt 500 ] || exit 90; sleep 0.01; done; sleep 0.5; if [ -f started-c ] || [ -f started-d ]; then touch cap-exceeded; fi; printf 'a\n' >> trace.txt"
+          shell: "/bin/sh count-active.sh a"
         - name: b
-          shell: "touch started-b; attempts=0; while [ ! -f started-a ]; do attempts=$((attempts + 1)); [ $attempts -lt 500 ] || exit 90; sleep 0.01; done; sleep 0.5; if [ -f started-c ] || [ -f started-d ]; then touch cap-exceeded; fi; printf 'b\n' >> trace.txt"
+          shell: "/bin/sh count-active.sh b"
         - name: c
-          shell: "touch started-c; attempts=0; while [ ! -f started-d ]; do attempts=$((attempts + 1)); [ $attempts -lt 500 ] || exit 90; sleep 0.01; done; printf 'c\n' >> trace.txt"
+          shell: "/bin/sh count-active.sh c"
         - name: d
-          shell: "touch started-d; attempts=0; while [ ! -f started-c ]; do attempts=$((attempts + 1)); [ $attempts -lt 500 ] || exit 90; sleep 0.01; done; printf 'd\n' >> trace.txt"
+          shell: "/bin/sh count-active.sh d"
 ---
 
 Body.
@@ -501,7 +529,7 @@ Body.
     assert_eq!(trace(workspace.path()).len(), 4);
     assert!(
         !workspace.path().join("cap-exceeded").exists(),
-        "max_parallel allowed a second-wave task to overlap the first pair",
+        "max_parallel allowed more than two tasks to overlap",
     );
 }
 
