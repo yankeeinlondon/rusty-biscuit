@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 mod common;
 #[cfg(unix)]
-use common::{augmented_path, write, write_executable};
+use common::{augmented_path, init_git_repo, write, write_executable};
 
 fn workspace_root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -52,8 +52,9 @@ fn shipped_prompt_corpus_parses_frontmatter() {
 
 #[cfg(unix)]
 #[test]
-fn shipped_implement_prompt_runs_real_router_target() {
+fn shipped_implement_router_runs_real_proxy_handoff() {
     let fixture = tempfile::tempdir().expect("fixture directory");
+    let prompt_fixture = tempfile::tempdir().expect("prompt fixture directory");
     let feature = fixture.path().join("features/2026-07-20-router-fixture");
     let review = feature.join("review.md");
     write(&review, "---\nimplemented: false\n---\n# Router fixture\n");
@@ -75,7 +76,18 @@ exit 0
     );
 
     let root = workspace_root();
-    let router = root.join("prompts/implement.md");
+    let prompt_dir = prompt_fixture.path().join("prompts");
+    let target_dir = prompt_dir.join("_implement");
+    std::fs::create_dir_all(&target_dir).expect("prompt fixture directory");
+    std::fs::copy(root.join("prompts/implement.md"), prompt_dir.join("implement.md"))
+        .expect("copy shipped router prompt");
+    write(
+        &target_dir.join("implement-review.md"),
+        "---\ntitle: Router target fixture\n---\n# Implementation of Review Findings\n",
+    );
+    assert!(init_git_repo(prompt_fixture.path()));
+
+    let router = prompt_dir.join("implement.md");
     let review_arg = format!("review={}", review.display());
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
@@ -83,7 +95,7 @@ exit 0
         .env("PATH", augmented_path(&bin_dir))
         .env("CLAUDINE_PROMPT_CAPTURE", &capture)
         .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .current_dir(&root)
+        .current_dir(prompt_fixture.path())
         .args([
             "compose",
             "--claude",

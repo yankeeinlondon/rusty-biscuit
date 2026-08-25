@@ -97,26 +97,6 @@ threads-required = "num-cpus"
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
-# These stdout parity tests launch the claudine CLI twice (perf and non-perf).
-# They are below the default timeout isolated, but can exceed 30s under
-# full-suite contention on macOS debug builds.
-[[profile.default.overrides]]
-filter = 'test(=compose_perf_stdout_matches_non_perf)'
-slow-timeout = { period = "30s", terminate-after = 3 }
-
-[[profile.default.overrides]]
-filter = 'test(=inline_compose_perf_stdout_matches_non_perf)'
-slow-timeout = { period = "30s", terminate-after = 3 }
-
-# This real shipped-prompt test performs repository-aware composition, a proxy
-# handoff, and a fake provider launch. It is bounded and finishes well below the
-# default ceiling alone, but can exceed 30s when debug-build composition tests
-# contend for the host. Keep the override specific so ordinary L1 hangs still
-# fail at the default deadline.
-[[profile.default.overrides]]
-filter = 'test(=shipped_implement_prompt_runs_real_router_target)'
-slow-timeout = { period = "30s", terminate-after = 3 }
-
 # This integration test shells out to the CLI multiple times; it is below the
 # default timeout isolated, but can exceed 30s under full-suite contention.
 [[profile.default.overrides]]

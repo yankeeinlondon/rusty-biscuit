@@ -37,6 +37,7 @@ fn handle_flushes_blocking_payload_before_nonzero_exit() {
     );
 
     let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
+        .current_dir(workspace.path())
         .env("HOME", &home_dir)
         .env("NO_COLOR", "1")
         .args(["handle", "turn_complete", "--provider", "gemini"])
