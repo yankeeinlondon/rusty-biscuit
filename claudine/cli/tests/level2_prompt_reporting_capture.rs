@@ -55,7 +55,9 @@
 #[allow(deprecated)]
 use assert_cmd::cargo::cargo_bin;
 use biscuit_terminal::utils::block_constraint::visible_width;
-use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name};
+use biscuit_test_harness::tmux::{
+    TmuxHarness, kill_session_by_name, spawn_shell_session_with_env,
+};
 use biscuit_test_harness::wezterm::WezTermHarness;
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
@@ -166,24 +168,8 @@ fn spawn_tmux_session(cols: u32, rows: u32) -> String {
     // POSIX shell (bash/sh), not the developer's `$SHELL`: a custom login
     // prompt (e.g. Starship's `❯`) never ends in `$`/`#`/`%`, so
     // `wait_for_prompt` would never match and burn its full timeout.
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            &cols.to_string(),
-            "-y",
-            &rows.to_string(),
-            &format!("{shell} -l"),
-        ])
-        .env("FORCE_COLOR", "1")
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn a {cols}x{rows} tmux session");
+    spawn_shell_session_with_env(&session, cols, rows, &[("FORCE_COLOR", "1")])
+        .expect("failed to spawn tmux session");
     session
 }
 

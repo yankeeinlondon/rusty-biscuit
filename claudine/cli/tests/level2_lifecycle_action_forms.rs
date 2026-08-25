@@ -40,7 +40,7 @@ use common::wrap::seed_minimal_config;
 use common::{augmented_path, init_git_repo, write_executable};
 
 use biscuit_test_harness::TerminalHarness;
-use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name};
+use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name, spawn_shell_session};
 use serial_test::serial;
 use std::fs;
 use std::path::Path;
@@ -112,23 +112,7 @@ fn run_compose_in_tmux(staged: &Staged, done_marker: &str, extra_claudine_args: 
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
     let session = format!("biscuit_l2_actforms_{}_{seq}", std::process::id());
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            "180",
-            "-y",
-            "60",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session(&session, 180, 60).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);

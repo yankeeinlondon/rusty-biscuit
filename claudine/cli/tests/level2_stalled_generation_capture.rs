@@ -70,7 +70,9 @@ mod common;
 use common::{augmented_path, clear_no_color, strip_ansi, write_executable};
 
 use biscuit_test_harness::TerminalHarness;
-use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name};
+use biscuit_test_harness::tmux::{
+    TmuxHarness, kill_session_by_name, spawn_shell_session_with_env,
+};
 use serial_test::serial;
 use std::fs;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -158,24 +160,8 @@ done
     // POSIX shell (bash/sh), not the developer's `$SHELL`: a custom login prompt
     // (e.g. Starship's `❯`) never ends in `$`/`#`/`%`, so `wait_for_prompt`
     // would never match and burn its full timeout.
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            "120",
-            "-y",
-            "50",
-            &format!("{shell} -l"),
-        ])
-        .env("FORCE_COLOR", "1")
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session_with_env(&session, 120, 50, &[("FORCE_COLOR", "1")])
+        .expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);

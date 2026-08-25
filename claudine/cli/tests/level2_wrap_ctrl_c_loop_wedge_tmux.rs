@@ -44,7 +44,7 @@ mod common;
 use common::{augmented_path, write_executable};
 
 use biscuit_test_harness::TerminalHarness;
-use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name};
+use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name, spawn_shell_session};
 use serial_test::serial;
 use std::fs;
 use std::path::Path;
@@ -151,23 +151,7 @@ fn double_ctrl_c_force_exits(deadline: Duration) -> (bool, String) {
     let session = format!("biscuit_l2_loopwedge_{}_{}", std::process::id(), seq);
     // POSIX shell, not `$SHELL`: a custom login prompt would never match
     // `wait_for_prompt` and would burn its full timeout.
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            "120",
-            "-y",
-            "50",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session(&session, 120, 50).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);

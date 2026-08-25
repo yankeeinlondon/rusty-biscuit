@@ -48,7 +48,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
-use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name};
+use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name, spawn_shell_session};
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use claudine_gen::generate::{CheckOutcome, Generation, Provenance, ResolvedField};
 use claudine_gen::offerings::OfferingJoinReport;
@@ -150,23 +150,7 @@ fn capture_probe(mode: &str, cols: u32, rows: u32) -> CapturedFrame {
     // POSIX shell, not the developer's `$SHELL`: a custom login prompt (e.g.
     // Starship's `❯`) never ends in `$`/`#`/`%`, so `wait_for_prompt` would
     // never match and burn its full timeout twice.
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            &cols.to_string(),
-            "-y",
-            &rows.to_string(),
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn a {cols}x{rows} tmux session");
+    spawn_shell_session(&session, cols, rows).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
