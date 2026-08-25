@@ -1,6 +1,7 @@
 ---
 status: draft
 created: 2026-08-12
+updated: 2026-08-25
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-08-12
@@ -8,6 +9,7 @@ clarified: claude/claude-fable-5
 area: claudine
 packages:
     - claudine
+    - darkmatter
 ---
 
 # `ctx.*` answers "where does the prompt live?" instead of "where did the caller launch from?"
@@ -39,6 +41,12 @@ through every phase of a document preparation epoch. Prompt-specific
 `SourceContext` remains authoritative for document/file resolution and other
 explicitly source-relative behavior.
 
+This specification was refreshed against `main` at
+`bd6c305a89ddf81c721649d48eb1428b497bf25d` on 2026-08-25. PR #54 is historical
+design and test evidence only: none of its implementation is assumed to be
+present, and implementation starts from the current green `main` architecture
+rather than by cherry-picking or reviving that branch.
+
 > **Reader's note:** The initial repair was a two-site replacement of
 > `source_context.base_dir()` with `launch_cwd`. Review expanded it into a
 > shared launch-capture seam because changing only the directory while retaining
@@ -66,7 +74,9 @@ meaning for `ctx.*`.
 - `current.ctx.*` is intentionally live event-time state and is outside this
   repair. This specification concerns prepared plain `ctx.*` only.
 
-## Observed behavior (verified 2026-08-12, binary built the same day)
+## Observed behavior
+
+### Runtime reproduction (verified 2026-08-12)
 
 A minimal prompt whose lifecycle reports `ctx.area` was run twice from the
 same shell directory (`darkmatter/`), changing only where the prompt file was
@@ -93,6 +103,31 @@ parameters resolve through the request-scoped file resolver and currently use
 the launch inputs correctly. The prepared runtime context is the component
 anchored incorrectly.
 
+### Current-main source audit (verified 2026-08-25)
+
+The defect remains present on the implementation baseline. Current main already
+has the two ownership primitives the repair should build around:
+
+- `InvocationContext` retains immutable launch CWD, environment, repository,
+  topology, file-resolution, and host evidence for the invocation; and
+- `PreparedComposition::compose_context` stores the exact early-binding
+  snapshot consumed downstream.
+
+The missing piece is the boundary between them. `InvocationContext` exposes
+`runtime_evidence(&SourceContext, ...)`, which intentionally projects evidence
+from a document source. Canonical preparation then combines that evidence with
+`source_context.base_dir()`. The audited production sites include direct
+preflight and preparation, sequence graph/JIT/task preparation, sequence
+referenced-document preflight, overlay and harness preparation, composition
+pipeline re-materialization, and system-prompt preparation. Darkmatter exposes
+`capture_with_evidence`, but does not yet expose an operation for extending an
+existing snapshot with newly required groups from the same evidence.
+
+Current main also has a canonical `DocumentPreparation` service and explicit
+`DocumentEntryReason`/`PreparationStages` metadata. The implementation should
+make that preparation boundary own the epoch snapshot instead of adding another
+route-local coordinator.
+
 ## Root cause
 
 `InvocationContext::derive_source` correctly sets `SourceContext::base_dir` to
@@ -107,7 +142,7 @@ bug is that callers also use the source context to build prepared `ctx.*`:
    `PrepareOptions.prepared_context`.
 3. Sequence graph preflight, per-document shell approval, JIT template
    preparation, and task execution repeat the source-anchored construction.
-4. Canonical overlay, harness re-materialization, passthrough, and
+4. Canonical overlay, harness re-materialization, composition-pipeline, and
    system-prompt paths contain the same pattern.
 
 The comments at the original direct-compose sites claim launch-area anchoring.
@@ -162,6 +197,11 @@ The method must use the retained launch repository/topology entry and the
 launch CWD together. Callers must not be able to pair a launch anchor with
 prompt-derived evidence accidentally.
 
+All repository-backed plain-context groups are launch projections, including
+`ctx.repo_root`, `ctx.area`, `ctx.current_packages`, `ctx.file_changes`,
+`ctx.languages`, and `ctx.documents`. Source-scanned implementations of those
+groups must scan from the launch repository/base, not from the prompt source.
+
 Refactor `runtime_evidence` internally if necessary so launch and source
 projections share caching and work accounting without fabricating a prompt
 path or performing another host scan. Do not construct a fake `SourceContext`
@@ -171,6 +211,13 @@ Verify—and complete where missing—the `record_ambient_fallback` wiring so a
 consumer that drops its prepared context cannot fall through to darkmatter's
 ambient capture unobserved. AC5's counter proof depends on that accounting
 having no blind spot.
+
+Darkmatter must support extending an existing `ComposeContext` with only the
+groups missing from a later `ContextRequirements` set. Extension preserves the
+snapshot's original datetime, environment, anchor, diagnostics, and already
+captured values; Claudine supplies evidence projected from the same retained
+launch inputs. This is a narrow context API addition, not a new ownership layer
+in Darkmatter.
 
 Alternatives considered:
 
@@ -205,9 +252,9 @@ existing resolution order.
 ### D4 — One snapshot per document preparation epoch
 
 A **document preparation epoch** begins when direct, proxy-target, retry, or
-resume entry reads and prepares an active document. It derives one coherent
-early-binding context after provider/model resolution and reuses that exact
-snapshot for:
+resume entry performs its canonical read and prepares an active document. It
+derives one coherent early-binding context after provider/model resolution and
+reuses that exact snapshot for:
 
 - narrow and full shell preflight;
 - body and non-lifecycle frontmatter composition;
@@ -216,12 +263,12 @@ snapshot for:
 - every lifecycle event for that prepared document.
 
 Do not capture a second “equivalent” context for preflight or lifecycle.
-Proxying to another document, retrying, or resuming starts the canonical fresh
-preparation required by the lifecycle contracts and may construct a new
-snapshot, but immutable launch-facing values remain projections of the same
-invocation evidence. Loop iterations that reuse one prepared document also
-reuse its stored snapshot. `current.ctx.*` remains separately captured and
-live.
+Proxying to another document starts a new epoch. Retry and resume replace the
+provider-attempt slice by performing a fresh canonical read and full validation,
+so they also start a new epoch. Each may construct one new snapshot, but
+immutable launch-facing values remain projections of the same invocation
+evidence. Loop iterations that reuse one prepared document also reuse its stored
+snapshot. `current.ctx.*` remains separately captured and live.
 
 The post-`initialize` stabilized reread stays inside the same epoch; it is not
 a fresh preparation. Because `initialize` may rewrite the document, the
@@ -265,6 +312,12 @@ allowlisted with a reason.
 
 - `claudine/lib/src/invocation_context.rs`: expose the paired launch-evidence
   context capture and retain demand-driven caching/work counters.
+- `darkmatter/lib/src/markdown/compose/context/runtime.rs`: add the minimal
+  missing-requirements and evidence-extension operations needed to extend an
+  existing epoch snapshot without recapture.
+- `DocumentPreparation` and `PreparedComposition::compose_context`: make the
+  current canonical preparation service create, extend, and carry the epoch
+  snapshot. Do not introduce a parallel preparation coordinator.
 - Direct compose/inline-compose preparation: remove the two independent
   source-anchored captures and pass the epoch snapshot through preflight,
   canonical preparation, loops, and lifecycle.
@@ -272,7 +325,7 @@ allowlisted with a reason.
   resolution, approval composition, JIT template preflight, and task runtime
   preparation. A task/group/prompt stored in another repository must still
   report the caller's launch area through plain `ctx.*`.
-- Proxy, retry/resume, harness re-materialization, passthrough, and overlay
+- Proxy, retry/resume, harness re-materialization, composition-pipeline, and overlay
   paths: reuse the active prepared document's snapshot or create it through the
   canonical epoch owner; do not recapture from the active source.
 - System-prompt composition: prepared plain `ctx.*` uses launch evidence while
@@ -340,8 +393,10 @@ allowlisted with a reason.
   Windows drive/prefix behavior and macOS symlinked temporary directories, and
   introduce no separator, case-sensitivity, or ambient-CWD assumptions.
 - **AC14 — validation.** `just test`, `just test-l2`, and `just lint` pass from
-  the `claudine/` package area. L2 terminal/browser fixtures must not take
-  focus.
+  the `claudine/` package area, and the affected Darkmatter L1/lint gates pass.
+  The complete affected L1 and L2 suites are then green in the local macOS,
+  `build-linux`, `build-win` (WSL), and `build-win-native` environments before
+  hosted CI is started. L2 terminal/browser fixtures must not take focus.
 
 ## Non-goals
 
@@ -363,7 +418,8 @@ repository; AC3 locks that decision. The prompt's own location remains
 available to source/file-resolution infrastructure but is not projected into
 plain `ctx.*`.
 
-Three residual questions were surfaced in review and ratified 2026-08-12:
+The 2026-08-25 current-main audit did not reopen the three decisions ratified
+in the original review:
 
 - **Pre-selection target identity.** Graph-phase sequence commands referencing
   `ctx.agent`/`ctx.model`/`env.AGENT`/`env.MODEL` are rejected with a typed
@@ -372,6 +428,7 @@ Three residual questions were surfaced in review and ratified 2026-08-12:
 - **Stabilized reread.** The post-`initialize` reread is the same epoch; the
   snapshot extends missing requirement groups from retained launch evidence
   and never re-anchors (D4, AC5).
-- **AC5 mechanism.** Snapshot-reuse proof is Claudine-only work accounting —
-  no darkmatter identity field, no `Arc` refactor; the `packages` scope in the
-  frontmatter is intentional (D2, AC5).
+- **AC5 mechanism.** Snapshot-reuse proof remains Claudine-owned work
+  accounting — no Darkmatter identity field or snapshot-identity plumbing.
+  Darkmatter is now listed in the package scope because its current API lacks
+  the narrow missing-group extension operation required by D2 and D4.

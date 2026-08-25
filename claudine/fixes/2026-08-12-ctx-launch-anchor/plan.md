@@ -1,7 +1,8 @@
 ---
 total_phases: 6
 created: 2026-08-12
-phase: 2
+updated: 2026-08-25
+phase: 1
 agent: codex/default
 yolo: true
 ---
@@ -18,6 +19,29 @@ caller's immutable launch context, while preserving the active document's
 must construct one target-adjusted early-binding snapshot and reuse that exact
 snapshot through preflight, composition, loops, and lifecycle execution.
 
+## Current implementation baseline
+
+This plan starts from `main` at
+`bd6c305a89ddf81c721649d48eb1428b497bf25d`. PR #54 is an evidence source for
+requirements and test cases, not an implementation base; do not cherry-pick or
+revive it.
+
+The 2026-08-25 source audit established:
+
+- `InvocationContext` already owns immutable launch inputs and reusable host,
+  repository, topology, environment, and file-resolution evidence;
+- `DocumentPreparation` is the canonical preparation service and
+  `PreparedComposition::compose_context` is the existing exact-snapshot carrier;
+- canonical routes still call `runtime_evidence(&SourceContext, ...)` and pair
+  it with `source_context.base_dir()`, including direct preparation, sequence,
+  system-prompt, overlay, harness, and composition-pipeline paths; and
+- Darkmatter has `capture_with_evidence`, but no missing-requirements or
+  same-snapshot evidence-extension API.
+
+No implementation from the previous branch is credited as complete. Phase 1
+therefore begins with a clean failure baseline and a fully classified route
+inventory on current main.
+
 ## Completion contract
 
 The fix is complete when:
@@ -26,8 +50,9 @@ The fix is complete when:
   launch-facing plain `ctx.*` values;
 - launch CWD and launch repository/topology evidence can only be paired through
   an `InvocationContext` API;
-- direct, inline, loop, proxy, retry/resume, sequence, harness, overlay, and
-  system-prompt paths use the canonical launch capture;
+- direct, inline, loop, proxy, retry/resume, sequence, harness, overlay,
+  composition-pipeline, and system-prompt paths use the canonical launch
+  capture;
 - one document preparation epoch reuses one exact target-adjusted snapshot;
 - the post-`initialize` stabilized reread stays inside its epoch: missing
   requirement groups are extended from retained launch evidence, and the
@@ -41,7 +66,8 @@ The fix is complete when:
   resolution retain their existing behavior;
 - no additional ambient CWD, HOME, environment, Git, or topology discovery is
   introduced; and
-- the capture-owner inventory guard and all Claudine quality gates pass.
+- the capture-owner inventory guard and all affected Claudine and Darkmatter
+  quality gates pass locally on every required operating-system environment.
 
 ## Dependency order
 
@@ -82,8 +108,8 @@ of every production capture before changing ownership.
 - [ ] Record the canonical migration list at minimum for direct compose
   preflight/preparation, sequence root and referenced-document preflight, JIT
   templates, task execution, lifecycle pipeline re-materialization, overlays,
-  passthrough harnesses, harness prompt preparation, and system-prompt
-  preparation.
+  harness prompt preparation, composition-pipeline re-materialization, and
+  system-prompt preparation.
 - [ ] Record the current graph-phase behavior for a pre-selection sequence
   command that references `ctx.agent`/`ctx.model`/`env.AGENT`/`env.MODEL`, so
   the Phase 4 typed rejection has a frozen before-state (AC7).
@@ -119,6 +145,11 @@ owned by `InvocationContext`.
   API) accepting `ContextRequirements` and returning a `ComposeContext`
   captured at `launch_cwd()` from the retained launch repository/topology,
   environment, and host evidence (D1, D2).
+- [ ] Add the minimal Darkmatter APIs for calculating missing
+  `ContextRequirements` and extending an existing `ComposeContext` from supplied
+  evidence. Preserve its original datetime, environment, anchor, diagnostics,
+  and previously captured values; do not add snapshot identity or ownership to
+  Darkmatter (D2, D4, AC5).
 - [ ] Refactor the internal runtime-evidence population so launch and source
   projections reuse the existing caches and work counters, but the launch path
   operates directly on the retained launch entry; do not fabricate a
@@ -137,7 +168,7 @@ owned by `InvocationContext`.
   found a consumer seam that could drop its prepared context and reach
   darkmatter's ambient capture unobserved; AC5's zero-fallback assertion
   depends on this accounting having no blind spot (D2, AC5).
-- [ ] Expose the epoch-extension operation: project only the missing
+- [ ] Expose the Claudine epoch-extension operation: project only the missing
   `ContextRequirements` groups from the same retained launch evidence into an
   existing snapshot, without re-anchoring, re-capturing environment, or
   re-applying target overrides (D4, AC5).
@@ -157,8 +188,9 @@ owned by `InvocationContext`.
 
 ### Validation checkpoint
 
-- [ ] Run `just test` and `just lint` from `claudine/`; confirm the new API is
-  additive and existing compatibility callers remain green before migrations.
+- [ ] Run the affected Darkmatter L1 tests and lint, then `just test` and
+  `just lint` from `claudine/`; confirm the new API is additive and existing
+  compatibility callers remain green before migrations.
 - [ ] Inspect request-local counters for the new unit matrix and confirm launch
   projection adds no Git root discovery or topology probe.
 
@@ -171,20 +203,21 @@ document entry and pass it through every stage of that epoch.
 
 ### Tasks
 
-- [ ] Move context construction in
-  `claudine/cli/src/commands/compose/prep.rs` to the canonical document-epoch
-  owner after provider/model resolution and before shell preflight; call the
-  launch-capture API once, then apply the resolved target's `env_overrides`
-  once (D4, AC5, AC6).
+- [ ] Make the existing `DocumentPreparation` service the canonical
+  document-epoch owner. Its CLI entry in
+  `claudine/cli/src/commands/compose/prep.rs` must request the snapshot after
+  provider/model resolution and before shell preflight, call the launch-capture
+  API once, and apply the resolved target's `env_overrides` once. Do not add a
+  parallel route-local coordinator (D4, AC5, AC6).
 - [ ] Pass that exact snapshot to the narrow/full shell preflight
   `ComposeOptions`, `PrepareOptions.prepared_context`, body and effective
   frontmatter composition, schema evaluation, loop seed/condition work, and
   lifecycle execution; remove the second capture currently performed before
   main preparation (AC1, AC2, AC5).
-- [ ] Change lifecycle pipeline setup to consume the prepared epoch snapshot
-  carried by the execution request instead of rebuilding a context from the
-  composed prompt and active `SourceContext`; leave event-time `current.ctx.*`
-  capture separate and live (AC5, AC8).
+- [ ] Change lifecycle and composition-pipeline setup to consume
+  `PreparedComposition::compose_context` instead of rebuilding a context from
+  the composed prompt and active `SourceContext`; leave event-time
+  `current.ctx.*` capture separate and live (AC5, AC8).
 - [ ] Keep the post-`initialize` stabilized reread inside the same epoch: when
   the reread's demand-driven requirements exceed the stored snapshot's groups,
   extend the snapshot through the epoch owner's extension operation; the
@@ -318,12 +351,12 @@ the final epoch/snapshot interfaces.
   repository root, package areas, and an external repository without changing
   their launch-facing expansion (AC9).
 
-### Track B — Overlay, harness, passthrough, and re-materialization paths
+### Track B — Overlay, harness, composition-pipeline, and re-materialization paths
 
-- [ ] Update overlay preparation, passthrough harness seed materialization,
-  harness prompt preparation, and loop-control target launch to receive the
-  active epoch snapshot or create it through the canonical launch owner; remove
-  direct source-anchored prepared-context captures (AC8, AC9).
+- [ ] Update overlay preparation, harness prompt preparation,
+  composition-pipeline re-materialization, and loop-control target launch to
+  receive the active epoch snapshot or create it through the canonical launch
+  owner; remove direct source-anchored prepared-context captures (AC8, AC9).
 - [ ] Prove re-materialization reuses the active epoch snapshot when the active
   document has not changed and starts exactly one fresh epoch on proxy,
   retry, or resume entry (AC5, AC8).
@@ -350,7 +383,7 @@ the final epoch/snapshot interfaces.
 
 ### Validation checkpoint
 
-- [ ] Run focused system-prompt, overlay, harness, passthrough, and
+- [ ] Run focused system-prompt, overlay, harness, composition-pipeline, and
   re-materialization nextest suites and confirm relocation does not affect
   launch-facing values.
 - [ ] Seed the inventory fixture with a forbidden direct capture and confirm the
@@ -387,10 +420,20 @@ package ready for implementation review.
 
 ### Final validation checkpoint
 
+- [ ] Run the affected Darkmatter `just test` and `just lint` gates and record
+  clean results.
 - [ ] Run `just test` from `claudine/` and record a clean nextest result.
 - [ ] Run `just test-l2` from `claudine/` with terminal/browser fixtures kept in
   the background so no window gains focus (AC14).
 - [ ] Run `just lint` from `claudine/` and record a clean result (AC14).
+- [ ] Repeat the complete affected L1 and L2 validation in `build-linux`,
+  `build-win` (WSL), and `build-win-native`, in addition to the macOS host.
+  Re-run L1 after L2 fixes to catch regressions; do not start hosted CI until
+  all four local environments are green (AC13, AC14).
+- [ ] After all local environments are green, run one full hosted CI workflow.
+  Treat any failure as a new local reproduce/fix/validate cycle before pushing
+  another CI attempt; do not increase timeouts without first exhausting a more
+  efficient deterministic test design.
 - [ ] Confirm the original real-world repro now reports the launch package area
   from both repository-root and package-local prompt copies, including
   lifecycle interpolation and `when:` evaluation.
