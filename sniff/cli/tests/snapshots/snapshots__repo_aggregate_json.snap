@@ -169,13 +169,7 @@ expression: stable
     ],
     "monorepo_standards": [
       {
-        "binary": {
-          "name": "cargo",
-          "path": "<normalized>",
-          "satisfies_min_version": null,
-          "source": "path",
-          "version": null
-        },
+        "binary": "<normalized>",
         "confidence": "marker-confirmed",
         "matched_markers": [
           "[BASE]/Cargo.toml"

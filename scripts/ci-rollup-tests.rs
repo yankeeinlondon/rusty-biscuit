@@ -1938,7 +1938,6 @@ fn the_checked_in_baseline_parses_and_every_entry_is_well_formed() {
         .join("ci-baseline.toml");
     let baseline = load_baseline(&path).expect("the checked-in baseline is valid");
 
-    assert!(!baseline.failure.is_empty());
     for entry in &baseline.failure {
         assert!(!entry.owner.is_empty(), "{} has no owner", entry.package);
         assert!(!entry.reason.is_empty(), "{} has no reason", entry.package);

@@ -151,6 +151,33 @@ do not belong here.
   for blob verification. `"$rev:$path"` can be parsed as a zsh parameter
   modifier.
 
+## Merge State
+
+- `git commit` refuses `--only` (and any `-- <pathspec>` restriction) while a
+  merge is in progress: `fatal: cannot do a partial commit during a merge.`
+  Even the sub-agent's narrow pathspec cannot restrict scope when
+  `.git/MERGE_HEAD` exists. Detect with `git status | grep -i merge` or
+  `test -f .git/MERGE_HEAD` BEFORE running any `git commit --only`; if a merge
+  is open, the only path is either to commit the whole merge as a single
+  commit or to drop into plumbing.
+- Plumbing bypass (`commit-tree` + `update-ref`) does NOT honor
+  `commit.gpgsign=true` even when the global config says to sign — the
+  resulting commit has `N` (no signature) and the user's required-signing
+  contract is silently violated. When plumbing around a merge-state block,
+  pass `-S <key>` (or set `GIT_COMMIT_SIGN=1`) explicitly so the produced
+  commit lands signed.
+- Before dispatching parallel commit work, check `git log --oneline -5` (or
+  recent commits for the expected subject) for a wrapper-pre-staged merge
+  that already resolved the change. A wrapper that ran `git pull --no-edit`
+  and pre-resolved conflicts will leave `MERGE_HEAD` in place AND land all
+  staged files as a single merge commit BEFORE any sub-agent runs. The
+  sub-agent prompt is then stale with respect to actual repo state. If
+  evidence of a recent merge of the same change exists, abort the parallel
+  dispatch — the parallel group has nothing left to do.
+- When a merge-state commit absorbs an out-of-scope group, the commit message
+  must explicitly name the absorbed scope and flag the parallel group as
+  redundant, so reviewers see the wider scope and do not expect a follow-up.
+
 ## Commit Messages
 
 - Follow recent repository history and the prompt's Conventional Commit format.

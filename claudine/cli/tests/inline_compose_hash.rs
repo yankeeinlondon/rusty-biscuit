@@ -1,56 +1,17 @@
 //! Integration test for inline-compose hash stamping.
 //!
 //! Verifies that a real `claudine inline-compose` run writes a valid
-//! Darkmatter `Simple` hash and that `md hash --diff` exits 0 on the
-//! resulting file.
+//! Darkmatter `Simple` hash and that Darkmatter's canonical comparison reports
+//! no difference for the resulting file.
 
 use std::fs;
 use std::path::Path;
+#[cfg(windows)]
 use std::process::Command;
 use tempfile::tempdir;
 mod common;
 use common::augmented_path;
 use common::wrap::seed_minimal_config;
-
-/// Locate the `md` binary.
-///
-/// `assert_cmd::cargo::cargo_bin` works for binaries of the crate under test;
-/// `md` lives in `darkmatter-cli`, so use `CARGO_BIN_EXE_md` when Cargo provides
-/// it and otherwise resolve the sibling binary next to this test's profile
-/// directory. Deriving that directory from `current_exe` respects custom
-/// target directories and the platform executable suffix.
-///
-/// A workspace build is preferred over `PATH` so the test exercises the current
-/// tree, but `PATH` is a valid last resort: `just init` installs `md` through
-/// `darkmatter`'s `install` recipe, which is a `cargo install` into the Cargo
-/// bin directory and never populates the workspace target directory.
-fn md_bin() -> std::path::PathBuf {
-    if let Ok(path) = std::env::var("CARGO_BIN_EXE_md") {
-        return path.into();
-    }
-    let test_exe = std::env::current_exe().expect("current test executable");
-    let profile_dir = test_exe
-        .parent()
-        .and_then(std::path::Path::parent)
-        .expect("integration test executable under <profile>/deps");
-    let file_name = format!("md{}", std::env::consts::EXE_SUFFIX);
-    let built = profile_dir.join(&file_name);
-    if built.exists() {
-        return built;
-    }
-    let installed = std::env::var_os("PATH").and_then(|path| {
-        std::env::split_paths(&path)
-            .map(|dir| dir.join(&file_name))
-            .find(|candidate| candidate.is_file())
-    });
-    if let Some(installed) = installed {
-        return installed;
-    }
-    panic!(
-        "md binary not found at {built:?} and not on PATH; \
-         run `cargo build -p darkmatter-cli --bin md` or `just init`"
-    );
-}
 
 /// Write a fake `goose` provider that prints a fixed, deterministic replacement
 /// body and exits 0, discoverable on `PATH` on every platform.
@@ -136,17 +97,22 @@ fn inline_compose_writes_hash_that_passes_md_diff() {
         "inline-compose must write the replacement body; file:\n{final_content}"
     );
 
-    // `md hash --diff` must report the stored hash matches the document.
-    let output = Command::new(md_bin())
-        .env("NO_COLOR", "1")
-        .args(["hash", "--diff", md_file.to_str().unwrap()])
-        .output()
-        .expect("md hash --diff should execute");
-
+    // This is the canonical library path behind `md hash --diff`, and unlike a
+    // sibling CLI process it remains available in a nextest archive.
+    let markdown: darkmatter::markdown::Markdown = final_content.into();
+    let options = claudine::composition::closure::inline_hash_options();
+    let stored_value = markdown
+        .frontmatter()
+        .as_map()
+        .get(&options.property)
+        .expect("inline-compose should write the hash property");
+    let stored = darkmatter::markdown::hash::StoredHash::parse(stored_value, &options.property)
+        .expect("inline-compose should write a valid stored hash");
+    let comparison = markdown
+        .compare_hash(&stored, &options)
+        .expect("stored hash should be comparable");
     assert!(
-        output.status.success(),
-        "md hash --diff must exit 0; stdout: {}, stderr: {}",
-        String::from_utf8_lossy(&output.stdout),
-        String::from_utf8_lossy(&output.stderr)
+        !comparison.frontmatter_changed && !comparison.body_changed,
+        "the stored hash must match the final document"
     );
 }

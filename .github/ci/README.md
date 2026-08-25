@@ -154,7 +154,7 @@ command surface:
   through `MESSENGER_STUB_BIN_DIR`. The WSL2 archive job builds a Linux sidecar;
   the WSL job copies it onto ext4 with executable permissions and unprivileged
   ownership. The guest verifies that Cargo and rustc are absent before running
-  the archive, so helper resolution cannot fall back to a nested build.
+  the archive, proving helper execution depends only on the delivered sidecar.
 - **`node-22` / `pnpm-10`** — the JavaScript toolchain a companion suite runs
   under (homelab-frontend, owned by homelab-server).
 - **`l2-parallel-self-spawn`** — run the L2 tier in `_test_l2`'s parallel

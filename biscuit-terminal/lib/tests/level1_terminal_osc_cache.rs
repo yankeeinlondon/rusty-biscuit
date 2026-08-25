@@ -207,7 +207,7 @@ mod unix {
             // Liveness bound, not a performance gate: 53 cached constructions
             // are ~50 ms of work, so this is ~600x headroom. It is generous
             // enough that a broken cache still reaches the count assertion
-            // below (53 unanswered round-trips at the 100 ms query timeout)
+            // below (53 unanswered round-trips at the one-second query timeout)
             // and fails there, with the diagnostic, rather than here.
             Duration::from_secs(30),
         );

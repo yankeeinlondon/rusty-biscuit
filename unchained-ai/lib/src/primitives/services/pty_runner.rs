@@ -1,16 +1,40 @@
 use std::io::{Read, Write};
 use std::time::Duration;
 
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+#[cfg(windows)]
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+
+use portable_pty::{CommandBuilder, PtySize, PtySystem, native_pty_system};
 use strip_ansi_escapes::strip;
 
 use super::error::AgentStatusError;
 
-/// Default timeout for PTY operations.
+/// Default timeout for PTY operations on Unix.
+#[cfg(not(windows))]
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 
-/// ConPTY may need its cursor-inheritance timeout to expire during shutdown.
+/// Windows commands may need more time to initialize than Unix commands.
+#[cfg(windows)]
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Maximum time to wait for the PTY reader to observe shutdown.
 const OUTPUT_DRAIN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// ConPTY exposes no child-attachment event, so fast commands get a bounded
+/// opportunity to exit before their input pipe is closed.
+#[cfg(windows)]
+const CONPTY_CHILD_EXIT_GRACE: Duration = Duration::from_secs(1);
+
+/// ConPTY delivers child output through an asynchronous pump after process exit.
+#[cfg(windows)]
+const CONPTY_OUTPUT_START_GRACE: Duration = Duration::from_secs(1);
+
+/// A quiet interval distinguishes the final output chunk from a delayed tail.
+#[cfg(windows)]
+const CONPTY_OUTPUT_QUIET: Duration = Duration::from_millis(500);
 
 /// A step in an interactive PTY session.
 #[derive(Debug, Clone)]
@@ -27,6 +51,7 @@ pub enum InteractiveStep {
 ///
 /// Returns `AgentStatusError::PtySpawnError` if the PTY or command fails to spawn.
 /// Returns `AgentStatusError::PtyReadError` if reading from the PTY fails.
+/// Returns `AgentStatusError::PtyWriteError` if PTY stdin cannot be acquired.
 /// Returns `AgentStatusError::TimeoutError` if the command exceeds the timeout.
 pub async fn run_pty_command(
     program: &str,
@@ -76,17 +101,88 @@ fn run_pty_blocking(
         .try_clone_reader()
         .map_err(|e| AgentStatusError::PtyReadError(format!("Failed to clone reader: {}", e)))?;
 
+    let writer = pair
+        .master
+        .take_writer()
+        .map_err(|e| AgentStatusError::PtyWriteError(format!("Failed to get writer: {}", e)))?;
+    #[cfg(windows)]
+    let mut writer = writer;
+
     drop(pair.slave);
 
     let (tx, rx) = mpsc::channel();
+    #[cfg(windows)]
+    let observed_bytes = Arc::new(AtomicUsize::new(0));
+    #[cfg(windows)]
+    let reader_observed_bytes = Arc::clone(&observed_bytes);
     thread::spawn(move || {
         let mut raw_output = Vec::new();
-        let result = reader.read_to_end(&mut raw_output);
+        let mut buffer = [0u8; 4096];
+        let result = loop {
+            match reader.read(&mut buffer) {
+                Ok(0) => break Ok(()),
+                Ok(read) => {
+                    raw_output.extend_from_slice(&buffer[..read]);
+                    #[cfg(windows)]
+                    reader_observed_bytes.store(raw_output.len(), Ordering::Release);
+                }
+                Err(error) => break Err(error),
+            }
+        };
         tx.send((raw_output, result)).ok();
     });
 
+    #[cfg(windows)]
     let start = Instant::now();
+
+    // Closing PTY input immediately can race a short-lived child attaching and
+    // discard its output on macOS.
+    #[cfg(target_os = "macos")]
+    thread::sleep(Duration::from_millis(20));
+
+    #[cfg(windows)]
+    let child_exited = loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break true,
+            Ok(None) => {}
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(AgentStatusError::PtyReadError(format!(
+                    "Failed to query child status: {}",
+                    error
+                )));
+            }
+        }
+
+        if start.elapsed() >= CONPTY_CHILD_EXIT_GRACE.min(timeout_dur) {
+            break false;
+        }
+
+        thread::sleep(Duration::from_millis(10));
+    };
+
+    #[cfg(windows)]
+    if !child_exited {
+        // Closing a ConPTY input pipe does not synthesize console EOF.
+        writer
+            .write_all(b"\x1a\r\n")
+            .map_err(|e| AgentStatusError::PtyWriteError(format!("Failed to send EOF: {}", e)))?;
+        writer
+            .flush()
+            .map_err(|e| AgentStatusError::PtyWriteError(format!("Failed to flush EOF: {}", e)))?;
+    }
+    drop(writer);
+
+    #[cfg(not(windows))]
+    let start = Instant::now();
+
     loop {
+        #[cfg(windows)]
+        if child_exited {
+            break;
+        }
+
         match child.try_wait() {
             Ok(Some(_)) => break,
             Ok(None) => {}
@@ -113,6 +209,36 @@ fn run_pty_blocking(
     }
 
     let _ = child.wait();
+
+    // Child exit and output delivery are independent in ConPTY. Closing the
+    // pseudo-console before its output pump settles can discard the final chunk.
+    #[cfg(windows)]
+    {
+        let settle_start = Instant::now();
+        let mut last_observed = observed_bytes.load(Ordering::Acquire);
+        let mut last_change = Instant::now();
+
+        loop {
+            let observed = observed_bytes.load(Ordering::Acquire);
+            if observed != last_observed {
+                last_observed = observed;
+                last_change = Instant::now();
+            }
+
+            if observed > 0 && last_change.elapsed() >= CONPTY_OUTPUT_QUIET {
+                break;
+            }
+            if observed == 0 && settle_start.elapsed() >= CONPTY_OUTPUT_START_GRACE {
+                break;
+            }
+            if settle_start.elapsed() >= OUTPUT_DRAIN_TIMEOUT {
+                break;
+            }
+
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     drop(pair.master);
 
     let (raw_output, read_result) = rx.recv_timeout(OUTPUT_DRAIN_TIMEOUT).map_err(|_| {
@@ -250,6 +376,10 @@ fn run_pty_interactive_blocking(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::Read;
+
+    const STDIN_EOF_CHILD: &str =
+        "primitives::services::pty_runner::tests::child_waits_for_stdin_eof";
 
     #[cfg(unix)]
     const ECHO_PROGRAM: &str = "echo";
@@ -286,6 +416,37 @@ mod tests {
             .expect("ANSI-producing command should succeed");
         assert!(output.trim().contains("red"));
         assert!(!output.contains("\x1b["));
+    }
+
+    #[test]
+    #[ignore = "subprocess fixture invoked by the PTY lifecycle test"]
+    fn child_waits_for_stdin_eof() {
+        println!("waiting for stdin EOF");
+        std::io::stdout()
+            .flush()
+            .expect("stdout should be flushable");
+        let mut input = String::new();
+        std::io::stdin()
+            .read_to_string(&mut input)
+            .expect("stdin should be readable");
+    }
+
+    #[tokio::test]
+    async fn test_noninteractive_command_closes_stdin() {
+        let executable = std::env::current_exe().expect("current test executable should resolve");
+        let output = run_pty_command(
+            executable
+                .to_str()
+                .expect("the test executable path should be valid UTF-8"),
+            &[STDIN_EOF_CHILD, "--exact", "--ignored", "--nocapture"],
+            Some(Duration::from_secs(15)),
+        )
+        .await
+        .expect("command waiting for stdin EOF should exit");
+        assert!(
+            output.contains("waiting for stdin EOF"),
+            "PTY output should contain the child readiness marker, got: {output:?}"
+        );
     }
 
     #[tokio::test]

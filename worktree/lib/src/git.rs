@@ -228,10 +228,17 @@ mod tests {
 
     #[test]
     #[serial_test::serial]
-    fn repo_info_from_monorepo() {
+    fn repo_info_from_current_repo() {
+        let repo = temp_repo();
+        let _guard = DirGuard::enter(repo.path());
+
         let info = repo_info().unwrap();
-        assert_eq!(info.name, "rusty-biscuit");
-        let _ = info.relative_path.to_string_lossy();
+        assert_eq!(
+            info.name,
+            repo.path().file_name().unwrap().to_string_lossy()
+        );
+        assert_eq!(info.root.canonicalize().unwrap(), repo.path().canonicalize().unwrap());
+        assert!(info.relative_path.as_os_str().is_empty());
     }
 
     #[test]

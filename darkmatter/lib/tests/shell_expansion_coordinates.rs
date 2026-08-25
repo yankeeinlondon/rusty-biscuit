@@ -38,8 +38,10 @@ fn compose_options(dir: &TempDir) -> ComposeOptions {
 
 /// A portable failing command that prints to stderr and exits non-zero on
 /// macOS, Windows, and Linux.
-fn failing_command() -> &'static str {
-    "rustc --edition=invalid"
+fn failing_command() -> String {
+    let executable = std::env::current_exe().expect("test executable path should be available");
+    let executable = biscuit_file::to_portable_string(&executable);
+    format!("\"{executable}\" --definitely-invalid-libtest-option")
 }
 
 #[test]
@@ -222,7 +224,10 @@ fn frontmatter_shell_origin_is_file_relative() {
 
 #[test]
 fn frontmatter_line_count_counts_source_lines_with_crlf() {
-    let content = "---\r\ntitle: Test\r\n---\r\n# Body\r\n::shell rustc --edition=invalid\r\n";
+    let content = format!(
+        "---\r\ntitle: Test\r\n---\r\n# Body\r\n::shell {}\r\n",
+        failing_command()
+    );
     let md: Markdown = content.into();
     // 3 frontmatter source lines (---, title, ---); body starts at line 4.
     assert_eq!(md.frontmatter_line_count(), 3);
@@ -231,7 +236,10 @@ fn frontmatter_line_count_counts_source_lines_with_crlf() {
 #[test]
 fn body_shell_origin_counts_lines_not_bytes_with_crlf() {
     let dir = TempDir::new().unwrap();
-    let content = "---\r\ntitle: Test\r\ncmd: placeholder\r\n---\r\n# Heading\r\n\r\n::shell rustc --edition=invalid\r\n";
+    let content = format!(
+        "---\r\ntitle: Test\r\ncmd: placeholder\r\n---\r\n# Heading\r\n\r\n::shell {}\r\n",
+        failing_command()
+    );
     std::fs::write(dir.path().join("doc.md"), content).unwrap();
 
     let md = Markdown::try_from(dir.path().join("doc.md").as_path()).unwrap();

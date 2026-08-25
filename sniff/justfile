@@ -87,7 +87,7 @@ test-browser:
 
 # Real-resource tests (network probes, host filesystem). Skip-clean when absent.
 test-real *args="":
-    @just _test_real sniff {{ args }}
+    @just _test_real sniff --features network {{ args }}
     @just _test_real sniff-cli {{ args }}
 
 # lint with clippy

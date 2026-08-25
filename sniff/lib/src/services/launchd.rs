@@ -35,12 +35,11 @@ pub(crate) fn list_launchd_services() -> Vec<Service> {
     services
 }
 
-#[cfg(test)]
+#[cfg(all(test, target_os = "macos"))]
 mod tests {
     use super::*;
 
     #[test]
-    #[cfg(target_os = "macos")]
     fn test_launchd_services_returns_services() {
         let services = list_launchd_services();
         assert!(

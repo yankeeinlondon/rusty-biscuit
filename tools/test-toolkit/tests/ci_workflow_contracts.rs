@@ -680,12 +680,11 @@ fn active_ci_authority_matches_the_retirement_contract() {
     );
 
     let ci_topic = read("docs/topics/ci-cd.md");
-    for survivor in ["biscuit-tui-windows-captured-stdout.yml"] {
-        assert!(
-            ci_topic.contains(survivor),
-            "the active specialized inventory must retain {survivor}"
-        );
-    }
+    let survivor = "biscuit-tui-windows-captured-stdout.yml";
+    assert!(
+        ci_topic.contains(survivor),
+        "the active specialized inventory must retain {survivor}"
+    );
     assert!(
         !ci_topic.contains("claudine-windows-ctrl-c.yml"),
         "the active specialized inventory must contain only executable survivors"
@@ -1276,7 +1275,8 @@ fn l2_runs_on_every_environment_with_a_provisioned_backend() {
         "the L2 job must be a matrix over the environments with a provisioned backend"
     );
     assert!(
-        package_ci.contains("Report L2 backend coverage") && package_ci.contains("CI=1"),
+        package_ci.contains("Report L2 backend coverage")
+            && package_ci.contains("CI is truthy"),
         "the L2 job must report which declared backends were reachable and which skipped"
     );
 
@@ -1568,8 +1568,10 @@ fn ci_verdict_is_the_single_required_check() {
     );
 
     assert!(
-        verdict.contains("uses: actions/download-artifact@v4") && !verdict.contains("name: junit-"),
-        "ci-verdict must download every artifact in the run, not a named subset"
+        verdict.contains("name: ci-scope")
+            && verdict.matches("pattern: '{junit-*,status-*}'").count() == 2
+            && verdict.matches("github-token: ${{ github.token }}").count() == 2,
+        "ci-verdict must combine exact policy, current-attempt evidence, and the newest run-wide evidence"
     );
     assert!(
         !ci.contains("baseline-failures.txt"),

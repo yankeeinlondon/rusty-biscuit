@@ -74,10 +74,9 @@ static TEXT_COLOR_CACHE: OnceLock<Option<RgbValue>> = OnceLock::new();
 
 /// Query background color via OSC 11 heuristics.
 ///
-/// Returns `None` if:
-/// - Not running in a TTY
-/// - Running in a CI environment
-/// - No color information is available
+/// Live terminal queries are skipped outside a TTY and in CI. Deterministic
+/// environment and terminal-default fallbacks remain available in both cases.
+/// Returns `None` only when no color information is available.
 ///
 /// The result is cached per-process so repeated calls do not trigger
 /// additional terminal queries.

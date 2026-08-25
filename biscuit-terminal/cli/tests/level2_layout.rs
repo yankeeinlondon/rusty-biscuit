@@ -63,8 +63,9 @@ fn run_bt(args: &str) -> Option<Vec<String>> {
     harness.settle();
     // `printf` emits the sentinel on its own line after the command echo (and
     // any echo line-wrapping) but before `bt`'s output.
+    let command = common::bt_command(args);
     harness
-        .send_text(format!("printf '{START_SENTINEL}\\n'; bt {args}\n").as_bytes())
+        .send_text(format!("printf '{START_SENTINEL}\\n'; {command}\n").as_bytes())
         .expect("send_text failed");
     harness.settle();
     let _ = biscuit_test_harness::wait_for_prompt(harness);

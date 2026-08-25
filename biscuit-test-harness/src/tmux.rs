@@ -25,7 +25,68 @@ use super::{
 };
 
 const SESSION_PREFIX: &str = "biscuit_test_";
+const SERVER_EXITED_UNEXPECTEDLY: &str = "server exited unexpectedly";
 static CLEANUP_ONCE: Once = Once::new();
+
+/// Spawns a detached login shell in a named tmux session.
+///
+/// A tmux client can lose the server-start race when several independent test
+/// processes create sessions concurrently. Retrying that one explicit server
+/// error is safe because a failed `new-session` created no named session; all
+/// other failures remain immediate and retain tmux's diagnostic.
+pub fn spawn_shell_session(session: &str, cols: u32, rows: u32) -> io::Result<()> {
+    spawn_shell_session_with_env(session, cols, rows, &[])
+}
+
+/// [`spawn_shell_session`] with variables applied to the tmux launch environment.
+pub fn spawn_shell_session_with_env(
+    session: &str,
+    cols: u32,
+    rows: u32,
+    environment: &[(&str, &str)],
+) -> io::Result<()> {
+    let shell_cmd = format!("{} -l", super::detect_shell());
+    let mut cmd = Command::new("tmux");
+    cmd.args([
+        "new-session",
+        "-d",
+        "-s",
+        session,
+        "-x",
+        &cols.to_string(),
+        "-y",
+        &rows.to_string(),
+        &shell_cmd,
+    ]);
+    cmd.envs(environment.iter().copied());
+    run_new_session(&mut cmd)
+}
+
+fn run_new_session(cmd: &mut Command) -> io::Result<()> {
+    for attempt in 0..2 {
+        let out = run_with_timeout(cmd, SPAWN_TIMEOUT)?;
+        if out.status.success() {
+            return Ok(());
+        }
+
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        if should_retry_server_exit(attempt, &stderr) {
+            std::thread::yield_now();
+            continue;
+        }
+
+        return Err(io::Error::other(format!(
+            "tmux new-session failed: {}",
+            stderr.trim()
+        )));
+    }
+
+    unreachable!("the retry loop always returns")
+}
+
+fn should_retry_server_exit(attempt: usize, stderr: &str) -> bool {
+    attempt == 0 && stderr.contains(SERVER_EXITED_UNEXPECTEDLY)
+}
 
 /// Environment variable read by [`TmuxHarness::shared_or_spawn`] to
 /// attach to a tmux session that was pre-spawned by an outer process
@@ -307,10 +368,7 @@ impl TerminalHarness for TmuxHarness {
         // state.
         super::apply_color_forcing_env(&mut cmd);
 
-        let out = run_with_timeout(&mut cmd, SPAWN_TIMEOUT)?;
-        if !out.status.success() {
-            return Err(io::Error::other("tmux new-session failed"));
-        }
+        run_new_session(&mut cmd)?;
         self.session = Some(session);
         wait_for_prompt(self)?;
         Ok(())
@@ -343,10 +401,7 @@ impl TerminalHarness for TmuxHarness {
             &shell_cmd,
         ]);
         super::apply_color_forcing_env(&mut cmd);
-        let out = run_with_timeout(&mut cmd, SPAWN_TIMEOUT)?;
-        if !out.status.success() {
-            return Err(io::Error::other("tmux new-session failed"));
-        }
+        run_new_session(&mut cmd)?;
         self.session = Some(session);
         std::thread::sleep(Duration::from_millis(400));
         Ok(())
@@ -423,6 +478,13 @@ fn which(bin: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retries_only_the_first_unexpected_server_exit() {
+        assert!(should_retry_server_exit(0, "server exited unexpectedly"));
+        assert!(!should_retry_server_exit(1, "server exited unexpectedly"));
+        assert!(!should_retry_server_exit(0, "duplicate session: fixture"));
+    }
 
     #[test]
     fn tmux_pid_from_session_extracts_pid() {

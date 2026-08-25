@@ -27,6 +27,8 @@
 //! terminal is absent the test prints `skipping: requires <X>` to stderr and
 //! returns immediately. No `#[ignore]` markers are used.
 
+mod common;
+
 use biscuit_test_harness::kitty::KittyHarness;
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
@@ -65,20 +67,22 @@ const BORDER_GLYPH: char = '│';
 
 /// Runs a `bt` command with color forced on and returns the captured frame.
 fn capture_bt<H: TerminalHarness>(harness: &mut H, cmd: &str) -> CapturedFrame {
+    let args = cmd
+        .strip_prefix("bt ")
+        .expect("capture_bt command must start with `bt `");
     harness
-        .send_command_with_env(cmd, &[("FORCE_COLOR", "1")])
+        .send_command_with_env(&common::bt_command(args), &[("FORCE_COLOR", "1")])
         .expect("send_command_with_env failed");
     biscuit_test_harness::capture_settled(harness).expect("capture failed")
 }
 
-/// Returns the raw (escape-bearing) capture line whose plain text contains
-/// `needle`, skipping the command-echo line that carries `echo_marker`.
-fn output_row(frame: &CapturedFrame, echo_marker: &str, needle: &str) -> Option<String> {
+/// Returns the raw output line after the newest `bt` command echo whose plain
+/// text contains `needle`.
+fn output_row(frame: &CapturedFrame, subcommand: &str, needle: &str) -> Option<String> {
     let raw_lines: Vec<&str> = frame.raw.lines().collect();
-    for (i, plain) in frame.plain.lines().enumerate() {
-        if plain.contains(echo_marker) {
-            continue;
-        }
+    let plain_lines: Vec<&str> = frame.plain.lines().collect();
+    let command_end = common::find_bt_command_end(&plain_lines, subcommand)?;
+    for (i, plain) in plain_lines.iter().enumerate().skip(command_end + 1) {
         if plain.contains(needle) {
             return raw_lines.get(i).map(|raw| (*raw).to_string());
         }
@@ -166,7 +170,7 @@ fn assert_border_thin_left_glyph<H: TerminalHarness>(harness: &mut H) {
         harness,
         &format!("bt block \"{BORDER_NEEDLE}\" --border left --border-color cyan"),
     );
-    let row = output_row(&frame, "bt block", BORDER_NEEDLE).unwrap_or_else(|| {
+    let row = output_row(&frame, "block", BORDER_NEEDLE).unwrap_or_else(|| {
         panic!(
             "could not locate the `bt block` row carrying the border glyph and {BORDER_NEEDLE}.\nplain:\n{}\nraw:\n{}",
             frame.plain, frame.raw,
@@ -202,7 +206,7 @@ fn assert_emphasis_bold_italic_sgr<H: TerminalHarness>(harness: &mut H) {
         harness,
         &format!("bt block \"{EMPHASIS_NEEDLE}\" --bold --italic"),
     );
-    let row = output_row(&frame, "bt block", EMPHASIS_NEEDLE).unwrap_or_else(|| {
+    let row = output_row(&frame, "block", EMPHASIS_NEEDLE).unwrap_or_else(|| {
         panic!(
             "could not locate the `bt block` row carrying {EMPHASIS_NEEDLE}.\nplain:\n{}\nraw:\n{}",
             frame.plain, frame.raw,

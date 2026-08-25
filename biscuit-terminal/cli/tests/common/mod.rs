@@ -22,14 +22,55 @@ pub use biscuit_test_harness::{CapturedFrame, TerminalHarness, skip_with_reason}
 
 pub mod pane_geometry;
 
+/// Builds a shell-safe command for the nextest-provided bt binary.
+pub fn bt_command(args: &str) -> String {
+    let bin = biscuit_test_harness::bin_exe!("bt");
+    let escaped = bin.to_string_lossy().replace('\'', "'\\''");
+    format!("'{escaped}' {args}")
+}
+
+/// Finds the newest command-echo row where a `bt` subcommand marker finishes.
+///
+/// Real terminals can wrap the archived binary's absolute path at any byte,
+/// including inside the `bt` filename. Joining a bounded number of preceding
+/// rows keeps command-region assertions stable without selecting stale
+/// scrollback from an earlier test.
+pub fn find_bt_command_end(lines: &[&str], subcommand: &str) -> Option<usize> {
+    let markers = [
+        format!("bt {subcommand}"),
+        format!("bt' {subcommand}"),
+        format!("bt.exe' {subcommand}"),
+    ];
+
+    for end in (0..lines.len()).rev() {
+        let start = end.saturating_sub(3);
+        let prefix = lines[start..end]
+            .iter()
+            .map(|line| line.trim())
+            .collect::<String>();
+        let prefix_len = prefix.len();
+        let joined = format!("{prefix}{}", lines[end].trim());
+        if markers.iter().any(|marker| {
+            joined
+                .match_indices(marker)
+                .any(|(index, value)| index + value.len() > prefix_len)
+        }) {
+            return Some(end);
+        }
+    }
+    None
+}
+
 /// Sends a `bt` command to the harness and waits for the terminal to
 /// settle.
 ///
 /// `args` is the full argument string after `bt` — e.g. `"prose \"<red>x</red>\""`.
+/// The binary path comes from nextest rather than the spawned login shell's
+/// `PATH`, which keeps clean and archived test runs equivalent.
 pub fn send_bt_command(harness: &mut impl TerminalHarness, args: &str) {
-    let cmd = format!("bt {}\n", args);
+    let cmd = format!("{}\n", bt_command(args));
     harness.send_text(cmd.as_bytes()).expect("send_text failed");
-    harness.settle();
+    biscuit_test_harness::capture_settled(harness).expect("bt command did not settle");
 }
 
 /// Polls [`TerminalHarness::capture`] until `predicate` accepts a frame

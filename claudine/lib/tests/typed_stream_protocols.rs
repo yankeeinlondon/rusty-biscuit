@@ -28,7 +28,7 @@ fn arbitrary_json_value() -> impl Strategy<Value = serde_json::Value> {
     })
 }
 
-/// Inject arbitrary extra fields into a JSON value.
+/// Inject arbitrary values under field names that cannot shadow known protocol keys.
 fn inject_extras(value: serde_json::Value, extras: Vec<(String, serde_json::Value)>) -> String {
     let mut obj = match value {
         serde_json::Value::Object(o) => o,
@@ -39,6 +39,7 @@ fn inject_extras(value: serde_json::Value, extras: Vec<(String, serde_json::Valu
         }
     };
     for (k, v) in extras {
+        let k = format!("extra_{k}");
         if !obj.contains_key(&k) {
             obj.insert(k, v);
         }
@@ -216,6 +217,23 @@ proptest! {
         let event: QwenEvent = serde_json::from_str(&line).unwrap();
         assert_eq!(event.type_str(), "tool_call");
     }
+}
+
+#[test]
+fn protocol_named_extras_do_not_shadow_known_fields() {
+    let codex_line = inject_extras(
+        json!({"type":"thread.started","thread_id":"th1"}),
+        vec![("id".to_string(), json!([]))],
+    );
+    let codex_event: CodexEvent = serde_json::from_str(&codex_line).unwrap();
+    assert_eq!(codex_event.type_str(), "thread.started");
+
+    let opencode_line = inject_extras(
+        json!({"type":"tool_start","part":{"id":"t1","tool_name":"bash"}}),
+        vec![("id".to_string(), json!({}))],
+    );
+    let opencode_event: OpenCodeEvent = serde_json::from_str(&opencode_line).unwrap();
+    assert_eq!(opencode_event.type_str(), "tool_start");
 }
 
 /// Ensure unknown event types fail typed deserialization for every provider.

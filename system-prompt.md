@@ -25,6 +25,8 @@ mode: "append"
 - **IMPORTANT:** never add gitnexus indexing information to CLAUDE.md or AGENTS.md
   ::end-block
 
+::file {{ctx.repo_root}}/.system-prompt.md when="file_exists('{{ctx.repo_root}}/.system-prompt.md')"
+
 ::block when="ctx.area == claudine || ctx.area == darkmatter"
 
 ## Kind Formalism

@@ -118,6 +118,16 @@ impl MixedFixture {
         }
     }
 
+    /// Construct `wt` with the fixture's repository and isolated cache roots.
+    pub fn wt_command(&self) -> Command {
+        let mut command = Command::new(cargo_bin("wt"));
+        command
+            .current_dir(&self.main)
+            .env("HOME", self.home.path())
+            .env("XDG_CACHE_HOME", self.xdg_cache.path());
+        command
+    }
+
     /// Delete the worktree SHA-pair cache so the next run is a guaranteed miss.
     pub fn clear_worktree_cache(&self) {
         let _ = fs::remove_dir_all(self.home.path().join("Library").join("Caches").join("worktree"));
@@ -127,11 +137,9 @@ impl MixedFixture {
 
     /// Run `wt list --perf` and return the parsed `list gather` stage duration.
     pub fn list_gather_duration(&self) -> Duration {
-        let output = Command::new(cargo_bin("wt"))
-            .current_dir(&self.main)
+        let output = self
+            .wt_command()
             .args(["list", "--perf"])
-            .env("HOME", self.home.path())
-            .env("XDG_CACHE_HOME", self.xdg_cache.path())
             .env_remove("TERM_PROGRAM")
             .env_remove("KITTY_WINDOW_ID")
             .output()

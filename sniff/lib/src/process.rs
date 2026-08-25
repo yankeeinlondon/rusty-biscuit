@@ -839,6 +839,7 @@ mod tests {
 
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    #[allow(clippy::zombie_processes)]
     fn child_spawns_pipe_holding_descendant() {
         let executable = std::env::current_exe().expect("current test executable should resolve");
         let args = test_child_args(PIPE_HOLDING_DESCENDANT);
@@ -857,6 +858,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    #[allow(clippy::zombie_processes)]
     fn child_spawns_detached_pipe_holding_descendant() {
         let executable = std::env::current_exe().expect("current test executable should resolve");
         let args = test_child_args(DETACHED_PIPE_HOLDING_DESCENDANT);
@@ -901,6 +903,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    #[allow(clippy::zombie_processes)]
     fn child_spawns_quiet_detached_descendant() {
         let executable = std::env::current_exe().expect("current test executable should resolve");
         let args = test_child_args(QUIET_DETACHED_DESCENDANT);
@@ -931,6 +934,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    #[allow(clippy::zombie_processes)]
     fn child_detaches_descendant_then_exits() {
         let executable = std::env::current_exe().expect("current test executable should resolve");
         let args = test_child_args(QUIET_DETACHED_DESCENDANT);
@@ -967,6 +971,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     #[ignore = "subprocess fixture invoked by the process behavior tests"]
+    #[allow(clippy::zombie_processes)]
     fn child_detaches_between_samples() {
         let go_file = std::path::PathBuf::from(
             std::env::var_os(BETWEEN_SAMPLES_GO_FILE)
@@ -1320,13 +1325,23 @@ mod tests {
             .expect("detached descendant should report its PID")
             .parse::<libc::pid_t>()
             .expect("reported descendant PID should be numeric");
-        // SAFETY: signal zero performs existence and permission checks without
-        // delivering a signal to the reported process.
-        let exists = unsafe { libc::kill(pid, 0) } == 0;
-        assert!(!exists, "quiet detached descendant {pid} survived cleanup");
+        // SIGKILL delivery and reaping by init are asynchronous, so poll rather
+        // than assert once; a surviving fixture sleeps far longer than this.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        let mut last_errno = None;
+        while Instant::now() < deadline {
+            // SAFETY: signal zero performs existence and permission checks
+            // without delivering a signal to the reported process.
+            if unsafe { libc::kill(pid, 0) } != 0 {
+                last_errno = std::io::Error::last_os_error().raw_os_error();
+                break;
+            }
+            std::thread::sleep(POLL_INTERVAL);
+        }
         assert_eq!(
-            std::io::Error::last_os_error().raw_os_error(),
-            Some(libc::ESRCH)
+            last_errno,
+            Some(libc::ESRCH),
+            "quiet detached descendant {pid} survived cleanup"
         );
     }
 

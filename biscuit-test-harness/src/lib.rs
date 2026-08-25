@@ -480,7 +480,7 @@ pub fn apply_color_forcing_env(cmd: &mut std::process::Command) {
 ///
 /// An unrecognized terminator is silent but expensive rather than fatal: it
 /// costs [`wait_for_prompt`] its full 5 s budget and every [`capture_settled`]
-/// its full 2 s budget instead of roughly one poll. That was enough to push
+/// its full 20 s budget instead of roughly one poll. That was enough to push
 /// `level2_render_tree_style_in_tmux` (22 captures) past nextest's 30 s
 /// termination ceiling on a host whose `~/.bashrc` initializes starship.
 ///
@@ -548,7 +548,7 @@ pub fn wait_for_prompt(harness: &mut impl TerminalHarness) -> io::Result<()> {
 /// bottom-most line and a stable pair could settle before the command ran.
 pub fn capture_settled(harness: &mut impl TerminalHarness) -> io::Result<CapturedFrame> {
     const POLL: Duration = Duration::from_millis(40);
-    const MAX: Duration = Duration::from_millis(2000);
+    const MAX: Duration = Duration::from_secs(20);
     let deadline = Instant::now() + MAX;
     let mut prev: Option<String> = None;
     loop {

@@ -662,17 +662,16 @@ fn stable_aggregate_json(json: &Value) -> Value {
         })
         .unwrap_or_default();
 
-    // The detected standard binary resolves through the host's PATH, so its
-    // path asserts the host, not the projection.
+    // The detected standard binary resolves through the host's PATH, and the
+    // toolchain-free WSL archive deliberately has no Cargo. Its presence and
+    // path assert the host, not the projection.
     let monorepo_standards = match json["structure"]["monorepo_standards"].as_array() {
         Some(entries) => entries
             .iter()
             .map(|s| {
                 let mut entry = s.clone();
-                if let Some(binary) = entry.get_mut("binary") {
-                    if binary.get("path").is_some_and(Value::is_string) {
-                        binary["path"] = json!("<normalized>");
-                    }
+                if entry.get("binary").is_some() {
+                    entry["binary"] = json!("<normalized>");
                 }
                 entry
             })
@@ -735,7 +734,8 @@ fn stable_aggregate_json(json: &Value) -> Value {
 /// Both the given and the canonicalized form are replaced: on macOS a temp dir
 /// handed out as `/var/...` is reported back through its `/private/var/...`
 /// realpath, so replacing only one leaves absolute paths in the snapshot. Path
-/// separators after the replacement are normalized for cross-platform output.
+/// Portable and native forms are both recognized so Windows verbatim-path
+/// simplification cannot leave an absolute fixture path in the snapshot.
 fn redact_base_paths(value: &Value, base: &std::path::Path) -> Value {
     let mut redacted = value.clone();
     let mut roots = vec![base.to_path_buf()];
@@ -743,9 +743,18 @@ fn redact_base_paths(value: &Value, base: &std::path::Path) -> Value {
         roots.push(canonical);
     }
     // Longest first: a prefix would otherwise mask the form that contains it.
-    roots.sort_by_key(|p| std::cmp::Reverse(p.as_os_str().len()));
+    let mut portable_roots = roots
+        .iter()
+        .map(|root| biscuit_file::to_portable_string(root))
+        .collect::<Vec<_>>();
+    portable_roots.sort_by_key(|root| std::cmp::Reverse(root.len()));
+    roots.sort_by_key(|root| std::cmp::Reverse(root.as_os_str().len()));
 
-    fn redact_strings(value: &mut Value, roots: &[std::path::PathBuf]) {
+    fn redact_strings(
+        value: &mut Value,
+        roots: &[std::path::PathBuf],
+        portable_roots: &[String],
+    ) {
         match value {
             Value::String(text) => {
                 for root in roots {
@@ -753,24 +762,44 @@ fn redact_base_paths(value: &Value, base: &std::path::Path) -> Value {
                 }
                 if text.contains("[BASE]") {
                     *text = text.replace('\\', "/");
+                    return;
+                }
+                if !text.contains("[BASE]") {
+                    let mut portable = biscuit_file::to_portable_string(std::path::Path::new(text));
+                    for root in portable_roots {
+                        portable = portable.replace(root, "[BASE]");
+                    }
+                    if portable.contains("[BASE]") {
+                        *text = portable;
+                    }
                 }
             }
             Value::Array(values) => {
                 for value in values {
-                    redact_strings(value, roots);
+                    redact_strings(value, roots, portable_roots);
                 }
             }
             Value::Object(values) => {
                 for value in values.values_mut() {
-                    redact_strings(value, roots);
+                    redact_strings(value, roots, portable_roots);
                 }
             }
             _ => {}
         }
     }
 
-    redact_strings(&mut redacted, &roots);
+    redact_strings(&mut redacted, &roots, &portable_roots);
     redacted
+}
+
+#[test]
+fn redact_base_paths_normalizes_windows_separators() {
+    let value = Value::String("[BASE]\\Cargo.toml".to_string());
+
+    assert_eq!(
+        redact_base_paths(&value, std::path::Path::new("unused")),
+        Value::String("[BASE]/Cargo.toml".to_string())
+    );
 }
 
 fn run_repo_aggregate_json(base: &std::path::Path) -> Value {

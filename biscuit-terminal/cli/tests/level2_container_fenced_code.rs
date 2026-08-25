@@ -42,7 +42,7 @@ fn assert_container_renders_fenced_code<H: TerminalHarness>(harness: &mut H, sub
     harness.settle();
     harness
         .send_command_with_env(
-            &format!("bt {subcommand} \"{FENCED_PROSE}\""),
+            &common::bt_command(&format!("{subcommand} \"{FENCED_PROSE}\"")),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");
@@ -87,8 +87,7 @@ fn find_output_row<'a>(
 ) -> Option<&'a str> {
     let raw_lines: Vec<&str> = frame.raw.lines().collect();
     let plain_lines: Vec<&str> = frame.plain.lines().collect();
-    let marker = format!("bt {subcommand}");
-    let cmd_idx = plain_lines.iter().position(|l| l.contains(&marker))?;
+    let cmd_idx = common::find_bt_command_end(&plain_lines, subcommand)?;
     plain_lines
         .iter()
         .enumerate()

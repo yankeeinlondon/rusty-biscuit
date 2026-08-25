@@ -260,7 +260,7 @@ fn actual_queries(text: &str, code: u8) -> usize {
 /// Shared WezTerm pane, settled and ready to answer OSC queries.
 ///
 /// The pane must be settled before the probe runs: WezTerm does not answer OSC
-/// 10 until it is up, and the library's timeout is only 100ms, so a probe fired
+/// 10 until it is up, and the library's timeout is bounded, so a probe fired
 /// at a cold pane silently records the default fallback instead. `spawn_shell`
 /// already waits for a prompt; `settle` covers the shared-pane attach path.
 fn shared_pane() -> Option<WezTermHarness> {

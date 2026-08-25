@@ -57,19 +57,18 @@ pub(super) fn query_osc_color_with_timeout(code: u8, timeout: Duration) -> Optio
     // Silence unused warning on non-Unix platforms; used inside #[cfg(unix)] below.
     let _ = timeout;
 
-    // Skip if not a TTY or in CI
-    if !is_tty() {
+    let tty = is_tty();
+    let ci = is_ci();
+    if !tty {
         tracing::debug!(code, "OSC{} query skipped: not a TTY", code);
-        return None;
     }
-    if is_ci() {
+    if ci {
         tracing::debug!(code, "OSC{} query skipped: CI environment", code);
-        return None;
     }
 
     // Try actual OSC query first (if terminal supports it)
     #[cfg(unix)]
-    {
+    if tty && !ci {
         let term_app = get_terminal_app();
         let supports_osc = matches!(
             term_app,
@@ -201,7 +200,7 @@ fn get_terminal_default_color(app: &TerminalApp, code: u8) -> Option<RgbValue> {
 }
 
 /// Check if running inside a terminal multiplexer.
-pub(super) fn detect_multiplexer() -> Option<&'static str> {
+pub(crate) fn detect_multiplexer() -> Option<&'static str> {
     if std::env::var("TMUX").is_ok() {
         Some("tmux")
     } else if std::env::var("ZELLIJ").is_ok() {

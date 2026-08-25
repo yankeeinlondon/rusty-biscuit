@@ -21,7 +21,7 @@
 //! [`AppleTerminalHarness::available`] returns `false` when:
 //!
 //! - The host is not macOS.
-//! - `CI=1` is set (Terminal.app cannot be exercised in CI).
+//! - `CI` has a truthy value (Terminal.app cannot be exercised in CI).
 //! - `osascript` cannot resolve the `Terminal` application bundle.
 //!
 //! Tests should early-return with
@@ -66,6 +66,15 @@ use super::{
 
 const WINDOW_TITLE_PREFIX: &str = "biscuit-test-terminal-";
 static CLEANUP_ONCE: Once = Once::new();
+
+fn ci_value_is_truthy(value: Option<&str>) -> bool {
+    value.is_some_and(|value| {
+        matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        )
+    })
+}
 
 /// Open-window count above which [`sweep_legacy_apple_terminal_windows`]
 /// self-heals without the opt-in env var. The shared-broker model keeps
@@ -458,7 +467,7 @@ impl AppleTerminalHarness {
         if !cfg!(target_os = "macos") {
             return false;
         }
-        if env::var("CI").as_deref() == Ok("1") {
+        if ci_value_is_truthy(env::var("CI").ok().as_deref()) {
             return false;
         }
         Command::new("osascript")
@@ -1588,29 +1597,17 @@ mod tests {
         let _ = super::super::wait_for_prompt(harness);
     }
 
-    /// On macOS `available()` must be false when `CI=1` so the harness
-    /// does not try to open a Terminal.app window in CI.
-    #[cfg(target_os = "macos")]
+    /// CI providers use more than one truthy spelling; GitHub Actions uses
+    /// `true`, while local test scripts commonly use `1`.
     #[test]
-    fn available_is_false_in_ci() {
-        // SAFETY: this test mutates a process-wide env var. Run it
-        // serially (the cfg below already gates it to macOS, where the
-        // serial cost is acceptable).
-        let prev = env::var_os("CI");
-        // SAFETY: single-threaded test process; no other threads
-        // observe the env var while we toggle it. set_var is unsafe in
-        // 2024 edition.
-        unsafe {
-            env::set_var("CI", "1");
+    fn ci_truthy_values_disable_apple_terminal() {
+        for value in ["1", "true", "TRUE", "yes", "on"] {
+            assert!(ci_value_is_truthy(Some(value)), "{value}");
         }
-        let avail = AppleTerminalHarness::available();
-        unsafe {
-            match prev {
-                Some(v) => env::set_var("CI", v),
-                None => env::remove_var("CI"),
-            }
+        for value in ["", "0", "false", "no", "off"] {
+            assert!(!ci_value_is_truthy(Some(value)), "{value}");
         }
-        assert!(!avail, "expected CI=1 to disable AppleTerminalHarness");
+        assert!(!ci_value_is_truthy(None));
     }
 
     /// Phase-5 static verification: the spawn AppleScript must never call

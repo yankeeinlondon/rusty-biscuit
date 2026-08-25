@@ -233,9 +233,15 @@ fn the_current_user_descriptor_names_this_account_and_nobody_else() {
     else {
         panic!("a Windows host must report a SID");
     };
+    // Windows renders the built-in local Administrator account by its SDDL
+    // alias instead of the equivalent machine SID ending in RID 500.
+    let principal = if sid.ends_with("-500") { "LA" } else { &sid };
 
-    assert!(sddl.contains(&format!("O:{sid}")), "got: {sddl}");
-    assert!(sddl.contains(&format!("(A;;GA;;;{sid})")), "got: {sddl}");
+    assert!(sddl.contains(&format!("O:{principal}")), "got: {sddl}");
+    assert!(
+        sddl.contains(&format!("(A;;GA;;;{principal})")),
+        "got: {sddl}"
+    );
     assert!(
         sddl.contains("D:P"),
         "the DACL must be protected, so no inherited ACE can widen it; got: {sddl}"

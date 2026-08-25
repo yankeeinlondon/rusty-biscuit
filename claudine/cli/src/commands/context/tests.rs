@@ -9,6 +9,7 @@ use super::*;
 use crate::commands::context_render::{
     configure_shared_table, context_column_widths, function_first_column_width, inline_code_text,
     render_context_section, render_table_resilient, render_table_within_contract, report_column,
+    value_column_budget,
     TableLayout,
 };
 use biscuit_terminal::components::table::table::{Table, TableCellContent, TableColumn};
@@ -130,6 +131,36 @@ fn default_report_preserves_all_columns_at_minimum_supported_width() {
     assert!(
         max <= MIN_SUPPORTED_REPORT_WIDTH as usize,
         "minimum-width report must fit within the terminal width; max={max}; output:\n{output}",
+    );
+}
+
+/// Windows path separators must provide the same wrap opportunities as Unix
+/// separators so runtime repository values do not raise the supported width.
+#[test]
+fn values_report_wraps_windows_paths_at_minimum_supported_width() {
+    use crate::commands::context_render::MIN_SUPPORTED_REPORT_WIDTH;
+
+    let term = Terminal::new_optimistic(MIN_SUPPORTED_REPORT_WIDTH);
+    let property_width = 41;
+    let type_width = 18;
+    let budget = value_column_budget(
+        MIN_SUPPORTED_REPORT_WIDTH as usize,
+        property_width,
+        type_width,
+    );
+    let path = r"W:\rb-repair\80bd1b3dae7a4823a2660615af60e485\claudine\cli";
+    let value = middle_elide(path, budget);
+    let output = render_context_section(&term, property_width, type_width, "Value", |table| {
+        table.add_row(vec![
+            "ctx.repo_root".into(),
+            "string".into(),
+            value.clone().into(),
+        ]);
+    });
+
+    assert!(
+        !output.contains("could not be rendered"),
+        "Windows-shaped paths must wrap at the minimum supported width; output was:\n{output}",
     );
 }
 

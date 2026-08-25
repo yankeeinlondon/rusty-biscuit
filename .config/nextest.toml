@@ -6,29 +6,26 @@
 # expression to `nextest run -E '...'` directly. Treat the expressions below as
 # the authoritative source for shared lifecycle recipes:
 #
-#   level2  = test(/level2_/)
-#   level3  = test(/level3_/)
-#   browser = test(/browser_/)
-#   real    = test(/real_/)
-#   slow    = test(/level2_/) + test(/level3_/) + test(/browser_/) + test(/real_/) + test(/slow_/)
+#   level2  = test(/(^|::)level2_/)
+#   level3  = test(/(^|::)level3_/)
+#   browser = test(/(^|::)browser_/)
+#   real    = test(/(^|::)real_/)
+#   slow    = test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/)
 #
 # `just sanity` uses `!(...slow...)` to exclude every non-default tier in one shot.
 
 [test-groups]
-# biscuit-speaks-cli integration tests spawn the `so-you-say` binary, which
-# drives real OS TTS/audio (`say`, audio playback). Running a dozen of those
-# concurrently saturates the shared audio subsystem: process teardown lags, which
-# both inflates "slow" markers and trips nextest's post-test pipe-drain LEAK check
-# on whichever fast test loses the race. Capping concurrency keeps only a few
-# audio children alive at once — same philosophy as the browser tier's `-j 1`.
-# 4 was the empirical sweet spot here: zero flakes, far fewer spurious slow marks.
-tts-audio = { max-threads = 4 }
-
-# Claudine's L1 library and CLI tests repeatedly perform repository discovery
-# and spawn nested processes. Unrestricted concurrency on high-core Windows
-# hosts starves otherwise bounded tests past the 30s termination ceiling; the
-# victim changes between runs, while the same suite is stable at four threads.
-claudine-windows-l1 = { max-threads = 4 }
+# Claudine's L1 library tests repeatedly perform repository discovery, so keep
+# their concurrency bounded on contended hosts.
+claudine-l1 = { max-threads = 4 }
+# Claudine's CLI integration tests spawn nested debug binaries. Even four-way
+# concurrency can starve those children on two-core CI runners long enough to
+# trip both their internal deadlines and nextest's termination ceiling.
+claudine-cli-l1 = { max-threads = 1 }
+# Sniff exercises shared Windows host-network APIs from both direct tests and
+# spawned CLI processes. Windows may fail-fast a changing test process when
+# full network detections overlap, so these tests run one process at a time.
+sniff-windows-l1 = { max-threads = 1 }
 
 [profile.default]
 # A test that passes only on retry is still a failed test run. Keep retries
@@ -43,7 +40,7 @@ slow-timeout = { period = "5s", terminate-after = 6 }
 # it exits (nextest's `LEAK` status). `result = "fail"` stays: a genuinely
 # leaked child is a hard failure everywhere.
 #
-# The window is 5s, not the 100ms stock default. Under full-workspace parallel
+# The window is 30s, not the 100ms stock default. Under full-workspace parallel
 # load, nextest's post-test pipe-drain observation is scheduler-starved on this
 # host and the spurious LEAK-FAIL lands on a RANDOM fast test each run — every
 # victim exits code 0 with assertions green and provably holds no pipe (pure
@@ -55,11 +52,13 @@ slow-timeout = { period = "5s", terminate-after = 6 }
 # biscuit-speaks-cli, claudine-cli L2, characterization, biscuit-terminal,
 # browser-tier Chrome teardown, and more); that many exceptions — plus victims
 # observed lagging even a 1s window — is evidence the global default was the
-# thing that was wrong, so a 5s window (the value the browser tier had already
-# validated) is now the default and those blocks are removed. Clean tests pay
-# nothing (their pipes reach EOF immediately); only an actual leak waits the
-# window out, and it still fails.
-leak-timeout = { period = "5s", result = "fail" }
+# thing that was wrong, so one shared window replaced those blocks. A 5s window
+# still produced a false LEAK-FAIL on a pure parser test in a loaded macOS CI
+# run; its assertions finished successfully and 26 immediate local CI-profile
+# reruns were clean. The 30s window covers transient pipe inheritance without
+# slowing clean tests (their pipes reach EOF immediately); an actual leak still
+# waits out the window and fails.
+leak-timeout = { period = "30s", result = "fail" }
 # `cargo nextest archive` carries test binaries and non-test *bin* targets;
 # examples are built but never archived. biscuit-terminal's PTY tests spawn the
 # `discovery_probe` example, so without this they fail in the only environment
@@ -73,34 +72,29 @@ archive.include = [
 ]
 
 [[profile.default.overrides]]
+filter = 'package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)'
+test-group = 'claudine-l1'
+
+[[profile.default.overrides]]
+filter = 'package(claudine-cli) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)'
+test-group = 'claudine-cli-l1'
+
+[[profile.default.overrides]]
 platform = { host = "cfg(windows)" }
-filter = 'package(claudine) + package(claudine-cli)'
-test-group = 'claudine-windows-l1'
+filter = 'package(sniff) + package(sniff-cli)'
+test-group = 'sniff-windows-l1'
+
+# This assertion measures a complete host discovery against a wall-clock
+# ceiling. Reserve the runner while it executes so concurrent filesystem-heavy
+# Sniff tests cannot turn scheduler contention into a false performance failure.
+[[profile.default.overrides]]
+filter = 'test(=test_detect_completes_in_reasonable_time)'
+threads-required = "num-cpus"
 
 # Tests that intentionally wait on a real clock (e.g. rate-limit pause policies)
 # need an even longer leash than the default termination window.
 [[profile.default.overrides]]
 filter = 'test(=compose_loop_rate_limit_pause_waits_then_continues)'
-slow-timeout = { period = "30s", terminate-after = 3 }
-
-# These stdout parity tests launch the claudine CLI twice (perf and non-perf).
-# They are below the default timeout isolated, but can exceed 30s under
-# full-suite contention on macOS debug builds.
-[[profile.default.overrides]]
-filter = 'test(=compose_perf_stdout_matches_non_perf)'
-slow-timeout = { period = "30s", terminate-after = 3 }
-
-[[profile.default.overrides]]
-filter = 'test(=inline_compose_perf_stdout_matches_non_perf)'
-slow-timeout = { period = "30s", terminate-after = 3 }
-
-# This real shipped-prompt test performs repository-aware composition, a proxy
-# handoff, and a fake provider launch. It is bounded and finishes well below the
-# default ceiling alone, but can exceed 30s when debug-build composition tests
-# contend for the host. Keep the override specific so ordinary L1 hangs still
-# fail at the default deadline.
-[[profile.default.overrides]]
-filter = 'test(=shipped_implement_prompt_runs_real_router_target)'
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # This integration test shells out to the CLI multiple times; it is below the
@@ -133,8 +127,9 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # `ComposeOptions::new()`, then compares the two renderings. Two complete
 # runtime captures is not incidental cost — it *is* the comparison, and each
 # walks the working tree for repository, document, and file-change facts
-# (~1.9s apiece in this monorepo on Windows). ~3.5s isolated, which crosses the
-# 5s slow marker only under full-suite contention.
+# (~1.9s apiece in this monorepo on native Windows). The toolchain-free WSL
+# archive has measured 48s under suite load because both captures cross its
+# virtualized filesystem, so this remains bounded by a 90s termination leash.
 #
 # It earns that: when the 2026-08-02 ambient-capture regression is reintroduced,
 # this reports all 36 blanked variables by name. The narrower two-variable test
@@ -142,7 +137,7 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # how many variables are read.
 [[profile.default.overrides]]
 filter = 'test(=every_catalog_variable_survives_ambient_options)'
-slow-timeout = { period = "15s", terminate-after = 2 }
+slow-timeout = { period = "30s", terminate-after = 3 }
 
 # These merge-regression tests intentionally perform several complete compose
 # or lifecycle passes. Each pass remains bounded, but their combined debug-build
@@ -175,15 +170,6 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # down at a time), so the historical 5s browser override was removed with the
 # other exemptions; `result = "fail"` still catches a genuinely runaway
 # browser.
-
-# The `tts-audio` group caps how many audio-spawning tests run at once (see
-# [test-groups] above): biscuit-speaks-cli's integration tests spawn the
-# `so-you-say` binary, which in turn spawns OS TTS/audio children (`say`,
-# audio playback), and a dozen of those concurrently saturate the shared
-# audio subsystem.
-[[profile.default.overrides]]
-filter = 'package(biscuit-speaks-cli)'
-test-group = 'tts-audio'
 
 # claudine-cli's L2 tier runs in parallel self-spawn mode (see
 # `claudine/justfile`'s `test-l2` and `just/devops.just`'s `BISCUIT_L2_THREADS`
@@ -225,11 +211,11 @@ retries = 0
 # `retries = 0` deliberately stays. A timeout must not be retried into looking
 # healthy — it should either fit the ceiling or be reported.
 slow-timeout = { period = "30s", terminate-after = 3 }
-# Leaked child processes are a hard failure in CI as well. 5s window (see
-# the default-profile note: sub-second windows produced random spurious
-# LEAK-FAILs under full-suite load; `result = "fail"` keeps genuine leaks
-# fatal).
-leak-timeout = { period = "5s", result = "fail" }
+# Leaked child processes are a hard failure in CI as well. The 30s observation
+# window matches the default-profile policy above; `result = "fail"` keeps
+# genuine leaks fatal without turning timing-sensitive pipe drainage into a
+# nondeterministic gate.
+leak-timeout = { period = "30s", result = "fail" }
 # JUnit XML for CI dashboards.
 junit = { path = "test-results.xml" }
 
@@ -238,6 +224,23 @@ junit = { path = "test-results.xml" }
 [[profile.ci.overrides]]
 filter = 'test(/level2_/)'
 retries = 0
+
+[[profile.ci.overrides]]
+filter = 'package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)'
+test-group = 'claudine-l1'
+
+[[profile.ci.overrides]]
+filter = 'package(claudine-cli) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)'
+test-group = 'claudine-cli-l1'
+
+[[profile.ci.overrides]]
+platform = { host = "cfg(windows)" }
+filter = 'package(sniff) + package(sniff-cli)'
+test-group = 'sniff-windows-l1'
+
+[[profile.ci.overrides]]
+filter = 'test(=test_detect_completes_in_reasonable_time)'
+threads-required = "num-cpus"
 
 # The browser tier runs serially (see `_test_browser`) but does not retry.
 [[profile.ci.overrides]]
@@ -273,11 +276,11 @@ filter = 'test(=markdown::compose::preflight::acceptance_tests::execution_subset
 slow-timeout = { period = "30s", terminate-after = 3 }
 
 # See the default-profile note: this test's cost is two complete runtime
-# captures, which is the comparison it performs. CI hosts walk the tree more
-# slowly still, so the same leash applies.
+# captures, which is the comparison it performs. CI uses the same measured WSL
+# allowance.
 [[profile.ci.overrides]]
 filter = 'test(=every_catalog_variable_survives_ambient_options)'
-slow-timeout = { period = "15s", terminate-after = 2 }
+slow-timeout = { period = "30s", terminate-after = 3 }
 
 # See the default-profile note: WezTerm CLI capture round trips make this
 # command-dense real-terminal test exceed CI's 30s termination ceiling on
@@ -289,10 +292,3 @@ slow-timeout = { period = "30s", terminate-after = 3 }
 # See the default-profile note: Chrome teardown fits the global 5s window,
 # so the historical 5s browser override was removed with the other
 # exemptions; `result = "fail"` still catches a genuinely runaway browser.
-
-# The `tts-audio` group caps how many audio-spawning tests run at once (see
-# [test-groups]); the leak grace that used to ride along is now the global
-# default.
-[[profile.ci.overrides]]
-filter = 'package(biscuit-speaks-cli)'
-test-group = 'tts-audio'

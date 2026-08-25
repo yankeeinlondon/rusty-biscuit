@@ -18,16 +18,14 @@
 //! ## Stub binary discovery
 //!
 //! `MESSENGER_STUB_BIN_DIR` is authoritative when set, allowing CI to build
-//! the six fixtures once and deliver them to test processes. Local runs first
-//! inspect the target directory beside the test executable, then build a
-//! missing or stale fixture on demand.
+//! the six fixtures once and deliver them to test processes. The canonical
+//! local test recipes likewise build all fixtures before starting nextest.
 
 #![cfg(feature = "desktop")]
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, OnceLock};
-use std::time::{Duration, Instant};
 
 use crate::dispatch::{NotificationAction, NotificationUrgency};
 use crate::provider::desktop::helpers::HelperBackend;
@@ -65,21 +63,11 @@ const STUB_NAMES: &[&str] = &[
 
 static STUB_PATH_CACHE: OnceLock<HashMap<&'static str, PathBuf>> = OnceLock::new();
 
-#[derive(Debug, PartialEq, Eq)]
-enum StubResolution {
-    Ready(PathBuf),
-    BuildRequired(PathBuf),
-}
-
-/// Resolve the path to a stub binary, building it on demand for local runs.
+/// Resolve the path to a stub binary prepared by the test runner.
 ///
 /// An explicit `MESSENGER_STUB_BIN_DIR` never falls back: a missing fixture is
-/// a delivery error. Without it, third-party runners and surgical filters may
-/// omit `[[bin]]` targets, so a missing or stale local fixture is rebuilt.
-///
-/// Resolved paths are cached in a process-wide [`OnceLock`] so that
-/// `cargo-nextest` (which runs each test in a fresh process) pays the
-/// build cost at most once per process, not once per test.
+/// a delivery error. Local runs resolve fixtures beside the test executable.
+/// Resolved paths are cached for the lifetime of each test process.
 fn stub_path(name: &str) -> PathBuf {
     let cache = STUB_PATH_CACHE.get_or_init(resolve_stub_paths);
     cache
@@ -96,70 +84,19 @@ fn resolve_stub_paths() -> HashMap<&'static str, PathBuf> {
 }
 
 fn resolve_stub_path(name: &str) -> PathBuf {
-    let path = match stub_resolution(name, &stub_bin_dir()) {
-        Ok(StubResolution::Ready(path)) => return path,
-        Ok(StubResolution::BuildRequired(path)) => path,
-        Err(error) => panic!("{error}"),
-    };
-
-    {
-        let mut child = std::process::Command::new(env!("CARGO"))
-            .args([
-                "build",
-                "--quiet",
-                "--bin",
-                name,
-                "--features",
-                "desktop",
-                "-p",
-                "messenger",
-            ])
-            .spawn()
-            .expect("failed to invoke cargo to build stub binary");
-
-        let start = Instant::now();
-        let timeout = Duration::from_secs(120);
-        let status = loop {
-            match child.try_wait() {
-                Ok(Some(status)) => break status,
-                Ok(None) => {
-                    if start.elapsed() > timeout {
-                        let _ = child.kill();
-                        panic!(
-                            "cargo build for stub binary `{name}` timed out after {timeout:?}. \
-                             Build stubs manually with: cargo build --features desktop -p messenger"
-                        );
-                    }
-                    std::thread::sleep(Duration::from_millis(100));
-                }
-                Err(e) => panic!("failed to wait for cargo build of stub `{name}`: {e}"),
-            }
-        };
-        assert!(
-            status.success(),
-            "cargo build failed for stub binary {name}"
-        );
-    }
-    assert!(
-        path.exists(),
-        "stub binary {} not found at {}. \
-         Build stubs manually with: cargo build --features desktop -p messenger",
-        name,
-        path.display()
-    );
-    path
+    stub_resolution(name, &stub_bin_dir()).unwrap_or_else(|error| panic!("{error}"))
 }
 
 fn stub_executable_name(name: &str, executable_suffix: &str) -> String {
     format!("{name}{executable_suffix}")
 }
 
-fn stub_resolution(name: &str, target_dir: &Path) -> Result<StubResolution, String> {
+fn stub_resolution(name: &str, target_dir: &Path) -> Result<PathBuf, String> {
     let file_name = stub_executable_name(name, std::env::consts::EXE_SUFFIX);
     if let Some(explicit_dir) = std::env::var_os("MESSENGER_STUB_BIN_DIR") {
         let path = PathBuf::from(explicit_dir).join(&file_name);
         return if path.is_file() {
-            Ok(StubResolution::Ready(path))
+            Ok(path)
         } else {
             Err(format!(
                 "MESSENGER_STUB_BIN_DIR fixture `{name}` is missing at {}",
@@ -169,26 +106,14 @@ fn stub_resolution(name: &str, target_dir: &Path) -> Result<StubResolution, Stri
     }
 
     let path = target_dir.join(file_name);
-    if path.is_file() && !stub_source_is_newer(name, &path) {
-        Ok(StubResolution::Ready(path))
+    if path.is_file() {
+        Ok(path)
     } else {
-        Ok(StubResolution::BuildRequired(path))
+        Err(format!(
+            "stub fixture `{name}` is missing at {}. Run tests through `just test` or `just sanity` so fixtures are built before nextest starts",
+            path.display()
+        ))
     }
-}
-
-fn stub_source_is_newer(name: &str, path: &Path) -> bool {
-    let source = Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests")
-        .join("bin")
-        .join(name)
-        .join("main.rs");
-    let Ok(source_modified) = source.metadata().and_then(|metadata| metadata.modified()) else {
-        return false;
-    };
-    let Ok(binary_modified) = path.metadata().and_then(|metadata| metadata.modified()) else {
-        return true;
-    };
-    source_modified > binary_modified
 }
 
 #[cfg(test)]
@@ -212,11 +137,9 @@ mod stub_resolution_tests {
         for name in STUB_NAMES {
             assert_eq!(
                 stub_resolution(name, target.path()).expect("stub resolves"),
-                StubResolution::Ready(
-                    explicit
-                        .path()
-                        .join(stub_executable_name(name, std::env::consts::EXE_SUFFIX))
-                )
+                explicit
+                    .path()
+                    .join(stub_executable_name(name, std::env::consts::EXE_SUFFIX))
             );
         }
     }
@@ -248,16 +171,29 @@ mod stub_resolution_tests {
 
     #[test]
     #[serial(stub_resolution_env)]
-    fn missing_target_fixture_remains_eligible_for_local_build_fallback() {
+    fn missing_target_fixture_reports_the_canonical_local_runner() {
+        let target = tempfile::tempdir().expect("target stub directory");
+        let _env = TestEnvGuard::remove_safe("MESSENGER_STUB_BIN_DIR");
+        let error = stub_resolution("stub_notify_send", target.path())
+            .expect_err("a missing local fixture is a runner error");
+
+        assert!(error.contains("stub_notify_send"));
+        assert!(error.contains("just test"));
+    }
+
+    #[test]
+    #[serial(stub_resolution_env)]
+    fn existing_target_fixture_never_starts_a_nested_build() {
         let target = tempfile::tempdir().expect("target stub directory");
         let _env = TestEnvGuard::remove_safe("MESSENGER_STUB_BIN_DIR");
         let expected = target
             .path()
             .join(stub_executable_name("stub_notify_send", std::env::consts::EXE_SUFFIX));
+        std::fs::write(&expected, []).expect("target stub fixture");
 
         assert_eq!(
-            stub_resolution("stub_notify_send", target.path()).expect("fallback remains valid"),
-            StubResolution::BuildRequired(expected)
+            stub_resolution("stub_notify_send", target.path()).expect("fixture resolves"),
+            expected
         );
     }
 }

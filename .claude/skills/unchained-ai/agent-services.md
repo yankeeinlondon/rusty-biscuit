@@ -104,11 +104,15 @@ pub async fn run_pty_command(
 
 **Implementation**:
 - Wraps blocking PTY ops in `tokio::task::spawn_blocking`
-- Uses `portable-pty` with 24x80 terminal size
+- Uses `xpty` through its `portable_pty`-compatible API with 24x80 terminal size
 - Drops the slave PTY immediately after spawning
+- Gives short-lived children time to attach before closing PTY input on macOS
+- Lets fast Windows commands exit during a bounded ConPTY attachment grace
+- Sends cooked-mode console EOF to Windows commands still running after that grace
 - Waits for the child before closing the master PTY so ConPTY readers receive EOF
+- Lets ConPTY's asynchronous output pump become quiet before closing the master
 - Reads output via `mpsc::channel` in separate thread
-- Default 5-second timeout (configurable)
+- Default timeout is 5 seconds on Unix and 10 seconds on Windows (configurable)
 - Strips ANSI escape codes via `strip-ansi-escapes`
 - Validates UTF-8 encoding
 
@@ -171,7 +175,7 @@ unchained limits --json
 
 | Crate | Purpose |
 |-------|---------|
-| `portable-pty` v0.9 | PTY spawning for agent commands |
+| `xpty` v0.3 | PTY spawning without ConPTY cursor inheritance hangs |
 | `strip-ansi-escapes` v0.2 | ANSI code stripping from PTY output |
 | `sniff` (workspace) | Platform detection (`InstalledAiClients`) |
 | `biscuit-terminal` (workspace) | Progress bar rendering in CLI |

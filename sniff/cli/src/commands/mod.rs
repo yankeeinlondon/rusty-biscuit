@@ -992,16 +992,24 @@ pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
                             } else {
                                 entry.branch.clone().unwrap_or_else(|| "unknown".to_string())
                             };
+                            let portable_path = biscuit_file::to_portable_string(&entry.path);
                             let display_path = match home {
                                 Some(ref home) => match entry.path.strip_prefix(home) {
-                                    Ok(stripped) => format!("~/{}", stripped.display()),
-                                    Err(_) => entry.path.display().to_string(),
+                                    Ok(stripped) => {
+                                        format!("~/{}", biscuit_file::to_portable_string(stripped))
+                                    }
+                                    Err(_) => portable_path.clone(),
                                 },
-                                None => entry.path.display().to_string(),
+                                None => portable_path.clone(),
                             };
-                            let absolute_path = entry.path.display().to_string();
+                            let href = biscuit_file::try_portable_string(&entry.path)
+                                .and_then(|path| url::Url::from_file_path(path).ok());
+                            let location = href.map_or_else(
+                                || display_path.clone(),
+                                |href| format!("<a href=\"{href}\">{display_path}</a>"),
+                            );
                             let body = format!(
-                                "<b>{}</b> (on <green>{branch_text}</green> branch, located at <a href=\"{absolute_path}\">{display_path}</a>)",
+                                "<b>{}</b> (on <green>{branch_text}</green> branch, located at {location})",
                                 entry.name
                             );
                             (entry.is_current, body)

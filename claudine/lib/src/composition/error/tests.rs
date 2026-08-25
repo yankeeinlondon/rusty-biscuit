@@ -968,13 +968,19 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
 
     let temp_dir = tempfile::TempDir::new().unwrap();
     let file_path = temp_dir.path().join("test.md");
-    let content = "---\ntitle: Shell demo\n---\n\nPre.\n\n::shell rustc --edition=invalid\n\nPost.\n";
+    let executable = std::env::current_exe().expect("test executable path should be available");
+    let executable = biscuit_file::to_portable_string(&executable);
+    let command = format!("\"{executable}\" --definitely-invalid-libtest-option");
+    let approved_command = format!("{executable} --definitely-invalid-libtest-option");
+    let content = format!(
+        "---\ntitle: Shell demo\n---\n\nPre.\n\n::shell {command}\n\nPost.\n"
+    );
     std::fs::write(&file_path, content).unwrap();
 
     let source = resolve_composition_source(file_path.to_str().unwrap()).unwrap();
 
     let mut approved = HashSet::new();
-    approved.insert("rustc --edition=invalid".to_string());
+    approved.insert(approved_command);
     let options = PrepareOptions {
         defer_schema_verdict: false,
         set_overrides: None,
@@ -983,7 +989,12 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
         perf_enabled: false,
         source_repo_root: None,
         shell_working_directory: None,
-        prepared_context: None,
+        prepared_context: Some(
+            darkmatter::markdown::compose::ComposeContext::capture_for_content(
+                temp_dir.path(),
+                "",
+            ),
+        ),
         file_ref_fallback_dir: None,
         file_resolution_context: None,
         name_coercion_keys: Vec::new(),

@@ -157,10 +157,6 @@ jobs:
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -248,10 +244,6 @@ jobs:
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -456,10 +448,6 @@ jobs:
       # clippy + rustfmt come from rust-toolchain.toml (the single authority).
       - name: Set up the pinned Rust toolchain
         run: rustup show
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -578,10 +566,6 @@ jobs:
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - name: Provision and verify the tmux backend
         shell: bash
         env:
@@ -649,7 +633,7 @@ jobs:
               if [ "$backend" = "tmux" ]; then
                 echo "| tmux | provisioned — its tests MUST execute |"
               elif [ "$backend" = "apple-terminal" ] && [ "$ENVIRONMENT" = "macos-latest" ]; then
-                echo "| apple-terminal | unavailable — \`available()\` returns false when CI=1; its tests skip |"
+                echo "| apple-terminal | unavailable — \`available()\` returns false when CI is truthy; its tests skip |"
               else
                 echo "| ${backend} | unavailable — needs a live GUI session; its tests skip |"
               fi
@@ -756,10 +740,6 @@ jobs:
           fi
       - name: Set up the pinned Rust toolchain
         run: rustup show
-      - name: Install protoc
-        uses: arduino/setup-protoc@v3
-        with:
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"

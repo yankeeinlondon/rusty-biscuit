@@ -34,6 +34,13 @@ vim.api.nvim_create_autocmd('FileType', {
   end,
 })
 
+local function dmls_clients()
+  if vim.lsp.get_clients then
+    return vim.lsp.get_clients({ name = 'dmls' })
+  end
+  return vim.lsp.get_active_clients({ name = 'dmls' })
+end
+
 -- Driven via `:lua DmlsToggle(false)` from the test: rewrites the workspace
 -- .dmls.toml and nudges the server with didChangeConfiguration, which must
 -- round-trip a workspace/semanticTokens/refresh and repaint the pane.
@@ -41,7 +48,7 @@ function DmlsToggle(enable)
   local f = assert(io.open([[__ROOT__]] .. '/.dmls.toml', 'w'))
   f:write('[semantic_tokens]\nenable = ' .. tostring(enable) .. '\n')
   f:close()
-  for _, c in ipairs(vim.lsp.get_clients({ name = 'dmls' })) do
+  for _, c in ipairs(dmls_clients()) do
     if vim.fn.has('nvim-0.11') == 1 then
       c:notify('workspace/didChangeConfiguration', { settings = vim.empty_dict() })
     else

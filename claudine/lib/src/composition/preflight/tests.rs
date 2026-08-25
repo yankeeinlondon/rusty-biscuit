@@ -712,7 +712,7 @@ fn lifecycle_shell_read_side_resolves_against_document_dir() {
     resolve_lifecycle_shell_commands(
         &mut config,
         &frontmatter,
-        &ComposeContext::capture(),
+        &ComposeContext::capture_for_dir(doc_dir.path()),
         &source_path,
         None,
         Some(launch_dir.path()),
@@ -744,7 +744,7 @@ fn lifecycle_shell_read_side_does_not_resolve_launch_only_file() {
     resolve_lifecycle_shell_commands(
         &mut config,
         &frontmatter,
-        &ComposeContext::capture(),
+        &ComposeContext::capture_for_dir(doc_dir.path()),
         &source_path,
         None,
         None,
@@ -825,7 +825,7 @@ fn lifecycle_shell_read_side_reuses_all_request_resolution_inputs() {
     resolve_lifecycle_shell_commands(
         &mut lifecycle,
         &frontmatter,
-        &ComposeContext::capture(),
+        &ComposeContext::capture_for_dir(request.path()),
         &source_dir.join("prompt.md"),
         Some(&snapshot),
         None,

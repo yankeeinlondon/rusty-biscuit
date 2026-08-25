@@ -19,11 +19,15 @@ fn level2_pty_wrapper_summary_shows_badges() {
     let bin_dir = workspace.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
     write_executable(&bin_dir.join("goose"), "#!/bin/sh\necho 'child-output'\n");
+    let home = workspace.path().join("home");
+    common::wrap::seed_minimal_config(&home);
 
     let mut cmd = Command::new(cargo_bin("claudine"));
+    cmd.current_dir(workspace.path());
     cmd.args(["goose", "-y", "-n", "--", "hi"]);
     cmd.env("NO_COLOR", "1");
     cmd.env("TERM_WIDTH", "80");
+    cmd.env("HOME", home);
     cmd.env("PATH", bin_dir);
 
     let mut p = Session::spawn(cmd).expect("failed to spawn PTY");
@@ -45,11 +49,15 @@ fn level2_pty_non_interactive_detection() {
     let bin_dir = workspace.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
     write_executable(&bin_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+    let home = workspace.path().join("home");
+    common::wrap::seed_minimal_config(&home);
 
     let mut cmd = Command::new(cargo_bin("claudine"));
+    cmd.current_dir(workspace.path());
     cmd.args(["goose", "--", "hi"]);
     cmd.env("NO_COLOR", "1");
     cmd.env("TERM_WIDTH", "80");
+    cmd.env("HOME", home);
     cmd.env("PATH", bin_dir);
 
     let mut p = Session::spawn(cmd).expect("failed to spawn PTY");

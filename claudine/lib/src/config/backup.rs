@@ -1,4 +1,5 @@
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
@@ -10,18 +11,29 @@ const MAX_BACKUPS: usize = 10;
 
 /// Create a timestamped backup of a config file before modification.
 ///
-/// Backups are stored at `~/.claudine/backups/<provider>/<timestamp>.bak`.
-/// After creating the backup, old backups beyond [`MAX_BACKUPS`] are pruned.
+/// Backups are stored at `~/.claudine/backups/<provider>/<timestamp>-<unique>.bak`.
+/// The unique suffix prevents concurrent registrations from targeting the same
+/// backup file. After creation, old backups beyond [`MAX_BACKUPS`] are pruned.
 pub fn create_backup(path: &Path, provider: Provider) -> Result<PathBuf> {
     let backup_dir = backup_base_dir()?.join(provider.as_slug());
-    fs::create_dir_all(&backup_dir)?;
+    create_backup_in(path, provider, &backup_dir)
+}
 
-    let timestamp = Utc::now().format("%Y%m%d_%H%M%S");
-    let backup_path = backup_dir.join(format!("{timestamp}.bak"));
+fn create_backup_in(path: &Path, provider: Provider, backup_dir: &Path) -> Result<PathBuf> {
+    fs::create_dir_all(backup_dir)?;
 
-    fs::copy(path, &backup_path)?;
+    let timestamp = Utc::now().format("%Y%m%d_%H%M%S_%9f");
+    let mut backup = tempfile::Builder::new()
+        .prefix(&format!("{timestamp}-"))
+        .suffix(".bak")
+        .tempfile_in(backup_dir)?;
 
-    let deleted = cleanup_old_backups(&backup_dir)?;
+    let mut source = fs::File::open(path)?;
+    io::copy(&mut source, &mut backup)?;
+    backup.as_file_mut().sync_all()?;
+    let (_, backup_path) = backup.keep().map_err(|error| error.error)?;
+
+    let deleted = cleanup_old_backups(backup_dir)?;
     if deleted > 0 {
         tracing::debug!(provider = %provider.as_slug(), deleted, retained = MAX_BACKUPS, "pruned old backups");
     }
@@ -31,8 +43,9 @@ pub fn create_backup(path: &Path, provider: Provider) -> Result<PathBuf> {
 
 /// Remove old backups beyond [`MAX_BACKUPS`], keeping the most recent.
 ///
-/// Files are sorted lexicographically by name (format `YYYYMMDD_HHMMSS.bak`),
-/// so alphabetical order equals chronological order.
+/// Files are sorted lexicographically by name (format
+/// `YYYYMMDD_HHMMSS_nnnnnnnnn-<unique>.bak`), so alphabetical order follows
+/// creation time.
 ///
 /// ## Returns
 ///
@@ -81,7 +94,10 @@ fn backup_base_dir() -> Result<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
     use std::fs;
+    use std::sync::{Arc, Barrier};
+    use std::thread;
 
     use tempfile::TempDir;
     use tracing_test::traced_test;
@@ -113,6 +129,36 @@ mod tests {
         let result = create_backup(&source, Provider::Codex);
         assert!(result.is_ok());
         assert!(result.unwrap().exists());
+    }
+
+    #[test]
+    fn concurrent_backups_use_distinct_files() {
+        let tmp = TempDir::new().unwrap();
+        let source = Arc::new(tmp.path().join("settings.json"));
+        let backup_dir = Arc::new(tmp.path().join("backups").join("antigravity"));
+        fs::write(&*source, "shared config").unwrap();
+
+        let barrier = Arc::new(Barrier::new(8));
+        let workers = (0..8)
+            .map(|_| {
+                let source = Arc::clone(&source);
+                let backup_dir = Arc::clone(&backup_dir);
+                let barrier = Arc::clone(&barrier);
+                thread::spawn(move || {
+                    barrier.wait();
+                    create_backup_in(&source, Provider::Antigravity, &backup_dir).unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let paths = workers
+            .into_iter()
+            .map(|worker| worker.join().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(paths.iter().collect::<HashSet<_>>().len(), paths.len());
+        for path in paths {
+            assert_eq!(fs::read_to_string(path).unwrap(), "shared config");
+        }
     }
 
     #[test]

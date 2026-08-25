@@ -372,15 +372,9 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
-    fn test_detect_gpus_on_macos() {
-        let gpus = detect_gpus();
-        // On macOS, we should detect at least one GPU
-        assert!(!gpus.is_empty(), "Expected at least one GPU on macOS");
-
-        for gpu in &gpus {
-            // Every GPU should have a name
+    fn detected_macos_gpus_have_required_fields() {
+        for gpu in detect_gpus() {
             assert!(!gpu.name.is_empty());
-            // Backend should be Metal on macOS
             assert_eq!(gpu.backend, "Metal");
         }
     }

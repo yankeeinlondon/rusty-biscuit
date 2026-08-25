@@ -13,6 +13,8 @@
 //! required terminal is absent the test prints `skipping: requires <X>`
 //! to stderr and returns immediately. No `#[ignore]` markers are used.
 
+mod common;
+
 use biscuit_test_harness::shared::SharedHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
 use biscuit_test_harness::wezterm::WezTermHarness;
@@ -38,9 +40,9 @@ const HINT_NEEDLE: &str = "endpoint";
 fn capture_status_block<H: TerminalHarness>(harness: &mut H) -> biscuit_test_harness::CapturedFrame {
     harness
         .send_command_with_env(
-            &format!(
-                "bt status-block --severity error --hint \"{HINT_TEXT}\" \"{BODY_TEXT}\""
-            ),
+            &common::bt_command(&format!(
+                "status-block --severity error --hint \"{HINT_TEXT}\" \"{BODY_TEXT}\""
+            )),
             &[("FORCE_COLOR", "1")],
         )
         .expect("send_command_with_env failed");

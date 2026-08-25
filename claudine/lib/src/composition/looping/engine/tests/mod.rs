@@ -15,9 +15,9 @@ use crate::composition::types::{LoopAction, LoopCondition};
 /// and a populated `current.env`, rather than the pre-fix `None`/`None`.
 #[test]
 fn capture_loop_lifecycle_globals_populates_timing_and_env() {
+    let base = TempDir::new().unwrap();
     let loop_start = std::time::Instant::now();
-    let (timing, current) =
-        capture_loop_lifecycle_globals(Some(Path::new(".")), None, loop_start);
+    let (timing, current) = capture_loop_lifecycle_globals(Some(base.path()), None, loop_start);
 
     assert!(
         timing.document_ms.is_some(),
@@ -31,7 +31,7 @@ fn capture_loop_lifecycle_globals_populates_timing_and_env() {
         current.env.is_object() && !current.env.as_object().unwrap().is_empty(),
         "current.env is a non-empty process-environment snapshot"
     );
-    // base_dir = "." → ctx is captured (at minimum ctx.today).
+    // A base directory captures ctx (at minimum ctx.today).
     assert!(
         current.ctx.get("today").is_some(),
         "current.ctx snapshot carries today"

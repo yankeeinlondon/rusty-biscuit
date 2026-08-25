@@ -156,6 +156,8 @@ impl SyncError {
 /// exact same code path. The sealer is shared from
 /// [`SessionLogManager`](crate::session_log::SessionLogManager) so
 /// all outbound message IDs are monotonic across the daemon lifetime.
+/// Inbound transactions are serialized per document so overlapping
+/// sync sessions cannot persist snapshots staged from the same base.
 #[derive(Clone)]
 pub struct SyncService {
     session_log: SessionLogManager,
@@ -163,6 +165,7 @@ pub struct SyncService {
     storage: Storage,
     identity: Arc<NodeIdentity>,
     sealer: Arc<Mutex<EnvelopeSealer>>,
+    document_locks: Arc<Mutex<HashMap<String, Arc<Mutex<()>>>>>,
 }
 
 impl SyncService {
@@ -183,7 +186,17 @@ impl SyncService {
             storage,
             identity,
             sealer,
+            document_locks: Arc::new(Mutex::new(HashMap::new())),
         }
+    }
+
+    fn document_lock(&self, document_id: &str) -> Arc<Mutex<()>> {
+        let mut locks = self.document_locks.lock();
+        Arc::clone(
+            locks
+                .entry(document_id.to_string())
+                .or_insert_with(|| Arc::new(Mutex::new(()))),
+        )
     }
 
     #[must_use]
@@ -267,6 +280,8 @@ impl SyncService {
         expected_kind: PayloadKind,
         inbox: &mut EnvelopeInbox,
     ) -> Result<bool, SyncError> {
+        let transaction_lock = self.document_lock(delta_chunk_id);
+        let _transaction_guard = transaction_lock.lock();
         let payload = self.validate_and_accept_envelope(
             peer_node_id_hex,
             delta_chunk_id,
@@ -332,6 +347,8 @@ impl SyncService {
         expected_kind: PayloadKind,
         inbox: &mut EnvelopeInbox,
     ) -> Result<bool, SyncError> {
+        let transaction_lock = self.document_lock(delta_doc_id);
+        let _transaction_guard = transaction_lock.lock();
         let payload = self.validate_and_accept_envelope(
             peer_node_id_hex,
             delta_doc_id,

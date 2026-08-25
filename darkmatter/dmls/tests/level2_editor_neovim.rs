@@ -245,12 +245,16 @@ fn level2_neovim_decodes_semantic_token_families_and_positions() {
     let (_dir, root) = stage_workspace();
     let report = run_probe("tokens", &root);
 
-    // docs/editors/neovim.md: "Modern Neovim advertises UTF-8, so dmls
-    // negotiates UTF-8 there."
-    assert_eq!(
-        report.offset_encoding.as_deref(),
-        Some("utf-8"),
-        "negotiated encoding drifted from the documented claim"
+    // Neovim 0.10 may offer only UTF-16; newer releases offer UTF-8 first.
+    // DMLS supports both, and the assertions below verify that Neovim decodes
+    // the negotiated token positions back to the intended byte columns.
+    assert!(
+        matches!(
+            report.offset_encoding.as_deref(),
+            Some("utf-8" | "utf-16")
+        ),
+        "Neovim negotiated an unsupported encoding: {:?}",
+        report.offset_encoding
     );
 
     // F1 interpolation: whole `{{ … }}` span, not inert.

@@ -17,6 +17,16 @@
         super::parse_shell_value(value, key, original_value, &test_ctx())
     }
 
+    fn available_executable() -> String {
+        biscuit_file::to_portable_string(
+            &std::env::current_exe().expect("test executable path should be available"),
+        )
+    }
+
+    fn shell_value(executable: &str, suffix: &str) -> String {
+        format!("$({executable}){suffix}")
+    }
+
     #[test]
     fn ternary_condition_uses_read_side_functions_with_context() {
         // A `$()` ternary condition evaluated at the real run carries the
@@ -142,17 +152,21 @@
 
     #[test]
     fn detects_no_cache_suffix() {
-        let directive = parse_shell_value("$(rustc)::no-cache", "key", None)
+        let executable = available_executable();
+        let value = shell_value(&executable, "::no-cache");
+        let directive = parse_shell_value(&value, "key", None)
             .unwrap()
             .unwrap();
-        assert_eq!(directive.executable, "rustc");
+        assert_eq!(directive.executable, executable);
         assert!(directive.no_cache);
         assert!(directive.timeout_override.is_none());
     }
 
     #[test]
     fn no_cache_defaults_false_without_suffix() {
-        let directive = parse_shell_value("$(rustc)", "key", None)
+        let executable = available_executable();
+        let value = shell_value(&executable, "");
+        let directive = parse_shell_value(&value, "key", None)
             .unwrap()
             .unwrap();
         assert!(!directive.no_cache);
@@ -160,13 +174,16 @@
 
     #[test]
     fn no_cache_combines_with_timeout_either_order() {
-        let a = parse_shell_value("$(rustc)::no-cache::timeout:5", "key", None)
+        let executable = available_executable();
+        let a_value = shell_value(&executable, "::no-cache::timeout:5");
+        let a = parse_shell_value(&a_value, "key", None)
             .unwrap()
             .unwrap();
         assert!(a.no_cache);
         assert_eq!(a.timeout_override, Some(std::time::Duration::from_secs(5)));
 
-        let b = parse_shell_value("$(rustc)::timeout:5::no-cache", "key", None)
+        let b_value = shell_value(&executable, "::timeout:5::no-cache");
+        let b = parse_shell_value(&b_value, "key", None)
             .unwrap()
             .unwrap();
         assert!(b.no_cache);

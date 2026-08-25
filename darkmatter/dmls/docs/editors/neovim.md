@@ -1,8 +1,9 @@
 # Neovim
 
 Neovim's built-in LSP client (0.10+) drives `dmls` directly — no plugin beyond
-your normal LSP setup is required. Modern Neovim advertises UTF-8, so `dmls`
-negotiates UTF-8 there.
+your normal LSP setup is required. Neovim 0.10 may advertise only UTF-16;
+newer releases advertise UTF-8 first. `dmls` negotiates either encoding and
+projects positions accordingly.
 
 ## Neovim 0.11+ (native config API)
 

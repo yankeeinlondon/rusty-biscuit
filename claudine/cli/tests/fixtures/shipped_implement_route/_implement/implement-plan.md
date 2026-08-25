@@ -11,7 +11,7 @@ description: |-
     prompt will detect the number of phases in the plan and then implement
     the project phase by phase.
 plan: "{{ spec ? dirname(spec) + '/plan.md'  : null }}"
-phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || 1 : null }}"
+phase: "{{ file_exists(plan) ? frontmatter(plan, 'start_phase') || frontmatter(plan, 'phase') || 1 : null }}"
 area: "{{ ctx.area ? ctx.area : ctx.is_monorepo ? 'monorepo-root' : 'repo-root' }}"
 pass_icon: "{{ _loop_is_last ? '✅' : '🧑‍💻' }}"
 total_phases: "{{ file_exists(plan) ? frontmatter(plan, 'total_phases') || frontmatter(plan, 'phases') || 0 : 0 }}"

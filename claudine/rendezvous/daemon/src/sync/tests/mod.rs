@@ -20,6 +20,9 @@ use loro::{ExportMode, LoroDoc};
 use rendezvous_core::{ChunkConfig, ChunkId, Entry, EnvelopeSealer, NodeIdentity};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, Ordering};
+use std::sync::mpsc;
+use std::thread;
+use std::time::Duration;
 use tempfile::TempDir;
 
 const ENTRIES_CONTAINER: &str = "entries";
@@ -100,6 +103,33 @@ fn build_harness() -> Harness {
         worker,
         _tmp: tmp,
     }
+}
+
+#[test]
+fn inbound_transactions_serialize_the_same_document() {
+    let harness = build_harness();
+    let document_id = "session/peer/session/0";
+    let held_lock = harness.service.document_lock(document_id);
+    let held_guard = held_lock.lock();
+    let service = harness.service.clone();
+    let (acquired_tx, acquired_rx) = mpsc::channel();
+
+    let waiter = thread::spawn(move || {
+        let lock = service.document_lock(document_id);
+        let _guard = lock.lock();
+        acquired_tx.send(()).expect("report lock acquisition");
+    });
+
+    assert!(
+        acquired_rx.recv_timeout(Duration::from_millis(50)).is_err(),
+        "a second transaction for the same document must wait"
+    );
+    drop(held_guard);
+    acquired_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("waiting transaction should proceed after release");
+    waiter.join().expect("waiter thread");
+    harness.worker.shutdown();
 }
 
 fn make_valid_loro_snapshot(

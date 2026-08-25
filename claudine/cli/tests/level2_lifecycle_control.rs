@@ -92,7 +92,7 @@ use common::wrap::seed_minimal_config;
 use common::{augmented_path, init_git_repo, write_executable};
 
 use biscuit_test_harness::TerminalHarness;
-use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name};
+use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name, spawn_shell_session};
 use serial_test::serial;
 use std::fs;
 use std::path::Path;
@@ -402,23 +402,7 @@ fn run_provider_in_tmux_for(staged: &Staged, provider_flag: &str, done_marker: &
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
     let session = format!("biscuit_l2_lcctl_{}_{seq}", std::process::id());
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            "200",
-            "-y",
-            "60",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session(&session, 200, 60).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -492,16 +476,7 @@ fn run_provider_with_ambient_env(
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
     let session = format!("biscuit_l2_lcctl_flags_{}_{seq}", std::process::id());
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session", "-d", "-s", &session, "-x", "200", "-y", "60",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session(&session, 200, 60).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -547,23 +522,7 @@ fn run_proxy_in_tmux_with_set(staged: &Staged, setters: &str, done_marker: &str)
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
     let session = format!("biscuit_l2_lcctl_set_{}_{seq}", std::process::id());
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            "200",
-            "-y",
-            "60",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session(&session, 200, 60).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -661,7 +620,9 @@ fn run_compose_await_exit_on_path(staged: &Staged, extra_args: &str, path: &str)
 /// comparing the *no-operator* diagnostic has to take the operator away. A
 /// retry has none by construction; this is how the direct arm is put in the
 /// same position.
-const NON_TTY_STDERR: &str = " 2>&1 | cat";
+// Use the system binary directly because an interactive login shell may alias
+// `cat` to a pager-backed viewer, which would block this unattended fixture.
+const NON_TTY_STDERR: &str = " 2>&1 | /bin/cat";
 
 /// [`run_compose_await_exit_on_path`] with a shell redirection appended to the
 /// compose command.
@@ -676,16 +637,7 @@ fn run_compose_await_exit_redirected(
     let provider_flag = extra_args;
 
     let session = format!("biscuit_l2_lcctl_exit_{}_{seq}", std::process::id());
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session", "-d", "-s", &session, "-x", "200", "-y", "60",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session(&session, 200, 60).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -3489,16 +3441,7 @@ fn run_compose_settle(staged: &Staged, marker: &str, expected: usize) -> String 
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
     let session = format!("biscuit_l2_lcctl_settle_{}_{seq}", std::process::id());
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session", "-d", "-s", &session, "-x", "200", "-y", "60",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session(&session, 200, 60).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -4629,23 +4572,7 @@ fn run_until_settled_with_params(
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
     let session = format!("biscuit_l2_lcequiv_{}_{seq}", std::process::id());
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            "200",
-            "-y",
-            "60",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session(&session, 200, 60).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -5188,7 +5115,7 @@ fn run_shipped_optional_commit_message(commit_message: Option<&str>) -> (Vec<Str
         &params,
         5,
         SettlePacing {
-            stable_for: Duration::from_secs(4),
+            stable_for: Duration::from_secs(15),
             ..SettlePacing::default()
         },
         &[("TTS_PROVIDER", "say")],
@@ -5362,8 +5289,8 @@ fn write_prompt_recording_goose(bin_dir: &Path, events_log: &Path) {
     write_executable(
         &bin_dir.join("goose"),
         &format!(
-            "#!/bin/sh\nstdin=$(cat)\nprintf 'prompt:%s %s\\n' \"$stdin\" \"$*\" >> {log}\n\
-             printf 'provider-ran\\n' >> {log}\nexit 0\n",
+            "#!/bin/sh\nstdin=$(cat)\nprintf 'prompt:' >> {log}\nprintf '%s %s' \"$stdin\" \"$*\" | tr '\\n' ' ' >> {log}\n\
+             printf '\\nprovider-ran\\n' >> {log}\nexit 0\n",
             log = events_log.display(),
         ),
     );
@@ -5380,23 +5307,7 @@ fn run_in_tmux_until_exit(staged: &Staged) -> String {
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
     let session = format!("biscuit_l2_lcctl_exit_{}_{seq}", std::process::id());
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            "200",
-            "-y",
-            "60",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session(&session, 200, 60).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -6261,23 +6172,7 @@ fn run_capturing_stdout(staged: &Staged, done_marker: &str) -> (String, String) 
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
     let session = format!("biscuit_l2_lcout_{}_{seq}", std::process::id());
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            "200",
-            "-y",
-            "60",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session(&session, 200, 60).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -6408,23 +6303,7 @@ fn run_sequence_until_target_runs(staged: &Staged, expected_runs: usize) -> Stri
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
     let session = format!("biscuit_l2_lcseq_{}_{seq}", std::process::id());
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            "200",
-            "-y",
-            "60",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session(&session, 200, 60).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -6490,23 +6369,7 @@ fn run_sequence_until_settled(staged: &Staged, expected_lines: usize) -> String 
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
     let session = format!("biscuit_l2_lcseqset_{}_{seq}", std::process::id());
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            "200",
-            "-y",
-            "60",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session(&session, 200, 60).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -6704,16 +6567,7 @@ fn run_inline_compose_await_exit(staged: &Staged) -> String {
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
     let session = format!("biscuit_l2_lcinline_{}_{seq}", std::process::id());
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session", "-d", "-s", &session, "-x", "200", "-y", "60",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session(&session, 200, 60).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -7862,27 +7716,10 @@ fn run_diagnostic_route(route: DiagnosticRoute, fixture: &DiagnosticFixture) -> 
     };
 
     let session = format!("biscuit_l2_lcdiag_{}_{seq}", std::process::id());
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            "200",
-            // Taller than the other runners: the terminal-recovery route renders
-            // the router's whole launch surface (system prompt, agent prompt,
-            // provider failure) above the diagnostic, and `capture()` has no
-            // scrollback — a 60-row pane would scroll the provenance line off.
-            "-y",
-            "120",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    // Taller than the other runners: the terminal-recovery route renders the
+    // router's whole launch surface above the diagnostic, and `capture()` has
+    // no scrollback.
+    spawn_shell_session(&session, 200, 120).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -8256,23 +8093,7 @@ fn run_initialize_ordering_route(route: DiagnosticRoute, target_doc: &str) -> Or
     }
 
     let session = format!("biscuit_l2_lcinit_{}_{seq}", std::process::id());
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            "200",
-            "-y",
-            "120",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session(&session, 200, 120).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -8617,16 +8438,7 @@ fn run_wrapper_in_tmux(staged: &Staged, done_marker: &str) -> String {
     let seq = SEQ.fetch_add(1, Ordering::Relaxed);
 
     let session = format!("biscuit_l2_lcctl_wrap_{}_{seq}", std::process::id());
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session", "-d", "-s", &session, "-x", "200", "-y", "60",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session(&session, 200, 60).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);

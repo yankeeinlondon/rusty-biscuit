@@ -39,7 +39,7 @@ mod common;
 use common::{augmented_path, write_executable};
 
 use biscuit_test_harness::TerminalHarness;
-use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name};
+use biscuit_test_harness::tmux::{TmuxHarness, kill_session_by_name, spawn_shell_session};
 use serial_test::serial;
 use std::fs;
 use std::path::Path;
@@ -107,25 +107,9 @@ fn ctrl_c_terminates(extra_env: &[(&str, &str)], deadline: Duration) -> (bool, S
     // POSIX shell (bash/sh), not the developer's `$SHELL`: a custom login
     // prompt (e.g. Starship's `❯`) never ends in `$`/`#`/`%`, so
     // `wait_for_prompt` would never match and burn its full timeout.
-    let shell = biscuit_test_harness::detect_shell();
     // A wide-but-short pane: a unique sentinel below makes the prompt-return
     // check robust without needing scrollback.
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            "120",
-            "-y",
-            "50",
-            &format!("{shell} -l"),
-        ])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn tmux session");
+    spawn_shell_session(&session, 120, 50).expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -153,8 +137,17 @@ fn ctrl_c_terminates(extra_env: &[(&str, &str)], deadline: Duration) -> (bool, S
         .iter()
         .map(|(k, v)| format!("{k}='{}' ", v.replace('\'', "'\\''")))
         .collect();
+    // Run from the isolated fixture workspace. Repository discovery in the
+    // ambient monorepo delays the wrapped child without exercising the signal
+    // path and can exhaust the readiness budget under CI contention.
+    let workspace_shell = workspace
+        .path()
+        .display()
+        .to_string()
+        .replace('\'', "'\\''");
     let cmd = format!(
-        "{env_prefix}{claudine} compose --opencode {md} ; echo {sentinel}",
+        "cd '{workspace}' && {env_prefix}{claudine} compose --opencode {md} ; echo {sentinel}",
+        workspace = workspace_shell,
         md = md_file.display(),
     );
     harness

@@ -62,7 +62,7 @@ Core pipeline machinery and the atomic steps used by the CLI and higher-level fl
 **Services**
 
 - `services::AgentStatus` detects installed agentic CLI platforms (Claude Code, Codex) via `sniff::programs::InstalledAiClients` and queries their usage limits.
-- `services::pty_runner` executes CLI commands in a pseudo-terminal via `portable-pty`, strips ANSI escape codes, and returns clean text output.
+- `services::pty_runner` executes CLI commands through `xpty` (imported under its `portable_pty`-compatible API), strips ANSI escape codes, and returns clean text output.
 - `services::parsers` extracts short-term/long-term cap usage percentages from platform-specific status command output.
 - `services::error::AgentStatusError` provides error types for PTY spawn, read, parse, timeout, and platform-not-installed failures.
 

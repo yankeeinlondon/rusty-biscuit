@@ -62,15 +62,17 @@
 #[allow(deprecated)]
 use assert_cmd::cargo::cargo_bin;
 use biscuit_terminal::utils::block_constraint::visible_width;
-use biscuit_test_harness::tmux::{kill_session_by_name, TmuxHarness};
+use biscuit_test_harness::tmux::{
+    TmuxHarness, kill_session_by_name, spawn_shell_session_with_env,
+};
 use biscuit_test_harness::{CapturedFrame, TerminalHarness};
 use serial_test::serial;
 use std::sync::atomic::{AtomicU32, Ordering};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use test_toolkit::{Backend, Level, require_level};
 
 mod common;
-use common::clear_no_color;
+use common::{CliProcessFixture, clear_no_color};
 
 /// Captures a `claudine context <args>` run inside a freshly spawned tmux
 /// session of `cols` × `rows` cells, then tears the session down.
@@ -81,6 +83,8 @@ use common::clear_no_color;
 /// emulator's capture, not claudine's raw stream; `COLUMNS` fixes the logical
 /// width.
 fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
+    let fixture = CliProcessFixture::named("claudine-context-l2");
+    fixture.seed_user_config();
     static SEQ: AtomicU32 = AtomicU32::new(0);
     let session = format!(
         "biscuit_ctx_l2_{}_{}",
@@ -90,24 +94,8 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
     // POSIX shell (bash/sh), not the developer's `$SHELL`: a custom login
     // prompt (e.g. Starship's `❯`) never ends in `$`/`#`/`%`, so
     // `wait_for_prompt` would never match and burn its full timeout twice.
-    let shell = biscuit_test_harness::detect_shell();
-    let spawned = std::process::Command::new("tmux")
-        .args([
-            "new-session",
-            "-d",
-            "-s",
-            &session,
-            "-x",
-            &cols.to_string(),
-            "-y",
-            &rows.to_string(),
-            &format!("{shell} -l"),
-        ])
-        .env("FORCE_COLOR", "1")
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    assert!(spawned, "failed to spawn a {cols}x{rows} tmux session");
+    spawn_shell_session_with_env(&session, cols, rows, &[("FORCE_COLOR", "1")])
+        .expect("failed to spawn tmux session");
 
     let mut harness = TmuxHarness::attach(&session);
     let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
@@ -116,22 +104,37 @@ fn capture_context(args: &[&str], cols: u32, rows: u32) -> CapturedFrame {
     clear_no_color(&mut harness);
 
     let claudine = cargo_bin("claudine").display().to_string();
+    let home = fixture.home().display().to_string().replace('\'', "'\\''");
+    let done_path = fixture.home().join(".context-command-complete");
+    let done = done_path.display().to_string().replace('\'', "'\\''");
     let cols_s = cols.to_string();
     // The environment is bound through `env` rather than the harness' inline
     // `KEY='v' cmd` prefix so the line can open with the `REPORT_SENTINEL`
     // print — see `report_plain_slice` for why the sentinel has to precede
     // claudine's first byte of output.
     let cmd = format!(
-        "printf '{REPORT_SENTINEL}\\n'; env FORCE_COLOR=1 COLUMNS={cols_s} {claudine} context {}",
+        "printf '{REPORT_SENTINEL}\\n'; env HOME='{home}' CLAUDINE_RENDEZVOUS_REPORT=false FORCE_COLOR=1 COLUMNS={cols_s} {claudine} context {}; printf done > '{done}'",
         args.join(" ")
     );
-    let send = harness.send_command_with_env(&cmd, &[]);
-    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
-    std::thread::sleep(Duration::from_millis(250));
-    let frame = harness.capture();
+    harness
+        .send_command_with_env(&cmd, &[])
+        .expect("send context command");
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !done_path.exists() {
+        if Instant::now() >= deadline {
+            let diagnostic = harness.capture().ok();
+            kill_session_by_name(&session);
+            panic!(
+                "claudine context did not complete within 30 seconds.\nframe:\n{}",
+                diagnostic.map_or_else(|| "<capture failed>".to_string(), |frame| frame.plain)
+            );
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let frame = biscuit_test_harness::capture_settled(&mut harness);
     kill_session_by_name(&session);
 
-    send.expect("send context command");
     frame.expect("capture failed")
 }
 

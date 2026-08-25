@@ -20,13 +20,9 @@ use test_toolkit::{Backend, Level, require_level};
 
 static SHARED_TMUX: SharedHarness<TmuxHarness> = SharedHarness::new();
 
-/// Returns the absolute path to the `icon` binary under test.
+/// Returns the runner-provided path to the `icon` binary under test.
 fn icon_bin() -> PathBuf {
-    let manifest = env!("CARGO_MANIFEST_DIR");
-    PathBuf::from(manifest)
-        .join("../../target/debug/icon")
-        .canonicalize()
-        .expect("icon binary should be built by cargo test")
+    biscuit_test_harness::bin_exe!("icon")
 }
 
 /// Returns a `PATH` value that includes the directory containing the `icon`
@@ -38,12 +34,12 @@ fn path_with_icon_bin() -> String {
     format!("{existing}:{}", bin_dir.display())
 }
 
-/// Runs an `icon` command with an isolated `$HOME` and a dead Iconify endpoint
-/// so tests never trigger live network searches.
+/// Runs an `icon` command with an isolated `$HOME` and an invalid Iconify base
+/// URL so tests never trigger live network searches.
 fn run_icon(harness: &mut TmuxHarness, args: &str) -> CapturedFrame {
     let home = tempfile::tempdir().unwrap();
     let cmd = format!(
-        "HOME='{}' PATH='{}' ICONIFY_BASE_URL='http://127.0.0.1:1' icon {}\n",
+        "HOME='{}' PATH='{}' ICONIFY_BASE_URL='offline' icon {}\n",
         home.path().display(),
         path_with_icon_bin(),
         args
@@ -373,7 +369,7 @@ fn run_sets(
     // Invoke the freshly-built binary by absolute path: a globally-installed
     // `icon` earlier on `$PATH` would otherwise shadow it and run stale code.
     let cmd = format!(
-        "HOME='{}' ICONIFY_BASE_URL='http://127.0.0.1:1' \
+        "HOME='{}' ICONIFY_BASE_URL='offline' \
          BISCUIT_TERM_WIDTH={width} BISCUIT_TERM_HEIGHT={height} '{}' sets {filter}\n",
         home.display(),
         icon_bin().display(),
@@ -517,7 +513,7 @@ fn run_sets_live(
     harness.send_text(b"clear\n").expect("clear failed");
     harness.settle();
     let cmd = format!(
-        "HOME='{}' ICONIFY_BASE_URL='http://127.0.0.1:1' '{}' sets {filter}\n",
+        "HOME='{}' ICONIFY_BASE_URL='offline' '{}' sets {filter}\n",
         home.display(),
         icon_bin().display(),
     );

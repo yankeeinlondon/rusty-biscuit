@@ -619,14 +619,13 @@ fn render_header(title: &str, terminal: &Terminal) -> String {
 /// the current worktree directory so sibling or parent layouts read as `..`,
 /// `../project`, or `.` instead of a home-abbreviated absolute path.
 fn worktree_path_link(path: &std::path::Path, current_worktree: &std::path::Path) -> String {
-    let absolute = path.display().to_string();
     // Both sides must share one canonical form before prefix math: detection
     // reports repo roots canonicalized (UNC-prefixed on Windows) while the
     // current directory arrives verbatim, and the two forms share no
     // components, which would degenerate the label to the absolute path.
     let canon = |p: &std::path::Path| std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     let label = relative_path_between(&canon(current_worktree), &canon(path));
-    format!("<blue><a href=\"{absolute}\">{label}</a></blue>")
+    worktree_link_markup(path, &label)
 }
 
 /// Formats a worktree directory path as a blue OSC8 hyperlink whose href is the
@@ -636,9 +635,22 @@ fn worktree_path_link(path: &std::path::Path, current_worktree: &std::path::Path
 /// Used for the current worktree's own "located at" line, where a label
 /// relative to itself would degenerate to `.` and tell the reader nothing.
 fn worktree_path_link_absolute(path: &std::path::Path) -> String {
-    let absolute = path.display().to_string();
     let label = alias_path(path);
-    format!("<blue><a href=\"{absolute}\">{label}</a></blue>")
+    worktree_link_markup(path, &label)
+}
+
+fn worktree_link_markup(path: &Path, label: &str) -> String {
+    let label = if label == path.to_string_lossy() {
+        biscuit_file::to_portable_string(path)
+    } else {
+        label.to_string()
+    };
+    match biscuit_file::try_portable_string(path)
+        .and_then(|path| url::Url::from_file_path(path).ok())
+    {
+        Some(href) => format!("<blue><a href=\"{href}\">{label}</a></blue>"),
+        None => format!("<blue>{label}</blue>"),
+    }
 }
 
 /// Computes a compact display label for an absolute path by offsetting it
@@ -1896,19 +1908,24 @@ mod tests {
             // the path label is relative to the current worktree directory. A
             // branch named differently from the directory must not be substituted
             // for the name.
-            let wt_dir = "/tmp/demo/login-fix";
-            let main_dir = "/tmp/demo/project";
+            let fixture = tempfile::tempdir().expect("temporary worktree fixture");
+            let wt_dir = fixture.path().join("login-fix");
+            let main_dir = fixture.path().join("project");
+            std::fs::create_dir_all(&wt_dir).expect("current worktree directory");
+            std::fs::create_dir_all(&main_dir).expect("main worktree directory");
+            let wt_dir = std::fs::canonicalize(wt_dir).expect("canonical current worktree");
+            let main_dir = std::fs::canonicalize(main_dir).expect("canonical main worktree");
 
             let mut git = make_git_info(vec![]);
-            git.repo_root = PathBuf::from(wt_dir);
-            git.base_repo_root = Some(PathBuf::from(main_dir));
+            git.repo_root = wt_dir.clone();
+            git.base_repo_root = Some(main_dir.clone());
             git.in_worktree = true;
             git.current_branch = Some("feature/login".to_string());
             git.worktrees.insert(
                 "feature/login".to_string(),
                 sniff::filesystem::git::WorktreeInfo {
                     branch: "feature/login".to_string(),
-                    filepath: PathBuf::from(wt_dir),
+                    filepath: wt_dir.clone(),
                     sha: "abc123".to_string(),
                     dirty: false,
                     ahead: 3,
@@ -1934,16 +1951,22 @@ mod tests {
             // Main worktree is a sibling directory, so its visible label is
             // `../project`. The current worktree shows its own absolute path —
             // a label relative to itself (`.`) would tell the reader nothing.
+            let main_href = biscuit_file::try_portable_string(&main_dir)
+                .and_then(|path| url::Url::from_file_path(path).ok())
+                .expect("main worktree file URL");
+            let main_markup = worktree_path_link(&main_dir, &wt_dir);
+            assert!(main_markup.contains(&format!("href=\"{main_href}\"")));
             assert!(
                 output.contains("[../project](file://"),
                 "main worktree label must be relative to the current directory: {output}"
             );
-            // The visible absolute label may word-wrap at the terminal width,
-            // so assert on the OSC8 href, which is emitted intact.
-            assert!(
-                output.contains("(file:///tmp/demo/login-fix)"),
-                "current worktree must link to its absolute path: {output}"
-            );
+            // Rendering may wrap a long URL, so verify its intact value before
+            // the terminal renderer applies line wrapping.
+            let current_href = biscuit_file::try_portable_string(&wt_dir)
+                .and_then(|path| url::Url::from_file_path(path).ok())
+                .expect("current worktree file URL");
+            let current_markup = worktree_path_link_absolute(&wt_dir);
+            assert!(current_markup.contains(&format!("href=\"{current_href}\"")));
         }
 
         #[test]

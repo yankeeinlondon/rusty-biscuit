@@ -35,9 +35,8 @@ pub enum OscQueryError {
     Multiplexer(String),
 }
 
-/// Default timeout for OSC queries (not used in current implementation but
-/// provided for future use or downstream compatibility).
-pub const DEFAULT_TIMEOUT: Duration = Duration::from_millis(100);
+/// Default timeout for an actual terminal OSC round trip.
+pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(1);
 
 /// RGB color with 8-bit components.
 ///
@@ -162,7 +161,7 @@ mod tests {
 
     #[test]
     fn test_default_timeout_value() {
-        assert_eq!(DEFAULT_TIMEOUT, Duration::from_millis(100));
+        assert_eq!(DEFAULT_TIMEOUT, Duration::from_secs(1));
     }
 
     #[test]
