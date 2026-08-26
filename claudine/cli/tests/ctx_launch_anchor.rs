@@ -409,7 +409,9 @@ fn lifecycle_warn_and_when_report_the_launch_area() {
     let plain = common::strip_ansi(&stderr);
     assert!(
         plain.contains("prepared consumers")
-            && plain.contains("[body, effective-frontmatter, lifecycle, preflight]"),
+            && plain.contains(
+                "[body (2), effective-frontmatter (2), lifecycle, preflight]"
+            ),
         "the live direct route must report its complete prepared-context consumer set; \
          perf note:\n{plain}"
     );
