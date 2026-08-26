@@ -109,6 +109,9 @@ fn load_overlaid_source(
         }
     })?;
     let mut markdown: darkmatter::markdown::Markdown = source_text.clone().into();
+    markdown = markdown.with_source(darkmatter::markdown::compose::ComposeSource::File(
+        state.source_path.clone(),
+    ));
     super::super::overlay::merge_frontmatter_overlay(
         markdown.frontmatter_mut().as_map_mut(),
         &state.overlay,
@@ -401,6 +404,193 @@ mod tests {
             "codex/gpt-5",
             "ctx.agent/ctx.model must resolve from the carried env, not the fallbacks",
         );
+    }
+
+    #[test]
+    fn harness_reentry_epochs_keep_launch_values_and_source_ownership() {
+        let temp = tempfile::tempdir().unwrap();
+        let launch_repo = temp.path().join("launch");
+        let launch_dir = launch_repo.join("alpha/lib");
+        let source_repo = temp.path().join("source");
+        let source_dir = source_repo.join("nested");
+        std::fs::create_dir_all(&launch_dir).unwrap();
+        std::fs::create_dir_all(&source_dir).unwrap();
+        for repo in [&launch_repo, &source_repo] {
+            assert!(std::process::Command::new("git")
+                .args(["init", "--quiet"])
+                .current_dir(repo)
+                .status()
+                .unwrap()
+                .success());
+        }
+        std::fs::write(
+            launch_repo.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"alpha/lib\", \"sibling\"]\nresolver = \"2\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            launch_dir.join("Cargo.toml"),
+            "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(launch_repo.join("sibling")).unwrap();
+        std::fs::write(
+            launch_repo.join("sibling/Cargo.toml"),
+            "[package]\nname = \"sibling\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            launch_dir.join("schema.yaml"),
+            "launch_only: string(required)\n",
+        )
+        .unwrap();
+        std::fs::write(launch_dir.join("fragment.md"), "LAUNCH-FRAGMENT\n").unwrap();
+        std::fs::write(
+            source_dir.join("schema.yaml"),
+            "source_marker: string(required)\nspec: 'file(eager; required)'\nprepared_area: \
+             string(required)\nprepared_agent: string(required)\nprepared_model: string(required)\n",
+        )
+        .unwrap();
+        std::fs::write(source_dir.join("spec.md"), "SOURCE-SPEC\n").unwrap();
+        std::fs::write(source_dir.join("fragment.md"), "SOURCE-FRAGMENT\n").unwrap();
+        let target = source_dir.join("target.md");
+        std::fs::write(
+            &target,
+            concat!(
+                "---\n",
+                "$schema: ./schema.yaml\n",
+                "source_marker: source-owned\n",
+                "spec: spec.md\n",
+                "prepared_area: '{{ ctx.area }}'\n",
+                "prepared_agent: '{{ ctx.agent }}'\n",
+                "prepared_model: '{{ ctx.model }}'\n",
+                "---\n",
+                "AREA={{ ctx.area }} AGENT={{ ctx.agent }} MODEL={{ ctx.model }} ",
+                "ENV={{ env.AGENT }}/{{ env.MODEL }} FILE={{ file_exists(spec) }}\n",
+                "SOURCE-BODY\n",
+            ),
+        )
+        .unwrap();
+
+        let env = BTreeMap::from([
+            ("AGENT".to_string(), "codex".to_string()),
+            ("MODEL".to_string(), "gpt-5".to_string()),
+        ]);
+        let mut state = compose_state(
+            &target,
+            CallerInputLayers {
+                env_overrides: env,
+                file_ref_fallback_dir: Some(launch_dir.clone()),
+                ..CallerInputLayers::default()
+            },
+        );
+        let invocation = claudine::invocation_context::InvocationContext::capture_at(&launch_dir);
+        state.source_context = Some(invocation.derive_source(&target).unwrap());
+        state.invocation_context = Some(invocation.clone());
+
+        let assert_materialized = |entry: DocumentEntryReason,
+                                   materialized: &MaterializedHarnessPrompt| {
+            assert!(
+                materialized
+                    .prompt
+                    .contains("AREA=alpha AGENT=codex MODEL=gpt-5 ENV=codex/gpt-5 FILE=true"),
+                "entry {entry:?} lost launch or target identity: {}",
+                materialized.prompt
+            );
+            assert!(
+                materialized.prompt.contains("SOURCE-BODY")
+                    && !materialized.prompt.contains("LAUNCH-FRAGMENT"),
+                "entry {entry:?} did not keep the document body source-owned: {}",
+                materialized.prompt
+            );
+            assert_eq!(materialized.frontmatter["prepared_area"], serde_json::json!("alpha"));
+            assert_eq!(materialized.frontmatter["prepared_agent"], serde_json::json!("codex"));
+            assert_eq!(materialized.frontmatter["prepared_model"], serde_json::json!("gpt-5"));
+            assert_eq!(materialized.frontmatter["source_marker"], serde_json::json!("source-owned"));
+        };
+
+        let proxy = materialize_harness_prompt(
+            &mut state,
+            Some(&source_repo),
+            &launch_dir,
+            None,
+            SchemaStage::Validate,
+        )
+        .unwrap();
+        assert_materialized(DocumentEntryReason::ProxyTarget, &proxy);
+        assert_eq!(invocation.work_snapshot().launch_context_constructions, 1);
+
+        // Model an initialize-time rewrite that adds a group the bootstrap
+        // document did not require. The next materialization is the
+        // stabilized reread in the same epoch and must extend, not recapture.
+        let original = std::fs::read_to_string(&target).unwrap();
+        std::fs::write(
+            &target,
+            original.replace(
+                "SOURCE-BODY\n",
+                "SOURCE-BODY OS={{ ctx.os }} REPO={{ ctx.repo_root }}\n",
+            ),
+        )
+        .unwrap();
+
+        let stabilized = materialize_harness_prompt(
+            &mut state,
+            Some(&source_repo),
+            &launch_dir,
+            None,
+            SchemaStage::Validate,
+        )
+        .unwrap();
+        assert_materialized(DocumentEntryReason::ProxyTarget, &stabilized);
+        assert!(
+            stabilized.prompt.contains(" OS=") && !stabilized.prompt.contains("OS= REPO="),
+            "the stabilized reread must populate the newly required OS group: {}",
+            stabilized.prompt
+        );
+        let reread_work = invocation.work_snapshot();
+        assert_eq!(
+            reread_work.launch_context_constructions,
+            1,
+            "a same-document stabilized reread must retain the epoch snapshot"
+        );
+        assert_eq!(
+            reread_work.launch_context_extensions, 1,
+            "the stabilized reread must extend the retained snapshot for its new OS group"
+        );
+        assert_eq!(reread_work.ambient_fallbacks, 0);
+        assert_eq!(
+            reread_work
+                .prepared_context_consumers
+                .keys()
+                .map(String::as_str)
+                .collect::<Vec<_>>(),
+            vec!["body", "effective-frontmatter"],
+            "harness materialization must expose the exact consumers that received the epoch snapshot"
+        );
+
+        for (entry, expected_constructions) in [
+            (DocumentEntryReason::Retry, 2),
+            (DocumentEntryReason::Resume, 3),
+        ] {
+            state.entry = entry;
+            let materialized = materialize_harness_prompt(
+                &mut state,
+                Some(&source_repo),
+                &launch_dir,
+                None,
+                SchemaStage::Validate,
+            )
+            .unwrap();
+            assert_materialized(entry, &materialized);
+            assert_eq!(
+                invocation.work_snapshot().launch_context_constructions,
+                expected_constructions,
+                "entry {entry:?} must start exactly one fresh epoch"
+            );
+        }
+        let final_work = invocation.work_snapshot();
+        assert_eq!(final_work.ambient_fallbacks, 0);
+        assert_eq!(final_work.launch_context_extensions, 1);
     }
 
     /// Issue #1 regression: a proxy target's own frontmatter `$(...)` shell
