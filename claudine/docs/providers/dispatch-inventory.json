@@ -18,18 +18,18 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 1469,
-    "provider_refs": 1576,
+    "sites": 1471,
+    "provider_refs": 1578,
     "by_form": {
       "direct-ref": 1416,
       "eq-comparison": 21,
       "match-provider": 5,
-      "matches-macro": 13,
+      "matches-macro": 15,
       "ne-comparison": 10,
       "tuple-array": 4
     },
     "by_dispatch_class": {
-      "conditional": 53,
+      "conditional": 55,
       "reference": 1416
     }
   },
@@ -1930,7 +1930,27 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs",
-      "line": 36,
+      "line": 37,
+      "form": "matches-macro",
+      "dispatch_class": "conditional",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs",
+      "line": 88,
+      "form": "matches-macro",
+      "dispatch_class": "conditional",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs",
+      "line": 166,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1940,7 +1960,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs",
-      "line": 87,
+      "line": 217,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1950,7 +1970,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs",
-      "line": 132,
+      "line": 262,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1960,7 +1980,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs",
-      "line": 181,
+      "line": 311,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1970,7 +1990,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs",
-      "line": 219,
+      "line": 349,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1980,7 +2000,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs",
-      "line": 264,
+      "line": 394,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4768,7 +4788,7 @@
     },
     {
       "path": "claudine/lib/src/composition/prepare/tests.rs",
-      "line": 168,
+      "line": 172,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4778,7 +4798,7 @@
     },
     {
       "path": "claudine/lib/src/composition/prepare/tests.rs",
-      "line": 606,
+      "line": 610,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4789,7 +4809,7 @@
     },
     {
       "path": "claudine/lib/src/composition/prepare/tests.rs",
-      "line": 662,
+      "line": 666,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
