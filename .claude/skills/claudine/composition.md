@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-064eb2d7d6f425fe
-last_updated: 2026-08-02
+hash: ef46db3751d8e999-39b4d8e587eee969
+last_updated: 2026-08-26
 ---
 # Claudine Composition
 
@@ -682,11 +682,12 @@ Plain `ctx.*` in a composed document describes the caller's **launch context** �
 
 - **One owner.** The launch anchor and the launch repository/topology/environment/host evidence are paired as a single operation on `InvocationContext` (`capture_launch_context` for a fresh document epoch, `extend_launch_context` for a same-epoch reread). A caller cannot combine a launch directory with prompt-derived evidence, so moving a prompt, task, group, overlay, or system-prompt file cannot change launch-facing `ctx.*` values (`ctx.area`, `ctx.repo_root`, `ctx.current_packages`, …). A source stored in another repository never substitutes that repository for the launch repository.
 - **One snapshot per document epoch.** Direct, inline, loop, proxy-target, retry, and resume entry each prepare one target-adjusted early-binding snapshot after provider/model resolution and reuse that exact snapshot through shell preflight, body and effective-frontmatter composition, schema evaluation, loop conditions, and every lifecycle event. The post-`initialize` stabilized reread stays inside its epoch: newly demanded context groups are extended from retained launch evidence, and the anchor, environment capture, and applied target overrides never change. Proxying to another document, and retry/resume re-entry, start a new epoch (at most one new snapshot each).
+- **Reuse is observable.** Invocation work accounting records populated prepared-context observations by the stable consumer names `preflight`, `body`, `effective-frontmatter`, `loop-condition`, and `lifecycle`. Performance reports project the sorted observed set alongside launch constructions, same-epoch extensions, and ambient fallbacks. Canonical preparation increments the fallback counter if an invocation owner is present but its prepared context is absent, so dropping the snapshot cannot pass a zero-fallback assertion invisibly.
 - **Target identity is layered, not captured.** `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` reflect the resolved target's environment overrides applied on top of the launch snapshot, preserving target-identity precedence on every route.
 - **The source context stays source-relative.** The active document's `SourceContext` (its authoring base, repository identity, and `FileResolutionContext`) remains authoritative for document-authored file references, transclusion, `$schema` discovery, and provenance. Source-relative resolution is unchanged by this contract.
 - **`current.ctx.*` is unchanged.** It remains live event-time state, captured when the event fires, and is explicitly *not* a fallback for a missing prepared `ctx.*`.
 
-In sequences, the graph phase runs before per-task target selection, so graph-resolved shell bytes cannot legally reference target identity: a command referencing `ctx.agent`, `ctx.model`, `env.AGENT`, or `env.MODEL` fails graph preflight with a typed target-identity rejection directing the author to the task that owns the target. Per-task and just-in-time audits — where the selected target's environment is available — continue to expand those roots. The capture-owner drift guard in `cli/tests/composition_seams.rs` rejects any new direct prepared-context capture outside the invocation owner and its allowlisted compatibility sites.
+In sequences, the graph phase runs before per-task target selection, so graph-resolved shell bytes cannot legally reference target identity: a command referencing `ctx.agent`, `ctx.model`, `env.AGENT`, or `env.MODEL` fails graph preflight with a typed target-identity rejection directing the author to the task that owns the target. Static bracket access such as `ctx["agent"]` is canonicalized to the same identity path. A computed index rooted at `ctx` or `env` also fails closed because its dynamic key could select a target-dependent leaf; computed indexes under other namespaces are unaffected. Per-task and just-in-time audits — where the selected target's environment is available — continue to expand those roots. The capture-owner drift guard in `cli/tests/composition_seams.rs` rejects any new direct prepared-context capture outside the invocation owner and its allowlisted compatibility sites.
 
 ## Document Handoffs and the Equivalence Contract
 

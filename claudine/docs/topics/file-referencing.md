@@ -60,26 +60,41 @@ In addition to the most common sigils above, we're also all familiar with differ
       - repo's root directory
     - The key difference from the magic path is that it does **not** reach into the user's home directory as a fallback. This is by design of course but it can also help to avoid a common pitfall when accidentally running into a security violation or an unwanted human-in-the-loop intervention because the current agent is happy to operate on repo file but not on user scoped files.
     - The `^` sigil is automatically used when a file reference falls into the pattern we refer to as an "ambiguous relative path".
+- `vault:` **Obsidian Vault(s)**
+- `$`
 
 
-> **Note:** the `@`, `&`, and `^` sigils are _defensively_ coded so that a following `/` character has no impact
+> **Note:** the `@`, `&`, `^`, `$`  sigils are _defensively_ coded so that a following `/` character has no impact
 > on the file paths which are evaluated:
 >
 > - `@path/to/file` is the same as `@/path/to/file`
 > - `&path/to/file` is the same as `&/path/to/file`
-> - `^path/to/file` is the same as `^/path/to/file`
+> - etc.
 
-## The Ambiguous Relative Path
+## The Implicit Relative Path
 
-All file references can and should be thought of as as a **base** path joined to a **relative** path:
+All file references can and should be thought of as a **base** path joined to a **relative** path:
 
 - what an OS would call an **absolute path** is just something like `/path/to/file.md`
-    - the **base** is just `/` and the rest represents a path from that base
-- what an OS would see clearly as a relative path is something like `./path/to/file.mdto/path.md`
-    - a relative path _doesn't_ have 
+    - the **base** is just `/` and the rest represents a relative path from that base
+- what an OS would see something like `./path/to/file.md` _or_ `../path/to/file.md` as a **relative path**
+    - a relative path doesn't have an explicit **base** path _yet_ but as we've already established:
+        - `.` will be converted to the current working directory at run time
+        - `..` will be converted to the parent of the working directory at run time
+- the `~` sigel acts in the same way ENV based paths do like `${HOME}` path used commonly in shell scripts
+    - a path of `~/path/to/file.md` or `${HOME}/path/to/file.md` has an _abstracted_ base path that is resolved at run time:
+    - `~` or `${HOME}` is the **base** path and `path/to/file.md` is a relative path off of that base
+
+So what then is an **implicit relative path**? It's a path that starts immediately with a relative path segment but without adding in a clear marker for what this relative file path's base should be. An example would be:
+
+- `path/to/file.md`
+
+Without a sigil to guide us Claudine is forced to treat this form of a relative path as a `&` reference; which then establishes the following assertion:
+
+- `path/to/file.md` is the same as `&path/to/file.md`
 
 
-## Concept: Design Time vs Run Time
+## Design Time vs Run Time
 
 When a file reference is made _inside a file_ this is deemed to be "design time" reference because a Markdown file is not immediately executable and with _composable_ content we value abstraction and reuse over absolutism. In contrast, when Claudine (or Darkmatter) _composes_ a document it is NOW "run time". Why does this matter?
 
@@ -103,7 +118,7 @@ In Claudine, we _refer to files_ inside of files in many situations such as:
 - conditional blocks: `::block when="file_exists(foo/bar/doit.sh)"`
 - etc.
 
-### Eager or Lazy Evaluation of Frontmatter
+## Eager or Lazy Evaluation of Frontmatter
 
 An edge case we must consider with Claudine is that we can pass in file references as Frontmatter. When we do this the schema type of the property matters and specifically whether the **eager** modifier is used to change the file reference into an eager evaluated reference or not.
 
@@ -128,56 +143,3 @@ In this example:
 
 - the file path to `spec` file path must be a valid file reference or else an error will be raised
 - the file path to `plan` will be treated as a file path but the file path being passed in -- _while needing to be a valid file path generically (e.g., no invalid characters in path)_ -- will not be checked at runtime to ensure that this file does exist in the file system
-
-
-### Absolute, Relative, and Abstracted File Paths
-
-In operating systems we're used to two basic file references: _relative_ and _absolute_ file paths: 
-
-- An **absolute** file path starts from the recognized root of the operating system's root file system and explicitly defines the entire path needed to get to the file
-    - this form of file reference can only point to a single location on a given host's file system 
-    - it leaves **zero ambiguity** on the where the file should be found
-    - while this form of file referencing has no **ambiguity** it trades that for less **portability** 
-        - across hosts absolute paths tend to be bad idea
-        - absolute paths should NEVER be used in repos that by their very nature pivot of a _root_ in the file system that is highly dynamic
-    - examples include:
-        - `/etc/resolv` uses the `/` sigil to specify it is an absolute path
-        - `file://etc/resolv` use the more formal `file://` sigil which indicates both that it's an absolute path but also that it should be treated as a file
-        - `\Users\Bob\.env` uses the `\` sigil which Windows users will be familiar with
-- A **relative** path describes a file path _relative_ to another file path
-    - relative paths often start with a `.` or `..` sigil to indicate both that it IS an explicitly _relative_ path and that it is relative to the _current working directory_
-    - more opaque relative paths are often used too like `foo/bar/baz.md` 
-
-- relative paths use symbols like `.` to represent the OS's _current working directory_, `..` to represent the parent of the current working directory
-    - assuming the "base directory" is clearly established and unambiguous -- and especially when used inside a **repo** -- relative paths are highly useful as they become highly portable across hosts
-
-Though less commonly discussed there are also a category of file references which we will call **abstracted** file references:
-
-- an _abstracted_ file reference provides some form of indirection to a part of the file path; in this document we'll focus primarily on abstractions which define the "base directory" but indeed a file path could also include 
-- the most commonly used example is the `~` symbol which most OS's will infer to mean "the current user's home directory"
-    - in this example something like `~/foo/bar/baz.md` uses `~` as an abstracted base directory to allow for a relative path to be used as an offset
-    - in fact, one could refer to an absolute path as nothing more than a relative path off 
-- the next most common example is the use of an environment variable:
-    - `${HOME}/foo/bar/baz.md` this path depends on the `HOME` environment variable being set and being a valid file path
-    - many OS's will set `${HOME}` for you 
-
-#### Examples
-
-1. `/etc/resolv` is unambiguously an absolute file path based on the leading `/` sigil in the file path
-1. `file://etc/resolv` is unambiguously an absolute file path which uses the `file://` protocol specifier to more explicitly state scoping
-1. `./children/one.md` is unambiguously a relative file path based on the leading `.` which means "current working directory"
-1. `children/one.md` _suggests_ that it is relative path but is not explicit about it's base
-1. `../bar.md` is unambiguously a relative file path of the _parent_ of the current working directory
-1. `~/.env` is _abstracted_ file reference 
-
-### Repos as Bounding Scope
-
-
-## In Practice
-
-Claudine provides the following **sigil**'s which can be used to reference the BASE for a relative file reference.
-
-for providing a base or _set of bases_ for a file reference:
-
-- `file://`, `/`, `\` all map to the base of the host OS's file system and are considered "absolute paths"
-- `.`
