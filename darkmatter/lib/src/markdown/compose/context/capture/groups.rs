@@ -87,6 +87,12 @@ impl ContextRequirements {
         self.groups.contains(&group)
     }
 
+    /// This requirement set plus `group`.
+    pub(crate) fn with(mut self, group: ContextGroup) -> Self {
+        self.groups.insert(group);
+        self
+    }
+
     /// Iterates the required groups in unspecified order.
     pub fn iter(&self) -> impl Iterator<Item = ContextGroup> + '_ {
         self.groups.iter().copied()
