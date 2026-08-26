@@ -38,6 +38,40 @@ pub enum InvocationContextError {
     SourceWithoutParent(PathBuf),
 }
 
+/// Canonical seams that consume a document epoch's prepared context.
+///
+/// These names are part of invocation work accounting: tests compare the
+/// observed set for a route with its expected semantic consumers. Recording a
+/// seam at its owner proves the snapshot was populated there; aggregate launch
+/// construction counts alone cannot distinguish reuse from equal recapture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PreparedContextConsumer {
+    /// Resolve-once preparation and shell discovery.
+    Preflight,
+    /// Prompt body composition.
+    Body,
+    /// Effective-frontmatter composition.
+    EffectiveFrontmatter,
+    /// A loop gate using the prepared context.
+    LoopCondition,
+    /// Event-time lifecycle interpolation.
+    Lifecycle,
+}
+
+impl PreparedContextConsumer {
+    /// These names are emitted in performance reports and form the stable
+    /// vocabulary used by exact route-consumer assertions.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Preflight => "preflight",
+            Self::Body => "body",
+            Self::EffectiveFrontmatter => "effective-frontmatter",
+            Self::LoopCondition => "loop-condition",
+            Self::Lifecycle => "lifecycle",
+        }
+    }
+}
+
 /// Request-local accounting for discovery and preparation work.
 ///
 /// `runtime_evidence_captures` counts, per group, the calls that ran the
@@ -64,6 +98,11 @@ pub struct InvocationWorkSnapshot {
     /// [`InvocationContext::extend_launch_context`]. Expected only from a
     /// stabilized reread whose document grew new `ctx.*` groups.
     pub launch_context_extensions: usize,
+    /// Populated prepared-context observations grouped by canonical consumer.
+    ///
+    /// Values retain repeat observations while callers that need the semantic
+    /// route contract can compare the deterministic map keys as a set.
+    pub prepared_context_consumers: BTreeMap<String, usize>,
     pub runtime_evidence_captures: BTreeMap<String, usize>,
     pub runtime_evidence_reuses: BTreeMap<String, usize>,
     pub system_prompt_timings: BTreeMap<String, std::time::Duration>,
@@ -81,6 +120,7 @@ struct InvocationWork {
     ambient_fallbacks: AtomicUsize,
     launch_context_constructions: AtomicUsize,
     launch_context_extensions: AtomicUsize,
+    prepared_context_consumers: Mutex<BTreeMap<String, usize>>,
     runtime_evidence_captures: Mutex<BTreeMap<String, usize>>,
     runtime_evidence_reuses: Mutex<BTreeMap<String, usize>>,
     system_prompt_timings: Mutex<BTreeMap<String, std::time::Duration>>,
@@ -103,6 +143,11 @@ impl InvocationWork {
                 .launch_context_constructions
                 .load(Ordering::Relaxed),
             launch_context_extensions: self.launch_context_extensions.load(Ordering::Relaxed),
+            prepared_context_consumers: self
+                .prepared_context_consumers
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
             runtime_evidence_captures: self
                 .runtime_evidence_captures
                 .lock()
@@ -1014,6 +1059,17 @@ impl InvocationContext {
             .work
             .ambient_fallbacks
             .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record that a canonical consumer received a populated epoch snapshot.
+    pub fn record_prepared_context_consumer(&self, consumer: PreparedContextConsumer) {
+        let mut consumers = self
+            .inner
+            .work
+            .prepared_context_consumers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *consumers.entry(consumer.as_str().to_string()).or_default() += 1;
     }
 }
 
