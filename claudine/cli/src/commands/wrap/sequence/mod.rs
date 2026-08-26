@@ -257,6 +257,9 @@ pub(crate) fn execute_sequence(
         &source.markdown,
     );
     let graph_context = prep_context.invocation.capture_launch_context(&requirements);
+    prep_context.invocation.record_prepared_context_consumer(
+        claudine::invocation_context::PreparedContextConsumer::Preflight,
+    );
     let graph = composition::build_preflight_graph_with_invocation(
         &plan,
         source,
