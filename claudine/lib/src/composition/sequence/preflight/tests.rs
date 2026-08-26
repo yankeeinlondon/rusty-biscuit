@@ -1154,6 +1154,95 @@ mod shell {
         }
     }
 
+    #[test]
+    fn bracket_target_identity_is_rejected_on_every_graph_shell_surface() {
+        let spellings = [
+            (r#"ctx["agent"]"#, "ctx.agent"),
+            (r#"ctx["model"]"#, "ctx.model"),
+            (r#"env["AGENT"]"#, "env.AGENT"),
+            (r#"env["MODEL"]"#, "env.MODEL"),
+        ];
+
+        for (access, canonical_root) in spellings {
+            for position in ["primary", "setup", "teardown", "nested expression"] {
+                let command = if position == "nested expression" {
+                    format!("echo {{{{ [{access}] }}}}")
+                } else {
+                    format!("echo {{{{ {access} }}}}")
+                };
+                let task = match position {
+                    "primary" | "nested expression" => json!({
+                        "name": "one",
+                        "shell": command,
+                    }),
+                    "setup" => json!({
+                        "name": "one",
+                        "shell": "echo primary",
+                        "setup": [{ "shell": command }],
+                    }),
+                    "teardown" => json!({
+                        "name": "one",
+                        "shell": "echo primary",
+                        "teardown": [{ "shell": command }],
+                    }),
+                    _ => unreachable!(),
+                };
+                let dir = TempDir::new().unwrap();
+                let source = write_source(
+                    dir.path(),
+                    "seq.md",
+                    &[("sequence", json!([task]))],
+                    "Body.\n",
+                );
+
+                let error = err_for(&source);
+                assert!(
+                    matches!(
+                        &error,
+                        CompositionError::SequenceShellTargetIdentity { root, .. }
+                            if root == canonical_root
+                    ),
+                    "`{access}` in the {position} position must be rejected as \
+                     `{canonical_root}`; got: {error}",
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn computed_ctx_and_env_indexes_fail_closed_at_graph_preflight() {
+        for access in [r#"ctx[identity_key]"#, r#"env[lower("MODEL")]"#] {
+            let dir = TempDir::new().unwrap();
+            let command = format!("echo {{{{ {access} }}}}");
+            let source = write_source(
+                dir.path(),
+                "seq.md",
+                &[(
+                    "sequence",
+                    json!([{ "name": "one", "shell": command }]),
+                )],
+                "Body.\n",
+            );
+
+            let error = err_for(&source);
+            assert!(
+                matches!(
+                    &error,
+                    CompositionError::SequenceShellTargetIdentity { root, .. }
+                        if root == access
+                ),
+                "computed access `{access}` could select a target-identity leaf and must \
+                 fail closed; got: {error}",
+            );
+        }
+
+        assert_eq!(
+            shape::first_target_identity_root("echo {{ state[identity_key] }}"),
+            None,
+            "the conservative computed-index rule is limited to ctx/env namespaces",
+        );
+    }
+
     /// A task's `teardown:` stack resolves through the same graph phase, so a
     /// target-identity reference there is rejected identically — the bytes it
     /// would bake in are the bytes execution runs.
@@ -1198,6 +1287,8 @@ mod shell {
                     "shell": [
                         "echo {{ state.name }}",
                         "echo {{ env.HOME }}",
+                        "echo {{ ctx[\"area\"] }}",
+                        "echo {{ env[\"HOME\"] }}",
                     ],
                 }]),
             )],
