@@ -50,7 +50,7 @@ The library pipeline lives in `claudine/lib/src/system_prompt/`:
 1. `InvocationContext` captures the launch CWD, HOME, environment, repository observation, and launch file-resolution rules once
 2. its `LaunchContext` projection selects either an explicit file or a discovered `system-prompt.md`; explicit references resolve through the invocation's launch `FileResolutionContext`
 3. each selected file retains a source-derived `SourceContext`, including its repository/package roots and `FileResolutionContext`
-4. the primary prompt and non-interactive candidates contribute one union of requested `ctx.*` groups; the invocation supplies cached evidence for one shared runtime context
+4. the primary prompt and non-interactive candidates contribute one union of requested `ctx.*` groups; the invocation captures that union as **one launch-anchored shared runtime context** — plain `ctx.*` in a system prompt or appendix projects the caller's launch repository and package area, so moving the source file cannot change its launch-facing expansion (see [composition.md — Launch-Anchored Prepared Context](composition.md#launch-anchored-prepared-context))
 5. each file composes with that shared runtime context and its own retained file-resolution context
 6. non-interactive sessions append `.claudine/non-interactive.md`, `~/.claudine/non-interactive.md`, or the built-in fallback message
 7. providers apply the prepared result through `WrapperProfile::apply_system_prompt()`
