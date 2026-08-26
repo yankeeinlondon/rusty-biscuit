@@ -587,3 +587,198 @@ fn repository_keys_preserve_windows_drive_and_unc_shapes() {
     assert_ne!(drive, drive_prefix_collision);
     assert_ne!(drive, unc);
 }
+
+// --- Launch-anchored prepared-context capture (ctx-launch-anchor) ----------
+
+fn repo_area_requirements() -> darkmatter::markdown::compose::ContextRequirements {
+    darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.area }} {{ ctx.repo_root }}",
+    )
+}
+
+/// AC2: a document stored in one package area, launched from another, reports
+/// the launch area through the launch-capture seam.
+#[test]
+fn launch_capture_reports_the_launch_area_not_the_source_area() {
+    let fixture = TempDir::new().unwrap();
+    init_repo(fixture.path());
+    write_workspace(fixture.path());
+    let opposing = fixture.path().join("other/pkg");
+    fs::create_dir_all(&opposing).unwrap();
+    fs::write(
+        fixture.path().join("Cargo.toml"),
+        "[workspace]\nmembers = [\"area/pkg\", \"other/pkg\"]\nresolver = \"2\"\n",
+    )
+    .unwrap();
+    fs::write(
+        opposing.join("Cargo.toml"),
+        "[package]\nname = \"opposing\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    let launch_dir = fixture.path().join("area/pkg");
+    let source = opposing.join("prompt.md");
+    fs::write(&source, "prompt").unwrap();
+
+    let invocation = InvocationContext::capture_at(&launch_dir);
+    let context = invocation.capture_launch_context(&repo_area_requirements());
+
+    assert_eq!(
+        context.get("area").and_then(serde_json::Value::as_str),
+        Some("fixture"),
+        "the launch area's own package must win over the source's area"
+    );
+    assert_eq!(
+        context.get("repo_root").and_then(serde_json::Value::as_str),
+        Some(fixture.path().to_string_lossy().as_ref())
+    );
+    let work = invocation.work_snapshot();
+    assert_eq!(work.launch_context_constructions, 1);
+    assert_eq!(work.launch_context_extensions, 0);
+    assert_eq!(work.ambient_fallbacks, 0);
+}
+
+/// AC2, repository split: a source stored in another repository must not
+/// substitute that repository for the launch repository.
+#[test]
+fn launch_capture_keeps_the_launch_repository_for_external_sources() {
+    let fixture = TempDir::new().unwrap();
+    let launch_repo = fixture.path().join("launch");
+    let external_repo = fixture.path().join("external");
+    fs::create_dir_all(&launch_repo).unwrap();
+    fs::create_dir_all(&external_repo).unwrap();
+    init_repo(&launch_repo);
+    init_repo(&external_repo);
+    write_workspace(&launch_repo);
+    let source = external_repo.join("prompt.md");
+    fs::write(&source, "prompt").unwrap();
+
+    let invocation = InvocationContext::capture_at(&launch_repo);
+    let context = invocation.capture_launch_context(&repo_area_requirements());
+
+    assert_eq!(
+        context.get("repo_root").and_then(serde_json::Value::as_str),
+        Some(launch_repo.to_string_lossy().as_ref()),
+        "an external source repository must not become the launch repository"
+    );
+}
+
+/// AC3, inverse: launching outside every repository reports no repository
+/// facts even when a derived source lives inside one.
+#[test]
+fn launch_capture_outside_any_repository_reports_no_repository_facts() {
+    let fixture = TempDir::new().unwrap();
+    let outside = fixture.path().join("outside");
+    let repo = fixture.path().join("repo");
+    fs::create_dir_all(&outside).unwrap();
+    fs::create_dir_all(&repo).unwrap();
+    init_repo(&repo);
+    write_workspace(&repo);
+    let source = repo.join("area/pkg/prompt.md");
+    fs::write(&source, "prompt").unwrap();
+
+    let invocation = InvocationContext::capture_at(&outside);
+    let source_context = invocation.derive_source(&source).unwrap();
+    assert_eq!(
+        source_context.repository_root(),
+        Some(repo.as_path()),
+        "fixture check: the source itself is inside a repository"
+    );
+    let context = invocation.capture_launch_context(&repo_area_requirements());
+
+    assert_eq!(
+        context.get("repo_root"),
+        Some(&serde_json::Value::Null),
+        "prompt location must not fill missing launch facts"
+    );
+    assert_eq!(
+        context.get("area").and_then(serde_json::Value::as_str),
+        Some(""),
+        "no launch repository means no launch package area"
+    );
+}
+
+/// AC11: repeated launch projections reuse retained evidence — no extra Git
+/// discovery or topology probe after invocation capture.
+#[test]
+fn repeated_launch_projections_reuse_retained_evidence() {
+    let fixture = TempDir::new().unwrap();
+    init_repo(fixture.path());
+    write_workspace(fixture.path());
+    // A second member: a single-package workspace is not classified as a
+    // monorepo, and `ctx.area` needs one to report the launch package.
+    fs::create_dir_all(fixture.path().join("sibling")).unwrap();
+    fs::write(
+        fixture.path().join("Cargo.toml"),
+        "[workspace]\nmembers = [\"area/pkg\", \"sibling\"]\nresolver = \"2\"\n",
+    )
+    .unwrap();
+    fs::write(
+        fixture.path().join("sibling/Cargo.toml"),
+        "[package]\nname = \"sibling\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    let launch_dir = fixture.path().join("area/pkg");
+
+    let invocation = InvocationContext::capture_at(&launch_dir);
+    let baseline = invocation.work_snapshot();
+    for _ in 0..4 {
+        let context = invocation.capture_launch_context(&repo_area_requirements());
+        assert_eq!(
+            context.get("area").and_then(serde_json::Value::as_str),
+            Some("fixture")
+        );
+    }
+    let after = invocation.work_snapshot();
+    assert_eq!(after.git_root_discoveries, baseline.git_root_discoveries);
+    assert_eq!(after.topology_probes, baseline.topology_probes);
+    assert_eq!(after.launch_context_constructions, 4);
+    assert_eq!(after.launch_context_extensions, 0);
+    assert_eq!(after.ambient_fallbacks, 0);
+    // `repo` clones retained evidence; every projection is a reuse.
+    assert_eq!(after.runtime_evidence_captures.get("repo"), None);
+    assert_eq!(after.runtime_evidence_reuses.get("repo"), Some(&4));
+}
+
+/// D4/AC5: same-epoch extension projects only the missing groups and never
+/// re-anchors; the anchor, environment, and captured values are preserved.
+#[test]
+fn launch_extension_projects_missing_groups_without_reanchoring() {
+    let fixture = TempDir::new().unwrap();
+    init_repo(fixture.path());
+    write_workspace(fixture.path());
+    let launch_dir = fixture.path().join("area/pkg");
+
+    let invocation = InvocationContext::capture_at(&launch_dir);
+    let base_requirements = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.repo_root }}",
+    );
+    let mut context = invocation.capture_launch_context(&base_requirements);
+    assert!(
+        !context
+            .capture_requirements()
+            .contains(darkmatter::markdown::compose::ContextGroup::FileChanges)
+    );
+    let anchor = context.anchor().to_path_buf();
+    let repo_root = context.get("repo_root").cloned();
+
+    let grown = darkmatter::markdown::compose::ContextRequirements::for_content(
+        "{{ ctx.repo_root }} {{ ctx.dirty_files }}",
+    );
+    invocation.extend_launch_context(&mut context, &grown);
+
+    assert!(
+        context
+            .capture_requirements()
+            .contains(darkmatter::markdown::compose::ContextGroup::FileChanges)
+    );
+    assert!(context.get("dirty_files").is_some());
+    assert_eq!(context.anchor(), anchor, "extension must not re-anchor");
+    assert_eq!(context.get("repo_root"), repo_root.as_ref());
+    let work = invocation.work_snapshot();
+    assert_eq!(work.launch_context_constructions, 1);
+    assert_eq!(work.launch_context_extensions, 1);
+
+    // A requirements set the snapshot already satisfies records no extension.
+    invocation.extend_launch_context(&mut context, &grown);
+    assert_eq!(invocation.work_snapshot().launch_context_extensions, 1);
+}

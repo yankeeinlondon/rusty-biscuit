@@ -787,7 +787,14 @@ impl<'a> Loader<'a> {
     ///
     /// The returned string is the *only* executable representation of the
     /// command: it is what preflight approves and what execution runs, so the
-    /// two can never drift.
+    /// two can never drift. That resolve-once property is also why a
+    /// target-identity root (`ctx.agent`, `ctx.model`, `env.AGENT`,
+    /// `env.MODEL`) is rejected here rather than expanded: this graph phase
+    /// runs before per-task target selection, so any value it could expand to
+    /// would be a pre-selection value, and execution would run those wrong
+    /// bytes with no second resolution to catch the divergence. Per-task and
+    /// JIT audits — where the selected target's environment is available —
+    /// continue to permit those roots.
     fn resolve_shell_bytes(
         &mut self,
         raw: &str,
@@ -805,31 +812,31 @@ impl<'a> Loader<'a> {
                 task: label.to_string(),
             });
         }
+        if let Some(root) = shape::first_target_identity_root(raw) {
+            return Err(CompositionError::SequenceShellTargetIdentity {
+                command: raw.to_string(),
+                root,
+                task: label.to_string(),
+            });
+        }
 
+        // Runtime values come from the graph's launch context — the caller's
+        // launch repository and package area — extended in place with any
+        // group this command needs. Each origin document's own
+        // `SourceContext` still supplies file resolution; it never supplies
+        // launch-facing `ctx.*`.
         let source_context = self.source_context_for(origin);
-        let (runtime_context, file_resolution_context) = match source_context.as_ref() {
-            Some(source_context) => {
-                let invocation = self
-                    .invocation
-                    .expect("source context requires an invocation owner");
-                let requirements =
-                    darkmatter::markdown::compose::ContextRequirements::for_content(raw);
-                let evidence = invocation.runtime_evidence(source_context, &requirements);
-                let mut context = ComposeContext::capture_with_evidence(
-                    source_context.base_dir(),
-                    &requirements,
-                    &evidence,
-                );
-                for (key, value) in self.context.env() {
-                    context.env_mut().insert(key.clone(), value.clone());
-                }
-                (
-                    context,
-                    Some(source_context.file_resolution_context().clone()),
-                )
-            }
-            None => (self.context.clone(), self.file_resolution_context.clone()),
-        };
+        let file_resolution_context = source_context
+            .as_ref()
+            .map(SourceContext::file_resolution_context)
+            .cloned()
+            .or_else(|| self.file_resolution_context.clone());
+        if let Some(invocation) = self.invocation {
+            let requirements =
+                darkmatter::markdown::compose::ContextRequirements::for_content(raw);
+            invocation.extend_launch_context(&mut self.context, &requirements);
+        }
+        let runtime_context = self.context.clone();
         let resolution_ctx = super::super::document_expression_resolution_context(
             origin,
             Some(&runtime_context),
