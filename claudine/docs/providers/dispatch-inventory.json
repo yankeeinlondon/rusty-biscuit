@@ -4146,7 +4146,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/mod.rs",
-      "line": 506,
+      "line": 509,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4768,7 +4768,7 @@
     },
     {
       "path": "claudine/lib/src/composition/prepare/tests.rs",
-      "line": 130,
+      "line": 168,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4778,7 +4778,7 @@
     },
     {
       "path": "claudine/lib/src/composition/prepare/tests.rs",
-      "line": 568,
+      "line": 606,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4789,7 +4789,7 @@
     },
     {
       "path": "claudine/lib/src/composition/prepare/tests.rs",
-      "line": 624,
+      "line": 662,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
