@@ -531,6 +531,7 @@ fn start_lifecycle_phase(
     control: &mut AttemptRetryProxyControl<'_>,
     materialized: &MaterializedHarnessPrompt,
 ) -> Result<Option<LoopStep>> {
+    observe_reentry_lifecycle_context(prompt.prompt_state, materialized);
     let attempt = control.active.iteration().attempt().number();
     let profile = control.profile;
     let provider = control.provider;
@@ -685,6 +686,23 @@ fn start_lifecycle_phase(
         }
     }
     Ok(None)
+}
+
+fn observe_reentry_lifecycle_context(
+    prompt_state: &HarnessPromptState,
+    materialized: &MaterializedHarnessPrompt,
+) {
+    if matches!(
+        prompt_state.entry,
+        claudine::composition::DocumentEntryReason::Retry
+            | claudine::composition::DocumentEntryReason::Resume
+    ) && materialized.compose_context.is_some()
+        && let Some(invocation) = prompt_state.invocation_context.as_ref()
+    {
+        invocation.record_prepared_context_consumer(
+            claudine::invocation_context::PreparedContextConsumer::Lifecycle,
+        );
+    }
 }
 
 /// Stages 1-3 of the staged boot: the bootstrap read's narrow initialize-shell
