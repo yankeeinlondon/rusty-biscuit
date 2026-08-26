@@ -261,6 +261,7 @@ pub fn execute_loop_with_config(
                     source_path: prompt_path,
                     fallback_dir: None,
                     context: None,
+                    prepared_context: None,
                 },
             )?
         {
@@ -515,7 +516,8 @@ where
                 LoopExpressionLookup::new(&frontmatter, &pre_mutation_ambient)
                     .with_base_dir(base_dir)
                     .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
-                    .with_file_resolution_context(file_resolution_context, prompt_path);
+                    .with_file_resolution_context(file_resolution_context, prompt_path)
+                    .with_prepared_context(lifecycle_ctx.context);
             !evaluate_condition(&config.condition, &pre_mutation_lookup)?
         };
         let ambient = LoopAmbient::new(
@@ -695,6 +697,7 @@ where
                     source_path: prompt_path,
                     fallback_dir: lifecycle_ctx.launch_area,
                     context: file_resolution_context,
+                    prepared_context: lifecycle_ctx.context,
                 },
             )?
         {
@@ -906,7 +909,8 @@ fn run_loop_gate(
     let lookup = LoopExpressionLookup::new(frontmatter, ambient)
         .with_base_dir(base_dir)
         .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
-        .with_file_resolution_context(file_resolution_context, prompt_path);
+        .with_file_resolution_context(file_resolution_context, prompt_path)
+        .with_prepared_context(lifecycle_ctx.context);
     if !evaluate_condition(&config.condition, &lookup)? {
         return Ok(LoopGateOutcome::Exit);
     }
@@ -1167,7 +1171,8 @@ fn should_continue_after_cap(
     let lookup = LoopExpressionLookup::new(frontmatter, &ambient)
         .with_base_dir(resolution.source_path.parent())
         .with_file_ref_fallback_dir(resolution.fallback_dir)
-        .with_file_resolution_context(resolution.context, resolution.source_path);
+        .with_file_resolution_context(resolution.context, resolution.source_path)
+        .with_prepared_context(resolution.prepared_context);
     evaluate_condition(&config.condition, &lookup)
 }
 
@@ -1176,6 +1181,7 @@ struct LoopFileResolution<'a> {
     source_path: &'a Path,
     fallback_dir: Option<&'a Path>,
     context: Option<&'a biscuit_file::FileResolutionContext>,
+    prepared_context: Option<&'a darkmatter::markdown::compose::ComposeContext>,
 }
 
 #[cfg(test)]
