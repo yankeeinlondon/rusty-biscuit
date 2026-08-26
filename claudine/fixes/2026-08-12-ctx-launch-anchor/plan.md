@@ -5,6 +5,7 @@ updated: 2026-08-26
 phase: 6
 agent: codex/default
 yolo: true
+implemented: true
 ---
 
 # Execution Plan: Anchor Prepared `ctx.*` to the Invocation Launch Context
@@ -255,10 +256,10 @@ document entry and pass it through every stage of that epoch.
   the epoch snapshot is extended from retained launch evidence — counters
   show one construction plus the extension, zero ambient fallbacks — and the
   anchor and target overrides are unchanged (AC5, AC11).
-- [ ] Add direct, loop, proxy, retry, and resume tests asserting target-specific
+- [x] Add direct, loop, proxy, retry, and resume tests asserting target-specific
   `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL`, plus launch-stable
   repository/package facts (AC6, AC8).
-- [ ] Add conflicting launch/source file fixtures proving body references,
+- [x] Add conflicting launch/source file fixtures proving body references,
   eager `file(...)`, and `$schema` remain source-relative/repository-first
   while plain `ctx.*` remains launch-relative (AC10).
 
@@ -347,7 +348,7 @@ the final epoch/snapshot interfaces.
   with the invocation launch-capture API; use one shared launch snapshot for
   the composed system-prompt bundle and retain each input's source context for
   its file/schema resolution (AC9, AC10).
-- [ ] Add relocation tests that move primary and appendix sources between the
+- [x] Add relocation tests that move primary and appendix sources between the
   repository root, package areas, and an external repository without changing
   their launch-facing expansion (AC9).
 
@@ -357,10 +358,10 @@ the final epoch/snapshot interfaces.
   composition-pipeline re-materialization, and loop-control target launch to
   receive the active epoch snapshot or create it through the canonical launch
   owner; remove direct source-anchored prepared-context captures (AC8, AC9).
-- [ ] Prove re-materialization reuses the active epoch snapshot when the active
+- [x] Prove re-materialization reuses the active epoch snapshot when the active
   document has not changed and starts exactly one fresh epoch on proxy,
   retry, or resume entry (AC5, AC8).
-- [ ] Add relocation/conflict tests for overlays and harness prompts that
+- [x] Add relocation/conflict tests for overlays and harness prompts that
   separately assert launch-facing `ctx.*` and source-facing file resolution
   (AC9, AC10).
 
