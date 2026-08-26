@@ -3,6 +3,76 @@
 use super::*;
 
 #[test]
+fn loop_iterations_share_one_exact_document_epoch() {
+    let source = make_source_with_body(
+        &[
+            (
+                "loop",
+                json!({
+                    "while": "counter < 2",
+                    "actions": ["increment(counter)"]
+                }),
+            ),
+            ("counter", json!(0)),
+            ("prepared", json!("{{ ctx.os }}")),
+        ],
+        "body={{ ctx.os }}",
+    );
+    let invocation = crate::invocation_context::InvocationContext::capture_at(
+        source.resolved_path.parent().unwrap(),
+    );
+    let requirements =
+        darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
+    let before = invocation.work_snapshot();
+    let prepared_context = invocation.capture_launch_context(&requirements);
+    invocation.record_prepared_context_consumer(
+        crate::invocation_context::PreparedContextConsumer::Preflight,
+    );
+    invocation.record_prepared_context_consumer(
+        crate::invocation_context::PreparedContextConsumer::LoopCondition,
+    );
+    let prepare_options = PrepareOptions {
+        invocation_context: Some(invocation.clone()),
+        prepared_context: Some(prepared_context),
+        ..PrepareOptions::default()
+    };
+
+    let result = execute_loop(
+        &source,
+        LoopExecutionOptions::default(),
+        prepare_options.clone(),
+        CompositionMode::ChainedDocument,
+        |_ctx| {
+            let prepared = crate::composition::prepare_direct(&source, prepare_options.clone())?;
+            invocation.record_prepared_context_consumer(
+                crate::invocation_context::PreparedContextConsumer::Lifecycle,
+            );
+            Ok(LoopIterationOutput::success(prepared.prompt))
+        },
+    )
+    .unwrap()
+    .unwrap();
+
+    assert_eq!(result.iteration_count, 2);
+    assert_eq!(
+        invocation.work_snapshot().document_epoch_since(&before),
+        crate::invocation_context::DocumentEpochWork {
+            launch_context_constructions: 1,
+            launch_context_extensions: 0,
+            ambient_fallbacks: 0,
+            prepared_context_consumers: std::collections::BTreeMap::from([
+                ("body".to_string(), 3),
+                ("effective-frontmatter".to_string(), 3),
+                ("lifecycle".to_string(), 2),
+                ("loop-condition".to_string(), 1),
+                ("preflight".to_string(), 1),
+            ]),
+        },
+        "the loop seed and every iteration must reuse one epoch snapshot"
+    );
+}
+
+#[test]
 fn runs_until_condition_stops_and_commits_actions() {
     let config = counter_loop(3);
     let result = execute_loop_with_config(
@@ -476,5 +546,4 @@ fn until_file_exists_resolves_against_prompt_parent() {
 }
 
 // ── Rate-limit policy tests ──────────────────────────────────────────
-
 

@@ -114,6 +114,7 @@ fn canonical_preparation_observes_populated_snapshot_consumers() {
     let invocation = crate::invocation_context::InvocationContext::capture_at(dir.path());
     let requirements =
         darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
+    let before = invocation.work_snapshot();
     let context = invocation.capture_launch_context(&requirements);
 
     prepare_direct(
@@ -126,15 +127,18 @@ fn canonical_preparation_observes_populated_snapshot_consumers() {
     )
     .unwrap();
 
-    let work = invocation.work_snapshot();
-    assert_eq!(work.launch_context_constructions, 1);
-    assert_eq!(work.ambient_fallbacks, 0);
     assert_eq!(
-        work.prepared_context_consumers,
-        std::collections::BTreeMap::from([
-            ("body".to_string(), 1),
-            ("effective-frontmatter".to_string(), 1),
-        ])
+        invocation.work_snapshot().document_epoch_since(&before),
+        crate::invocation_context::DocumentEpochWork {
+            launch_context_constructions: 1,
+            launch_context_extensions: 0,
+            ambient_fallbacks: 0,
+            prepared_context_consumers: std::collections::BTreeMap::from([
+                ("body".to_string(), 1),
+                ("effective-frontmatter".to_string(), 1),
+            ]),
+        },
+        "direct canonical preparation must be one exact epoch"
     );
 }
 
