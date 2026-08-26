@@ -374,6 +374,133 @@ fn a_different_launch_anchor_derives_a_different_context() {
     );
 }
 
+/// AC6/AC8/AC10: every document-entry route receives target identity and
+/// launch facts from its epoch snapshot while schema and file references stay
+/// owned by the active source document.
+#[test]
+fn every_entry_keeps_launch_values_separate_from_source_files_and_schema() {
+    let dir = TempDir::new().unwrap();
+    let root = dir.path().join("repo");
+    let launch_dir = root.join("alpha/lib");
+    let source_dir = root.join("beta/lib");
+    fs::create_dir_all(&launch_dir).unwrap();
+    fs::create_dir_all(&source_dir).unwrap();
+    let status = std::process::Command::new("git")
+        .args(["init", "--quiet"])
+        .current_dir(&root)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    fs::write(
+        root.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"alpha/lib\", \"beta/lib\"]\nresolver = \"2\"\n",
+    )
+    .unwrap();
+    for (path, name) in [(&launch_dir, "alpha"), (&source_dir, "beta")] {
+        fs::write(
+            path.join("Cargo.toml"),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
+        )
+        .unwrap();
+    }
+
+    fs::write(
+        launch_dir.join("schema.yaml"),
+        "launch_only: string(required)\n",
+    )
+    .unwrap();
+    fs::write(
+        source_dir.join("schema.yaml"),
+        "source_marker: string(required)\nspec: 'file(eager; required)'\n",
+    )
+    .unwrap();
+    fs::write(source_dir.join("spec.md"), "SOURCE-SPEC\n").unwrap();
+    let source_path = source_dir.join("probe.md");
+    fs::write(
+        &source_path,
+        concat!(
+            "---\n",
+            "$schema: ./schema.yaml\n",
+            "source_marker: source-owned\n",
+            "spec: spec.md\n",
+            "prepared_area: '{{ ctx.area }}'\n",
+            "prepared_agent: '{{ ctx.agent }}'\n",
+            "prepared_model: '{{ ctx.model }}'\n",
+            "---\n",
+            "AREA={{ ctx.area }} AGENT={{ ctx.agent }} MODEL={{ ctx.model }} ",
+            "ENV={{ env.AGENT }}/{{ env.MODEL }} FILE={{ file_exists(spec) }}\n",
+        ),
+    )
+    .unwrap();
+    let source = crate::composition::resolve_composition_source(
+        source_path.to_string_lossy().as_ref(),
+    )
+    .unwrap();
+
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&launch_dir);
+    let source_context = invocation.derive_source(&source.resolved_path).unwrap();
+    let requirements =
+        darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
+    let env_overrides = std::collections::BTreeMap::from([
+        ("AGENT".to_string(), "codex".to_string()),
+        ("MODEL".to_string(), "gpt-5".to_string()),
+    ]);
+
+    for entry in DocumentEntryReason::ALL {
+        let mut context = invocation.capture_launch_context(&requirements);
+        context.env_mut().extend(env_overrides.clone());
+        let prepared = prepare(
+            *entry,
+            &source,
+            PrepareOptions {
+                env_overrides: env_overrides.clone(),
+                prepared_context: Some(context),
+                file_ref_fallback_dir: Some(launch_dir.clone()),
+                file_resolution_context: Some(source_context.file_resolution_context().clone()),
+                invocation_context: Some(invocation.clone()),
+                ..PrepareOptions::default()
+            },
+        );
+
+        assert!(
+            prepared.prompt.contains("AREA=alpha AGENT=codex MODEL=gpt-5 ENV=codex/gpt-5 FILE=true"),
+            "entry {entry:?} did not use the launch snapshot and target overrides: {}",
+            prepared.prompt
+        );
+        assert_eq!(
+            prepared.effective_frontmatter.get("prepared_area"),
+            Some(&serde_json::json!("alpha")),
+            "entry {entry:?} did not prepare frontmatter from the launch snapshot"
+        );
+        assert_eq!(
+            prepared.effective_frontmatter.get("prepared_agent"),
+            Some(&serde_json::json!("codex"))
+        );
+        assert_eq!(
+            prepared.effective_frontmatter.get("prepared_model"),
+            Some(&serde_json::json!("gpt-5"))
+        );
+        assert_eq!(
+            prepared.effective_frontmatter.get("source_marker"),
+            Some(&serde_json::json!("source-owned")),
+            "entry {entry:?} must validate against the source-side schema"
+        );
+        assert_eq!(
+            prepared
+                .effective_frontmatter
+                .get("spec")
+                .and_then(serde_json::Value::as_str),
+            Some("spec.md"),
+            "entry {entry:?} must preserve the source-owned file reference"
+        );
+        assert!(source_dir.join("spec.md").is_file());
+        assert!(
+            !launch_dir.join("spec.md").exists(),
+            "entry {entry:?} could only have passed eager validation by resolving from the source"
+        );
+    }
+}
+
 // -- cross-route typed identity ---------------------------------------------
 //
 // Phase 12 of `features/2026-07-13-proxy-with`. These lock the claim the

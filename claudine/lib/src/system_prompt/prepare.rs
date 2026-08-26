@@ -1,6 +1,6 @@
 use biscuit_file::serde_yaml_ng;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
+use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeSource};
 use darkmatter::markdown::schemas::{SimplifiedSchema, parse_yaml_schema};
 use tracing::{info_span, warn};
 
@@ -126,6 +126,10 @@ fn compose_prompt_markdown(
     shell_cwd: Option<&std::path::Path>,
 ) -> Result<Markdown, crate::error::ClaudineError> {
     let md: Markdown = raw_text.into();
+    let md = match source_path(source) {
+        Some(path) => md.with_source(ComposeSource::File(path.to_path_buf())),
+        None => md,
+    };
 
     // Canonical session preparation supplies one context covering the union of
     // the primary and appendix requirements. The ambient branch remains for
@@ -150,6 +154,12 @@ fn compose_prompt_markdown(
     };
     if let Some(invocation) = shared_ctx.and_then(|shared| shared.invocation.as_ref()) {
         invocation.record_compose_operation();
+        invocation.record_prepared_context_consumer(
+            crate::invocation_context::PreparedContextConsumer::Body,
+        );
+        invocation.record_prepared_context_consumer(
+            crate::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
+        );
     }
     if let Some(source_context) = source_context {
         options = options.with_file_resolution_context(
