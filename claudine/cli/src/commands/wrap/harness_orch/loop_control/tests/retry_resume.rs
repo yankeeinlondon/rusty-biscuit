@@ -3,6 +3,136 @@
 use super::*;
 
 #[test]
+fn canonical_retry_and_resume_reentry_each_produce_exact_epoch_delta() {
+    let fx = fixture(serde_json::json!({}));
+    std::fs::write(
+        &fx.source_path,
+        "---\nprepared: '{{ ctx.os }}'\n---\nbody={{ ctx.os }}\n",
+    )
+    .unwrap();
+    let invocation =
+        claudine::invocation_context::InvocationContext::capture_at(fx._dir.path());
+    let mut state = prompt_state(&fx.source_path);
+    state.source_context = Some(invocation.derive_source(&fx.source_path).unwrap());
+    state.invocation_context = Some(invocation.clone());
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+    guard.mark_provider_launched();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+
+    let retry = outcome_with(StackControl::Retry {
+        max_attempts: 2,
+        backoff: RetryBackoff::Fixed,
+        delay: "0s".to_string(),
+    });
+    assert!(matches!(
+        dispatch_terminal_control(
+            &retry,
+            1,
+            active.iteration_mut(),
+            Some("sess-1"),
+            resume_capable_profile(),
+            Provider::Claude,
+            &mut state,
+            &fx.materialized,
+            &mut guard,
+            &ledger(&fx.source_path),
+            &fx.term,
+            false,
+        ),
+        TerminalControlAction::Continue
+    ));
+    assert_eq!(state.entry, claudine::composition::DocumentEntryReason::Retry);
+    let before_retry = invocation.work_snapshot();
+    let retried = materialize_harness_prompt(
+        &mut state,
+        Some(fx._dir.path()),
+        fx._dir.path(),
+        None,
+        claudine::composition::SchemaStage::Validate,
+    )
+    .unwrap();
+    assert!(retried.prompt.contains("body="));
+    observe_reentry_lifecycle_context(&state, &retried);
+    assert_eq!(
+        invocation
+            .work_snapshot()
+            .document_epoch_since(&before_retry),
+        claudine::invocation_context::DocumentEpochWork {
+            launch_context_constructions: 1,
+            launch_context_extensions: 0,
+            ambient_fallbacks: 0,
+            prepared_context_consumers: std::collections::BTreeMap::from([
+                ("body".to_string(), 1),
+                ("effective-frontmatter".to_string(), 1),
+                ("lifecycle".to_string(), 1),
+            ]),
+        },
+        "the retry transition must lead to one fresh canonical epoch"
+    );
+
+    guard.mark_provider_launched();
+    let resume = outcome_with(StackControl::Resume {
+        message: "continue".to_string(),
+        max_attempts: 1,
+    });
+    assert!(matches!(
+        dispatch_terminal_control(
+            &resume,
+            2,
+            active.iteration_mut(),
+            Some("sess-2"),
+            resume_capable_profile(),
+            Provider::Claude,
+            &mut state,
+            &retried,
+            &mut guard,
+            &ledger(&fx.source_path),
+            &fx.term,
+            false,
+        ),
+        TerminalControlAction::Continue
+    ));
+    assert_eq!(state.entry, claudine::composition::DocumentEntryReason::Resume);
+    let before_resume = invocation.work_snapshot();
+    let resumed = materialize_harness_prompt(
+        &mut state,
+        Some(fx._dir.path()),
+        fx._dir.path(),
+        active.iteration().attempt().resume_followup(),
+        claudine::composition::SchemaStage::Validate,
+    )
+    .unwrap();
+    assert_eq!(resumed.prompt, "continue");
+    observe_reentry_lifecycle_context(&state, &resumed);
+    assert_eq!(
+        invocation
+            .work_snapshot()
+            .document_epoch_since(&before_resume),
+        claudine::invocation_context::DocumentEpochWork {
+            launch_context_constructions: 1,
+            launch_context_extensions: 0,
+            ambient_fallbacks: 0,
+            prepared_context_consumers: std::collections::BTreeMap::from([
+                ("body".to_string(), 1),
+                ("effective-frontmatter".to_string(), 1),
+                ("lifecycle".to_string(), 1),
+            ]),
+        },
+        "the resume transition must lead to one fresh canonical epoch"
+    );
+}
+
+#[test]
 fn dispatch_retry_from_failure_continues_and_resets_guard() {
     let fx = fixture(serde_json::json!({}));
     let emitter = RecordingEmitter::default();
@@ -355,4 +485,3 @@ fn a_refused_resume_routes_through_failure_then_finalize_with_err() {
         "the incompatibility stays the active error rather than being replaced"
     );
 }
-
