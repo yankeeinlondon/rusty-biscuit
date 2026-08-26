@@ -191,6 +191,41 @@ fn same_repository_parallel_sources_stay_within_launch_work_bounds() {
 }
 
 #[test]
+fn prepared_context_consumer_accounting_is_concurrency_safe() {
+    let fixture = TempDir::new().unwrap();
+    let invocation = InvocationContext::capture_at(fixture.path());
+    let consumers = [
+        PreparedContextConsumer::Preflight,
+        PreparedContextConsumer::Body,
+        PreparedContextConsumer::EffectiveFrontmatter,
+        PreparedContextConsumer::LoopCondition,
+        PreparedContextConsumer::Lifecycle,
+    ];
+
+    std::thread::scope(|scope| {
+        for _ in 0..8 {
+            let invocation = invocation.clone();
+            scope.spawn(move || {
+                for consumer in consumers {
+                    invocation.record_prepared_context_consumer(consumer);
+                }
+            });
+        }
+    });
+
+    assert_eq!(
+        invocation.work_snapshot().prepared_context_consumers,
+        BTreeMap::from([
+            ("body".to_string(), 8),
+            ("effective-frontmatter".to_string(), 8),
+            ("lifecycle".to_string(), 8),
+            ("loop-condition".to_string(), 8),
+            ("preflight".to_string(), 8),
+        ])
+    );
+}
+
+#[test]
 fn sibling_repository_serial_sources_add_one_repository_observation() {
     let fixture = TempDir::new().unwrap();
     let launch = fixture.path().join("launch");
