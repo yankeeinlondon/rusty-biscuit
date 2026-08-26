@@ -391,6 +391,10 @@ fn command_perf_collector_renders_request_owned_discovery_counts() {
         git_root_discoveries: 1,
         topology_probes: 2,
         topology_reuses: 3,
+        prepared_context_consumers: std::collections::BTreeMap::from([
+            ("body".to_string(), 2),
+            ("preflight".to_string(), 1),
+        ]),
         ..Default::default()
     };
     let mut collector = CommandPerfCollector::new("Test", startup);
@@ -402,6 +406,10 @@ fn command_perf_collector_renders_request_owned_discovery_counts() {
     assert!(note.contains("Git discoveries 1"), "{note}");
     assert!(note.contains("topology probes 2"), "{note}");
     assert!(note.contains("topology reuses 3"), "{note}");
+    assert!(
+        note.contains("prepared consumers [body (2), preflight]"),
+        "consumer counts must remain visible in performance evidence: {note}"
+    );
 
     let rendered = strip_ansi(&render_perf_report(&report));
     assert!(rendered.contains("source context work"), "{rendered}");

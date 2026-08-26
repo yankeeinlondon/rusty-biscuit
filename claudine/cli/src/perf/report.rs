@@ -360,7 +360,7 @@ struct InvocationWorkCounts {
     launch_context_constructions: usize,
     launch_context_extensions: usize,
     ambient_fallbacks: usize,
-    prepared_context_consumers: Vec<String>,
+    prepared_context_consumers: Vec<(String, usize)>,
 }
 
 impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationWorkCounts {
@@ -374,8 +374,8 @@ impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationW
             ambient_fallbacks: work.ambient_fallbacks,
             prepared_context_consumers: work
                 .prepared_context_consumers
-                .keys()
-                .cloned()
+                .iter()
+                .map(|(name, count)| (name.clone(), *count))
                 .collect(),
         }
     }
@@ -392,7 +392,17 @@ impl InvocationWorkCounts {
             self.launch_context_constructions,
             self.launch_context_extensions,
             self.ambient_fallbacks,
-            self.prepared_context_consumers.join(", "),
+            self.prepared_context_consumers
+                .into_iter()
+                .map(|(name, count)| {
+                    if count == 1 {
+                        name
+                    } else {
+                        format!("{name} ({count})")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", "),
         )
     }
 }
