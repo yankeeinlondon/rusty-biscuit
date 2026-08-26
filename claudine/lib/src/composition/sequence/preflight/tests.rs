@@ -1123,6 +1123,93 @@ mod shell {
         }
     }
 
+    /// Graph-phase shell bytes are resolved before per-task target selection,
+    /// so a target-identity reference would expand a pre-selection value that
+    /// execution then runs verbatim. Each root is rejected with the typed
+    /// target-identity error naming the offending path (D4/AC7).
+    #[test]
+    fn target_identity_in_a_graph_phase_shell_command_is_rejected() {
+        for root in ["ctx.agent", "ctx.model", "env.AGENT", "env.MODEL"] {
+            let dir = TempDir::new().unwrap();
+            let command = format!("echo {{{{ {root} }}}}");
+            let source = write_source(
+                dir.path(),
+                "seq.md",
+                &[(
+                    "sequence",
+                    json!([{ "name": "one", "shell": command }]),
+                )],
+                "Body.\n",
+            );
+            let error = err_for(&source);
+            assert!(
+                matches!(
+                    &error,
+                    CompositionError::SequenceShellTargetIdentity { root: offending, .. }
+                        if offending == root
+                ),
+                "`{root}` must be rejected with the typed target-identity error at \
+                 graph preflight; got: {error}",
+            );
+        }
+    }
+
+    /// A task's `teardown:` stack resolves through the same graph phase, so a
+    /// target-identity reference there is rejected identically — the bytes it
+    /// would bake in are the bytes execution runs.
+    #[test]
+    fn target_identity_in_a_teardown_shell_command_is_rejected() {
+        let dir = TempDir::new().unwrap();
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[(
+                "sequence",
+                json!([{
+                    "name": "one",
+                    "shell": "echo primary",
+                    "teardown": [ { "action": [ { "shell": "echo {{ env.AGENT }}" } ] } ],
+                }]),
+            )],
+            "Body.\n",
+        );
+        let error = err_for(&source);
+        assert!(
+            matches!(
+                &error,
+                CompositionError::SequenceShellTargetIdentity { root, .. } if root == "env.AGENT"
+            ),
+            "a teardown target-identity reference must be rejected; got: {error}",
+        );
+    }
+
+    /// `ctx.*` and `env.*` as namespaces stay legal in graph-phase commands —
+    /// only the agent/model identity leaves are target-dependent.
+    #[test]
+    fn non_identity_ctx_and_env_references_stay_legal_in_shell_commands() {
+        let dir = TempDir::new().unwrap();
+        let source = write_source(
+            dir.path(),
+            "seq.md",
+            &[(
+                "sequence",
+                json!([{
+                    "name": "one",
+                    "shell": [
+                        "echo {{ state.name }}",
+                        "echo {{ env.HOME }}",
+                    ],
+                }]),
+            )],
+            "Body.\n",
+        );
+        let graph = graph_for(&source).unwrap();
+        assert!(
+            !graph.shell_commands.is_empty(),
+            "non-identity references must resolve, not reject"
+        );
+    }
+
     /// Conditional branches are potential work: a `when:`-guarded setup action
     /// contributes its command whether or not the guard reads true today.
     #[test]

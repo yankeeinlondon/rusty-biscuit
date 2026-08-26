@@ -55,6 +55,15 @@ pub struct InvocationWorkSnapshot {
     pub harness_eligibility_parses: usize,
     pub harness_materializations: usize,
     pub ambient_fallbacks: usize,
+    /// Launch-capture constructions: full `ComposeContext` snapshots built by
+    /// [`InvocationContext::capture_launch_context`]. One per document
+    /// preparation epoch is the contract; more means a route recaptured.
+    pub launch_context_constructions: usize,
+    /// Same-epoch group extensions: missing-requirement projections applied to
+    /// an already-constructed snapshot by
+    /// [`InvocationContext::extend_launch_context`]. Expected only from a
+    /// stabilized reread whose document grew new `ctx.*` groups.
+    pub launch_context_extensions: usize,
     pub runtime_evidence_captures: BTreeMap<String, usize>,
     pub runtime_evidence_reuses: BTreeMap<String, usize>,
     pub system_prompt_timings: BTreeMap<String, std::time::Duration>,
@@ -70,6 +79,8 @@ struct InvocationWork {
     harness_eligibility_parses: AtomicUsize,
     harness_materializations: AtomicUsize,
     ambient_fallbacks: AtomicUsize,
+    launch_context_constructions: AtomicUsize,
+    launch_context_extensions: AtomicUsize,
     runtime_evidence_captures: Mutex<BTreeMap<String, usize>>,
     runtime_evidence_reuses: Mutex<BTreeMap<String, usize>>,
     system_prompt_timings: Mutex<BTreeMap<String, std::time::Duration>>,
@@ -88,6 +99,10 @@ impl InvocationWork {
                 .load(Ordering::Relaxed),
             harness_materializations: self.harness_materializations.load(Ordering::Relaxed),
             ambient_fallbacks: self.ambient_fallbacks.load(Ordering::Relaxed),
+            launch_context_constructions: self
+                .launch_context_constructions
+                .load(Ordering::Relaxed),
+            launch_context_extensions: self.launch_context_extensions.load(Ordering::Relaxed),
             runtime_evidence_captures: self
                 .runtime_evidence_captures
                 .lock()
@@ -573,22 +588,136 @@ impl InvocationContext {
     /// when retained evidence answered it. Groups that hold no evidence at all
     /// (`datetime`, `agent`) and groups that only clone what the repository
     /// entry already carries (`git`, `repo`) are therefore always reuses.
+    ///
+    /// This is the *source* projection: repository facts come from the supplied
+    /// document's repository and package area. Canonical prepared `ctx.*` must
+    /// instead use [`Self::capture_launch_context`], which pairs the launch
+    /// anchor with launch evidence as one operation.
     pub fn runtime_evidence(
         &self,
         source: &SourceContext,
         requirements: &darkmatter::markdown::compose::ContextRequirements,
     ) -> darkmatter::markdown::compose::ContextCaptureEvidence {
+        self.project_evidence(
+            &source.repository.inner,
+            &source.base_dir,
+            source.repository_root.as_deref(),
+            requirements,
+        )
+    }
+
+    /// Capture the launch-anchored prepared-`ctx.*` snapshot for one document
+    /// preparation epoch.
+    ///
+    /// The returned `ComposeContext` is anchored at [`Self::launch_cwd`] and
+    /// populated exclusively from the invocation's retained launch repository,
+    /// launch package topology, environment, and host evidence. The anchor and
+    /// the evidence are inseparable here by construction: a caller cannot pair
+    /// a launch directory with a prompt-derived repository.
+    ///
+    /// Source-scanned groups (`file_changes`, `languages`, `documents`) scan
+    /// from the launch base when requested, and Git/repository facts project
+    /// the launch repository — never a document source's repository. No
+    /// ambient CWD, HOME, environment, Git, or topology discovery runs; the
+    /// retained caches answer every group.
+    ///
+    /// Callers apply the resolved target's `env_overrides` (agent/model
+    /// identity) on the returned snapshot through `env_mut`; that is the
+    /// existing target-identity precedence, not part of the capture.
+    ///
+    /// Counts one `launch_context_constructions` in the work snapshot.
+    pub fn capture_launch_context(
+        &self,
+        requirements: &darkmatter::markdown::compose::ContextRequirements,
+    ) -> darkmatter::markdown::compose::ComposeContext {
+        let evidence = self.project_evidence(
+            &self.inner.launch_repository,
+            &self.inner.launch_cwd,
+            self.launch_repository_root_spelling().as_deref(),
+            requirements,
+        );
+        let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
+            &self.inner.launch_cwd,
+            requirements,
+            &evidence,
+        );
+        self.inner
+            .work
+            .launch_context_constructions
+            .fetch_add(1, Ordering::Relaxed);
+        context
+    }
+
+    /// Extend an existing epoch snapshot with requirement groups it is
+    /// missing, from the same retained launch evidence.
+    ///
+    /// This is the same-epoch operation the post-`initialize` stabilized
+    /// reread uses when the rewritten document demands context groups the
+    /// stored snapshot was not captured with: only the missing groups are
+    /// projected, and the snapshot's capture anchor, environment capture, and
+    /// already-applied target overrides are preserved. A requirements set the
+    /// snapshot already satisfies is a no-op that records no extension.
+    ///
+    /// Counts one `launch_context_extensions` per extension that populated at
+    /// least one missing group.
+    pub fn extend_launch_context(
+        &self,
+        context: &mut darkmatter::markdown::compose::ComposeContext,
+        requirements: &darkmatter::markdown::compose::ContextRequirements,
+    ) {
+        let missing = context.missing_requirements(requirements);
+        if missing.iter().next().is_none() {
+            return;
+        }
+        let evidence = self.project_evidence(
+            &self.inner.launch_repository,
+            &self.inner.launch_cwd,
+            self.launch_repository_root_spelling().as_deref(),
+            &missing,
+        );
+        if context.extend_with_evidence(requirements, &evidence) {
+            self.inner
+                .work
+                .launch_context_extensions
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// The launch repository root projected into the launch directory's
+    /// spelling family, mirroring what [`Self::derive_source`] retains for a
+    /// source context.
+    fn launch_repository_root_spelling(&self) -> Option<PathBuf> {
+        self.inner
+            .launch_repository
+            .repo_root()
+            .map(|root| repo_root_in_base_spelling(&self.inner.launch_cwd, root))
+    }
+
+    /// Project one requirements set's evidence from a retained repository
+    /// entry, a scanning base, and that base's repository-root spelling.
+    ///
+    /// `runtime_evidence` (source projection) and `capture_launch_context` /
+    /// `extend_launch_context` (launch projection) share this walk so both pay
+    /// the same caches and record the same per-group work counters; only the
+    /// entry and base differ.
+    #[allow(clippy::too_many_lines)]
+    fn project_evidence(
+        &self,
+        repository: &Arc<RepositoryEntry>,
+        base_dir: &Path,
+        repository_root: Option<&Path>,
+        requirements: &darkmatter::markdown::compose::ContextRequirements,
+    ) -> darkmatter::markdown::compose::ContextCaptureEvidence {
         use darkmatter::markdown::compose::{ContextCaptureEvidence, ContextGroup};
 
         let mut evidence = ContextCaptureEvidence::new(self.inner.environment.clone());
-        let repository = &source.repository.inner;
         let source_evidence = {
             let mut cache = repository
                 .source_evidence
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             cache
-                .entry(source.base_dir.clone())
+                .entry(base_dir.to_path_buf())
                 .or_insert_with(|| Arc::new(SourceEvidence::default()))
                 .clone()
         };
@@ -610,7 +739,7 @@ impl InvocationContext {
                         && !matches!(repository.topology.get(), Some(Err(_)))
                     {
                         evidence = evidence.with_repository(
-                            source.repository_root.clone(),
+                            repository_root.map(Path::to_path_buf),
                             repository.repo_info().cloned(),
                         );
                     }
@@ -637,7 +766,7 @@ impl InvocationContext {
                         .languages
                         .get_or_init(|| {
                             captured = true;
-                            detect_source_filesystem(repository, &source.base_dir, true, false)
+                            detect_source_filesystem(repository, base_dir, true, false)
                                 .map(|filesystem| filesystem.languages)
                                 .map_err(Arc::new)
                         })
@@ -651,7 +780,7 @@ impl InvocationContext {
                         .documents
                         .get_or_init(|| {
                             captured = true;
-                            detect_source_filesystem(repository, &source.base_dir, false, true)
+                            detect_source_filesystem(repository, base_dir, false, true)
                                 .map(|filesystem| filesystem.docs)
                                 .map_err(Arc::new)
                         })
@@ -659,8 +788,8 @@ impl InvocationContext {
                     {
                         evidence = evidence.with_documents_for_source(
                             documents.clone(),
-                            &source.base_dir,
-                            source.repository_root.as_deref(),
+                            base_dir,
+                            repository_root,
                             repository.repo_info(),
                         );
                     }

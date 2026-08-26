@@ -175,6 +175,64 @@ pub fn first_unavailable_root(raw: &str, roots: &[&str]) -> Option<String> {
     None
 }
 
+/// The target-identity roots whose values do not exist when graph-phase shell
+/// commands are resolved, because per-task target selection has not run yet.
+///
+/// Unlike [`first_unavailable_root`], these are dotted paths, not bare roots:
+/// `ctx` and `env` are legal in a graph-phase command, and only the
+/// agent/model leaves of each are target-dependent.
+pub(crate) const TARGET_IDENTITY_ROOTS: &[&str] =
+    &["ctx.agent", "ctx.model", "env.AGENT", "env.MODEL"];
+
+/// The first target-identity path referenced by any `{{ … }}` span of `raw`.
+///
+/// A graph-phase shell command that references the resolved agent or model
+/// would expand a pre-selection value, and sequence preflight resolves bytes
+/// once — execution runs exactly those bytes — so the reference is rejected
+/// rather than expanded. See [`SHELL_UNAVAILABLE_ROOTS`][roots] for the bare
+/// late-binding roots.
+pub(crate) fn first_target_identity_root(raw: &str) -> Option<String> {
+    for location in ExpressionFinder::find_all_plain(raw) {
+        let Ok(expr) = parse(&location.expression) else {
+            continue;
+        };
+        if let Some(path) = target_identity_path_in_expr(&expr) {
+            return Some(path);
+        }
+    }
+    None
+}
+
+fn target_identity_path_in_expr(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Variable(path) => TARGET_IDENTITY_ROOTS
+            .contains(&path.as_str())
+            .then(|| path.clone()),
+        Expr::MemberAccess { base, .. } => target_identity_path_in_expr(base),
+        Expr::UnaryNot(inner) | Expr::UnaryMinus(inner) | Expr::Paren(inner) => {
+            target_identity_path_in_expr(inner)
+        }
+        Expr::Binary { left, right, .. } | Expr::Comparison { left, right, .. } => {
+            target_identity_path_in_expr(left).or_else(|| target_identity_path_in_expr(right))
+        }
+        Expr::Index { base, index } => target_identity_path_in_expr(base)
+            .or_else(|| target_identity_path_in_expr(index)),
+        Expr::FunctionCall { args, .. } => {
+            args.iter().find_map(target_identity_path_in_expr)
+        }
+        Expr::Fallback { primary, fallback } => target_identity_path_in_expr(primary)
+            .or_else(|| target_identity_path_in_expr(fallback)),
+        Expr::Ternary {
+            condition,
+            then_branch,
+            else_branch,
+        } => target_identity_path_in_expr(condition)
+            .or_else(|| target_identity_path_in_expr(then_branch))
+            .or_else(|| target_identity_path_in_expr(else_branch)),
+        _ => None,
+    }
+}
+
 fn root_in_expr(expr: &Expr, roots: &[&str]) -> Option<String> {
     match expr {
         Expr::Variable(path) => {
