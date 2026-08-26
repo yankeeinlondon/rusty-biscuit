@@ -226,6 +226,32 @@ fn prepared_context_consumer_accounting_is_concurrency_safe() {
 }
 
 #[test]
+fn document_epoch_delta_keeps_exact_consumer_counts() {
+    let fixture = TempDir::new().unwrap();
+    let invocation = InvocationContext::capture_at(fixture.path());
+    invocation.record_prepared_context_consumer(PreparedContextConsumer::Preflight);
+    let before = invocation.work_snapshot();
+
+    invocation.record_prepared_context_consumer(PreparedContextConsumer::Body);
+    invocation.record_prepared_context_consumer(PreparedContextConsumer::Body);
+    invocation.record_prepared_context_consumer(PreparedContextConsumer::Lifecycle);
+    invocation.record_ambient_fallback();
+
+    assert_eq!(
+        invocation.work_snapshot().document_epoch_since(&before),
+        DocumentEpochWork {
+            launch_context_constructions: 0,
+            launch_context_extensions: 0,
+            ambient_fallbacks: 1,
+            prepared_context_consumers: BTreeMap::from([
+                ("body".to_string(), 2),
+                ("lifecycle".to_string(), 1),
+            ]),
+        }
+    );
+}
+
+#[test]
 fn sibling_repository_serial_sources_add_one_repository_observation() {
     let fixture = TempDir::new().unwrap();
     let launch = fixture.path().join("launch");
