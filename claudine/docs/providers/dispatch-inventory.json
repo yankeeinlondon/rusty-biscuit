@@ -1809,7 +1809,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs",
-      "line": 247,
+      "line": 248,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1880,7 +1880,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs",
-      "line": 70,
+      "line": 71,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1890,7 +1890,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs",
-      "line": 137,
+      "line": 138,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1900,7 +1900,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs",
-      "line": 147,
+      "line": 148,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1910,7 +1910,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs",
-      "line": 191,
+      "line": 192,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1920,7 +1920,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs",
-      "line": 234,
+      "line": 235,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4146,7 +4146,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/mod.rs",
-      "line": 503,
+      "line": 506,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [

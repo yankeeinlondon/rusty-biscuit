@@ -224,6 +224,10 @@ impl ActiveDocumentCoordinator {
         prompt_state.source_path = handoff.resolved_target().to_path_buf();
         prompt_state.original_ref = handoff.authored_target().to_string();
         prompt_state.entry = DocumentEntryReason::ProxyTarget;
+        // A new document starts a new preparation epoch: the source's launch
+        // snapshot must not leak into the target's reads. The target's first
+        // canonical read constructs its own.
+        prompt_state.epoch_context = None;
         if let Some(source_context) = source_context.as_ref() {
             prompt_state.input_layers.file_resolution_context =
                 Some(source_context.file_resolution_context().clone());

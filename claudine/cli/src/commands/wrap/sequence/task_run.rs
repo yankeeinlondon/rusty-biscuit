@@ -206,12 +206,10 @@ fn prepare_task_context(
         .expect("resolved task document always has a parent directory");
     let scan = task_context_scan(task);
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(&scan);
-    let evidence = invocation.runtime_evidence(&task_source_context, &requirements);
-    let mut task_context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-        task_source_context.base_dir(),
-        &requirements,
-        &evidence,
-    );
+    // One launch-anchored snapshot per task epoch: launch repository and
+    // package facts come from the invocation owner, while the task document's
+    // own `SourceContext` (returned alongside) still drives file resolution.
+    let mut task_context = invocation.capture_launch_context(&requirements);
     for (key, value) in env_overrides {
         task_context.env_mut().insert(key.clone(), value.clone());
     }
@@ -578,7 +576,7 @@ mod tests {
     }
 
     #[test]
-    fn task_stack_context_belongs_to_the_authoring_repository() {
+    fn task_source_belongs_to_the_authoring_repo_context_to_the_launch_repo() {
         let fixture = Fixture::new();
         let origin_path = fixture.origin_path();
         let mut task = fixture.task();
@@ -590,6 +588,8 @@ mod tests {
 
         let (source, context) = prepare_task_context(&invocation, &task, &env);
 
+        // File resolution stays source-relative: the task document's own
+        // repository drives references and provenance.
         assert_eq!(source.base_dir(), fixture.task_dir);
         assert_eq!(source.repository_root(), Some(fixture.task_repo.as_path()));
         assert_eq!(
@@ -600,9 +600,12 @@ mod tests {
             source.file_resolution_context().repository_root(),
             Some(fixture.task_repo.as_path())
         );
+        // Prepared `ctx.*` is launch-anchored: the task may be authored in a
+        // different repository, but `ctx.repo_root` still reports the one the
+        // caller launched from (D1/AC7).
         assert_eq!(
             context.get("repo_root").and_then(Value::as_str),
-            Some(fixture.task_repo.to_string_lossy().as_ref())
+            Some(fixture.launch_repo.to_string_lossy().as_ref())
         );
         assert_eq!(context.env().get("TASK_MARKER").map(String::as_str), Some("owned"));
     }
@@ -689,7 +692,7 @@ mod tests {
 
             assert_eq!(
                 context.get("repo_root").and_then(Value::as_str),
-                Some(fixture.task_repo.to_string_lossy().as_ref()),
+                Some(fixture.launch_repo.to_string_lossy().as_ref()),
                 "`{field}` was not scanned for runtime-context references"
             );
         }
@@ -731,7 +734,7 @@ mod tests {
 
             assert_eq!(
                 context.get("repo_root").and_then(Value::as_str),
-                Some(fixture.task_repo.to_string_lossy().as_ref()),
+                Some(fixture.launch_repo.to_string_lossy().as_ref()),
                 "`{label}` was not scanned for runtime-context references"
             );
         }

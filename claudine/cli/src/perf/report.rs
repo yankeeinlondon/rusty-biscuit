@@ -357,6 +357,9 @@ struct InvocationWorkCounts {
     git_root_discoveries: usize,
     topology_probes: usize,
     topology_reuses: usize,
+    launch_context_constructions: usize,
+    launch_context_extensions: usize,
+    ambient_fallbacks: usize,
 }
 
 impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationWorkCounts {
@@ -365,6 +368,9 @@ impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationW
             git_root_discoveries: work.git_root_discoveries,
             topology_probes: work.topology_probes,
             topology_reuses: work.topology_reuses,
+            launch_context_constructions: work.launch_context_constructions,
+            launch_context_extensions: work.launch_context_extensions,
+            ambient_fallbacks: work.ambient_fallbacks,
         }
     }
 }
@@ -372,8 +378,14 @@ impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationW
 impl InvocationWorkCounts {
     fn note(self) -> String {
         format!(
-            "source context work: Git discoveries {}, topology probes {}, topology reuses {}",
-            self.git_root_discoveries, self.topology_probes, self.topology_reuses,
+            "source context work: Git discoveries {}, topology probes {}, topology reuses {}; \
+             launch captures {} (extensions {}), ambient fallbacks {}",
+            self.git_root_discoveries,
+            self.topology_probes,
+            self.topology_reuses,
+            self.launch_context_constructions,
+            self.launch_context_extensions,
+            self.ambient_fallbacks,
         )
     }
 }

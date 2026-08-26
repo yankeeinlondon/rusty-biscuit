@@ -20,6 +20,7 @@ fn requeue_prompt_state(source: &Path) -> HarnessPromptState {
         input_layers: Default::default(),
         entry: claudine::composition::DocumentEntryReason::Direct,
         invocation_context: None,
+        epoch_context: None,
         source_context: None,
     }
 }

@@ -83,7 +83,7 @@ fn a_resume_followup_recorded_on_the_model_overrides_the_composed_body() {
     // Exactly the argument `materialize_attempt_prompt_phase` threads: the
     // follow-up recorded on the model's freshly-advanced attempt slice.
     let materialized = super::super::super::materialize_harness_prompt(
-        &state,
+        &mut state,
         Some(fx._dir.path()),
         fx._dir.path(),
         active.iteration().attempt().resume_followup(),

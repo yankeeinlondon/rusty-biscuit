@@ -245,7 +245,7 @@ fn approved_bytes_equal_the_bytes_a_with_value_resolves_to() {
 
     // ...and the bytes that execute are the bytes that were approved.
     let materialized = materialize_harness_prompt(
-        &state,
+        &mut state,
         None,
         dir.path(),
         None,

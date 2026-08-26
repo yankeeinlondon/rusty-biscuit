@@ -266,18 +266,16 @@ pub(super) fn build_template_preflight_options(
             .derive_source(source_path)
             .expect("resolved sequence document always has a parent directory")
     });
-    let mut ctx = match (invocation, derived_source_context.as_ref()) {
-        (Some(invocation), Some(source_context)) => {
+    // One launch-anchored snapshot per step epoch: constructed through the
+    // invocation owner, never from this document's source context, so moving
+    // the step document cannot change launch-facing `ctx.*`.
+    let mut ctx = match invocation {
+        Some(invocation) => {
             let requirements =
                 darkmatter::markdown::compose::ContextRequirements::for_document(markdown);
-            let evidence = invocation.runtime_evidence(source_context, &requirements);
-            darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-                source_context.base_dir(),
-                &requirements,
-                &evidence,
-            )
+            invocation.capture_launch_context(&requirements)
         }
-        _ => darkmatter::markdown::compose::ComposeContext::capture_for_document(anchor, markdown),
+        None => darkmatter::markdown::compose::ComposeContext::capture_for_document(anchor, markdown),
     };
     for (key, value) in env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
