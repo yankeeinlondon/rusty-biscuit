@@ -183,6 +183,9 @@ pub(super) fn compose_step(
     );
 
     let mut approved = approved;
+    ctx.invocation.record_prepared_context_consumer(
+        claudine::invocation_context::PreparedContextConsumer::Preflight,
+    );
     let template_preflight = composition::resolve_shell_approvals(
         Some(&step_source.markdown),
         Some(&compose_options),

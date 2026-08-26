@@ -569,6 +569,9 @@ pub(crate) fn prepare_and_run_active_document(
     // root, so an ambient capture would answer `ctx.area` differently
     // depending on when it ran.
     let compose_options = {
+        invocation.record_prepared_context_consumer(
+            claudine::invocation_context::PreparedContextConsumer::Preflight,
+        );
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(
             prepared_context.clone(),
         )
@@ -796,6 +799,9 @@ fn build_and_run_loop(
     let Some(config) = config else {
         return Ok(None);
     };
+    prep_context.invocation.record_prepared_context_consumer(
+        claudine::invocation_context::PreparedContextConsumer::LoopCondition,
+    );
 
     // Build the seed AND parse lifecycle from the document's full composed
     // frontmatter. The seed lifts only iteration-control variables, so parsing

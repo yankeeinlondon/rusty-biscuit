@@ -352,7 +352,7 @@ impl CommandPerfCollector {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct InvocationWorkCounts {
     git_root_discoveries: usize,
     topology_probes: usize,
@@ -360,6 +360,7 @@ struct InvocationWorkCounts {
     launch_context_constructions: usize,
     launch_context_extensions: usize,
     ambient_fallbacks: usize,
+    prepared_context_consumers: Vec<String>,
 }
 
 impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationWorkCounts {
@@ -371,6 +372,11 @@ impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationW
             launch_context_constructions: work.launch_context_constructions,
             launch_context_extensions: work.launch_context_extensions,
             ambient_fallbacks: work.ambient_fallbacks,
+            prepared_context_consumers: work
+                .prepared_context_consumers
+                .keys()
+                .cloned()
+                .collect(),
         }
     }
 }
@@ -379,13 +385,14 @@ impl InvocationWorkCounts {
     fn note(self) -> String {
         format!(
             "source context work: Git discoveries {}, topology probes {}, topology reuses {}; \
-             launch captures {} (extensions {}), ambient fallbacks {}",
+             launch captures {} (extensions {}), ambient fallbacks {}, prepared consumers [{}]",
             self.git_root_discoveries,
             self.topology_probes,
             self.topology_reuses,
             self.launch_context_constructions,
             self.launch_context_extensions,
             self.ambient_fallbacks,
+            self.prepared_context_consumers.join(", "),
         )
     }
 }

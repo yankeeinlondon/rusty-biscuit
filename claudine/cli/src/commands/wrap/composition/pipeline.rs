@@ -1304,6 +1304,9 @@ fn construct_lifecycle_runtime(
             let scan = format!("{fm_json}\n{}", request.prepared.prompt);
             let mut ctx = request.prepared.compose_context.clone();
             if let Some(invocation) = request.invocation_context.as_ref() {
+                invocation.record_prepared_context_consumer(
+                    claudine::invocation_context::PreparedContextConsumer::Lifecycle,
+                );
                 let requirements =
                     darkmatter::markdown::compose::ContextRequirements::for_content(&scan);
                 invocation.extend_launch_context(&mut ctx, &requirements);
