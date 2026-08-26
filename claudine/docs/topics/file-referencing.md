@@ -137,6 +137,17 @@ claudine compose prompts/doit.md spec=features/the-big-one/spec.md
 - in this case the prompt author's role was was likely just to provide the schema type for the `spec` property (although possibly with a "default" path)
 - the author doesn't have any direct skin in the game on how the spec file should be resolved into a fully qualified file path 
 
+### And Now For Something Completely Different
+
+While not as directly involved in how to resolve CWD it must be mentioned that:
+
+- when Claudine starts up the CLI it immediately _changes the directory_ to the repo root before doing anything else
+- it DOES keep track of the directory in which the CLI was started in:
+    - `ctx.cwd` directly reports on this
+    - the ENV variable `${AGENT_CWD}` reports on this
+    - the `ctx.area`, `ctx.package`, and  `ctx.package_area` context variables are derived from the real starting directory 
+- Why do we change to the repo root directory first (at least when the CLI is started in a repo)? Well because it's almost always the right thing to do from a permissions standpoint as well as helping the Agent to find skills, prompts, and other things.
+
 ### Addressing the Great Divide
 
 In all cases a prompt author or the operator _could_ opt to use the `&`, `^`, or `!` sigil's to explicitly express their intentions. Sadly there is a great divide between _could_ and _should_ / _would_. A well designed solution can't offer good defaults for this important variable.
@@ -146,15 +157,26 @@ It is an obvious solution to each actor:
 - the prompt author believes **CWD** _obviously_ should be the file which they are authoring
 - the operator calling the prompt believes **CWD** _obviously_ should be the directory they are calling the prompt from
 
-The solution may surprise you but give it a second thought and I think you'll agree with approach:
+The solution may surprise you but give it a second thought and I think you'll agree with the approach:
 
-1. Ruling: 
-    - when _composing_ a Markdown file in Darkmatter or Claudine the **CWD** should be the file's directory; not the caller's directory
-        - if you are a "caller" please don't get angry
-        - and yes we know that convention would suggest that **CWD** should determined by the caller
+1. **Ruling:** 
 
-2. Exception: 
-    - if the caller passes in any `file` Frontmatter properties the file path will be resolved as it's passed in
+    When _composing_ a Markdown file in Darkmatter or Claudine the **CWD** should be the directory of the file being composed; not the caller's directory!
+
+    If you are a "caller" we appreciate that you might be angry. We get it. Yes we know that convention would suggest that where you were calling from should set **CWD**. Unfortunately like all real rulings, this one has been ruled, so let's discuss some tools that do line up in your favor:
+
+    - `ctx.cwd` can be used in a prompt anytime you want to reference the callers **CWD**
+    - `ctx.area`, `ctx.package-area`, and `ctx.package` all DO use the directory from which you called the CLI
+
+    Ok so hopefully you've stopped your sobbing now. Now for the really good news ... we've created an "exception clause" that addresses the edge between passing in parameters and the composition flow.
+
+2. **Exception Clause:** 
+
+    - if the caller passes in a file reference as a Frontmatter property the file path will be resolved as it's passed in
+    - if the Frontmatter property is set with **eager** evaluation than it will be resolved and validated; if not then it will just be resolved
+    - during this resolution process the caller's **CWD** (the original CWD not the repo root) will be used as the CWD during this process.
+
+    This clause allows callers to ergonomically pass in file references with a CWD directory that makes sense to them and then the core composition process across a recursive set of files uses the file's directory as **CWD**.
 
 > **Note:** all references to `claudine compose` apply equally as well to `claudine inline-compose` and `claudine sequence` ... basically what we're referring to is the act of composition.
 
