@@ -16,15 +16,24 @@ A file reference may -- _at design time_ -- be somewhat ambiguous to the full fi
 
 When _referencing_ files we rely on an enumerated set of **sigils** that provide a useful abstraction to a base for our file path reference. The most common examples include:
 
-- `.` - refers to the operating system's "current working directory" 
-- `..` - refers to the _parent_ of the "current working directory"
+- `.` / `./` _and_ `.\` - refers to the operating system's "current working directory"
+- `..`, `../` _and_ `..\` - refers to the _parent_ of the "current working directory"
 - `~` - refers to the current user's home directory
 
-In addition to the most common sigils above, we're also all familiar with different for the ROOT of the host's file system:
+In addition to these sigils, file references may use native absolute-path and URI forms. These forms are roots or namespaces, rather than additional base-directory sigils:
 
 - `/` - used in all POSIX operating systems to represent the root
-- `\` - used by Windows (and apparently cavemen) to represent the root
-- `file:///` or `file:/` - used by IETF as RFC 8089 (e.g., the `file` URI Scheme) to represent the root
+- `{drive}:\` _or_ `{drive}:` - represents the root of a Windows drive like `C:` or any other mapped drive
+    - `C:\` would be an example
+    - as would `C:`
+- `file:///` or `file:/` - are local-file URI forms defined by RFC 8089; their root semantics depend on the path that follows
+- `file:///C:/` - is the URI form of a Windows drive root
+- `file://server/share/` - is the URI form of a Windows UNC share root
+- `\\?\` and `\\.\` - more obscure Windows referencing
+
+Windows also has a drive-relative form that must not be confused with a drive-absolute path:
+
+- `C:path\to\file` - is relative to the current directory associated with the `C:` drive; it does **not** mean `C:\path\to\file`
 
 **Claudine** (by way of **biscuit-file**) provides the following _additional_ sigils:
 
@@ -34,16 +43,13 @@ In addition to the most common sigils above, we're also all familiar with differ
     - many Agentic CLI's use some form of this sigil to help users to autocomplete or reference a file path
     - magic paths _prefer_ the most specific/localized path that is valid
     - the base paths -- _in order of precedence_ -- which will be used are:
-        - repo's package root (if CWD is inside a monorepo and inside a package of that monorepo)
+        - repo's package root (if **CWD** is inside a monorepo and inside a package of that monorepo)
         - repo's package-area root (if CWD is inside a monorepo and inside a package area of that monorepo)
         - repo's root directory (if CWD is inside a repo)
         - the user's home directory
     - a pattern many developers will be familiar with is referencing an Agent Skill such as: `@.claude/skills/do-me-like-that/SKILL.md`
         - this will TRY to use the repo's skill definition first, but if it doesn't exist then
         - it falls back to `~/.claude/skills/do-me-like-that/SKILL.md`
-
-
-
 - `&` **Repo References**
     - provides local repo references
     - it's cheap and cheerful, the `&` sigil is always replaced one for one with repo's root directory
@@ -60,11 +66,20 @@ In addition to the most common sigils above, we're also all familiar with differ
       - repo's root directory
     - The key difference from the magic path is that it does **not** reach into the user's home directory as a fallback. This is by design of course but it can also help to avoid a common pitfall when accidentally running into a security violation or an unwanted human-in-the-loop intervention because the current agent is happy to operate on repo file but not on user scoped files.
     - The `^` sigil is automatically used when a file reference falls into the pattern we refer to as an "ambiguous relative path".
+- `!` **Immediate Context**
+    - there may be times in a file where you want to create a file reference that you may want to reference a file **not** relative from the _current working directory_ but instead from relative to the **current file**.
+    - if the file `foo/bar/doit.md` has the following file reference:
+
+        ```md
+        ::file !baz.md
+        ```
+
+        the location it is referring to is `foo/bar/baz.md` regardless of what directory the user was when they executed composition.
+    - this is relative to the current file, not to the repository, package area, or current working directory
 - `vault:` **Obsidian Vault(s)**
-- `$`
 
 
-> **Note:** the `@`, `&`, `^`, `$`  sigils are _defensively_ coded so that a following `/` character has no impact
+> **Note:** the `@`, `&`, `^`, and `!` sigils are _defensively_ coded so that a following `/` character has no impact
 > on the file paths which are evaluated:
 >
 > - `@path/to/file` is the same as `@/path/to/file`
@@ -81,18 +96,67 @@ All file references can and should be thought of as a **base** path joined to a 
     - a relative path doesn't have an explicit **base** path _yet_ but as we've already established:
         - `.` will be converted to the current working directory at run time
         - `..` will be converted to the parent of the working directory at run time
-- the `~` sigel acts in the same way ENV based paths do like `${HOME}` path used commonly in shell scripts
-    - a path of `~/path/to/file.md` or `${HOME}/path/to/file.md` has an _abstracted_ base path that is resolved at run time:
-    - `~` or `${HOME}` is the **base** path and `path/to/file.md` is a relative path off of that base
+- the `~` sigil acts in the same way ENV-based paths do, such as the `${HOME}` path commonly used in shell scripts
+    - a path of `~/path/to/file.md` or `${HOME}/path/to/file.md` has an _abstracted_ base path that is resolved at run time
+    - on Windows, `%USERPROFILE%\path\to\file.md` is the corresponding native environment-variable form
+    - environment-variable references are substitutions, not additional file-reference sigils; `~`, `${HOME}`, and `%USERPROFILE%` are the **base** paths and `path/to/file.md` is a relative path off of that base
 
 So what then is an **implicit relative path**? It's a path that starts immediately with a relative path segment but without adding in a clear marker for what this relative file path's base should be. An example would be:
 
 - `path/to/file.md`
 
-Without a sigil to guide us Claudine is forced to treat this form of a relative path as a `&` reference; which then establishes the following assertion:
+Without a sigil to guide us, Claudine and Darkmatter must determine what  _base directory_ will be joined with the relative path segment provided. In this case, the solution is to take a dual-pathed approach:
 
-- `path/to/file.md` is the same as `&path/to/file.md`
+1. if `path/to/file.md` is a valid path off of the _current working directory_ then that is matched first: `${CWD}/path/to/file.md`
+2. if the **CWD** based file path doesn't match then we will match on the repo's root: `{repo-root}/path/to/file.md`
 
+Of course if the _current working directory_ is not in a repo then we can ONLY consider the CWD path.
+
+## What is the Current Working Directory?
+
+> formerly titled `What's the frequency Kenneth?` and before that `Yeah but who's on First?`
+
+### Why it's not Obvious
+
+When you run `claudine compose prompt.md` the _current working directory_ (**CWD**) that `prompt.md` will use in its file references can not be ambiguous. While the goal is for the **CWD** to be intuitive and ergonomic for both the prompt author _and_ the operator who is executing the prompt; these two actors sometimes might not see **CWD** the same way:
+
+- the operator _executing_ a prompt is intentionally in a certain directory and would expect that _where they execute_ a prompt should be considered the current working directory
+- the prompt author has no idea which directory a future operator will execute from and it will obviously change dynamically on a per call basis
+    - there may be some _fancy_ cases where an author might want to play off of where the prompt is being executed out of; however
+    - in most cases the most _intuitive_ answer for the prompt author is that the _expected_ current working directory for an author is the directory in which the current file resides
+
+### Further Divergence in Actor Goals
+
+Now let's consider a quite common situation in which an operator is calling `claudine compose` and passing in a path based parameter:
+
+```sh
+claudine compose prompts/doit.md spec=features/the-big-one/spec.md
+```
+
+- from the operators perspective it makes perfect sense that the relative file path being passed in as `spec` will be relative to the current directory
+- in this case the prompt author's role was was likely just to provide the schema type for the `spec` property (although possibly with a "default" path)
+- the author doesn't have any direct skin in the game on how the spec file should be resolved into a fully qualified file path 
+
+### Addressing the Great Divide
+
+In all cases a prompt author or the operator _could_ opt to use the `&`, `^`, or `!` sigil's to explicitly express their intentions. Sadly there is a great divide between _could_ and _should_ / _would_. A well designed solution can't offer good defaults for this important variable.
+
+It is an obvious solution to each actor:
+
+- the prompt author believes **CWD** _obviously_ should be the file which they are authoring
+- the operator calling the prompt believes **CWD** _obviously_ should be the directory they are calling the prompt from
+
+The solution may surprise you but give it a second thought and I think you'll agree with approach:
+
+1. Ruling: 
+    - when _composing_ a Markdown file in Darkmatter or Claudine the **CWD** should be the file's directory; not the caller's directory
+        - if you are a "caller" please don't get angry
+        - and yes we know that convention would suggest that **CWD** should determined by the caller
+
+2. Exception: 
+    - if the caller passes in any `file` Frontmatter properties the file path will be resolved as it's passed in
+
+> **Note:** all references to `claudine compose` apply equally as well to `claudine inline-compose` and `claudine sequence` ... basically what we're referring to is the act of composition.
 
 ## Design Time vs Run Time
 
@@ -117,6 +181,7 @@ In Claudine, we _refer to files_ inside of files in many situations such as:
 - shell expansion: `::shell foo/bar/doit.sh`
 - conditional blocks: `::block when="file_exists(foo/bar/doit.sh)"`
 - etc.
+
 
 ## Eager or Lazy Evaluation of Frontmatter
 
