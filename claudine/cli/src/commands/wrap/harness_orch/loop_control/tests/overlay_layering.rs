@@ -77,7 +77,7 @@ impl OverlayFixture {
     /// Prepare the currently active document exactly as the harness loop does.
     fn materialize(
         &self,
-        state: &HarnessPromptState,
+        state: &mut HarnessPromptState,
     ) -> Result<MaterializedHarnessPrompt, color_eyre::eyre::Report> {
         super::super::super::materialize_harness_prompt(
             state,
@@ -111,7 +111,7 @@ fn overlay_beats_the_targets_authored_frontmatter() {
     let mut state = prompt_state(&fx.fx.source_path);
 
     fx.adopt(&mut state, &[("phase", serde_json::json!(2))]);
-    let after = fx.materialize(&state).expect("the target materializes");
+    let after = fx.materialize(&mut state).expect("the target materializes");
 
     assert_eq!(
         after.prompt.trim(),
@@ -137,7 +137,7 @@ fn caller_set_override_beats_a_conflicting_with_key() {
     state.input_layers.set_overrides = Some(serde_json::json!({ "phase": 9 }));
 
     fx.adopt(&mut state, &[("phase", serde_json::json!(2))]);
-    let materialized = fx.materialize(&state).expect("the target materializes");
+    let materialized = fx.materialize(&mut state).expect("the target materializes");
 
     assert_eq!(
         materialized.prompt.trim(),
@@ -170,7 +170,7 @@ fn overlay_scalar_and_array_values_replace_the_authored_ones() {
             ("tags", serde_json::json!(["z"])),
         ],
     );
-    let materialized = fx.materialize(&state).expect("the target materializes");
+    let materialized = fx.materialize(&mut state).expect("the target materializes");
 
     assert_eq!(
         effective(&materialized, "name"),
@@ -192,7 +192,7 @@ fn overlay_object_replaces_rather_than_deep_merging() {
     let mut state = prompt_state(&fx.fx.source_path);
 
     fx.adopt(&mut state, &[("opts", serde_json::json!({ "b": 9 }))]);
-    let materialized = fx.materialize(&state).expect("the target materializes");
+    let materialized = fx.materialize(&mut state).expect("the target materializes");
 
     assert_eq!(
         effective(&materialized, "opts"),
@@ -207,7 +207,7 @@ fn overlay_null_removes_the_targets_authored_property() {
     let mut state = prompt_state(&fx.fx.source_path);
 
     fx.adopt(&mut state, &[("phase", serde_json::json!(null))]);
-    let materialized = fx.materialize(&state).expect("the target materializes");
+    let materialized = fx.materialize(&mut state).expect("the target materializes");
 
     assert_eq!(
         effective(&materialized, "phase"),
@@ -237,7 +237,7 @@ fn a_caller_override_restores_a_key_the_overlay_removed() {
             ("dropped", serde_json::json!(null)),
         ],
     );
-    let materialized = fx.materialize(&state).expect("the target materializes");
+    let materialized = fx.materialize(&mut state).expect("the target materializes");
 
     assert_eq!(
         effective(&materialized, "phase"),
@@ -270,7 +270,7 @@ fn typed_overlay_values_keep_their_types_through_layering() {
             ("nested", serde_json::json!({ "k": "v" })),
         ],
     );
-    let materialized = fx.materialize(&state).expect("the target materializes");
+    let materialized = fx.materialize(&mut state).expect("the target materializes");
 
     assert_eq!(effective(&materialized, "live"), Some(serde_json::json!(true)));
     assert_eq!(effective(&materialized, "count"), Some(serde_json::json!(3)));
@@ -303,7 +303,7 @@ fn the_overlay_reaches_the_bootstrap_read_and_the_stabilized_reread() {
 
     // Stage 1: the bootstrap read, the one `initialize` conditions and actions
     // evaluate against.
-    let bootstrap = fx.materialize(&state).expect("the bootstrap read prepares");
+    let bootstrap = fx.materialize(&mut state).expect("the bootstrap read prepares");
     assert_eq!(
         bootstrap.prompt.trim(),
         "phase=2 stage=authored",
@@ -319,7 +319,7 @@ fn the_overlay_reaches_the_bootstrap_read_and_the_stabilized_reread() {
     .unwrap();
 
     // Stage 4: the stabilized reread.
-    let stabilized = fx.materialize(&state).expect("the stabilized reread prepares");
+    let stabilized = fx.materialize(&mut state).expect("the stabilized reread prepares");
     assert_eq!(
         stabilized.prompt.trim(),
         "phase=2 stage=mutated-by-initialize",
@@ -336,7 +336,7 @@ fn the_overlay_is_visible_to_selection_hints() {
     let mut state = prompt_state(&fx.fx.source_path);
 
     fx.adopt(&mut state, &[("agent", serde_json::json!("codex"))]);
-    let materialized = fx.materialize(&state).expect("the target materializes");
+    let materialized = fx.materialize(&mut state).expect("the target materializes");
 
     assert_eq!(
         effective(&materialized, "agent"),
@@ -366,7 +366,7 @@ fn a_control_plane_overlay_is_reparsed_by_the_target() {
             }),
         )],
     );
-    let materialized = fx.materialize(&state).expect("the target materializes");
+    let materialized = fx.materialize(&mut state).expect("the target materializes");
 
     let lifecycle = materialized
         .lifecycle
@@ -400,7 +400,7 @@ fn a_shell_command_installed_by_the_overlay_stays_subject_to_target_side_policy(
             }),
         )],
     );
-    let materialized = fx.materialize(&state).expect("the target materializes");
+    let materialized = fx.materialize(&mut state).expect("the target materializes");
     let lifecycle = materialized
         .lifecycle
         .as_ref()
@@ -440,7 +440,7 @@ fn a_malformed_control_plane_overlay_fails_as_the_targets_own_parse_error() {
         &[("success", serde_json::json!({ "stack": "not-a-sequence" }))],
     );
     let error = fx
-        .materialize(&state)
+        .materialize(&mut state)
         .expect_err("a malformed lifecycle stack must not prepare");
 
     assert!(
@@ -462,7 +462,7 @@ fn schema_coercion_shapes_effective_frontmatter_but_not_the_stored_overlay() {
     let mut state = prompt_state(&fx.fx.source_path);
 
     fx.adopt(&mut state, &[("phase", serde_json::json!(2))]);
-    let materialized = fx.materialize(&state).expect("the target materializes");
+    let materialized = fx.materialize(&mut state).expect("the target materializes");
 
     assert_eq!(
         effective(&materialized, "phase"),
@@ -486,7 +486,7 @@ fn refreshing_the_same_target_reapplies_the_same_overlay() {
     fx.adopt(&mut state, &[("phase", serde_json::json!(2))]);
     let stored = state.overlay.clone();
 
-    let first = fx.materialize(&state).expect("first preparation");
+    let first = fx.materialize(&mut state).expect("first preparation");
     assert_eq!(
         first.prompt.trim(),
         "phase=2",
@@ -494,7 +494,7 @@ fn refreshing_the_same_target_reapplies_the_same_overlay() {
     );
     // A retry/resume re-entry: fresh read, same document, same overlay.
     state.entry = claudine::composition::DocumentEntryReason::Retry;
-    let second = fx.materialize(&state).expect("refreshed preparation");
+    let second = fx.materialize(&mut state).expect("refreshed preparation");
 
     assert_eq!(
         second.prompt.trim(),
@@ -532,7 +532,7 @@ fn a_hop_that_omits_with_installs_an_empty_overlay_rather_than_forwarding() {
         state.overlay.is_empty(),
         "the source's overlay is discarded with the rest of its state"
     );
-    let materialized = fx.materialize(&state).expect("the target materializes");
+    let materialized = fx.materialize(&mut state).expect("the target materializes");
     assert_eq!(
         materialized.prompt.trim(),
         "phase=1",
@@ -641,7 +641,7 @@ fn an_overlay_never_writes_to_disk() {
 
     let mut state = prompt_state(&fx.fx.source_path);
     fx.adopt(&mut state, &[("phase", serde_json::json!(2))]);
-    let materialized = fx.materialize(&state).expect("the target materializes");
+    let materialized = fx.materialize(&mut state).expect("the target materializes");
     assert_eq!(
         materialized.prompt.trim(),
         "phase=2",
@@ -673,7 +673,7 @@ fn with_satisfies_a_required_schema_property_the_target_does_not_author() {
 
     fx.adopt(&mut state, &[("topic", serde_json::json!("proxies"))]);
     let materialized = fx
-        .materialize(&state)
+        .materialize(&mut state)
         .expect("the overlay satisfies the target's required property");
 
     assert_eq!(materialized.prompt.trim(), "plan proxies");
@@ -702,7 +702,7 @@ fn a_file_valued_overlay_property_resolves_through_the_targets_own_context() {
     // anchor, not against wherever the router happened to live.
     fx.adopt(&mut state, &[("spec", serde_json::json!("spec.md"))]);
     let materialized = fx
-        .materialize(&state)
+        .materialize(&mut state)
         .expect("the overlay's file reference resolves against the launch area");
 
     assert_eq!(
@@ -749,7 +749,7 @@ fn an_invalid_overlay_fails_the_targets_schema_before_any_launch() {
 
     fx.adopt(&mut state, &[("topic", serde_json::json!(["not", "a", "string"]))]);
     let error = fx
-        .materialize(&state)
+        .materialize(&mut state)
         .expect_err("an array cannot satisfy the `string(required)` the target validates");
 
     let composition = error

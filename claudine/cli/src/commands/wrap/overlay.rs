@@ -55,12 +55,9 @@ pub(crate) fn materialize_passthrough_harness_seed(
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
         &source_markdown,
     );
-    let evidence = invocation.runtime_evidence(source_context, &requirements);
-    let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-        source_context.base_dir(),
-        &requirements,
-        &evidence,
-    );
+    // Launch-anchored, never source-anchored: moving the wrapped memory file
+    // must not change its launch-facing `ctx.*` expansion (AC9).
+    let context = invocation.capture_launch_context(&requirements);
     let options = claudine::composition::bind_agent_workspace(
         darkmatter::markdown::compose::ComposeOptions::new_with_context(context.clone())
             .with_file_resolution_context(source_context.file_resolution_context().clone()),

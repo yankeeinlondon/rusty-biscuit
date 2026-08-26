@@ -73,6 +73,19 @@ pub(crate) struct HarnessPromptState {
     /// `Some` with no repository is authoritative: callers must not replace it
     /// with the launch repository merely because the source is outside Git.
     pub(crate) source_context: Option<claudine::invocation_context::SourceContext>,
+    /// The active document epoch's launch snapshot, without target overrides.
+    ///
+    /// Seeded from the caller's canonical preparation
+    /// ([`PreparedComposition::compose_context`][pcs]) for a directly-invoked
+    /// document and constructed at a fresh epoch's first read otherwise
+    /// (adopted proxy target, retry, resume). The stabilized reread and every
+    /// loop refresh extend this exact snapshot rather than constructing a new
+    /// one, so one epoch owns one capture. Cleared when the coordinator
+    /// repoints the run at a new document.
+    ///
+    /// [pcs]: claudine::composition::PreparedComposition::compose_context
+    pub(crate) epoch_context:
+        Option<darkmatter::markdown::compose::ComposeContext>,
 }
 
 impl HarnessPromptState {

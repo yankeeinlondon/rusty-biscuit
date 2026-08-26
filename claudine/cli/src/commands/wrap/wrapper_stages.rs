@@ -543,6 +543,9 @@ pub(crate) fn run_execution_stage(
             entry: claudine::composition::DocumentEntryReason::Direct,
             invocation_context: Some(invocation.clone()),
             source_context: Some(source_context),
+            // The passthrough seed's compose context is this epoch's launch
+            // snapshot; later harness refreshes extend it in place.
+            epoch_context: initial_compose_context.clone(),
         };
 
         let mut harness_base_args = child_args.to_vec();

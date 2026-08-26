@@ -127,8 +127,15 @@ fn load_overlaid_source(
 /// This is the single input-layer assembly point the harness re-entry uses; the
 /// composition commands' first preparation assembles the same shape in
 /// `compose/prep.rs`.
+///
+/// The prepared context follows the document-epoch contract: a retry or resume
+/// constructs one fresh launch capture (a new epoch), while the stabilized
+/// reread and any same-document refresh extend the retained epoch snapshot in
+/// place — the capture anchor, environment capture, and target overrides never
+/// change within an epoch. Every launch-facing field comes from the invocation
+/// owner either way.
 fn harness_prepare_options(
-    state: &HarnessPromptState,
+    state: &mut HarnessPromptState,
     source: &claudine::composition::ResolvedCompositionSource,
     child_cwd: &Path,
 ) -> claudine::composition::PrepareOptions {
@@ -161,6 +168,10 @@ fn harness_prepare_options(
         .source_context
         .as_ref()
         .or(compatibility_source_context.as_ref());
+    // The launch-anchored epoch snapshot. Constructed through the invocation
+    // owner — never from this document's source context — so a harness
+    // re-materialization (bootstrap read, stabilized reread, retry, resume,
+    // loop refresh) cannot re-anchor prepared `ctx.*` on the prompt directory.
     let propagated = state
         .invocation_context
         .as_ref()
@@ -169,12 +180,24 @@ fn harness_prepare_options(
             let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
                 &source.markdown,
             );
-            let evidence = invocation.runtime_evidence(source_context, &requirements);
-            let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-                source_context.base_dir(),
-                &requirements,
-                &evidence,
+            let fresh_epoch = matches!(
+                state.entry,
+                claudine::composition::DocumentEntryReason::Retry
+                    | claudine::composition::DocumentEntryReason::Resume
             );
+            let context = if fresh_epoch || state.epoch_context.is_none() {
+                invocation.capture_launch_context(&requirements)
+            } else {
+                let mut retained = state
+                    .epoch_context
+                    .clone()
+                    .expect("epoch snapshot checked above");
+                invocation.extend_launch_context(&mut retained, &requirements);
+                retained
+            };
+            // A fresh epoch replaces the retained snapshot; a same-epoch
+            // reread keeps the (now possibly extended) one for later stages.
+            state.epoch_context = Some(context.clone());
             (context, source_context.file_resolution_context().clone())
         });
     let mut options = input_layers.apply_to(claudine::composition::PrepareOptions {
@@ -222,7 +245,7 @@ pub(crate) fn preflight_proxy_target(
 }
 
 pub(crate) fn materialize_harness_prompt(
-    state: &HarnessPromptState,
+    state: &mut HarnessPromptState,
     _repo_root: Option<&Path>,
     child_cwd: &Path,
     // The resume follow-up recorded on the active document's provider-attempt
@@ -345,6 +368,7 @@ mod tests {
             last_final_output: None,
             entry: DocumentEntryReason::ProxyTarget,
             invocation_context: None,
+            epoch_context: None,
             source_context: None,
         }
     }
@@ -363,7 +387,7 @@ mod tests {
         let mut env = BTreeMap::new();
         env.insert("AGENT".to_string(), "codex".to_string());
         env.insert("MODEL".to_string(), "gpt-5".to_string());
-        let state = compose_state(
+        let mut state = compose_state(
             &target,
             CallerInputLayers {
                 env_overrides: env,
@@ -371,7 +395,7 @@ mod tests {
             },
         );
 
-        let materialized = materialize_harness_prompt(&state, None, dir.path(), None, SchemaStage::Validate).unwrap();
+        let materialized = materialize_harness_prompt(&mut state, None, dir.path(), None, SchemaStage::Validate).unwrap();
         assert_eq!(
             materialized.prompt.trim(),
             "codex/gpt-5",
@@ -430,7 +454,7 @@ mod tests {
 
         // The re-materialize compose now expands the frontmatter command against
         // the augmented pre-approved set instead of failing NotPreApproved.
-        let materialized = materialize_harness_prompt(&state, None, dir.path(), None, SchemaStage::Validate).unwrap();
+        let materialized = materialize_harness_prompt(&mut state, None, dir.path(), None, SchemaStage::Validate).unwrap();
         assert_eq!(materialized.prompt.trim(), "reviewing spec.md");
     }
 }

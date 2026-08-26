@@ -1214,7 +1214,10 @@ fn construct_lifecycle_runtime(
         let request = &attempt.request;
         let SelectionPhase {
             launch_cwd,
-            launch_workspace,
+            // The epoch snapshot on `request.prepared.compose_context` anchors
+            // lifecycle `ctx.*`; the launch workspace itself is read by the
+            // runner phase, not here.
+            launch_workspace: _,
             target: _,
             provider: _,
             is_inline: _,
@@ -1287,37 +1290,24 @@ fn construct_lifecycle_runtime(
             .auto_rehash(false)
             .build();
 
-        // Capture the early-binding context ONCE for this run, against the launch
-        // area (the package area the caller launched from), and reuse the same
-        // snapshot for every lifecycle event (the pre-flight `blocked`/`finalize`
-        // stacks and the post-closure `initialize`) so plain `ctx.*`/`env.*` cannot
-        // diverge per event and no per-event sniff scan runs. Demand-driven over
-        // the effective frontmatter (which still carries the deferred lifecycle
-        // `{{ctx.*}}` strings) plus the composed body. `env_overrides` mirror what
-        // `prepare` applied. `current.*` stays event-time and is captured below.
+        // The lifecycle early-binding context is the epoch snapshot the
+        // canonical preparation stored (`PreparedComposition::compose_context`)
+        // — the exact snapshot body compose and shell preflight already used,
+        // with the target's identity overrides already applied — extended in
+        // place when the composed scan names `ctx.*` groups the document's own
+        // capture did not. Plain `ctx.*`/`env.*` therefore cannot diverge per
+        // event and no per-event sniff scan runs. `current.*` stays event-time
+        // and is captured below.
         let lifecycle_context = {
             let fm_json =
                 serde_json::to_string(&request.prepared.effective_frontmatter).unwrap_or_default();
             let scan = format!("{fm_json}\n{}", request.prepared.prompt);
-            let mut ctx = match (
-                request.invocation_context.as_ref(),
-                request.source_context.as_ref(),
-            ) {
-                (Some(invocation), Some(source_context)) => {
-                    let requirements =
-                        darkmatter::markdown::compose::ContextRequirements::for_content(&scan);
-                    let evidence = invocation.runtime_evidence(source_context, &requirements);
-                    darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-                        source_context.base_dir(),
-                        &requirements,
-                        &evidence,
-                    )
-                }
-                _ => darkmatter::markdown::compose::ComposeContext::capture_for_content(
-                    launch_workspace.launch_cwd.as_path(),
-                    &scan,
-                ),
-            };
+            let mut ctx = request.prepared.compose_context.clone();
+            if let Some(invocation) = request.invocation_context.as_ref() {
+                let requirements =
+                    darkmatter::markdown::compose::ContextRequirements::for_content(&scan);
+                invocation.extend_launch_context(&mut ctx, &requirements);
+            }
             for (key, value) in &request.env_overrides {
                 ctx.env_mut().insert(key.clone(), value.clone());
             }

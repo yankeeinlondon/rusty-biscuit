@@ -437,6 +437,10 @@ pub(super) fn run_composition_body(
         entry: request.prepared.entry,
         invocation_context: request.invocation_context.clone(),
         source_context: request.source_context.clone(),
+        // The caller's canonical preparation already built this document
+        // epoch's launch snapshot; the harness's stabilized reread extends it
+        // in place rather than constructing a second capture.
+        epoch_context: Some(request.prepared.compose_context.clone()),
     };
 
     let mut harness_base_args = args_before_prompt.clone();
