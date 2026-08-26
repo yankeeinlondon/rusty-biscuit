@@ -52,6 +52,9 @@ pub(crate) fn materialize_passthrough_harness_seed(
         }
     })?;
     let source_markdown: darkmatter::markdown::Markdown = source_text.into();
+    let source_markdown = source_markdown.with_source(
+        darkmatter::markdown::compose::ComposeSource::File(source_path.to_path_buf()),
+    );
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
         &source_markdown,
     );
@@ -65,6 +68,9 @@ pub(crate) fn materialize_passthrough_harness_seed(
         shell_cwd,
     );
     invocation.record_compose_operation();
+    invocation.record_prepared_context_consumer(
+        claudine::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
+    );
     let (composed, _report) = source_markdown.compose_with(options)?;
 
     let frontmatter = frontmatter_map_to_value(composed.frontmatter());
@@ -88,4 +94,102 @@ pub(crate) fn materialize_passthrough_harness_seed(
         // send this path into a replay it recorded no inputs for.
         mcp_body_tags: Vec::new(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn init_git_repo(path: &Path) {
+        let status = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(path)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+
+    #[test]
+    fn relocated_overlay_seed_uses_launch_context_and_source_resolution() {
+        let temp = tempfile::tempdir().unwrap();
+        let launch_repo = temp.path().join("launch");
+        let launch_dir = launch_repo.join("alpha/lib");
+        let source_repo = temp.path().join("source");
+        let source_dir = source_repo.join("nested");
+        fs::create_dir_all(&launch_dir).unwrap();
+        fs::create_dir_all(&source_dir).unwrap();
+        init_git_repo(&launch_repo);
+        init_git_repo(&source_repo);
+        fs::write(
+            launch_repo.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"alpha/lib\", \"sibling\"]\nresolver = \"2\"\n",
+        )
+        .unwrap();
+        fs::write(
+            launch_dir.join("Cargo.toml"),
+            "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(launch_repo.join("sibling")).unwrap();
+        fs::write(
+            launch_repo.join("sibling/Cargo.toml"),
+            "[package]\nname = \"sibling\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+
+        fs::write(
+            launch_dir.join("schema.yaml"),
+            "launch_only: string(required)\n",
+        )
+        .unwrap();
+        fs::write(launch_dir.join("spec.md"), "LAUNCH-SPEC\n").unwrap();
+        fs::write(
+            source_dir.join("schema.yaml"),
+            concat!(
+                "source_file: 'file(eager; required)'\n",
+                "prepared_area: string(required)\n",
+                "prepared_repo: string(required)\n",
+            ),
+        )
+        .unwrap();
+        fs::write(source_dir.join("spec.md"), "SOURCE-SPEC\n").unwrap();
+        let source = source_dir.join("memory.md");
+        fs::write(
+            &source,
+            concat!(
+                "---\n",
+                "$schema: ./schema.yaml\n",
+                "source_file: spec.md\n",
+                "prepared_area: '{{ ctx.area }}'\n",
+                "prepared_repo: '{{ ctx.repo_root }}'\n",
+                "---\n",
+                "Memory body.\n",
+            ),
+        )
+        .unwrap();
+
+        let invocation = claudine::invocation_context::InvocationContext::capture_at(&launch_dir);
+        let source_context = invocation.derive_source(&source).unwrap();
+        let materialized = materialize_passthrough_harness_seed(
+            &source,
+            "provider-owned prompt".to_string(),
+            None,
+            std::sync::Arc::new(claudine::composition::RuntimeState::new()),
+            &invocation,
+            &source_context,
+        )
+        .unwrap();
+
+        assert_eq!(materialized.frontmatter["prepared_area"], serde_json::json!("alpha"));
+        assert_eq!(
+            materialized.frontmatter["prepared_repo"],
+            serde_json::json!(launch_repo.to_string_lossy())
+        );
+        assert_eq!(materialized.prompt, "provider-owned prompt");
+        let resolution = materialized
+            .file_resolution_context
+            .expect("overlay seed keeps the source resolution snapshot");
+        assert_eq!(resolution.repository_root(), Some(source_repo.as_path()));
+        assert_eq!(resolution.source_path(), Some(source.as_path()));
+    }
 }

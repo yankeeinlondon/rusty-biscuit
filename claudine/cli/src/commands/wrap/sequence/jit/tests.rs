@@ -154,6 +154,104 @@ fn template_preflight_does_not_resolve_launch_only_file() {
         result.approved_commands,
     );
 }
+
+#[test]
+fn distributed_step_keeps_launch_identity_and_source_schema_and_files() {
+    let temp = tempfile::tempdir().unwrap();
+    let launch_repo = temp.path().join("launch");
+    let launch_dir = launch_repo.join("alpha/lib");
+    let source_repo = temp.path().join("source");
+    let source_dir = source_repo.join("nested");
+    std::fs::create_dir_all(&launch_dir).unwrap();
+    std::fs::create_dir_all(&source_dir).unwrap();
+    for repo in [&launch_repo, &source_repo] {
+        let status = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(repo)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+    std::fs::write(
+        launch_repo.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"alpha/lib\", \"sibling\"]\nresolver = \"2\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        launch_dir.join("Cargo.toml"),
+        "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    std::fs::create_dir_all(launch_repo.join("sibling")).unwrap();
+    std::fs::write(
+        launch_repo.join("sibling/Cargo.toml"),
+        "[package]\nname = \"sibling\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        launch_dir.join("schema.yaml"),
+        "launch_only: string(required)\n",
+    )
+    .unwrap();
+    std::fs::write(launch_dir.join("fragment.md"), "LAUNCH-FRAGMENT\n").unwrap();
+    std::fs::write(
+        source_dir.join("schema.yaml"),
+        "source_marker: string(required)\nspec: 'file(eager; required)'\n",
+    )
+    .unwrap();
+    std::fs::write(source_dir.join("spec.md"), "SOURCE-SPEC\n").unwrap();
+    std::fs::write(source_dir.join("fragment.md"), "SOURCE-FRAGMENT\n").unwrap();
+    let source_path = source_dir.join("step.md");
+    std::fs::write(
+        &source_path,
+        concat!(
+            "---\n",
+            "$schema: ./schema.yaml\n",
+            "source_marker: source-owned\n",
+            "spec: spec.md\n",
+            "---\n",
+            "REPO={{ ctx.repo_root }} AREA={{ ctx.area }} AGENT={{ ctx.agent }} ",
+            "MODEL={{ ctx.model }} ENV={{ env.AGENT }}/{{ env.MODEL }} ",
+            "FILE={{ file_exists(spec) }}\n",
+            "SOURCE-BODY\n",
+        ),
+    )
+    .unwrap();
+
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(&launch_dir);
+    let source_context = invocation.derive_source(&source_path).unwrap();
+    let source = claudine::composition::resolve_composition_source(
+        source_path.to_string_lossy().as_ref(),
+    )
+    .unwrap();
+    let pre = claudine::composition::pre_validate_schema(&source, None, Some(&launch_dir))
+        .expect("the source-side schema must be selected");
+    let env = BTreeMap::from([
+        ("AGENT".to_string(), "codex".to_string()),
+        ("MODEL".to_string(), "gpt-5".to_string()),
+    ]);
+    let (options, context) = build_template_preflight_options(
+        &env,
+        &pre.source.resolved_path,
+        &pre.source.markdown,
+        &serde_json::json!({}),
+        Some(&launch_dir),
+        Some(source_context.file_resolution_context()),
+        Some(&invocation),
+    );
+    let (composed, _) = pre.source.markdown.compose_with(options).unwrap();
+    let body = composed.content();
+
+    assert!(body.contains("AREA=alpha AGENT=codex MODEL=gpt-5 ENV=codex/gpt-5 FILE=true"));
+    assert!(body.contains(launch_repo.to_string_lossy().as_ref()));
+    assert!(body.contains("SOURCE-BODY"));
+    assert!(!body.contains("LAUNCH-FRAGMENT"));
+    assert_eq!(context.get("area").and_then(serde_json::Value::as_str), Some("alpha"));
+    let effective = context.as_object();
+    assert_eq!(effective.get("agent").and_then(serde_json::Value::as_str), Some("codex"));
+    assert_eq!(effective.get("model").and_then(serde_json::Value::as_str), Some("gpt-5"));
+    assert_eq!(source_context.repository_root(), Some(source_repo.as_path()));
+}
 // ---------------------------------------------------------------------------
 // Layer precedence
 // ---------------------------------------------------------------------------
