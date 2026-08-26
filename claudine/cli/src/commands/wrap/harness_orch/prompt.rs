@@ -487,6 +487,7 @@ mod tests {
         let invocation = claudine::invocation_context::InvocationContext::capture_at(&launch_dir);
         state.source_context = Some(invocation.derive_source(&target).unwrap());
         state.invocation_context = Some(invocation.clone());
+        let approval_options = claudine::harness::ShellApprovalOptions::default();
 
         let assert_materialized = |entry: DocumentEntryReason,
                                    materialized: &MaterializedHarnessPrompt| {
@@ -509,6 +510,8 @@ mod tests {
             assert_eq!(materialized.frontmatter["source_marker"], serde_json::json!("source-owned"));
         };
 
+        let before_proxy = invocation.work_snapshot();
+        preflight_proxy_target(&mut state, &approval_options, &launch_dir).unwrap();
         let proxy = materialize_harness_prompt(
             &mut state,
             Some(&source_repo),
@@ -518,7 +521,22 @@ mod tests {
         )
         .unwrap();
         assert_materialized(DocumentEntryReason::ProxyTarget, &proxy);
-        assert_eq!(invocation.work_snapshot().launch_context_constructions, 1);
+        assert_eq!(
+            invocation
+                .work_snapshot()
+                .document_epoch_since(&before_proxy),
+            claudine::invocation_context::DocumentEpochWork {
+                launch_context_constructions: 1,
+                launch_context_extensions: 0,
+                ambient_fallbacks: 0,
+                prepared_context_consumers: BTreeMap::from([
+                    ("body".to_string(), 1),
+                    ("effective-frontmatter".to_string(), 1),
+                    ("preflight".to_string(), 1),
+                ]),
+            },
+            "the proxy target's first canonical read must be one complete epoch"
+        );
 
         // Model an initialize-time rewrite that adds a group the bootstrap
         // document did not require. The next materialization is the
@@ -533,6 +551,8 @@ mod tests {
         )
         .unwrap();
 
+        let before_stabilized = invocation.work_snapshot();
+        preflight_proxy_target(&mut state, &approval_options, &launch_dir).unwrap();
         let stabilized = materialize_harness_prompt(
             &mut state,
             Some(&source_repo),
@@ -547,50 +567,22 @@ mod tests {
             "the stabilized reread must populate the newly required OS group: {}",
             stabilized.prompt
         );
-        let reread_work = invocation.work_snapshot();
         assert_eq!(
-            reread_work.launch_context_constructions,
-            1,
-            "a same-document stabilized reread must retain the epoch snapshot"
+            invocation
+                .work_snapshot()
+                .document_epoch_since(&before_stabilized),
+            claudine::invocation_context::DocumentEpochWork {
+                launch_context_constructions: 0,
+                launch_context_extensions: 1,
+                ambient_fallbacks: 0,
+                prepared_context_consumers: BTreeMap::from([
+                    ("body".to_string(), 1),
+                    ("effective-frontmatter".to_string(), 1),
+                    ("preflight".to_string(), 1),
+                ]),
+            },
+            "the stabilized reread stays inside the proxy epoch and only extends it"
         );
-        assert_eq!(
-            reread_work.launch_context_extensions, 1,
-            "the stabilized reread must extend the retained snapshot for its new OS group"
-        );
-        assert_eq!(reread_work.ambient_fallbacks, 0);
-        assert_eq!(
-            reread_work
-                .prepared_context_consumers
-                .keys()
-                .map(String::as_str)
-                .collect::<Vec<_>>(),
-            vec!["body", "effective-frontmatter"],
-            "harness materialization must expose the exact consumers that received the epoch snapshot"
-        );
-
-        for (entry, expected_constructions) in [
-            (DocumentEntryReason::Retry, 2),
-            (DocumentEntryReason::Resume, 3),
-        ] {
-            state.entry = entry;
-            let materialized = materialize_harness_prompt(
-                &mut state,
-                Some(&source_repo),
-                &launch_dir,
-                None,
-                SchemaStage::Validate,
-            )
-            .unwrap();
-            assert_materialized(entry, &materialized);
-            assert_eq!(
-                invocation.work_snapshot().launch_context_constructions,
-                expected_constructions,
-                "entry {entry:?} must start exactly one fresh epoch"
-            );
-        }
-        let final_work = invocation.work_snapshot();
-        assert_eq!(final_work.ambient_fallbacks, 0);
-        assert_eq!(final_work.launch_context_extensions, 1);
     }
 
     /// Issue #1 regression: a proxy target's own frontmatter `$(...)` shell

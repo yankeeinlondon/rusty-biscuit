@@ -3,13 +3,81 @@
 //! The layering helpers are pure; the template-preflight options carry the
 //! document-relative resolution contract a step's approved shell bytes depend on.
 
-use super::build_template_preflight_options;
+use super::{StepComposeContext, build_template_preflight_options, compose_step};
 use std::collections::BTreeMap;
 
 use darkmatter::markdown::Markdown;
 
 use claudine::composition::resolve_shell_approvals;
 use claudine::harness::ShellApprovalOptions;
+
+#[test]
+fn sequence_step_preparation_is_one_exact_document_epoch() {
+    use clap::Parser;
+
+    #[derive(Debug, clap::Parser)]
+    struct Probe {
+        #[command(flatten)]
+        shared: crate::commands::compose::SharedComposeArgs,
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let source_path = directory.path().join("step.md");
+    std::fs::write(
+        &source_path,
+        "---\nprepared: '{{ ctx.os }}'\n---\nbody={{ ctx.os }}\n",
+    )
+    .unwrap();
+    let invocation =
+        claudine::invocation_context::InvocationContext::capture_at(directory.path());
+    let source_context = invocation.derive_source(&source_path).unwrap();
+    let source = claudine::composition::resolve_composition_source(
+        source_path.to_string_lossy().as_ref(),
+    )
+    .unwrap();
+    let shared = Probe::try_parse_from(["probe", "--dry-run"])
+        .unwrap()
+        .shared;
+    let approval_cache =
+        std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+    let context = StepComposeContext {
+        source_repo_root: source_context.repository_root(),
+        child_cwd: directory.path(),
+        launch_area: Some(directory.path()),
+        shared: &shared,
+        approval_cache,
+        inline_mode: false,
+        file_resolution_context: source_context.file_resolution_context(),
+        invocation: &invocation,
+    };
+    let before = invocation.work_snapshot();
+
+    let step = compose_step(
+        &source,
+        &context,
+        &serde_json::json!({}),
+        &BTreeMap::new(),
+        std::collections::HashSet::new(),
+        false,
+    )
+    .unwrap();
+
+    assert!(step.prepared.prompt.contains("body="));
+    assert_eq!(
+        invocation.work_snapshot().document_epoch_since(&before),
+        claudine::invocation_context::DocumentEpochWork {
+            launch_context_constructions: 1,
+            launch_context_extensions: 0,
+            ambient_fallbacks: 0,
+            prepared_context_consumers: BTreeMap::from([
+                ("body".to_string(), 1),
+                ("effective-frontmatter".to_string(), 1),
+                ("preflight".to_string(), 1),
+            ]),
+        },
+        "one sequence step must prepare through one complete epoch"
+    );
+}
 
 /// RAII guard that switches the process CWD and restores it on drop
 /// (including on panic). Tests using it are serialized to avoid racing on
