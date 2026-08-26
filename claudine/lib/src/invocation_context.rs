@@ -108,6 +108,73 @@ pub struct InvocationWorkSnapshot {
     pub system_prompt_timings: BTreeMap<String, std::time::Duration>,
 }
 
+/// Work attributable to one document preparation epoch.
+///
+/// Obtain this from two invocation snapshots taken immediately before and
+/// after a canonical document boundary. Consumer counts remain intact so a
+/// route cannot satisfy an exact-set assertion by populating each consumer in
+/// a different epoch.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DocumentEpochWork {
+    pub launch_context_constructions: usize,
+    pub launch_context_extensions: usize,
+    pub ambient_fallbacks: usize,
+    pub prepared_context_consumers: BTreeMap<String, usize>,
+}
+
+impl InvocationWorkSnapshot {
+    /// Return the preparation work performed since `before`.
+    ///
+    /// Both snapshots must belong to the same invocation and `before` must
+    /// have been captured first. Violating either condition is a caller bug.
+    pub fn document_epoch_since(&self, before: &Self) -> DocumentEpochWork {
+        DocumentEpochWork {
+            launch_context_constructions: monotonic_delta(
+                self.launch_context_constructions,
+                before.launch_context_constructions,
+            ),
+            launch_context_extensions: monotonic_delta(
+                self.launch_context_extensions,
+                before.launch_context_extensions,
+            ),
+            ambient_fallbacks: monotonic_delta(
+                self.ambient_fallbacks,
+                before.ambient_fallbacks,
+            ),
+            prepared_context_consumers: map_delta(
+                &self.prepared_context_consumers,
+                &before.prepared_context_consumers,
+            ),
+        }
+    }
+}
+
+fn monotonic_delta(after: usize, before: usize) -> usize {
+    after
+        .checked_sub(before)
+        .expect("invocation work snapshots must be ordered and share an owner")
+}
+
+fn map_delta(
+    after: &BTreeMap<String, usize>,
+    before: &BTreeMap<String, usize>,
+) -> BTreeMap<String, usize> {
+    let mut delta = BTreeMap::new();
+    for (name, after_count) in after {
+        let count = monotonic_delta(*after_count, before.get(name).copied().unwrap_or_default());
+        if count > 0 {
+            delta.insert(name.clone(), count);
+        }
+    }
+    for (name, before_count) in before {
+        assert!(
+            after.contains_key(name) || *before_count == 0,
+            "invocation consumer counts must be monotonic"
+        );
+    }
+    delta
+}
+
 #[derive(Debug, Default)]
 struct InvocationWork {
     git_root_discoveries: AtomicUsize,
