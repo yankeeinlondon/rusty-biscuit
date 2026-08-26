@@ -1,5 +1,3 @@
-#![cfg(unix)]
-
 //! CLI-seam regressions for launch-anchored prepared `ctx.*`
 //! (`fixes/2026-08-12-ctx-launch-anchor`).
 //!
@@ -14,7 +12,17 @@ use std::path::Path;
 use tempfile::tempdir;
 
 mod common;
-use common::{augmented_path, init_git_repo, write, write_executable};
+use common::{augmented_path, init_git_repo, write};
+
+#[cfg(unix)]
+fn write_command_stub(bin_dir: &Path, name: &str, unix_content: &str, _windows_content: &str) {
+    common::write_executable(&bin_dir.join(name), unix_content);
+}
+
+#[cfg(windows)]
+fn write_command_stub(bin_dir: &Path, name: &str, _unix_content: &str, windows_content: &str) {
+    write(&bin_dir.join(format!("{name}.cmd")), windows_content);
+}
 
 /// A two-package-area Cargo workspace, so `ctx.area` has a real answer for a
 /// launch inside `alpha/lib`.
@@ -118,6 +126,167 @@ fn dry_run_reports_the_launch_area_for_an_opposing_area_prompt() {
     );
 }
 
+/// AC2/AC10: one opposing-area real invocation discriminates every prepared
+/// surface from source-owned file and schema resolution.
+#[test]
+fn opposing_area_real_route_separates_launch_surfaces_from_source_files() {
+    let workspace = tempdir().unwrap();
+    let root = workspace.path().join("repo");
+    fs::create_dir_all(root.join("alpha/lib")).unwrap();
+    fs::create_dir_all(root.join("beta/lib")).unwrap();
+    stage_monorepo(&root);
+    let launch_dir = root.join("alpha/lib");
+    let source_dir = root.join("beta/lib");
+    let doc = source_dir.join("probe-full-matrix.md");
+
+    write(
+        &launch_dir.join("schema.yaml"),
+        "launch_only: string(required)\n",
+    );
+    write(&launch_dir.join("fragment.md"), "LAUNCH-FRAGMENT\n");
+    write(
+        &source_dir.join("schema.yaml"),
+        "source_marker: string(required)\nspec: 'file(eager; required)'\nmy_area: string(required)\n",
+    );
+    write(&source_dir.join("spec.md"), "SOURCE-SPEC\n");
+    write(&source_dir.join("fragment.md"), "SOURCE-FRAGMENT\n");
+    write(
+        &doc,
+        concat!(
+            "---\n",
+            "$schema: ./schema.yaml\n",
+            "source_marker: source-owned\n",
+            "spec: spec.md\n",
+            "my_area: '{{ ctx.area }}'\n",
+            "start:\n",
+            "  stack:\n",
+            "    - when: \"ctx.area == 'alpha'\"\n",
+            "      action: {append_line: [\"events.log\", \"when-held\"]}\n",
+            "    - action: {shell: \"recordctx {{ ctx.area }}\"}\n",
+            "success:\n",
+            "  stack:\n",
+            "    - action: {append_line: [\"events.log\", \"ctx={{ ctx.area }} fm={{ my_area }}\"]}\n",
+            "---\n",
+            "SOURCE-BODY AREA={{ ctx.area }} FILE={{ file_exists(spec) }}\n",
+        ),
+    );
+    write(
+        &root.join(".darkmatter-shell-whitelist"),
+        "prefix recordctx\n",
+    );
+
+    let bin = workspace.path().join("bin");
+    let provider_log = workspace.path().join("provider.log");
+    let shell_log = workspace.path().join("shell.log");
+    write_command_stub(
+        &bin,
+        "claude",
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$CTX_PROVIDER_LOG\"\ncat >> \"$CTX_PROVIDER_LOG\"\nexit 0\n",
+        "@echo off\r\n> \"%CTX_PROVIDER_LOG%\" echo %*\r\nmore >> \"%CTX_PROVIDER_LOG%\"\r\nexit /b 0\r\n",
+    );
+    write_command_stub(
+        &bin,
+        "recordctx",
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CTX_SHELL_LOG\"\n",
+        "@echo off\r\n>> \"%CTX_SHELL_LOG%\" echo %*\r\n",
+    );
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    assert_cmd::Command::cargo_bin("claudine")
+        .unwrap()
+        .env("NO_COLOR", "1")
+        .env("HOME", &home)
+        .env("PATH", augmented_path(&bin))
+        .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+        .env("CTX_PROVIDER_LOG", &provider_log)
+        .env("CTX_SHELL_LOG", &shell_log)
+        .current_dir(&launch_dir)
+        .args(["compose", "--claude", &doc.to_string_lossy()])
+        .assert()
+        .success();
+
+    let provider = fs::read_to_string(&provider_log).unwrap_or_default();
+    assert!(
+        provider.contains("AREA=alpha FILE=true"),
+        "provider-bound body must contain launch area and source-owned eager file: {provider}"
+    );
+    assert!(
+        provider.contains("SOURCE-BODY") && !provider.contains("LAUNCH-FRAGMENT"),
+        "the provider must receive the opposing source's body: {provider}"
+    );
+    assert_eq!(
+        fs::read_to_string(&shell_log).unwrap_or_default().trim(),
+        "alpha",
+        "preflight-expanded and executed shell bytes must contain the launch area"
+    );
+    let events = fs::read_to_string(root.join("events.log")).unwrap_or_default();
+    assert!(events.contains("when-held"), "lifecycle when: did not see launch area: {events}");
+    assert!(
+        events.contains("ctx=alpha fm=alpha"),
+        "lifecycle and effective frontmatter must share the launch area: {events}"
+    );
+}
+
+/// AC1/AC8: loop documents at the repository root and in the launch package
+/// reuse the launch snapshot through their conditions, bodies, and lifecycle.
+#[test]
+fn loop_route_keeps_launch_area_for_root_and_package_documents() {
+    let workspace = tempdir().unwrap();
+    let root = workspace.path().join("repo");
+    fs::create_dir_all(root.join("alpha/lib")).unwrap();
+    fs::create_dir_all(root.join("beta/lib")).unwrap();
+    stage_monorepo(&root);
+    let launch_dir = root.join("alpha/lib");
+    let at_root = root.join("loop-root.md");
+    let in_area = launch_dir.join("loop-area.md");
+    for (path, label) in [(&at_root, "root"), (&in_area, "area")] {
+        write(
+            path,
+            &format!(
+                "---\nmy_area: '{{{{ ctx.area }}}}'\nloop:\n  while: \"ctx.area == 'alpha' && counter < 1\"\n  actions:\n    - \"increment(counter)\"\nstart:\n  stack:\n    - when: \"ctx.area == 'alpha'\"\n      action: {{append_line: [\"loop-events.log\", \"{label}:ctx={{{{ ctx.area }}}}:fm={{{{ my_area }}}}\"]}}\n---\n{label}:AREA={{{{ ctx.area }}}}\n"
+            ),
+        );
+    }
+
+    let bin = workspace.path().join("bin");
+    let provider_log = workspace.path().join("loop-provider.log");
+    write_command_stub(
+        &bin,
+        "claude",
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CTX_PROVIDER_LOG\"\ncat >> \"$CTX_PROVIDER_LOG\"\nprintf '%s\\n' '--- attempt ---' >> \"$CTX_PROVIDER_LOG\"\nexit 0\n",
+        "@echo off\r\n>> \"%CTX_PROVIDER_LOG%\" echo %*\r\nmore >> \"%CTX_PROVIDER_LOG%\"\r\n>> \"%CTX_PROVIDER_LOG%\" echo --- attempt ---\r\nexit /b 0\r\n",
+    );
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    for doc in [&at_root, &in_area] {
+        assert_cmd::Command::cargo_bin("claudine")
+            .unwrap()
+            .env("NO_COLOR", "1")
+            .env("HOME", &home)
+            .env("PATH", augmented_path(&bin))
+            .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+            .env("CTX_PROVIDER_LOG", &provider_log)
+            .current_dir(&launch_dir)
+            .args(["compose", "--claude", &doc.to_string_lossy()])
+            .assert()
+            .success();
+    }
+
+    let provider = fs::read_to_string(&provider_log).unwrap_or_default();
+    assert!(provider.contains("root:AREA=alpha"));
+    assert!(provider.contains("area:AREA=alpha"));
+    assert_eq!(
+        provider.matches("--- attempt ---").count(),
+        4,
+        "each equivalent loop document must run its seed attempt and one iteration: {provider}"
+    );
+    let events = fs::read_to_string(root.join("loop-events.log")).unwrap_or_default();
+    assert!(events.contains("root:ctx=alpha:fm=alpha"));
+    assert!(events.contains("area:ctx=alpha:fm=alpha"));
+}
+
 /// AC3: a prompt stored in another repository reports the launch repository;
 /// a prompt inside a repository launched from outside every repository reports
 /// no launch facts at all.
@@ -207,15 +376,21 @@ fn lifecycle_warn_and_when_report_the_launch_area() {
     // The fake provider exits non-zero so the `failure` event (a terminal
     // interpolation surface) fires alongside `start`.
     let bin = workspace.path().join("bin");
-    write_executable(&bin.join("claude"), "#!/bin/sh\nexit 1\n");
+    write_command_stub(
+        &bin,
+        "claude",
+        "#!/bin/sh\nexit 1\n",
+        "@echo off\r\nexit /b 1\r\n",
+    );
 
-    assert_cmd::Command::cargo_bin("claudine")
+    let output = assert_cmd::Command::cargo_bin("claudine")
         .unwrap()
         .env("NO_COLOR", "1")
         .env("HOME", &home)
         .env("PATH", augmented_path(&bin))
+        .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
         .current_dir(&launch_dir)
-        .args(["compose", "--claude", &doc.to_string_lossy()])
+        .args(["compose", "--claude", "--perf", &doc.to_string_lossy()])
         .assert()
         .failure();
 
@@ -229,6 +404,14 @@ fn lifecycle_warn_and_when_report_the_launch_area() {
     assert!(
         events.contains("when-alpha-held"),
         "the when: guard must see the launch area; events:\n{events}"
+    );
+    let stderr = String::from_utf8_lossy(&output.get_output().stderr);
+    let plain = common::strip_ansi(&stderr);
+    assert!(
+        plain.contains("prepared consumers")
+            && plain.contains("[body, effective-frontmatter, lifecycle, preflight]"),
+        "the live direct route must report its complete prepared-context consumer set; \
+         perf note:\n{plain}"
     );
 }
 
@@ -272,5 +455,11 @@ fn perf_reports_one_launch_capture_and_zero_ambient_fallbacks() {
     assert!(
         plain.contains("ambient fallbacks 0"),
         "no stage may fall through to darkmatter's ambient capture; perf note:\n{plain}"
+    );
+    assert!(
+        plain.contains("prepared consumers")
+            && plain.contains("[body, effective-frontmatter, preflight]"),
+        "the direct dry-run route must report its exact prepared-context consumer set; \
+         perf note:\n{plain}"
     );
 }
