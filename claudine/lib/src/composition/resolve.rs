@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use biscuit_file::{FileReference, FileResolutionContext, PathPosition, home_dir};
+use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::{Markdown, MarkdownError};
 
 use super::error::{CompositionError, MarkdownLoadCause};
@@ -231,8 +232,9 @@ pub fn resolve_composition_source_in_context(
     // infallible `From<String>` drops a `FrontmatterParse` error and returns an
     // empty-frontmatter document, which downstream looks like a *missing*
     // `prompt` property — hiding the actual YAML syntax error from the user.
-    let markdown =
-        Markdown::try_from(resolved_path.as_path()).map_err(|e| map_load_error(&resolved_path, e))?;
+    let markdown = Markdown::try_from(resolved_path.as_path())
+        .map_err(|e| map_load_error(&resolved_path, e))?
+        .with_source(ComposeSource::File(resolved_path.clone()));
 
     Ok(ResolvedCompositionSource {
         original_ref: file_ref.to_string(),

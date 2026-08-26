@@ -1702,7 +1702,8 @@ pub enum CompositionError {
     SequenceShellTargetIdentity {
         /// The authored command.
         command: String,
-        /// The offending path (`ctx.agent`, `ctx.model`, `env.AGENT`, `env.MODEL`).
+        /// The offending canonical identity path, or a computed `ctx`/`env`
+        /// access that could select one.
         root: String,
         /// A label locating the task.
         task: String,

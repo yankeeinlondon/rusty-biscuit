@@ -167,6 +167,9 @@ fn derive_compose_context(
     if let Some(prepared) = options.prepared_context.clone() {
         return prepared;
     }
+    if let Some(invocation) = options.invocation_context.as_ref() {
+        invocation.record_ambient_fallback();
+    }
     let anchor = options
         .file_ref_fallback_dir
         .clone()
@@ -175,6 +178,17 @@ fn derive_compose_context(
     // Demand-driven over this document's frontmatter and body, so a document
     // that never mentions `ctx.*` pays for no host scan.
     ComposeContext::capture_for_document(&anchor, &source.markdown)
+}
+
+fn observe_prepared_context(
+    options: &PrepareOptions,
+    consumer: crate::invocation_context::PreparedContextConsumer,
+) {
+    if options.prepared_context.is_some()
+        && let Some(invocation) = options.invocation_context.as_ref()
+    {
+        invocation.record_prepared_context_consumer(consumer);
+    }
 }
 
 /// The one `ComposeOptions` shape every canonical preparation stage composes
@@ -252,6 +266,10 @@ pub fn preflight_document_shell(
     options: &PrepareOptions,
     approval_options: &crate::harness::ShellApprovalOptions,
 ) -> Result<std::collections::HashSet<String>, CompositionError> {
+    observe_prepared_context(
+        options,
+        crate::invocation_context::PreparedContextConsumer::Preflight,
+    );
     let ctx = derive_compose_context(source, options);
     let compose_opts = canonical_compose_options(&source.resolved_path, &ctx, options);
     match super::resolve_shell_approvals(
@@ -336,6 +354,16 @@ pub(super) fn prepare_direct_with_prompt(
             replacement: replacement.to_string(),
         });
     }
+    if matches!(&prompt_source, PromptSource::ComposedBody) {
+        observe_prepared_context(
+            &options,
+            crate::invocation_context::PreparedContextConsumer::Body,
+        );
+    }
+    observe_prepared_context(
+        &options,
+        crate::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
+    );
     // Reuse the single composition-start snapshot when the caller supplied one
     // (so body, preflight, and lifecycle share one `ctx.*`/`env.*` capture);
     // otherwise derive one from the launch anchor.
@@ -492,6 +520,14 @@ pub fn prepare_inline(
         }
     };
 
+    observe_prepared_context(
+        &options,
+        crate::invocation_context::PreparedContextConsumer::Body,
+    );
+    observe_prepared_context(
+        &options,
+        crate::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
+    );
     // Build temporary markdown (frontmatter + prompt as body) and compose
     let temp_md = Markdown::with_frontmatter(fm.clone(), &prompt_text);
     // Reuse the single composition-start snapshot when supplied; see
