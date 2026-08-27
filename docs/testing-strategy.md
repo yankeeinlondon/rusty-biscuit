@@ -317,6 +317,22 @@ provider client and its Wiremock test, bench, and example targets:
   `darkmatter`; the dependency-aware scope includes those consumers whenever
   the Sniff surface changes.
 
+The shared `_test_all` recipe and root `just test [selectors...]` runner use one
+local Nextest invocation, so one scheduler can run test binaries from every
+selected package concurrently. Under the CI profile/environment, `_test_all`
+retains its per-package loop for independent JUnit staging and summaries.
+
+`features` remains the CI compile/test/archive contract. When CI additionally
+needs helpers for a higher tier, `local-features` overrides that list for local
+L1; an explicit empty array means default features only. `all-features` is
+expanded into package-qualified feature names so one package's policy does not
+widen its siblings. Tier-helper overrides keep Claudine's daemon/DuckDB and
+terminal targets, Darkmatter's terminal/browser targets, Biscuit Terminal's
+terminal/browser harnesses, Biscuit TUI's real-terminal targets, Sniff CLI's
+terminal fixtures, and comparable tier-only targets out of ordinary local L1
+compilation. Messenger locally enables only its desktop contract while CI
+retains all-provider coverage.
+
 ### Orchestrated and standalone workflows
 
 The remaining bespoke single-behavior workflow

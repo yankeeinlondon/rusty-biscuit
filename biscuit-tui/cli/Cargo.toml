@@ -8,6 +8,9 @@ license = "AGPL-3.0-only"
 name = "question"
 path = "src/main.rs"
 
+[features]
+terminal-tests = ["dep:biscuit-test-harness"]
+
 [dependencies]
 biscuit-tui = { path = "../lib" }
 clap = { version = "4", features = ["derive", "wrap_help"] }
@@ -18,14 +21,26 @@ toml = "0.8"
 csv = "1.3"
 heck = "0.5"
 thiserror = "2"
+biscuit-test-harness = { path = "../../biscuit-test-harness", optional = true }
 
 [dev-dependencies]
 assert_cmd = "2"
-biscuit-test-harness = { path = "../../biscuit-test-harness" }
 expectrl = "0.8"
 predicates = "3"
 serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
+
+[[test]]
+name = "real_terminal_render"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level3_chord_select"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "windows_captured_stdout"
+required-features = ["terminal-tests"]
 
 # Test-only, target-scoped: in `tests/windows_captured_stdout.rs` the F2
 # boundary test self-attaches a console (`AllocConsole`), rewires the process
@@ -60,3 +75,5 @@ reason = "Thin CLI wrapper around biscuit-tui; no measurable hot paths."
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]
 l2-backends = ["tmux", "wezterm", "kitty"]
+features = ["terminal-tests"]
+local-features = []

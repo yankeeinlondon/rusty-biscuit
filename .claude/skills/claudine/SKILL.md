@@ -13,6 +13,12 @@ The package follows the monorepo `lib` + `cli` split: library crate `claudine`, 
 
 Alongside these, `claudine/rendezvous/` is a first-class package-area family of **three crates** backing `claudine dashboard` and the (unwired) lifecycle `defer` scheduler, in a `core → {daemon, client}` shape: `rendezvous-core` (leaf — protobuf/gRPC stubs, identity, signed envelopes, sync wire framing, and the typed `LocalEndpoint`), `rendezvous-daemon` (the long-running service: gRPC over the platform's local endpoint, the `redb → Loro → DuckDB` session-log pipeline, register store, QUIC sync engine), and `rendezvous-client` (the portable `connect(&LocalEndpoint)` plus a thin gRPC test client). Both leaf crates depend on `rendezvous-core`, never on each other. Its area justfile (`cd claudine/rendezvous`) exposes `just check|build|test|lint`, each iterating all three crates.
 
+Ordinary local L1 leaves `claudine-cli/daemon-tests`,
+`claudine-cli/terminal-tests`, and both contract/CLI `real-tests` disabled.
+Required-feature targets keep DuckDB, L2/L3 integration binaries, and live
+provider targets out of that compile graph. CI enables daemon and terminal
+features; explicit tier recipes enable the corresponding local targets.
+
 The **local control plane** is platform-native and per stable OS user: a Unix-domain socket on macOS/Linux/WSL, a Windows named pipe on native Windows, qualified by the effective UID or process-token SID from `sniff::os::current_user_id()` — never a username. One portable `spawn_local_server` binds it to a transport-neutral daemon built exactly once. Read `claudine/docs/rendezvous/local-ipc.md` before changing endpoint, daemon-boot, or connector behavior; see [architecture.md](architecture.md) → Rendezvous Package-Area Family for the crate roles, the local-IPC rules, and the `SessionLogManager` module boundary.
 
 **Where to look next:**

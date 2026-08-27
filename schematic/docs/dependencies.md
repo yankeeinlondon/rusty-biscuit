@@ -44,7 +44,7 @@
 
     _Tags: errors, macros_
 
-### Development Dependencies
+### Development and Test-Tier Dependencies
 
 - [serde_json](https://github.com/serde-rs/json) _v1.0_
 
@@ -110,7 +110,16 @@
 
 - [biscuit-test-harness](../../biscuit-test-harness) _v0.1.0_
 
-    _Workspace test harness; `terminal_capture.rs` uses its `bin_exe!` macro to locate the `schematic-gen` binary at run time._
+    _Optional behind `schematic-gen/terminal-tests`; `terminal_capture.rs` uses
+    its `bin_exe!` macro to locate the generator in the L2 tmux tier. Local L1
+    omits the target and dependency, while CI and `just test-l2` enable them._
+
+    _Tags: workspace, testing_
+
+- [test-toolkit](../../tools/test-toolkit) _v0.1.0_
+
+    _Optional under the same `terminal-tests` feature; its L2 gate records tmux
+    execution evidence for CI's backend-proof verification._
 
     _Tags: workspace, testing_
 

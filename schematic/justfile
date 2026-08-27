@@ -86,9 +86,9 @@ lint-schema:
     @echo ""
     @cargo clippy --manifest-path schema/Cargo.toml --all-targets -- -D warnings
 
-# not applicable: schematic has no real-terminal (Level-2) tests
-test-l2:
-    @echo "test-l2: not applicable for schematic"
+# Real-terminal styling tests for the generator's status output.
+test-l2 *args="":
+    @just _test_l2 schematic-gen --features terminal-tests {{ args }}
 
 # not applicable: schematic has no OS-keyboard-injection (Level-3) tests
 test-l3:

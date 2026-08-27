@@ -14,7 +14,7 @@ use assert_cmd::Command;
 #[cfg(unix)]
 pub mod pty;
 
-#[cfg(unix)]
+#[cfg(all(unix, feature = "terminal-tests"))]
 pub mod real_terminal;
 
 /// Whether the `expect` driver [`run_question_in_pty`] shells out to is

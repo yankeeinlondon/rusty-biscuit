@@ -76,7 +76,7 @@ test-browser:
 # Live provider-API tests. Skip-clean without credentials.
 test-real *args="":
     @just _test_real unchained-ai {{ args }}
-    @just _test_real unchained-ai-contract {{ args }}
+    @just _test_real unchained-ai-contract --features real-tests {{ args }}
     @just _test_real unchained-ai-cli {{ args }}
     @just _test_real unchained-ai-gen {{ args }}
 

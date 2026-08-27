@@ -113,6 +113,7 @@ bench = false
 
 [package.metadata.ci.tests]
 all-features = true
+local-features = ["desktop"]
 runner-tools = ["messenger-desktop-stubs"]
 
 [package.metadata.ci.native]

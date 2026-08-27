@@ -481,9 +481,113 @@ _run_all recipe specs *args="":
         exit 1
     fi
 
-# Level-1 tests across several packages, continuing past failures. See `_run_all`.
+# Level-1 tests across several packages. Local development uses one Nextest
+# scheduler across the area; CI retains the per-package loop for independent
+# JUnit staging and package-level summaries.
 _test_all specs *args="":
-    @just _run_all _test "{{ specs }}" {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
+        just _run_all _test '{{ specs }}' {{ args }}
+    else
+        just _test_local_all '{{ specs }}' {{ args }}
+    fi
+
+# Run one L1 nextest invocation across an entire package area. This is the
+# local-development engine used by `_test_all`: Nextest schedules all selected
+# test binaries concurrently. `specs` has `_run_all`'s shape, so an area can
+# retain package-specific feature contracts without splitting the run.
+_test_local_all specs *args="": _storage_preflight
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    read -r -a nextest_bin <<< "${BISCUIT_NEXTEST_BIN:-cargo nextest}"
+    forwarded=({{ args }})
+
+    specs='{{ specs }}'
+    entries=()
+    if [[ "${specs}" == *";"* ]]; then
+        old_ifs="$IFS"
+        IFS=';'
+        read -r -a raw_entries <<< "${specs}"
+        IFS="$old_ifs"
+        for entry in "${raw_entries[@]}"; do
+            entry="${entry#"${entry%%[![:space:]]*}"}"
+            entry="${entry%"${entry##*[![:space:]]}"}"
+            [[ -n "${entry}" ]] && entries+=("${entry}")
+        done
+    else
+        for entry in ${specs}; do
+            entries+=("${entry}")
+        done
+    fi
+
+    selected=()
+    package_names=()
+    for entry in "${entries[@]}"; do
+        # Word-splitting is the point: an entry is `<package> [feature flags]`.
+        # shellcheck disable=SC2206
+        parts=(${entry})
+        package="${parts[0]}"
+        package_names+=("${package}")
+        selected+=(-p "${package}")
+
+        idx=1
+        while (( idx < ${#parts[@]} )); do
+            arg="${parts[$idx]}"
+            values=""
+            case "${arg}" in
+                --features|-F)
+                    idx=$((idx + 1))
+                    values="${parts[$idx]:-}"
+                    ;;
+                --features=*) values="${arg#--features=}" ;;
+                --all-features)
+                    values="$(cargo metadata --no-deps --format-version 1 \
+                        | jq -r --arg package "${package}" '
+                            .packages[]
+                            | select(.name == $package)
+                            | .features
+                            | keys
+                            | join(",")
+                        ')"
+                    ;;
+                *)
+                    echo "_test_local_all: unsupported per-package argument for ${package}: ${arg}" >&2
+                    echo "Only --features/-F and --all-features are supported; pass common Nextest arguments after specs." >&2
+                    exit 2
+                    ;;
+            esac
+            old_ifs="$IFS"
+            IFS=','
+            read -r -a features <<< "${values}"
+            IFS="$old_ifs"
+            for feature in "${features[@]}"; do
+                [[ -n "${feature}" ]] && selected+=(-F "${package}/${feature}")
+            done
+            idx=$((idx + 1))
+        done
+    done
+    if (( ${#selected[@]} == 0 )); then
+        echo "No packages given to _test_local_all." >&2
+        exit 1
+    fi
+
+    echo
+    echo -e "Testing {{ bold }}${package_names[*]}{{ reset }} in one local invocation"
+    echo
+
+    if "${nextest_bin[@]}" --version >/dev/null 2>&1; then
+        filter="$(just _tier_filter L1)"
+        if [[ -z "${BISCUIT_TEST_FILTER:-}" ]] && printf '%s\n' "${package_names[@]}" | grep -Fxq worktree-cli; then
+            filter="(${filter}) & !(package(worktree-cli) & test(/(^|::)perf_/))"
+        fi
+        "${nextest_bin[@]}" run "${selected[@]}" -E "${filter}" --no-tests=pass \
+            ${forwarded[@]+"${forwarded[@]}"}
+    else
+        cargo test "${selected[@]}" ${forwarded[@]+"${forwarded[@]}"} -- \
+            --skip level2_ --skip level3_ --skip browser_ --skip real_ --skip slow_ --skip perf_
+    fi
 
 # Sanity tier across several packages, continuing past failures. See `_run_all`.
 _sanity_all specs *args="":
@@ -963,39 +1067,6 @@ _test_workspace *selectors="": _storage_preflight
     #!/usr/bin/env bash
     set -euo pipefail
 
-    passed_packages=()
-    failed_packages=()
-    failed_codes=()
-    current_package=""
-
-    print_summary() {
-        echo
-        echo "================================================"
-        echo "Workspace Test Summary"
-        echo "================================================"
-        echo -e "{{ green }}Passed{{ reset }} (${#passed_packages[@]}): ${passed_packages[*]:-(none)}"
-        echo -e "{{ red }}Failed{{ reset }} (${#failed_packages[@]}):"
-        if (( ${#failed_packages[@]} == 0 )); then
-            echo "  (none)"
-        else
-            local i
-            for ((i = 0; i < ${#failed_packages[@]}; i++)); do
-                echo "  - ${failed_packages[$i]} (exit ${failed_codes[$i]})"
-            done
-        fi
-        echo "================================================"
-        echo
-    }
-
-    on_interrupt() {
-        trap - INT
-        echo
-        echo "Interrupted (Ctrl+C)${current_package:+ while testing ${current_package}}; remaining packages were not run."
-        print_summary
-        exit 130
-    }
-    trap on_interrupt INT
-
     metadata_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-workspace-tests.XXXXXX")"
     selected_file="$(mktemp "${TMPDIR:-/tmp}/biscuit-workspace-selected.XXXXXX")"
     trap 'rm -f "${metadata_file}" "${selected_file}"' EXIT
@@ -1046,46 +1117,41 @@ _test_workspace *selectors="": _storage_preflight
 
     package_count="$(wc -l < "${selected_file}" | tr -d ' ')"
     echo
-    echo "Running Level-1 tests for ${package_count} workspace packages..."
+    echo "Running Level-1 tests for ${package_count} workspace packages in one invocation..."
     echo "------------------------------------------------"
 
+    # CI features are the existing package-level coverage contract. A package
+    # may provide `local-features` when CI additionally builds helpers for a
+    # higher tier; presence (including an empty array) overrides `features`.
+    specs=""
     while IFS= read -r package; do
-        current_package="${package}"
-        package_args=()
-
-        # Messenger's default feature set omits the desktop implementation its
-        # package-area test contract covers.
-        if [[ "${package}" == "messenger" ]]; then
-            package_args+=(--features desktop)
+        features="$(jq -r --arg package "${package}" '
+            .packages[]
+            | select(.name == $package)
+            | . as $record
+            | (.metadata.ci.tests // {}) as $tests
+            | if ($tests | has("local-features"))
+              then ($tests["local-features"] // [])
+              elif ($tests["all-features"] // false)
+              then ($record.features | keys)
+              else ($tests.features // [])
+              end
+            | join(",")
+        ' "${metadata_file}")"
+        entry="${package}"
+        if [[ -n "${features}" ]]; then
+            entry="${entry} --features ${features}"
         fi
-
-        echo
-        echo "Testing ${package}..."
-        set +e
-        if (( ${#package_args[@]} > 0 )); then
-            just _test "${package}" "${package_args[@]}"
+        if [[ -n "${specs}" ]]; then
+            specs="${specs}; ${entry}"
         else
-            just _test "${package}"
+            specs="${entry}"
         fi
-        exit_code=$?
-        set -e
-
-        if [[ ${exit_code} -eq 130 ]]; then
-            on_interrupt
-        elif [[ ${exit_code} -eq 0 ]]; then
-            passed_packages+=("${package}")
-        else
-            failed_packages+=("${package}")
-            failed_codes+=("${exit_code}")
-        fi
-        current_package=""
     done < "${selected_file}"
 
-    print_summary
-
-    if (( ${#failed_packages[@]} > 0 )); then
-        exit 1
-    fi
+    # One scheduler sees every selected test binary. `--no-fail-fast` preserves
+    # the old workspace loop's promise that one failure does not hide the rest.
+    just _test_local_all "${specs}" --no-fail-fast
 
 # Verify that every package-area `test` recipe preserves Ctrl+C as exit 130.
 _check_test_interrupts:

@@ -217,8 +217,8 @@ Follows the monorepo L1/L2/L3 taxonomy.
 - L1 (library): domain / style / SVG assembly, `strum` round-trips, the
   string-convenience constructors, the Iconify client (via `wiremock` for
   HTTP contract), the SQLite cache (via `tempfile`).
-- L2 (CLI): `assert_cmd` + `predicates` — default-command equivalence,
-  `--from` filtering, completions (built-in + cached), error rendering.
+- L2 (CLI): real-terminal rendering behind the internal `terminal-tests`
+  feature. `just test-l2` enables it with `image`; local L1 omits the target.
 - L3: not applicable.
 
 ## Open Files in This Skill

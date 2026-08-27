@@ -7,6 +7,9 @@ edition = "2024"
 name = "hug"
 path = "src/main.rs"
 
+[features]
+terminal-tests = ["dep:biscuit-test-harness", "dep:test-toolkit"]
+
 [dependencies]
 biscuit-file = { path = "../../biscuit-file/lib", default-features = false }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
@@ -18,16 +21,22 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tree-hugger = { path = "../lib" }
 url = "2.5"
+biscuit-test-harness = { path = "../../biscuit-test-harness", optional = true }
+test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 
 [dev-dependencies]
 assert_cmd = "2.0"
-biscuit-test-harness = { path = "../../biscuit-test-harness" }
 predicates = "3.1"
 serial_test = "3"
 tempfile = "3.15"
-test-toolkit = { path = "../../tools/test-toolkit" }
+
+[[test]]
+name = "level2_god_files"
+required-features = ["terminal-tests"]
 
 # CI policy: tree-hugger-cli owns the area's L2 (real-terminal) tier tests.
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]
 l2-backends = ["tmux", "wezterm", "kitty"]
+features = ["terminal-tests"]
+local-features = []

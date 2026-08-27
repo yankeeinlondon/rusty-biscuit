@@ -166,6 +166,11 @@ messenger/
   docs/research/ # Provider research and API design notes
 ```
 
+Local L1 enables only the `desktop` feature used by the package-area contract.
+CI retains `all-features` coverage for every provider; the separate
+`local-features` metadata prevents root local testing from inheriting that
+provider-wide graph.
+
 ## Detailed Documentation
 
 - [Providers Reference](providers.md) - Provider trait, adapter implementations, config structs, capabilities

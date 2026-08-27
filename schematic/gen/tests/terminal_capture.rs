@@ -6,8 +6,8 @@
 //! `tmux capture-pane -e` (which preserves escape codes) and the raw
 //! buffer is asserted against expected ANSI styling and content.
 //!
-//! The tests **self-skip** when `tmux` is not available on `PATH`,
-//! keeping CI environments without a terminal multiplexer green.
+//! Local runs skip when `tmux` is unavailable. CI declares tmux as required,
+//! so absence or zero executed tmux tests fails the L2 backend proof.
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -17,6 +17,7 @@ use std::thread::sleep;
 use std::time::{Duration, Instant};
 
 use biscuit_test_harness::bin_exe;
+use test_toolkit::{Backend, Level, require_level};
 
 /// Per-process tmux socket path. Lives under `std::env::temp_dir()` in a
 /// directory created with mode 0700 so tmux does not refuse it as unsafe
@@ -228,13 +229,10 @@ fn assert_not_contains(haystack: &str, needle: &str, label: &str) {
 /// `schematic-gen validate --api openai` should emit bold-green
 /// `[PASS]` and `[OK]` markers when run inside a real terminal.
 ///
-/// Skips when tmux is unavailable so CI hosts without it stay green.
+/// Skips locally when tmux is unavailable; CI requires the backend.
 #[test]
-fn validate_emits_ansi_styled_ok_on_success() {
-    if !tmux_available() {
-        eprintln!("tmux not available on PATH - skipping terminal capture test");
-        return;
-    }
+fn level2_validate_emits_ansi_styled_ok_on_success() {
+    require_level!(Level::L2, tmux_available(), Backend::Tmux);
 
     let bin = schematic_gen_bin();
     let cmd = format!(
@@ -275,14 +273,10 @@ fn validate_emits_ansi_styled_ok_on_success() {
 /// (`ollamanative.json`, `emqxbasic.json`).
 ///
 /// Captures from a real terminal so we additionally verify the
-/// bold-green `[OK]` marker survives the styling pipeline. Skips when
-/// tmux is unavailable.
+/// bold-green `[OK]` marker survives the styling pipeline.
 #[test]
-fn generate_dry_run_emits_module_grouped_filenames() {
-    if !tmux_available() {
-        eprintln!("tmux not available on PATH - skipping terminal capture test");
-        return;
-    }
+fn level2_generate_dry_run_emits_module_grouped_filenames() {
+    require_level!(Level::L2, tmux_available(), Backend::Tmux);
 
     // Use a temp dir so paths are absolute and the shell `cd` does not
     // matter.
@@ -332,13 +326,10 @@ fn generate_dry_run_emits_module_grouped_filenames() {
 
 /// Validating an unknown API should print a red `[ERROR]` marker and
 /// list the available APIs. Verifies that error styling survives the
-/// terminal pipeline. Skips when tmux is unavailable.
+/// terminal pipeline.
 #[test]
-fn validate_unknown_api_emits_red_error() {
-    if !tmux_available() {
-        eprintln!("tmux not available on PATH - skipping terminal capture test");
-        return;
-    }
+fn level2_validate_unknown_api_emits_red_error() {
+    require_level!(Level::L2, tmux_available(), Backend::Tmux);
 
     let bin = schematic_gen_bin();
     // `definitely-not-a-real-api` is not in the registry, so the CLI

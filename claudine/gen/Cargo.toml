@@ -16,6 +16,9 @@ name = "claudine_gen"
 name = "claudine-gen"
 path = "src/main.rs"
 
+[features]
+terminal-tests = ["dep:serial_test", "dep:test-toolkit"]
+
 [dependencies]
 # Internal
 claudine-catalog-types = { path = "../catalog-types" }
@@ -47,14 +50,18 @@ tempfile = "3"
 
 # Variant-name introspection for the schema<->catalog compatibility gate
 strum = "0.28"
+serial_test = { version = "3", optional = true }
+test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 
 [dev-dependencies]
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 # Level-2 real-terminal report tests. Neither crate is `claudine`/`claudine-cli`,
 # so the bootstrap rule above still holds.
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
-test-toolkit = { path = "../../tools/test-toolkit" }
-serial_test = "3"
+
+[[test]]
+name = "level2_report_terminal"
+required-features = ["terminal-tests"]
 
 # CI policy: this package owns real L2 tests (`tests/level2_report_terminal.rs`
 # — tmux-driven report rendering), so the tier must be declared here or those
@@ -62,3 +69,5 @@ serial_test = "3"
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]
 l2-backends = ["tmux"]
+features = ["terminal-tests"]
+local-features = []

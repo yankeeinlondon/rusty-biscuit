@@ -10,6 +10,9 @@ repository = "https://github.com/yankeeinlondon/rusty-biscuit"
 name = "bt"
 path = "src/main.rs"
 
+[features]
+terminal-tests = ["dep:biscuit-test-harness", "dep:test-toolkit"]
+
 [dependencies]
 biscuit-terminal = { path = "../lib", features = ["clap", "image"] }
 renderable = { path = "../../renderable" }
@@ -21,20 +24,66 @@ serde_json = "1.0"
 color-eyre = "0.6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+biscuit-test-harness = { path = "../../biscuit-test-harness", optional = true }
+test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 
 [dev-dependencies]
 assert_cmd = "2"
-biscuit-test-harness = { path = "../../biscuit-test-harness" }
 expectrl = "0.8.0"
 insta = "1.46.3"
 predicates = "3"
 serial_test = "3"
 sha2 = "0.10"
 tempfile = "3"
-test-toolkit = { path = "../../tools/test-toolkit" }
 unicode-width = "0.2"
+
+[[test]]
+name = "level2_apple_terminal_prose"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_container_fenced_code"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_cursor_and_hygiene"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_diagrams"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_image"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_layout"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_prose_cells"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_prose_styling"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_render_tree_style"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_status_block"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_style_everywhere_matrix"
+required-features = ["terminal-tests"]
 
 # CI policy: biscuit-terminal-cli owns L2 (real-terminal) tier tests.
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]
 l2-backends = ["tmux", "wezterm", "kitty", "apple-terminal"]
+features = ["terminal-tests"]
+local-features = []

@@ -88,6 +88,7 @@ CI_TEST_FIELDS = {
     "tiers",
     "l2-backends",
     "features",
+    "local-features",
     "all-features",
     "l1-include-slow",
     "runner-tools",
@@ -429,9 +430,16 @@ def validate_package_ci(
         )
 
     features = tests.get("features", [])
+    local_features = tests.get("local-features", features)
     all_features = tests.get("all-features", False)
     if not isinstance(features, list) or not all(isinstance(f, str) for f in features):
         raise RuntimeError(f"{label}.tests field 'features' must be a list of feature names")
+    if not isinstance(local_features, list) or not all(
+        isinstance(f, str) for f in local_features
+    ):
+        raise RuntimeError(
+            f"{label}.tests field 'local-features' must be a list of feature names"
+        )
     if not isinstance(all_features, bool):
         raise RuntimeError(f"{label}.tests field 'all-features' must be a boolean")
     if features and all_features:
