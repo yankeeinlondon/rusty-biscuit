@@ -4,8 +4,8 @@ description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
   `require_level!` gating, nextest filtersets, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 1acc7c1c76b11142-074f2fcc0f68fad2
-last_updated: 2026-08-12
+hash: 1acc7c1c76b11142-087cb82e7ef3825c
+last_updated: 2026-08-27
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -197,7 +197,12 @@ Before running any final build, test, or lint gate:
    `sniff repo package-dependencies` to map that impact to executable scopes.
 3. Run build, test, and lint for every affected package area. Use its local
    `just build`, `just test`, and `just lint` recipes, or an exact package
-   selector when the repository provides a narrower supported recipe.
+   selector when the repository provides a narrower supported recipe. To run
+   exactly what CI's `lint` and `test` gates run for the branch's affected
+   packages, use `just ci-local` at the root (`--lint-only` first: the
+   no-features clippy build is where incomplete feature gating surfaces;
+   `--dry-run` prints the scope). The pre-push hook runs `just lint` for the
+   changed areas before `just test` for the same reason.
 4. Report the selected scope and commands with the gate results.
 
 For durable native CI, declare package policy in the package's own

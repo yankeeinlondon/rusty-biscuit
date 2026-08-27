@@ -5,9 +5,10 @@
 //! Scans every production `.rs` file under `lib/src/` **and** `cli/src/` for
 //! per-variant `Provider` dispatch and regenerates the committed inventory at
 //! `claudine/docs/providers/dispatch-inventory.json`. The drift test
-//! byte-compares the regenerated document against the committed file, so a
-//! plain `just test` run fails whenever dispatch sites change without a
-//! matching inventory update. `#[cfg(test)]` module bodies are blanked before
+//! compares the regenerated document against the committed file with `"line"`
+//! values masked, so a plain `just test` run fails whenever dispatch *sites*
+//! change without a matching inventory update — but not when code merely
+//! moves. `#[cfg(test)]` module bodies are blanked before
 //! scanning (test fixtures are not production dispatch), so integration tests
 //! under `*/tests/` and inline unit-test modules are both out of scope by
 //! design.
@@ -938,8 +939,9 @@ fn render(inventory: &Inventory) -> String {
     json
 }
 
-/// Drift test: the committed inventory must byte-match a fresh regeneration.
-/// Set `CLAUDINE_UPDATE_INVENTORY=1` to bless the committed file instead.
+/// Drift test: the committed inventory must match a fresh regeneration once
+/// `"line"` values are masked (see [`mask_line_numbers`]). Set
+/// `CLAUDINE_UPDATE_INVENTORY=1` to bless the committed file instead.
 #[test]
 fn dispatch_inventory_matches_committed_file() {
     let inventory = generate_inventory();
@@ -966,6 +968,8 @@ fn dispatch_inventory_matches_committed_file() {
         })
         .replace("\r\n", "\n");
 
+    let committed = mask_line_numbers(&committed);
+    let generated = mask_line_numbers(&generated);
     if committed != generated {
         let divergence = committed
             .lines()
@@ -1258,6 +1262,31 @@ fn cli_dispatch_guard_holds_the_line() {
         "GUARD_ALLOWLIST entries with an unrecognized tag or a `keep` entry missing a \
          reason: {bad_meta:#?}"
     );
+}
+
+/// Replaces every `"line": <n>` value with `"line": _` so the drift test
+/// compares dispatch *facts* only.
+///
+/// Line numbers stay in the committed file as navigation aids, but they are
+/// not what the guard protects: inserting a comment or a `#[cfg]` attribute
+/// above a site must not fail the test (it did, repeatedly, in 2026-08). A
+/// stale line number is corrected by the next intentional bless.
+fn mask_line_numbers(document: &str) -> String {
+    document
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            match trimmed.strip_prefix("\"line\": ") {
+                Some(rest) if rest.trim_end_matches(',').bytes().all(|b| b.is_ascii_digit()) => {
+                    let indent = &line[..line.len() - trimmed.len()];
+                    let comma = if rest.ends_with(',') { "," } else { "" };
+                    format!("{indent}\"line\": _{comma}")
+                }
+                _ => line.to_string(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 // ---------------------------------------------------------------------------
