@@ -185,7 +185,7 @@ mod tests {
         assert_eq!(materialized.frontmatter["prepared_area"], serde_json::json!("alpha"));
         assert_eq!(
             materialized.frontmatter["prepared_repo"],
-            serde_json::json!(launch_repo.to_string_lossy())
+            serde_json::json!(biscuit_file::to_portable_string(&launch_repo))
         );
         assert_eq!(materialized.prompt, "provider-owned prompt");
         let resolution = materialized
