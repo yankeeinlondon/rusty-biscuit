@@ -137,7 +137,8 @@ behavioral change on adoption.
 
 The store is bounded; `target/` is not. Run `just sweep` to prune stale
 build artifacts (`cargo sweep`: uninstalled toolchains, then anything untouched
-for 14 days, then a 120 GB per-root backstop cap). With a warm kache store,
+for 14 days, then a 120 GB per-root cap only when the target filesystem has
+less than 100 GiB free). With a warm kache store,
 swept artifacts return as link-restores rather than recompiles, and a lean
 `target/` keeps kache's per-crate keying fast. Schedule it per host — launchd
 on macOS, `just install-windows-sweep` on Windows, and cron or a systemd timer
