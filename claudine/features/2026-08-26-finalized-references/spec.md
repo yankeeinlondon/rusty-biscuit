@@ -11,6 +11,7 @@ packages:
     - darkmatter
     - claudine
 depends-on: ../../fixes/2026-08-12-ctx-launch-anchor/spec.md
+implemented: true
 ---
 
 # Finalized file-reference grammar: one sigil catalog, one CWD model
