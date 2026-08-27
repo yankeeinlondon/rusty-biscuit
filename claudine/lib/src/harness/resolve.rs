@@ -40,7 +40,8 @@ pub struct HarnessResolutionContext<'a> {
 /// - **implicit** (`foo.md`, `sub/foo.md`) — source directory first, then the
 ///   repository root.
 /// - **explicit** (`./foo.md`, `../foo.md`) — pinned to the source directory.
-/// - **`@foo`** — magic-root search (repository root, configured roots, home).
+/// - **`@foo`** — registered prepend roots, then intrinsic package,
+///   package-area, repository, and home roots, then registered append roots.
 /// - **`~`**, **`~/foo`** — the user's home directory (`~user` unsupported).
 /// - **absolute** — the path itself.
 ///

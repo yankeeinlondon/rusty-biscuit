@@ -218,9 +218,12 @@ skills_files_updated_during_phase_7:
     - .claude/skills/claudine/SKILL.md
     - .claude/skills/claudine/architecture.md
 source_files_during_phase_8:
+    - biscuit-file/lib/src/file_reference/parse.rs
+    - biscuit-file/lib/tests/reference_grammar.rs
     - claudine/cli/src/commands/wrap/sequence/mod.rs
     - claudine/cli/src/commands/wrap/sequence/task_run.rs
     - claudine/cli/tests/level2_file_resolution_capture.rs
+    - claudine/lib/src/harness/resolve.rs
     - claudine/lib/src/composition/sequence/task/mod.rs
     - claudine/lib/src/composition/sequence/task/tests.rs
     - claudine/lib/src/system_prompt/prepare.rs
