@@ -1,8 +1,8 @@
 //! Phase 4 integration tests: the implicit-relative precedence flip and the
 //! OQ1 interpolation-reclassification rule.
 //!
-//! Implicit relative references now resolve **repository root first, then the
-//! source/base directory**. Explicit `./`/`../` references keep their single
+//! Implicit relative references resolve **the source/base directory first,
+//! then the repository root**. Explicit `./`/`../` references keep their single
 //! base-relative candidate with no fallback. Environment interpolation
 //! reclassifies filesystem anchoring for the local family (OQ1 option 2) and
 //! rejects any injected grammar sigil.

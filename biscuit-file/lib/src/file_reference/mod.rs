@@ -510,8 +510,8 @@ impl FileReference {
 
     /// Resolve the reference to an absolute filesystem path.
     ///
-    /// Uses the ambient process working directory for relative, `@`, and
-    /// `!` lookups. When the reference comes from a document or file whose
+    /// Uses the ambient process working directory for relative, `@`, `&`, and
+    /// `^` lookups. When the reference comes from a document or file whose
     /// own location should drive resolution, prefer [`resolve_from`].
     ///
     /// ## Returns
@@ -532,8 +532,9 @@ impl FileReference {
 
     /// Resolve the reference treating `base` as the working directory.
     ///
-    /// This overrides the ambient process CWD used for relative, `@`
-    /// (magic), and `!` (package) lookups. Use this when a reference
+    /// This overrides the ambient process CWD used for relative, `@` (magic),
+    /// `&` (repository-root), and `^` (repository-scoped) lookups. Use this
+    /// when a reference
     /// appears inside a document or file and should be resolved relative
     /// to *that file's* location rather than wherever the current process
     /// happens to be running.
