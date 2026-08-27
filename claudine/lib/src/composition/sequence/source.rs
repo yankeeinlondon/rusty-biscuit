@@ -13,7 +13,7 @@
 
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext};
+use biscuit_file::{FileReference, FileResolutionContext};
 use serde_json::{Map, Value};
 
 use super::super::error::{CompositionError, SequenceLoadCause};
@@ -27,9 +27,9 @@ use super::normalize::normalize_plan;
 /// Resolve an external sequence reference string to an absolute existing path.
 ///
 /// Delegates all grammar and candidate ordering to [`FileReference`] and the
-/// shared [`FileResolutionContext`] (D5/D11): implicit refs probe the
-/// repository root then the source directory; explicit refs pin to the source
-/// directory; `@`/`!`/`vault:`/`~`/absolute keep their usual meanings. The
+/// shared [`FileResolutionContext`] (D5/D11): implicit refs probe the source
+/// directory before repository scopes; explicit refs pin to the source
+/// directory; `@`/`^`/`vault:`/`~`/absolute keep their usual meanings. The
 /// reference is authored inside the composition source, so the source
 /// document's directory is the base and the launch directory is never a
 /// fallback here.
@@ -82,10 +82,9 @@ pub fn resolve_sequence_reference_in_context(
 /// Capture the request-scoped resolution anchors for an external sequence
 /// reference authored inside a composition source.
 ///
-/// The worktree root and package area are discovered once here (via `sniff`) and
-/// passed in, so `FileReference` resolution never re-probes git or Cargo state
-/// per reference. Package-area discovery is skipped for every reference kind
-/// except `!`, whose resolution is the only one that consumes it.
+/// The worktree root and package area are discovered once here (via `sniff`)
+/// and passed in, so `FileReference` resolution never re-probes repository
+/// topology per candidate.
 fn build_sequence_resolution_context(
     file_ref: &FileReference,
     base_dir: &Path,
@@ -101,7 +100,7 @@ fn build_sequence_resolution_context(
     }
     ctx = ctx.with_repository_root(repo_root.clone());
 
-    if file_ref.class().kind == FileReferenceKind::Package
+    if file_ref.class().kind == biscuit_file::FileReferenceKind::RepositoryScoped
         && let Ok(Some(repo)) = sniff::filesystem::detect_repo(&repo_root)
         && let Some(area) = repo.package_area_label_for_dir(base_dir)
     {

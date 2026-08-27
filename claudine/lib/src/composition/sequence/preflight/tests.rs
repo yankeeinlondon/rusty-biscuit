@@ -171,7 +171,7 @@ mod loading {
                 "kind": "group",
                 "tasks": [
                     { "task": "nested/magic-task.yaml" },
-                    { "task": "!package-task.yaml" },
+                    { "task": "^package-task.yaml" },
                 ],
             }),
         );

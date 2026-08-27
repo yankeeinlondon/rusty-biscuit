@@ -111,7 +111,10 @@ fn configure_tts() -> Result<TtsValue> {
                     log::message(&format!(
                         "  Attempting to install a TTS provider with `{rendered_command}`..."
                     ));
-                    let install_result = std::process::Command::new(&command).args(&args).output();
+                    let mut child = std::process::Command::new(&command);
+                    child.args(&args);
+                    claudine::child_environment::contribute_child_environment(&mut child)?;
+                    let install_result = child.output();
                     match install_result {
                         Ok(output) if output.status.success() => {
                             log::message("  TTS provider installed successfully. TTS enabled.");

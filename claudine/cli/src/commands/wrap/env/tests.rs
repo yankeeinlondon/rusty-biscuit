@@ -420,6 +420,44 @@ fn build_child_env_overrides_pwd_to_match_child_cwd() {
     );
 }
 
+#[test]
+fn build_child_env_overwrites_stale_agent_cwd_with_process_launch_directory() {
+    let expected = claudine::child_environment::initialize_process_launch_directory(
+        claudine::child_environment::LaunchDirectoryMode::Ordinary,
+    )
+    .unwrap()
+    .to_path_buf();
+    let profile = profile_for_provider(claudine::provider::Provider::Claude).unwrap();
+    let cwd = tempfile::tempdir().unwrap();
+
+    let plan = build_child_env(
+        profile,
+        claudine::provider::Provider::Claude,
+        &[],
+        false,
+        false,
+        &[],
+        cwd.path(),
+        &[("AGENT_CWD".to_string(), "stale/value".to_string())],
+        false,
+        false,
+        None,
+    )
+    .unwrap();
+
+    assert_eq!(
+        plan.env.get(std::ffi::OsStr::new("AGENT_CWD")),
+        Some(&expected.clone().into_os_string())
+    );
+    assert_eq!(
+        plan.added
+            .iter()
+            .find(|(key, _)| key == "AGENT_CWD")
+            .map(|(_, value)| std::path::PathBuf::from(value)),
+        Some(expected)
+    );
+}
+
 /// The wrapper stamps two interactiveness signals with distinct
 /// audiences: the child-facing `INTERACTIVE` ("true"/"false") and the
 /// `CLAUDINE_`-namespaced `CLAUDINE_INTERACTIVE` ("1"/"0") gate that the

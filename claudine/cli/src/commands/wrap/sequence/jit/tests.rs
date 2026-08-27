@@ -260,12 +260,14 @@ fn distributed_step_keeps_launch_identity_and_source_schema_and_files() {
     )
     .unwrap();
     std::fs::write(launch_dir.join("fragment.md"), "LAUNCH-FRAGMENT\n").unwrap();
+    std::fs::write(launch_dir.join("caller.md"), "LAUNCH-CALLER\n").unwrap();
     std::fs::write(
         source_dir.join("schema.yaml"),
-        "source_marker: string(required)\nspec: 'file(eager; required)'\n",
+        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
     )
     .unwrap();
     std::fs::write(source_dir.join("spec.md"), "SOURCE-SPEC\n").unwrap();
+    std::fs::write(source_dir.join("caller.md"), "SOURCE-CALLER\n").unwrap();
     std::fs::write(source_dir.join("fragment.md"), "SOURCE-FRAGMENT\n").unwrap();
     let source_path = source_dir.join("step.md");
     std::fs::write(
@@ -276,15 +278,16 @@ fn distributed_step_keeps_launch_identity_and_source_schema_and_files() {
             "source_marker: source-owned\n",
             "spec: spec.md\n",
             "---\n",
-            "REPO={{ ctx.repo_root }} AREA={{ ctx.area }} AGENT={{ ctx.agent }} ",
+            "REPO={{ ctx.repo_root }} AREA={{ ctx.area }} CWD={{ ctx.cwd }} AGENT={{ ctx.agent }} ",
             "MODEL={{ ctx.model }} ENV={{ env.AGENT }}/{{ env.MODEL }} ",
-            "FILE={{ file_exists(spec) }}\n",
+            "FILE={{ file_exists(spec) }} CALLER={{ caller_spec }}\n",
             "SOURCE-BODY\n",
         ),
     )
     .unwrap();
 
     let invocation = claudine::invocation_context::InvocationContext::capture_at(&launch_dir);
+    let materialized_caller = biscuit_file::to_portable_string(&launch_dir.join("caller.md"));
     let source_context = invocation.derive_source(&source_path).unwrap();
     let source = claudine::composition::resolve_composition_source(
         source_path.to_string_lossy().as_ref(),
@@ -300,7 +303,9 @@ fn distributed_step_keeps_launch_identity_and_source_schema_and_files() {
         &env,
         &pre.source.resolved_path,
         &pre.source.markdown,
-        &serde_json::json!({}),
+        // The sequence boundary receives the effective value produced by the
+        // canonical raw/effective materializer and must not re-anchor it.
+        &serde_json::json!({ "caller_spec": materialized_caller }),
         Some(&launch_dir),
         Some(source_context.file_resolution_context()),
         Some(&invocation),
@@ -308,11 +313,20 @@ fn distributed_step_keeps_launch_identity_and_source_schema_and_files() {
     let (composed, _) = pre.source.markdown.compose_with(options).unwrap();
     let body = composed.content();
 
-    assert!(body.contains("AREA=alpha AGENT=codex MODEL=gpt-5 ENV=codex/gpt-5 FILE=true"));
+    assert!(body.contains(&format!(
+        "AREA=alpha CWD={} AGENT=codex MODEL=gpt-5 ENV=codex/gpt-5 FILE=true",
+        biscuit_file::to_portable_string(&launch_dir)
+    )));
     assert!(body.contains(launch_repo.to_string_lossy().as_ref()));
     assert!(body.contains("SOURCE-BODY"));
     assert!(!body.contains("LAUNCH-FRAGMENT"));
+    assert!(body.contains(biscuit_file::to_portable_string(&launch_dir.join("caller.md")).as_str()));
+    assert!(!body.contains("SOURCE-CALLER"));
     assert_eq!(context.get("area").and_then(serde_json::Value::as_str), Some("alpha"));
+    assert_eq!(
+        context.get("cwd").and_then(serde_json::Value::as_str),
+        Some(biscuit_file::to_portable_string(&launch_dir).as_str())
+    );
     let effective = context.as_object();
     assert_eq!(effective.get("agent").and_then(serde_json::Value::as_str), Some("codex"));
     assert_eq!(effective.get("model").and_then(serde_json::Value::as_str), Some("gpt-5"));

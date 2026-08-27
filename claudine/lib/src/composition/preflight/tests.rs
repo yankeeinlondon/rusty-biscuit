@@ -783,13 +783,13 @@ fn lifecycle_shell_read_side_reuses_all_request_resolution_inputs() {
         "env_ref": env_ref,
         "home_ref": "~/home.flag",
         "magic_ref": "@magic.flag",
-        "package_ref": "!package.flag",
+        "package_ref": "^package.flag",
     });
     let fm_with_event = serde_json::json!({
         "env_ref": env_ref,
         "home_ref": "~/home.flag",
         "magic_ref": "@magic.flag",
-        "package_ref": "!package.flag",
+        "package_ref": "^package.flag",
         "start": {
             "stack": [{"action": {"shell": concat!(
                 "echo {{ file_exists(env_ref) }} ",

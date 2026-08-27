@@ -30,7 +30,7 @@ fn loop_file_functions_reuse_request_home_magic_and_package_roots() {
     for expression in [
         "file_exists('~/home.flag')",
         "file_exists('@magic.flag')",
-        "file_exists('!package.flag')",
+        "file_exists('^package.flag')",
     ] {
         assert!(
             evaluate_condition(&LoopCondition::While(expression.into()), &lookup).unwrap(),

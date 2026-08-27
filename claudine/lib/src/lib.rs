@@ -1,5 +1,6 @@
 pub mod actions;
 pub mod badges;
+pub mod child_environment;
 pub mod composition;
 pub mod config;
 pub mod diagnostics;

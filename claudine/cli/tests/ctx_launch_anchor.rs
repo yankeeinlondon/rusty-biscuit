@@ -44,8 +44,9 @@ fn stage_monorepo(root: &Path) {
 
 /// The probe document: body and effective-frontmatter surfaces that both read
 /// the prepared launch snapshot.
-const PROBE_BODY: &str = "AREA={{ ctx.area }} REPO={{ ctx.repo_root }}";
-const PROBE_DOC: &str = "---\ntitle: ctx probe\nmy_area: \"{{ ctx.area }}\"\n---\n";
+const PROBE_BODY: &str = "AREA={{ ctx.area }} CWD={{ ctx.cwd }} REPO={{ ctx.repo_root }}";
+const PROBE_DOC: &str =
+    "---\ntitle: ctx probe\nmy_area: \"{{ ctx.area }}\"\nmy_cwd: \"{{ ctx.cwd }}\"\n---\n";
 
 fn write_probe(path: &Path) {
     write(path, &format!("{PROBE_DOC}{PROBE_BODY}"));
@@ -89,6 +90,16 @@ fn dry_run_reports_the_launch_area_for_root_and_package_prompts() {
         assert!(
             output.contains("AREA=alpha"),
             "launch package area must be reported for {}\noutput:\n{output}",
+            doc.display()
+        );
+        assert!(
+            output.contains(&format!(
+                "CWD={}",
+                biscuit_file::to_portable_string(
+                    &launch_dir.canonicalize().expect("canonical launch directory")
+                )
+            )),
+            "launch CWD must be reported for {}\noutput:\n{output}",
             doc.display()
         );
         let reported_repo = output
@@ -146,7 +157,7 @@ fn opposing_area_real_route_separates_launch_surfaces_from_source_files() {
     write(&launch_dir.join("fragment.md"), "LAUNCH-FRAGMENT\n");
     write(
         &source_dir.join("schema.yaml"),
-        "source_marker: string(required)\nspec: 'file(eager; required)'\nmy_area: string(required)\n",
+        "source_marker: string(required)\nspec: 'file(eager; required)'\nmy_area: string(required)\nmy_cwd: string(required)\n",
     );
     write(&source_dir.join("spec.md"), "SOURCE-SPEC\n");
     write(&source_dir.join("fragment.md"), "SOURCE-FRAGMENT\n");
@@ -158,6 +169,7 @@ fn opposing_area_real_route_separates_launch_surfaces_from_source_files() {
             "source_marker: source-owned\n",
             "spec: spec.md\n",
             "my_area: '{{ ctx.area }}'\n",
+            "my_cwd: '{{ ctx.cwd }}'\n",
             "start:\n",
             "  stack:\n",
             "    - when: \"ctx.area == 'alpha'\"\n",
@@ -165,9 +177,9 @@ fn opposing_area_real_route_separates_launch_surfaces_from_source_files() {
             "    - action: {shell: \"recordctx {{ ctx.area }}\"}\n",
             "success:\n",
             "  stack:\n",
-            "    - action: {append_line: [\"events.log\", \"ctx={{ ctx.area }} fm={{ my_area }}\"]}\n",
+            "    - action: {append_line: [\"events.log\", \"ctx={{ ctx.area }} cwd={{ ctx.cwd }} fm={{ my_area }}/{{ my_cwd }}\"]}\n",
             "---\n",
-            "SOURCE-BODY AREA={{ ctx.area }} FILE={{ file_exists(spec) }}\n",
+            "SOURCE-BODY AREA={{ ctx.area }} CWD={{ ctx.cwd }} FILE={{ file_exists(spec) }}\n",
         ),
     );
     write(
@@ -208,9 +220,13 @@ fn opposing_area_real_route_separates_launch_surfaces_from_source_files() {
 
     let provider = fs::read_to_string(&provider_log).unwrap_or_default();
     assert!(
-        provider.contains("AREA=alpha FILE=true"),
+        provider.contains("AREA=alpha") && provider.contains("FILE=true"),
         "provider-bound body must contain launch area and source-owned eager file: {provider}"
     );
+    let expected_cwd = biscuit_file::to_portable_string(
+        &launch_dir.canonicalize().expect("canonical launch directory"),
+    );
+    assert!(provider.contains(&format!("CWD={expected_cwd}")), "{provider}");
     assert!(
         provider.contains("SOURCE-BODY") && !provider.contains("LAUNCH-FRAGMENT"),
         "the provider must receive the opposing source's body: {provider}"
@@ -223,8 +239,105 @@ fn opposing_area_real_route_separates_launch_surfaces_from_source_files() {
     let events = fs::read_to_string(root.join("events.log")).unwrap_or_default();
     assert!(events.contains("when-held"), "lifecycle when: did not see launch area: {events}");
     assert!(
-        events.contains("ctx=alpha fm=alpha"),
+        events.contains(&format!("ctx=alpha cwd={expected_cwd} fm=alpha/{expected_cwd}")),
         "lifecycle and effective frontmatter must share the launch area: {events}"
+    );
+}
+
+/// Finalized-reference AC5 regression (2026-08-26): D3 supersedes
+/// ctx-launch-anchor review-3 Finding 4 for document-authored references while
+/// retaining its caller rule. A caller file parameter is materialized at the
+/// launch boundary and must keep that absolute identity when a repo-root shared
+/// prompt proxies to another document.
+#[test]
+fn caller_file_anchor_survives_direct_and_proxy_success_guards() {
+    let workspace = tempdir().unwrap();
+    let root = workspace.path().join("repo");
+    fs::create_dir_all(root.join("alpha/lib")).unwrap();
+    fs::create_dir_all(root.join("beta/lib")).unwrap();
+    stage_monorepo(&root);
+    let launch_dir = root.join("alpha/lib");
+    let launch_spec = launch_dir.join("spec.md");
+    write(&launch_spec, "# launch spec\n");
+    write(&launch_dir.join("sibling.md"), "# launch sibling\n");
+    write(&root.join("spec.md"), "# repository decoy\n");
+
+    let target = root.join("shared-target.md");
+    write(
+        &target,
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  spec: 'file(eager; required)'\n",
+            "success:\n",
+            "  stack:\n",
+            "    - when: \"file_exists(dirname(spec) + '/sibling.md') && file_exists(parent_dir(spec) + '/sibling.md')\"\n",
+            "      action: {append_line: [\"events.log\", \"anchored={{ spec }} cwd={{ ctx.cwd }}\"]}\n",
+            "---\n",
+            "TARGET SPEC={{ spec }}\n",
+        ),
+    );
+    let router = root.join("shared-router.md");
+    write(
+        &router,
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  spec: 'file(eager; required)'\n",
+            "initialize:\n",
+            "  stack:\n",
+            "    - action: {proxy: \"shared-target.md\"}\n",
+            "---\n",
+            "ROUTER\n",
+        ),
+    );
+
+    let bin = workspace.path().join("bin");
+    let provider_log = workspace.path().join("provider.log");
+    write_command_stub(
+        &bin,
+        "claude",
+        "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CTX_PROVIDER_LOG\"\ncat >> \"$CTX_PROVIDER_LOG\"\nexit 0\n",
+        "@echo off\r\n>> \"%CTX_PROVIDER_LOG%\" echo %*\r\nmore >> \"%CTX_PROVIDER_LOG%\"\r\nexit /b 0\r\n",
+    );
+    let home = workspace.path().join("home");
+    fs::create_dir_all(&home).unwrap();
+
+    for document in [&target, &router] {
+        assert_cmd::Command::cargo_bin("claudine")
+            .unwrap()
+            .env("NO_COLOR", "1")
+            .env("HOME", &home)
+            .env("PATH", augmented_path(&bin))
+            .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
+            .env("CTX_PROVIDER_LOG", &provider_log)
+            .current_dir(&launch_dir)
+            .args([
+                "compose",
+                "--claude",
+                &document.to_string_lossy(),
+                "spec=spec.md",
+            ])
+            .assert()
+            .success();
+    }
+
+    let expected = biscuit_file::to_portable_string(
+        &launch_spec.canonicalize().expect("canonical launch spec"),
+    );
+    let provider = fs::read_to_string(&provider_log).unwrap_or_default();
+    assert_eq!(provider.matches("TARGET SPEC=").count(), 2, "{provider}");
+    assert!(provider.contains(&format!("TARGET SPEC={expected}")), "{provider}");
+    let events = fs::read_to_string(root.join("events.log")).unwrap_or_default();
+    let expected_cwd = biscuit_file::to_portable_string(
+        &launch_dir.canonicalize().expect("canonical launch directory"),
+    );
+    assert_eq!(
+        events
+            .matches(&format!("anchored={expected} cwd={expected_cwd}"))
+            .count(),
+        2,
+        "{events}"
     );
 }
 
@@ -238,13 +351,16 @@ fn loop_route_keeps_launch_area_for_root_and_package_documents() {
     fs::create_dir_all(root.join("beta/lib")).unwrap();
     stage_monorepo(&root);
     let launch_dir = root.join("alpha/lib");
+    let launch_spec = launch_dir.join("spec.md");
+    write(&launch_spec, "# launch spec\n");
+    write(&root.join("spec.md"), "# repository decoy\n");
     let at_root = root.join("loop-root.md");
     let in_area = launch_dir.join("loop-area.md");
     for (path, label) in [(&at_root, "root"), (&in_area, "area")] {
         write(
             path,
             &format!(
-                "---\nmy_area: '{{{{ ctx.area }}}}'\nloop:\n  while: \"ctx.area == 'alpha' && counter < 1\"\n  actions:\n    - \"increment(counter)\"\nstart:\n  stack:\n    - when: \"ctx.area == 'alpha'\"\n      action: {{append_line: [\"loop-events.log\", \"{label}:ctx={{{{ ctx.area }}}}:fm={{{{ my_area }}}}\"]}}\n---\n{label}:AREA={{{{ ctx.area }}}}\n"
+                "---\n$schema:\n  spec: 'file(eager; required)'\nmy_area: '{{{{ ctx.area }}}}'\nmy_cwd: '{{{{ ctx.cwd }}}}'\nloop:\n  while: \"ctx.area == 'alpha' && counter < 1\"\n  actions:\n    - \"increment(counter)\"\nstart:\n  stack:\n    - when: \"ctx.area == 'alpha'\"\n      action: {{append_line: [\"loop-events.log\", \"{label}:ctx={{{{ ctx.area }}}}:cwd={{{{ ctx.cwd }}}}:fm={{{{ my_area }}}}/{{{{ my_cwd }}}}:spec={{{{ spec }}}}\"]}}\n---\n{label}:AREA={{{{ ctx.area }}}}:CWD={{{{ ctx.cwd }}}}:SPEC={{{{ spec }}}}\n"
             ),
         );
     }
@@ -269,7 +385,7 @@ fn loop_route_keeps_launch_area_for_root_and_package_documents() {
             .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
             .env("CTX_PROVIDER_LOG", &provider_log)
             .current_dir(&launch_dir)
-            .args(["compose", "--claude", &doc.to_string_lossy()])
+            .args(["compose", "--claude", &doc.to_string_lossy(), "spec=spec.md"])
             .assert()
             .success();
     }
@@ -277,14 +393,26 @@ fn loop_route_keeps_launch_area_for_root_and_package_documents() {
     let provider = fs::read_to_string(&provider_log).unwrap_or_default();
     assert!(provider.contains("root:AREA=alpha"));
     assert!(provider.contains("area:AREA=alpha"));
+    let expected_cwd = biscuit_file::to_portable_string(
+        &launch_dir.canonicalize().expect("canonical launch directory"),
+    );
+    let expected_spec = biscuit_file::to_portable_string(
+        &launch_spec.canonicalize().expect("canonical launch spec"),
+    );
+    assert_eq!(provider.matches(&format!("CWD={expected_cwd}")).count(), 4);
+    assert_eq!(provider.matches(&format!("SPEC={expected_spec}")).count(), 4);
     assert_eq!(
         provider.matches("--- attempt ---").count(),
         4,
         "each equivalent loop document must run its seed attempt and one iteration: {provider}"
     );
     let events = fs::read_to_string(root.join("loop-events.log")).unwrap_or_default();
-    assert!(events.contains("root:ctx=alpha:fm=alpha"));
-    assert!(events.contains("area:ctx=alpha:fm=alpha"));
+    assert!(events.contains(&format!(
+        "root:ctx=alpha:cwd={expected_cwd}:fm=alpha/{expected_cwd}:spec={expected_spec}"
+    )));
+    assert!(events.contains(&format!(
+        "area:ctx=alpha:cwd={expected_cwd}:fm=alpha/{expected_cwd}:spec={expected_spec}"
+    )));
 }
 
 /// AC3: a prompt stored in another repository reports the launch repository;

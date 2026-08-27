@@ -127,6 +127,29 @@ fn system_shell_runner_preserves_nested_quotes() {
     assert_eq!(code, 37);
 }
 
+#[test]
+fn system_shell_runner_observes_agent_cwd() {
+    let expected = crate::child_environment::initialize_process_launch_directory(
+        crate::child_environment::LaunchDirectoryMode::Ordinary,
+    )
+    .unwrap()
+    .to_string_lossy()
+    .into_owned();
+    let command = agent_cwd_match_command(&expected);
+    let code = SystemShellRunner.run(&command).unwrap();
+    assert_eq!(code, 0);
+}
+
+#[cfg(windows)]
+fn agent_cwd_match_command(expected: &str) -> String {
+    format!(r#"if "%AGENT_CWD%"=="{expected}" (exit /B 0) else (exit /B 41)"#)
+}
+
+#[cfg(not(windows))]
+fn agent_cwd_match_command(expected: &str) -> String {
+    format!("test \"$AGENT_CWD\" = '{}'", expected.replace('\'', "'\\''"))
+}
+
 fn temp_engine() -> (tempfile::TempDir, EffectEngine) {
     let dir = tempfile::tempdir().unwrap();
     let engine = EffectEngine::builder()

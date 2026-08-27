@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::HashMap;
 use std::error::Error as _;
 use std::fs;
 use std::io::{self, ErrorKind};
@@ -7,7 +8,9 @@ use tempfile::TempDir;
 
 #[test]
 fn prompt_magic_roots_are_closest_first() {
-    // Discrete package before package area before repo before HOME.
+    // Only Claudine conventions are registered. The package, area,
+    // repository, and home roots are supplied by biscuit-file's intrinsic
+    // `@` chain and must not be duplicated here.
     let area = Path::new("/repo/claudine");
     let package = Path::new("/repo/claudine/lib");
     let repo = Path::new("/repo");
@@ -16,9 +19,7 @@ fn prompt_magic_roots_are_closest_first() {
     assert_eq!(
         got,
         vec![
-            PathBuf::from("/repo/claudine/lib"),
             PathBuf::from("/repo/claudine/lib/prompts"),
-            PathBuf::from("/repo/claudine"),
             PathBuf::from("/repo/claudine/prompts"),
             PathBuf::from("/repo/prompts"),
             PathBuf::from("/repo/.claudine/prompts"),
@@ -55,6 +56,88 @@ fn prompt_magic_roots_skip_absent_anchors() {
         ],
     );
     assert!(prompt_magic_roots(None, None, None, None).is_empty());
+}
+
+#[test]
+fn prompt_magic_candidates_interleave_conventions_and_intrinsic_scopes_once() {
+    let repo = Path::new("/repo");
+    let area = Path::new("/repo/claudine");
+    let package = Path::new("/repo/claudine/lib");
+    let home = Path::new("/home/u");
+    let catalog = biscuit_file::RepositoryScopeCatalog::new(
+        repo,
+        vec![area.to_path_buf()],
+        vec![package.to_path_buf()],
+        biscuit_file::PackageAreaFallback::FirstComponent,
+    )
+    .unwrap();
+    let mut context = FileResolutionContext::from_snapshot(
+        package.join("src"),
+        Some(home.to_path_buf()),
+        HashMap::new(),
+    )
+    .with_repository_scope_catalog(catalog);
+    for root in prompt_magic_roots(Some(repo), Some(area), Some(package), Some(home)) {
+        context = context.add_magic_path(root, PathPosition::Start);
+    }
+
+    let candidates = FileReference::new("@shared.md")
+        .unwrap()
+        .candidate_plan(&context)
+        .unwrap()
+        .iter()
+        .map(|candidate| candidate.path().to_path_buf())
+        .collect::<Vec<_>>();
+
+    assert_eq!(candidates[0], package.join("prompts/shared.md"));
+    assert_eq!(candidates[1], area.join("prompts/shared.md"));
+    let package_intrinsic = package.join("shared.md");
+    let area_intrinsic = area.join("shared.md");
+    let repo_intrinsic = repo.join("shared.md");
+    let home_intrinsic = home.join("shared.md");
+    for intrinsic in [
+        package_intrinsic,
+        area_intrinsic,
+        repo_intrinsic,
+        home_intrinsic,
+    ] {
+        assert_eq!(
+            candidates.iter().filter(|candidate| **candidate == intrinsic).count(),
+            1,
+            "intrinsic root must occur exactly once: {intrinsic:?}"
+        );
+    }
+}
+
+#[test]
+fn skill_reference_prefers_repository_then_falls_back_to_home() {
+    let fixture = TempDir::new().unwrap();
+    let repo = fixture.path().join("repo");
+    let home = fixture.path().join("home");
+    let repo_skill = repo.join(".claude/skills/name/SKILL.md");
+    let home_skill = home.join(".claude/skills/name/SKILL.md");
+    fs::create_dir_all(repo_skill.parent().unwrap()).unwrap();
+    fs::create_dir_all(home_skill.parent().unwrap()).unwrap();
+    fs::write(&repo_skill, "repo skill").unwrap();
+    fs::write(&home_skill, "home skill").unwrap();
+    let catalog = biscuit_file::RepositoryScopeCatalog::new(
+        &repo,
+        Vec::new(),
+        Vec::new(),
+        biscuit_file::PackageAreaFallback::None,
+    )
+    .unwrap();
+    let context = FileResolutionContext::from_snapshot(
+        &repo,
+        Some(home.clone()),
+        HashMap::new(),
+    )
+    .with_repository_scope_catalog(catalog);
+    let reference = FileReference::new("@.claude/skills/name/SKILL.md").unwrap();
+
+    assert_eq!(reference.resolve_in_context(&context).unwrap(), Some(repo_skill.clone()));
+    fs::remove_file(repo_skill).unwrap();
+    assert_eq!(reference.resolve_in_context(&context).unwrap(), Some(home_skill));
 }
 
 #[test]

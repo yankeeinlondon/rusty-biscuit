@@ -71,13 +71,25 @@ struct Candidate {
 pub(crate) fn run(mode: ComposeMode, ctx: &ScopeContext, partial_token: &str) -> Vec<String> {
     let scope_set = scopes::resolve_compose_scopes(ctx, mode);
     let resolution = scopes::file_resolution_context(ctx);
-    let Ok(Some(completion)) = FileReference::complete_partial_in_context(partial_token, &resolution)
+    // Execution correctly rejects a bare sigil, but completion must still
+    // enumerate its roots before the user has typed the first payload byte.
+    let completion_token = match partial_token {
+        "@" => "@_",
+        "&" => "&_",
+        "^" => "^_",
+        token => token,
+    };
+    let empty_sigil = (completion_token != partial_token).then_some("");
+    let Ok(Some(completion)) =
+        FileReference::complete_partial_in_context(completion_token, &resolution)
     else {
         return Vec::new();
     };
 
     let candidates = match completion.entry_form() {
-        CompletionEntryForm::Magic => gather_magic(mode, &completion),
+        CompletionEntryForm::Magic
+        | CompletionEntryForm::RepositoryRoot
+        | CompletionEntryForm::RepositoryScoped => gather_magic(mode, &completion, empty_sigil),
         CompletionEntryForm::ImplicitRelative => {
             gather_implicit(mode, ctx, &scope_set, partial_token, &completion)
         }

@@ -57,10 +57,11 @@ fn run_production_attempt_preflight(
 #[test]
 fn canonical_retry_and_resume_reentry_each_produce_exact_epoch_work() {
     let fx = fixture(serde_json::json!({}));
+    std::fs::write(fx._dir.path().join("spec.md"), "launch-owned\n").unwrap();
     std::fs::write(
         &fx.source_path,
-        "---\nprepared: '{{ ctx.os }}'\nprobe: \"$(echo {{ ctx.os }})\"\n\
-         start:\n  stderr: '{{ ctx.os }}'\n---\nbody={{ ctx.os }} probe={{ probe }}\n",
+        "---\n$schema:\n  spec: 'file(eager; required)'\nprepared: '{{ ctx.os }}'\nprepared_cwd: '{{ ctx.cwd }}'\nprobe: \"$(echo {{ ctx.os }})\"\n\
+         start:\n  stderr: '{{ ctx.os }} cwd={{ ctx.cwd }}'\n---\nbody={{ ctx.os }} cwd={{ ctx.cwd }} probe={{ probe }}\n",
     )
     .unwrap();
     let invocation =
@@ -68,6 +69,10 @@ fn canonical_retry_and_resume_reentry_each_produce_exact_epoch_work() {
     let mut state = prompt_state(&fx.source_path);
     state.source_context = Some(invocation.derive_source(&fx.source_path).unwrap());
     state.invocation_context = Some(invocation.clone());
+    state.input_layers.set_overrides = Some(serde_json::json!({ "spec": "spec.md" }));
+    state.input_layers.file_ref_fallback_dir = Some(fx._dir.path().to_path_buf());
+    state.input_layers.file_resolution_context =
+        Some(invocation.launch_file_resolution_context().clone());
     let emitter = RecordingEmitter::default();
     let ctx = LifecycleRuntimeContext {
         settings: &fx.settings,
@@ -139,6 +144,11 @@ fn canonical_retry_and_resume_reentry_each_produce_exact_epoch_work() {
     )
     .unwrap();
     assert!(retried.prompt.contains("body="));
+    let expected_cwd = biscuit_file::to_portable_string(fx._dir.path());
+    assert!(retried.prompt.contains(&format!("cwd={expected_cwd}")));
+    assert_eq!(retried.frontmatter["prepared_cwd"], serde_json::json!(expected_cwd));
+    let expected_spec = biscuit_file::to_portable_string(&fx._dir.path().join("spec.md"));
+    assert_eq!(retried.frontmatter["spec"], serde_json::json!(expected_spec));
     guard.set_config(retried.lifecycle.clone().unwrap());
     let start = run_start_lifecycle_event(
         &state,
@@ -209,6 +219,8 @@ fn canonical_retry_and_resume_reentry_each_produce_exact_epoch_work() {
     )
     .unwrap();
     assert_eq!(resumed.prompt, "continue");
+    assert_eq!(resumed.frontmatter["prepared_cwd"], serde_json::json!(expected_cwd));
+    assert_eq!(resumed.frontmatter["spec"], serde_json::json!(expected_spec));
     guard.set_config(resumed.lifecycle.clone().unwrap());
     let start = run_start_lifecycle_event(
         &state,

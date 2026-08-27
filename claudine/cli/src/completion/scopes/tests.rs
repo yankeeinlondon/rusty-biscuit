@@ -219,6 +219,28 @@ fn cwd_inside_discrete_package_sets_both_area_and_package() {
 }
 
 #[test]
+fn completion_file_context_uses_projected_intrinsic_scopes_once() {
+    let tmp = TempDir::new().unwrap();
+    seed_cargo_workspace(tmp.path(), &["claudine/lib", "claudine/cli"]);
+    let package = tmp.path().join("claudine/cli");
+    let ctx = test_ctx(&package);
+
+    let resolution = file_resolution_context(&ctx);
+    assert_eq!(resolution.package_root(), Some(package.as_path()));
+    assert_eq!(
+        resolution.package_area(),
+        Some(tmp.path().join("claudine").as_path())
+    );
+    assert!(
+        !resolution
+            .prepended_magic_paths()
+            .iter()
+            .any(|root| root == &package || root == &tmp.path().join("claudine")),
+        "intrinsic scopes must not also be registered as completion conventions"
+    );
+}
+
+#[test]
 fn inline_compose_adds_docs_and_skill_peer_extras() {
     let tmp = TempDir::new().unwrap();
     seed_cargo_workspace(tmp.path(), &["a/lib"]);
