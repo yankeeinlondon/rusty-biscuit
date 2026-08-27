@@ -260,7 +260,7 @@ fn lifecycle_reuses_prepared_snapshot_for_prompt_outside_launch_area() {
     );
     assert_ne!(
         resolved,
-        prompt_repo_root.to_string_lossy(),
+        biscuit_file::to_portable_string(&prompt_repo_root),
         "lifecycle ctx.* must not resolve against the prompt's own repo"
     );
 }
