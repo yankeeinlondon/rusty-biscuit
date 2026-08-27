@@ -20,6 +20,7 @@ fn point_endpoint_at(endpoint: &LocalEndpoint) {
 }
 
 /// Boot a daemon on a fresh private endpoint and point the reporter at it.
+#[cfg(feature = "daemon-tests")]
 fn boot_daemon(tmp: &tempfile::TempDir) -> (rendezvous_daemon::server::ServerHandle, LocalEndpoint) {
     let endpoint = private_endpoint(tmp.path(), "daemon");
     point_endpoint_at(&endpoint);
@@ -68,6 +69,7 @@ async fn kill_switch_disables_reporting() {
     assert!(presence.session_id.is_none());
 }
 
+#[cfg(feature = "daemon-tests")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn round_trip_against_live_daemon() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -121,6 +123,7 @@ async fn round_trip_against_live_daemon() {
     daemon.shutdown().await.expect("daemon shutdown");
 }
 
+#[cfg(feature = "daemon-tests")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn status_reporter_flips_and_clears_waiting() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -192,6 +195,7 @@ async fn report_status_kill_switch_and_missing_session_are_fast_noops() {
 // The idle hook (Trigger 2) reports through the explicit-session
 // `report_status` helper; this proves the round-trip flips a STARTED
 // session to `idle` and the next prompt clears it back to `active`.
+#[cfg(feature = "daemon-tests")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn report_status_flips_idle_and_clears_to_active() {
     unsafe { std::env::remove_var(ENABLE_ENV) };
@@ -229,6 +233,7 @@ async fn report_status_flips_idle_and_clears_to_active() {
 // `permission_signal` is computed at STARTED from the launched
 // provider's PermissionRequest support, so the dashboard can tell
 // "no intervention needed" apart from "signal unavailable."
+#[cfg(feature = "daemon-tests")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn started_records_permission_signal_per_provider() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
@@ -271,6 +276,7 @@ async fn started_records_permission_signal_per_provider() {
 /// `expected` status, since `StatusReporter::report` is
 /// fire-and-forget.
 ///
+#[cfg(feature = "daemon-tests")]
 async fn await_status(
     client: &mut rendezvous_core::RendezvousClient<tonic::transport::Channel>,
     session_id: &str,
