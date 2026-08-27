@@ -316,4 +316,7 @@ pub mod layout {
     }
 }
 
+// Only the `level2_*` targets (gated on `terminal-tests`) use this module, and it
+// depends on the optional `biscuit-test-harness` crate.
+#[cfg(feature = "terminal-tests")]
 pub mod level2;
