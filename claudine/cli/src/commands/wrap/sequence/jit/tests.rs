@@ -309,7 +309,7 @@ fn distributed_step_keeps_launch_identity_and_source_schema_and_files() {
     let body = composed.content();
 
     assert!(body.contains("AREA=alpha AGENT=codex MODEL=gpt-5 ENV=codex/gpt-5 FILE=true"));
-    assert!(body.contains(launch_repo.to_string_lossy().as_ref()));
+    assert!(body.contains(&biscuit_file::to_portable_string(&launch_repo)));
     assert!(body.contains("SOURCE-BODY"));
     assert!(!body.contains("LAUNCH-FRAGMENT"));
     assert_eq!(context.get("area").and_then(serde_json::Value::as_str), Some("alpha"));
