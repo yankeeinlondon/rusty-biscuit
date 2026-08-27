@@ -27,20 +27,21 @@ When _referencing_ files we rely on an enumerated set of **sigils** that provide
 - `..`, `../` _and_ `..\` - refers to the _parent_ of the "current working directory"
 - `~` - refers to the current user's home directory
 
-In addition to these sigils, file references may use native absolute-path and URI forms. These forms are roots or namespaces, rather than additional base-directory sigils:
+In addition to these sigils, file references may use native absolute-path forms. These forms are roots or namespaces, rather than additional base-directory sigils. The grammar **accepts** the following absolute forms:
 
 - `/` - used in all POSIX operating systems to represent the root
 - `{drive}:\` _or_ `{drive}:` - represents the root of a Windows drive like `C:` or any other mapped drive
     - `C:\` would be an example
     - as would `C:`
-- `file:///` or `file:/` - are local-file URI forms defined by RFC 8089; their root semantics depend on the path that follows
-- `file:///C:/` - is the URI form of a Windows drive root
-- `file://server/share/` - is the URI form of a Windows UNC share root
-- `\\?\` and `\\.\` - more obscure Windows referencing
+- `\\server\share\...` - a Windows UNC share path
 
-Windows also has a drive-relative form that must not be confused with a drive-absolute path:
+Authors will also **encounter** the following forms in the wild. They are documented here so their meaning is understood, but they are **not** part of the reference grammar (ruled 2026-08-27): each is rejected with a typed error that points at the equivalent native absolute path, rather than being silently treated as a relative path:
 
-- `C:path\to\file` - is relative to the current directory associated with the `C:` drive; it does **not** mean `C:\path\to\file`
+- `file:///` or `file:/` - local-file URI forms defined by RFC 8089; their root semantics depend on the path that follows
+    - `file:///C:/` is the URI form of a Windows drive root
+    - `file://server/share/` is the URI form of a Windows UNC share root
+- `\\?\` and `\\.\` - the more obscure Windows verbatim/device prefixes
+- `C:path\to\file` - the Windows drive-relative form, which is relative to the current directory associated with the `C:` drive; it does **not** mean `C:\path\to\file`
 
 **Claudine** (by way of **biscuit-file**) provides the following _additional_ sigils:
 

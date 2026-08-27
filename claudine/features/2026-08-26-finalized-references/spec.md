@@ -23,8 +23,9 @@ that target in specific, chronicled ways (`sigil-delta.md` in this feature
 directory). This specification closes the gap: it adds the `&` and `^`
 sigils, removes the `!` sigil, flips the implicit-relative candidate order to
 match the target, re-anchors multi-homed sigil bases to the reference's own
-scope, materializes caller-passed file parameters as anchored values, and
-adds `ctx.cwd`. It also makes the repo-only claim of `&` and `^` enforceable:
+scope, materializes caller-passed file parameters as anchored values, adds
+`ctx.cwd`, and sets `AGENT_CWD` in the environment of every spawned child
+process. It also makes the repo-only claim of `&` and `^` enforceable:
 their payloads and resolved targets may not escape the repository.
 
 The design-intent document is normative for semantics. Where this
@@ -42,8 +43,10 @@ updated directly.
 > this revision makes them explicit: explicit resolution remains snapshot-only,
 > repo-only sigils enforce both lexical and resolved-target containment, and a
 > lazy local parameter materializes from the first unprobed candidate while
-> recursive lazy values are rejected. The remaining questions at the end are
-> design-document ratification choices, not implementation details.
+> recursive lazy values are rejected. Both former open questions are now
+> ruled (2026-08-27): OQ1 rejects and reserves the unsupported local
+> namespace forms, and OQ2 sets `AGENT_CWD` on every spawned child (D8.7).
+> No open design questions remain.
 
 ## Baseline
 
@@ -332,6 +335,18 @@ paths uses `ctx.*` interpolation or derives from a caller-passed parameter
    expression, body, lifecycle, proxy, and launch-plan consumer sees the
    materialized effective value. No downstream consumer reparses the raw
    relative string.
+7. **`AGENT_CWD` for spawned children** *(OQ2, ruled 2026-08-27)*. Every
+   Claudine-spawned child process — provider CLIs, hooks, and `::shell`
+   commands — receives the `AGENT_CWD` environment variable set to the
+   captured absolute launch directory: the same immutable invocation state
+   behind `ctx.cwd`. Claudine **overwrites** any inherited `AGENT_CWD` so a
+   nested invocation cannot leak a stale value, and the value is stable
+   across retry, resume, loop, and sequence re-entry. The un-namespaced name
+   is the design document's ruling; the overwrite rule protects Claudine's
+   own children, and the residual risk — an unrelated tool reading
+   `AGENT_CWD` with different expectations — is accepted and must be noted in
+   the environment documentation. Every spawn seam is covered by the existing
+   environment inventory tests.
 
 This extends the existing eager-`file` normalization so that derivation and
 proxy boundaries cannot strand a value without its anchor. The 2026-08-26
@@ -353,8 +368,8 @@ explicit-relative forms, then an implicit path. The exact rules are:
   leading `%` is invalid rather than a recursive filename.
 - Drive-absolute paths are classified before the generic scheme guard. Any
   other leading RFC-scheme-shaped prefix (`[A-Za-z][A-Za-z0-9+.-]*:`) must be
-  one of the supported schemes or a typed unsupported-scheme parse error
-  (subject to OQ1's decision on `file:`). This prevents `file:/...`,
+  one of the supported schemes or a typed unsupported-scheme parse error —
+  `file:` included, per OQ1's ruling. This prevents `file:/...`,
   `C:relative`, and misspelled schemes from silently becoming implicit paths
   while preserving `C:/absolute` and `C:\absolute`.
 - `!x` has a dedicated removed-sigil diagnostic suggesting `^`; it does not
@@ -373,9 +388,10 @@ an explicit-relative spelling such as `./name:part`.
   remote typing, absolute-path forms, `~` home pinning and `~user` rejection.
 - `vault:` — implemented behavior is retained but stays documented as future
   scope; no new work.
-- Supported native absolute paths remain unchanged. The currently unsupported
-  `file:` URI and Windows device-prefix forms are governed by OQ1; Windows
-  drive-relative forms are rejected by D9 rather than treated as implicit.
+- Supported native absolute paths remain unchanged. The `file:` URI and
+  Windows device-prefix forms are rejected and reserved (OQ1, ruled
+  2026-08-27); Windows drive-relative forms are rejected by D9 rather than
+  treated as implicit.
 - `$schema` resolution stays document-relative and outside the implicit
   candidate order.
 - The launch directory remains diagnostic-only for document-authored
@@ -420,7 +436,8 @@ an explicit-relative spelling such as `./name:part`.
   (document-scoped bases for document-authored references, launch-scoped for
   parameters); convention magic-root registration reviewed against D6;
   sequence/harness/proxy/system-prompt/overlay surfaces consume the correct
-  source context and materialized parameter values.
+  source context and materialized parameter values; `AGENT_CWD` injection at
+  every child-spawn seam (providers, hooks, `::shell`) per D8.7.
 - Consumer audit: use compiler exhaustiveness plus repository search and
   GitNexus impact analysis. At minimum, audit all `FileReferenceKind`, internal
   `ReferenceKind`, `RootProvenance`, `FileReferenceError`, candidate-plan,
@@ -486,7 +503,10 @@ an explicit-relative spelling such as `./name:part`.
   Outside-repository coverage proves `ctx.cwd` remains populated without
   requesting the repository group; a forced ambient CWD failure produces
   `null` plus a typed partial-capture diagnostic rather than an empty or
-  relative path.
+  relative path. `AGENT_CWD` is present in every spawned child's environment
+  (provider, hook, `::shell`) as the captured absolute launch directory,
+  overwrites an inherited value, and stays stable across re-entry; the
+  environment inventory tests cover every spawn path.
 - **AC7 — magic conventions preserved.** The skill example
   (`@.claude/skills/.../SKILL.md`: repo first, home fallback) and Claudine's
   prompt-lookup conventions keep working through registered roots. Collision
@@ -524,19 +544,22 @@ an explicit-relative spelling such as `./name:part`.
   workspace, detailed diagnostics preserve distinct package/package-area
   provenance, and shipped schema/prompt corpora plus normal CLI invocation
   paths cover the new grammar.
-- **AC13 — ratification gate.** OQ1 and OQ2 are resolved before implementation.
-  Any answer that differs from the design-intent document is approved there
-  first and the document is updated in the same change, so the specification's
-  "design intent wins" rule cannot leave two normative answers.
+- **AC13 — ratification gate (satisfied 2026-08-27).** Both former open
+  questions are ruled. OQ1: unsupported local namespace forms are rejected
+  and reserved; because that differs from the design-intent document, the
+  document amendment distinguishing forms authors may *encounter* from forms
+  the grammar *accepts* lands in the same change as this ruling. OQ2:
+  `AGENT_CWD` is set on every spawned child (D8.7), matching the document, so
+  no amendment was required. No two-normative-answers window remains;
+  implementation may start.
 
 ## Non-goals
 
 - `vault:` enhancements or Obsidian-specific behavior (future scope).
-- Implementing `file:` URI or Windows device-prefix support unless OQ1 selects
-  that option. Windows drive-relative (`C:path`) resolution is not a non-goal:
-  D9 rejects it explicitly so it cannot silently escape an implicit base.
-- An `AGENT_CWD` environment variable for child processes unless OQ2 selects
-  that option.
+- Implementing `file:` URI or Windows device-prefix support — OQ1 ruled both
+  rejected and reserved. Windows drive-relative (`C:path`) resolution is not
+  a silent non-goal: D9 rejects it explicitly so it cannot escape an implicit
+  base.
 - Named namespace schemes (`prompt:`, `skill:`) replacing Claudine's
   registered magic roots — discussed and deferred; D6 keeps the registration
   mechanism.
@@ -550,60 +573,43 @@ an explicit-relative spelling such as `./name:part`.
 
 ## Open questions
 
-### OQ1 — Unsupported local namespace forms
+### OQ1 — Unsupported local namespace forms *(RESOLVED 2026-08-27)*
 
-The design-intent document lists RFC 8089 `file:` URIs and Windows device
-prefixes (`\\?\`, `\\.\`) as native forms. biscuit-file does not define either
-as a supported public reference kind; its generic UNC classifier can currently
-admit device-prefixed strings without giving them device-specific semantics.
-Treating URI forms as implicit paths or device forms as ordinary UNC paths is
-unacceptable; the decision is whether this feature implements or explicitly
-reserves them.
+**Ruling: reject and reserve all unsupported forms.** RFC 8089 `file:` URIs
+and Windows device prefixes (`\\?\`, `\\.\`) are not reference grammar: each
+is a typed parse error pointing at the equivalent native absolute path, per
+D9's scheme guard and D10. This keeps the grammar small and deterministic —
+no host-dependent URI decoding, authority/share ambiguity, or
+device-namespace bypass of the `&`/`^` containment checks — and future
+support can be added without changing what an implicit path means. Because
+this ruling differs from the design-intent document, that document is amended
+in the same change (AC13) to distinguish forms authors may *encounter* from
+forms the grammar *accepts*.
 
-1. **Reject and reserve all unsupported forms in this feature.**
-   - Pros: smallest deterministic grammar; no host-dependent URI decoding,
-     authority/share ambiguity, or device-namespace bypass; future support can
-     be added without changing implicit-path meaning.
-   - Cons: requires an approved correction to the design-intent document and
-     excludes legitimate file-URI interchange workflows.
-2. **Implement RFC 8089 `file:` URIs; reject device prefixes.**
-   - Pros: supports a standardized interchange form and can map Windows drive
-     and UNC URIs deliberately while keeping device namespaces out.
-   - Cons: adds percent-decoding, authority, host/platform, and round-trip
-     rules to this already broad feature; needs a dedicated cross-OS matrix.
-3. **Implement both URI and Windows device forms.**
-   - Pros: widest native-form coverage and closest literal reading of the
-     design document.
-   - Cons: largest security and portability surface; device paths interact
-     poorly with containment, normalization, and non-Windows testing.
+Rejected alternatives, for the record: implementing `file:` URIs (a
+standardized interchange form, but it adds percent-decoding,
+authority/host, and round-trip rules plus a dedicated cross-OS matrix to an
+already broad feature, and no concrete workflow needs it) and implementing
+both URI and device forms (widest coverage, largest security and portability
+surface). Loud reservation was judged safer than accidental implicit
+fallback in every case.
 
-**Recommendation:** Option 1. No concrete workflow in the feature requires
-either form, and loud reservation is safer than accidental implicit fallback.
-Amend the design-intent document to distinguish forms authors may encounter
-from forms the grammar accepts.
+### OQ2 — Child-process launch-directory environment *(RESOLVED 2026-08-27)*
 
-### OQ2 — Child-process launch-directory environment
+**Ruling: set `AGENT_CWD` on every Claudine-spawned child** — now normative as
+D8.7. The design-intent document promises `${AGENT_CWD}`; the value already
+exists as immutable invocation state (the launch snapshot behind `ctx.cwd`),
+so honoring the promise costs one environment insertion at spawn seams that
+already carry environment inventory tests, and it serves the consumers that
+cannot read `ctx.*` (provider CLIs, hooks, `::shell` commands). Because the
+ruling matches the design document, no amendment was required.
 
-The design-intent document says `${AGENT_CWD}` reports the launch directory,
-but no such variable exists today. `ctx.cwd` covers composed expressions, not
-child programs that only receive environment variables.
-
-1. **Set `AGENT_CWD` on every Claudine-spawned child.**
-   - Pros: matches the current design-intent text and gives providers, hooks,
-     and `::shell` commands one consistent launch anchor.
-   - Cons: creates a new global-looking environment contract and must define
-     collision/override behavior at every spawn seam.
-2. **Use a namespaced `CLAUDINE_LAUNCH_CWD` variable instead.**
-   - Pros: clear ownership and lower collision risk.
-   - Cons: requires changing the design-intent document and offers no
-     compatibility with consumers expecting `AGENT_CWD`.
-3. **Expose only `ctx.cwd` and remove the environment claim.**
-   - Pros: smallest surface and no child-environment mutation.
-   - Cons: shell/hooks/providers cannot obtain the captured launch directory
-     through the documented mechanism.
-
-**Recommendation:** Option 1. The value already exists as immutable invocation
-state and the normative document promises it. Claudine should overwrite any
-inherited `AGENT_CWD` for spawned children with the captured absolute launch
-directory, keep it stable across re-entry, and cover every spawn path with the
-existing environment inventory tests.
+Rejected alternatives, for the record: a namespaced `CLAUDINE_LAUNCH_CWD`
+(clearer ownership, but renames what the normative document promises) and
+exposing only `ctx.cwd` (smallest surface — most scripts can take
+`{{ctx.cwd}}` as an argument — but leaves the document's environment claim
+dangling). The accepted trade-off is documented in D8.7: `AGENT_CWD` is
+un-namespaced, Claudine's overwrite-on-spawn rule protects its own children,
+and the residual risk of an unrelated tool reading the variable with
+different expectations is accepted and noted in the environment
+documentation.
