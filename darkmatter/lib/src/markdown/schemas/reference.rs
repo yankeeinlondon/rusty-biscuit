@@ -95,7 +95,6 @@ pub(crate) fn is_bare_schema_name(reference: &str) -> bool {
         return false;
     }
     !reference.starts_with('@')
-        && !reference.starts_with('!')
         && !reference.starts_with('%')
         && !reference.starts_with("vault:")
         && !reference.starts_with("vault::")

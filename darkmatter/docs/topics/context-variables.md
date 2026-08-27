@@ -73,6 +73,10 @@ failure message prints the up-to-date block to paste back.
 > [magic paths](./magic-paths.md).
 
 <!-- BEGIN GENERATED: ctx catalog (source: md schema about / context_catalog_markdown) -->
+**Invocation**
+
+- **ctx.cwd** — `string` _(optional)_ — Absolute launch directory captured when the composition request began, or null when ambient capture failed.
+
 **Date and Time**
 
 - **ctx.now** — `datetime` — Local date and time in ISO-8601 format.

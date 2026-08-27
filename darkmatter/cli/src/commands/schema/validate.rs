@@ -137,8 +137,11 @@ fn validate_one(
 
     let api = if no_trigger_schemas {
         api.clone()
-    } else if let Some(boundary) =
-        darkmatter::markdown::compose::find_git_root_from(&discovery_path)
+    } else if let Some(boundary) = darkmatter::markdown::compose::capture_file_resolution_context(
+        discovery_path.parent().unwrap_or(&discovery_path),
+    )
+    .repository_root()
+    .map(Path::to_path_buf)
     {
         match api
             .clone()

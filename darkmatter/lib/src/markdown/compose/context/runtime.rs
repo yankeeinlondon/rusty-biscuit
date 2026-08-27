@@ -140,12 +140,13 @@ impl ComposeContext {
                     serde_json::Map::new(),
                     vec![
                         super::ContextMergeDiagnostic::PartialRuntimeCapture {
-                            area: "cwd",
+                            area: "invocation.cwd",
                             detail: format!("current_dir() failed: {e}"),
                         },
                     ],
                 );
                 super::capture::populate_datetime(&mut values);
+                values.insert("cwd".into(), serde_json::Value::Null);
                 Self::from_values(
                     values,
                     diagnostics,

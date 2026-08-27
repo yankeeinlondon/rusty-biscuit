@@ -1,7 +1,7 @@
 //! Schema-driven eager-`file` value rewrite (normalization).
 //!
 //! Walks a compiled JSON Schema and rewrites every present, non-null value
-//! under an eager `format: darkmatter-file` marker to its repo-relative
+//! under an eager `format: darkmatter-file` marker to its document-relative
 //! resolved path — the same projection `relative(value)` / `dirname(value)`
 //! already produce. Pure: builds a rewritten copy and never mutates inputs.
 //!
@@ -14,7 +14,7 @@
 //!
 //! Resolution consumes the shared document-backed context anchored at the
 //! document `base_dir` — the same resolver the eager `file` validator resolves
-//! through (implicit paths repository-first then source, no launch-area
+//! through (implicit paths document-first then repository, no launch-area
 //! fallback; D2) — so the stored value resolves identically at prepare time and
 //! at every later read (Decision #5). The projection itself goes through
 //! [`make_portable_relative`] so the stored string uses `/` separators on every
@@ -59,7 +59,7 @@ pub struct NormalizationOutcome {
 ///
 /// Pure: never mutates inputs. `base_dir` is the prompt document directory the
 /// eager-`file` format validator resolves against, so the rewrite resolves
-/// through the identical repository-first-then-source order the read side uses.
+/// through the identical document-first-then-repository order the read side uses.
 /// `fallback` (the launch area) is threaded for structural parity with the
 /// validator but is not a resolution input (D2).
 ///
@@ -341,7 +341,7 @@ fn rewrite_property_union(
     (eager_matches == 1).then_some(rewritten).flatten()
 }
 
-/// Rewrites a single present eager-file value to its repo-relative resolved
+/// Rewrites a single present eager-file value to its document-relative resolved
 /// path. Returns `Some(new_value)` when the value was rewritten, `None` to
 /// leave it untouched.
 ///
@@ -376,7 +376,7 @@ fn rewrite_file_value(
     }
     // Resolve through the shared document-backed context — the same resolver
     // the eager-file format validator used to accept this value: implicit paths
-    // repository-first then source, no launch-area fallback (D2). The rewrite
+    // document-first then repository, no launch-area fallback (D2). The rewrite
     // must consume the same resolver so the stored value resolves identically at
     // every later read (Decision #5).
     let normalized = normalize_path_arg(raw);
@@ -391,15 +391,7 @@ fn rewrite_file_value(
             snapshot.repository_root().map(Path::to_path_buf),
             snapshot.package_area().map(Path::to_path_buf),
         ),
-        None => {
-            let repository_root = crate::markdown::compose::find_git_root_from(base_dir);
-            let package_area = crate::markdown::compose::package_area_for_reference(
-                &file_ref,
-                base_dir,
-                repository_root.as_deref(),
-            );
-            (repository_root, package_area)
-        }
+        None => (None, None),
     };
     let resolved = match resolve_document_file_ref(
         &file_ref,
@@ -536,10 +528,7 @@ mod tests {
     /// Creates a temp directory that looks like a git repository root, with
     /// an optional subdirectory the "document" lives in.
     ///
-    /// `find_git_root_from` walks up looking for `.git`, so a temp dir with a
-    /// `.git` subdirectory is treated as a repo root regardless of where the
-    /// host's real repo boundaries sit. This keeps the rewrite tests
-    /// independent of the ambient filesystem.
+    /// The request context treats this temp directory as its repository root.
     fn repo_fixture() -> TempDir {
         let dir = TempDir::new().unwrap();
         std::fs::create_dir_all(dir.path().join(".git")).unwrap();
@@ -584,7 +573,7 @@ mod tests {
     // ── Decision #1: only the eager marker triggers ───────────────────────
 
     #[test]
-    fn eager_file_property_is_rewritten_to_git_root_relative() {
+    fn eager_file_property_is_rewritten_to_document_relative() {
         let repo = repo_fixture();
         std::fs::create_dir_all(repo.path().join("area/sub")).unwrap();
         std::fs::write(repo.path().join("area/sub/spec.md"), "# Spec\n").unwrap();
@@ -596,7 +585,7 @@ mod tests {
         let pending = HashSet::new();
         let outcome = rewrite_eager_file_values(&schema, &instance, &base_dir, None, &pending);
         assert!(outcome.changed);
-        assert_eq!(outcome.value["spec"], json!("area/sub/spec.md"));
+        assert_eq!(outcome.value["spec"], json!("spec.md"));
     }
 
     #[test]
@@ -612,12 +601,12 @@ mod tests {
 
         // Projection via the shared helper the expression path uses.
         let ctx = ResolutionContext::new(base_dir.clone());
-        let relative = relative_fn(&[json!("guide.md")], &ctx).expect("relative_fn resolves");
-        assert_eq!(relative, json!("docs/guide.md"));
+        let relative = relative_fn(&[json!("./guide.md")], &ctx).expect("relative_fn resolves");
+        assert_eq!(relative, json!("guide.md"));
 
         // Projection via the rewrite pass.
         let schema = eager_file_schema();
-        let instance = json!({ "spec": "guide.md" });
+        let instance = json!({ "spec": "./guide.md" });
         let pending = HashSet::new();
         let outcome = rewrite_eager_file_values(&schema, &instance, &base_dir, None, &pending);
         assert!(outcome.changed);

@@ -113,6 +113,8 @@ impl Described for ContextVariableDescriptor {
 /// `grouping_map_is_total` test fails if the YAML adds or removes a key without
 /// a matching grouping edit.
 const CONTEXT_VARIABLE_GROUPING: &[(&str, &str, &str)] = &[
+    // ── Invocation ──────────────────────────────────────────────────
+    ("cwd", "Invocation", ""),
     // ── Date and Time ───────────────────────────────────────────────
     ("now", "Date and Time", ""),
     ("now_utc", "Date and Time", ""),

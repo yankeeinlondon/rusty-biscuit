@@ -480,6 +480,24 @@ pub(crate) fn malformed_disclosure_block(reason: &str, range: &std::ops::Range<u
         .hint("Disclosure blocks need `::disclosure`, `::details`, and `::end-disclosure`; the summary must contain only phrasing content.")
 }
 
+/// Build the [`StatusBlock`] for [`MarkdownError::ParameterBinding`].
+pub(crate) fn parameter_binding_block(
+    property: &str,
+    provided: &str,
+    reason: &str,
+) -> StatusBlock {
+    let body = format!(
+        "<dim>Property:</dim> <inverse>{}</inverse>\n<dim>Value:</dim> {}\n{}",
+        Prose::escape_text(property),
+        Prose::escape_text(provided),
+        Prose::escape_text(reason),
+    );
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("MarkdownError", "parameter binding failed"))
+        .body(body)
+        .hint("Use `file(eager)` when the reference needs filesystem search or recursive matching.")
+}
+
 /// Build the [`StatusBlock`] for [`MarkdownError::SchemaValidationFailed`].
 ///
 /// When `problems` is empty the failure represents a schema *preparation*

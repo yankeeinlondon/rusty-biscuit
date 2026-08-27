@@ -1640,7 +1640,7 @@ fn resolve_path_arg(
 /// and missing targets are shaped by the shared
 /// [`resolve_document_file_ref_shape`], so a shape can never disagree with an
 /// execution-time resolution on classification, candidate order, or
-/// repository-first anchoring.
+/// document-first anchoring.
 fn resolve_path_shape(
     name: &'static str,
     raw: &str,
@@ -1658,7 +1658,7 @@ fn resolve_path_shape(
     })?;
     // Magic (`@`) roots and the pass's cached repository root live on the
     // context; the shared shaper builds the same candidate plan execution
-    // probes (repository-first for implicit references), so a missing target's
+    // probes (document-first for implicit references), so a missing target's
     // shape is the first shared candidate rather than a source-first join.
     resolve_document_file_ref_shape(
         &file_ref,
@@ -1954,12 +1954,23 @@ pub fn basename_without_index_fn(args: &[Value], ctx: &ResolutionContext) -> Res
 }
 
 /// `dirname(file) -> string` — the directory portion of the display path.
+///
+/// An absolute input retains its absolute anchor so a schema-materialized
+/// caller value can derive a sibling path without adopting the document base.
 pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("dirname", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
+    let raw = require_string_expr("dirname", &args[0])?;
     let path = resolve_path_arg("dirname", &args[0], ctx)?;
+    if Path::new(raw).is_absolute() {
+        return Ok(Value::String(
+            path.parent()
+                .map(biscuit_file::to_portable_string)
+                .unwrap_or_default(),
+        ));
+    }
     let (dirs, _) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
     Ok(Value::String(if dirs.is_empty() {
         String::new()
@@ -1982,12 +1993,23 @@ pub fn ext_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Expressi
 
 /// `parent_dir(file) -> string` — the directory segment immediately above the
 /// basename, or an empty string when there is none.
+///
+/// An absolute input returns its absolute parent so it remains a stable anchor
+/// when another file name is appended.
 pub fn parent_dir_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("parent_dir", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
+    let raw = require_string_expr("parent_dir", &args[0])?;
     let path = resolve_path_arg("parent_dir", &args[0], ctx)?;
+    if Path::new(raw).is_absolute() {
+        return Ok(Value::String(
+            path.parent()
+                .map(biscuit_file::to_portable_string)
+                .unwrap_or_default(),
+        ));
+    }
     let (dirs, _) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
     Ok(Value::String(dirs.last().cloned().unwrap_or_default()))
 }
@@ -2211,8 +2233,7 @@ pub fn has_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Ex
             .repository_root()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| ctx.base_dir.clone()),
-        None => crate::markdown::compose::find_git_root_from(&ctx.base_dir)
-            .unwrap_or_else(|| ctx.base_dir.clone()),
+        None => ctx.base_dir.clone(),
     };
     let roots = SkillRoots::new(home_dir, local_root).roots_for_agent(&agent);
     Ok(Value::Bool(skill_exists_in_roots(&roots, name)))
@@ -2239,8 +2260,7 @@ pub fn has_local_skill_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Val
             .repository_root()
             .map(Path::to_path_buf)
             .unwrap_or_else(|| ctx.base_dir.clone()),
-        None => crate::markdown::compose::find_git_root_from(&ctx.base_dir)
-            .unwrap_or_else(|| ctx.base_dir.clone()),
+        None => ctx.base_dir.clone(),
     };
     let roots = SkillRoots::new(PathBuf::from("."), local_root).local_roots_for_agent(&agent);
     Ok(Value::Bool(skill_exists_in_roots(&roots, name)))
@@ -3473,19 +3493,29 @@ mod tests {
         }
 
         #[test]
-        fn absolute_package_reference_uses_package_area_not_repository() {
+        fn absolute_repository_scoped_reference_uses_package_before_repository() {
             let repo = tempfile::TempDir::new().unwrap();
             let package_area = repo.path().join("darkmatter");
             let base_dir = package_area.join("docs");
             std::fs::create_dir_all(&base_dir).unwrap();
             std::fs::write(repo.path().join("shared.md"), "repository decoy").unwrap();
             std::fs::write(package_area.join("shared.md"), "package").unwrap();
-            let ctx = ResolutionContext::new(base_dir)
+            let catalog = biscuit_file::RepositoryScopeCatalog::new(
+                repo.path(),
+                vec![package_area.clone()],
+                vec![package_area.clone()],
+                biscuit_file::PackageAreaFallback::FirstComponent,
+            )
+            .unwrap();
+            let snapshot = biscuit_file::FileResolutionContext::new(&base_dir)
+                .with_repository_scope_catalog(catalog);
+            let mut ctx = ResolutionContext::new(base_dir)
                 .with_repository_root(repo.path())
                 .with_package_area(&package_area);
+            ctx.file_resolution_context = Some(snapshot);
 
             assert_eq!(
-                absolute_fn(&[json!("!shared.md")], &ctx).unwrap(),
+                absolute_fn(&[json!("^shared.md")], &ctx).unwrap(),
                 json!(package_area.join("shared.md").to_string_lossy().to_string()),
             );
         }
@@ -4391,12 +4421,10 @@ mod tests {
             assert!(join_fn(&[json!("a"), json!([])], &ctx).is_err());
         }
 
-        /// A missing implicit bare reference is shaped **repository-first**
-        /// (D3), matching how an existing implicit reference resolves — not the
-        /// removed private `ctx.base_dir.join` source-first fallback. The
-        /// explicit `./` form still pins to the source directory only.
+        /// A missing implicit bare reference is shaped from the document CWD
+        /// first. The explicit `./` form pins to the same source directory.
         #[test]
-        fn missing_implicit_path_shape_is_repository_first() {
+        fn missing_implicit_path_shape_is_document_cwd_first() {
             let repo = tempfile::TempDir::new().unwrap();
             std::fs::create_dir_all(repo.path().join(".git")).unwrap();
             let base = repo.path().join("prompts");
@@ -4404,9 +4432,9 @@ mod tests {
             let ctx = ResolutionContext::new(base.clone())
                 .with_repository_root(repo.path().to_path_buf());
 
-            // Implicit bare miss → repository-root candidate, not `prompts/…`.
+            // Implicit bare miss → document-CWD candidate.
             let implicit = resolve_path_shape("dirname", "sub/missing.md", &ctx).unwrap();
-            assert_eq!(implicit, repo.path().join("sub/missing.md"));
+            assert_eq!(implicit, base.join("sub/missing.md"));
 
             // Explicit `./` miss → source-directory candidate only.
             let explicit = resolve_path_shape("dirname", "./sub/missing.md", &ctx).unwrap();

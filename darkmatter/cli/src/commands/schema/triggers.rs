@@ -5,7 +5,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::{Result, eyre};
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::find_git_root_from;
+use darkmatter::markdown::compose::capture_file_resolution_context;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, normalize_path, trace_registry};
 use std::path::Path;
 
@@ -13,7 +13,9 @@ use std::path::Path;
 pub fn run_triggers(file: &Path) -> Result<()> {
     let document_path = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
     let markdown = Markdown::try_from(document_path.as_path())?;
-    let boundary = find_git_root_from(&document_path)
+    let boundary = capture_file_resolution_context(document_path.parent().unwrap_or(&document_path))
+        .repository_root()
+        .map(Path::to_path_buf)
         .ok_or_else(|| eyre!("no repository boundary found for `{}`", file.display()))?;
     let api = DarkmatterSchemas::new().with_trigger_discovery(&document_path, &boundary)?;
     let registry = api

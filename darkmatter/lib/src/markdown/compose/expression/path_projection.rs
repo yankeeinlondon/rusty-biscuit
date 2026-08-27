@@ -65,7 +65,7 @@ fn project_in_context(
 ) -> Projection {
     let repository_root = match request_context {
         Some(context) => context.repository_root().map(Path::to_path_buf),
-        None => crate::markdown::compose::find_git_root_from(base_dir),
+        None => None,
     };
     if let Some(repo) = repository_root
         && let Ok(stripped) = abs.strip_prefix(&repo)

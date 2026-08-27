@@ -1086,7 +1086,7 @@ mod tests {
             &root_path,
             "::file child-1.md when=\"file_exists('~/home.flag')\"\n\
              ::file child-2.md when=\"file_exists('@magic.flag')\"\n\
-             ::file child-3.md when=\"file_exists('!package.flag')\"\n",
+             ::file child-3.md when=\"file_exists('^package.flag')\"\n",
         )
         .unwrap();
         let snapshot = biscuit_file::FileResolutionContext::from_snapshot(

@@ -44,7 +44,7 @@ pub struct ResolutionContext {
     /// Per D2, the launch directory is a base for **top-level** references only
     /// (owned by Claudine); it is **not** a fallback for references authored
     /// inside a nested document. Darkmatter's nested-document resolution is
-    /// repository-first then source-relative and never consults this directory.
+    /// document-first then repository-relative and never consults this directory.
     /// It is carried here solely so the `fallback_dir` facet of a
     /// [`FileReferenceDiagnostic`](super::error::FileReferenceDiagnostic)
     /// can surface the configured launch area.
@@ -274,7 +274,7 @@ pub fn normalize_path_arg(raw: &str) -> String {
 /// local filesystem reference the candidate order is (D2/D3):
 ///
 /// - **explicit** `./`/`../` → the document `base_dir` only, no fallback;
-/// - **implicit** bare paths → the repository root first, then `base_dir`;
+/// - **implicit** bare paths → `base_dir` first, then the repository root;
 /// - `~`/`~/…` → the user's home directory only;
 /// - `@`/`!`/`vault:`/`%`/absolute/URL → their existing `FileReference`
 ///   semantics against the context's configured roots.
@@ -298,8 +298,8 @@ pub fn normalize_path_arg(raw: &str) -> String {
 pub(crate) fn resolve_document_file_ref(
     file_ref: &FileReference,
     base_dir: &Path,
-    repository_root: Option<&Path>,
-    package_area: Option<&Path>,
+    _repository_root: Option<&Path>,
+    _package_area: Option<&Path>,
     magic_paths: &[(PathBuf, PathPosition)],
     request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Result<Option<PathBuf>, FileReferenceError> {
@@ -310,8 +310,7 @@ pub(crate) fn resolve_document_file_ref(
             base_dir,
             None,
             magic_paths,
-            repository_root,
-            package_area,
+            None,
         ),
     };
     file_ref.resolve_in_context(&ctx)
@@ -323,7 +322,7 @@ pub(crate) fn resolve_document_file_ref(
 ///
 /// Path-component expression functions (`basename`, `dirname`, `join`, the
 /// file-index family) operate on references whose target need not exist. The
-/// missing-target shape comes from the same repository-first candidate order
+/// missing-target shape comes from the same document-first candidate order
 /// execution probes (D1/D3) — never a private prefix branch plus
 /// `base_dir.join`. An implicit bare miss therefore yields the repository-root
 /// candidate, identical to how an existing implicit reference resolves; a shape
@@ -342,8 +341,8 @@ pub(crate) fn resolve_document_file_ref(
 pub(crate) fn resolve_document_file_ref_shape(
     file_ref: &FileReference,
     base_dir: &Path,
-    repository_root: Option<&Path>,
-    package_area: Option<&Path>,
+    _repository_root: Option<&Path>,
+    _package_area: Option<&Path>,
     magic_paths: &[(PathBuf, PathPosition)],
     request_context: Option<&biscuit_file::FileResolutionContext>,
 ) -> Result<PathBuf, FileReferenceError> {
@@ -353,15 +352,14 @@ pub(crate) fn resolve_document_file_ref_shape(
             base_dir,
             None,
             magic_paths,
-            repository_root,
-            package_area,
+            None,
         ),
     };
     if let Some(path) = file_ref.resolve_in_context(&ctx)? {
         return Ok(path);
     }
     // Clean miss: the path shape is the first candidate the shared plan would
-    // have probed (repository-first for an implicit bare path), taken from
+    // have probed (document-first for an implicit bare path), taken from
     // `FileReference` itself rather than re-deriving the grammar from the raw
     // string.
     file_ref
@@ -423,7 +421,7 @@ mod tests {
     }
 
     /// Creates a temp directory that looks like a git repository root by
-    /// planting a `.git` marker, so `find_git_root_from` anchors implicit
+    /// planting a `.git` marker, so the request capture anchors implicit
     /// references on it independent of the host's real repo boundaries.
     fn repo_fixture() -> tempfile::TempDir {
         let dir = tempfile::TempDir::new().unwrap();
@@ -431,11 +429,9 @@ mod tests {
         dir
     }
 
-    /// Implicit (bare) references resolve **repository-root first**: a same-named
-    /// file present in BOTH the repository root and the nested document
-    /// directory resolves to the repository-root copy (D2/D3 repository-first).
+    /// Implicit references prefer the document CWD over the repository root.
     #[test]
-    fn implicit_reference_prefers_repository_root_over_base() {
+    fn implicit_reference_prefers_document_cwd_over_repository_root() {
         let repo = repo_fixture();
         let base_dir = repo.path().join("prompts");
         std::fs::create_dir_all(&base_dir).unwrap();
@@ -447,7 +443,7 @@ mod tests {
             .unwrap()
             .expect("should resolve");
 
-        assert_eq!(resolved, repo.path().join("shared.md"));
+        assert_eq!(resolved, base_dir.join("shared.md"));
     }
 
     /// Explicit `./` references pin to the document directory only and never
@@ -470,7 +466,7 @@ mod tests {
     }
 
     #[test]
-    fn package_reference_prefers_package_area_over_repository_root() {
+    fn repository_scoped_reference_prefers_package_area_over_repository_root() {
         let repo = repo_fixture();
         let package_area = repo.path().join("darkmatter");
         let base_dir = package_area.join("docs");
@@ -478,14 +474,23 @@ mod tests {
         std::fs::write(repo.path().join("shared.md"), "repository decoy").unwrap();
         std::fs::write(package_area.join("shared.md"), "package").unwrap();
 
-        let file_ref = FileReference::new("!shared.md").unwrap();
+        let catalog = biscuit_file::RepositoryScopeCatalog::new(
+            repo.path(),
+            vec![package_area.clone()],
+            vec![package_area.clone()],
+            biscuit_file::PackageAreaFallback::FirstComponent,
+        )
+        .unwrap();
+        let snapshot = biscuit_file::FileResolutionContext::new(&base_dir)
+            .with_repository_scope_catalog(catalog);
+        let file_ref = FileReference::new("^shared.md").unwrap();
         let resolved = resolve_document_file_ref(
             &file_ref,
             &base_dir,
             Some(repo.path()),
             Some(&package_area),
             &[],
-            None,
+            Some(&snapshot),
         )
         .unwrap();
 

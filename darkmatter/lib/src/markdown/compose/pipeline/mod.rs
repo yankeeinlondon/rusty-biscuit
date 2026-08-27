@@ -33,6 +33,7 @@ impl Markdown {
         // to exactly the groups this document names, and stays untouched when
         // it names none or when the caller chose the context themselves.
         options.upgrade_ambient_context_for(self);
+        options.ensure_file_resolution_context();
 
         // Resolve persistent cache root if configured
         let persistent_root = options.cache_root.as_ref().map(|root| {

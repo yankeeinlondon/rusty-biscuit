@@ -316,4 +316,5 @@ pub mod layout {
     }
 }
 
+#[cfg(feature = "terminal-tests")]
 pub mod level2;

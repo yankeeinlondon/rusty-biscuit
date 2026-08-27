@@ -1,9 +1,7 @@
 //! Path and URL resolution for transclusion references.
 
 use super::types::{DirectiveKind, ResolvedTarget, TransclusionError};
-use crate::markdown::compose::util::{
-    document_resolution_context, find_git_root_from, package_area_for_reference,
-};
+use crate::markdown::compose::util::document_resolution_context;
 use crate::markdown::compose::{ComposeSource, TransclusionOptions};
 use crate::markdown::compose::context::options::SourceDerivation;
 use biscuit_file::{FileReference, FileReferenceError, FileReferenceKind};
@@ -74,7 +72,7 @@ fn resolve_url_target(
 /// Every non-URL target is parsed by [`FileReference`] and resolved through the
 /// shared document-backed context ([`document_resolution_context`]): explicit
 /// `./`/`../` from the source document's directory only, implicit bare paths
-/// repository-root first then the source directory, `~`/`~/…` against the user's
+/// source directory first then the repository root, `~`/`~/…` against the user's
 /// home, and `@` (magic), `!` (package), `vault:`, `%` (recursive), absolute,
 /// and `{{ENV}}` references by their existing `FileReference` semantics. There
 /// is no ambient-CWD read (D2).
@@ -149,18 +147,12 @@ fn resolve_file_reference(
             (Some(path), SourceDerivation::Ordinary) => snapshot.for_source(path),
             (None, _) => snapshot.for_base(&base_dir),
         },
-        None => {
-            let repo_root = find_git_root_from(&base_dir);
-            let package_area =
-                package_area_for_reference(file_ref, &base_dir, repo_root.as_deref());
-            document_resolution_context(
-                &base_dir,
-                source_file_path(source).as_deref(),
-                &options.magic_paths,
-                repo_root.as_deref(),
-                package_area.as_deref(),
-            )
-        }
+        None => document_resolution_context(
+            &base_dir,
+            source_file_path(source).as_deref(),
+            &options.magic_paths,
+            None,
+        ),
     };
 
     let path = file_ref.resolve_in_context(&resolution_ctx)?.ok_or_else(|| {
@@ -384,10 +376,16 @@ mod tests {
         let package_target = package_area.join("shared.md");
         std::fs::write(&package_target, "# package").unwrap();
 
+        let mut options = default_options();
+        options.file_resolution_context = Some(
+            crate::markdown::compose::capture_file_resolution_context(
+                source_path.parent().expect("source parent"),
+            ),
+        );
         let resolved = resolve_path(
-            "!shared.md",
+            "^shared.md",
             DirectiveKind::File,
-            &default_options(),
+            &options,
             &ComposeSource::File(source_path),
             1,
             dummy_ctx("# root"),
@@ -432,21 +430,19 @@ mod tests {
         let target_path = root.join("shared.md");
         std::fs::write(&target_path, "# shared").unwrap();
 
-        // FileReference resolves @/ from CWD's git root, so we need to
-        // temporarily change to the temp dir for this test.
-        let original_dir = std::env::current_dir().unwrap();
-        std::env::set_current_dir(&nested).unwrap();
+        let mut options = default_options();
+        options.file_resolution_context = Some(
+            crate::markdown::compose::capture_file_resolution_context(&nested),
+        );
 
         let resolved = resolve_path(
             "@/shared.md",
             DirectiveKind::File,
-            &default_options(),
+            &options,
             &ComposeSource::File(source_path),
             1,
             dummy_ctx("# root"),
         );
-
-        std::env::set_current_dir(&original_dir).unwrap();
 
         let resolved = resolved.unwrap();
         assert_eq!(resolved, root.join("shared.md"));
@@ -479,7 +475,7 @@ mod tests {
             "~/notes/intro.md",
             "/absolute/path.md",
             "intro.md",
-            "!README.md",
+            "^README.md",
             "%@docs/spec.md",
             "vault:notes/today.md",
             "{{CONFIG_DIR}}/app.toml",
@@ -490,6 +486,10 @@ mod tests {
                 FrontmatterReference::Parsed(_)
             ));
         }
+        assert!(matches!(
+            classify_frontmatter_reference("!README.md"),
+            FrontmatterReference::ParseError(_)
+        ));
         for reference in ["Just some text content", "**Bold** markdown", ""] {
             assert!(matches!(
                 classify_frontmatter_reference(reference),

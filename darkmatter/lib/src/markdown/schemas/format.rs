@@ -7,7 +7,7 @@
 //!   [`biscuit_file::FileReference`] and confirms the resolved path exists.
 //!   Resolution runs through the shared document-backed context
 //!   ([`resolve_document_file_ref`]): implicit bare paths resolve
-//!   repository-root first then the prompt document directory, explicit
+//!   prompt document directory first then the repository root, explicit
 //!   `./`/`../` from the document directory only, with no launch-area fallback
 //!   (D2) and no ambient-CWD read on the anchored path. This mirrors the
 //!   expression path (`file_exists`/`frontmatter`) so schema validation and
@@ -69,7 +69,7 @@ use crate::markdown::schemas::simplified::{
 /// for raw JSON Schema authors who want existence-checking.
 ///
 /// The eager validator parses the value as a [`FileReference`], resolves it
-/// through the shared document-backed context (repository-first then
+/// through the shared document-backed context (document-first then
 /// source-relative for implicit paths), and fails when the file does not exist
 /// on disk.
 pub const DARKMATTER_FILE_FORMAT: &str = "darkmatter-file";
@@ -168,7 +168,7 @@ fn valid_iso8601_time(value: &str) -> bool {
 /// Registers the `darkmatter-file` format on a `ValidationOptions` builder.
 ///
 /// `base_dir`, when `Some`, is the prompt document directory: implicit bare
-/// references resolve repository-root first then the document directory, and
+/// references resolve from the document directory first, then the repository root, and
 /// explicit `./`/`../` from the document directory only. When `None` (the bare
 /// validator API with no document anchor) the validator resolves against the
 /// ambient process CWD.
@@ -342,7 +342,7 @@ impl fmt::Display for FileReferenceFailure {
 ///
 /// When a document `base_dir` is supplied the reference resolves through the
 /// shared document-backed context ([`resolve_document_file_ref`]): explicit
-/// `./`/`../` from the base only, implicit bare paths repository-root first then
+/// `./`/`../` from the base only, implicit bare paths from the base first then
 /// the base, and the special kinds by their existing `FileReference` semantics.
 /// There is **no** launch-area fallback for these document-authored references
 /// (D2) and **no** ambient-CWD read — the `_fallback` (launch-area) anchor is
@@ -377,7 +377,7 @@ fn resolve_file_reference_in_context(
         err,
     })?;
     let resolved = match base_dir {
-        // Document-backed: repository-first then source-relative, no launch-area
+        // Document-backed: document-first then repository-relative, no launch-area
         // fallback (D2) and no ambient CWD.
         Some(base_dir) => {
             let (repository_root, package_area) = match file_resolution_context {
@@ -385,15 +385,7 @@ fn resolve_file_reference_in_context(
                     snapshot.repository_root().map(Path::to_path_buf),
                     snapshot.package_area().map(Path::to_path_buf),
                 ),
-                None => {
-                    let repository_root = crate::markdown::compose::find_git_root_from(base_dir);
-                    let package_area = crate::markdown::compose::package_area_for_reference(
-                        &reference,
-                        base_dir,
-                        repository_root.as_deref(),
-                    );
-                    (repository_root, package_area)
-                }
+                None => (None, None),
             };
             resolve_document_file_ref(
                 &reference,
@@ -698,9 +690,17 @@ mod tests {
         let package_target = package_area.join("shared.md");
         std::fs::write(&package_target, "package").unwrap();
 
+        let base = member.join("docs");
+        let context = crate::markdown::compose::capture_file_resolution_context(&base);
         assert_eq!(
             std::fs::canonicalize(
-                resolve_file_reference("!shared.md", Some(&member.join("docs")), None).unwrap()
+                resolve_file_reference_in_context(
+                    "^shared.md",
+                    Some(&base),
+                    None,
+                    Some(&context),
+                )
+                .unwrap(),
             )
             .unwrap(),
             std::fs::canonicalize(package_target).unwrap(),
@@ -927,19 +927,19 @@ mod tests {
 
     #[test]
     #[serial_test::serial(darkmatter_file_cwd)]
-    fn resolve_file_reference_no_match_for_missing_package_path() {
+    fn resolve_file_reference_rejects_removed_package_sigil() {
         let dir = temp_dir();
         let _cwd = CwdGuard::enter(dir.path());
         let raw = "!darkmatter-test-missing-package-xyz.md";
-        let err = resolve_file_reference(raw, None, None).expect_err("should fail with NoMatch");
+        let err = resolve_file_reference(raw, None, None)
+            .expect_err("removed package sigil should fail parsing");
         let rendered = err.to_string();
         assert!(
-            rendered.contains("no existing file matched reference"),
+            rendered.contains("removed") && rendered.contains('^'),
             "rendered: {rendered}"
         );
         assert!(rendered.contains(&format!("`{raw}`")), "rendered: {rendered}");
-        assert!(!rendered.contains("darkmatter-test-missing-package-xyz.md "), "rendered: {rendered}");
-        assert!(matches!(err, FileReferenceFailure::NoMatch { .. }));
+        assert!(matches!(err, FileReferenceFailure::InvalidSyntax { .. }));
     }
 
     #[test]

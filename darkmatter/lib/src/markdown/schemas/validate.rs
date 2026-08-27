@@ -67,7 +67,7 @@ pub const DEFAULT_CACHE_SIZE: usize = 64;
 /// The prompt document directory (`base_dir`) is supplied per call to
 /// [`Self::validator_for`] because it varies per document. It participates in
 /// the cache key alongside the schema JSON so validators preserve the
-/// repository-first, then source-relative candidate plan of their document.
+/// document-first, then repository-relative candidate plan of their document.
 /// [`Self::file_ref_fallback_dir`] is also part of cache identity for
 /// diagnostic parity, but is not a resolution candidate for document-authored
 /// references.
@@ -124,7 +124,7 @@ impl ValidatorCache {
     /// Records the launch-area anchor for `format: darkmatter-file` diagnostics.
     ///
     /// Per D2 the launch area is not a resolution input for a document-authored
-    /// `file` value — those resolve repository-first then against the document
+    /// `file` value — those resolve against the document first, then the repository
     /// `base_dir`. This anchor is retained for structural parity with the
     /// validator-cache identity and is not consulted during resolution.
     #[must_use]
@@ -258,7 +258,7 @@ fn schema_uses_lookaround(schema: &Value) -> bool {
 /// keywords.
 ///
 /// `base_dir` (the prompt document directory) anchors `format: darkmatter-file`
-/// value resolution: implicit bare references resolve repository-root first then
+/// value resolution: implicit bare references resolve document-first then repository-root
 /// the document directory, explicit `./`/`../` from the document directory only.
 /// When `None`, the bare validator API resolves against the ambient CWD.
 /// `file_ref_fallback_dir` (the launch area) is threaded for structural parity
@@ -603,7 +603,7 @@ fn offending_property_of(kind: &ValidationErrorKind) -> Option<String> {
 ///
 /// Mirrors the anchors the compiled validator was built with so the
 /// re-resolution reproduces the same failure mode. `base_dir` is the document
-/// directory the value resolves against (repository-first then source for
+/// directory the value resolves against (document-first then repository for
 /// implicit references); `fallback` (the launch area) is carried for structural
 /// parity but is not a resolution input (D2).
 #[derive(Clone, Copy, Default)]
