@@ -191,6 +191,10 @@ just -f schematic/justfile generate
 cargo check -p schematic-schema
 ```
 
+The generator's tmux capture suite is L2 behind its internal
+`terminal-tests` feature. Ordinary local L1 omits the target and harness;
+`just test-l2` and CI enable them.
+
 ## Importing an API From a Published Spec
 
 `schematic-gen import` turns an OpenAPI document into either a standalone client

@@ -97,6 +97,10 @@ cargo run -p unchained-ai-gen -- --providers openai,anthropic
 cargo run -p unchained-ai-gen -- --dry-run
 ```
 
+`unchained-ai-contract` keeps its installed-provider integration target behind
+the internal `real-tests` feature. Ordinary L1 omits that target;
+`just test-real` enables it together with the runtime environment gate.
+
 ## Implementation Status
 
 **Implemented**: Pipeline state/execution, Prompt building (multi-modal), `Prompt::execute()` via `complete_blocking()` + capability resolver, execution surface (`CompletionBackend`, `complete()`, `complete_blocking()`), capability-based model resolver (`models::selection`), OpenCode delegation, provider registry (13 providers), model enums (auto-generated), model metadata (models.dev + provider-native merge), rich OpenRouter metadata (pricing, architecture, default parameters), rig tools (BraveSearch, ScreenScrape), client adaptors (Z.ai, ZenMux), ModelCapability serialization, `UnchainedInferenceAdapter` in `unchained-ai-contract`, agent status detection (ClaudeCode, Codex), PTY-based status command execution, cap limit parsing, CLI binary with `limits` subcommand (terminal + JSON output)

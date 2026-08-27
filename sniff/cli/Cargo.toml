@@ -23,7 +23,7 @@ path = "src/bin/render_git_status_fixture.rs"
 required-features = ["test-fixtures"]
 
 [features]
-test-fixtures = []
+test-fixtures = ["dep:biscuit-test-harness"]
 
 [dependencies]
 chrono = "0.4"
@@ -44,10 +44,10 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
 url = "2"
+biscuit-test-harness = { path = "../../biscuit-test-harness", optional = true }
 
 [dev-dependencies]
 assert_cmd = "2"
-biscuit-test-harness = { path = "../../biscuit-test-harness" }
 expectrl = "0.8"
 # Only to snapshot worktrees into commits when building CLI test repos —
 # gix has no worktree-staging write API. See sniff-lib's dev-dep note.
@@ -60,9 +60,18 @@ serial_test = "3"
 tempfile = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 
+[[test]]
+name = "level2_cicd_styling"
+required-features = ["test-fixtures"]
+
+[[test]]
+name = "level2_git_status_styling"
+required-features = ["test-fixtures"]
+
 # CI policy: the L1 suite runs with the `test-fixtures` feature, and sniff-cli
 # owns the area's tmux-driven L2 tests (CI/CD status-cell styling).
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]
 l2-backends = ["tmux"]
 features = ["test-fixtures"]
+local-features = []

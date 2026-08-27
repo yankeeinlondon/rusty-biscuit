@@ -24,6 +24,8 @@ default = []
 # and attempts no network access. Off by default; production builds carry no
 # counter state and expose none of the instrumentation API.
 effects-instrumentation = []
+terminal-tests = ["dep:image"]
+browser-tests = ["dep:biscuit-browser-harness", "dep:chromiumoxide", "dep:futures-util"]
 
 [dependencies]
 # Tracing
@@ -115,6 +117,13 @@ jsonschema = { version = "0.42", default-features = false }
 # for such schemas and to validate emitted patterns at conversion time.
 fancy-regex = "0.17"
 
+# Cargo has no optional dev-dependencies. Required-feature targets below keep
+# these tier-only dependencies out of production and ordinary L1 builds.
+biscuit-browser-harness = { path = "../../biscuit-browser-harness", optional = true }
+chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"], optional = true }
+futures-util = { version = "0.3", optional = true }
+image = { version = "0.25", optional = true }
+
 [target.'cfg(unix)'.dependencies]
 # `setsid` for the alias-lookup child in
 # `markdown/compose/shell_expansion/alias.rs`. Only the raw syscall is needed,
@@ -142,19 +151,29 @@ libgit2-sys = ">=0.18.3, <0.18.6"
 proptest = "1.6"
 criterion = { version = "0.5", features = ["html_reports"] }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
-biscuit-browser-harness = { path = "../../biscuit-browser-harness" }
 test-toolkit = { path = "../../tools/test-toolkit" }
 tempfile = "3"
-# Encodes the distinctive-fill probe image and decodes the screen capture in the
-# Level-2 terminal-image paint test (`level2_render_tree_terminal`).
-image = "0.25"
-# Used by the `html_to_png` example for direct visual inspection. The browser
-# *tests* go through biscuit-browser-harness; the example reaches for the
-# chromiumoxide screenshot API directly because the harness intentionally
-# doesn't expose `full_page` screenshots.
-chromiumoxide = { version = "0.7", default-features = false, features = ["tokio-runtime"] }
-futures-util = "0.3"
 wiremock = "0.6"
+
+[[example]]
+name = "html_to_png"
+required-features = ["browser-tests"]
+
+[[test]]
+name = "browser_render"
+required-features = ["browser-tests"]
+
+[[test]]
+name = "level3_popover"
+required-features = ["browser-tests"]
+
+[[test]]
+name = "level2_render_tree_terminal"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level3_image_painting"
+required-features = ["terminal-tests"]
 
 [[bench]]
 name = "schema_validation"
@@ -226,5 +245,7 @@ harness = false
 # that no lib test executes fails backend-proof.
 [package.metadata.ci.tests]
 tiers = ["L1", "L2", "browser"]
+features = ["terminal-tests", "browser-tests"]
+local-features = []
 l2-backends = ["wezterm"]
 l1-include-slow = true

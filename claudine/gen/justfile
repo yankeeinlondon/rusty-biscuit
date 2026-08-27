@@ -61,7 +61,7 @@ test *args="":
 
 # run real-terminal (Level-2) tests for the generator reports
 test-l2 *args="":
-    @just _test_l2 {{ LIBRARY }} {{args}}
+    @just _test_l2 {{ LIBRARY }} --features terminal-tests {{args}}
 
 # not applicable: claudine-gen has no OS-keyboard-injection (Level-3) tests
 test-l3:

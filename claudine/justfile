@@ -78,7 +78,9 @@ test-rendezvous *args:
     @just _test rendezvous-client {{ args }}
 
 # Build darkmatter's `md` into the workspace target dir, where
-# `inline_compose_hash` looks for it before falling back to PATH.
+# `inline_compose_hash` looks for it before falling back to PATH. The forwarded
+# feature matches the Darkmatter test graph so a cold build produces one shared
+# dependency variant rather than recompiling it for the fixture.
 #
 # claudine writes a Darkmatter content hash and then verifies it round-trips by
 # shelling out to `md diff`, so `md` is a test *fixture* for this area, not an
@@ -97,16 +99,32 @@ test-rendezvous *args:
 _ensure-md:
     @if ! command -v md >/dev/null 2>&1 && [ ! -x ../target/debug/md ]; then \
         if command -v cargo >/dev/null 2>&1; then \
-            cargo build -q -p darkmatter-cli --bin md; \
+            cargo build -q -p darkmatter-cli --bin md --features darkmatter/effects-instrumentation; \
         else \
             echo "warning: 'md' not found and cargo is unavailable (prebuilt-archive run);" >&2; \
             echo "         inline_compose_writes_hash_that_passes_md_diff will fail." >&2; \
         fi; \
     fi
 
-# Test the catalog types, library, contract adapter, CLI, and generator.
+# Test the catalog types, library, contract adapter, CLI, and generator. Local
+# development uses one Nextest invocation so its scheduler can use the whole
+# machine. CI keeps per-package invocations for distinct JUnit reports and
+# enables the daemon fixtures that pull bundled DuckDB into the build graph.
 test *args="": _ensure-md
-    @just _test_all "claudine-catalog-types claudine claudine-contract claudine-cli claudine-gen" {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    packages="claudine-catalog-types claudine claudine-contract claudine-cli claudine-gen"
+    if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
+        just _test_all "claudine-catalog-types; claudine; claudine-contract; claudine-cli --features daemon-tests,terminal-tests; claudine-gen --features terminal-tests" {{ args }}
+    else
+        just _test_local_all "${packages}" {{ args }}
+    fi
+
+# Run the CLI L1 suite with its daemon-backed tests enabled. This is
+# intentionally opt-in: the feature adds rendezvous-daemon and bundled DuckDB
+# to the graph.
+test-daemon *args="": _ensure-md
+    @just _test claudine-cli --features daemon-tests {{ args }}
 
 # test just the contract adapter library
 test-contract *args="":
@@ -140,11 +158,11 @@ test-l2 *args="":
         || nproc 2>/dev/null \
         || echo 4)"
     threads=$(( cores < 8 ? cores : 8 ))
-    BISCUIT_L2_THREADS="${BISCUIT_L2_THREADS:-${threads}}" just _test_l2 claudine-cli {{ args }}
+    BISCUIT_L2_THREADS="${BISCUIT_L2_THREADS:-${threads}}" just _test_l2 claudine-cli --features terminal-tests {{ args }}
     # claudine-gen owns the report-rendering L2 tests (declared in its
     # manifest). They self-isolate per test but are `#[serial]`-chained, so
     # the plain serial path — not the self-spawn mode above — is the right fit.
-    just _test_l2 claudine-gen {{ args }}
+    just _test_l2 claudine-gen --features terminal-tests {{ args }}
 
 # Level-3 OS-keyboard-injection tests. Gated by `require_level!(Level::L3, ...)`;
 # the recipe exports RUN_LEVEL3=1, and each test also skips cleanly when its
@@ -153,7 +171,7 @@ test-l2 *args="":
 # Ctrl+C keystroke delivery into a real WezTerm window (signal-handling.md).
 # The tmux multiplexer Ctrl+C coverage lives at L2 (`just test-l2`).
 test-l3 *args="":
-    @just _test_l3 claudine-cli {{ args }}
+    @just _test_l3 claudine-cli --features terminal-tests {{ args }}
 
 # not applicable: claudine emits terminal/CLI output, not HTML
 test-browser:
@@ -171,8 +189,8 @@ test-real *args="":
     # code so a genuine failure still fails the recipe.
     set -uo pipefail
     rc=0
-    CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-contract --test real_provider {{ args }} || rc=$?
-    CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-cli --test real_opencode_yolo_subagent {{ args }} || rc=$?
+    CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-contract --features real-tests --test real_provider {{ args }} || rc=$?
+    CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-cli --features real-tests --test real_opencode_yolo_subagent {{ args }} || rc=$?
     exit $rc
 
 # Guard against typed errors collapsing to prose anywhere in lib/src, cli/src,
@@ -210,6 +228,52 @@ lint:
 # Criterion benches for the runtime hot paths.
 bench *args="":
     @just _bench claudine {{ args }}
+
+# Compare cold stable and nightly L1 test compilation without executing tests.
+# Both runs disable kache and incremental compilation, use isolated temporary
+# target directories, and compile the same local graph. Nightly adds parallel
+# frontend compilation; the exact nightly date makes repeat measurements fair.
+benchmark-compile:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    stable="$(awk -F'"' '/channel/ { print $2; exit }' ../rust-toolchain.toml)"
+    nightly="nightly-2026-08-26"
+    for toolchain in "${stable}" "${nightly}"; do
+        if ! rustup toolchain list | awk '{ print $1 }' | grep -Eq "^${toolchain}(-|$)"; then
+            echo "Missing Rust toolchain: ${toolchain}" >&2
+            echo "Install it with: rustup toolchain install ${toolchain}" >&2
+            exit 1
+        fi
+    done
+
+    bench_root="$(mktemp -d "${TMPDIR:-/tmp}/claudine-compile-benchmark.XXXXXX")"
+    trap 'rm -rf "${bench_root}"' EXIT
+    packages=(-p claudine-catalog-types -p claudine -p claudine-contract -p claudine-cli -p claudine-gen)
+    filter="$(just _tier_filter L1)"
+
+    echo "Cold compile benchmark (tests are compiled, not run)"
+    echo "stable:  ${stable}"
+    echo "nightly: ${nightly} with -Zthreads=8"
+    echo
+
+    SECONDS=0
+    RUSTC_WRAPPER="" RUSTFLAGS="" CARGO_INCREMENTAL=0 \
+        CARGO_TARGET_DIR="${bench_root}/stable" \
+        rustup run "${stable}" cargo nextest run --no-run \
+        "${packages[@]}" -E "${filter}" --no-tests=pass
+    stable_seconds=${SECONDS}
+
+    SECONDS=0
+    RUSTC_WRAPPER="" RUSTFLAGS="-Zthreads=8" CARGO_INCREMENTAL=0 \
+        CARGO_TARGET_DIR="${bench_root}/nightly" \
+        rustup run "${nightly}" cargo nextest run --no-run \
+        "${packages[@]}" -E "${filter}" --no-tests=pass
+    nightly_seconds=${SECONDS}
+
+    echo
+    echo "stable:  ${stable_seconds}s"
+    echo "nightly: ${nightly_seconds}s"
 
 # Per-package LCOV coverage for the library, contract adapter, and CLI.
 coverage *args="":

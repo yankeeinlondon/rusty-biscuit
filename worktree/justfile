@@ -75,7 +75,7 @@ test *args="":
 # Level-2 real-terminal tests for the CLI. Skips cleanly if the harness is
 # unavailable unless `BISCUIT_TEST_LEVEL_REQUIRED=2` is set in the environment.
 test-l2 *args="":
-    @just _test_l2 {{ CLI }} {{ args }}
+    @just _test_l2 {{ CLI }} --features terminal-tests {{ args }}
 
 # Not applicable: worktree has no OS-keyboard-injection (Level-3) tests.
 test-l3 *args="":

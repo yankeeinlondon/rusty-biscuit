@@ -68,11 +68,15 @@ sanity:
 # `browser_`/`level2_` filter terms, so the whole binary is skipped.
 test *args="":
     #!/usr/bin/env bash
-    set -uo pipefail
-    # Unlike the shared default, darkmatter's L1 contract keeps `slow_` tests.
-    export BISCUIT_TEST_FILTER='!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/))'
+    set -euo pipefail
     exit_code=0
-    just _test_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }}" {{ args }} || exit_code=$?
+    if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
+        # Darkmatter's CI L1 contract retains the explicitly marked slow tests
+        # and keeps per-package invocations for distinct JUnit reports.
+        BISCUIT_L1_INCLUDE_SLOW=1 just _test_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }}" {{ args }} || exit_code=$?
+    else
+        just _test_local_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }}" {{ args }} || exit_code=$?
+    fi
     if (( exit_code == 130 )); then
         exit 130
     fi
@@ -90,18 +94,18 @@ test-l2 *args="":
     @echo -e "Running {{ BOLD }}Level-2{{ RESET }} render-tree terminal tests"
     @echo -e "{{ DIM }}- export BISCUIT_TEST_LEVEL_REQUIRED=2 to hard-fail on missing harness{{ RESET }}"
     @echo
-    @just _test_l2_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }}" {{ args }}
+    @just _test_l2_all "{{ LIBRARY }} --features terminal-tests; {{ CLI }} --features terminal-tests; {{ DMLS }} --features terminal-tests" {{ args }}
 
 # darkmatter Level-3 tests
 test-l3 *args="":
-    @just _test_l3 {{ LIBRARY }} {{ args }}
+    @just _test_l3 {{ LIBRARY }} --features terminal-tests,browser-tests {{ args }}
     @just _test_l3 {{ CLI }} {{ args }}
 
 # Headless-browser tests (chromiumoxide). Selects every `browser_*` test in
 # the library crate. Skips cleanly when Chrome is absent unless
 # `BISCUIT_BROWSER_REQUIRED=1` is set.
 test-browser *args="":
-    @just _test_browser {{ LIBRARY }} {{ args }}
+    @just _test_browser {{ LIBRARY }} --features browser-tests {{ args }}
 
 # not applicable: darkmatter has no real-resource (device / network) tier
 test-real:

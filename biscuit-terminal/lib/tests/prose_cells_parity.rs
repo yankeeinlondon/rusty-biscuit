@@ -541,7 +541,7 @@ fn bespoke_resolves_prose_once() {
 // ---------------------------------------------------------------------------
 
 #[test]
-fn browser_preserves_semantic_emphasis_in_td() {
+fn html_preserves_semantic_emphasis_in_td() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
         .with_data(vec![vec![TableCellContent::from(Prose::new(
@@ -560,7 +560,7 @@ fn browser_preserves_semantic_emphasis_in_td() {
 }
 
 #[test]
-fn browser_preserves_link_in_td() {
+fn html_preserves_link_in_td() {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Link")])
         .with_data(vec![vec![TableCellContent::from(Prose::new(
@@ -815,16 +815,18 @@ fn tree_output_contains_prose_cell_content() {
 // ---------------------------------------------------------------------------
 // Browser tier — real headless Chrome computed-style assertions
 //
-// The L1 `browser_*` tests above assert HTML structure (semantic tags, link
+// The L1 HTML tests above assert structure (semantic tags, link
 // href). These prove the emitted CSS is valid and actually applied by a real
 // browser to the styled run inside the `<td>`. They skip cleanly when no
 // Chrome/Chromium is present (set BISCUIT_BROWSER_REQUIRED=1 to hard-fail).
 // ---------------------------------------------------------------------------
 
+#[cfg(feature = "browser-tests")]
 use biscuit_browser_harness::{BrowserHarness, ChromeHarness, require_browser, wrap_fragment};
 
 /// A one-column table whose single Prose cell carries `markup`, rendered to a
 /// standalone HTML page ready for the browser harness.
+#[cfg(feature = "browser-tests")]
 fn browser_cell_page(markup: &str) -> String {
     let table = Table::new()
         .with_columns(vec![TableColumn::new("Col")])
@@ -832,6 +834,7 @@ fn browser_cell_page(markup: &str) -> String {
     wrap_fragment(&table.render_html_fragment().render(), "#ffffff")
 }
 
+#[cfg(feature = "browser-tests")]
 #[tokio::test]
 #[serial_test::serial(browser)]
 async fn browser_prose_cell_color_computes() {
@@ -856,6 +859,7 @@ async fn browser_prose_cell_color_computes() {
     harness.shutdown().await;
 }
 
+#[cfg(feature = "browser-tests")]
 #[tokio::test]
 #[serial_test::serial(browser)]
 async fn browser_prose_cell_background_computes() {
@@ -878,6 +882,7 @@ async fn browser_prose_cell_background_computes() {
     harness.shutdown().await;
 }
 
+#[cfg(feature = "browser-tests")]
 #[tokio::test]
 #[serial_test::serial(browser)]
 async fn browser_prose_cell_underline_computes() {

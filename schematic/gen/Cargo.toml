@@ -13,6 +13,9 @@ path = "src/lib.rs"
 name = "schematic-gen"
 path = "src/main.rs"
 
+[features]
+terminal-tests = ["dep:biscuit-test-harness", "dep:test-toolkit"]
+
 [dependencies]
 biscuit-file = { path = "../../biscuit-file/lib", features = ["toml", "yaml"] }
 clap = { version = "4.5", features = ["derive"] }
@@ -28,15 +31,26 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 openapiv3 = "2"
 indexmap = "2"
+biscuit-test-harness = { path = "../../biscuit-test-harness", optional = true }
+test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 
 [dev-dependencies]
 tempfile = "3.15"
 jsonschema = { version = "0.42", default-features = false }
-# `bin_exe!`: resolves the `schematic-gen` path at run time so the capture tests
-# survive execution from a relocated nextest archive (the wsl2 leg).
-biscuit-test-harness = { path = "../../biscuit-test-harness" }
+
+[[test]]
+name = "terminal_capture"
+required-features = ["terminal-tests"]
 
 # Opt-out of benchmarking: this crate has no algorithmic hot paths.
 [package.metadata.benchmarks]
 required = false
 reason = "Code-generation tool; runs at build time and has no runtime hot paths."
+
+# The tmux capture target is L2. CI enables the feature in its reusable build;
+# ordinary local L1 omits both the target and terminal harness.
+[package.metadata.ci.tests]
+tiers = ["L1", "L2"]
+l2-backends = ["tmux"]
+features = ["terminal-tests"]
+local-features = []

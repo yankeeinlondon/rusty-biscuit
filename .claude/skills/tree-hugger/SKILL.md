@@ -122,6 +122,10 @@ When modifying queries or symbol extraction:
 3. Bug fixes require regression tests
 4. Run `cargo test -p tree-hugger-lib` to verify
 
+The CLI's real-terminal `god-files` test is behind the internal
+`terminal-tests` feature. Ordinary local L1 omits its harness and target;
+`just test-l2` and CI enable it.
+
 ## Resolver and Adapter Architecture (Phase 3)
 
 ### Semantic Resolvers

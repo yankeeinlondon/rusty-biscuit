@@ -404,6 +404,25 @@ class PackagePolicyTests(unittest.TestCase):
                 today=TODAY,
             )
 
+    def test_local_features_are_accepted_as_local_runner_policy(self) -> None:
+        validate_package_ci(
+            "a",
+            ci_policy(tests={"features": ["ci-helper"], "local-features": []}),
+            self.RUNNER_LABELS,
+            root=Path("/"),
+            today=TODAY,
+        )
+
+    def test_local_features_must_be_a_string_list(self) -> None:
+        with self.assertRaises(RuntimeError):
+            validate_package_ci(
+                "a",
+                ci_policy(tests={"local-features": "fast"}),
+                self.RUNNER_LABELS,
+                root=Path("/"),
+                today=TODAY,
+            )
+
     def test_unknown_runner_tool_is_rejected(self) -> None:
         with self.assertRaises(RuntimeError):
             validate_package_ci(

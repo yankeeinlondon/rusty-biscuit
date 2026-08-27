@@ -45,7 +45,7 @@ test *args="":
     @just _test_all "biscuit-icon --features image; biscuit-icon-cli --features image" {{ args }}
 
 test-l2 *args="":
-    @just _test_l2 biscuit-icon-cli --features image {{ args }}
+    @just _test_l2 biscuit-icon-cli --features image,terminal-tests {{ args }}
 
 test-l3:
     @echo "test-l3: not applicable for biscuit-icon"

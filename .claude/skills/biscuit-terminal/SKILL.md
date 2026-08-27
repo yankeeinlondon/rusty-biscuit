@@ -98,6 +98,9 @@ Use the `renderable` skill for shared IR/layout/style definitions. Use the
 - For HTML/CSS render output, use computed-style assertions when possible.
 - For image protocols, assert terminal-specific capture behavior; WezTerm often
   requires debug/meta output while Kitty can preserve graphics protocol bytes.
+- Internal `terminal-tests` and `browser-tests` features expose only their
+  corresponding integration targets and harness dependencies. Ordinary local
+  L1 keeps both disabled; tier recipes and CI enable them explicitly.
 
 See `biscuit-test-harness/README.md` and the `cli` skill for the full testing
 workflow.

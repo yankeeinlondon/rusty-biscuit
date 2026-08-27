@@ -9,6 +9,9 @@ description = "InferenceAdapter backed by Claudine non-interactive, tool-free ag
 name = "claudine_contract"
 path = "src/lib.rs"
 
+[features]
+real-tests = []
+
 [dependencies]
 # Internal
 biscuit-contract = { path = "../../biscuit-contract/lib" }
@@ -36,3 +39,7 @@ tracing = "0.1"
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread", "process", "io-util", "time", "sync"] }
 tracing-subscriber = { version = "0.3", features = ["registry"] }
+
+[[test]]
+name = "real_provider"
+required-features = ["real-tests"]

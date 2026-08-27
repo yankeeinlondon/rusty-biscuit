@@ -59,7 +59,7 @@ test-l2 *args="":
     @echo -e "Running {{BOLD}}Level-2{{RESET}} real-terminal tests"
     @echo -e "{{DIM}}- export BISCUIT_TEST_LEVEL_REQUIRED=2 to hard-fail on missing harness{{RESET}}"
     @echo
-    @just _test_l2 {{CLI}} {{args}}
+    @just _test_l2 {{CLI}} --features terminal-tests {{args}}
 
 # Level-3 OS-keyboard-injection tests for the CLI. Library has no L3 tests.
 #
@@ -71,7 +71,7 @@ test-l2 *args="":
 # contract; L3 is the opt-in physical-keypress proof. These steal desktop focus,
 # so they are intentionally NOT part of `test`/`all`.
 test-l3 *args="":
-    @just _test_l3 {{CLI}} {{args}}
+    @just _test_l3 {{CLI}} --features terminal-tests {{args}}
 
 # Windows-host runtime gate for F2 captured-stdout parity. Runs the ignored,
 # deterministic console-boundary integration test by exact name; it must execute
@@ -85,7 +85,7 @@ test-windows-captured-stdout:
         echo "test-windows-captured-stdout must run on a Windows host with an attached console" >&2
         exit 1
     fi
-    cargo test -p {{CLI}} --test windows_captured_stdout -- --ignored captured_stdout_receives_only_value_no_tui_bytes
+    cargo test -p {{CLI}} --features terminal-tests --test windows_captured_stdout -- --ignored captured_stdout_receives_only_value_no_tui_bytes
 
 # Not applicable: biscuit-tui has no browser-target tests.
 test-browser:

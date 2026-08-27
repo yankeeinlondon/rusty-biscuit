@@ -17,6 +17,9 @@ path = "src/lib.rs"
 name = "md"
 path = "src/main.rs"
 
+[features]
+terminal-tests = ["dep:biscuit-test-harness"]
+
 [dependencies]
 darkmatter = { path = "../lib" }
 renderable = { path = "../../renderable" }
@@ -37,6 +40,7 @@ open = "5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tokio = { version = "1", features = ["rt"] }
+biscuit-test-harness = { path = "../../biscuit-test-harness", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -45,15 +49,60 @@ libc = "0.2"
 assert_cmd = "2"
 predicates = "3"
 tempfile = "3"
-biscuit-test-harness = { path = "../../biscuit-test-harness" }
 serial_test = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 tracing-test = "0.2"
 syntect = "5.2"
 
+[[test]]
+name = "level2_code_block_styling"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_disclosure_blocks"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_errors"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_frontmatter_images"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_frontmatter_tables"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_harness_integrity"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_horizontal_rules"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_layout_dimensions"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_ordered_lists"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_schema_about"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_schema_validate"
+required-features = ["terminal-tests"]
+
 # CI policy: darkmatter's L1 contract keeps `slow_` tests, and the CLI owns L2
 # (render-tree terminal) tier tests.
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]
+features = ["terminal-tests"]
+local-features = []
 l2-backends = ["tmux", "wezterm"]
 l1-include-slow = true
