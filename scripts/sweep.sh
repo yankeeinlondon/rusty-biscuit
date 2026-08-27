@@ -5,7 +5,9 @@
 #   1. incremental caches over SWEEP_INCREMENTAL_MAX_GIB (default 15)
 #   2. artifacts from uninstalled toolchains
 #   3. artifacts untouched for more than SWEEP_TIME_DAYS (default 14)
-#   4. BACKSTOP: cap each target/ at SWEEP_MAX_SIZE (default 120GB), oldest first
+#   4. LOW-SPACE BACKSTOP: when the target filesystem has less than
+#      SWEEP_MIN_FREE_GIB free (default 100), cap each target/ at
+#      SWEEP_MAX_SIZE (default 120GB), oldest first
 #
 # Then one pass over the whole host:
 #   5. out-of-tree target dirs untouched for more than SWEEP_ORPHAN_DAYS,
@@ -23,7 +25,14 @@ set -euo pipefail
 
 time_days="${SWEEP_TIME_DAYS:-14}"
 max_size="${SWEEP_MAX_SIZE:-120GB}"
+min_free_gib="${SWEEP_MIN_FREE_GIB:-100}"
 incremental_max_kb=$(( ${SWEEP_INCREMENTAL_MAX_GIB:-15} * 1024 * 1024 ))
+
+if [[ ! "$min_free_gib" =~ ^[0-9]+$ ]]; then
+    echo "SWEEP_MIN_FREE_GIB must be a non-negative integer, got: $min_free_gib" >&2
+    exit 2
+fi
+min_free_kb=$(( min_free_gib * 1024 * 1024 ))
 
 if [[ $# -gt 0 ]]; then
     roots=("$@")
@@ -71,7 +80,28 @@ for root in "${roots[@]}"; do
 
     cargo sweep -r --installed "$root"
     cargo sweep -r --time "$time_days" "$root"
-    cargo sweep -r --maxsize "$max_size" "$root"
+
+    # Artifact mtimes describe when rustc produced a file, not when Cargo last
+    # reused it. An unconditional oldest-first cap therefore evicts healthy,
+    # reusable dependencies from an active worktree and turns the next local
+    # test into a cold build. Reserve that tradeoff for actual capacity pressure.
+    free_kb="$(df -Pk "$root" 2>/dev/null | awk 'END { print $4 }')"
+    if [[ "$free_kb" =~ ^[0-9]+$ ]] && (( free_kb >= min_free_kb )); then
+        awk -v f="$free_kb" -v m="$min_free_kb" 'BEGIN {
+            printf "[capacity] %.1f GiB free >= %.1f GiB floor -- skipping maxsize backstop\n",
+                   f / 1048576, m / 1048576
+        }'
+    else
+        if [[ ! "$free_kb" =~ ^[0-9]+$ ]]; then
+            echo "[capacity] free space unavailable -- applying maxsize backstop" >&2
+        else
+            awk -v f="$free_kb" -v m="$min_free_kb" 'BEGIN {
+                printf "[capacity] %.1f GiB free < %.1f GiB floor -- applying maxsize backstop\n",
+                       f / 1048576, m / 1048576
+            }'
+        fi
+        cargo sweep -r --maxsize "$max_size" "$root"
+    fi
 done
 
 # Out-of-tree target directories, swept once for the host rather than per root.
