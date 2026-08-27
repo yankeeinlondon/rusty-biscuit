@@ -54,4 +54,4 @@ jobs:
 
       - name: Run Windows captured-stdout verification test
         shell: cmd
-        run: cargo test -p biscuit-tui-cli --test windows_captured_stdout -- --ignored captured_stdout_receives_only_value_no_tui_bytes --nocapture
+        run: cargo test -p biscuit-tui-cli --features terminal-tests --test windows_captured_stdout -- --ignored captured_stdout_receives_only_value_no_tui_bytes --nocapture
