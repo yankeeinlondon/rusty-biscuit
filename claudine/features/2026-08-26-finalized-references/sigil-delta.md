@@ -172,8 +172,8 @@ Two gaps remain against today's code:
   directory is captured internally and drives the caller-scoped `ctx.area`,
   `ctx.package_area`, and `ctx.package`, but is not directly readable from a
   prompt. `ctx.cwd` (caller-scoped, like its siblings) must be added by the
-  finalized spec; whether `AGENT_CWD` is worth setting for child processes is
-  an open call.
+  finalized spec; `AGENT_CWD` was ruled in on 2026-08-27 (spec D8.7: set on
+  every spawned child, overwriting any inherited value).
 - **The Exception Clause needs one strengthening.** The clause resolves the
   *parameter* against the caller's launch directory — matching today's
   top-level behavior — but must additionally require that the parameter's
@@ -252,5 +252,5 @@ each:
 | bare paths | Open conflict on candidate order: target document says composition-CWD first, implementation says repo-root first — the central ruling this feature must make (review-3 Finding 4 is deferred to it) |
 | `!` | Ruled 2026-08-27: removed from the target document; implementation removal of the Package meaning is pending the finalized spec |
 | `&`, `^` | New sigils; unimplemented; currently-legal path characters, so reserving them is a (minor) breaking change |
-| `file:` URIs, device prefixes, drive-relative | Unimplemented; need an explicit accept/reject decision in the final grammar |
+| `file:` URIs, device prefixes, drive-relative | Ruled 2026-08-27 (spec OQ1): rejected and reserved with typed errors — never silently implicit paths |
 | `%`, `{{VAR}}`, URLs, diagnostics, eager rewrite | Implemented and battle-tested; proposal must incorporate or consciously retire them |
