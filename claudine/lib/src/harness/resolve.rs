@@ -9,8 +9,9 @@
 //!
 //! It is now a thin adapter over [`FileReference`] and the shared
 //! [`FileResolutionContext`]: implicit references are source-relative then
-//! repository-relative, `@` is a magic-root search, `~` is home-pinned,
-//! explicit `./`/`../` stay pinned to the source directory, and resolution
+//! repository-relative, `@` is a magic-root search, `&` pins to the repository
+//! root, `^` searches package, package-area, then repository roots, `~` is
+//! home-pinned, explicit `./`/`../` stay pinned to the source directory, and resolution
 //! probes the filesystem so only an existing regular file is a match.
 
 use std::path::{Path, PathBuf};

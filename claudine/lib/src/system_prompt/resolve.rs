@@ -263,7 +263,8 @@ fn build_scope_list(context: &LaunchContext) -> Vec<(PathBuf, StandardPromptScop
 /// Delegates all grammar and candidate ordering to [`FileReference`] and the
 /// shared [`FileResolutionContext`] rather than the former absolute-or-`cwd.join`
 /// grammar: implicit references are launch-relative then repository-relative,
-/// `@foo` is a magic-root search, `~`/`~/foo` is
+/// `@foo` is a magic-root search, `&foo` pins to the repository root, `^foo`
+/// searches package, package-area, then repository roots, `~`/`~/foo` is
 /// home-pinned (`~user` unsupported), explicit `./`/`../` stay pinned to the launch directory, and an
 /// absolute path resolves to itself. The launch context has no source document,
 /// so its directory is the base and the caller-supplied repository root anchors

@@ -185,7 +185,7 @@ behavior changes.
 - [Messaging](messaging.md) — outbound routes (Discord/Slack/Signal/WhatsApp), the config-TUI route manager, webhook redaction invariants, the desktop-notification boundary
 - [Traces and Logging](traces-and-logging.md), [Log Reporting](log-reporting.md)
 - [CLI Pre-Parsing](cli-pre-parsing.md) — argv normalization pipeline; rule-by-rule reference in [argv-normalization.md](argv-normalization.md)
-- [Shell Completions](completions/shell-completions.md) — dynamic completion engine, per-mode pipelines, magic `@` resolution
+- [Shell Completions](completions/shell-completions.md) — dynamic completion engine, per-mode pipelines, and shared `@`/`&`/`^`/implicit file-reference resolution
 
 ## Research on Agentic CLI Platforms
 

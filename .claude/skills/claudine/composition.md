@@ -176,7 +176,7 @@ every `<TAB>`. The supplement engine applies these rules in order:
 - **Four supported entry forms**: `@`-prefixed magic paths, `&` repository-root
   paths, `^` repository-scoped paths, and implicit-relative paths like
   `prompts/…`. Each enumerates the same ordered roots its execution form uses.
-- **Typed-length scope**: 0–2 "meaningful characters" (leading `@` and
+- **Typed-length scope**: 0–2 "meaningful characters" (a leading `@`, `&`, or `^` and
   segments before a `/` don't count) use the curated scope only —
   `prompts/` and `sequences/` under `<repo>/`, `<package-root>/`,
   `<package-area-root>/`, `~/`, and `~/.claudine/`. 3+ characters extend

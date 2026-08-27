@@ -75,14 +75,14 @@ The generated bash/zsh/fish scripts shell out to `claudine __complete` on
 every `<TAB>`. The supplement engine applies these rules in order:
 
 - **Candidates are markdown files only** (`*.md`). Directories,
-    non-markdown files, `./`/`../` traversal tokens, `!` package sigils,
+  non-markdown files, `./`/`../` traversal tokens,
     `vault:`, `/abs`, `%`, and `{{…}}` prefixes all return zero candidates.
 
-- **Two supported entry forms**: `@`-prefixed magic paths (enumerated
-    against repo root + user home) and implicit-relative paths like
-    `prompts/…` (enumerated against the repo root only).
+- **Four supported entry forms**: `@`-prefixed magic paths, `&` repository-root
+  paths, `^` repository-scoped paths, and implicit-relative paths like
+  `prompts/…`. Each enumerates the same ordered roots its execution form uses.
 
-- **Typed-length scope**: 0–2 "meaningful characters" (leading `@` and
+- **Typed-length scope**: 0–2 "meaningful characters" (a leading `@`, `&`, or `^` and
     segments before a `/` don't count) use the curated scope only —
     `prompts/` and `sequences/` under `<repo>/`, `<package-root>/`,
     `<package-area-root>/`, `~/`, and `~/.claudine/`. 3+ characters extend
@@ -148,8 +148,8 @@ Each entry point destructures its clap args struct, then calls the shared `parse
 
 **What it does:**
 
-1. Constructs a `FileReference` with package-area magic path support
-2. Calls `.resolve()` to find the actual file on disk (supports `@` magic, `!` package, repo-relative, monorepo-package-relative, absolute paths)
+1. Constructs a `FileReference` with Claudine's convention roots
+2. Calls `.resolve()` to find the actual file on disk (supports `@` magic, `&` repository-root, `^` repository-scoped, implicit, explicit-relative, home, vault, recursive, and absolute paths)
 3. Validates `.md`/`.markdown` extension
 4. Reads file content and parses into a `Markdown` struct
 
@@ -592,7 +592,7 @@ claudine sequence --fail-fast false @batch.md
 3. If `sequence` is an array: normalizes via `normalize_inline_list()` → `SequenceStep` array (scalar strings or objects with required `name`)
 4. If `sequence` is a string: resolves as external YAML file reference via `resolve_sequence_reference()`:
 
-    - Supports `@`, `!`, `vault:`, `%`, `{{ENV}}`, `~`, absolute, and relative paths
+    - Supports `@`, `&`, `^`, `vault:`, `%`, `{{ENV}}`, `~`, absolute, and relative paths
     - External file form 1: `{ sequence: [...] }`
     - External file form 2: `{ kind: "sequence", list: [...], template?: {...} }` with `{{key}}` template rendering
 

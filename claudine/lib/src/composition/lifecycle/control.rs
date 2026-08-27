@@ -260,8 +260,10 @@ pub fn proxy_handoff_allowed(chain: &[std::path::PathBuf], target: &std::path::P
 ///
 /// Delegates to [`crate::harness::resolve_harness_path`], the thin adapter over
 /// the shared [`biscuit_file::FileReference`] grammar: implicit references are
-/// source-relative then repository-relative, `@` is a magic-root search, `~` is
-/// home-pinned, and explicit `./`/`../` stay pinned to the source. Resolution
+/// source-relative then repository-relative, `@` is a magic-root search, `&`
+/// pins to the repository root, `^` searches package, package-area, then
+/// repository roots, `~` is home-pinned, and explicit `./`/`../` stay pinned
+/// to the source. Resolution
 /// probes the filesystem, so a hand-off to a missing document fails loudly with
 /// a typed [`crate::harness::HarnessError`] rather than producing an
 /// empty/garbage run. The proxied target document is the source for its own

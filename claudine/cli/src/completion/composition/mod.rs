@@ -18,10 +18,10 @@
 //! 6. Sort by source rank then candidate text.
 //! 7. Render tokens.
 //!
-//! Magic paths (`@...`) are a filename search: they resolve against the
-//! scope priority order and are rendered as `@<basename>` (the `@` is kept;
-//! only the filename is inserted), deduped by basename. The committed
-//! `@<basename>` is resolved to the closest matching file at launch. A
+//! Sigil paths (`@...`, `&...`, and `^...`) are filename searches through the
+//! exact ordered roots supplied by `FileReference`; their sigil is retained in
+//! the rendered candidate. Magic candidates are deduped by basename, and the
+//! committed value resolves to the closest matching file at launch. A
 //! committed directory token (ending in `/`) shortcuts the pipeline to walk
 //! only inside that directory.
 
