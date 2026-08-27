@@ -116,6 +116,7 @@ fn removed_package_sigil_has_a_migration_diagnostic() {
 #[test]
 fn reserved_schemes_and_windows_device_prefixes_are_rejected() {
     for (raw, expected_scheme) in [
+        ("C:", "C"),
         ("C:path", "C"),
         ("file:", "file"),
         ("file:///tmp/a.md", "file"),
@@ -141,7 +142,6 @@ fn reserved_schemes_and_windows_device_prefixes_are_rejected() {
 
 #[test]
 fn supported_absolute_and_explicit_filename_escape_hatches_are_preserved() {
-    assert_eq!(kind("C:"), FileReferenceKind::Absolute);
     assert_eq!(kind("C:/abs"), FileReferenceKind::Absolute);
     assert_eq!(kind(r"C:\abs"), FileReferenceKind::Absolute);
     assert_eq!(kind("./name:part"), FileReferenceKind::ExplicitRelative);

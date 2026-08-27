@@ -211,8 +211,7 @@ pub(crate) fn is_absolute_reference(s: &str) -> bool {
         return true;
     }
     let bytes = s.as_bytes();
-    (bytes.len() == 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
-        || bytes.len() >= 3
+    bytes.len() >= 3
         && bytes[0].is_ascii_alphabetic()
         && bytes[1] == b':'
         && (bytes[2] == b'\\' || bytes[2] == b'/')
@@ -632,10 +631,13 @@ mod tests {
 
     #[test]
     fn windows_drive_relative_is_rejected_as_scheme_shaped() {
-        assert!(matches!(
-            parse("C:foo.md"),
-            Err(FileReferenceError::UnsupportedScheme { ref scheme, .. }) if scheme == "C"
-        ));
+        for raw in ["C:", "C:foo.md"] {
+            assert!(matches!(
+                parse(raw),
+                Err(FileReferenceError::UnsupportedScheme { ref scheme, ref reference })
+                    if scheme == "C" && reference == raw
+            ));
+        }
     }
 
     #[test]
