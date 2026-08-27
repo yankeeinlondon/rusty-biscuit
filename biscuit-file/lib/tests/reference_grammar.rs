@@ -30,35 +30,130 @@ fn explicit_vs_implicit_relative_are_distinguished_without_fs() {
 fn special_kinds_classify() {
     assert_eq!(kind("/tmp/a.md"), FileReferenceKind::Absolute);
     assert_eq!(kind("@docs/spec.md"), FileReferenceKind::Magic);
-    assert_eq!(kind("!lib/src/lib.rs"), FileReferenceKind::Package);
+    assert_eq!(kind("&docs/spec.md"), FileReferenceKind::RepositoryRoot);
+    assert_eq!(kind("^docs/spec.md"), FileReferenceKind::RepositoryScoped);
     assert_eq!(kind("vault:notes/today.md"), FileReferenceKind::Vault);
     assert_eq!(kind("http://example.com/a.md"), FileReferenceKind::Url);
     assert_eq!(kind("https://example.com/a.md"), FileReferenceKind::Url);
 }
 
 #[test]
-fn magic_payload_must_remain_relative_after_the_documented_sigil() {
-    for raw in [
-        "@//etc/hosts",
-        "@///etc/hosts",
-        "%@//etc/hosts",
-        r"@C:\Windows\win.ini",
-        r"@/C:\Windows\win.ini",
-        r"%@C:\Windows\win.ini",
-        r"@C:Windows\win.ini",
-        r"@\Windows\win.ini",
-        r"@/\Windows\win.ini",
-        r"@\\server\share\file.md",
-        r"@/\\server\share\file.md",
-        r"%@\\server\share\file.md",
+fn defensive_sigil_payloads_are_portable_and_relative() {
+    for sigil in ['@', '&', '^'] {
+        for suffix in [
+            "",
+            "/",
+            "//etc/hosts",
+            "///etc/hosts",
+            r"\Windows\win.ini",
+            r"/\Windows\win.ini",
+            r"\\server\share\file.md",
+            r"/\\server\share\file.md",
+            r"C:\Windows\win.ini",
+            r"/C:\Windows\win.ini",
+            r"C:Windows\win.ini",
+        ] {
+            let raw = format!("{sigil}{suffix}");
+            assert!(
+                matches!(
+                    FileReference::new(&raw),
+                    Err(FileReferenceError::InvalidSyntax(_))
+                ),
+                "rooted or empty sigil payload must be rejected on every host: {raw:?}",
+            );
+
+            let recursive = format!("%{raw}");
+            assert!(
+                matches!(
+                    FileReference::new(&recursive),
+                    Err(FileReferenceError::InvalidSyntax(_))
+                ),
+                "recursive rooted or empty sigil payload must be rejected: {recursive:?}",
+            );
+        }
+    }
+}
+
+#[test]
+fn one_forward_slash_after_a_defensive_sigil_is_optional() {
+    for (compact, separated, expected) in [
+        ("@docs/spec.md", "@/docs/spec.md", FileReferenceKind::Magic),
+        (
+            "&docs/spec.md",
+            "&/docs/spec.md",
+            FileReferenceKind::RepositoryRoot,
+        ),
+        (
+            "^docs/spec.md",
+            "^/docs/spec.md",
+            FileReferenceKind::RepositoryScoped,
+        ),
     ] {
+        let compact = FileReference::new(compact).unwrap();
+        let separated = FileReference::new(separated).unwrap();
+        assert_eq!(compact.class().kind, expected);
+        assert_eq!(separated.class().kind, expected);
+        assert_eq!(compact.class(), separated.class());
+    }
+}
+
+#[test]
+fn removed_package_sigil_has_a_migration_diagnostic() {
+    let error = FileReference::new("!lib/src/lib.rs").unwrap_err();
+    let FileReferenceError::InvalidSyntax(detail) = error else {
+        panic!("removed `!` must be InvalidSyntax");
+    };
+    assert!(detail.contains("removed"));
+    assert!(detail.contains('!'));
+    assert!(detail.contains('^'));
+
+    assert_eq!(
+        kind("./!weird-name.md"),
+        FileReferenceKind::ExplicitRelative
+    );
+}
+
+#[test]
+fn reserved_schemes_and_windows_device_prefixes_are_rejected() {
+    for (raw, expected_scheme) in [
+        ("C:path", "C"),
+        ("file:", "file"),
+        ("file:///tmp/a.md", "file"),
+        ("htps://example.com/a.md", "htps"),
+    ] {
+        assert!(matches!(
+            FileReference::new(raw),
+            Err(FileReferenceError::UnsupportedScheme { ref scheme, ref reference })
+                if scheme == expected_scheme && reference == raw
+        ));
+    }
+
+    for raw in [r"\\?\C:\work\a.md", r"\\.\C:\work\a.md"] {
         assert!(
             matches!(
                 FileReference::new(raw),
                 Err(FileReferenceError::InvalidSyntax(_))
             ),
-            "rooted magic payload must be rejected on every host: {raw:?}",
+            "Windows device prefixes are reserved on every host: {raw:?}",
         );
+    }
+}
+
+#[test]
+fn supported_absolute_and_explicit_filename_escape_hatches_are_preserved() {
+    assert_eq!(kind("C:"), FileReferenceKind::Absolute);
+    assert_eq!(kind("C:/abs"), FileReferenceKind::Absolute);
+    assert_eq!(kind(r"C:\abs"), FileReferenceKind::Absolute);
+    assert_eq!(kind("./name:part"), FileReferenceKind::ExplicitRelative);
+}
+
+#[test]
+fn a_second_recursive_marker_is_invalid() {
+    for raw in ["%%", "%%x"] {
+        assert!(matches!(
+            FileReference::new(raw),
+            Err(FileReferenceError::InvalidSyntax(_))
+        ));
     }
 }
 
@@ -100,9 +195,26 @@ fn windows_absolute_and_unc_classify_absolute_on_any_host() {
 }
 
 #[test]
-fn windows_drive_relative_is_not_absolute() {
-    // `C:foo.md` is drive-relative; it must not be mistaken for absolute.
-    assert_eq!(kind("C:foo.md"), FileReferenceKind::ImplicitRelative);
+fn repository_error_diagnostics_carry_only_the_required_context() {
+    let outside = FileReferenceError::OutsideRepository {
+        sigil: '&',
+        reference_cwd: "/workspace/outside".into(),
+    }
+    .to_string();
+    assert!(outside.contains('&'));
+    assert!(outside.contains("/workspace/outside"));
+
+    let escaped = FileReferenceError::RepositoryEscape {
+        sigil: '^',
+        reference: "^../outside.md".to_string(),
+        repository_root: "/workspace/repo".into(),
+        escaped_candidate: "/workspace/outside.md".into(),
+    }
+    .to_string();
+    assert!(escaped.contains('^'));
+    assert!(escaped.contains("^../outside.md"));
+    assert!(escaped.contains("/workspace/repo"));
+    assert!(escaped.contains("/workspace/outside.md"));
 }
 
 #[test]

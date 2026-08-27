@@ -15,7 +15,7 @@ pub(crate) fn parse(raw: &str) -> Result<ParsedReference, FileReferenceError> {
         ));
     }
 
-    let (recursive, remainder) = strip_recursive(raw);
+    let (recursive, remainder) = strip_recursive(raw)?;
     if recursive && remainder.is_empty() {
         return Err(FileReferenceError::InvalidSyntax(
             "`%` prefix requires a path".to_string(),
@@ -25,13 +25,15 @@ pub(crate) fn parse(raw: &str) -> Result<ParsedReference, FileReferenceError> {
     let template = parse_template(path_str)?;
 
     let parsed = ParsedReference {
+        authored: raw.to_string(),
         recursive,
         kind: match kind {
             DetectedKind::Relative => ReferenceKind::Relative(template),
             DetectedKind::ImplicitRelative => ReferenceKind::ImplicitRelative(template),
             DetectedKind::Absolute => ReferenceKind::Absolute(template),
             DetectedKind::Magic => ReferenceKind::Magic(template),
-            DetectedKind::Package => ReferenceKind::Package(template),
+            DetectedKind::RepositoryRoot => ReferenceKind::RepositoryRoot(template),
+            DetectedKind::RepositoryScoped => ReferenceKind::RepositoryScoped(template),
             DetectedKind::Home => ReferenceKind::Home(template),
             DetectedKind::Vault => ReferenceKind::Vault(template),
             DetectedKind::Url => ReferenceKind::Url(template),
@@ -43,11 +45,16 @@ pub(crate) fn parse(raw: &str) -> Result<ParsedReference, FileReferenceError> {
 }
 
 /// Strip a leading `%` and return whether the reference is recursive.
-fn strip_recursive(raw: &str) -> (bool, &str) {
+fn strip_recursive(raw: &str) -> Result<(bool, &str), FileReferenceError> {
     if let Some(rest) = raw.strip_prefix('%') {
-        (true, rest)
+        if rest.starts_with('%') {
+            return Err(FileReferenceError::InvalidSyntax(
+                "a file reference accepts at most one leading `%` recursive modifier".to_string(),
+            ));
+        }
+        Ok((true, rest))
     } else {
-        (false, raw)
+        Ok((false, raw))
     }
 }
 
@@ -56,7 +63,8 @@ enum DetectedKind {
     ImplicitRelative,
     Absolute,
     Magic,
-    Package,
+    RepositoryRoot,
+    RepositoryScoped,
     Home,
     Vault,
     Url,
@@ -73,8 +81,9 @@ enum DetectedKind {
 ///
 /// Returns [`FileReferenceError::UnsupportedUserHome`] for a `~user` form,
 /// which is not portable and must never fall through to magic or implicit.
-/// Returns [`FileReferenceError::InvalidSyntax`] when a magic payload remains
-/// rooted after the documented `@` or `@/` sigil.
+/// Returns [`FileReferenceError::InvalidSyntax`] when reserved syntax is
+/// malformed, and [`FileReferenceError::UnsupportedScheme`] for an unsupported
+/// RFC-scheme-shaped prefix.
 fn detect_kind(s: &str) -> Result<(DetectedKind, &str), FileReferenceError> {
     // URL scheme is matched ASCII case-insensitively and before any drive/path
     // classifier so `HTTP://host` is never mistaken for a Windows path.
@@ -89,27 +98,82 @@ fn detect_kind(s: &str) -> Result<(DetectedKind, &str), FileReferenceError> {
         return Ok((DetectedKind::Vault, rest));
     }
     if let Some(rest) = s.strip_prefix('@') {
-        let payload = rest.strip_prefix('/').unwrap_or(rest);
-        if is_rooted_magic_payload(payload) {
-            return Err(FileReferenceError::InvalidSyntax(format!(
-                "magic reference payload must be relative after `@` or `@/`: `{s}`"
-            )));
-        }
-        return Ok((DetectedKind::Magic, payload));
+        return detect_defensive_sigil(s, rest, '@', DetectedKind::Magic);
     }
-    if let Some(rest) = s.strip_prefix('!') {
-        return Ok((DetectedKind::Package, rest));
+    if let Some(rest) = s.strip_prefix('&') {
+        return detect_defensive_sigil(s, rest, '&', DetectedKind::RepositoryRoot);
+    }
+    if let Some(rest) = s.strip_prefix('^') {
+        return detect_defensive_sigil(s, rest, '^', DetectedKind::RepositoryScoped);
+    }
+    if s.starts_with('!') {
+        return Err(FileReferenceError::InvalidSyntax(format!(
+            "the `!` file-reference sigil was removed; use `^` for repository-scoped lookup: `{s}`"
+        )));
     }
     if let Some(rest) = s.strip_prefix('~') {
         return detect_home(s, rest);
     }
+    if is_windows_device_prefix(s) {
+        return Err(FileReferenceError::InvalidSyntax(format!(
+            "Windows device-prefix paths are not supported; use a native absolute path: `{s}`"
+        )));
+    }
     if is_absolute_reference(s) {
         return Ok((DetectedKind::Absolute, s));
+    }
+    if let Some(scheme) = unsupported_scheme(s) {
+        return Err(FileReferenceError::UnsupportedScheme {
+            scheme: scheme.to_string(),
+            reference: s.to_string(),
+        });
     }
     if is_explicit_relative(s) {
         return Ok((DetectedKind::Relative, s));
     }
     Ok((DetectedKind::ImplicitRelative, s))
+}
+
+fn detect_defensive_sigil<'a>(
+    raw: &str,
+    rest: &'a str,
+    sigil: char,
+    kind: DetectedKind,
+) -> Result<(DetectedKind, &'a str), FileReferenceError> {
+    if rest.starts_with('\\') {
+        return Err(FileReferenceError::InvalidSyntax(format!(
+            "`/` is the only portable separator after the `{sigil}` sigil: `{raw}`"
+        )));
+    }
+    let payload = rest.strip_prefix('/').unwrap_or(rest);
+    if payload.is_empty() {
+        return Err(FileReferenceError::InvalidSyntax(format!(
+            "the `{sigil}` sigil requires a relative payload: `{raw}`"
+        )));
+    }
+    if is_rooted_magic_payload(payload) {
+        return Err(FileReferenceError::InvalidSyntax(format!(
+            "reference payload must be relative after `{sigil}` or `{sigil}/`: `{raw}`"
+        )));
+    }
+    Ok((kind, payload))
+}
+
+fn is_windows_device_prefix(s: &str) -> bool {
+    s.starts_with(r"\\?\") || s.starts_with(r"\\.\")
+}
+
+fn unsupported_scheme(s: &str) -> Option<&str> {
+    let colon = s.find(':')?;
+    let scheme = &s[..colon];
+    let mut chars = scheme.chars();
+    if chars.next().is_some_and(|c| c.is_ascii_alphabetic())
+        && chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '.' | '-'))
+    {
+        Some(scheme)
+    } else {
+        None
+    }
 }
 
 /// Classify the tail of a `~`-prefixed reference.
@@ -147,7 +211,8 @@ pub(crate) fn is_absolute_reference(s: &str) -> bool {
         return true;
     }
     let bytes = s.as_bytes();
-    bytes.len() >= 3
+    (bytes.len() == 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+        || bytes.len() >= 3
         && bytes[0].is_ascii_alphabetic()
         && bytes[1] == b':'
         && (bytes[2] == b'\\' || bytes[2] == b'/')
@@ -242,15 +307,19 @@ mod tests {
     }
 
     #[test]
-    fn magic_root_separator_is_part_of_the_shared_grammar() {
-        let compact = parse("@docs/spec.md").unwrap();
-        let rooted = parse("@/docs/spec.md").unwrap();
-
-        assert_eq!(
-            compact.kind.template().segments,
-            rooted.kind.template().segments
-        );
-        assert!(matches!(rooted.kind, ReferenceKind::Magic(_)));
+    fn defensive_sigil_separator_is_part_of_the_shared_grammar() {
+        for (compact, separated) in [
+            ("@docs/spec.md", "@/docs/spec.md"),
+            ("&docs/spec.md", "&/docs/spec.md"),
+            ("^docs/spec.md", "^/docs/spec.md"),
+        ] {
+            let compact = parse(compact).unwrap();
+            let separated = parse(separated).unwrap();
+            assert_eq!(
+                compact.kind.template().segments,
+                separated.kind.template().segments
+            );
+        }
     }
 
     #[test]
@@ -297,10 +366,15 @@ mod tests {
     }
 
     #[test]
-    fn package_path() {
-        let parsed = parse("!lib/src/lib.rs").unwrap();
-        assert!(!parsed.recursive);
-        assert!(matches!(parsed.kind, ReferenceKind::Package(_)));
+    fn repository_reference_kinds() {
+        assert!(matches!(
+            parse("&lib/src/lib.rs").unwrap().kind,
+            ReferenceKind::RepositoryRoot(_)
+        ));
+        assert!(matches!(
+            parse("^lib/src/lib.rs").unwrap().kind,
+            ReferenceKind::RepositoryScoped(_)
+        ));
     }
 
     #[test]
@@ -557,14 +631,11 @@ mod tests {
     }
 
     #[test]
-    fn windows_drive_relative_is_not_absolute() {
-        // `C:foo.md` is drive-relative, not absolute.
-        let parsed = parse("C:foo.md").unwrap();
-        assert!(
-            matches!(parsed.kind, ReferenceKind::ImplicitRelative(_)),
-            "drive-relative must not classify absolute; got {:?}",
-            parsed.kind
-        );
+    fn windows_drive_relative_is_rejected_as_scheme_shaped() {
+        assert!(matches!(
+            parse("C:foo.md"),
+            Err(FileReferenceError::UnsupportedScheme { ref scheme, .. }) if scheme == "C"
+        ));
     }
 
     #[test]

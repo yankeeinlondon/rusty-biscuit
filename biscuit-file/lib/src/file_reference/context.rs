@@ -7,6 +7,196 @@ use crate::file_reference::MagicPathList;
 use crate::file_reference::error::FileReferenceError;
 use crate::file_reference::resolve::normalize_components;
 
+/// Policy for assigning a package-area root when a monorepo directory is not
+/// covered by an explicitly cataloged area.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackageAreaFallback {
+    /// Do not infer an area for uncataloged directories.
+    None,
+    /// Treat the first component below the repository root as the area.
+    FirstComponent,
+}
+
+/// Validation failure while constructing a [`RepositoryScopeCatalog`].
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum RepositoryScopeCatalogError {
+    /// Every catalog root must be absolute.
+    #[error("{root_kind} root must be absolute: `{path}`")]
+    RootNotAbsolute {
+        root_kind: &'static str,
+        path: PathBuf,
+    },
+    /// Catalog roots must not retain `.` or `..` components.
+    #[error("{root_kind} root must be lexically normalized: `{path}`")]
+    RootNotNormalized {
+        root_kind: &'static str,
+        path: PathBuf,
+    },
+    /// Package and package-area roots must stay inside their repository.
+    #[error("{root_kind} root `{path}` is outside repository `{repository_root}`")]
+    RootOutsideRepository {
+        root_kind: &'static str,
+        path: PathBuf,
+        repository_root: PathBuf,
+    },
+}
+
+/// Repository, package-area, and package roots captured by an observing caller.
+///
+/// Construction and scope selection are purely lexical. Neither operation
+/// reads the filesystem or performs repository discovery.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RepositoryScopeCatalog {
+    repository_root: PathBuf,
+    package_area_roots: Vec<PathBuf>,
+    package_roots: Vec<PathBuf>,
+    package_area_fallback: PackageAreaFallback,
+}
+
+impl RepositoryScopeCatalog {
+    /// Validate and construct a repository scope catalog.
+    pub fn new(
+        repository_root: impl Into<PathBuf>,
+        package_area_roots: Vec<PathBuf>,
+        package_roots: Vec<PathBuf>,
+        package_area_fallback: PackageAreaFallback,
+    ) -> Result<Self, RepositoryScopeCatalogError> {
+        let repository_root = repository_root.into();
+        validate_catalog_root("repository", &repository_root, None)?;
+        let package_area_roots = validate_catalog_roots(
+            "package-area",
+            package_area_roots,
+            &repository_root,
+        )?;
+        let package_roots =
+            validate_catalog_roots("package", package_roots, &repository_root)?;
+        Ok(Self {
+            repository_root,
+            package_area_roots,
+            package_roots,
+            package_area_fallback,
+        })
+    }
+
+    /// The repository root represented by this catalog.
+    pub fn repository_root(&self) -> &Path {
+        &self.repository_root
+    }
+
+    /// Explicit package-area roots, deduplicated in caller order.
+    pub fn package_area_roots(&self) -> &[PathBuf] {
+        &self.package_area_roots
+    }
+
+    /// Explicit package roots, deduplicated in caller order.
+    pub fn package_roots(&self) -> &[PathBuf] {
+        &self.package_roots
+    }
+
+    /// Select the most-specific cataloged scope containing `base`.
+    #[must_use]
+    pub fn scope_for(&self, base: &Path) -> RepositoryScope {
+        let base = normalize_components(base);
+        if !base.starts_with(&self.repository_root) {
+            return RepositoryScope::default();
+        }
+        let package_root = most_specific_containing(&self.package_roots, &base);
+        let package_area_root = most_specific_containing(&self.package_area_roots, &base)
+            .or_else(|| package_root.is_none().then(|| self.fallback_area_for(&base)).flatten());
+        RepositoryScope {
+            repository_root: Some(self.repository_root.clone()),
+            package_area_root,
+            package_root,
+        }
+    }
+
+    fn fallback_area_for(&self, base: &Path) -> Option<PathBuf> {
+        if self.package_area_fallback == PackageAreaFallback::None {
+            return None;
+        }
+        let relative = base.strip_prefix(&self.repository_root).ok()?;
+        let first = relative.components().next()?;
+        Some(self.repository_root.join(first.as_os_str()))
+    }
+}
+
+/// Repository scopes selected for one reference base.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RepositoryScope {
+    repository_root: Option<PathBuf>,
+    package_area_root: Option<PathBuf>,
+    package_root: Option<PathBuf>,
+}
+
+impl RepositoryScope {
+    /// Selected repository root, absent when the base is outside the catalog.
+    pub fn repository_root(&self) -> Option<&Path> {
+        self.repository_root.as_deref()
+    }
+
+    /// Selected package-area root.
+    pub fn package_area_root(&self) -> Option<&Path> {
+        self.package_area_root.as_deref()
+    }
+
+    /// Selected package root.
+    pub fn package_root(&self) -> Option<&Path> {
+        self.package_root.as_deref()
+    }
+}
+
+fn validate_catalog_roots(
+    root_kind: &'static str,
+    roots: Vec<PathBuf>,
+    repository_root: &Path,
+) -> Result<Vec<PathBuf>, RepositoryScopeCatalogError> {
+    let mut validated = Vec::with_capacity(roots.len());
+    for root in roots {
+        validate_catalog_root(root_kind, &root, Some(repository_root))?;
+        if !validated.contains(&root) {
+            validated.push(root);
+        }
+    }
+    Ok(validated)
+}
+
+fn validate_catalog_root(
+    root_kind: &'static str,
+    root: &Path,
+    repository_root: Option<&Path>,
+) -> Result<(), RepositoryScopeCatalogError> {
+    if !root.is_absolute() {
+        return Err(RepositoryScopeCatalogError::RootNotAbsolute {
+            root_kind,
+            path: root.to_path_buf(),
+        });
+    }
+    if normalize_components(root) != root {
+        return Err(RepositoryScopeCatalogError::RootNotNormalized {
+            root_kind,
+            path: root.to_path_buf(),
+        });
+    }
+    if let Some(repository_root) = repository_root
+        && !root.starts_with(repository_root)
+    {
+        return Err(RepositoryScopeCatalogError::RootOutsideRepository {
+            root_kind,
+            path: root.to_path_buf(),
+            repository_root: repository_root.to_path_buf(),
+        });
+    }
+    Ok(())
+}
+
+fn most_specific_containing(roots: &[PathBuf], base: &Path) -> Option<PathBuf> {
+    roots
+        .iter()
+        .filter(|root| base.starts_with(root))
+        .max_by_key(|root| root.components().count())
+        .cloned()
+}
+
 /// Runtime state captured for file reference resolution.
 pub(crate) struct ResolutionContext {
     pub cwd: PathBuf,
@@ -18,13 +208,10 @@ pub(crate) struct ResolutionContext {
     /// `allow_ambient_discovery`); the explicit document-backed context does
     /// not, so `None` means "no repository root" rather than "discover one".
     pub repository_root: Option<PathBuf>,
-    /// Caller-supplied package area. Authoritative for `!` references on the
-    /// explicit path; the ambient path leaves this `None` and discovers the
-    /// area via `cargo metadata` instead.
+    pub package_root: Option<PathBuf>,
     pub package_area: Option<PathBuf>,
-    /// Whether the resolver may fall back to live, ambient discovery (a `gix`
-    /// git-root walk or a `cargo metadata` package-area probe) when an anchor
-    /// was not supplied.
+    /// Whether the resolver may fall back to a live `gix` repository-root walk
+    /// when an anchor was not supplied.
     ///
     /// `true` for the `resolve()`/`resolve_from()` compatibility methods, which
     /// resolve against live process state. `false` for the explicit,
@@ -54,6 +241,7 @@ impl ResolutionContext {
             home_dir,
             env,
             repository_root: None,
+            package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
         })
@@ -64,8 +252,7 @@ impl ResolutionContext {
     /// state.
     ///
     /// If `base` is a relative path, it is joined onto the ambient CWD so
-    /// that git and workspace discovery always operate on an absolute
-    /// location.
+    /// that repository discovery always operates on an absolute location.
     pub fn from_base(base: &Path) -> Result<Self, FileReferenceError> {
         let cwd = if base.is_absolute() {
             base.to_path_buf()
@@ -81,6 +268,7 @@ impl ResolutionContext {
             home_dir,
             env,
             repository_root: None,
+            package_root: None,
             package_area: None,
             allow_ambient_discovery: true,
         })
@@ -91,13 +279,14 @@ impl ResolutionContext {
     ///
     /// The context is authoritative: `allow_ambient_discovery` is `false`, so
     /// resolution consumes only the anchors the caller supplied and never falls
-    /// back to a live git-root walk or `cargo metadata` probe (D2/D10).
+    /// back to a live repository-root walk (D2/D10).
     pub fn from_context(ctx: &FileResolutionContext) -> Self {
         Self {
             cwd: ctx.base_dir.clone(),
             home_dir: ctx.home_dir.clone(),
             env: ctx.env.clone(),
             repository_root: ctx.repository_root.clone(),
+            package_root: ctx.package_root.clone(),
             package_area: ctx.package_area.clone(),
             allow_ambient_discovery: false,
         }
@@ -136,7 +325,9 @@ pub struct FileResolutionContext {
     source_path: Option<PathBuf>,
     base_dir: PathBuf,
     repository_root: Option<PathBuf>,
+    package_root: Option<PathBuf>,
     package_area: Option<PathBuf>,
+    repository_scope_catalog: Option<RepositoryScopeCatalog>,
     home_dir: Option<PathBuf>,
     env: HashMap<String, String>,
     magic_paths: MagicPathList,
@@ -168,7 +359,9 @@ impl FileResolutionContext {
             request_base_dir: base_dir.clone(),
             base_dir,
             repository_root: None,
+            package_root: None,
             package_area: None,
+            repository_scope_catalog: None,
             home_dir,
             env,
             magic_paths: MagicPathList::default(),
@@ -189,7 +382,9 @@ impl FileResolutionContext {
             request_base_dir: base_dir.clone(),
             base_dir,
             repository_root: None,
+            package_root: None,
             package_area: None,
+            repository_scope_catalog: None,
             home_dir: home_dir(),
             env: std::env::vars().collect(),
             magic_paths: MagicPathList::default(),
@@ -220,6 +415,7 @@ impl FileResolutionContext {
         derived.source_path = Some(source_path);
         derived.base_dir = base_dir;
         derived.trusted_external_authoring_base = false;
+        derived.recompute_repository_scopes();
         derived
     }
 
@@ -249,6 +445,7 @@ impl FileResolutionContext {
         derived.source_path = None;
         derived.base_dir = base_dir.into();
         derived.trusted_external_authoring_base = false;
+        derived.recompute_repository_scopes();
         derived
     }
 
@@ -276,6 +473,21 @@ impl FileResolutionContext {
     #[must_use]
     pub fn with_repository_root(mut self, repository_root: impl Into<PathBuf>) -> Self {
         self.repository_root = Some(repository_root.into());
+        self
+    }
+
+    /// Supply a captured repository topology and select scopes for this base.
+    #[must_use]
+    pub fn with_repository_scope_catalog(mut self, catalog: RepositoryScopeCatalog) -> Self {
+        self.repository_scope_catalog = Some(catalog);
+        self.recompute_repository_scopes();
+        self
+    }
+
+    /// Supply the package root used by intrinsic magic and repository-scoped searches.
+    #[must_use]
+    pub fn with_package_root(mut self, package_root: impl Into<PathBuf>) -> Self {
+        self.package_root = Some(package_root.into());
         self
     }
 
@@ -344,6 +556,11 @@ impl FileResolutionContext {
         self.repository_root.as_deref()
     }
 
+    /// The selected package root, when the reference base is inside one.
+    pub fn package_root(&self) -> Option<&Path> {
+        self.package_root.as_deref()
+    }
+
     /// The supplied package-area root, when one was supplied.
     pub fn package_area(&self) -> Option<&Path> {
         self.package_area.as_deref()
@@ -390,6 +607,16 @@ impl FileResolutionContext {
         &self.magic_paths
     }
 
+    fn recompute_repository_scopes(&mut self) {
+        let Some(catalog) = &self.repository_scope_catalog else {
+            return;
+        };
+        let scope = catalog.scope_for(&self.base_dir);
+        self.repository_root = scope.repository_root;
+        self.package_area = scope.package_area_root;
+        self.package_root = scope.package_root;
+    }
+
     /// Validate repository containment for the request and authoring bases.
     ///
     /// Containment is component-aware and lexical after `.`/`..` normalization
@@ -410,6 +637,17 @@ impl FileResolutionContext {
     /// Returns [`FileReferenceError::RepositoryRootNotContainingSource`] when a
     /// repository root is supplied but does not contain a required base.
     pub fn validate(&self) -> Result<(), FileReferenceError> {
+        if self.repository_scope_catalog.is_some() {
+            if let Some(repo) = &self.repository_root
+                && !normalize_components(&self.base_dir).starts_with(normalize_components(repo))
+            {
+                return Err(FileReferenceError::RepositoryRootNotContainingSource {
+                    repository_root: repo.clone(),
+                    source_path: self.base_dir.clone(),
+                });
+            }
+            return Ok(());
+        }
         if let Some(repo) = &self.repository_root {
             let repo_norm = normalize_components(repo);
             let required_bases = if self.trusted_external_authoring_base {
@@ -456,81 +694,6 @@ pub fn find_git_root(from: &Path) -> Result<Option<PathBuf>, FileReferenceError>
         }
         Err(e) => Err(FileReferenceError::Git(Box::new(e))),
     }
-}
-
-/// Find the package area (first path component of a workspace member) for
-/// the current working directory within a Cargo workspace.
-///
-/// Given a workspace root and a CWD within it, this identifies which workspace
-/// member contains the CWD and returns its "area" directory (the first path
-/// component under the workspace root).
-///
-/// For a single-crate repo (no workspace members), returns `None`.
-pub fn find_package_area(
-    repo_root: &Path,
-    cwd: &Path,
-) -> Result<Option<PathBuf>, FileReferenceError> {
-    trace!(?repo_root, ?cwd, "searching for package area");
-    let metadata = cargo_metadata::MetadataCommand::new()
-        .manifest_path(repo_root.join("Cargo.toml"))
-        .no_deps()
-        .exec()
-        .map_err(|e| FileReferenceError::Workspace(Box::new(e)))?;
-
-    let workspace_root = metadata.workspace_root.as_std_path();
-
-    // If there are no workspace members beyond the root, this is a single-crate repo
-    let members: Vec<_> = metadata
-        .workspace_packages()
-        .into_iter()
-        .filter_map(|pkg| {
-            let manifest = pkg.manifest_path.as_std_path();
-            let pkg_dir = manifest.parent()?;
-            pkg_dir.strip_prefix(workspace_root).ok().map(|rel| {
-                let first_component = rel
-                    .components()
-                    .next()
-                    .map(|c| PathBuf::from(c.as_os_str()))
-                    .unwrap_or_default();
-                (pkg_dir.to_path_buf(), first_component)
-            })
-        })
-        .collect();
-
-    // Find the member whose directory is an ancestor of CWD
-    let cwd_normalized = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
-
-    for (pkg_dir, area) in &members {
-        let pkg_normalized = pkg_dir
-            .canonicalize()
-            .unwrap_or_else(|_| pkg_dir.to_path_buf());
-
-        if cwd_normalized.starts_with(&pkg_normalized) && !area.as_os_str().is_empty() {
-            let found = workspace_root.join(area);
-            debug!(?found, "found package area");
-            return Ok(Some(found));
-        }
-    }
-
-    // Fallback: CWD may sit at the area root itself (between workspace_root and
-    // the package manifest directory), e.g. `repo/claudine` when packages are at
-    // `repo/claudine/lib` and `repo/claudine/cli`. Match against area dirs.
-    let workspace_root_normalized = workspace_root
-        .canonicalize()
-        .unwrap_or_else(|_| workspace_root.to_path_buf());
-
-    for (_, area) in &members {
-        if area.as_os_str().is_empty() {
-            continue;
-        }
-        let area_root = workspace_root_normalized.join(area);
-        if cwd_normalized.starts_with(&area_root) {
-            return Ok(Some(workspace_root.join(area)));
-        }
-    }
-
-    trace!("no package area found");
-    Ok(None)
 }
 
 /// Get the user's home directory from the cross-platform provider.

@@ -404,8 +404,8 @@ Recommended additions:
 
 - `git2`
   - robust repo-root discovery without spawning `git`
-- `cargo_metadata`
-  - workspace-member inspection for package-area inference
+- a caller-supplied repository scope catalog
+  - pure-data package and package-area scope selection without filesystem discovery
 - `walkdir`
   - deterministic recursive traversal
 
