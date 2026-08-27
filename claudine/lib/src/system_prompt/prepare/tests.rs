@@ -231,14 +231,14 @@ fn relocated_primary_and_appendix_share_launch_context_but_keep_source_files() {
         Some(&launch_dir),
     )
     .unwrap();
-    let launch_repo_text = launch_repo.to_string_lossy();
+    let launch_repo_text = biscuit_file::to_portable_string(&launch_repo);
 
     assert!(primary.composed_markdown.contains("PRIMARY-SOURCE-BODY AREA=alpha"));
-    assert!(primary.composed_markdown.contains(launch_repo_text.as_ref()));
+    assert!(primary.composed_markdown.contains(launch_repo_text.as_str()));
     assert!(primary.composed_markdown.contains("FILE=true"));
     assert!(!primary.composed_markdown.contains("LAUNCH-FRAGMENT"));
     assert!(appendix.composed_markdown.contains("APPENDIX-SOURCE-BODY AREA=alpha"));
-    assert!(appendix.composed_markdown.contains(launch_repo_text.as_ref()));
+    assert!(appendix.composed_markdown.contains(launch_repo_text.as_str()));
     assert!(appendix.composed_markdown.contains("FILE=true"));
     assert!(!appendix.composed_markdown.contains("LAUNCH-FRAGMENT"));
     assert_eq!(invocation.work_snapshot().launch_context_constructions, 1);

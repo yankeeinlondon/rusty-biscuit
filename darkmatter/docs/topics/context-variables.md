@@ -200,6 +200,10 @@ The prose below adds constraints and derivation rules that the per-variable
 types above cannot express. Variable names, types, and one-line descriptions
 live only in the generated block.
 
+### Repo
+
+Directory-valued variables (`repo_root`, `package_root`, `package_area_root`, `area_root`) are rendered as portable text: `/` separators on every platform, with a safely reducible Windows verbatim prefix (`\\?\`) removed. A native Windows spelling would not survive interpolation into a Markdown body, because CommonMark treats `\` before punctuation (`\.`, `\-`, `\_`) as an escape.
+
 ### Languages
 
 **`programming_language` rules:**

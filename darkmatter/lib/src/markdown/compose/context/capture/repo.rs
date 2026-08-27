@@ -10,6 +10,16 @@ pub(super) const KEYS: &[&str] = &[
     "area_root", "current_packages", "depends_on", "used_by",
 ];
 
+/// Render a directory path for `ctx.*` as portable text.
+///
+/// Native Windows spellings (`\\` separators, `\\?\\` verbatim prefixes) are
+/// mangled once interpolated into a Markdown body, because CommonMark treats
+/// `\\` before punctuation as an escape; forward slashes are valid on every
+/// platform and survive composition intact.
+fn portable_dir(path: &std::path::Path) -> String {
+    strip_trailing_sep(&biscuit_file::to_portable_string(path))
+}
+
 pub(super) fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value>) {
     let repo = cap.repo_info.as_ref();
 
@@ -23,7 +33,7 @@ pub(super) fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value
     values.insert(
         "repo_root".into(),
         cap.repo_root.as_ref().map_or(Value::Null, |r| {
-            Value::String(strip_trailing_sep(&r.to_string_lossy()))
+            Value::String(portable_dir(r))
         }),
     );
 
@@ -39,7 +49,7 @@ pub(super) fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value
         values.insert(
             "package_root".into(),
             cap.current_package.as_ref().map_or(Value::Null, |p| {
-                Value::String(p.path.to_string_lossy().to_string())
+                Value::String(portable_dir(&p.path))
             }),
         );
 
@@ -49,7 +59,7 @@ pub(super) fn populate_repo(cap: &ContextCapture, values: &mut Map<String, Value
                 .as_ref()
                 .map_or(Value::Null, |area| {
                     let root = repo.unwrap().root.join(area);
-                    Value::String(root.to_string_lossy().to_string())
+                    Value::String(portable_dir(&root))
                 }),
         );
 
@@ -107,7 +117,7 @@ pub(super) fn populate_monorepo_area(cap: &ContextCapture, values: &mut Map<Stri
     let repo_root_str = || {
         cap.repo_root
             .as_ref()
-            .map(|r| strip_trailing_sep(&r.to_string_lossy()))
+            .map(|r| portable_dir(r))
             .unwrap_or_default()
     };
 
@@ -118,15 +128,14 @@ pub(super) fn populate_monorepo_area(cap: &ContextCapture, values: &mut Map<Stri
         (
             pkg.name.clone(),
             format!("{} package", pkg.name),
-            strip_trailing_sep(&pkg.path.to_string_lossy()),
+            portable_dir(&pkg.path),
         )
     } else if let Some(area_name) = cap.current_package_area.as_deref().filter(|a| *a != "root") {
         // Inside a package area but not a package folder.
         let area_path = cap
             .repo_root
             .as_ref()
-            .map(|r| r.join(area_name))
-            .map(|p| strip_trailing_sep(&p.to_string_lossy()))
+            .map(|r| portable_dir(&r.join(area_name)))
             .unwrap_or_default();
         (
             area_name.to_string(),
