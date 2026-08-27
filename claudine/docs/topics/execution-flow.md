@@ -7,8 +7,8 @@ prompt: |-
   - identify what CLI switches or prompt frontmatter has an impact on each step and what that impact is
 
   After fully documenting the flows add a section called `## Future Improvements` and add any improvements you think could be made to the current flow
-last_updated: 2026-07-04
-hash: 7738d51f4cfa73e2-83b6b84817b7ee16
+last_updated: 2026-08-27
+hash: 7738d51f4cfa73e2-20e4f64f887d14d3
 ---
 Let me explore the composition-related source code and documentation to trace the exact execution flows.Now let me read the existing composition topic doc and the key source files for precision:Now let me read the critical execution pipeline files:Now let me read the remaining portions of the composition executor to get the full execution pipeline:Now I have a comprehensive understanding of all three flows. Let me compose the complete Markdown body.Now I have all the details needed. Let me produce the comprehensive Markdown body content:Now I have all the details. Let me compose the full Markdown document body:
 
@@ -318,6 +318,18 @@ Builds child process environment via `env::build_child_env()`:
 - Constructs `EnvPlan` with env vars, shadow HOME, sensitive var stripping
 - Sets `OPERATION` env if specified
 - Applies request-level env overrides
+- Sets `AGENT_CWD` on every Claudine-spawned child to the absolute directory
+  captured when the invocation entered. The value is immutable across retry,
+  resume, loop, and sequence re-entry and overwrites an inherited value.
+
+Ordinary invocations always use their own entry directory. The hidden
+`claudine handle` hook entry point instead retains an absolute `AGENT_CWD`
+supplied by its wrapper, because the provider may have changed its child CWD
+before invoking the hook; a missing value falls back to the hook process's
+entry directory and a relative value is rejected. `AGENT_CWD` is intentionally
+un-namespaced. Claudine's overwrite rule protects its own descendants, but an
+unrelated child tool may interpret that generic name differently; this naming
+collision is an accepted residual risk.
 
 **Affected by:**
 

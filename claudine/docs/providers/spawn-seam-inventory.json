@@ -1,0 +1,122 @@
+{
+  "tool": "claudine-spawn-inventory",
+  "scanned_roots": [
+    "claudine/lib/src",
+    "claudine/cli/src"
+  ],
+  "regenerate": "CLAUDINE_UPDATE_SPAWN_INVENTORY=1 cargo nextest run -p claudine-cli --test spawn_inventory",
+  "sites": [
+    {
+      "path": "cli/src/commands/config_tui/mod.rs",
+      "line": 581,
+      "function": "query_say_voices",
+      "command_kind": "std",
+      "governed_by": "contribute_child_environment"
+    },
+    {
+      "path": "cli/src/commands/config_tui/mod.rs",
+      "line": 603,
+      "function": "query_espeak_voices",
+      "command_kind": "std",
+      "governed_by": "contribute_child_environment"
+    },
+    {
+      "path": "cli/src/commands/init_wizard.rs",
+      "line": 114,
+      "function": "configure_tts",
+      "command_kind": "std",
+      "governed_by": "contribute_child_environment"
+    },
+    {
+      "path": "cli/src/commands/providers.rs",
+      "line": 370,
+      "function": "gen_command",
+      "command_kind": "std",
+      "governed_by": "contribute_child_environment"
+    },
+    {
+      "path": "cli/src/commands/providers.rs",
+      "line": 373,
+      "function": "gen_command",
+      "command_kind": "std",
+      "governed_by": "contribute_child_environment"
+    },
+    {
+      "path": "cli/src/commands/sequence.rs",
+      "line": 177,
+      "function": "expand_shell_source",
+      "command_kind": "std",
+      "governed_by": "contribute_child_environment"
+    },
+    {
+      "path": "cli/src/commands/wrap/exec/spawn/setup.rs",
+      "line": 94,
+      "function": "base_command",
+      "command_kind": "std",
+      "governed_by": "contribute_child_environment"
+    },
+    {
+      "path": "lib/src/composition/lifecycle/executor.rs",
+      "line": 297,
+      "function": "system_shell_command",
+      "command_kind": "std",
+      "governed_by": "caller:SystemShellRunner::run"
+    },
+    {
+      "path": "lib/src/composition/lifecycle/executor.rs",
+      "line": 307,
+      "function": "system_shell_command",
+      "command_kind": "std",
+      "governed_by": "caller:SystemShellRunner::run"
+    },
+    {
+      "path": "lib/src/composition/sequence/task/shell.rs",
+      "line": 883,
+      "function": "system_shell_command",
+      "command_kind": "std",
+      "governed_by": "caller:SystemTaskShell::run"
+    },
+    {
+      "path": "lib/src/composition/sequence/task/shell.rs",
+      "line": 894,
+      "function": "system_shell_command",
+      "command_kind": "std",
+      "governed_by": "caller:SystemTaskShell::run"
+    },
+    {
+      "path": "lib/src/dispatch/runner/bash.rs",
+      "line": 95,
+      "function": "execute_bash",
+      "command_kind": "tokio",
+      "governed_by": "contribute_child_environment"
+    },
+    {
+      "path": "lib/src/dispatch/runner/bash.rs",
+      "line": 107,
+      "function": "execute_bash",
+      "command_kind": "tokio",
+      "governed_by": "contribute_child_environment"
+    },
+    {
+      "path": "lib/src/dispatch/runner/bash.rs",
+      "line": 179,
+      "function": "run_command_blocking",
+      "command_kind": "tokio",
+      "governed_by": "contribute_child_environment"
+    },
+    {
+      "path": "lib/src/harness/shell.rs",
+      "line": 382,
+      "function": "execute_approved_command",
+      "command_kind": "tokio",
+      "governed_by": "contribute_child_environment"
+    },
+    {
+      "path": "lib/src/model_catalog/provider_sources.rs",
+      "line": 135,
+      "function": "fetch_shell_command_models",
+      "command_kind": "tokio",
+      "governed_by": "contribute_child_environment"
+    }
+  ]
+}
