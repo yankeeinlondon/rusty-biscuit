@@ -649,7 +649,7 @@ mod tests {
         // caller launched from (D1/AC7).
         assert_eq!(
             context.get("repo_root").and_then(Value::as_str),
-            Some(fixture.launch_repo.to_string_lossy().as_ref())
+            Some(biscuit_file::to_portable_string(&fixture.launch_repo).as_str())
         );
         assert_eq!(context.env().get("TASK_MARKER").map(String::as_str), Some("owned"));
     }
@@ -679,7 +679,7 @@ mod tests {
         assert_eq!(source.repository_root(), Some(fixture.task_repo.as_path()));
         assert_eq!(
             context.get("repo_root").and_then(Value::as_str),
-            Some(fixture.launch_repo.to_string_lossy().as_ref())
+            Some(biscuit_file::to_portable_string(&fixture.launch_repo).as_str())
         );
         assert_eq!(context.get("area").and_then(Value::as_str), Some("alpha"));
         let effective = context.as_object();
@@ -772,7 +772,7 @@ mod tests {
 
             assert_eq!(
                 context.get("repo_root").and_then(Value::as_str),
-                Some(fixture.launch_repo.to_string_lossy().as_ref()),
+                Some(biscuit_file::to_portable_string(&fixture.launch_repo).as_str()),
                 "`{field}` was not scanned for runtime-context references"
             );
         }
@@ -814,7 +814,7 @@ mod tests {
 
             assert_eq!(
                 context.get("repo_root").and_then(Value::as_str),
-                Some(fixture.launch_repo.to_string_lossy().as_ref()),
+                Some(biscuit_file::to_portable_string(&fixture.launch_repo).as_str()),
                 "`{label}` was not scanned for runtime-context references"
             );
         }

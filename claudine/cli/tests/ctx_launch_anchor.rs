@@ -462,7 +462,7 @@ fn dry_run_external_source_and_outside_launch_matrix() {
         "no launch package area exists outside every repository\noutput:\n{output}"
     );
     assert!(
-        !output.contains(&format!("REPO={}", root.to_string_lossy())),
+        !output.contains(&format!("REPO={}", biscuit_file::to_portable_string(&root))),
         "no launch repository exists outside every repository; the prompt's own \
          repository must not be substituted\noutput:\n{output}"
     );

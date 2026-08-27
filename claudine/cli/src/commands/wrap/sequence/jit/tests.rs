@@ -317,7 +317,7 @@ fn distributed_step_keeps_launch_identity_and_source_schema_and_files() {
         "AREA=alpha CWD={} AGENT=codex MODEL=gpt-5 ENV=codex/gpt-5 FILE=true",
         biscuit_file::to_portable_string(&launch_dir)
     )));
-    assert!(body.contains(launch_repo.to_string_lossy().as_ref()));
+    assert!(body.contains(&biscuit_file::to_portable_string(&launch_repo)));
     assert!(body.contains("SOURCE-BODY"));
     assert!(!body.contains("LAUNCH-FRAGMENT"));
     assert!(body.contains(biscuit_file::to_portable_string(&launch_dir.join("caller.md")).as_str()));

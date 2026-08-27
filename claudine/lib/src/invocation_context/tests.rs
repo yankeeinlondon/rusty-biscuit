@@ -455,7 +455,7 @@ fn repeated_derivation_for_retry_resume_and_jit_reuses_invocation_evidence() {
         );
         assert_eq!(
             context.get("repo_root").and_then(serde_json::Value::as_str),
-            Some(fixture.path().to_string_lossy().as_ref())
+            Some(biscuit_file::to_portable_string(fixture.path()).as_str())
         );
     }
 
@@ -842,7 +842,7 @@ fn launch_capture_reports_the_launch_area_not_the_source_area() {
     );
     assert_eq!(
         context.get("repo_root").and_then(serde_json::Value::as_str),
-        Some(fixture.path().to_string_lossy().as_ref())
+        Some(biscuit_file::to_portable_string(fixture.path()).as_str())
     );
     let work = invocation.work_snapshot();
     assert_eq!(work.launch_context_constructions, 1);
@@ -870,7 +870,7 @@ fn launch_capture_keeps_the_launch_repository_for_external_sources() {
 
     assert_eq!(
         context.get("repo_root").and_then(serde_json::Value::as_str),
-        Some(launch_repo.to_string_lossy().as_ref()),
+        Some(biscuit_file::to_portable_string(&launch_repo).as_str()),
         "an external source repository must not become the launch repository"
     );
 }
