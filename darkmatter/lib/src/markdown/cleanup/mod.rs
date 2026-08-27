@@ -24,8 +24,8 @@ use std::ops::Range;
 use blockquote::fix_blockquote_formatting;
 use brackets::unescape_brackets;
 use emphasis::{
-    get_preferred_emphasis_style, preserve_original_emphasis, restore_emphasis_placeholders,
-    unescape_emphasis_chars,
+    get_preferred_emphasis_style, preserve_original_emphasis, restore_backslash_placeholders,
+    restore_emphasis_placeholders, unescape_emphasis_chars,
 };
 use lists::{
     detect_list_indentation, extract_additional_paragraph_contexts,
@@ -417,6 +417,10 @@ fn cleanup_content_internal(
 
     // Unescape unnecessarily escaped brackets (e.g., \[0%\] -> [0%])
     unescape_brackets(&mut output);
+
+    // Author-written escapes come back only now, after every pass that strips
+    // escapes `cmark` added has run.
+    restore_backslash_placeholders(&mut output);
 
     restore_opaque_directive_bodies(&mut output, opaque_bodies.payloads());
 
