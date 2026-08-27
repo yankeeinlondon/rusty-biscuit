@@ -47,6 +47,16 @@ updated directly.
 > ruled (2026-08-27): OQ1 rejects and reserves the unsupported local
 > namespace forms, and OQ2 sets `AGENT_CWD` on every spawned child (D8.7).
 > No open design questions remain.
+>
+> **Layering pass (2026-08-27):** a final review of *where* each change lands
+> found that repository/package-scope discovery is implemented three times
+> today (biscuit-file via `cargo_metadata`, Darkmatter via
+> `sniff::detect_repo_structure` per reference, Claudine via retained Sniff
+> `RepoInfo`) and that Darkmatter still performs per-reference `.git` walks at
+> its resolver sites. The new "Ownership and reuse boundaries" section fixes one
+> owner per responsibility; D7, D8.7, Scope, AC4, and AC6 were tightened to
+> match, and the unverified "existing environment inventory tests" claim was
+> replaced with a concrete guard requirement.
 
 ## Baseline
 
@@ -93,6 +103,45 @@ as a frontmatter parameter (`spec=...`) is resolved using the caller's launch
 directory as its CWD. An `eager` `file(...)` parameter is resolved *and*
 validated at bind time; a lazy `file` parameter is resolved to a path shape
 without an existence check.
+
+## Ownership and reuse boundaries
+
+Each responsibility below has exactly one owning crate. The dependency
+direction is fixed — `biscuit-file` ← `darkmatter` ← `claudine` — and a lower
+layer never grows a dependency to satisfy a higher one.
+
+| Responsibility | Owner | Consumers |
+|---|---|---|
+| Sigil grammar, detection order, `FileReferenceKind`, parse errors (D1, D2, D9) | biscuit-file `file_reference::parse` | everyone, only through `FileReference` — no prefix checks upstream |
+| Candidate plans, first-match resolution, completion roots, `RootProvenance` (D3–D6, AC8) | biscuit-file `file_reference::resolve` | Darkmatter resolvers and expression functions; Claudine completion |
+| Lexical **and** canonical repository containment for `&`/`^` (D4, D5, AC11) | biscuit-file — one helper, reused by direct, recursive, completion, and lazy-ancestor paths | Darkmatter must not add a second containment implementation; its `file_links` boundary check is a different contract and stays where it is |
+| `RepositoryScopeCatalog` — the pure-data description of a repository's root, package-area roots, and package roots (D7) | biscuit-file (type only; **no I/O, no Sniff dependency**) | populated by Darkmatter, forwarded by Claudine |
+| Sniff `RepoInfo` → `RepositoryScopeCatalog` projection (the single discovery adapter) | Darkmatter, at its request boundary next to the existing repository capture group | Darkmatter's ambient `md` path and Claudine's `derive_source` both call it; there is no second Sniff→catalog code path |
+| Repository/topology *observation* (running Sniff, caching per repository) | Claudine `InvocationContext` for Claudine invocations; Darkmatter's request-boundary capture for standalone `md` | — |
+| `ctx.cwd`, `ContextGroup::Invocation`, parameter materialization, raw-vs-effective value layering (D8.1–D8.6) | Darkmatter compose/context and schema layers | Claudine's prepared-context catalog projects them; Claudine adds no materialization logic of its own |
+| `AGENT_CWD` and every other Claudine-owned child-environment contribution (D8.7) | `claudine` lib — one shared contribution helper | every `Command`-spawning site in `claudine` lib **and** `claudine-cli`'s `build_child_env` |
+
+Retirements that follow from this table:
+
+- biscuit-file's `find_package_area` (a `cargo_metadata` shell-out that only
+  understands Cargo workspaces) is deleted along with the `cargo_metadata`
+  dependency of the `file-reference` feature; package selection comes only
+  from the supplied catalog. `find_git_root` and
+  `ResolutionContext::from_ambient` remain for biscuit-file's own ambient
+  convenience API and the `bf` CLI, but neither Darkmatter nor Claudine may
+  use them to populate a `FileResolutionContext`.
+- Darkmatter's `compose/util.rs::find_package_area_from` and
+  `package_area_for_reference` are deleted. The per-reference
+  `find_git_root_from` fallbacks in `document_resolution_context`, the
+  transclusion resolver, `link_resolve`, `link_normalization`,
+  `schema_validation`, `schemas/resolve`, `expression/path_projection`, and the
+  `git_root`-style expression functions are replaced by reads from the
+  request's catalog. `find_git_root_from` may survive only for display-only
+  helpers such as `abbreviate_path`, which never feed a resolution candidate.
+- Claudine's `derive_source` stops computing `package_root` /
+  `package_area_root` from `RepoInfo` itself and calls Darkmatter's projection
+  on its retained observation, so Claudine and standalone `md` cannot disagree
+  about which package contains a document.
 
 ## Design decisions
 
@@ -239,16 +288,20 @@ This does **not** authorize late discovery in biscuit-file or Darkmatter.
 Explicit resolution remains snapshot-only:
 
 - `FileResolutionContext` gains a distinct package-root anchor and a
-  caller-supplied repository-scope catalog sufficient to select the package
-  root and package-area root containing a derived base. `for_source` and
-  `for_base` recompute source-specific anchors from that catalog by
-  component-aware, most-specific containment; they must not blindly copy the
-  previous document's package anchors.
-- Claudine's `InvocationContext::derive_source` remains the discovery owner.
-  It builds the catalog and each definitive `SourceContext` from retained
-  Sniff repository/topology observations. A source in another repository gets
-  a context for that repository from the invocation cache; no source inherits
-  the launch repository merely because the launch context found it.
+  caller-supplied `RepositoryScopeCatalog` (a biscuit-file data type — see
+  "Ownership and reuse boundaries") sufficient to select the package root and
+  package-area root containing a derived base. `for_source` and `for_base`
+  recompute source-specific anchors from that catalog by component-aware,
+  most-specific containment; they must not blindly copy the previous
+  document's package anchors.
+- Claudine's `InvocationContext::derive_source` remains the *observation*
+  owner: it runs and caches Sniff per repository and builds each definitive
+  `SourceContext`. The catalog itself comes from Darkmatter's single
+  `RepoInfo` → `RepositoryScopeCatalog` projection, the same function
+  Darkmatter's standalone `md` path uses at its request boundary. A source in
+  another repository gets a context for that repository from the invocation
+  cache; no source inherits the launch repository merely because the launch
+  context found it.
 - A trusted external derivation not covered by a supplied repository catalog
   clears repository/package/package-area anchors. It therefore gets the
   documented outside-repository behavior unless the composition owner supplies
@@ -345,8 +398,17 @@ paths uses `ctx.*` interpolation or derives from a caller-passed parameter
    is the design document's ruling; the overwrite rule protects Claudine's
    own children, and the residual risk — an unrelated tool reading
    `AGENT_CWD` with different expectations — is accepted and must be noted in
-   the environment documentation. Every spawn seam is covered by the existing
-   environment inventory tests.
+   the environment documentation.
+   The variable is contributed by **one** helper in the `claudine` lib that
+   every child-spawning site calls — today that is at least the provider
+   launch (`claudine-cli` `build_child_env`), hook runners
+   (`dispatch/runner/bash.rs`), `::shell` execution (`harness/shell.rs`,
+   `composition/sequence/task/shell.rs`), and the lifecycle executor — rather
+   than N independent `.env("AGENT_CWD", …)` insertions. Only the provider
+   seam has an environment assertion today (`debug_assert_child_env`); a
+   spawn-seam inventory guard in the style of `dispatch_inventory.rs` must
+   fail when a `Command` construction in `claudine` lib or CLI bypasses the
+   shared helper.
 
 This extends the existing eager-`file` normalization so that derivation and
 proxy boundaries cannot strand a value without its anchor. The 2026-08-26
@@ -412,13 +474,21 @@ an explicit-relative spelling such as `./name:part`.
       (D6) with registered prepend/append preserved; package/area selection
       driven only by the supplied source-scope catalog (D7); lexical and
       canonical containment for `&`/`^` (D4/D5).
-    - context/error: add package-root plus scope-catalog inputs; ensure normal
-      and trusted-external derivations cannot retain stale repository scopes;
-      add distinct outside-repository and repository-escape errors rather than
-      repurposing `MissingPackageContext`; replace ambiguous package provenance
-      per D7; add direct (non-`%`) completion for `&`/`^` matching execution
-      order.
+    - context/error: add the package-root anchor and the pure-data
+      `RepositoryScopeCatalog` input; delete `find_package_area` and the
+      `cargo_metadata` dependency; ensure normal and trusted-external
+      derivations cannot retain stale repository scopes; add distinct
+      outside-repository and repository-escape errors rather than repurposing
+      `MissingPackageContext`; replace ambiguous package provenance per D7;
+      one shared containment helper for `&`/`^`; add direct (non-`%`)
+      completion for `&`/`^` matching execution order.
 - `darkmatter/lib`:
+    - one `RepoInfo` → `RepositoryScopeCatalog` projection at the request
+      boundary (beside the repository capture group), used by the ambient `md`
+      path and exported for Claudine; delete `find_package_area_from` /
+      `package_area_for_reference` and replace every per-reference
+      `find_git_root_from` fallback in resolver code with catalog reads (see
+      "Ownership and reuse boundaries" for the site list);
     - expression functions, transclusion, TOC linking, preflight, reference
       graphing, schema import/validation/rewrite, and completion consume the new
       grammar through `FileReference` rather than prefix checks;
@@ -432,12 +502,19 @@ an explicit-relative spelling such as `./name:part`.
     - resolver and schema documentation that states repository-first or
       eager-only caller normalization is updated.
 - `claudine/lib` + `claudine/cli`: `ctx.cwd` in the prepared-context catalog
-  inputs and its schema/single-sourcing projections; anchor provisioning per D7
+  inputs and its schema/single-sourcing projections; `derive_source` calls
+  Darkmatter's catalog projection on its retained `RepoInfo` instead of
+  computing package/area roots itself; anchor provisioning per D7
   (document-scoped bases for document-authored references, launch-scoped for
   parameters); convention magic-root registration reviewed against D6;
   sequence/harness/proxy/system-prompt/overlay surfaces consume the correct
-  source context and materialized parameter values; `AGENT_CWD` injection at
-  every child-spawn seam (providers, hooks, `::shell`) per D8.7.
+  source context and materialized parameter values; one shared
+  child-environment contribution helper carrying `AGENT_CWD`, wired into
+  every spawn seam (providers, hooks, `::shell`, lifecycle executor, sequence
+  shell tasks) plus a spawn-seam inventory guard, per D8.7. The only
+  remaining biscuit-file ambient call in Claudine
+  (`cli/src/commands/providers.rs` → `find_git_root`) is switched to the
+  invocation context.
 - Consumer audit: use compiler exhaustiveness plus repository search and
   GitNexus impact analysis. At minimum, audit all `FileReferenceKind`, internal
   `ReferenceKind`, `RootProvenance`, `FileReferenceError`, candidate-plan,
@@ -483,7 +560,12 @@ an explicit-relative spelling such as `./name:part`.
   prompt lives. Moving through package, area, repository, trusted-external,
   and second-repository documents recomputes or clears scopes exactly as D7
   requires. Work counters/seeded guards prove explicit resolution performs no
-  ambient CWD, HOME, Git, Cargo metadata, or topology discovery.
+  ambient CWD, HOME, Git, Cargo metadata, or topology discovery. A
+  standalone `md compose` and a `claudine compose` of the same document
+  produce identical `^`/`@`/implicit candidate plans, proving both consume
+  the one catalog projection; repository search shows no remaining
+  `cargo_metadata` use in biscuit-file and no `find_package_area_from` /
+  resolver-side `find_git_root_from` in Darkmatter.
 - **AC5 — materialization and provenance.** The matrix covers caller CLI
   overrides, document defaults, `proxy.with`, sequence task parameters,
   direct/proxy/retry/resume/loop/sequence consumers, scalar/array/union schema
@@ -504,9 +586,12 @@ an explicit-relative spelling such as `./name:part`.
   requesting the repository group; a forced ambient CWD failure produces
   `null` plus a typed partial-capture diagnostic rather than an empty or
   relative path. `AGENT_CWD` is present in every spawned child's environment
-  (provider, hook, `::shell`) as the captured absolute launch directory,
-  overwrites an inherited value, and stays stable across re-entry; the
-  environment inventory tests cover every spawn path.
+  (provider, hook, `::shell`, lifecycle executor, sequence shell task) as the
+  captured absolute launch directory, overwrites an inherited value, and stays
+  stable across re-entry. The spawn-seam inventory guard (D8.7) fails on any
+  `Command` construction in `claudine` lib or CLI that does not go through
+  the shared environment helper, and is proven non-vacuous by neutering one
+  seam.
 - **AC7 — magic conventions preserved.** The skill example
   (`@.claude/skills/.../SKILL.md`: repo first, home fallback) and Claudine's
   prompt-lookup conventions keep working through registered roots. Collision
