@@ -115,11 +115,29 @@ layer never grows a dependency to satisfy a higher one.
 | Sigil grammar, detection order, `FileReferenceKind`, parse errors (D1, D2, D9) | biscuit-file `file_reference::parse` | everyone, only through `FileReference` — no prefix checks upstream |
 | Candidate plans, first-match resolution, completion roots, `RootProvenance` (D3–D6, AC8) | biscuit-file `file_reference::resolve` | Darkmatter resolvers and expression functions; Claudine completion |
 | Lexical **and** canonical repository containment for `&`/`^` (D4, D5, AC11) | biscuit-file — one helper, reused by direct, recursive, completion, and lazy-ancestor paths | Darkmatter must not add a second containment implementation; its `file_links` boundary check is a different contract and stays where it is |
-| `RepositoryScopeCatalog` — the pure-data description of a repository's root, package-area roots, and package roots (D7) | biscuit-file (type only; **no I/O, no Sniff dependency**) | populated by Darkmatter, forwarded by Claudine |
-| Sniff `RepoInfo` → `RepositoryScopeCatalog` projection (the single discovery adapter) | Darkmatter, at its request boundary next to the existing repository capture group | Darkmatter's ambient `md` path and Claudine's `derive_source` both call it; there is no second Sniff→catalog code path |
+| `RepositoryScopeCatalog` — the pure-data description of a repository's root, monorepo package-area fallback policy, package-area roots, and package roots (D7) | biscuit-file (type only; **no I/O, no Sniff dependency**) | populated by Darkmatter, forwarded by Claudine |
+| Retained Sniff observation → `RepositoryScopeCatalog` projection (`RepoInfo` plus the request's lexically compatible repository-root spelling; the single discovery adapter) | Darkmatter, at its request boundary next to the existing repository capture group | Darkmatter's ambient `md` path and Claudine's `derive_source` both call it; there is no second Sniff→catalog code path |
 | Repository/topology *observation* (running Sniff, caching per repository) | Claudine `InvocationContext` for Claudine invocations; Darkmatter's request-boundary capture for standalone `md` | — |
 | `ctx.cwd`, `ContextGroup::Invocation`, parameter materialization, raw-vs-effective value layering (D8.1–D8.6) | Darkmatter compose/context and schema layers | Claudine's prepared-context catalog projects them; Claudine adds no materialization logic of its own |
 | `AGENT_CWD` and every other Claudine-owned child-environment contribution (D8.7) | `claudine` lib — one shared contribution helper | every `Command`-spawning site in `claudine` lib **and** `claudine-cli`'s `build_child_env` |
+
+The catalog boundary has a data contract, not merely a crate location. Its
+validated constructor accepts absolute, lexically normalized roots, rejects an
+explicit package or package-area root outside its repository, and deduplicates
+roots without filesystem I/O. Scope selection is component-aware and
+most-specific-first. The catalog carries enough pure data to preserve Sniff's
+current topology semantics, including nested-package ownership and
+`RepoInfo::package_area_label_for_dir`'s first-component fallback for a newly
+scaffolded directory in a monorepo. The Darkmatter projection does not observe
+the filesystem: it maps retained `RepoInfo` plus the already-observed repository
+root expressed in a spelling lexically compatible with the reference base.
+Package and area roots are rebuilt from their repository-relative identities
+under that root spelling rather than copying a potentially foreign-spelled
+absolute `Package::path`.
+This keeps macOS `/var` → `/private/var`, symlinked launch directories, and
+Windows canonical/verbatim spellings from turning one repository identity into
+a false outside-repository result. Canonical filesystem checks remain the
+separate `&`/`^` containment responsibility.
 
 Retirements that follow from this table:
 
@@ -140,8 +158,8 @@ Retirements that follow from this table:
   helpers such as `abbreviate_path`, which never feed a resolution candidate.
 - Claudine's `derive_source` stops computing `package_root` /
   `package_area_root` from `RepoInfo` itself and calls Darkmatter's projection
-  on its retained observation, so Claudine and standalone `md` cannot disagree
-  about which package contains a document.
+  on its retained observation and source-compatible root spelling, so Claudine
+  and standalone `md` cannot disagree about which package contains a document.
 
 ## Design decisions
 
@@ -296,12 +314,12 @@ Explicit resolution remains snapshot-only:
   document's package anchors.
 - Claudine's `InvocationContext::derive_source` remains the *observation*
   owner: it runs and caches Sniff per repository and builds each definitive
-  `SourceContext`. The catalog itself comes from Darkmatter's single
-  `RepoInfo` → `RepositoryScopeCatalog` projection, the same function
-  Darkmatter's standalone `md` path uses at its request boundary. A source in
-  another repository gets a context for that repository from the invocation
-  cache; no source inherits the launch repository merely because the launch
-  context found it.
+  `SourceContext`. The catalog itself comes from Darkmatter's single retained-
+  observation projection (`RepoInfo` plus a source-compatible repository-root
+  spelling), the same function Darkmatter's standalone `md` path uses at its
+  request boundary. A source in another repository gets a context for that
+  repository from the invocation cache; no source inherits the launch
+  repository merely because the launch context found it.
 - A trusted external derivation not covered by a supplied repository catalog
   clears repository/package/package-area anchors. It therefore gets the
   documented outside-repository behavior unless the composition owner supplies
@@ -399,6 +417,19 @@ paths uses `ctx.*` interpolation or derives from a caller-passed parameter
    own children, and the residual risk — an unrelated tool reading
    `AGENT_CWD` with different expectations — is accepted and must be noted in
    the environment documentation.
+   The capture source is mode-specific but singular. An ordinary top-level or
+   nested Claudine invocation captures its own absolute entry CWD before any
+   process-directory mutation and does **not** adopt an inherited
+   `AGENT_CWD`; this is what makes overwrite remove stale values. The hidden
+   provider-hook `handle` entry point instead adopts the absolute
+   `AGENT_CWD` supplied by its wrapper parent as retained launch evidence,
+   because the provider may already be running from Claudine's repository-root
+   child CWD. It rejects a present non-absolute value and uses the hook
+   process's entry CWD only when the variable is absent. Thus the original
+   launch value survives wrapper → provider → hook → hook-action propagation
+   without making inherited `AGENT_CWD` authoritative for ordinary commands.
+   Any CLI route that can spawn a child captures this lightweight launch fact
+   at entry even when it does not build a composition `InvocationContext`.
    The variable is contributed by **one** helper in the `claudine` lib that
    every child-spawning site calls — today that is at least the provider
    launch (`claudine-cli` `build_child_env`), hook runners
@@ -407,8 +438,14 @@ paths uses `ctx.*` interpolation or derives from a caller-passed parameter
    than N independent `.env("AGENT_CWD", …)` insertions. Only the provider
    seam has an environment assertion today (`debug_assert_child_env`); a
    spawn-seam inventory guard in the style of `dispatch_inventory.rs` must
-   fail when a `Command` construction in `claudine` lib or CLI bypasses the
-   shared helper.
+   classify every production `std::process::Command` and
+   `tokio::process::Command` construction in `claudine` lib or CLI, including
+   aliased, helper-returned, and inline `status`/`output` forms, and fail when a
+   child can execute without the shared contribution helper. As in the model
+   guard, `#[cfg(test)]` bodies and test-only source files are excluded; clap's
+   unrelated `Command` builder is not a process seam. Every recorded production
+   process seam must be governed — an allowlist may describe an indirect
+   governed path, but may not exempt a spawned child from `AGENT_CWD`.
 
 This extends the existing eager-`file` normalization so that derivation and
 proxy boundaries cannot strand a value without its anchor. The 2026-08-26
@@ -483,12 +520,15 @@ an explicit-relative spelling such as `./name:part`.
       one shared containment helper for `&`/`^`; add direct (non-`%`)
       completion for `&`/`^` matching execution order.
 - `darkmatter/lib`:
-    - one `RepoInfo` → `RepositoryScopeCatalog` projection at the request
-      boundary (beside the repository capture group), used by the ambient `md`
-      path and exported for Claudine; delete `find_package_area_from` /
-      `package_area_for_reference` and replace every per-reference
-      `find_git_root_from` fallback in resolver code with catalog reads (see
-      "Ownership and reuse boundaries" for the site list);
+    - one retained-observation → `RepositoryScopeCatalog` projection at the
+      request boundary (beside the repository capture group), taking `RepoInfo`
+      plus the already-observed, source-compatible repository-root spelling;
+      preserve Sniff's known-area, scaffolded-area, nested-package, and path-
+      spelling semantics; use it in the ambient `md` path and export it for
+      Claudine; delete `find_package_area_from` / `package_area_for_reference`
+      and replace every per-reference `find_git_root_from` fallback in resolver
+      code with catalog reads (see "Ownership and reuse boundaries" for the
+      site list);
     - expression functions, transclusion, TOC linking, preflight, reference
       graphing, schema import/validation/rewrite, and completion consume the new
       grammar through `FileReference` rather than prefix checks;
@@ -561,9 +601,17 @@ an explicit-relative spelling such as `./name:part`.
   and second-repository documents recomputes or clears scopes exactly as D7
   requires. Work counters/seeded guards prove explicit resolution performs no
   ambient CWD, HOME, Git, Cargo metadata, or topology discovery. A
-  standalone `md compose` and a `claudine compose` of the same document
-  produce identical `^`/`@`/implicit candidate plans, proving both consume
-  the one catalog projection; repository search shows no remaining
+  standalone `md compose` and a `claudine compose` of the same document produce
+  identical `^` and implicit candidate plans and identical intrinsic
+  package/package-area/repository/home segments of the `@` plan. Claudine's
+  additional registered convention roots are asserted separately at their D6
+  prepend/append positions; they do not make the parity test fail. Projection
+  fixtures compare the catalog's selected scopes with the retained `RepoInfo`
+  across repository root, known area outside a package, newly scaffolded area,
+  root and nested packages, a second repository, and symlink-equivalent root
+  spellings. A production-source inventory proves Darkmatter contains the only
+  Sniff-observation → catalog adapter and Claudine calls it rather than
+  constructing a catalog from `RepoInfo`. Repository search shows no remaining
   `cargo_metadata` use in biscuit-file and no `find_package_area_from` /
   resolver-side `find_git_root_from` in Darkmatter.
 - **AC5 — materialization and provenance.** The matrix covers caller CLI
@@ -588,10 +636,17 @@ an explicit-relative spelling such as `./name:part`.
   relative path. `AGENT_CWD` is present in every spawned child's environment
   (provider, hook, `::shell`, lifecycle executor, sequence shell task) as the
   captured absolute launch directory, overwrites an inherited value, and stays
-  stable across re-entry. The spawn-seam inventory guard (D8.7) fails on any
-  `Command` construction in `claudine` lib or CLI that does not go through
-  the shared environment helper, and is proven non-vacuous by neutering one
-  seam.
+  stable across re-entry. A wrapper → provider → `handle` → hook-action fixture
+  proves the hook process retains the wrapper's launch value despite the
+  provider child CWD; an ordinary nested Claudine invocation started with a
+  stale inherited value instead publishes its own entry CWD. Missing and
+  non-absolute inherited values on `handle` cover the D8.7 fallback/error rule.
+  The spawn-seam inventory guard fails on any production `Command` construction
+  in `claudine` lib or CLI whose child can execute without the shared
+  environment helper. Scanner unit fixtures prove the guard is non-vacuous by
+  presenting each supported construction form with one governed and one
+  deliberately ungoverned seam; proving the guard never requires mutating
+  production source during a test.
 - **AC7 — magic conventions preserved.** The skill example
   (`@.claude/skills/.../SKILL.md`: repo first, home fallback) and Claudine's
   prompt-lookup conventions keep working through registered roots. Collision
@@ -684,10 +739,10 @@ fallback in every case.
 **Ruling: set `AGENT_CWD` on every Claudine-spawned child** — now normative as
 D8.7. The design-intent document promises `${AGENT_CWD}`; the value already
 exists as immutable invocation state (the launch snapshot behind `ctx.cwd`),
-so honoring the promise costs one environment insertion at spawn seams that
-already carry environment inventory tests, and it serves the consumers that
-cannot read `ctx.*` (provider CLIs, hooks, `::shell` commands). Because the
-ruling matches the design document, no amendment was required.
+so honoring the promise is a shared environment contribution at every spawn
+seam, and it serves the consumers that cannot read `ctx.*` (provider CLIs,
+hooks, `::shell` commands). Because the ruling matches the design document,
+no amendment was required.
 
 Rejected alternatives, for the record: a namespaced `CLAUDINE_LAUNCH_CWD`
 (clearer ownership, but renames what the normative document promises) and
