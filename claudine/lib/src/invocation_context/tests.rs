@@ -226,6 +226,66 @@ fn prepared_context_consumer_accounting_is_concurrency_safe() {
 }
 
 #[test]
+fn document_epoch_tokens_isolate_overlapping_work() {
+    let fixture = TempDir::new().unwrap();
+    let invocation = InvocationContext::capture_at(fixture.path());
+    let left = invocation.begin_document_epoch();
+    let right = invocation.begin_document_epoch();
+    let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+
+    std::thread::scope(|scope| {
+        let left_barrier = std::sync::Arc::clone(&barrier);
+        let left = left.clone();
+        scope.spawn(move || {
+            let requirements =
+                darkmatter::markdown::compose::ContextRequirements::for_content("");
+            let _context = left.capture_launch_context(&requirements);
+            left.record_prepared_context_consumer(PreparedContextConsumer::Body);
+            left_barrier.wait();
+            left.record_prepared_context_consumer(PreparedContextConsumer::Lifecycle);
+        });
+
+        let right_barrier = std::sync::Arc::clone(&barrier);
+        let right = right.clone();
+        scope.spawn(move || {
+            let requirements =
+                darkmatter::markdown::compose::ContextRequirements::for_content("");
+            let _context = right.capture_launch_context(&requirements);
+            right.record_prepared_context_consumer(PreparedContextConsumer::Preflight);
+            right_barrier.wait();
+            right.record_prepared_context_consumer(
+                PreparedContextConsumer::EffectiveFrontmatter,
+            );
+        });
+    });
+
+    assert_eq!(
+        left.work_snapshot(),
+        DocumentEpochWork {
+            launch_context_constructions: 1,
+            launch_context_extensions: 0,
+            ambient_fallbacks: 0,
+            prepared_context_consumers: BTreeMap::from([
+                ("body".to_string(), 1),
+                ("lifecycle".to_string(), 1),
+            ]),
+        }
+    );
+    assert_eq!(
+        right.work_snapshot(),
+        DocumentEpochWork {
+            launch_context_constructions: 1,
+            launch_context_extensions: 0,
+            ambient_fallbacks: 0,
+            prepared_context_consumers: BTreeMap::from([
+                ("effective-frontmatter".to_string(), 1),
+                ("preflight".to_string(), 1),
+            ]),
+        }
+    );
+}
+
+#[test]
 fn document_epoch_delta_keeps_exact_consumer_counts() {
     let fixture = TempDir::new().unwrap();
     let invocation = InvocationContext::capture_at(fixture.path());

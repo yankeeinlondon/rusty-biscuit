@@ -60,7 +60,8 @@ pub(crate) fn materialize_passthrough_harness_seed(
     );
     // Launch-anchored, never source-anchored: moving the wrapped memory file
     // must not change its launch-facing `ctx.*` expansion (AC9).
-    let context = invocation.capture_launch_context(&requirements);
+    let document_epoch = invocation.begin_document_epoch();
+    let context = document_epoch.capture_launch_context(&requirements);
     let options = claudine::composition::bind_agent_workspace(
         darkmatter::markdown::compose::ComposeOptions::new_with_context(context.clone())
             .with_file_resolution_context(source_context.file_resolution_context().clone()),
@@ -68,7 +69,7 @@ pub(crate) fn materialize_passthrough_harness_seed(
         shell_cwd,
     );
     invocation.record_compose_operation();
-    invocation.record_prepared_context_consumer(
+    document_epoch.record_prepared_context_consumer(
         claudine::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
     );
     let (composed, _report) = source_markdown.compose_with(options)?;
@@ -84,6 +85,7 @@ pub(crate) fn materialize_passthrough_harness_seed(
         inline_closure_plan: None,
         file_resolution_context: Some(source_context.file_resolution_context().clone()),
         compose_context: Some(context),
+        document_epoch: Some(document_epoch),
         live_frontmatter,
         runtime_state,
         lifecycle: None,

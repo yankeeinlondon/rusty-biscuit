@@ -131,6 +131,7 @@ fn run_loop_lifecycle_with_engine_path(
         &crate::composition::lifecycle_executor::SystemShellRunner,
         emitter,
         None,
+        None,
         |_ctx, _guard| {
             *invocations.borrow_mut() += 1;
             Ok(LoopIterationOutput::success("ran"))
@@ -644,6 +645,7 @@ fn run_loop_lifecycle_emitting_terminal(
         &effect_engine,
         &shell_runner,
         emitter,
+        None,
         None,
         |ctx, guard| {
             *invocations.borrow_mut() += 1;

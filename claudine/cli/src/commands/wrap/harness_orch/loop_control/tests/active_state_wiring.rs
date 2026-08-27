@@ -36,6 +36,7 @@ fn materialized_with_prompt(prompt: &str) -> MaterializedHarnessPrompt {
         inline_closure_plan: None,
         file_resolution_context: None,
         compose_context: None,
+        document_epoch: None,
         lifecycle: None,
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),

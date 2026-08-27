@@ -99,7 +99,9 @@ use std::path::Path;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{Duration, Instant};
 use rendezvous_core::local_endpoint::LocalEndpoint;
-use rendezvous_core::local_endpoint::test_support::{endpoint_env_value, private_endpoint};
+use rendezvous_core::local_endpoint::test_support::endpoint_env_value;
+#[cfg(feature = "daemon-tests")]
+use rendezvous_core::local_endpoint::test_support::private_endpoint;
 use tempfile::tempdir;
 use test_toolkit::{Backend, Level, require_level};
 
@@ -307,6 +309,7 @@ fn stage_proxy_pair(source_doc: &str, target_doc: &str, succeeding: bool) -> Sta
 // Retained for when `defer` is wired to the rendezvous deferred-execution
 // backend; currently unused because `defer` returns the not-implemented error.
 #[allow(dead_code)]
+#[cfg(feature = "daemon-tests")]
 struct RendezvousQueue {
     runtime: tokio::runtime::Runtime,
     handle: Option<rendezvous_daemon::server::ServerHandle>,
@@ -315,6 +318,7 @@ struct RendezvousQueue {
 }
 
 #[allow(dead_code)]
+#[cfg(feature = "daemon-tests")]
 impl RendezvousQueue {
     fn spawn(workspace: &Path) -> Self {
         let endpoint = private_endpoint(workspace, "rendezvous");
@@ -366,6 +370,7 @@ impl RendezvousQueue {
     }
 }
 
+#[cfg(feature = "daemon-tests")]
 impl Drop for RendezvousQueue {
     fn drop(&mut self) {
         if let Some(handle) = self.handle.take() {

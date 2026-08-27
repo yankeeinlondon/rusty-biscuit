@@ -1303,13 +1303,23 @@ fn construct_lifecycle_runtime(
                 serde_json::to_string(&request.prepared.effective_frontmatter).unwrap_or_default();
             let scan = format!("{fm_json}\n{}", request.prepared.prompt);
             let mut ctx = request.prepared.compose_context.clone();
-            if let Some(invocation) = request.invocation_context.as_ref() {
+            if let Some(epoch) = request.prepared.document_epoch.as_ref() {
+                epoch.record_prepared_context_consumer(
+                    claudine::invocation_context::PreparedContextConsumer::Lifecycle,
+                );
+            } else if let Some(invocation) = request.invocation_context.as_ref() {
                 invocation.record_prepared_context_consumer(
                     claudine::invocation_context::PreparedContextConsumer::Lifecycle,
                 );
+            }
+            if let Some(invocation) = request.invocation_context.as_ref() {
                 let requirements =
                     darkmatter::markdown::compose::ContextRequirements::for_content(&scan);
-                invocation.extend_launch_context(&mut ctx, &requirements);
+                if let Some(epoch) = request.prepared.document_epoch.as_ref() {
+                    epoch.extend_launch_context(&mut ctx, &requirements);
+                } else {
+                    invocation.extend_launch_context(&mut ctx, &requirements);
+                }
             }
             for (key, value) in &request.env_overrides {
                 ctx.env_mut().insert(key.clone(), value.clone());

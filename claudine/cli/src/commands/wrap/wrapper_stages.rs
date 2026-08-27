@@ -546,6 +546,7 @@ pub(crate) fn run_execution_stage(
             // The passthrough seed's compose context is this epoch's launch
             // snapshot; later harness refreshes extend it in place.
             epoch_context: initial_compose_context.clone(),
+            document_epoch: initial_materialized.document_epoch.clone(),
         };
 
         let mut harness_base_args = child_args.to_vec();

@@ -10,7 +10,7 @@ area: claudine
 packages:
     - claudine
     - darkmatter
-review_iterations: 2
+review_iterations: 3
 implemented: true
 ---
 

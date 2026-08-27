@@ -32,7 +32,7 @@ use tracing::info_span;
 use super::{
     CachedHarnessLoopContext, HarnessPromptState, MaterializedHarnessPrompt, build_harness_launch,
     execute_harness_attempt, harness_prompt_mode_label, materialize_harness_prompt,
-    preflight_proxy_target, session_compat_key, HarnessPromptMode,
+    preflight_harness_document, session_compat_key, HarnessPromptMode,
 };
 
 type HarnessLoopResult = (
@@ -481,7 +481,12 @@ fn prepare_attempt_phase(
             .harness_context
             .refresh(&prompt.prompt_state.source_path, prompt.repo_root);
     }
-    preflight_pending_proxy_phase(&mut prompt, &mut lifecycle, &control)?;
+    preflight_fresh_document_phase(
+        &mut prompt,
+        &mut lifecycle,
+        control.active.iteration().attempt().number(),
+        control.coordinator.bootstrap_pending(),
+    )?;
     // A document still owing its staged boot is being read *before* its own
     // `initialize`, which may add or repair the very property a schema verdict
     // would reject; the stabilized reread inside the boot judges it instead (R4).
@@ -531,7 +536,6 @@ fn start_lifecycle_phase(
     control: &mut AttemptRetryProxyControl<'_>,
     materialized: &MaterializedHarnessPrompt,
 ) -> Result<Option<LoopStep>> {
-    observe_reentry_lifecycle_context(prompt.prompt_state, materialized);
     let attempt = control.active.iteration().attempt().number();
     let profile = control.profile;
     let provider = control.provider;
@@ -545,9 +549,9 @@ fn start_lifecycle_phase(
     let effect_engine = lifecycle.effect_engine;
     let term = lifecycle.term;
     let loop_start = lifecycle.loop_start;
-    let start_outcome = run_lifecycle_event(
+    let start_outcome = run_start_lifecycle_event(
+        prompt_state,
         lifecycle_guard,
-        LifecycleSignal::Start,
         materialized,
         &prompt_state.source_path,
         repo_root,
@@ -688,6 +692,32 @@ fn start_lifecycle_phase(
     Ok(None)
 }
 
+#[allow(clippy::too_many_arguments)]
+fn run_start_lifecycle_event(
+    prompt_state: &HarnessPromptState,
+    lifecycle_guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+    materialized: &MaterializedHarnessPrompt,
+    source_path: &Path,
+    repo_root: Option<&Path>,
+    term: &Terminal,
+    effect_engine: &EffectEngine,
+    err: Option<&LifecycleErrorInfo>,
+    loop_start: std::time::Instant,
+) -> LifecycleEventOutcome {
+    observe_reentry_lifecycle_context(prompt_state, materialized);
+    run_lifecycle_event(
+        lifecycle_guard,
+        LifecycleSignal::Start,
+        materialized,
+        source_path,
+        repo_root,
+        term,
+        effect_engine,
+        err,
+        loop_start,
+    )
+}
+
 fn observe_reentry_lifecycle_context(
     prompt_state: &HarnessPromptState,
     materialized: &MaterializedHarnessPrompt,
@@ -697,9 +727,9 @@ fn observe_reentry_lifecycle_context(
         claudine::composition::DocumentEntryReason::Retry
             | claudine::composition::DocumentEntryReason::Resume
     ) && materialized.compose_context.is_some()
-        && let Some(invocation) = prompt_state.invocation_context.as_ref()
+        && let Some(epoch) = materialized.document_epoch.as_ref()
     {
-        invocation.record_prepared_context_consumer(
+        epoch.record_prepared_context_consumer(
             claudine::invocation_context::PreparedContextConsumer::Lifecycle,
         );
     }
@@ -860,7 +890,7 @@ fn bootstrap_adopted_document_phase(
     // Kept so a direct document can tell whether its own `initialize` changed
     // the prompt the operator was already shown.
     let reported_prompt = materialized.prompt.clone();
-    if let Err(error) = preflight_proxy_target(
+    if let Err(error) = preflight_harness_document(
         prompt.prompt_state,
         prompt.harness_context.shell_options(),
         prompt.child_cwd,
@@ -1199,6 +1229,7 @@ fn empty_materialized_prompt() -> MaterializedHarnessPrompt {
         inline_closure_plan: None,
         file_resolution_context: None,
         compose_context: None,
+        document_epoch: None,
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         lifecycle: None,
@@ -1206,13 +1237,12 @@ fn empty_materialized_prompt() -> MaterializedHarnessPrompt {
     }
 }
 
-fn preflight_pending_proxy_phase(
+fn preflight_fresh_document_phase(
     prompt: &mut AttemptPromptPreparation<'_>,
     lifecycle: &mut AttemptLifecycleExecution<'_, '_>,
-    control: &AttemptRetryProxyControl<'_>,
+    attempt: u32,
+    proxy_pending: bool,
 ) -> Result<()> {
-    let attempt = control.active.iteration().attempt().number();
-    let proxy_pending = control.coordinator.bootstrap_pending();
     let has_seed = prompt.initial_materialized.is_some();
     let prompt_state = &mut *prompt.prompt_state;
     let harness_context = &mut *prompt.harness_context;
@@ -1228,16 +1258,21 @@ fn preflight_pending_proxy_phase(
     // route (compose/inline/sequence, looping or not) uniformly. It is
     // deliberately not re-emitted here, where the target has already been
     // adopted, to avoid a doubled redirect line.
-    if !proxy_pending || has_seed {
-        return Ok(());
-    }
     let result = info_span!(
-        "harness_proxy_target_preflight",
+        "harness_fresh_document_preflight",
         attempt,
         source_path = %prompt_state.source_path.display(),
     )
     .in_scope(|| {
-        preflight_proxy_target(prompt_state, harness_context.shell_options(), child_cwd)
+        let fresh_reentry = matches!(
+            prompt_state.entry,
+            claudine::composition::DocumentEntryReason::Retry
+                | claudine::composition::DocumentEntryReason::Resume
+        );
+        if (!proxy_pending && !fresh_reentry) || has_seed {
+            return Ok(());
+        }
+        preflight_harness_document(prompt_state, harness_context.shell_options(), child_cwd)
     });
     if let Err(error) = result {
         let err_info = LifecycleErrorInfo::from_error_or_action("shell_approval", error.as_ref());

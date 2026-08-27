@@ -441,6 +441,7 @@ pub(super) fn run_composition_body(
         // epoch's launch snapshot; the harness's stabilized reread extends it
         // in place rather than constructing a second capture.
         epoch_context: Some(request.prepared.compose_context.clone()),
+        document_epoch: request.prepared.document_epoch.clone(),
     };
 
     let mut harness_base_args = args_before_prompt.clone();

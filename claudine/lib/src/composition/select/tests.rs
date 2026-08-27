@@ -34,6 +34,7 @@ fn make_prepared_composition(
         input_layers: Default::default(),
         entry: crate::composition::DocumentEntryReason::Direct,
         compose_context: darkmatter::markdown::compose::ComposeContext::capture_for_content(std::path::Path::new("."), ""),
+        document_epoch: None,
     }
 }
 

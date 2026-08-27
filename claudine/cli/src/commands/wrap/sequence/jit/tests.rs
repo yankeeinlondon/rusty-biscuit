@@ -50,8 +50,6 @@ fn sequence_step_preparation_is_one_exact_document_epoch() {
         file_resolution_context: source_context.file_resolution_context(),
         invocation: &invocation,
     };
-    let before = invocation.work_snapshot();
-
     let step = compose_step(
         &source,
         &context,
@@ -64,7 +62,7 @@ fn sequence_step_preparation_is_one_exact_document_epoch() {
 
     assert!(step.prepared.prompt.contains("body="));
     assert_eq!(
-        invocation.work_snapshot().document_epoch_since(&before),
+        step.prepared.document_epoch.unwrap().work_snapshot(),
         claudine::invocation_context::DocumentEpochWork {
             launch_context_constructions: 1,
             launch_context_extensions: 0,
@@ -144,7 +142,7 @@ fn template_preflight_resolves_against_document_dir() {
     let _cwd = CwdGuard::enter(unrelated.path());
 
     let env_overrides: BTreeMap<String, String> = BTreeMap::new();
-    let (opts, _) = build_template_preflight_options(
+    let (opts, _, _) = build_template_preflight_options(
         &env_overrides,
         &source_path,
         &md,
@@ -198,7 +196,7 @@ fn template_preflight_does_not_resolve_launch_only_file() {
     let _cwd = CwdGuard::enter(unrelated.path());
 
     let env_overrides: BTreeMap<String, String> = BTreeMap::new();
-    let (opts, _) = build_template_preflight_options(
+    let (opts, _, _) = build_template_preflight_options(
         &env_overrides,
         &source_path,
         &md,
@@ -298,7 +296,7 @@ fn distributed_step_keeps_launch_identity_and_source_schema_and_files() {
         ("AGENT".to_string(), "codex".to_string()),
         ("MODEL".to_string(), "gpt-5".to_string()),
     ]);
-    let (options, context) = build_template_preflight_options(
+    let (options, context, _) = build_template_preflight_options(
         &env,
         &pre.source.resolved_path,
         &pre.source.markdown,
