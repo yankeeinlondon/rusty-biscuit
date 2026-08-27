@@ -1,6 +1,7 @@
 ---
 implementation_1: "2026-08-26T15:46:25+01:00"
 implementation_2: "2026-08-26T20:15:11+01:00"
+implementation_3: "2026-08-26T22:05:41+01:00"
 ---
 
 ## Implementation of Review Findings #1
@@ -89,6 +90,7 @@ The files changed by this implementation are:
 - `claudine/cli/tests/ctx_launch_anchor.rs`
 - `claudine/fixes/2026-08-12-ctx-launch-anchor/plan.md`
 - `claudine/fixes/2026-08-12-ctx-launch-anchor/log.md`
+
 - `claudine/fixes/2026-08-12-ctx-launch-anchor/review-1.md`
 
 ## Implementation of Review Findings #2
@@ -184,4 +186,137 @@ The files changed by this implementation are:
 - `claudine/cli/tests/ctx_launch_anchor.rs`
 - `claudine/docs/providers/dispatch-inventory.json`
 - `claudine/fixes/2026-08-12-ctx-launch-anchor/review-2.md`
+- `claudine/fixes/2026-08-12-ctx-launch-anchor/log.md`
+
+## Implementation of Review Findings #3
+
+> **started at:** 2026-08-26T22:05:41+01:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'claudine/fixes/2026-08-12-ctx-launch-anchor/review-3.md'
+- this is iteration 3 of the review-to-implement cycle
+- starting the work on 'retry and resume epochs include fresh shell preflight' at 22:07:37
+        - confirmed that the production attempt phase preflights only a pending proxy target; retry and resume proceed directly to materialization
+        - confirmed that adding preflight without changing epoch ownership would construct twice because retry/resume currently force every context request to capture, while the transition retains the prior epoch snapshot
+        - confirmed that same-document shell-policy refresh already preserves the frozen approval window, so a fresh retry/resume audit can reuse cached approvals without reopening prompts
+        - changed retry/resume dispatch to retire the prior epoch snapshot, allowing the production attempt-preparation preflight to construct the fresh snapshot once and materialization to reuse it
+        - expanded the production fresh-document preflight phase to include retry and resume while retaining the existing frozen approval policy
+        - replaced the helper-level regression with a shell-bearing `ctx.os` fixture that enters the production attempt-preparation preflight and start-lifecycle seams; both exact epoch maps now require `preflight`, `body`, `effective-frontmatter`, and `lifecycle`
+        - the focused retry/resume epoch regression passed, and the related retry/resume and shell-approval checks passed
+        - regenerated the checked dispatch inventory after the production seam changes; its 12 tests passed
+        - kept the existing boxed diagnostic visible by renaming its allowlist entry and unboxing at the production report boundary; the focused diagnostic guards passed
+        - package-area verification completed successfully
+                - `just test` passed for all five Claudine packages, including all 2,386 `claudine-cli` tests (245 skipped)
+                - `just lint` passed for every Claudine package and its lifecycle/error guards
+                - `git diff --check` passed with no whitespace errors
+- work completed for 'retry and resume epochs include fresh shell preflight' at 22:32:26
+- starting the work on 'concurrency-safe exact-epoch attribution through production seams' at 22:33:56
+        - confirmed that `document_epoch_since` subtracts invocation-global counters and consumer maps, so a sibling thread can contribute work to another task's asserted interval
+        - confirmed that the loop regression writes `preflight`, `loop-condition`, and `lifecycle` observations from test code instead of traversing the production owners
+        - selected an invocation-owned epoch token with an epoch-local recorder: the token attributes construction, extension, fallback, and consumer work without adding identity to Darkmatter's `ComposeContext`
+        - threaded the epoch token through canonical direct/inline preparation, sequence JIT and task preparation, loop condition/lifecycle execution, and harness retry/resume materialization
+        - removed test-authored loop and re-entry observations
+                - the loop regression now traverses production document shell preflight, canonical body/effective-frontmatter composition, integrated loop-condition evaluation, and integrated lifecycle execution
+                - retry/resume assertions now read the fresh materialized epoch's own recorder after production preflight and start-lifecycle execution
+        - added a deliberately overlapping real parallel sequence group whose two prompt-task provider attempts wait at a sibling barrier; `--perf` must expose two independently exact task epoch maps
+        - added a lower-level synchronized-thread regression proving two epoch tokens keep disjoint consumer maps even while their work overlaps
+        - focused verification passed all six attribution regressions across direct preparation, overlapping tokens, loop production seams, sequence JIT, retry/resume production seams, and the real parallel sequence group
+        - regenerated the dispatch inventory after the new epoch owner call sites and confirmed its 12-test drift guard passes
+        - updated the Claudine composition guidance to distinguish exact epoch-local attribution from invocation-wide aggregate diagnostics, then refreshed its Darkmatter content hash
+        - canonical package verification completed successfully
+                - `cd claudine && just test` passed all five package suites with zero failures, including 4,049 `claudine`, 2,386 `claudine-cli`, and 154 `claudine-gen` tests
+                - `cd claudine && just lint` passed the diagnostic and lifecycle-document guards plus Clippy for every Claudine package with no source warnings
+                - the test run emitted only the known macOS linker warning that the `__eh_frame` section is too large for compact unwind offsets
+                - Darkmatter gates were not required because no Darkmatter source was changed
+                - `git diff --check` passed with no whitespace errors
+- work completed for 'concurrency-safe exact-epoch attribution through production seams' at 23:10:02
+- starting the work on 'complete Linux, WSL, native-Windows, and hosted-CI validation matrix' at 23:11:20
+        - read the Claudine, Rust, Rust-testing, and Sniff skills plus the Apple Terminal Level 2 focus-safety reference before validation
+        - the exact current macOS `cd claudine && just test-l2` gate passed
+                - `claudine-cli`: 230 passed, 2,401 skipped
+                - `claudine-gen`: 3 passed, 155 skipped
+                - the recipe used its canonical parallel self-spawn mode for `claudine-cli` and canonical serial recipe for `claudine-gen`
+                - one-second foreground-application sampling throughout the run remained on AppKit process `ASN:0x0-0xc73c73`; tmux, WezTerm, and Apple Terminal never gained focus
+        - the requested `build-native` SSH alias refused its connection; continuing native-Windows discovery through the repository-documented `build-win-native` fallback
+        - Sniff host discovery established the validation environments and storage limits
+                - local macOS: macOS 27.0, native runtime, Rust 1.97.1, and 1.49 TB free on the APFS repository volume
+                - `build-linux`: Debian 13 native Linux, Rust/Cargo 1.97.1, and 140.2 GB free on the root ZFS volume
+                - `build-win`: Ubuntu 26.04 under WSL2, Rust/Cargo 1.97.1, and 52.3 GB free on its ext4 root volume
+                - `build-win-native`: Windows 11 Pro build 26200, native `x86_64-pc-windows-msvc` Rust 1.97.1, `just` 1.57.0, and only 4.7 GB free on `C:` / 8.8 GB free on `W:`
+                - native Windows cannot satisfy the repository's non-bypassable 50 GiB Cargo storage preflight on any visible fixed volume; no unrelated build cache or stale clone was altered to manufacture space
+        - created a source-only current-worktree snapshot containing 10,081 tracked regular files plus the untracked `review-3.md`
+                - excluded only tracked symlink projections and large image/audio/PDF design assets that are not build inputs
+                - archive Git blob is `a60ee410cbdb3131849482a610997095149a13f0`
+                - raw extracted-file manifest Git blob is `4c03cdc3a53b321405c990fe0d674bdedd402298`
+        - staged the snapshot without touching either host's stale clone
+                - Linux staging path: `/tmp/rb-ctx-anchor-iter3-linux.bb0U8p`; the archive transport Git blob matched before extraction
+                - WSL staging path: `/tmp/rb-ctx-anchor-iter3-wsl.NhGG5Q`; transfer completed before that host became intermittently unreachable
+        - exact-path and ownership validation succeeded for residual Linux `/tmp/rb-ctx-anchor-a3Nzbs`; it was deleted unrecoverably as a temporary duplicate, while the current local snapshot remains available
+        - the first 10,081-file snapshot was rejected as a validation input when the WSL cold build proved `playa/effects/air-reverse-burst.wav` is a required build input; this was a staging-filter defect, not an implementation defect
+                - created a corrected buildable snapshot with 10,232 tracked regular files plus untracked `claudine/fixes/2026-08-12-ctx-launch-anchor/review-3.md`, excluding only top-level design assets, `.afphoto` sources, and tracked symlink projections
+                - the corrected archive Git blob is `10ed61e549ebdf9558c8f4600ffc2936c25d9ca1` and its raw-file manifest Git blob is `515ac8cd99137529a8b9514126b1075ca262302a`
+                - Linux and WSL reconstructed the identical staged Git tree `9ffae14ded97091da52ca89d72c74b4f49512c52`; native Windows matched all 10,232 raw content hashes, while its diagnostic index tree `a4c4bcff4f70d1636204b360ccf15c07810fbcb1` reflects Windows executable-mode normalization
+        - WSL validation used the requested `build-win` guest and, after its SSH daemon became intermittent, the same Ubuntu 26.04 distribution through noninteractive `build-win-native` to `wsl.exe --distribution Ubuntu-26.04 --user ken`
+                - the corrected isolated path was `/tmp/rb-ctx-anchor-iter3-wsl.NhGG5Q`; its archive and all 10,232 raw-file hashes matched before execution
+                - canonical `cd claudine && just test` completed compilation far enough to confirm the missing-audio staging defect was resolved, but the cold target exhausted the 52.3 GB ext4 volume; Rust reported `No space left on device` and `rust-lld` received `SIGBUS` before any tests executed
+                - because Level 1 consumed the only usable WSL volume, canonical Claudine `just test-l2` / `just lint` and Darkmatter `just test` / `just lint` could not safely execute; the mounted native volumes had only 4.7 GB and 8.8 GB free and no alternate volume could host the cold target
+                - no Level 2 command reached terminal creation, so no terminal or browser window could gain focus; no portability fix was made and AC14 did not require a new Level 1 run
+                - exact-path validation preceded deletion of `/tmp/rb-ctx-anchor-iter3-wsl.NhGG5Q`; the temporary build output is unrecoverable, the source remains reproducible from this worktree, and the guest recovered to 49 GB free
+        - Linux received the corrected snapshot at isolated path `/tmp/rb-ctx-anchor-iter3-linux.bb0U8p` without modifying its stale clone
+                - the archive Git blob, all 10,232 raw-file hashes, and reconstructed tree `9ffae14ded97091da52ca89d72c74b4f49512c52` matched the local snapshot
+                - the first gate shell lacked Cargo's bin directory and therefore did not find `just`; the corrected canonical `cd claudine && just test` invocation exported `/home/build/.cargo/bin` but the SSH connection timed out before command execution, so no Linux test count or verdict is claimed
+                - the final bounded exact-path cleanup connection also timed out; `/tmp/rb-ctx-anchor-iter3-linux.bb0U8p` may retain the reproducible 10,232-file isolated snapshot and should be removed on the next successful `build-linux` connection
+        - native Windows validation used `build-win-native` because requested alias `build-native` refused port 22
+                - the corrected isolated snapshot was reconstructed at short path `C:\\rb3-2b2d360a` to avoid native `MAX_PATH` failures; archive blob `10ed61e549ebdf9558c8f4600ffc2936c25d9ca1` and all 10,232 raw hashes matched
+                - canonical Claudine `just test`, `just test-l2`, and `just lint`, plus Darkmatter `just test` and `just lint`, were each attempted against the corrected snapshot with automatic unrelated-cache sweeping disabled
+                - all five commands stopped at the repository's intact 50 GiB Cargo storage preflight with 3.2 GiB free on the 119.0 GiB `C:` volume; Level 1 reported zero package groups passed and five Claudine / three Darkmatter package groups blocked before tests
+                - the storage guard was not bypassed and no unrelated cache was removed; Level 2 stopped before terminal creation and therefore could not steal focus
+                - exact-path validation preceded deletion of `C:\\rb3-2b2d360a`; the temporary copy is unrecoverable but reproducible from this worktree, and deletion restored `C:` to 4,941,172,736 free bytes
+        - hosted-CI validation is deferred for the exact uncommitted tree
+                - `.github/workflows/ci.yml` exposes `workflow_dispatch` without source or bundle inputs, and it delegates to `_package-ci.yml` / `_wsl-ci.yml`; all applicable jobs use `actions/checkout@v4` against a published repository ref
+                - no workflow accepts a local archive or patch, so hosted CI cannot execute archive `10ed61e549ebdf9558c8f4600ffc2936c25d9ca1` without a commit and push; neither was authorized, and no workflow was triggered against a different ref
+        - removed five exact-path-validated local `rb-ctx-anchor-iter3-*` staging directories; the copies are unrecoverable temporary artifacts and remain reproducible from the current worktree
+        - Finding 3 is complete with the macOS Level 2 gate green; Linux execution deferred for connectivity, WSL and native Windows gates deferred for storage capacity, and exact-current-tree hosted CI deferred because the workflows require a published ref
+- work completed for 'complete Linux, WSL, native-Windows, and hosted-CI validation matrix' at 23:54:35
+- starting the work on 'correct the public file-reference resolution contract' at 23:55:40
+        - read the Claudine, Rust, Rust-testing, Darkmatter, and biscuit-file skills plus biscuit-file's file-reference reference and authoritative topic
+        - confirmed the shared resolver contract and existing Claudine conflict fixtures agree: bare implicit references probe repository root first and source directory second, while explicit `./` and `../` references probe the source directory only
+        - rewrote the public topic's implicit-reference and CWD sections to distinguish the immutable caller launch directory, active document source directory, and mutable provider or shell process working directory
+        - documented that the launch and process working directories are not document-reference candidates and that a missing repository leaves only the source-directory candidate
+        - kept `$schema` as a separate document-relative rule outside the bare implicit candidate order
+        - corrected the topic's adjacent `.` and `..` definitions so they no longer contradict the explicit source-only contract
+        - verification completed successfully
+                - the focused implicit-resolution regression selection passed all 3 repository/source ordering tests
+                - `cd claudine && just test` passed all five Claudine package suites with zero failures
+                - `cd claudine && just lint` passed the diagnostic and lifecycle-document guards plus Clippy for every Claudine package
+                - Darkmatter and biscuit-file package gates were not required because this finding changed no source in either package area
+                - `git diff --check` passed with no whitespace errors
+- work completed for 'correct the public file-reference resolution contract' at 00:10:51
+
+### Successful Completion
+
+The implementation of review cycle 3 has completed successfully in 2h 7m 59s. During this implementation all 4 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 3 were fixed, 1 was deferred (see reasons below):
+
+- 'complete Linux, WSL, native-Windows, and hosted-CI validation matrix' was partially deferred because the exact current worktree could not complete every required environment gate
+        - Linux accepted and verified the exact snapshot, but repeated `build-linux` SSH timeouts prevented the corrected canonical gate from starting
+        - WSL began the canonical Level 1 gate from the verified snapshot, but its 52.3 GB ext4 volume exhausted during the cold build before tests executed; the isolated stage was removed and 49 GB was restored
+        - native Windows accepted and verified the exact snapshot through `build-win-native` after `build-native` refused port 22, but all five canonical Claudine and Darkmatter gates stopped at the intact 50 GiB storage preflight because only 3.2 GiB was free
+        - hosted CI requires a published Git ref and accepts no local archive or patch input; committing and pushing the exact worktree was outside this task's authorization
+
+The files changed by this implementation are:
+
+- `.claude/skills/claudine/composition.md`
+- `claudine/lib/src/invocation_context.rs` and `claudine/lib/src/invocation_context/tests.rs`
+- `claudine/lib/src/composition/types.rs`, `claudine/lib/src/composition/prepare.rs`, and `claudine/lib/src/composition/prepare/tests.rs`
+- `claudine/lib/src/composition/looping/engine.rs` and its iteration-action and lifecycle-control tests
+- the Claudine composition coordinator, error, and selection tests
+- `claudine/cli/src/commands/compose/loop_run.rs` and `claudine/cli/src/commands/compose/prep.rs`
+- the wrapper composition pipeline and runner
+- the harness orchestrator's loop control, dispatch, coordinator, prompt, types, target-launch tests, and retry/resume state tests
+- `claudine/cli/src/commands/wrap/overlay.rs` and `claudine/cli/src/commands/wrap/wrapper_stages.rs`
+- the sequence JIT implementation and tests plus task preparation
+- `claudine/cli/src/perf/report.rs`
+- the effective-diagnostic, error-guard, and sequence-group CLI tests and boxed-diagnostic allowlist
+- `claudine/docs/providers/dispatch-inventory.json`
+- `claudine/docs/topics/file-referencing.md`
+- `claudine/fixes/2026-08-12-ctx-launch-anchor/review-3.md`
 - `claudine/fixes/2026-08-12-ctx-launch-anchor/log.md`

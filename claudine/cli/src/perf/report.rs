@@ -361,6 +361,7 @@ struct InvocationWorkCounts {
     launch_context_extensions: usize,
     ambient_fallbacks: usize,
     prepared_context_consumers: Vec<(String, usize)>,
+    document_epochs: Vec<(usize, claudine::invocation_context::DocumentEpochWork)>,
 }
 
 impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationWorkCounts {
@@ -377,6 +378,11 @@ impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationW
                 .iter()
                 .map(|(name, count)| (name.clone(), *count))
                 .collect(),
+            document_epochs: work
+                .document_epochs
+                .iter()
+                .map(|(id, epoch)| (*id, epoch.clone()))
+                .collect(),
         }
     }
 }
@@ -385,7 +391,8 @@ impl InvocationWorkCounts {
     fn note(self) -> String {
         format!(
             "source context work: Git discoveries {}, topology probes {}, topology reuses {}; \
-             launch captures {} (extensions {}), ambient fallbacks {}, prepared consumers [{}]",
+             launch captures {} (extensions {}), ambient fallbacks {}, prepared consumers [{}]; \
+             document epochs [{}]",
             self.git_root_discoveries,
             self.topology_probes,
             self.topology_reuses,
@@ -403,6 +410,26 @@ impl InvocationWorkCounts {
                 })
                 .collect::<Vec<_>>()
                 .join(", "),
+            self.document_epochs
+                .into_iter()
+                .map(|(id, epoch)| format!(
+                    "{id}: captures {} (extensions {}), fallbacks {}, consumers [{}]",
+                    epoch.launch_context_constructions,
+                    epoch.launch_context_extensions,
+                    epoch.ambient_fallbacks,
+                    epoch
+                        .prepared_context_consumers
+                        .into_iter()
+                        .map(|(name, count)| if count == 1 {
+                            name
+                        } else {
+                            format!("{name} ({count})")
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+                .collect::<Vec<_>>()
+                .join("; "),
         )
     }
 }

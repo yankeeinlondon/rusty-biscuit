@@ -66,7 +66,13 @@ pub fn execute_loop(
     let Some(config) = resolve_loop_config(source)? else {
         return Ok(None);
     };
+    let document_epoch = prepare_options.document_epoch.clone();
     let initial_frontmatter = build_loop_seed(source, &config, prepare_options, mode)?;
+    if let Some(epoch) = document_epoch.as_ref() {
+        epoch.record_prepared_context_consumer(
+            crate::invocation_context::PreparedContextConsumer::LoopCondition,
+        );
+    }
     execute_loop_with_config(
         &source.resolved_path,
         &config,
@@ -314,6 +320,7 @@ pub fn execute_loop_with_lifecycle<E>(
     shell_runner: &dyn ShellRunner,
     emitter: &dyn LifecycleEmitter,
     file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    document_epoch: Option<&crate::invocation_context::DocumentEpoch>,
     mut executor: E,
 ) -> Result<LoopExecutionResult, CompositionError>
 where
@@ -322,6 +329,16 @@ where
         &mut LifecycleRunGuard<'_>,
     ) -> Result<LoopIterationOutput, CompositionError>,
 {
+    if let Some(epoch) = document_epoch {
+        epoch.record_prepared_context_consumer(
+            crate::invocation_context::PreparedContextConsumer::LoopCondition,
+        );
+        if lifecycle_ctx.context.is_some() {
+            epoch.record_prepared_context_consumer(
+                crate::invocation_context::PreparedContextConsumer::Lifecycle,
+            );
+        }
+    }
     let max_iterations = options
         .max_iterations
         .or(config.max_iterations)

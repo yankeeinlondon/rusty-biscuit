@@ -9,12 +9,13 @@ fn loop_iterations_share_one_exact_document_epoch() {
             (
                 "loop",
                 json!({
-                    "while": "counter < 2",
+                    "while": "counter < 1",
                     "actions": ["increment(counter)"]
                 }),
             ),
             ("counter", json!(0)),
             ("prepared", json!("{{ ctx.os }}")),
+            ("initialize", json!({"stderr": "{{ ctx.os }}"})),
         ],
         "body={{ ctx.os }}",
     );
@@ -23,39 +24,71 @@ fn loop_iterations_share_one_exact_document_epoch() {
     );
     let requirements =
         darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
-    let before = invocation.work_snapshot();
-    let prepared_context = invocation.capture_launch_context(&requirements);
-    invocation.record_prepared_context_consumer(
-        crate::invocation_context::PreparedContextConsumer::Preflight,
-    );
-    invocation.record_prepared_context_consumer(
-        crate::invocation_context::PreparedContextConsumer::LoopCondition,
-    );
+    let document_epoch = invocation.begin_document_epoch();
+    let prepared_context = document_epoch.capture_launch_context(&requirements);
     let prepare_options = PrepareOptions {
         invocation_context: Some(invocation.clone()),
-        prepared_context: Some(prepared_context),
+        document_epoch: Some(document_epoch.clone()),
+        prepared_context: Some(prepared_context.clone()),
         ..PrepareOptions::default()
     };
-
-    let result = execute_loop(
+    crate::composition::preflight_document_shell(
         &source,
-        LoopExecutionOptions::default(),
+        &prepare_options,
+        &crate::harness::ShellApprovalOptions::default(),
+    )
+    .unwrap();
+
+    let config = resolve_loop_config(&source).unwrap().unwrap();
+    let seed = crate::composition::build_loop_seed_with_lifecycle(
+        &source,
+        &config,
         prepare_options.clone(),
         CompositionMode::ChainedDocument,
-        |_ctx| {
+    )
+    .unwrap();
+    let settings = crate::events::GlobalSettings::default();
+    let messaging = crate::messaging::RuntimeMessagingSettings {
+        user: None,
+        repo: None,
+    };
+    let term = biscuit_terminal::terminal::Terminal::default();
+    let lifecycle_ctx = crate::composition::LifecycleRuntimeContext {
+        settings: &settings,
+        messaging: &messaging,
+        term: &term,
+        source_path: &source.resolved_path,
+        repo_root: source.resolved_path.parent(),
+        launch_area: source.resolved_path.parent(),
+        context: Some(&prepared_context),
+    };
+    let effect_engine = darkmatter::effects::EffectEngine::builder()
+        .mutation_root(source.resolved_path.parent().unwrap())
+        .auto_rehash(false)
+        .build();
+
+    let result = execute_loop_with_lifecycle(
+        &source.resolved_path,
+        &config,
+        seed.seed,
+        LoopExecutionOptions::default(),
+        &seed.lifecycle,
+        &lifecycle_ctx,
+        &effect_engine,
+        &crate::composition::lifecycle_executor::SystemShellRunner,
+        &crate::composition::DefaultLifecycleEmitter,
+        None,
+        Some(&document_epoch),
+        |_ctx, _guard| {
             let prepared = crate::composition::prepare_direct(&source, prepare_options.clone())?;
-            invocation.record_prepared_context_consumer(
-                crate::invocation_context::PreparedContextConsumer::Lifecycle,
-            );
             Ok(LoopIterationOutput::success(prepared.prompt))
         },
     )
-    .unwrap()
     .unwrap();
 
     assert_eq!(result.iteration_count, 2);
     assert_eq!(
-        invocation.work_snapshot().document_epoch_since(&before),
+        document_epoch.work_snapshot(),
         crate::invocation_context::DocumentEpochWork {
             launch_context_constructions: 1,
             launch_context_extensions: 0,
@@ -63,7 +96,7 @@ fn loop_iterations_share_one_exact_document_epoch() {
             prepared_context_consumers: std::collections::BTreeMap::from([
                 ("body".to_string(), 3),
                 ("effective-frontmatter".to_string(), 3),
-                ("lifecycle".to_string(), 2),
+                ("lifecycle".to_string(), 1),
                 ("loop-condition".to_string(), 1),
                 ("preflight".to_string(), 1),
             ]),
@@ -546,4 +579,3 @@ fn until_file_exists_resolves_against_prompt_parent() {
 }
 
 // ── Rate-limit policy tests ──────────────────────────────────────────
-

@@ -162,7 +162,7 @@ pub(super) fn compose_step(
         .set_overrides
         .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
 
-    let (compose_options, prepared_context) = build_template_preflight_options(
+    let (compose_options, prepared_context, document_epoch) = build_template_preflight_options(
         env_overrides,
         &step_source.resolved_path,
         &step_source.markdown,
@@ -183,7 +183,10 @@ pub(super) fn compose_step(
     );
 
     let mut approved = approved;
-    ctx.invocation.record_prepared_context_consumer(
+    document_epoch
+        .as_ref()
+        .expect("canonical sequence preparation owns an epoch")
+        .record_prepared_context_consumer(
         claudine::invocation_context::PreparedContextConsumer::Preflight,
     );
     let template_preflight = composition::resolve_shell_approvals(
@@ -216,6 +219,7 @@ pub(super) fn compose_step(
         allow_empty_body,
         defer_schema_verdict: false,
         invocation_context: Some(ctx.invocation.clone()),
+        document_epoch,
     };
 
     // Inline steps prepare via `prepare_inline_with_schema` so the composed
@@ -260,6 +264,7 @@ pub(super) fn build_template_preflight_options(
 ) -> (
     darkmatter::markdown::compose::ComposeOptions,
     darkmatter::markdown::compose::ComposeContext,
+    Option<claudine::invocation_context::DocumentEpoch>,
 ) {
     let anchor = launch_area
         .or_else(|| source_path.parent())
@@ -272,11 +277,12 @@ pub(super) fn build_template_preflight_options(
     // One launch-anchored snapshot per step epoch: constructed through the
     // invocation owner, never from this document's source context, so moving
     // the step document cannot change launch-facing `ctx.*`.
-    let mut ctx = match invocation {
-        Some(invocation) => {
+    let document_epoch = invocation.map(|invocation| invocation.begin_document_epoch());
+    let mut ctx = match document_epoch.as_ref() {
+        Some(epoch) => {
             let requirements =
                 darkmatter::markdown::compose::ContextRequirements::for_document(markdown);
-            invocation.capture_launch_context(&requirements)
+            epoch.capture_launch_context(&requirements)
         }
         None => darkmatter::markdown::compose::ComposeContext::capture_for_document(anchor, markdown),
     };
@@ -310,7 +316,7 @@ pub(super) fn build_template_preflight_options(
             .map(|s| (*s).to_string())
             .collect(),
     );
-    (opts, ctx)
+    (opts, ctx, document_epoch)
 }
 
 #[cfg(test)]

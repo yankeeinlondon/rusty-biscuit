@@ -1066,16 +1066,26 @@ fn parallel_group_members_keep_separate_provider_sessions() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
-    // Each launch records the session id it was handed, one line per launch.
+    // Each launch records the session id it was handed, then waits for its
+    // sibling. Reaching the barrier requires both production task preparations
+    // to remain live at once; serial scheduling cannot satisfy it.
     write_executable(
         &path_dir.join("goose"),
-        "#!/bin/sh\nprintf '%s\\n' \"${CLAUDINE_SESSION_ID:-none}\" >> \"$CLAUDINE_TEST_SESSIONS\"\nprintf 'agent-said\\n'\nexit 0\n",
+        "#!/bin/sh\nprintf '%s\\n' \"${CLAUDINE_SESSION_ID:-none}\" >> \"$CLAUDINE_TEST_SESSIONS\"\nattempts=0\nwhile [ \"$(wc -l < \"$CLAUDINE_TEST_SESSIONS\")\" -lt 2 ]; do attempts=$((attempts + 1)); [ $attempts -lt 500 ] || exit 90; sleep 0.01; done\nprintf 'agent-said\\n'\nexit 0\n",
     );
     let sessions = workspace.path().join("sessions.txt");
     fs::write(&sessions, "").unwrap();
 
-    fs::write(workspace.path().join("one.md"), "---\nprompt: hi\n---\n\nOne.\n").unwrap();
-    fs::write(workspace.path().join("two.md"), "---\nprompt: hi\n---\n\nTwo.\n").unwrap();
+    fs::write(
+        workspace.path().join("one.md"),
+        "---\nstart:\n  stderr: '{{ ctx.os }}'\n---\n\nOne {{ ctx.os }}.\n",
+    )
+    .unwrap();
+    fs::write(
+        workspace.path().join("two.md"),
+        "---\nstart:\n  stderr: '{{ ctx.os }}'\n---\n\nTwo {{ ctx.os }}.\n",
+    )
+    .unwrap();
     fs::write(
         workspace.path().join("seq.md"),
         r#"---
@@ -1102,7 +1112,7 @@ Body.
         .env("PATH", augmented_path(&path_dir))
         .env("CLAUDINE_TEST_SESSIONS", &sessions)
         .current_dir(workspace.path())
-        .args(["sequence", "--goose", "--yolo", "seq.md"])
+        .args(["sequence", "--goose", "--yolo", "seq.md", "--perf"])
         .assert()
         .get_output()
         .clone();
@@ -1120,5 +1130,18 @@ Body.
         distinct.len(),
         2,
         "two concurrent members shared one session id: {recorded:?}"
+    );
+
+    let compact_stderr = stderr
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+        .replace("- ", "-")
+        .replace("▌ ", "");
+    let exact_member_epoch =
+        "captures 1 (extensions 0), fallbacks 0, consumers [body, effective-frontmatter, lifecycle, preflight]";
+    assert!(
+        compact_stderr.matches(exact_member_epoch).count() >= 2,
+        "both overlapping prompt tasks must retain uncontaminated exact epoch maps: {stderr}"
     );
 }

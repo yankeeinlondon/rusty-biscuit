@@ -196,6 +196,7 @@ fn document_with_tags(
         inline_closure_plan: None,
         file_resolution_context: None,
         compose_context: None,
+        document_epoch: None,
         lifecycle: None,
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         mcp_body_tags,

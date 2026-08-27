@@ -228,6 +228,7 @@ impl ActiveDocumentCoordinator {
         // snapshot must not leak into the target's reads. The target's first
         // canonical read constructs its own.
         prompt_state.epoch_context = None;
+        prompt_state.document_epoch = None;
         if let Some(source_context) = source_context.as_ref() {
             prompt_state.input_layers.file_resolution_context =
                 Some(source_context.file_resolution_context().clone());

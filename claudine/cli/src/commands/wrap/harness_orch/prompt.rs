@@ -34,6 +34,7 @@ pub(crate) fn materialized_harness_prompt_from_prepared(
         inline_closure_plan,
         file_resolution_context: prepared.input_layers.file_resolution_context.clone(),
         compose_context: Some(prepared.compose_context.clone()),
+        document_epoch: prepared.document_epoch.clone(),
         lifecycle: Some(prepared.lifecycle.clone()),
         live_frontmatter,
         runtime_state,
@@ -183,19 +184,21 @@ fn harness_prepare_options(
             let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
                 &source.markdown,
             );
-            let fresh_epoch = matches!(
-                state.entry,
-                claudine::composition::DocumentEntryReason::Retry
-                    | claudine::composition::DocumentEntryReason::Resume
-            );
-            let context = if fresh_epoch || state.epoch_context.is_none() {
-                invocation.capture_launch_context(&requirements)
+            let context = if state.epoch_context.is_none() {
+                let epoch = invocation.begin_document_epoch();
+                let context = epoch.capture_launch_context(&requirements);
+                state.document_epoch = Some(epoch);
+                context
             } else {
                 let mut retained = state
                     .epoch_context
                     .clone()
                     .expect("epoch snapshot checked above");
-                invocation.extend_launch_context(&mut retained, &requirements);
+                if let Some(epoch) = state.document_epoch.as_ref() {
+                    epoch.extend_launch_context(&mut retained, &requirements);
+                } else {
+                    invocation.extend_launch_context(&mut retained, &requirements);
+                }
                 retained
             };
             // A fresh epoch replaces the retained snapshot; a same-epoch
@@ -210,6 +213,7 @@ fn harness_prepare_options(
     });
     if let Some((context, file_resolution)) = propagated {
         options.prepared_context = Some(context);
+        options.document_epoch = state.document_epoch.clone();
         options.file_resolution_context = Some(file_resolution);
     } else if let Some(source_context) = source_context {
         options.file_resolution_context = Some(source_context.file_resolution_context().clone());
@@ -217,8 +221,8 @@ fn harness_prepare_options(
     options
 }
 
-/// Run the proxied target document's own pre-flight shell audit and fold any
-/// newly-approved commands into the invocation's approved set.
+/// Run the active document's pre-flight shell audit and fold any newly-approved
+/// commands into the invocation's approved set.
 ///
 /// Only [`HarnessPromptMode::Compose`] re-runs a body compose that expands
 /// shell; `Inline` runs its own `prepare_inline` audit and `Passthrough` has no
@@ -230,7 +234,7 @@ fn harness_prepare_options(
 /// routes it through the standard `blocked`/`finalize` path.
 ///
 /// [`CompositionError`]: claudine::composition::CompositionError
-pub(crate) fn preflight_proxy_target(
+pub(crate) fn preflight_harness_document(
     state: &mut HarnessPromptState,
     approval_options: &claudine::harness::ShellApprovalOptions,
     child_cwd: &Path,
@@ -304,6 +308,7 @@ pub(crate) fn materialize_harness_prompt(
     };
     let file_resolution_context = prepared.input_layers.file_resolution_context.clone();
     let compose_context = prepared.compose_context;
+    let document_epoch = prepared.document_epoch;
     let mut prompt = prepared.prompt;
     let frontmatter = prepared.effective_frontmatter;
     let lifecycle = prepared.lifecycle;
@@ -344,6 +349,7 @@ pub(crate) fn materialize_harness_prompt(
         inline_closure_plan,
         file_resolution_context,
         compose_context: Some(compose_context),
+        document_epoch,
         lifecycle: Some(lifecycle),
         live_frontmatter,
         runtime_state: std::sync::Arc::clone(&state.runtime_state),
@@ -372,6 +378,7 @@ mod tests {
             entry: DocumentEntryReason::ProxyTarget,
             invocation_context: None,
             epoch_context: None,
+            document_epoch: None,
             source_context: None,
         }
     }
@@ -510,8 +517,7 @@ mod tests {
             assert_eq!(materialized.frontmatter["source_marker"], serde_json::json!("source-owned"));
         };
 
-        let before_proxy = invocation.work_snapshot();
-        preflight_proxy_target(&mut state, &approval_options, &launch_dir).unwrap();
+        preflight_harness_document(&mut state, &approval_options, &launch_dir).unwrap();
         let proxy = materialize_harness_prompt(
             &mut state,
             Some(&source_repo),
@@ -522,9 +528,7 @@ mod tests {
         .unwrap();
         assert_materialized(DocumentEntryReason::ProxyTarget, &proxy);
         assert_eq!(
-            invocation
-                .work_snapshot()
-                .document_epoch_since(&before_proxy),
+            proxy.document_epoch.as_ref().unwrap().work_snapshot(),
             claudine::invocation_context::DocumentEpochWork {
                 launch_context_constructions: 1,
                 launch_context_extensions: 0,
@@ -551,8 +555,7 @@ mod tests {
         )
         .unwrap();
 
-        let before_stabilized = invocation.work_snapshot();
-        preflight_proxy_target(&mut state, &approval_options, &launch_dir).unwrap();
+        preflight_harness_document(&mut state, &approval_options, &launch_dir).unwrap();
         let stabilized = materialize_harness_prompt(
             &mut state,
             Some(&source_repo),
@@ -568,17 +571,15 @@ mod tests {
             stabilized.prompt
         );
         assert_eq!(
-            invocation
-                .work_snapshot()
-                .document_epoch_since(&before_stabilized),
+            stabilized.document_epoch.as_ref().unwrap().work_snapshot(),
             claudine::invocation_context::DocumentEpochWork {
-                launch_context_constructions: 0,
+                launch_context_constructions: 1,
                 launch_context_extensions: 1,
                 ambient_fallbacks: 0,
                 prepared_context_consumers: BTreeMap::from([
-                    ("body".to_string(), 1),
-                    ("effective-frontmatter".to_string(), 1),
-                    ("preflight".to_string(), 1),
+                    ("body".to_string(), 2),
+                    ("effective-frontmatter".to_string(), 2),
+                    ("preflight".to_string(), 2),
                 ]),
             },
             "the stabilized reread stays inside the proxy epoch and only extends it"
@@ -621,7 +622,7 @@ mod tests {
         // target's own frontmatter shell command.
         assert!(state.input_layers.pre_approved_commands.is_none());
 
-        preflight_proxy_target(&mut state, &approval_options, dir.path())
+        preflight_harness_document(&mut state, &approval_options, dir.path())
             .expect("whitelisted proxy-target command must pre-flight cleanly");
 
         let approved = state

@@ -103,17 +103,21 @@ pub struct InvocationWorkSnapshot {
     /// Values retain repeat observations while callers that need the semantic
     /// route contract can compare the deterministic map keys as a set.
     pub prepared_context_consumers: BTreeMap<String, usize>,
+    /// Work keyed by its intrinsically attributable document epoch.
+    ///
+    /// Unlike invocation-global deltas, these records remain exact when
+    /// sibling sequence tasks prepare concurrently.
+    pub document_epochs: BTreeMap<usize, DocumentEpochWork>,
     pub runtime_evidence_captures: BTreeMap<String, usize>,
     pub runtime_evidence_reuses: BTreeMap<String, usize>,
     pub system_prompt_timings: BTreeMap<String, std::time::Duration>,
 }
 
-/// Work attributable to one document preparation epoch.
+/// Work shape for one document preparation epoch.
 ///
-/// Obtain this from two invocation snapshots taken immediately before and
-/// after a canonical document boundary. Consumer counts remain intact so a
-/// route cannot satisfy an exact-set assertion by populating each consumer in
-/// a different epoch.
+/// [`DocumentEpoch::work_snapshot`] is the exact, concurrency-safe source.
+/// Invocation snapshot deltas use the same shape only as aggregate interval
+/// diagnostics and cannot attribute overlapping workers.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DocumentEpochWork {
     pub launch_context_constructions: usize,
@@ -122,11 +126,38 @@ pub struct DocumentEpochWork {
     pub prepared_context_consumers: BTreeMap<String, usize>,
 }
 
+#[derive(Debug, Default)]
+struct DocumentEpochRecorder {
+    launch_context_constructions: AtomicUsize,
+    launch_context_extensions: AtomicUsize,
+    ambient_fallbacks: AtomicUsize,
+    prepared_context_consumers: Mutex<BTreeMap<String, usize>>,
+}
+
+impl DocumentEpochRecorder {
+    fn snapshot(&self) -> DocumentEpochWork {
+        DocumentEpochWork {
+            launch_context_constructions: self
+                .launch_context_constructions
+                .load(Ordering::Relaxed),
+            launch_context_extensions: self.launch_context_extensions.load(Ordering::Relaxed),
+            ambient_fallbacks: self.ambient_fallbacks.load(Ordering::Relaxed),
+            prepared_context_consumers: self
+                .prepared_context_consumers
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
+        }
+    }
+}
+
 impl InvocationWorkSnapshot {
-    /// Return the preparation work performed since `before`.
+    /// Return aggregate preparation work performed since `before`.
     ///
     /// Both snapshots must belong to the same invocation and `before` must
     /// have been captured first. Violating either condition is a caller bug.
+    /// This interval is not an exact epoch boundary when work overlaps; use
+    /// [`DocumentEpoch::work_snapshot`] for attributable assertions.
     pub fn document_epoch_since(&self, before: &Self) -> DocumentEpochWork {
         DocumentEpochWork {
             launch_context_constructions: monotonic_delta(
@@ -188,6 +219,8 @@ struct InvocationWork {
     launch_context_constructions: AtomicUsize,
     launch_context_extensions: AtomicUsize,
     prepared_context_consumers: Mutex<BTreeMap<String, usize>>,
+    next_document_epoch: AtomicUsize,
+    document_epochs: Mutex<BTreeMap<usize, Arc<DocumentEpochRecorder>>>,
     runtime_evidence_captures: Mutex<BTreeMap<String, usize>>,
     runtime_evidence_reuses: Mutex<BTreeMap<String, usize>>,
     system_prompt_timings: Mutex<BTreeMap<String, std::time::Duration>>,
@@ -215,6 +248,13 @@ impl InvocationWork {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .clone(),
+            document_epochs: self
+                .document_epochs
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .iter()
+                .map(|(id, recorder)| (*id, recorder.snapshot()))
+                .collect(),
             runtime_evidence_captures: self
                 .runtime_evidence_captures
                 .lock()
@@ -477,7 +517,95 @@ pub struct InvocationContext {
     inner: Arc<InvocationInner>,
 }
 
+/// Attribution token for one canonical document preparation epoch.
+///
+/// The recorder belongs to the token, not to a before/after interval on the
+/// invocation. Overlapping sequence workers therefore cannot contribute to
+/// one another's exact construction, extension, fallback, or consumer map.
+#[derive(Debug, Clone)]
+pub struct DocumentEpoch {
+    id: usize,
+    invocation: InvocationContext,
+    work: Arc<DocumentEpochRecorder>,
+}
+
+impl DocumentEpoch {
+    /// Stable request-local identity used to correlate diagnostic snapshots.
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
+    /// Capture this epoch's one launch-anchored context construction.
+    pub fn capture_launch_context(
+        &self,
+        requirements: &darkmatter::markdown::compose::ContextRequirements,
+    ) -> darkmatter::markdown::compose::ComposeContext {
+        let context = self.invocation.capture_launch_context(requirements);
+        self.work
+            .launch_context_constructions
+            .fetch_add(1, Ordering::Relaxed);
+        context
+    }
+
+    /// Extend this epoch's retained context from the invocation's launch evidence.
+    pub fn extend_launch_context(
+        &self,
+        context: &mut darkmatter::markdown::compose::ComposeContext,
+        requirements: &darkmatter::markdown::compose::ContextRequirements,
+    ) {
+        if self
+            .invocation
+            .extend_launch_context(context, requirements)
+        {
+            self.work
+                .launch_context_extensions
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Record a production seam that consumed this epoch's populated context.
+    pub fn record_prepared_context_consumer(&self, consumer: PreparedContextConsumer) {
+        self.invocation.record_prepared_context_consumer(consumer);
+        record_group(
+            &self.work.prepared_context_consumers,
+            consumer.as_str().to_string(),
+        );
+    }
+
+    /// Record a compatibility capture taken instead of this epoch's context.
+    pub fn record_ambient_fallback(&self) {
+        self.invocation.record_ambient_fallback();
+        self.work.ambient_fallbacks.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Return exact work owned by this epoch.
+    pub fn work_snapshot(&self) -> DocumentEpochWork {
+        self.work.snapshot()
+    }
+}
+
 impl InvocationContext {
+    /// Begin one independently attributable canonical document epoch.
+    pub fn begin_document_epoch(&self) -> DocumentEpoch {
+        let id = self
+            .inner
+            .work
+            .next_document_epoch
+            .fetch_add(1, Ordering::Relaxed);
+        let work = Arc::new(DocumentEpochRecorder::default());
+        self.inner
+            .work
+            .document_epochs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(id, Arc::clone(&work));
+        DocumentEpoch {
+            id,
+            invocation: self.clone(),
+            work,
+        }
+    }
+
     /// Capture a composition invocation from the ambient launch directory.
     pub fn capture() -> Result<Self, InvocationContextError> {
         let cwd = std::env::current_dir().map_err(InvocationContextError::CurrentDirectory)?;
@@ -776,10 +904,10 @@ impl InvocationContext {
         &self,
         context: &mut darkmatter::markdown::compose::ComposeContext,
         requirements: &darkmatter::markdown::compose::ContextRequirements,
-    ) {
+    ) -> bool {
         let missing = context.missing_requirements(requirements);
         if missing.iter().next().is_none() {
-            return;
+            return false;
         }
         let evidence = self.project_evidence(
             &self.inner.launch_repository,
@@ -792,6 +920,9 @@ impl InvocationContext {
                 .work
                 .launch_context_extensions
                 .fetch_add(1, Ordering::Relaxed);
+            true
+        } else {
+            false
         }
     }
 

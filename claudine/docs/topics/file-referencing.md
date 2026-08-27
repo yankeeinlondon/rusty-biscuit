@@ -1,5 +1,12 @@
 # File Referencing
 
+> **Design-Intent Document.** This topic describes the *target* design for
+> file referencing. It intentionally may diverge from the current
+> implementation while the design is being finalized. Do **not** "drift-correct"
+> this document against the code — where the two disagree, treat the
+> disagreement as an open design decision and surface it to Ken rather than
+> editing this file. Changes to this document require Ken's explicit approval.
+
 In **Claudine** (_and the underlying **Darkmatter** library_) we rely on a consistent way of allowing for file referencing that is:
 
 1. Deterministic
@@ -65,21 +72,11 @@ Windows also has a drive-relative form that must not be confused with a drive-ab
       - repo's package-area root (if CWD is inside a monorepo and inside a package area of that monorepo)
       - repo's root directory
     - The key difference from the magic path is that it does **not** reach into the user's home directory as a fallback. This is by design of course but it can also help to avoid a common pitfall when accidentally running into a security violation or an unwanted human-in-the-loop intervention because the current agent is happy to operate on repo file but not on user scoped files.
-    - The `^` sigil is automatically used when a file reference falls into the pattern we refer to as an "ambiguous relative path".
-- `!` **Immediate Context**
-    - there may be times in a file where you want to create a file reference that you may want to reference a file **not** relative from the _current working directory_ but instead from relative to the **current file**.
-    - if the file `foo/bar/doit.md` has the following file reference:
-
-        ```md
-        ::file !baz.md
-        ```
-
-        the location it is referring to is `foo/bar/baz.md` regardless of what directory the user was when they executed composition.
-    - this is relative to the current file, not to the repository, package area, or current working directory
 - `vault:` **Obsidian Vault(s)**
+    - this is made reference to here as this will soon be added but currently this is "FUTURE SCOPE"
 
 
-> **Note:** the `@`, `&`, `^`, and `!` sigils are _defensively_ coded so that a following `/` character has no impact
+> **Note:** the `@`, `&`, and `^` sigils are _defensively_ coded so that a following `/` character has no impact
 > on the file paths which are evaluated:
 >
 > - `@path/to/file` is the same as `@/path/to/file`
@@ -92,7 +89,7 @@ All file references can and should be thought of as a **base** path joined to a 
 
 - what an OS would call an **absolute path** is just something like `/path/to/file.md`
     - the **base** is just `/` and the rest represents a relative path from that base
-- what an OS would see something like `./path/to/file.md` _or_ `../path/to/file.md` as a **relative path**
+- an OS would see something like `./path/to/file.md` _or_ `../path/to/file.md` as a **relative path**
     - a relative path doesn't have an explicit **base** path _yet_ but as we've already established:
         - `.` will be converted to the current working directory at run time
         - `..` will be converted to the parent of the working directory at run time
@@ -150,7 +147,7 @@ While not as directly involved in how to resolve CWD it must be mentioned that:
 
 ### Addressing the Great Divide
 
-In all cases a prompt author or the operator _could_ opt to use the `&`, `^`, or `!` sigil's to explicitly express their intentions. Sadly there is a great divide between _could_ and _should_ / _would_. A well designed solution can't offer good defaults for this important variable.
+In all cases a prompt author or the operator _could_ opt to use the `&` or `^` sigil's to explicitly express their intentions. Sadly there is a great divide between _could_ and _should_ / _would_. A well designed solution can't offer good defaults for this important variable.
 
 It is an obvious solution to each actor:
 

@@ -145,6 +145,7 @@ pub(crate) fn run_loop_with_overrides<F>(
     shell_runner: &dyn claudine::composition::ShellRunner,
     emitter: &dyn claudine::composition::LifecycleEmitter,
     file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    document_epoch: Option<&claudine::invocation_context::DocumentEpoch>,
     mut executor: F,
 ) -> std::result::Result<
     Option<claudine::composition::LoopExecutionResult>,
@@ -223,6 +224,7 @@ where
         shell_runner,
         emitter,
         file_resolution_context,
+        document_epoch,
         wrapped_executor,
     )?;
 

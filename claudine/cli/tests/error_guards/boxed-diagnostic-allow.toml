@@ -14,7 +14,7 @@
 [[allow]]
 site = "result_error"
 file = "cli/src/commands/wrap/harness_orch/prompt.rs"
-symbol = "preflight_proxy_target"
+symbol = "preflight_harness_document"
 boxed = "CompositionError"
 tag = "retained"
 reason = """

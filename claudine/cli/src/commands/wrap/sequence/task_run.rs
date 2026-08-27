@@ -87,9 +87,9 @@ pub(super) fn run_step_task(
         }
     };
 
-    let (task_source_context, task_context) =
+    let (task_source_context, task_context, document_epoch) =
         prepare_task_context(&run.prep_context.invocation, task, env_overrides);
-    run.prep_context.invocation.record_prepared_context_consumer(
+    document_epoch.record_prepared_context_consumer(
         claudine::invocation_context::PreparedContextConsumer::Lifecycle,
     );
 
@@ -203,7 +203,11 @@ fn prepare_task_context(
     invocation: &InvocationContext,
     task: &PreflightTask,
     env_overrides: &BTreeMap<String, String>,
-) -> (SourceContext, darkmatter::markdown::compose::ComposeContext) {
+) -> (
+    SourceContext,
+    darkmatter::markdown::compose::ComposeContext,
+    claudine::invocation_context::DocumentEpoch,
+) {
     let task_source_context = invocation
         .derive_source(&task.origin_path)
         .expect("resolved task document always has a parent directory");
@@ -212,12 +216,13 @@ fn prepare_task_context(
     // One launch-anchored snapshot per task epoch: launch repository and
     // package facts come from the invocation owner, while the task document's
     // own `SourceContext` (returned alongside) still drives file resolution.
-    let mut task_context = invocation.capture_launch_context(&requirements);
+    let document_epoch = invocation.begin_document_epoch();
+    let mut task_context = document_epoch.capture_launch_context(&requirements);
     for (key, value) in env_overrides {
         task_context.env_mut().insert(key.clone(), value.clone());
     }
 
-    (task_source_context, task_context)
+    (task_source_context, task_context, document_epoch)
 }
 
 /// Every authored surface of `task` that can carry a `{{ … }}` expression,
@@ -608,7 +613,7 @@ mod tests {
         let invocation = InvocationContext::capture_at(&fixture.launch_dir);
         let env = BTreeMap::from([("TASK_MARKER".to_string(), "owned".to_string())]);
 
-        let (source, context) = prepare_task_context(&invocation, &task, &env);
+        let (source, context, _) = prepare_task_context(&invocation, &task, &env);
 
         // File resolution stays source-relative: the task document's own
         // repository drives references and provenance.
@@ -652,7 +657,7 @@ mod tests {
             ("MODEL".to_string(), "gpt-5".to_string()),
         ]);
 
-        let (source, context) = prepare_task_context(&invocation, &task, &env);
+        let (source, context, _) = prepare_task_context(&invocation, &task, &env);
 
         assert_eq!(source.repository_root(), Some(fixture.task_repo.as_path()));
         assert_eq!(
@@ -675,7 +680,8 @@ mod tests {
         let fixture = Fixture::new();
         let invocation = InvocationContext::capture_at(&fixture.launch_dir);
 
-        let (_, context) = prepare_task_context(&invocation, &fixture.task(), &BTreeMap::new());
+        let (_, context, _) =
+            prepare_task_context(&invocation, &fixture.task(), &BTreeMap::new());
 
         assert_eq!(context.get("repo_root"), None);
     }
@@ -745,7 +751,7 @@ mod tests {
             let mut task = fixture.task();
             plant(&mut task);
 
-            let (_, context) = prepare_task_context(&invocation, &task, &BTreeMap::new());
+            let (_, context, _) = prepare_task_context(&invocation, &task, &BTreeMap::new());
 
             assert_eq!(
                 context.get("repo_root").and_then(Value::as_str),
@@ -787,7 +793,7 @@ mod tests {
             let mut task = fixture.task();
             task.action = action;
 
-            let (_, context) = prepare_task_context(&invocation, &task, &BTreeMap::new());
+            let (_, context, _) = prepare_task_context(&invocation, &task, &BTreeMap::new());
 
             assert_eq!(
                 context.get("repo_root").and_then(Value::as_str),

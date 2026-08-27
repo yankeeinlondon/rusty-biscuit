@@ -114,13 +114,14 @@ fn canonical_preparation_observes_populated_snapshot_consumers() {
     let invocation = crate::invocation_context::InvocationContext::capture_at(dir.path());
     let requirements =
         darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
-    let before = invocation.work_snapshot();
-    let context = invocation.capture_launch_context(&requirements);
+    let document_epoch = invocation.begin_document_epoch();
+    let context = document_epoch.capture_launch_context(&requirements);
 
-    prepare_direct(
+    let prepared = prepare_direct(
         &source,
         PrepareOptions {
             invocation_context: Some(invocation.clone()),
+            document_epoch: Some(document_epoch),
             prepared_context: Some(context),
             ..PrepareOptions::default()
         },
@@ -128,7 +129,7 @@ fn canonical_preparation_observes_populated_snapshot_consumers() {
     .unwrap();
 
     assert_eq!(
-        invocation.work_snapshot().document_epoch_since(&before),
+        prepared.document_epoch.unwrap().work_snapshot(),
         crate::invocation_context::DocumentEpochWork {
             launch_context_constructions: 1,
             launch_context_extensions: 0,

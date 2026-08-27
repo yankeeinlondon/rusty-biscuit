@@ -10,6 +10,7 @@ implemented_by: codex/default
 description: "A **fix** review of `2026-08-12-ctx-launch-anchor/spec.md`"
 fix: 2026-08-12-ctx-launch-anchor/review-2.md
 previous: 2026-08-12-ctx-launch-anchor/review-1.md
+next: 2026-08-12-ctx-launch-anchor/review-3.md
 ---
 
 # Review 2: Ctx Launch Anchor

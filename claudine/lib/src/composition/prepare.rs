@@ -64,6 +64,11 @@ pub struct PrepareOptions {
     /// Compatibility callers may omit it without changing composition
     /// behavior.
     pub invocation_context: Option<crate::invocation_context::InvocationContext>,
+    /// Intrinsically attributable work recorder for this document epoch.
+    ///
+    /// Canonical command paths supply this with `prepared_context`; library
+    /// compatibility callers may omit both.
+    pub document_epoch: Option<crate::invocation_context::DocumentEpoch>,
     /// Frontmatter `--set` overrides (JSON object).
     pub set_overrides: Option<serde_json::Value>,
     /// Commands pre-approved during pre-flight shell discovery.
@@ -168,7 +173,11 @@ fn derive_compose_context(
         return prepared;
     }
     if let Some(invocation) = options.invocation_context.as_ref() {
-        invocation.record_ambient_fallback();
+        if let Some(epoch) = options.document_epoch.as_ref() {
+            epoch.record_ambient_fallback();
+        } else {
+            invocation.record_ambient_fallback();
+        }
     }
     let anchor = options
         .file_ref_fallback_dir
@@ -184,10 +193,12 @@ fn observe_prepared_context(
     options: &PrepareOptions,
     consumer: crate::invocation_context::PreparedContextConsumer,
 ) {
-    if options.prepared_context.is_some()
-        && let Some(invocation) = options.invocation_context.as_ref()
-    {
-        invocation.record_prepared_context_consumer(consumer);
+    if options.prepared_context.is_some() {
+        if let Some(epoch) = options.document_epoch.as_ref() {
+            epoch.record_prepared_context_consumer(consumer);
+        } else if let Some(invocation) = options.invocation_context.as_ref() {
+            invocation.record_prepared_context_consumer(consumer);
+        }
     }
 }
 
@@ -482,6 +493,7 @@ pub(super) fn prepare_direct_with_prompt(
         warnings: report.warnings.clone(),
         input_layers,
         compose_context: ctx,
+        document_epoch: options.document_epoch,
     })
 }
 
@@ -641,6 +653,7 @@ pub fn prepare_inline(
         warnings: report.warnings.clone(),
         input_layers,
         compose_context: ctx,
+        document_epoch: options.document_epoch,
     })
 }
 

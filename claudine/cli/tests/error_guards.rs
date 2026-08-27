@@ -500,7 +500,7 @@ fn the_boxed_scan_finds_the_sites_known_to_exist() {
             .iter()
             .any(|b| b.site == source_scan::BoxSite::ResultError),
         "scan found no `Result<_, Box<RegisteredDiagnostic>>`, but D-13's \
-         `preflight_proxy_target` is one; found {boxed:?}"
+         `preflight_harness_document` is one; found {boxed:?}"
     );
 }
 

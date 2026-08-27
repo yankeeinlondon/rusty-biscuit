@@ -547,11 +547,12 @@ pub(crate) fn prepare_and_run_active_document(
     // `current.ctx.*` stays live event-time state and is captured separately
     // downstream. The active `SourceContext` (not this snapshot) remains
     // authoritative for file resolution, transclusion, and `$schema`.
+    let document_epoch = invocation.begin_document_epoch();
     let prepared_context = {
         let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
             &source.markdown,
         );
-        let mut ctx = invocation.capture_launch_context(&requirements);
+        let mut ctx = document_epoch.capture_launch_context(&requirements);
         for (key, value) in &env_overrides {
             ctx.env_mut().insert(key.clone(), value.clone());
         }
@@ -569,7 +570,7 @@ pub(crate) fn prepare_and_run_active_document(
     // root, so an ambient capture would answer `ctx.area` differently
     // depending on when it ran.
     let compose_options = {
-        invocation.record_prepared_context_consumer(
+        document_epoch.record_prepared_context_consumer(
             claudine::invocation_context::PreparedContextConsumer::Preflight,
         );
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(
@@ -660,6 +661,7 @@ pub(crate) fn prepare_and_run_active_document(
         adopted_handoff,
         file_resolution_context,
         prepared_context,
+        document_epoch,
     )?;
 
     Ok((outcome, commit_repo_root))
@@ -790,6 +792,7 @@ fn build_and_run_loop(
     header_emitted: bool,
     prep_context: &CompositionPrepContext,
     prepared_context: &darkmatter::markdown::compose::ComposeContext,
+    document_epoch: &claudine::invocation_context::DocumentEpoch,
     verbose: u8,
     shared: &SharedComposeArgs,
     proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
@@ -799,7 +802,7 @@ fn build_and_run_loop(
     let Some(config) = config else {
         return Ok(None);
     };
-    prep_context.invocation.record_prepared_context_consumer(
+    document_epoch.record_prepared_context_consumer(
         claudine::invocation_context::PreparedContextConsumer::LoopCondition,
     );
 
@@ -876,6 +879,7 @@ fn build_and_run_loop(
         &shell_runner,
         &emitter,
         loop_prepare_options.file_resolution_context.as_ref(),
+        loop_prepare_options.document_epoch.as_ref(),
         |ctx, guard| {
             let prepared = {
                 let _span = match kind {
@@ -1132,6 +1136,7 @@ fn execute_loop_or_single(
     // target's identity overrides. Every preparation below composes against
     // this exact snapshot.
     prepared_context: darkmatter::markdown::compose::ComposeContext,
+    document_epoch: claudine::invocation_context::DocumentEpoch,
 ) -> Result<ActiveDocumentOutcome> {
     let loop_options = build_loop_options(shared);
 
@@ -1154,6 +1159,7 @@ fn execute_loop_or_single(
 
     let loop_prepare_options = PrepareOptions {
         invocation_context: Some(prep_context.invocation.clone()),
+        document_epoch: Some(document_epoch.clone()),
         set_overrides: set_overrides.clone(),
         pre_approved_commands: Some(preflight.approved_commands.clone()),
         env_overrides: env_overrides.clone(),
@@ -1195,6 +1201,7 @@ fn execute_loop_or_single(
             header_emitted,
             &prep_context,
             &prepared_context,
+            &document_epoch,
             verbose,
             shared,
             &proxy_overlay,
@@ -1256,6 +1263,7 @@ fn execute_loop_or_single(
             &source,
             PrepareOptions {
                 invocation_context: Some(prep_context.invocation.clone()),
+                document_epoch: Some(document_epoch),
                 set_overrides,
                 pre_approved_commands: Some(preflight.approved_commands),
                 env_overrides: env_overrides.clone(),
