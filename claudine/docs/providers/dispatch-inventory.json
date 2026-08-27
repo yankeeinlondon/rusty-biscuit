@@ -4207,7 +4207,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/session_report/tests.rs",
-      "line": 43,
+      "line": 44,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4217,7 +4217,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/session_report/tests.rs",
-      "line": 62,
+      "line": 63,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4227,7 +4227,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/session_report/tests.rs",
-      "line": 84,
+      "line": 86,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4237,7 +4237,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/session_report/tests.rs",
-      "line": 136,
+      "line": 139,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4247,7 +4247,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/session_report/tests.rs",
-      "line": 208,
+      "line": 212,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4257,7 +4257,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/session_report/tests.rs",
-      "line": 248,
+      "line": 253,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4267,7 +4267,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/session_report/tests.rs",
-      "line": 251,
+      "line": 256,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
