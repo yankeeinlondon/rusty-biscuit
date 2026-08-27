@@ -87,6 +87,13 @@ do not belong here.
   `git commit -- <paths> <<EOF` can open the configured editor and block.
   checked temp file for long bodies. A bare `git commit -- <paths> <<EOF` can
   open the configured editor and block.
+- When staging a message in a temp file via the `Write` tool, avoid `$$` (PID
+  placeholder) in the filename. The `Write` tool stores shell metacharacters
+  literally rather than expanding them, so `/tmp/commit_msg_$$.txt` lands with
+  the literal `$$` in the path while the subsequent `git commit -F
+  /tmp/commit_msg_$$.txt` shell-expands to a different PID and the file is not
+  where the commit looks. Use a static name (`/tmp/commit_msg.txt`) or echo
+  the agent's actual `$$` value before writing.
 - `--` between `-F -` and the pathspec list is mandatory, even with `--only`.
   Without it, git parses the first path as a subcommand (e.g. `git commit
   --only -F - claudine/lib/...` tries to invoke `git-claudine`) and may also
