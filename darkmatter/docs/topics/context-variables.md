@@ -69,7 +69,7 @@ failure message prints the up-to-date block to paste back.
 > derive from the directory that _executed_ the `md compose` command (most discovery
 > leverages the `sniff` library), **not** the directory where the composed document
 > lives. File *reference* resolution is separate: implicit references resolve
-> **repository-root first, then the source document's directory** — see
+> **the source document's directory first, then the repository root** — see
 > [magic paths](./magic-paths.md).
 
 <!-- BEGIN GENERATED: ctx catalog (source: md schema about / context_catalog_markdown) -->

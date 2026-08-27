@@ -2131,7 +2131,8 @@ fn format_markdown_link(text: &str, destination: &str) -> String {
 /// [`ExpressionError`] when the path has no faithful portable spelling (a
 /// Windows UNC, device, or unreducible verbatim path). `link()` has no
 /// compose-report warning channel, and falling back to the raw argument is not
-/// an option: it may be a magic (`@`, `!`) or source-relative reference that
+/// an option: it may be a magic (`@`), repository (`&`/`^`), or source-relative
+/// reference that
 /// names a different file once the composed document moves.
 fn portable_destination(path: &Path) -> Result<String, ExpressionError> {
     biscuit_file::try_portable_string(path).ok_or_else(|| {

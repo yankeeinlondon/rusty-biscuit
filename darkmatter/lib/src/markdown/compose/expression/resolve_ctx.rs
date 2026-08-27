@@ -28,8 +28,8 @@ pub struct ResolutionContext {
     /// Magic (`@`) search paths, mirroring the compose link-resolution config.
     pub magic_paths: Vec<(PathBuf, PathPosition)>,
     /// Repository (worktree) root for the resolution pass, discovered once from
-    /// the resolution base directory. Implicit references anchor repository-root
-    /// first, then the document directory (D2). Threaded through
+    /// the resolution base directory. Implicit references anchor at the document
+    /// directory first, then the repository root. Threaded through
     /// [`document_resolution_context`] so per-reference resolution reuses this
     /// root rather than rediscovering it. `None` when the base is not inside a
     /// worktree, in which case resolution falls back to a per-call discovery
@@ -37,7 +37,7 @@ pub struct ResolutionContext {
     ///
     /// [`document_resolution_context`]: crate::markdown::compose::util::document_resolution_context
     pub repository_root: Option<PathBuf>,
-    /// Package-area root captured for package (`!`) references.
+    /// Package-area root captured for `@` and `^` references.
     pub package_area: Option<PathBuf>,
     /// The captured launch-area directory, retained for diagnostics only.
     ///
@@ -91,7 +91,7 @@ impl ResolutionContext {
         self
     }
 
-    /// Sets the package-area root for package (`!`) references.
+    /// Sets the package-area root for `@` and `^` references.
     #[must_use]
     pub fn with_package_area(mut self, root: impl Into<PathBuf>) -> Self {
         self.package_area = Some(root.into());

@@ -73,8 +73,9 @@ fn resolve_url_target(
 /// shared document-backed context ([`document_resolution_context`]): explicit
 /// `./`/`../` from the source document's directory only, implicit bare paths
 /// source directory first then the repository root, `~`/`~/…` against the user's
-/// home, and `@` (magic), `!` (package), `vault:`, `%` (recursive), absolute,
-/// and `{{ENV}}` references by their existing `FileReference` semantics. There
+/// home, `@` (magic), `&` (repository-root), `^` (repository-scoped), `vault:`,
+/// `%` (recursive), absolute, and `{{ENV}}` references by their existing
+/// `FileReference` semantics. There
 /// is no ambient-CWD read (D2).
 ///
 /// Source provenance controls context derivation. Ordinary sources retain

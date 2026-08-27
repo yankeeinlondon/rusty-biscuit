@@ -131,7 +131,7 @@ The [read-side functions](../topics/darkmatter-expressions.md#read-side-function
 `validate_schema`, `absolute`, `relative`) resolve in frontmatter interpolation
 just as they do in body interpolation — both passes carry a resolution context
 anchored on the source document's directory and its repository root (implicit
-paths resolve repository-root first, then the document directory). The motivating pattern relies on this:
+paths resolve from the document directory first, then the repository root). The motivating pattern relies on this:
 
 ```yaml
 possible_spec: "{{dir}}/spec.md"
