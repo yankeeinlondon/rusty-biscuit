@@ -23,6 +23,8 @@ clap = ["dep:clap", "renderable/clap"]
 serde = []
 # Enables SVG rasterization via resvg for terminal image rendering.
 image = ["dep:resvg", "dep:biscuit-visualized", "biscuit-visualized/image"]
+terminal-tests = ["dep:biscuit-test-harness", "dep:test-toolkit"]
+browser-tests = ["dep:biscuit-browser-harness"]
 
 [dependencies]
 base64 = "0.22"
@@ -63,6 +65,12 @@ clap = { version = "4", features = ["derive"], optional = true }
 # Temporary files (for mermaid rendering)
 tempfile = "3"
 chrono = { version = "0.4.43", features = ["serde"] }
+# Higher-tier harnesses are optional normal dependencies because Cargo does not
+# support optional dev-dependencies. Required-feature targets and cfg gates keep
+# them out of ordinary L1 and production builds.
+biscuit-browser-harness = { path = "../../biscuit-browser-harness", optional = true }
+biscuit-test-harness = { path = "../../biscuit-test-harness", optional = true }
+test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
@@ -82,17 +90,11 @@ proptest = "1.5"
 serial_test = "3"
 tempfile = "3"
 tracing-test = "0.2"
-# Browser-tier (real headless Chrome) computed-style tests for Prose table
-# cells (`tests/prose_cells_parity.rs`). They skip cleanly when no
-# Chrome/Chromium is found.
-biscuit-browser-harness = { path = "../../biscuit-browser-harness" }
-# Real-terminal (Level-2) harness for the OSC 10 cache proof
-# (`tests/level2_terminal_osc_wezterm.rs`). Shared harness — biscuit-terminal
-# adds no PTY abstraction of its own.
-biscuit-test-harness = { path = "../../biscuit-test-harness" }
-# `require_level!` gating for the Level-2 tier.
-test-toolkit = { path = "../../tools/test-toolkit" }
 tokio = { version = "1.48", features = ["macros", "rt-multi-thread"] }
+
+[[test]]
+name = "level2_terminal_osc_wezterm"
+required-features = ["terminal-tests"]
 
 [[bench]]
 name = "rendering"
@@ -109,4 +111,5 @@ harness = false
 [package.metadata.ci.tests]
 tiers = ["L1", "L2", "browser"]
 l2-backends = ["wezterm"]
-features = ["image"]
+features = ["image", "terminal-tests", "browser-tests"]
+local-features = ["image"]

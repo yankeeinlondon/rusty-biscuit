@@ -79,7 +79,7 @@ test *args="":
 # Level-2 real-terminal tests. Skips cleanly if the harness is unavailable
 # unless `BISCUIT_TEST_LEVEL_REQUIRED=2` is set in the environment.
 test-l2 *args="":
-    @just _test_l2_all "{{ LIBRARY }} {{ CLI }}" {{ args }}
+    @just _test_l2_all "{{ LIBRARY }} --features terminal-tests; {{ CLI }} --features terminal-tests" {{ args }}
 
 # not applicable: biscuit-terminal has no OS-keyboard-injection (Level-3) tests
 test-l3 *args="":
@@ -88,7 +88,7 @@ test-l3 *args="":
 
 # Headless-browser tests (computed-style parity for BrowserRenderable output).
 test-browser:
-    @just _test_browser {{ LIBRARY }}
+    @just _test_browser {{ LIBRARY }} --features browser-tests
 
 # not applicable: biscuit-terminal has no real-resource tier
 test-real:

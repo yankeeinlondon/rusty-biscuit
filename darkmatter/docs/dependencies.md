@@ -14,6 +14,21 @@
 These dependencies are required so every network egress path goes through the
 same scheme validation and deny-all-by-default host policy.
 
+## Tier-only Test Dependencies
+
+- `browser-tests` enables `biscuit-browser-harness`, `chromiumoxide`, and
+  `futures-util` for the headless-browser and OS-input browser targets.
+- `terminal-tests` enables `image` for the real-terminal image fixtures. The
+  shared terminal harness remains available to L1 because `render_invariants`
+  uses its pure layout-invariant helpers without opening a terminal.
+- The CLI's separate `terminal-tests` feature enables its terminal harness.
+
+The corresponding integration targets declare `required-features`, so an L1
+filter does not first compile binaries and native/browser dependencies that it
+will never execute. CI enables the tier features for its reusable all-tier
+build; `just test-l2`, `just test-l3`, and `just test-browser` enable only the
+features their tier requires.
+
 ## Compose Text Replacement
 
 - `aho-corasick` powers the `replace:` map matcher in

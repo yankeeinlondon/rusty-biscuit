@@ -40,9 +40,17 @@ edges exist to serve.
     creation and so leaves no permissive window
   - `Win32_Foundation` — `LocalFree` for the RAII-owned descriptor
 
-  The daemon's `rendezvous-daemon` dev-dependency in `claudine-cli` is no longer
-  in a `cfg(unix)` target section: the daemon-spawning tests compile and run on
-  Windows through `spawn_local_server`.
+  The CLI's optional `daemon-tests` feature enables `rendezvous-daemon` on every
+  target, so daemon-spawning tests compile and run on Windows through
+  `spawn_local_server`. Ordinary local L1 tests leave the feature disabled to
+  avoid compiling bundled DuckDB; CI and `just test-daemon` retain the
+  cross-platform live-daemon contract.
+
+- `claudine-cli`'s `terminal-tests` feature exposes its L2/L3 integration
+  targets, and `claudine-gen` uses the same feature for its terminal report
+  target. Required-feature declarations keep those binaries out of local L1;
+  CI and the tier recipes enable them. The contract and CLI `real-tests`
+  features similarly keep live-provider targets opt-in.
 
 ## Lifecycle Requeue
 

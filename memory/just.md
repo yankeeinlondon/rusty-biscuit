@@ -43,6 +43,18 @@ flag", pass a single string and split it in bash: whitespace for the plain case,
 (`_test_all "sniff --features remote; sniff-cli"`). Deciding the separator from
 whether the string contains a `;` keeps the common call sites unadorned.
 
+## Multi-package L1 should split by environment, not by area
+
+One local Nextest invocation lets its scheduler see test binaries from every
+crate in a package area; a shell loop around one invocation per crate makes
+otherwise independent work serial. CI still needs the loop when each package
+must stage a separate JUnit document. `_test_all` therefore selects
+`_test_local_all` normally and `_run_all _test` only for the CI
+profile/environment. Package-specific features remain safe in the shared local
+invocation by translating them to package-qualified `-F package/feature`
+arguments; `--all-features` must first be expanded from Cargo metadata because
+the unqualified flag would widen every selected package.
+
 ## An absolute `import` lets a throwaway justfile reuse the shared recipes
 
 `import '/abs/path/to/just/devops.just'` works from anywhere, and the imported

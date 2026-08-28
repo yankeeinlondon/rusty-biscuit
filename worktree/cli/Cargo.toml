@@ -8,6 +8,9 @@ license = "AGPL-3.0-only"
 name = "wt"
 path = "src/main.rs"
 
+[features]
+terminal-tests = ["dep:test-toolkit"]
+
 [dependencies]
 biscuit-terminal = { path = "../../biscuit-terminal/lib", features = ["image"] }
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
@@ -17,6 +20,7 @@ dirs = "6"
 inquire = "0.9"
 sniff = { path = "../../sniff/lib" }
 worktree = { path = "../lib" }
+test-toolkit = { path = "../../tools/test-toolkit", optional = true }
 
 [dev-dependencies]
 worktree = { path = "../lib", features = ["count-git"] }
@@ -25,9 +29,18 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 predicates = "3"
 serial_test = "3"
 tempfile = "3"
-test-toolkit = { path = "../../tools/test-toolkit" }
+
+[[test]]
+name = "level2_dirty_tree"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_list_verbose"
+required-features = ["terminal-tests"]
 
 # CI policy: worktree-cli owns the area's L2 (real-terminal) tier tests.
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]
 l2-backends = ["tmux", "kitty"]
+features = ["terminal-tests"]
+local-features = []

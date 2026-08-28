@@ -15,16 +15,20 @@
 # `just sanity` uses `!(...slow...)` to exclude every non-default tier in one shot.
 
 [test-groups]
-# Claudine's L1 library tests repeatedly perform repository discovery, so keep
-# their concurrency bounded on contended hosts.
+# Claudine's L1 library tests repeatedly perform repository discovery, so CI
+# keeps their concurrency bounded on contended runners. Local runs use the
+# normal scheduler so developer machines are not capped at four tests.
 claudine-l1 = { max-threads = 4 }
 # Claudine's CLI integration tests spawn nested debug binaries. Even four-way
 # concurrency can starve those children on two-core CI runners long enough to
-# trip both their internal deadlines and nextest's termination ceiling.
-claudine-cli-l1 = { max-threads = 1 }
+# trip both their internal deadlines and nextest's termination ceiling. This
+# group is applied only by the CI profile; local runs use Nextest's normal
+# parallel scheduler.
+claudine-cli-ci-l1 = { max-threads = 1 }
 # Sniff exercises shared Windows host-network APIs from both direct tests and
 # spawned CLI processes. Windows may fail-fast a changing test process when
-# full network detections overlap, so these tests run one process at a time.
+# full network detections overlap, so CI runs them one process at a time. Local
+# Windows development retains Nextest's normal scheduler.
 sniff-windows-l1 = { max-threads = 1 }
 
 [profile.default]
@@ -70,26 +74,6 @@ archive.include = [
     { path = "debug/examples/discovery_probe", relative-to = "target", on-missing = "ignore" },
     { path = "x86_64-unknown-linux-gnu/debug/examples/discovery_probe", relative-to = "target", on-missing = "ignore" },
 ]
-
-[[profile.default.overrides]]
-filter = 'package(claudine) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)'
-test-group = 'claudine-l1'
-
-[[profile.default.overrides]]
-filter = 'package(claudine-cli) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)'
-test-group = 'claudine-cli-l1'
-
-[[profile.default.overrides]]
-platform = { host = "cfg(windows)" }
-filter = 'package(sniff) + package(sniff-cli)'
-test-group = 'sniff-windows-l1'
-
-# This assertion measures a complete host discovery against a wall-clock
-# ceiling. Reserve the runner while it executes so concurrent filesystem-heavy
-# Sniff tests cannot turn scheduler contention into a false performance failure.
-[[profile.default.overrides]]
-filter = 'test(=test_detect_completes_in_reasonable_time)'
-threads-required = "num-cpus"
 
 # Tests that intentionally wait on a real clock (e.g. rate-limit pause policies)
 # need an even longer leash than the default termination window.
@@ -231,13 +215,16 @@ test-group = 'claudine-l1'
 
 [[profile.ci.overrides]]
 filter = 'package(claudine-cli) & !test(/(^|::)level2_/) & !test(/(^|::)level3_/) & !test(/(^|::)browser_/) & !test(/(^|::)real_/) & !test(/(^|::)slow_/)'
-test-group = 'claudine-cli-l1'
+test-group = 'claudine-cli-ci-l1'
 
 [[profile.ci.overrides]]
 platform = { host = "cfg(windows)" }
 filter = 'package(sniff) + package(sniff-cli)'
 test-group = 'sniff-windows-l1'
 
+# The wall-clock performance assertion needs an otherwise idle CI runner to
+# avoid turning unrelated contention into a gate failure. Local runs favor
+# throughput and leave it under the normal scheduler.
 [[profile.ci.overrides]]
 filter = 'test(=test_detect_completes_in_reasonable_time)'
 threads-required = "num-cpus"

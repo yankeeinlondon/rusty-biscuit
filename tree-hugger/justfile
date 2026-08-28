@@ -40,7 +40,7 @@ test *args="":
 
 # real-terminal (Level-2) tests for the `hug god-files` styled report.
 test-l2 *args="":
-    @just _test_l2 tree-hugger-cli {{args}}
+    @just _test_l2 tree-hugger-cli --features terminal-tests {{args}}
 
 # not applicable: tree-hugger has no OS-keyboard-injection (Level-3) tests
 test-l3:

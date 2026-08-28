@@ -32,4 +32,7 @@ Notable crates used by the `biscuit-icon` library and the `icon` CLI, and why.
 ## Cargo features
 
 - `image` (default **off**) on both `biscuit-icon` and `biscuit-icon-cli` enables image-protocol terminal rendering of glyph-less icons. When disabled, the terminal ladder stops at the text identifier fallback.
+- `terminal-tests` on the CLI enables the L2 test gate. Its integration target
+  declares `required-features`, so local L1 does not compile that target; CI and
+  `just test-l2` enable it alongside `image`.
 - The `iconify` crate is intentionally **not** used; bodies are vendored offline and assembled into `<svg>` locally.

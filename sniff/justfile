@@ -66,11 +66,17 @@ check *args="":
 # cfg-out the whole `sniff::remote` module and silently reduce its Wiremock
 # suites to empty binaries instead of failing.
 #
-# `test-fixtures` on the CLI for the same reason `test-l2` passes it: it gates
-# the `render_*_fixture` helper bins and 2 L1 tests, so a default-feature L1 run
-# reported 788 of 790 as the whole suite.
+# `test-fixtures` is intentionally absent from local L1: it gates only the
+# real-terminal helper binaries and their L2 tests. CI enables it while building
+# the reusable all-tier archive, and `test-l2` enables it explicitly.
 test *args="":
-    @just _test_all "sniff --features remote; sniff-cli --features test-fixtures" {{ args }}
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
+        just _test_all "sniff --features remote; sniff-cli --features test-fixtures" {{ args }}
+    else
+        just _test_local_all "sniff --features remote; sniff-cli" {{ args }}
+    fi
 
 # Real-terminal (Level-2) tests: CI/CD status-cell styling in sniff-cli.
 # `--features test-fixtures` builds the `render_cicd_fixture` helper the test spawns.

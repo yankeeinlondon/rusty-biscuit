@@ -219,6 +219,16 @@
 
 ## Optional Dependencies
 
+### Test tiers
+
+- `terminal-tests` enables the real-terminal harness and tier gate for the
+  library and CLI integration targets.
+- `browser-tests` enables the headless-browser harness used by computed-style
+  tests. Browser-only items are cfg-gated inside the mixed parity target.
+
+Both are disabled for ordinary local L1 and enabled by their explicit tier
+recipes and CI feature policy.
+
 ### CLI Support
 
 - [clap](https://github.com/clap-rs/clap) _v4_ (feature: `clap`)

@@ -242,10 +242,12 @@ cannot be verified from the dependency-derived scope; record that reason before
 running it.
 
 At the repository root, `just test` delegates to `_test_workspace`. It uses
-Cargo metadata as the package source of truth, runs every workspace package,
-continues after ordinary failures, and reports failed packages at the end.
-Ctrl+C aborts the remaining packages and preserves exit code `130`. Optional
-selectors may be exact package names or package-area paths.
+Cargo metadata as the package source of truth and runs every selected package
+in one local Nextest invocation with `--no-fail-fast`. Optional selectors may
+be exact package names or package-area paths. Package-area `_test_all` recipes
+use the same one-scheduler path locally, but retain per-package execution under
+the CI profile/environment for JUnit staging and summaries. CI `features` and
+local `local-features` remain separate metadata contracts.
 
 Run `just check-test-interrupts` to verify that every package-area `test`
 recipe also preserves Ctrl+C as exit `130`.

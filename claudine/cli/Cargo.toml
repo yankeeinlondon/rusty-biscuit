@@ -9,6 +9,13 @@ description = "cross-agent abstraction and meta-agent harness"
 name = "claudine"
 path = "src/main.rs"
 
+[features]
+# Keep the bundled DuckDB build out of the ordinary local test graph. CI and
+# the explicit daemon-test recipe enable this feature on every supported OS.
+daemon-tests = ["dep:rendezvous-daemon"]
+terminal-tests = []
+real-tests = []
+
 [dependencies]
 biscuit-file = { path = "../../biscuit-file/lib" }
 # Non-crypto content hashing authority (xxHash) for the resume session-
@@ -55,6 +62,7 @@ rustls = { version = "0.23", default-features = false, features = ["ring", "std"
 # `commands/wrap/harness_orch/loop_control.rs`).
 rendezvous-client = { path = "../rendezvous/client" }
 rendezvous-core = { path = "../rendezvous/core" }
+rendezvous-daemon = { path = "../rendezvous/daemon", optional = true }
 tonic = { version = "0.14", default-features = false, features = ["codegen"] }
 url = "2"
 
@@ -110,16 +118,144 @@ biscuit-test-harness = { path = "../../biscuit-test-harness" }
 # is available on every target.
 rendezvous-core = { path = "../rendezvous/core", features = ["test-support"] }
 
-# The daemon-spawning fixtures boot through `spawn_local_server`, which binds a
-# Unix socket or a named pipe depending on the target. Bundled DuckDB is part of
-# that test contract on every platform; the Windows-GNU recipe supplies the
-# large-COFF-object flags its unity build requires.
-rendezvous-daemon = { path = "../rendezvous/daemon" }
+[[test]]
+name = "level2_auto_complete_chooser"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_auto_complete_operation_file"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_context_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_dry_run_approval_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_dry_run_metadata_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_dry_run_pty"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_file_resolution_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_inline_compose_mismatch_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_interrupt_feedback_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_invalid_file_reference_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_lifecycle_action_forms"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_lifecycle_control"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_lifecycle_dispatch"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_lifecycle_loop"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_malformed_frontmatter_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_perf_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_prompt_reporting_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_provided_partial_file_pty"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_pty_tests"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_removed_validation_key_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_schema_parse_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_schema_prompt_pty"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_sequence_task_stream_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_stalled_generation_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_typed_error_render_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_wrap_ctrl_c_loop_wedge_tmux"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level2_wrap_ctrl_c_tmux"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level3_auto_complete_chooser"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level3_linux_sequence_ctrl_c"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level3_sequence_ctrl_c"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level3_windows_sequence_ctrl_c"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "level3_wrap_ctrl_c"
+required-features = ["terminal-tests"]
+
+[[test]]
+name = "real_opencode_yolo_subagent"
+required-features = ["real-tests"]
 
 # CI policy: claudine-cli owns the area's L2 (PTY/tmux) tier tests. Its tests
 # need inert AI-provider CLI stubs for provider discovery, and the darkmatter
 # `md` binary built into the workspace target dir (inline_compose_hash).
 [package.metadata.ci.tests]
 tiers = ["L1", "L2"]
+features = ["daemon-tests", "terminal-tests"]
+local-features = []
 l2-backends = ["tmux", "wezterm"]
 runner-tools = ["ai-provider-stubs", "darkmatter-md-fixture", "l2-parallel-self-spawn"]

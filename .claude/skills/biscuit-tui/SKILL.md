@@ -479,6 +479,11 @@ just install    # install `question` binary
 just cli <args>  # run in dev mode
 ```
 
+The CLI's internal `terminal-tests` feature exposes its real-terminal, L3, and
+Windows-console integration targets. Ordinary local L1 omits the terminal
+harness and those standalone targets; `just test-l2`, `just test-l3`, the
+Windows console recipe, and CI enable them explicitly.
+
 ## Dependencies
 
 - `ratatui` 0.30 — core TUI framework
