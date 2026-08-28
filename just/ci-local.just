@@ -15,8 +15,9 @@
 # Scope comes from `scripts/ci/affected_scope.py`, the same script CI uses, fed
 # the files that differ from the base ref (committed, staged, unstaged, and
 # untracked). A change under `just/`, `.github/`, `Cargo.toml`, ... is global
-# there too, so the run covers the whole workspace; `--lint-only` keeps that
-# tractable.
+# there too — unless its diff against the base touches only comments and blank
+# lines — so a recipe change covers the whole workspace; `--lint-only` keeps
+# that tractable.
 #
 # Not replicated: L2/L3/browser tiers, WSL archives, companion suites, and the
 # Windows runner. Use `just test-l2` inside an area, and the `build-win-native`
@@ -81,7 +82,7 @@ ci-local *args="":
             lock_args=(--base-lockfile "${lock_file}")
         fi
         # shellcheck disable=SC2086
-        python3 scripts/ci/affected_scope.py "${lock_args[@]}" ${changed} > "${scope_file}"
+        python3 scripts/ci/affected_scope.py "${lock_args[@]}" --base-ref "${merge_base}" ${changed} > "${scope_file}"
         echo
         echo "Changed vs ${base} (${merge_base:0:9}): $(wc -l <<< "${changed}" | tr -d ' ') file(s)"
     fi
