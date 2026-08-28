@@ -106,3 +106,26 @@ fn an_incomplete_tail_is_released_at_end_of_stream() {
     assert_eq!(stream.push(&"€".as_bytes()[..2]), "");
     assert_eq!(stream.finish(), "\u{FFFD}");
 }
+
+/// A command can finish before ownership is verified: `printf` exits in
+/// microseconds, and on macOS `getpgid` answers `ESRCH` for a process that
+/// already exited (Linux still reports the zombie's group). Ownership must
+/// still be granted — the group id is the child's pid by construction, and
+/// any descendant that outlives the leader stays in that group.
+#[cfg(unix)]
+#[test]
+fn ownership_survives_a_child_that_exited_before_verification() {
+    use super::{ProcessTree, isolate_process_tree};
+
+    let mut builder = std::process::Command::new("sh");
+    builder.arg("-c").arg("true").stdin(std::process::Stdio::null());
+    isolate_process_tree(&mut builder);
+    let mut child = builder.spawn().expect("spawn sh");
+    // Let it exit without reaping it (no `wait`/`try_wait`), so it is a zombie.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+
+    let tree = ProcessTree::own(&child).expect("an exited child is still an owned tree");
+    drop(tree);
+    let status = child.wait().expect("wait");
+    assert!(status.success());
+}
