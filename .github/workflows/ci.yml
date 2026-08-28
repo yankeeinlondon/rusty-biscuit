@@ -88,6 +88,11 @@ jobs:
               if git show "$base:Cargo.lock" >base-Cargo.lock 2>/dev/null; then
                 scope_args+=(--base-lockfile base-Cargo.lock)
               fi
+              # Global inputs (justfile, just/, Cargo.toml, workflows, ...) are
+              # diffed against the base so a comment-only edit does not
+              # schedule the whole workspace. An unobtainable diff keeps the
+              # global trigger — widened, never narrowed.
+              scope_args+=(--base-ref "$base")
               scope_args+=(-- "${changed_files[@]}")
             fi
           fi

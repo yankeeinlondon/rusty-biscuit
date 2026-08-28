@@ -10,6 +10,8 @@ from pathlib import Path
 
 from affected_scope import (
     calculate_scope,
+    diff_changes_more_than_comments,
+    global_trigger,
     lockfile_impacted_names,
     parse_lockfile,
     matrix_record,
@@ -122,6 +124,57 @@ class AffectedScopeTests(unittest.TestCase):
         # a change to it has the same blast radius as `_package-ci.yml`.
         scope = self.scope([".github/workflows/_wsl-ci.yml"])
         self.assertTrue(scope["full_scope"])
+
+    # -- content-aware global triggers (2026-08-28) -------------------------
+    #
+    # A global path is a trigger by *content*, not by name, once a base ref is
+    # supplied: nine comment lines in the root justfile once scheduled all 72
+    # packages. The differ is injected so these never touch Git.
+
+    COMMENT_ONLY_DIFF = (
+        "--- a/justfile\n+++ b/justfile\n@@ -1,2 +1,3 @@\n"
+        "-# old wording\n+# new wording\n+\n+# and a second line\n"
+    )
+    RECIPE_DIFF = (
+        "--- a/justfile\n+++ b/justfile\n@@ -5 +5 @@\n"
+        "-    cargo clippy -p {{ pkg }}\n+    cargo clippy -p {{ pkg }} --all-targets\n"
+    )
+
+    def test_comment_only_diff_is_not_a_content_change(self) -> None:
+        self.assertFalse(diff_changes_more_than_comments(self.COMMENT_ONLY_DIFF))
+        self.assertTrue(diff_changes_more_than_comments(self.RECIPE_DIFF))
+        # A `#` that is not at the start of the line is content (a shell
+        # command with a fragment, a TOML value) — only leading `#` is a comment.
+        self.assertTrue(diff_changes_more_than_comments("+foo # trailing\n"))
+
+    def test_comment_only_global_change_with_base_ref_scopes_like_docs(self) -> None:
+        differ = lambda base, path: self.COMMENT_ONLY_DIFF  # noqa: E731
+        self.assertIsNone(global_trigger(["justfile"], "base", differ))
+        scope = self.scope(["justfile"], base_ref="base", differ=differ)
+        self.assertFalse(scope["full_scope"])
+        self.assertEqual("documentation", scope["change_class"])
+        self.assertEqual([], scope["packages"])
+
+    def test_comment_only_global_change_still_scopes_the_other_files(self) -> None:
+        differ = lambda base, path: self.COMMENT_ONLY_DIFF  # noqa: E731
+        scope = self.scope(["justfile", "alpha/lib/src/lib.rs"], base_ref="base", differ=differ)
+        self.assertFalse(scope["full_scope"])
+        self.assertEqual(["alpha-core", "beta-app"], scope["packages"])
+
+    def test_recipe_change_with_base_ref_is_still_global(self) -> None:
+        differ = lambda base, path: self.RECIPE_DIFF  # noqa: E731
+        self.assertEqual("justfile", global_trigger(["justfile"], "base", differ))
+        scope = self.scope(["justfile"], base_ref="base", differ=differ)
+        self.assertTrue(scope["full_scope"])
+        self.assertIn("justfile", scope["preflight_reason"])
+
+    def test_undecidable_global_diff_keeps_the_trigger(self) -> None:
+        # No base ref, or a differ that cannot produce the diff: widen, never
+        # narrow silently.
+        self.assertEqual("justfile", global_trigger(["justfile"]))
+        differ = lambda base, path: None  # noqa: E731
+        self.assertEqual("justfile", global_trigger(["justfile"], "base", differ))
+        self.assertTrue(self.scope(["justfile"], base_ref="base", differ=differ)["full_scope"])
 
     def test_package_local_change_derives_three_runner_preflight(self) -> None:
         scope = self.scope(["alpha/lib/src/lib.rs"])
