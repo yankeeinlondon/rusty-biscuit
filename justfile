@@ -20,6 +20,7 @@ import "./just/review.just"
 import "./just/notify.just"
 import "./just/ai.just"
 import "./just/devops.just"
+import "./just/ci-local.just"
 import "./just/spec.just"
 
 # Every package area in this monorepo that owns tests.
@@ -119,7 +120,12 @@ changed-areas:
     echo "${matched# }"
 
 # pre-push hook entry point (default areas: claudine darkmatter)
+#
+# Lint first: CI's clippy job (`--all-targets`, no features) is where
+# incomplete feature gating surfaces, and it is far cheaper than the tests.
+# `just ci-local` is the package-precise equivalent for manual use.
 pre-push *areas="claudine darkmatter":
+    @just _orchestrate lint {{ areas }}
     @just test {{ areas }}
 
 # run Level 1 tests for the .githooks/pre-push shell hook itself
@@ -451,6 +457,7 @@ init: _ensure-native-bash
     echo -e "{{ BOLD }}Repository and developer tools{{ RESET }}"
     just _ensure-cargo-sweep
     just _ensure-gitnexus
+    just _ensure-git-hooks
     echo
     (cd sniff && just install)
     sniff runtime
@@ -1242,3 +1249,24 @@ _orchestrate recipe *args="":
 
 audio-reset:
     sudo killall coreaudiod
+
+# install the versioned pre-push hook into this checkout's hook directory
+#
+# A symlink (copy on hosts without symlink rights) rather than
+# `core.hooksPath = .githooks`: switching the hooks path would silently disable
+# any unversioned hooks already living in .git/hooks (e.g. commit-msg).
+_ensure-git-hooks:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    hooks_dir="$(git rev-parse --git-path hooks)"
+    source="$(git rev-parse --show-toplevel)/.githooks/pre-push"
+    target="${hooks_dir}/pre-push"
+    if [[ -e "${target}" ]] && cmp -s "${source}" "${target}"; then
+        exit 0
+    fi
+    mkdir -p "${hooks_dir}"
+    if ! ln -sf "${source}" "${target}" 2>/dev/null; then
+        cp "${source}" "${target}"
+    fi
+    chmod +x "${target}"
+    echo "Git hooks: installed .githooks/pre-push -> ${target} (lint + tests for changed areas; RUSTY_BISCUIT_PRE_PUSH=off|warn|strict)"
