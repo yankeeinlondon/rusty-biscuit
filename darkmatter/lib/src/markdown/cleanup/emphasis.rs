@@ -23,6 +23,9 @@ const UNDERSCORE_EMPHASIS_PLACEHOLDER: char = '\u{E000}';
 const UNDERSCORE_STRONG_PLACEHOLDER: &str = "\u{E000}\u{E000}";
 const ASTERISK_EMPHASIS_PLACEHOLDER: char = '\u{E001}';
 const ASTERISK_STRONG_PLACEHOLDER: &str = "\u{E001}\u{E001}";
+/// Carries an author-written backslash escape (`\.`, `\*`, `\[`, …) through
+/// `cmark` and the unescape passes; see `restore_backslash_placeholders`.
+const BACKSLASH_PLACEHOLDER: char = '\u{E002}';
 
 /// Transforms emphasis/strong events into literal text events to preserve original markers.
 ///
@@ -95,6 +98,10 @@ pub(super) fn preserve_original_emphasis<'a>(
                 };
                 result.push(Event::Text(CowStr::from(placeholder)));
             }
+            Event::Text(text) => match preserve_backslash_escapes(content, range, text) {
+                Some(preserved) => result.push(Event::Text(CowStr::from(preserved))),
+                None => result.push(event.clone()),
+            },
             _ => {
                 // Pass through all other events unchanged
                 result.push(event.clone());
@@ -210,3 +217,39 @@ pub(super) fn unescape_emphasis_chars(output: &mut String) {
     *output = result;
 }
 
+
+/// Re-attaches an author-written escape to a `Text` event, as
+/// [`BACKSLASH_PLACEHOLDER`] + the event text, or returns `None` when the
+/// event was not escaped.
+///
+/// The parser resolves CommonMark escapes before handing back `Event::Text`,
+/// and its source range for the escaped character starts *after* the
+/// backslash (`a\-b` yields `Text("-b")` at `2..4`), so the backslash lives in
+/// the gap before the event. An event is an escape when its text starts with
+/// ASCII punctuation, its range really does start with that character, and the
+/// source immediately before the range ends in an odd run of backslashes (an
+/// even run is escaped backslashes, `a\\-b`). Code blocks never match: their
+/// text keeps its backslashes, so the character before a range is never a
+/// stray `\`.
+fn preserve_backslash_escapes(content: &str, range: &Range<usize>, text: &str) -> Option<String> {
+    let first = text.chars().next()?;
+    if !first.is_ascii_punctuation() {
+        return None;
+    }
+    let before = content.get(..range.start)?;
+    if !content.get(range.clone())?.starts_with(first) {
+        return None;
+    }
+    let run = before.bytes().rev().take_while(|b| *b == b'\\').count();
+    (run % 2 == 1).then(|| format!("{BACKSLASH_PLACEHOLDER}{text}"))
+}
+
+/// Restores author-written backslashes carried through by
+/// `preserve_backslash_escapes`. Must run after `unescape_emphasis_chars` and
+/// `unescape_brackets`, so an author's `\*` (now `␣*`, possibly re-escaped by
+/// `cmark` to `␣\*` and reduced back to `␣*`) ends as `\*` rather than `*`.
+pub(super) fn restore_backslash_placeholders(output: &mut String) {
+    if output.contains(BACKSLASH_PLACEHOLDER) {
+        *output = output.replace(BACKSLASH_PLACEHOLDER, "\\");
+    }
+}
