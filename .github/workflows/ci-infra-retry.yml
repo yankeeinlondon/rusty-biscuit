@@ -1,0 +1,70 @@
+name: ci-infra-retry
+
+# One-shot retry for runs that failed ONLY because a hosted runner died.
+#
+# "The hosted runner lost communication with the server" is GitHub terminating
+# a job whose machine stopped responding — seen three times on 2026-08-27/28,
+# every time on the WSL2 guest-provisioning step under Windows-runner
+# saturation, every time green on a plain rerun. The job uploads no log and no
+# status, so nothing inside the run can retry it: `ci-verdict` is itself part
+# of the run, and the rerun endpoint refuses a run that is still in progress.
+#
+# This workflow runs once `ci` has completed and asks `runner_loss.py` the same
+# question `ci-verdict` asked for attribution: did every failed producer lose
+# its runner? If so — and only on attempt 1 — it reruns the failed jobs, which
+# keeps every passing job's evidence and re-runs `ci-verdict` as attempt 2. A
+# genuine test failure never matches; a second loss is left for a human.
+#
+# `workflow_run` executes this file from the default branch, so a change here
+# takes effect only after it merges.
+
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+
+permissions:
+  actions: write
+  checks: read
+  contents: read
+
+jobs:
+  retry:
+    name: rerun failed jobs after a lost runner
+    if: ${{ github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.run_attempt == 1 }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Decide
+        id: decide
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/runner_loss.py decide \
+            --repo "$GITHUB_REPOSITORY" \
+            --run-id "$RUN_ID" \
+            --attempt "$ATTEMPT" \
+            --out decision.json
+          echo "rerun=$(jq -r '.rerun' decision.json)" >>"$GITHUB_OUTPUT"
+          {
+            echo "## Lost-runner retry for run $RUN_ID (attempt $ATTEMPT)"
+            echo ""
+            echo "**$(jq -r '.reason' decision.json)**"
+            echo ""
+            jq -r '.runner_lost[] | "- `\(.name)` — interrupted during `\(.step // "(no step reported)")`"' decision.json
+          } >>"$GITHUB_STEP_SUMMARY"
+      - name: Rerun the failed jobs once
+        if: ${{ steps.decide.outputs.rerun == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: |
+          set -euo pipefail
+          gh api -X POST "repos/$GITHUB_REPOSITORY/actions/runs/$RUN_ID/rerun-failed-jobs"
+          echo "Requested rerun of failed jobs for run $RUN_ID." >>"$GITHUB_STEP_SUMMARY"
