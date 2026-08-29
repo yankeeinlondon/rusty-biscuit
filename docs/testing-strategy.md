@@ -202,6 +202,21 @@ the workflows, `.config/nextest.toml`, ...) select the whole workspace — but b
 whose diff touches only `#` comments and blank lines is scoped like
 documentation. An unobtainable diff keeps the trigger (widened, never narrowed).
 
+**Lost runners.** A job whose hosted runner dies mid-step ("The hosted runner
+lost communication with the server") is terminated by GitHub after ~45 minutes
+with no log and no producer status — on this workspace it has only ever hit the
+WSL2 guest-provisioning step, under Windows-runner saturation. Two safeguards:
+`ci-verdict` runs `scripts/ci/runner_loss.py attribute`, which synthesizes the
+missing `status.json` naming the interrupted step so the grid reads
+`MISSING — … lost communication …` rather than looking like a package
+regression; and `ci-infra-retry.yml` (a `workflow_run` follower, because the
+rerun endpoint refuses an in-progress run) reruns the failed jobs once, only on
+attempt 1 and only when *every* failed producer lost its runner. A real test
+failure is never retried; a second loss is left for a human. Both provisioning
+steps in `_wsl-ci.yml` also carry a 10-minute step timeout for the other hang
+shape (a wedged `wsl.exe` on a live runner), which falls through to the
+existing second attempt.
+
 A bootstrap `preflight` job runs first (3 OSes for global CI/tooling changes, a
 scoped OS set for package-local changes) and gates the package fan-out via
 `needs: [scope, preflight]`. For each package, `check` (compile), `lint`
