@@ -158,7 +158,10 @@ class SynthesizeStatusTests(unittest.TestCase):
         records = classify([LOST_WSL_JOB], {LOST_WSL_JOB["id"]: LOST_ANNOTATION})["runner_lost"]
         with tempfile.TemporaryDirectory() as tmp:
             [path] = synthesize_status(records, Path(tmp))
-            self.assertTrue(path.endswith("status-playa-cli-L1-wsl2-ubuntu/status.json"))
+            # Compare path components, not a string: Windows joins with `\`.
+            self.assertEqual(
+                ("status-playa-cli-L1-wsl2-ubuntu", "status.json"), Path(path).parts[-2:]
+            )
             status = json.loads(Path(path).read_text())
             self.assertEqual("failure", status["result"])
             self.assertEqual("wsl2-ubuntu", status["environment"])
