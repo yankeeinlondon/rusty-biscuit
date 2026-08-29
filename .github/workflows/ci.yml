@@ -203,6 +203,8 @@ jobs:
         run: just check-canonical
       - name: Test affected-scope calculation
         run: python3 scripts/ci/test_affected_scope.py
+      - name: Test runner-loss attribution and retry decision
+        run: python3 scripts/ci/test_runner_loss.py
 
   package-ci:
     name: ${{ matrix.package }}
@@ -318,6 +320,15 @@ jobs:
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # `checks: read` is for the runner-loss attribution step below: a job whose
+    # hosted runner died carries that fact only as a check-run annotation.
+    # A job-level block zeroes every scope it does not name: `actions: read` is
+    # what the artifact overlay (`run-id:`) and the jobs listing already relied
+    # on from the default token, and must be restated here.
+    permissions:
+      contents: read
+      actions: read
+      checks: read
     steps:
       - uses: actions/checkout@v4
       - name: Set up the pinned Rust toolchain
@@ -375,6 +386,27 @@ jobs:
           merge-multiple: false
           github-token: ${{ github.token }}
           run-id: ${{ github.run_id }}
+      # A producer whose hosted runner died ("lost communication with the
+      # server") never reached its status step, so it uploaded nothing and the
+      # rollup could only say "produced no report at all" — indistinguishable
+      # from a broken package. Write the status it would have written, naming
+      # the interrupted step, so the grid says why. A status a live producer
+      # DID upload is never overwritten. `ci-infra-retry.yml` makes the retry
+      # decision from the same classification once the run has completed.
+      - name: Attribute producers whose runner was lost
+        if: ${{ steps.verdict-scope.outputs.has_scope == 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p ci-artifacts
+          python3 scripts/ci/runner_loss.py attribute \
+            --repo "$GITHUB_REPOSITORY" \
+            --run-id "$GITHUB_RUN_ID" \
+            --attempt "$GITHUB_RUN_ATTEMPT" \
+            --artifacts ci-artifacts \
+            --out "$RUNNER_TEMP/runner-loss.json"
       # `--no-default-features` deselects biscuit-terminal, sniff, and
       # cargo_metadata, which the other two bins in `scripts/` need and this one
       # does not. Measured: ~8s versus 40s+. Do not drop the flag.

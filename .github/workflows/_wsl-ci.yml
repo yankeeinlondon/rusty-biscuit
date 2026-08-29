@@ -323,9 +323,18 @@ jobs:
       # four shards started within two seconds of each other and all provisioned
       # cleanly, while the two 403s hit isolated legs 28 minutes apart. Treat the
       # wait as ordinary backoff against a flaky endpoint, not as de-racing.
+      # `timeout-minutes` on both attempts: provisioning takes ~1 minute when it
+      # works (63 s measured across today's passing legs), and a `wsl.exe` that
+      # wedges with the runner still alive would otherwise sit until the job
+      # timeout. Ten minutes covers a slow 300 MB distribution download and
+      # turns that hang into a retry. It cannot reach the other failure shape —
+      # the hosted runner itself dying ("lost communication with the server",
+      # three times on 2026-08-27/28) — which `ci-infra-retry.yml` handles by
+      # rerunning the failed jobs once from outside the run.
       - name: Provision the WSL2 guest
         id: provision
         continue-on-error: true
+        timeout-minutes: 10
         uses: Vampire/setup-wsl@v7
         with:
           distribution: ${{ inputs.distribution }}
@@ -341,6 +350,7 @@ jobs:
       - name: Provision the WSL2 guest (second attempt)
         id: provision_retry
         if: ${{ steps.provision.outcome == 'failure' }}
+        timeout-minutes: 10
         uses: Vampire/setup-wsl@v7
         with:
           distribution: ${{ inputs.distribution }}
