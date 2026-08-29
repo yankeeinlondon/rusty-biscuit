@@ -3,6 +3,109 @@
 use super::*;
 
 #[test]
+fn loop_iterations_share_one_exact_document_epoch() {
+    let source = make_source_with_body(
+        &[
+            (
+                "loop",
+                json!({
+                    "while": "counter < 1",
+                    "actions": ["increment(counter)"]
+                }),
+            ),
+            ("counter", json!(0)),
+            ("prepared", json!("{{ ctx.os }}")),
+            ("initialize", json!({"stderr": "{{ ctx.os }}"})),
+        ],
+        "body={{ ctx.os }}",
+    );
+    let invocation = crate::invocation_context::InvocationContext::capture_at(
+        source.resolved_path.parent().unwrap(),
+    );
+    let requirements =
+        darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
+    let document_epoch = invocation.begin_document_epoch();
+    let prepared_context = document_epoch.capture_launch_context(&requirements);
+    let prepare_options = PrepareOptions {
+        invocation_context: Some(invocation.clone()),
+        document_epoch: Some(document_epoch.clone()),
+        prepared_context: Some(prepared_context.clone()),
+        ..PrepareOptions::default()
+    };
+    crate::composition::preflight_document_shell(
+        &source,
+        &prepare_options,
+        &crate::harness::ShellApprovalOptions::default(),
+    )
+    .unwrap();
+
+    let config = resolve_loop_config(&source).unwrap().unwrap();
+    let seed = crate::composition::build_loop_seed_with_lifecycle(
+        &source,
+        &config,
+        prepare_options.clone(),
+        CompositionMode::ChainedDocument,
+    )
+    .unwrap();
+    let settings = crate::events::GlobalSettings::default();
+    let messaging = crate::messaging::RuntimeMessagingSettings {
+        user: None,
+        repo: None,
+    };
+    let term = biscuit_terminal::terminal::Terminal::default();
+    let lifecycle_ctx = crate::composition::LifecycleRuntimeContext {
+        settings: &settings,
+        messaging: &messaging,
+        term: &term,
+        source_path: &source.resolved_path,
+        repo_root: source.resolved_path.parent(),
+        launch_area: source.resolved_path.parent(),
+        context: Some(&prepared_context),
+    };
+    let effect_engine = darkmatter::effects::EffectEngine::builder()
+        .mutation_root(source.resolved_path.parent().unwrap())
+        .auto_rehash(false)
+        .build();
+
+    let result = execute_loop_with_lifecycle(
+        &source.resolved_path,
+        &config,
+        seed.seed,
+        LoopExecutionOptions::default(),
+        &seed.lifecycle,
+        &lifecycle_ctx,
+        &effect_engine,
+        &crate::composition::lifecycle_executor::SystemShellRunner,
+        &crate::composition::DefaultLifecycleEmitter,
+        None,
+        Some(&document_epoch),
+        |_ctx, _guard| {
+            let prepared = crate::composition::prepare_direct(&source, prepare_options.clone())?;
+            Ok(LoopIterationOutput::success(prepared.prompt))
+        },
+    )
+    .unwrap();
+
+    assert_eq!(result.iteration_count, 2);
+    assert_eq!(
+        document_epoch.work_snapshot(),
+        crate::invocation_context::DocumentEpochWork {
+            launch_context_constructions: 1,
+            launch_context_extensions: 0,
+            ambient_fallbacks: 0,
+            prepared_context_consumers: std::collections::BTreeMap::from([
+                ("body".to_string(), 3),
+                ("effective-frontmatter".to_string(), 3),
+                ("lifecycle".to_string(), 1),
+                ("loop-condition".to_string(), 1),
+                ("preflight".to_string(), 1),
+            ]),
+        },
+        "the loop seed and every iteration must reuse one epoch snapshot"
+    );
+}
+
+#[test]
 fn runs_until_condition_stops_and_commits_actions() {
     let config = counter_loop(3);
     let result = execute_loop_with_config(
@@ -476,5 +579,3 @@ fn until_file_exists_resolves_against_prompt_parent() {
 }
 
 // ── Rate-limit policy tests ──────────────────────────────────────────
-
-

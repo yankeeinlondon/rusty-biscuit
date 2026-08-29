@@ -455,8 +455,11 @@ pub(crate) fn prepare_and_run_active_document(
     // Build per-document provider-selection state from the invocation owner
     // and definitive source bundle without another repository observation.
     let prep_ctx_t = std::time::Instant::now();
-    let prep_context =
-        CompositionPrepContext::from_invocation(invocation, source_context, &shared.excluded())?;
+    let prep_context = CompositionPrepContext::from_invocation(
+        invocation.clone(),
+        source_context,
+        &shared.excluded(),
+    )?;
     record_prep_substage(&mut prep_substages, perf_enabled, "prep context", prep_ctx_t);
     // This document's own repository root resolves its `@repo/…` proxy
     // targets; captured before `execute_loop_or_single` consumes the context.
@@ -527,53 +530,68 @@ pub(crate) fn prepare_and_run_active_document(
         kind.on_header_emitted(&source, shared, current_file, inline_state.take())?;
     }
 
+    // ── The document-epoch snapshot ──────────────────────────────────────
+    //
+    // One target-adjusted early-binding `ctx.*`/`env.*` snapshot per document
+    // preparation epoch: captured once, after provider/model resolution and
+    // before shell preflight, anchored on the invocation's immutable launch
+    // context (the area the caller launched from) and populated from that
+    // invocation's retained launch repository/topology evidence. Every stage
+    // of this epoch — narrow/full shell preflight, body and effective
+    // frontmatter composition, schema evaluation, loop seed/condition work,
+    // and lifecycle execution — receives this exact snapshot, so moving the
+    // prompt file cannot change launch-facing `ctx.*` values and no stage can
+    // observe a second, separately constructed capture. The resolved target's
+    // identity overrides are applied exactly once, here.
+    //
+    // `current.ctx.*` stays live event-time state and is captured separately
+    // downstream. The active `SourceContext` (not this snapshot) remains
+    // authoritative for file resolution, transclusion, and `$schema`.
+    let document_epoch = invocation.begin_document_epoch();
+    let prepared_context = {
+        let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
+            &source.markdown,
+        );
+        let mut ctx = document_epoch.capture_launch_context(&requirements);
+        for (key, value) in &env_overrides {
+            ctx.env_mut().insert(key.clone(), value.clone());
+        }
+        ctx
+    };
+
     // Preflight must see the same resolved environment as the main prepare
     // pass, including frontmatter values derived from `env.AGENT`.
     // ── Pre-flight shell approval ────────────────────────────────────────
     //
-    // The snapshot carries the resolved `AGENT` (and any other composition env
-    // overrides) into the same Darkmatter compose pipeline the preflight pass
-    // walks. Without it, frontmatter values that derive from env (e.g.
-    // `runtime_agent: '{{ env.AGENT }}'`) fail Darkmatter's built-in schema
-    // validation during preflight, before reaching `prepare_direct_with_schema`.
-    //
-    // Anchored on the launch area, never the process CWD: the wrapper mutates
-    // the parent CWD to the repo root, so an ambient capture would answer
-    // `ctx.area` differently depending on when it ran — and would disagree with
-    // the launch-area-anchored snapshot the body compose uses, so the audit
-    // could discover different commands than the compose expands.
+    // Composes against the epoch snapshot above, so the commands this audit
+    // discovers are the commands the main prepare expands: same snapshot, same
+    // `AGENT`, same target identity. The snapshot is launch-anchored, never
+    // process-CWD-anchored — the wrapper mutates the parent CWD to the repo
+    // root, so an ambient capture would answer `ctx.area` differently
+    // depending on when it ran.
     let compose_options = {
-        let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
-            &source.markdown,
+        document_epoch.record_prepared_context_consumer(
+            claudine::invocation_context::PreparedContextConsumer::Preflight,
         );
-        let evidence = prep_context
-            .invocation
-            .runtime_evidence(&prep_context.source_context, &requirements);
-        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-            prep_context.source_context.base_dir(),
-            &requirements,
-            &evidence,
-        );
-        for (key, value) in &env_overrides {
-            ctx.env_mut().insert(key.clone(), value.clone());
-        }
-        let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(ctx)
-            .with_source_file(&source.resolved_path)
-            .with_file_resolution_context(file_resolution_context.clone())
-            // Lifecycle subtrees remain deferred because their file references
-            // may target artifacts created before the event fires. Their shell
-            // commands are audited separately by `collect_lifecycle_shell_commands`.
-            .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied())
-            // Retain the captured launch directory as diagnostic metadata;
-            // document-authored references use the request-scoped resolver.
-            .with_file_ref_fallback_dir(prep_context.launch_workspace.launch_cwd.clone())
-            // Discovery, not judgment: this pass exists to find `::shell`
-            // directives. The verdict belongs to canonical preparation — and for
-            // a document with an `initialize`, to the reread taken after it — so
-            // reporting one here would put the schema ahead of `initialize`
-            // again (R4) and would render Darkmatter's raw error instead of the
-            // typed one the direct route renders (AC28).
-            .with_deferred_schema_verdict(true);
+        let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(
+            prepared_context.clone(),
+        )
+        .with_source_file(&source.resolved_path)
+        .with_file_resolution_context(file_resolution_context.clone())
+        // Lifecycle subtrees remain deferred because their file references
+        // may target artifacts created before the event fires. Their shell
+        // commands are audited separately by `collect_lifecycle_shell_commands`.
+        .with_exclude_keys(LIFECYCLE_EVENT_KEYS.iter().copied())
+        // Retain the captured launch directory as diagnostic metadata;
+        // document-authored references use the request-scoped resolver.
+        .with_file_ref_fallback_dir(prep_context.launch_workspace.launch_cwd.clone())
+        // Discovery, not judgment: this pass exists to find `::shell`
+        // directives. The verdict belongs to canonical preparation — and for
+        // a document with an `initialize`, to the reread taken after it — so
+        // reporting one here would put the schema ahead of `initialize`
+        // again (R4) and would render Darkmatter's raw error instead of the
+        // typed one the direct route renders (AC28).
+        .with_deferred_schema_verdict(true);
         if let Some(ref overrides) = set_overrides {
             opts = opts.with_set_overrides(overrides.clone());
         }
@@ -642,6 +660,8 @@ pub(crate) fn prepare_and_run_active_document(
         current_overlay.clone(),
         adopted_handoff,
         file_resolution_context,
+        prepared_context,
+        document_epoch,
     )?;
 
     Ok((outcome, commit_repo_root))
@@ -772,6 +792,7 @@ fn build_and_run_loop(
     header_emitted: bool,
     prep_context: &CompositionPrepContext,
     prepared_context: &darkmatter::markdown::compose::ComposeContext,
+    document_epoch: &claudine::invocation_context::DocumentEpoch,
     verbose: u8,
     shared: &SharedComposeArgs,
     proxy_overlay: &indexmap::IndexMap<String, serde_json::Value>,
@@ -781,6 +802,9 @@ fn build_and_run_loop(
     let Some(config) = config else {
         return Ok(None);
     };
+    document_epoch.record_prepared_context_consumer(
+        claudine::invocation_context::PreparedContextConsumer::LoopCondition,
+    );
 
     // Build the seed AND parse lifecycle from the document's full composed
     // frontmatter. The seed lifts only iteration-control variables, so parsing
@@ -855,6 +879,7 @@ fn build_and_run_loop(
         &shell_runner,
         &emitter,
         loop_prepare_options.file_resolution_context.as_ref(),
+        loop_prepare_options.document_epoch.as_ref(),
         |ctx, guard| {
             let prepared = {
                 let _span = match kind {
@@ -1106,6 +1131,12 @@ fn execute_loop_or_single(
     // instead, so this is consumed only by the single-execution branch below.
     adopted_handoff: Option<Box<ProxyHandoff>>,
     file_resolution_context: biscuit_file::FileResolutionContext,
+    // The document-epoch snapshot: the one target-adjusted launch capture the
+    // coordinator built after provider/model resolution, already carrying this
+    // target's identity overrides. Every preparation below composes against
+    // this exact snapshot.
+    prepared_context: darkmatter::markdown::compose::ComposeContext,
+    document_epoch: claudine::invocation_context::DocumentEpoch,
 ) -> Result<ActiveDocumentOutcome> {
     let loop_options = build_loop_options(shared);
 
@@ -1117,38 +1148,18 @@ fn execute_loop_or_single(
 
     let file_for_loop = file.clone();
 
-    // Capture the early-binding context ONCE, against the launch area (the
-    // package area the caller launched from), and reuse the same snapshot for
-    // body compose and lifecycle events. This is the single source of truth for
-    // `ctx.*`/`env.*`: the body and the lifecycle can no longer diverge, and
-    // there is no per-event re-scan. `capture_for_document` is demand-driven
-    // over both frontmatter and body, so the lifecycle `{{ctx.*}}` strings in
-    // frontmatter pull in the groups they need. `current.*` stays event-time and
+    // The early-binding snapshot is the coordinator's epoch capture, received
+    // as a parameter: preflight, body compose, effective frontmatter, loop
+    // iterations, and lifecycle events all reuse this one exact instance, so
+    // `ctx.*`/`env.*` cannot diverge between stages and there is no per-event
+    // re-scan. The harness's post-`initialize` stabilized reread extends this
+    // same snapshot (never re-anchoring) when the rewritten document demands
+    // context groups it was not captured with. `current.*` stays event-time and
     // is captured separately.
-    //
-    // Constructed exactly as the pre-flight snapshot in `prepare_composition`
-    // is, so the commands the audit discovered are the commands this compose
-    // expands.
-    let prepared_context = {
-        let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
-            &source.markdown,
-        );
-        let evidence = prep_context
-            .invocation
-            .runtime_evidence(&prep_context.source_context, &requirements);
-        let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-            prep_context.source_context.base_dir(),
-            &requirements,
-            &evidence,
-        );
-        for (key, value) in &env_overrides {
-            ctx.env_mut().insert(key.clone(), value.clone());
-        }
-        ctx
-    };
 
     let loop_prepare_options = PrepareOptions {
         invocation_context: Some(prep_context.invocation.clone()),
+        document_epoch: Some(document_epoch.clone()),
         set_overrides: set_overrides.clone(),
         pre_approved_commands: Some(preflight.approved_commands.clone()),
         env_overrides: env_overrides.clone(),
@@ -1190,6 +1201,7 @@ fn execute_loop_or_single(
             header_emitted,
             &prep_context,
             &prepared_context,
+            &document_epoch,
             verbose,
             shared,
             &proxy_overlay,
@@ -1251,6 +1263,7 @@ fn execute_loop_or_single(
             &source,
             PrepareOptions {
                 invocation_context: Some(prep_context.invocation.clone()),
+                document_epoch: Some(document_epoch),
                 set_overrides,
                 pre_approved_commands: Some(preflight.approved_commands),
                 env_overrides: env_overrides.clone(),

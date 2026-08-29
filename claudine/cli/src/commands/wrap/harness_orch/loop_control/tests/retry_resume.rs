@@ -2,6 +2,248 @@
 
 use super::*;
 
+#[derive(Default)]
+struct CountingApprovalHandler {
+    prompts: Mutex<Vec<String>>,
+}
+
+impl darkmatter::markdown::compose::shell_expansion::ShellApprovalHandler
+    for CountingApprovalHandler
+{
+    fn approve(
+        &self,
+        request: darkmatter::markdown::compose::shell_expansion::ShellApprovalRequest,
+    ) -> Result<
+        darkmatter::markdown::compose::shell_expansion::ShellApprovalDecision,
+        darkmatter::markdown::compose::shell_expansion::ShellExpansionError,
+    > {
+        self.prompts.lock().unwrap().push(request.normalized_exact);
+        Ok(darkmatter::markdown::compose::shell_expansion::ShellApprovalDecision::AllowOnce)
+    }
+}
+
+fn run_production_attempt_preflight(
+    state: &mut HarnessPromptState,
+    harness_context: &mut CachedHarnessLoopContext,
+    guard: &mut claudine::composition::LifecycleRunGuard<'_>,
+    effect_engine: &EffectEngine,
+    term: &Terminal,
+    child_cwd: &Path,
+    attempt: u32,
+) {
+    let mut initial_materialized = None;
+    let mut prompt = AttemptPromptPreparation {
+        prompt_state: state,
+        harness_context,
+        initial_materialized: &mut initial_materialized,
+        child_cwd,
+        repo_root: Some(child_cwd),
+        effective_non_interactive: true,
+        show_checks: false,
+        detail_requested: false,
+        silent: true,
+        stream_verbosity: claudine::stream::stderr::Verbosity::Silent,
+    };
+    let mut lifecycle = AttemptLifecycleExecution {
+        guard,
+        effect_engine,
+        term,
+        loop_start: loop_start_now(),
+    };
+    preflight_fresh_document_phase(&mut prompt, &mut lifecycle, attempt, false)
+        .expect("fresh retry/resume document preflight succeeds");
+}
+
+#[test]
+fn canonical_retry_and_resume_reentry_each_produce_exact_epoch_work() {
+    let fx = fixture(serde_json::json!({}));
+    std::fs::write(
+        &fx.source_path,
+        "---\nprepared: '{{ ctx.os }}'\nprobe: \"$(echo {{ ctx.os }})\"\n\
+         start:\n  stderr: '{{ ctx.os }}'\n---\nbody={{ ctx.os }} probe={{ probe }}\n",
+    )
+    .unwrap();
+    let invocation =
+        claudine::invocation_context::InvocationContext::capture_at(fx._dir.path());
+    let mut state = prompt_state(&fx.source_path);
+    state.source_context = Some(invocation.derive_source(&fx.source_path).unwrap());
+    state.invocation_context = Some(invocation.clone());
+    let emitter = RecordingEmitter::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &fx.settings,
+        messaging: &fx.messaging,
+        term: &fx.term,
+        source_path: &fx.source_path,
+        repo_root: Some(fx._dir.path()),
+        launch_area: None,
+        context: None,
+    };
+    let mut guard = dispatch_guard(&fx.config, &ctx, &emitter);
+    guard.mark_provider_launched();
+    let mut active = claudine::composition::ActiveDocumentState::initial();
+    let approval_handler = std::sync::Arc::new(CountingApprovalHandler::default());
+    let shell_options = claudine::harness::ShellApprovalOptions {
+        policy_root: Some(fx._dir.path().to_path_buf()),
+        approval_handler: Some(approval_handler.clone()),
+        ..Default::default()
+    };
+    preflight_harness_document(&mut state, &shell_options, fx._dir.path())
+        .expect("the initial document approves its shell-bearing context expression");
+    let mut harness_context = CachedHarnessLoopContext::with_shell_options(
+        &fx.source_path,
+        Some(fx._dir.path()),
+        shell_options,
+    );
+    harness_context.freeze_shell_approvals();
+    let effect_engine = engine(fx._dir.path());
+    let loop_start = loop_start_now();
+
+    let retry = outcome_with(StackControl::Retry {
+        max_attempts: 2,
+        backoff: RetryBackoff::Fixed,
+        delay: "0s".to_string(),
+    });
+    assert!(matches!(
+        dispatch_terminal_control(
+            &retry,
+            1,
+            active.iteration_mut(),
+            Some("sess-1"),
+            resume_capable_profile(),
+            Provider::Claude,
+            &mut state,
+            &fx.materialized,
+            &mut guard,
+            &ledger(&fx.source_path),
+            &fx.term,
+            false,
+        ),
+        TerminalControlAction::Continue
+    ));
+    assert_eq!(state.entry, claudine::composition::DocumentEntryReason::Retry);
+    run_production_attempt_preflight(
+        &mut state,
+        &mut harness_context,
+        &mut guard,
+        &effect_engine,
+        &fx.term,
+        fx._dir.path(),
+        active.iteration().attempt().number(),
+    );
+    let retried = materialize_harness_prompt(
+        &mut state,
+        Some(fx._dir.path()),
+        fx._dir.path(),
+        None,
+        claudine::composition::SchemaStage::Validate,
+    )
+    .unwrap();
+    assert!(retried.prompt.contains("body="));
+    guard.set_config(retried.lifecycle.clone().unwrap());
+    let start = run_start_lifecycle_event(
+        &state,
+        &mut guard,
+        &retried,
+        &fx.source_path,
+        Some(fx._dir.path()),
+        &fx.term,
+        &effect_engine,
+        None,
+        loop_start,
+    );
+    assert!(start.evaluation_error.is_none());
+    assert_eq!(
+        retried.document_epoch.as_ref().unwrap().work_snapshot(),
+        claudine::invocation_context::DocumentEpochWork {
+            launch_context_constructions: 1,
+            launch_context_extensions: 0,
+            ambient_fallbacks: 0,
+            prepared_context_consumers: std::collections::BTreeMap::from([
+                ("body".to_string(), 1),
+                ("effective-frontmatter".to_string(), 1),
+                ("lifecycle".to_string(), 1),
+                ("preflight".to_string(), 1),
+            ]),
+        },
+        "the retry transition must lead to one fresh canonical epoch"
+    );
+
+    guard.mark_provider_launched();
+    let resume = outcome_with(StackControl::Resume {
+        message: "continue".to_string(),
+        max_attempts: 1,
+    });
+    assert!(matches!(
+        dispatch_terminal_control(
+            &resume,
+            2,
+            active.iteration_mut(),
+            Some("sess-2"),
+            resume_capable_profile(),
+            Provider::Claude,
+            &mut state,
+            &retried,
+            &mut guard,
+            &ledger(&fx.source_path),
+            &fx.term,
+            false,
+        ),
+        TerminalControlAction::Continue
+    ));
+    assert_eq!(state.entry, claudine::composition::DocumentEntryReason::Resume);
+    run_production_attempt_preflight(
+        &mut state,
+        &mut harness_context,
+        &mut guard,
+        &effect_engine,
+        &fx.term,
+        fx._dir.path(),
+        active.iteration().attempt().number(),
+    );
+    let resumed = materialize_harness_prompt(
+        &mut state,
+        Some(fx._dir.path()),
+        fx._dir.path(),
+        active.iteration().attempt().resume_followup(),
+        claudine::composition::SchemaStage::Validate,
+    )
+    .unwrap();
+    assert_eq!(resumed.prompt, "continue");
+    guard.set_config(resumed.lifecycle.clone().unwrap());
+    let start = run_start_lifecycle_event(
+        &state,
+        &mut guard,
+        &resumed,
+        &fx.source_path,
+        Some(fx._dir.path()),
+        &fx.term,
+        &effect_engine,
+        None,
+        loop_start,
+    );
+    assert!(start.evaluation_error.is_none());
+    assert_eq!(
+        resumed.document_epoch.as_ref().unwrap().work_snapshot(),
+        claudine::invocation_context::DocumentEpochWork {
+            launch_context_constructions: 1,
+            launch_context_extensions: 0,
+            ambient_fallbacks: 0,
+            prepared_context_consumers: std::collections::BTreeMap::from([
+                ("body".to_string(), 1),
+                ("effective-frontmatter".to_string(), 1),
+                ("lifecycle".to_string(), 1),
+                ("preflight".to_string(), 1),
+            ]),
+        },
+        "the resume transition must lead to one fresh canonical epoch"
+    );
+    assert_eq!(
+        approval_handler.prompts.lock().unwrap().len(),
+        1,
+        "retry and resume keep the approval window frozen and reuse the initial approval"
+    );
+}
+
 #[test]
 fn dispatch_retry_from_failure_continues_and_resets_guard() {
     let fx = fixture(serde_json::json!({}));
@@ -355,4 +597,3 @@ fn a_refused_resume_routes_through_failure_then_finalize_with_err() {
         "the incompatibility stays the active error rather than being replaced"
     );
 }
-

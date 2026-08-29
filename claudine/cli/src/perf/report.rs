@@ -352,11 +352,16 @@ impl CommandPerfCollector {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct InvocationWorkCounts {
     git_root_discoveries: usize,
     topology_probes: usize,
     topology_reuses: usize,
+    launch_context_constructions: usize,
+    launch_context_extensions: usize,
+    ambient_fallbacks: usize,
+    prepared_context_consumers: Vec<(String, usize)>,
+    document_epochs: Vec<(usize, claudine::invocation_context::DocumentEpochWork)>,
 }
 
 impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationWorkCounts {
@@ -365,6 +370,19 @@ impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationW
             git_root_discoveries: work.git_root_discoveries,
             topology_probes: work.topology_probes,
             topology_reuses: work.topology_reuses,
+            launch_context_constructions: work.launch_context_constructions,
+            launch_context_extensions: work.launch_context_extensions,
+            ambient_fallbacks: work.ambient_fallbacks,
+            prepared_context_consumers: work
+                .prepared_context_consumers
+                .iter()
+                .map(|(name, count)| (name.clone(), *count))
+                .collect(),
+            document_epochs: work
+                .document_epochs
+                .iter()
+                .map(|(id, epoch)| (*id, epoch.clone()))
+                .collect(),
         }
     }
 }
@@ -372,8 +390,46 @@ impl From<&claudine::invocation_context::InvocationWorkSnapshot> for InvocationW
 impl InvocationWorkCounts {
     fn note(self) -> String {
         format!(
-            "source context work: Git discoveries {}, topology probes {}, topology reuses {}",
-            self.git_root_discoveries, self.topology_probes, self.topology_reuses,
+            "source context work: Git discoveries {}, topology probes {}, topology reuses {}; \
+             launch captures {} (extensions {}), ambient fallbacks {}, prepared consumers [{}]; \
+             document epochs [{}]",
+            self.git_root_discoveries,
+            self.topology_probes,
+            self.topology_reuses,
+            self.launch_context_constructions,
+            self.launch_context_extensions,
+            self.ambient_fallbacks,
+            self.prepared_context_consumers
+                .into_iter()
+                .map(|(name, count)| {
+                    if count == 1 {
+                        name
+                    } else {
+                        format!("{name} ({count})")
+                    }
+                })
+                .collect::<Vec<_>>()
+                .join(", "),
+            self.document_epochs
+                .into_iter()
+                .map(|(id, epoch)| format!(
+                    "{id}: captures {} (extensions {}), fallbacks {}, consumers [{}]",
+                    epoch.launch_context_constructions,
+                    epoch.launch_context_extensions,
+                    epoch.ambient_fallbacks,
+                    epoch
+                        .prepared_context_consumers
+                        .into_iter()
+                        .map(|(name, count)| if count == 1 {
+                            name
+                        } else {
+                            format!("{name} ({count})")
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                ))
+                .collect::<Vec<_>>()
+                .join("; "),
         )
     }
 }

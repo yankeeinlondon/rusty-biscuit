@@ -1,6 +1,6 @@
 use biscuit_file::serde_yaml_ng;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
+use darkmatter::markdown::compose::{ComposeContext, ComposeOptions, ComposeSource};
 use darkmatter::markdown::schemas::{SimplifiedSchema, parse_yaml_schema};
 use tracing::{info_span, warn};
 
@@ -126,6 +126,10 @@ fn compose_prompt_markdown(
     shell_cwd: Option<&std::path::Path>,
 ) -> Result<Markdown, crate::error::ClaudineError> {
     let md: Markdown = raw_text.into();
+    let md = match source_path(source) {
+        Some(path) => md.with_source(ComposeSource::File(path.to_path_buf())),
+        None => md,
+    };
 
     // Canonical session preparation supplies one context covering the union of
     // the primary and appendix requirements. The ambient branch remains for
@@ -150,6 +154,12 @@ fn compose_prompt_markdown(
     };
     if let Some(invocation) = shared_ctx.and_then(|shared| shared.invocation.as_ref()) {
         invocation.record_compose_operation();
+        invocation.record_prepared_context_consumer(
+            crate::invocation_context::PreparedContextConsumer::Body,
+        );
+        invocation.record_prepared_context_consumer(
+            crate::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
+        );
     }
     if let Some(source_context) = source_context {
         options = options.with_file_resolution_context(
@@ -208,40 +218,13 @@ fn build_shared_compose_context_with_invocation(
         }
     }
 
-    let source_context = primary
-        .and_then(|input| input.source_context.clone())
-        .or_else(|| {
-            appendix_candidates.and_then(|candidates| {
-                candidates
-                    .iter()
-                    .find_map(|input| input.source_context.clone())
-            })
-        });
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(&combined);
-    let mut runtime = match source_context.as_ref() {
-        Some(source_context) => {
-            let evidence = invocation.runtime_evidence(source_context, &requirements);
-            ComposeContext::capture_with_evidence(
-                source_context.base_dir(),
-                &requirements,
-                &evidence,
-            )
-        }
-        // Built-in appendix only: neither the primary prompt nor any
-        // appendix candidate has a file source to derive from. This stays
-        // on the request-owned evidence path (D4/D6): no fabricated
-        // `source_path` is invented to feed `derive_source`, and no ambient
-        // `std::env::vars()`/CWD read is substituted either — the evidence
-        // bundle carries only the invocation's captured environment, so any
-        // Git/repo/OS/etc. group a future built-in appendix might reference
-        // resolves to null rather than a live ambient read.
-        None => {
-            let evidence = darkmatter::markdown::compose::ContextCaptureEvidence::new(
-                invocation.environment().clone(),
-            );
-            ComposeContext::capture_with_evidence(invocation.launch_cwd(), &requirements, &evidence)
-        }
-    };
+    // One launch-anchored snapshot for the whole composed system-prompt bundle:
+    // prepared plain `ctx.*` projects the caller's launch context regardless of
+    // where the primary or appendix source file is stored. Each input's own
+    // source context is retained separately (on the input) for its file and
+    // schema resolution.
+    let mut runtime = invocation.capture_launch_context(&requirements);
     if let Some(agent) = launch_context.agent.as_ref() {
         runtime.env_mut().insert("AGENT".to_string(), agent.clone());
     }

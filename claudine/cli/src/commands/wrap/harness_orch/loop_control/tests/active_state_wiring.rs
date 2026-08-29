@@ -36,6 +36,7 @@ fn materialized_with_prompt(prompt: &str) -> MaterializedHarnessPrompt {
         inline_closure_plan: None,
         file_resolution_context: None,
         compose_context: None,
+        document_epoch: None,
         lifecycle: None,
         live_frontmatter: MaterializedHarnessPrompt::live_cell_from(&serde_json::Value::Null),
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
@@ -83,7 +84,7 @@ fn a_resume_followup_recorded_on_the_model_overrides_the_composed_body() {
     // Exactly the argument `materialize_attempt_prompt_phase` threads: the
     // follow-up recorded on the model's freshly-advanced attempt slice.
     let materialized = super::super::super::materialize_harness_prompt(
-        &state,
+        &mut state,
         Some(fx._dir.path()),
         fx._dir.path(),
         active.iteration().attempt().resume_followup(),

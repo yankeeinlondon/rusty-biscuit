@@ -119,6 +119,133 @@ fn shared_context_uses_request_owned_repo_and_os_evidence() {
 }
 
 #[test]
+fn relocated_primary_and_appendix_share_launch_context_but_keep_source_files() {
+    let temp = TempDir::new().unwrap();
+    let launch_repo = temp.path().join("launch");
+    let launch_dir = launch_repo.join("alpha/lib");
+    let appendix_dir = launch_repo.join("beta/lib");
+    let external_repo = temp.path().join("external");
+    let primary_dir = external_repo.join("prompts");
+    std::fs::create_dir_all(&launch_dir).unwrap();
+    std::fs::create_dir_all(&appendix_dir).unwrap();
+    std::fs::create_dir_all(&primary_dir).unwrap();
+    for repo in [&launch_repo, &external_repo] {
+        let status = std::process::Command::new("git")
+            .args(["init", "--quiet"])
+            .current_dir(repo)
+            .status()
+            .unwrap();
+        assert!(status.success());
+    }
+    std::fs::write(
+        launch_repo.join("Cargo.toml"),
+        "[workspace]\nmembers = [\"alpha/lib\", \"beta/lib\"]\nresolver = \"2\"\n",
+    )
+    .unwrap();
+    for (path, name) in [(&launch_dir, "alpha"), (&appendix_dir, "beta")] {
+        std::fs::write(
+            path.join("Cargo.toml"),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
+        )
+        .unwrap();
+    }
+
+    std::fs::write(
+        launch_dir.join("schema.yaml"),
+        "launch_only: string(required)\n",
+    )
+    .unwrap();
+    std::fs::write(launch_dir.join("fragment.md"), "LAUNCH-FRAGMENT\n").unwrap();
+    for (dir, label) in [(&primary_dir, "PRIMARY"), (&appendix_dir, "APPENDIX")] {
+        std::fs::write(
+            dir.join("schema.yaml"),
+            "marker: string(required)\nspec: 'file(eager; required)'\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("spec.md"), format!("{label}-SOURCE-SPEC\n")).unwrap();
+        std::fs::write(dir.join("fragment.md"), format!("{label}-SOURCE-FRAGMENT\n")).unwrap();
+    }
+    let primary_path = primary_dir.join("primary.md");
+    let appendix_path = appendix_dir.join("appendix.md");
+    let primary_raw = concat!(
+        "---\n",
+        "$schema: ./schema.yaml\n",
+        "marker: primary\n",
+        "spec: spec.md\n",
+        "---\n",
+        "PRIMARY-SOURCE-BODY AREA={{ ctx.area }} REPO={{ ctx.repo_root }} ",
+        "FILE={{ file_exists(spec) }}\n",
+    );
+    let appendix_raw = concat!(
+        "---\n",
+        "$schema: ./schema.yaml\n",
+        "marker: appendix\n",
+        "spec: spec.md\n",
+        "---\n",
+        "APPENDIX-SOURCE-BODY AREA={{ ctx.area }} REPO={{ ctx.repo_root }} ",
+        "FILE={{ file_exists(spec) }}\n",
+    );
+    std::fs::write(&primary_path, primary_raw).unwrap();
+    std::fs::write(&appendix_path, appendix_raw).unwrap();
+
+    let invocation = crate::invocation_context::InvocationContext::capture_at(&launch_dir);
+    let launch_context = invocation.launch_context();
+    let primary = ResolvedPromptInput::capture(
+        (
+            SystemPromptSource::ExplicitFile {
+                path: primary_path,
+                mode: SystemPromptMode::Append,
+            },
+            primary_raw.to_string(),
+        ),
+        &invocation,
+    )
+    .unwrap();
+    let appendix = ResolvedPromptInput::capture(
+        (
+            SystemPromptSource::NonInteractiveFile {
+                path: appendix_path,
+                scope: StandardPromptScope::Package,
+            },
+            appendix_raw.to_string(),
+        ),
+        &invocation,
+    )
+    .unwrap();
+    let shared = build_shared_compose_context_with_invocation(
+        Some(&primary),
+        Some(std::slice::from_ref(&appendix)),
+        &launch_context,
+        &invocation,
+    )
+    .unwrap();
+
+    let ResolvedSystemPrompt::Ready(primary) =
+        prepare_system_prompt_with_ctx(primary, Some(&shared), Some(&launch_dir)).unwrap()
+    else {
+        panic!("expected a prepared primary system prompt");
+    };
+    let appendix = prepare_non_interactive_appendix_from(
+        vec![appendix],
+        Some(&shared),
+        Some(&launch_dir),
+    )
+    .unwrap();
+    let launch_repo_text = biscuit_file::to_portable_string(&launch_repo);
+
+    assert!(primary.composed_markdown.contains("PRIMARY-SOURCE-BODY AREA=alpha"));
+    assert!(primary.composed_markdown.contains(launch_repo_text.as_str()));
+    assert!(primary.composed_markdown.contains("FILE=true"));
+    assert!(!primary.composed_markdown.contains("LAUNCH-FRAGMENT"));
+    assert!(appendix.composed_markdown.contains("APPENDIX-SOURCE-BODY AREA=alpha"));
+    assert!(appendix.composed_markdown.contains(launch_repo_text.as_str()));
+    assert!(appendix.composed_markdown.contains("FILE=true"));
+    assert!(!appendix.composed_markdown.contains("LAUNCH-FRAGMENT"));
+    assert_eq!(invocation.work_snapshot().launch_context_constructions, 1);
+    assert_eq!(invocation.work_snapshot().ambient_fallbacks, 0);
+}
+
+#[test]
 fn plain_markdown_composes_as_is() {
     let tmp = TempDir::new().unwrap();
     let path = write_temp_file(tmp.path(), "prompt.md", "# Hello World\n\nSome content.");

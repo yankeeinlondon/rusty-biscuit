@@ -64,6 +64,11 @@ pub struct PrepareOptions {
     /// Compatibility callers may omit it without changing composition
     /// behavior.
     pub invocation_context: Option<crate::invocation_context::InvocationContext>,
+    /// Intrinsically attributable work recorder for this document epoch.
+    ///
+    /// Canonical command paths supply this with `prepared_context`; library
+    /// compatibility callers may omit both.
+    pub document_epoch: Option<crate::invocation_context::DocumentEpoch>,
     /// Frontmatter `--set` overrides (JSON object).
     pub set_overrides: Option<serde_json::Value>,
     /// Commands pre-approved during pre-flight shell discovery.
@@ -167,6 +172,13 @@ fn derive_compose_context(
     if let Some(prepared) = options.prepared_context.clone() {
         return prepared;
     }
+    if let Some(invocation) = options.invocation_context.as_ref() {
+        if let Some(epoch) = options.document_epoch.as_ref() {
+            epoch.record_ambient_fallback();
+        } else {
+            invocation.record_ambient_fallback();
+        }
+    }
     let anchor = options
         .file_ref_fallback_dir
         .clone()
@@ -175,6 +187,19 @@ fn derive_compose_context(
     // Demand-driven over this document's frontmatter and body, so a document
     // that never mentions `ctx.*` pays for no host scan.
     ComposeContext::capture_for_document(&anchor, &source.markdown)
+}
+
+fn observe_prepared_context(
+    options: &PrepareOptions,
+    consumer: crate::invocation_context::PreparedContextConsumer,
+) {
+    if options.prepared_context.is_some() {
+        if let Some(epoch) = options.document_epoch.as_ref() {
+            epoch.record_prepared_context_consumer(consumer);
+        } else if let Some(invocation) = options.invocation_context.as_ref() {
+            invocation.record_prepared_context_consumer(consumer);
+        }
+    }
 }
 
 /// The one `ComposeOptions` shape every canonical preparation stage composes
@@ -252,6 +277,10 @@ pub fn preflight_document_shell(
     options: &PrepareOptions,
     approval_options: &crate::harness::ShellApprovalOptions,
 ) -> Result<std::collections::HashSet<String>, CompositionError> {
+    observe_prepared_context(
+        options,
+        crate::invocation_context::PreparedContextConsumer::Preflight,
+    );
     let ctx = derive_compose_context(source, options);
     let compose_opts = canonical_compose_options(&source.resolved_path, &ctx, options);
     match super::resolve_shell_approvals(
@@ -336,6 +365,16 @@ pub(super) fn prepare_direct_with_prompt(
             replacement: replacement.to_string(),
         });
     }
+    if matches!(&prompt_source, PromptSource::ComposedBody) {
+        observe_prepared_context(
+            &options,
+            crate::invocation_context::PreparedContextConsumer::Body,
+        );
+    }
+    observe_prepared_context(
+        &options,
+        crate::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
+    );
     // Reuse the single composition-start snapshot when the caller supplied one
     // (so body, preflight, and lifecycle share one `ctx.*`/`env.*` capture);
     // otherwise derive one from the launch anchor.
@@ -454,6 +493,7 @@ pub(super) fn prepare_direct_with_prompt(
         warnings: report.warnings.clone(),
         input_layers,
         compose_context: ctx,
+        document_epoch: options.document_epoch,
     })
 }
 
@@ -492,6 +532,14 @@ pub fn prepare_inline(
         }
     };
 
+    observe_prepared_context(
+        &options,
+        crate::invocation_context::PreparedContextConsumer::Body,
+    );
+    observe_prepared_context(
+        &options,
+        crate::invocation_context::PreparedContextConsumer::EffectiveFrontmatter,
+    );
     // Build temporary markdown (frontmatter + prompt as body) and compose
     let temp_md = Markdown::with_frontmatter(fm.clone(), &prompt_text);
     // Reuse the single composition-start snapshot when supplied; see
@@ -605,6 +653,7 @@ pub fn prepare_inline(
         warnings: report.warnings.clone(),
         input_layers,
         compose_context: ctx,
+        document_epoch: options.document_epoch,
     })
 }
 

@@ -51,10 +51,11 @@ impl LoopAmbient {
 /// 1. Reserved `doc` namespace (bare `doc` → the whole frontmatter object;
 ///    `doc.<path>` → dotted traversal into it). Intercepted first so a missing
 ///    `doc.<path>` never collapses into a same-named ambient/env/frontmatter key.
-/// 2. `env.NAME`
-/// 3. Ambient variables (`_loop_count`, `_loop_is_first`, `_loop_is_last`,
+/// 2. Prepared `ctx.NAME` and `env.NAME` from the document epoch, when supplied
+/// 3. Ambient `env.NAME` compatibility lookup
+/// 4. Ambient variables (`_loop_count`, `_loop_is_first`, `_loop_is_last`,
 ///    `_loop_last_output`, `_loop_last_exit_code`)
-/// 4. Frontmatter properties, including nested object paths via `.`
+/// 5. Frontmatter properties, including nested object paths via `.`
 ///
 /// When constructed with a base directory ([`with_base_dir`](Self::with_base_dir)),
 /// the lookup exposes a [`ResolutionContext`] rooted at the prompt's parent so
@@ -75,6 +76,7 @@ pub struct LoopExpressionLookup<'a> {
     file_ref_fallback_dir: Option<&'a Path>,
     file_resolution_context: Option<&'a biscuit_file::FileResolutionContext>,
     source_path: Option<&'a Path>,
+    prepared_context: Option<&'a darkmatter::markdown::compose::ComposeContext>,
 }
 
 impl<'a> LoopExpressionLookup<'a> {
@@ -87,6 +89,7 @@ impl<'a> LoopExpressionLookup<'a> {
             file_ref_fallback_dir: None,
             file_resolution_context: None,
             source_path: None,
+            prepared_context: None,
         }
     }
 
@@ -120,6 +123,17 @@ impl<'a> LoopExpressionLookup<'a> {
         self.source_path = Some(source_path);
         self
     }
+
+    /// Reuse the active document epoch for prepared `ctx.*` and target-adjusted
+    /// `env.*` lookups.
+    #[must_use]
+    pub fn with_prepared_context(
+        mut self,
+        context: Option<&'a darkmatter::markdown::compose::ComposeContext>,
+    ) -> Self {
+        self.prepared_context = context;
+        self
+    }
 }
 
 impl EvaluationLookup for LoopExpressionLookup<'_> {
@@ -128,7 +142,21 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
             return resolve_doc(self.frontmatter, path);
         }
 
+        if let Some(name) = path.strip_prefix("ctx.")
+            && let Some(value) = self
+                .prepared_context
+                .and_then(|context| context.get(name))
+        {
+            return Some(value.clone());
+        }
+
         if let Some(env_key) = path.strip_prefix("env.") {
+            if let Some(value) = self
+                .prepared_context
+                .and_then(|context| context.env().get(env_key))
+            {
+                return Some(Value::String(value.clone()));
+            }
             return resolve_env(env_key);
         }
 
@@ -147,7 +175,7 @@ impl EvaluationLookup for LoopExpressionLookup<'_> {
         self.base_dir.map(|dir| match self.source_path {
             Some(source_path) => super::super::document_expression_resolution_context(
                 source_path,
-                None,
+                self.prepared_context,
                 self.file_resolution_context,
                 self.file_ref_fallback_dir,
             ),

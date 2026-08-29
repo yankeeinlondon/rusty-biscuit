@@ -272,6 +272,164 @@ struct Occurrence {
     name: Option<String>,
 }
 
+/// Every production direct prepared-`ComposeContext` capture constructor.
+///
+/// D5/AC12 (`ctx-launch-anchor`): canonical prepared `ctx.*` must be projected
+/// by the invocation-owned launch seam —
+/// `InvocationContext::capture_launch_context` for a fresh epoch and
+/// `InvocationContext::extend_launch_context` for a same-epoch reread — so the
+/// launch anchor and the launch repository/topology evidence can never be
+/// paired with prompt-derived facts by accident. A new direct
+/// `ComposeContext::capture*` call on a prepared path is the source-anchored
+/// pattern this fix removed: route it through the invocation owner, or add the
+/// site here with a reason naming the compatibility contract it serves.
+///
+/// Live `current.ctx.*` capture is a different contract (event-time state, out
+/// of scope by design) and is allowlisted as such below.
+const PREPARED_CONTEXT_CAPTURE_BASELINE: &[AllowedSite] = &[
+    AllowedSite {
+        site: "invocation_context::capture_launch_context",
+        calls: 1,
+        reason: "OWNER — the one invocation-owned launch capture: pairs the \
+                 launch CWD anchor with the retained launch repository, \
+                 topology, environment, and host evidence as a single \
+                 operation (D1/D2)",
+    },
+    AllowedSite {
+        site: "composition::prepare::derive_compose_context",
+        calls: 1,
+        reason: "public library compatibility fallback for callers that supply \
+                 no `prepared_context`; canonical CLI paths never reach it",
+    },
+    AllowedSite {
+        site: "composition::document_expression_resolution_context",
+        calls: 1,
+        reason: "demand-driven no-snapshot fallback for library expression \
+                 resolution; canonical paths always pass the epoch snapshot",
+    },
+    AllowedSite {
+        site: "lifecycle::executor::early_binding_context",
+        calls: 1,
+        reason: "library compatibility fallback when no prepared snapshot was \
+                 supplied; canonical paths always carry one",
+    },
+    AllowedSite {
+        site: "lifecycle::executor::capture_proxy_with_fallback",
+        calls: 1,
+        reason: "library compatibility fallback for `proxy.with` evaluation \
+                 without a retained snapshot",
+    },
+    AllowedSite {
+        site: "lifecycle::context::capture_at_event",
+        calls: 1,
+        reason: "LIVE `current.ctx.*` event-time capture — intentionally \
+                 ambient and outside the prepared-snapshot contract",
+    },
+    AllowedSite {
+        site: "sequence::preflight::build_preflight_graph",
+        calls: 1,
+        reason: "public library preflight entry without an invocation owner; \
+                 the CLI passes the launch context through \
+                 `build_preflight_graph_with_invocation` instead",
+    },
+    AllowedSite {
+        site: "system_prompt::prepare::compose_prompt_markdown",
+        calls: 1,
+        reason: "library compatibility branch when no shared session context \
+                 exists; the session path supplies the launch capture",
+    },
+    AllowedSite {
+        site: "sequence::jit::build_template_preflight_options",
+        calls: 1,
+        reason: "library compatibility branch when no invocation owner was \
+                 supplied; the CLI branch uses the launch capture",
+    },
+    AllowedSite {
+        site: "loop_control::target_launch::rebuild_target_launch",
+        calls: 1,
+        reason: "synthetic-fixture fallback when a materialized prompt carries \
+                 no compose context; every canonical preparation attaches one",
+    },
+    AllowedSite {
+        site: "composition::interpolation_conformance::prepared_context",
+        calls: 1,
+        reason: "test-support module (declared `#[cfg(test)]` at its parent); \
+                 no production caller",
+    },
+];
+
+/// Every production call to a `ComposeContext` capture constructor other than
+/// the argument-less ambient form (which
+/// [`AMBIENT_CONTEXT_CAPTURE_BASELINE`] already bans outright).
+///
+/// The needles are identifier-plus-paren suffixes, so any path spelling of the
+/// call — `ComposeContext::capture_for_content(` or
+/// `compose::ComposeContext::capture_with_evidence(` — matches, while a
+/// reference without a call (a function item passed as a value) does not.
+fn find_prepared_context_captures(src: &[u8]) -> Vec<Occurrence> {
+    const NEEDLES: &[&[u8]] = &[
+        b"ComposeContext::capture_with_evidence(",
+        b"ComposeContext::capture_for_content_with_evidence(",
+        b"ComposeContext::capture_for_document_with_evidence(",
+        b"ComposeContext::capture_for_content(",
+        b"ComposeContext::capture_for_document(",
+        b"ComposeContext::capture_for_dir(",
+        b"ComposeContext::capture_minimal(",
+    ];
+    let mut out = Vec::new();
+    for needle in NEEDLES {
+        for offset in find_all(src, needle) {
+            out.push(Occurrence {
+                offset,
+                name: None,
+            });
+        }
+    }
+    out
+}
+
+#[test]
+fn every_prepared_context_capture_belongs_to_the_invocation_owner() {
+    let found = scan_all(find_prepared_context_captures);
+    assert_baseline(
+        &found,
+        PREPARED_CONTEXT_CAPTURE_BASELINE,
+        "direct prepared-`ComposeContext` capture",
+        "D5/AC12 (ctx-launch-anchor): canonical prepared `ctx.*` must come from \
+         `InvocationContext::capture_launch_context` (fresh epoch) or \
+         `extend_launch_context` (same-epoch reread) so the launch anchor and \
+         launch evidence stay one operation. Route the new site through the \
+         invocation owner, or add it to `PREPARED_CONTEXT_CAPTURE_BASELINE` \
+         with a reason naming the compatibility contract it serves.",
+    );
+}
+
+/// The capture-owner guard must actually reject a seeded violation: a direct
+/// prepared capture in a canonical-route file is reported with its source path,
+/// so the guard can never silently degrade into a rubber stamp.
+#[test]
+fn the_capture_owner_guard_rejects_a_seeded_direct_capture() {
+    const FILE: &str = "cli/src/commands/wrap/overlay.rs";
+    let src = fs::read_to_string(area_root().join(FILE)).expect("read overlay.rs");
+    let seeded = format!(
+        "{src}\n#[allow(dead_code)]\nfn seeded_owner_violation() -> \
+         darkmatter::markdown::compose::ComposeContext {{\n    \
+         darkmatter::markdown::compose::ComposeContext::capture_for_content(\
+         std::path::Path::new(\".\"), \"\")\n}}\n"
+    );
+    let sanitized = sanitize(&seeded);
+
+    let found = find_prepared_context_captures(&sanitized);
+    assert!(
+        found
+            .iter()
+            .any(|occurrence| enclosing_item(&sanitized, occurrence.offset)
+                .is_some_and(|item| item == "seeded_owner_violation")),
+        "the seeded direct capture was not detected; the guard's needles no \
+         longer match a canonical capture spelling"
+    );
+}
+
 #[test]
 fn compose_with_allowlist_holds_the_line() {
     let found = scan_all(find_compose_with_calls);

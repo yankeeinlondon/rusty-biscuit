@@ -38,6 +38,40 @@ pub enum InvocationContextError {
     SourceWithoutParent(PathBuf),
 }
 
+/// Canonical seams that consume a document epoch's prepared context.
+///
+/// These names are part of invocation work accounting: tests compare the
+/// observed set for a route with its expected semantic consumers. Recording a
+/// seam at its owner proves the snapshot was populated there; aggregate launch
+/// construction counts alone cannot distinguish reuse from equal recapture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum PreparedContextConsumer {
+    /// Resolve-once preparation and shell discovery.
+    Preflight,
+    /// Prompt body composition.
+    Body,
+    /// Effective-frontmatter composition.
+    EffectiveFrontmatter,
+    /// A loop gate using the prepared context.
+    LoopCondition,
+    /// Event-time lifecycle interpolation.
+    Lifecycle,
+}
+
+impl PreparedContextConsumer {
+    /// These names are emitted in performance reports and form the stable
+    /// vocabulary used by exact route-consumer assertions.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Preflight => "preflight",
+            Self::Body => "body",
+            Self::EffectiveFrontmatter => "effective-frontmatter",
+            Self::LoopCondition => "loop-condition",
+            Self::Lifecycle => "lifecycle",
+        }
+    }
+}
+
 /// Request-local accounting for discovery and preparation work.
 ///
 /// `runtime_evidence_captures` counts, per group, the calls that ran the
@@ -55,9 +89,121 @@ pub struct InvocationWorkSnapshot {
     pub harness_eligibility_parses: usize,
     pub harness_materializations: usize,
     pub ambient_fallbacks: usize,
+    /// Launch-capture constructions: full `ComposeContext` snapshots built by
+    /// [`InvocationContext::capture_launch_context`]. One per document
+    /// preparation epoch is the contract; more means a route recaptured.
+    pub launch_context_constructions: usize,
+    /// Same-epoch group extensions: missing-requirement projections applied to
+    /// an already-constructed snapshot by
+    /// [`InvocationContext::extend_launch_context`]. Expected only from a
+    /// stabilized reread whose document grew new `ctx.*` groups.
+    pub launch_context_extensions: usize,
+    /// Populated prepared-context observations grouped by canonical consumer.
+    ///
+    /// Values retain repeat observations while callers that need the semantic
+    /// route contract can compare the deterministic map keys as a set.
+    pub prepared_context_consumers: BTreeMap<String, usize>,
+    /// Work keyed by its intrinsically attributable document epoch.
+    ///
+    /// Unlike invocation-global deltas, these records remain exact when
+    /// sibling sequence tasks prepare concurrently.
+    pub document_epochs: BTreeMap<usize, DocumentEpochWork>,
     pub runtime_evidence_captures: BTreeMap<String, usize>,
     pub runtime_evidence_reuses: BTreeMap<String, usize>,
     pub system_prompt_timings: BTreeMap<String, std::time::Duration>,
+}
+
+/// Work shape for one document preparation epoch.
+///
+/// [`DocumentEpoch::work_snapshot`] is the exact, concurrency-safe source.
+/// Invocation snapshot deltas use the same shape only as aggregate interval
+/// diagnostics and cannot attribute overlapping workers.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DocumentEpochWork {
+    pub launch_context_constructions: usize,
+    pub launch_context_extensions: usize,
+    pub ambient_fallbacks: usize,
+    pub prepared_context_consumers: BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Default)]
+struct DocumentEpochRecorder {
+    launch_context_constructions: AtomicUsize,
+    launch_context_extensions: AtomicUsize,
+    ambient_fallbacks: AtomicUsize,
+    prepared_context_consumers: Mutex<BTreeMap<String, usize>>,
+}
+
+impl DocumentEpochRecorder {
+    fn snapshot(&self) -> DocumentEpochWork {
+        DocumentEpochWork {
+            launch_context_constructions: self
+                .launch_context_constructions
+                .load(Ordering::Relaxed),
+            launch_context_extensions: self.launch_context_extensions.load(Ordering::Relaxed),
+            ambient_fallbacks: self.ambient_fallbacks.load(Ordering::Relaxed),
+            prepared_context_consumers: self
+                .prepared_context_consumers
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
+        }
+    }
+}
+
+impl InvocationWorkSnapshot {
+    /// Return aggregate preparation work performed since `before`.
+    ///
+    /// Both snapshots must belong to the same invocation and `before` must
+    /// have been captured first. Violating either condition is a caller bug.
+    /// This interval is not an exact epoch boundary when work overlaps; use
+    /// [`DocumentEpoch::work_snapshot`] for attributable assertions.
+    pub fn document_epoch_since(&self, before: &Self) -> DocumentEpochWork {
+        DocumentEpochWork {
+            launch_context_constructions: monotonic_delta(
+                self.launch_context_constructions,
+                before.launch_context_constructions,
+            ),
+            launch_context_extensions: monotonic_delta(
+                self.launch_context_extensions,
+                before.launch_context_extensions,
+            ),
+            ambient_fallbacks: monotonic_delta(
+                self.ambient_fallbacks,
+                before.ambient_fallbacks,
+            ),
+            prepared_context_consumers: map_delta(
+                &self.prepared_context_consumers,
+                &before.prepared_context_consumers,
+            ),
+        }
+    }
+}
+
+fn monotonic_delta(after: usize, before: usize) -> usize {
+    after
+        .checked_sub(before)
+        .expect("invocation work snapshots must be ordered and share an owner")
+}
+
+fn map_delta(
+    after: &BTreeMap<String, usize>,
+    before: &BTreeMap<String, usize>,
+) -> BTreeMap<String, usize> {
+    let mut delta = BTreeMap::new();
+    for (name, after_count) in after {
+        let count = monotonic_delta(*after_count, before.get(name).copied().unwrap_or_default());
+        if count > 0 {
+            delta.insert(name.clone(), count);
+        }
+    }
+    for (name, before_count) in before {
+        assert!(
+            after.contains_key(name) || *before_count == 0,
+            "invocation consumer counts must be monotonic"
+        );
+    }
+    delta
 }
 
 #[derive(Debug, Default)]
@@ -70,6 +216,11 @@ struct InvocationWork {
     harness_eligibility_parses: AtomicUsize,
     harness_materializations: AtomicUsize,
     ambient_fallbacks: AtomicUsize,
+    launch_context_constructions: AtomicUsize,
+    launch_context_extensions: AtomicUsize,
+    prepared_context_consumers: Mutex<BTreeMap<String, usize>>,
+    next_document_epoch: AtomicUsize,
+    document_epochs: Mutex<BTreeMap<usize, Arc<DocumentEpochRecorder>>>,
     runtime_evidence_captures: Mutex<BTreeMap<String, usize>>,
     runtime_evidence_reuses: Mutex<BTreeMap<String, usize>>,
     system_prompt_timings: Mutex<BTreeMap<String, std::time::Duration>>,
@@ -88,6 +239,22 @@ impl InvocationWork {
                 .load(Ordering::Relaxed),
             harness_materializations: self.harness_materializations.load(Ordering::Relaxed),
             ambient_fallbacks: self.ambient_fallbacks.load(Ordering::Relaxed),
+            launch_context_constructions: self
+                .launch_context_constructions
+                .load(Ordering::Relaxed),
+            launch_context_extensions: self.launch_context_extensions.load(Ordering::Relaxed),
+            prepared_context_consumers: self
+                .prepared_context_consumers
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone(),
+            document_epochs: self
+                .document_epochs
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .iter()
+                .map(|(id, recorder)| (*id, recorder.snapshot()))
+                .collect(),
             runtime_evidence_captures: self
                 .runtime_evidence_captures
                 .lock()
@@ -350,7 +517,95 @@ pub struct InvocationContext {
     inner: Arc<InvocationInner>,
 }
 
+/// Attribution token for one canonical document preparation epoch.
+///
+/// The recorder belongs to the token, not to a before/after interval on the
+/// invocation. Overlapping sequence workers therefore cannot contribute to
+/// one another's exact construction, extension, fallback, or consumer map.
+#[derive(Debug, Clone)]
+pub struct DocumentEpoch {
+    id: usize,
+    invocation: InvocationContext,
+    work: Arc<DocumentEpochRecorder>,
+}
+
+impl DocumentEpoch {
+    /// Stable request-local identity used to correlate diagnostic snapshots.
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
+    /// Capture this epoch's one launch-anchored context construction.
+    pub fn capture_launch_context(
+        &self,
+        requirements: &darkmatter::markdown::compose::ContextRequirements,
+    ) -> darkmatter::markdown::compose::ComposeContext {
+        let context = self.invocation.capture_launch_context(requirements);
+        self.work
+            .launch_context_constructions
+            .fetch_add(1, Ordering::Relaxed);
+        context
+    }
+
+    /// Extend this epoch's retained context from the invocation's launch evidence.
+    pub fn extend_launch_context(
+        &self,
+        context: &mut darkmatter::markdown::compose::ComposeContext,
+        requirements: &darkmatter::markdown::compose::ContextRequirements,
+    ) {
+        if self
+            .invocation
+            .extend_launch_context(context, requirements)
+        {
+            self.work
+                .launch_context_extensions
+                .fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Record a production seam that consumed this epoch's populated context.
+    pub fn record_prepared_context_consumer(&self, consumer: PreparedContextConsumer) {
+        self.invocation.record_prepared_context_consumer(consumer);
+        record_group(
+            &self.work.prepared_context_consumers,
+            consumer.as_str().to_string(),
+        );
+    }
+
+    /// Record a compatibility capture taken instead of this epoch's context.
+    pub fn record_ambient_fallback(&self) {
+        self.invocation.record_ambient_fallback();
+        self.work.ambient_fallbacks.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Return exact work owned by this epoch.
+    pub fn work_snapshot(&self) -> DocumentEpochWork {
+        self.work.snapshot()
+    }
+}
+
 impl InvocationContext {
+    /// Begin one independently attributable canonical document epoch.
+    pub fn begin_document_epoch(&self) -> DocumentEpoch {
+        let id = self
+            .inner
+            .work
+            .next_document_epoch
+            .fetch_add(1, Ordering::Relaxed);
+        let work = Arc::new(DocumentEpochRecorder::default());
+        self.inner
+            .work
+            .document_epochs
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(id, Arc::clone(&work));
+        DocumentEpoch {
+            id,
+            invocation: self.clone(),
+            work,
+        }
+    }
+
     /// Capture a composition invocation from the ambient launch directory.
     pub fn capture() -> Result<Self, InvocationContextError> {
         let cwd = std::env::current_dir().map_err(InvocationContextError::CurrentDirectory)?;
@@ -573,22 +828,139 @@ impl InvocationContext {
     /// when retained evidence answered it. Groups that hold no evidence at all
     /// (`datetime`, `agent`) and groups that only clone what the repository
     /// entry already carries (`git`, `repo`) are therefore always reuses.
+    ///
+    /// This is the *source* projection: repository facts come from the supplied
+    /// document's repository and package area. Canonical prepared `ctx.*` must
+    /// instead use [`Self::capture_launch_context`], which pairs the launch
+    /// anchor with launch evidence as one operation.
     pub fn runtime_evidence(
         &self,
         source: &SourceContext,
         requirements: &darkmatter::markdown::compose::ContextRequirements,
     ) -> darkmatter::markdown::compose::ContextCaptureEvidence {
+        self.project_evidence(
+            &source.repository.inner,
+            &source.base_dir,
+            source.repository_root.as_deref(),
+            requirements,
+        )
+    }
+
+    /// Capture the launch-anchored prepared-`ctx.*` snapshot for one document
+    /// preparation epoch.
+    ///
+    /// The returned `ComposeContext` is anchored at [`Self::launch_cwd`] and
+    /// populated exclusively from the invocation's retained launch repository,
+    /// launch package topology, environment, and host evidence. The anchor and
+    /// the evidence are inseparable here by construction: a caller cannot pair
+    /// a launch directory with a prompt-derived repository.
+    ///
+    /// Source-scanned groups (`file_changes`, `languages`, `documents`) scan
+    /// from the launch base when requested, and Git/repository facts project
+    /// the launch repository — never a document source's repository. No
+    /// ambient CWD, HOME, environment, Git, or topology discovery runs; the
+    /// retained caches answer every group.
+    ///
+    /// Callers apply the resolved target's `env_overrides` (agent/model
+    /// identity) on the returned snapshot through `env_mut`; that is the
+    /// existing target-identity precedence, not part of the capture.
+    ///
+    /// Counts one `launch_context_constructions` in the work snapshot.
+    pub fn capture_launch_context(
+        &self,
+        requirements: &darkmatter::markdown::compose::ContextRequirements,
+    ) -> darkmatter::markdown::compose::ComposeContext {
+        let evidence = self.project_evidence(
+            &self.inner.launch_repository,
+            &self.inner.launch_cwd,
+            self.launch_repository_root_spelling().as_deref(),
+            requirements,
+        );
+        let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
+            &self.inner.launch_cwd,
+            requirements,
+            &evidence,
+        );
+        self.inner
+            .work
+            .launch_context_constructions
+            .fetch_add(1, Ordering::Relaxed);
+        context
+    }
+
+    /// Extend an existing epoch snapshot with requirement groups it is
+    /// missing, from the same retained launch evidence.
+    ///
+    /// This is the same-epoch operation the post-`initialize` stabilized
+    /// reread uses when the rewritten document demands context groups the
+    /// stored snapshot was not captured with: only the missing groups are
+    /// projected, and the snapshot's capture anchor, environment capture, and
+    /// already-applied target overrides are preserved. A requirements set the
+    /// snapshot already satisfies is a no-op that records no extension.
+    ///
+    /// Counts one `launch_context_extensions` per extension that populated at
+    /// least one missing group.
+    pub fn extend_launch_context(
+        &self,
+        context: &mut darkmatter::markdown::compose::ComposeContext,
+        requirements: &darkmatter::markdown::compose::ContextRequirements,
+    ) -> bool {
+        let missing = context.missing_requirements(requirements);
+        if missing.iter().next().is_none() {
+            return false;
+        }
+        let evidence = self.project_evidence(
+            &self.inner.launch_repository,
+            &self.inner.launch_cwd,
+            self.launch_repository_root_spelling().as_deref(),
+            &missing,
+        );
+        if context.extend_with_evidence(requirements, &evidence) {
+            self.inner
+                .work
+                .launch_context_extensions
+                .fetch_add(1, Ordering::Relaxed);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// The launch repository root projected into the launch directory's
+    /// spelling family, mirroring what [`Self::derive_source`] retains for a
+    /// source context.
+    fn launch_repository_root_spelling(&self) -> Option<PathBuf> {
+        self.inner
+            .launch_repository
+            .repo_root()
+            .map(|root| repo_root_in_base_spelling(&self.inner.launch_cwd, root))
+    }
+
+    /// Project one requirements set's evidence from a retained repository
+    /// entry, a scanning base, and that base's repository-root spelling.
+    ///
+    /// `runtime_evidence` (source projection) and `capture_launch_context` /
+    /// `extend_launch_context` (launch projection) share this walk so both pay
+    /// the same caches and record the same per-group work counters; only the
+    /// entry and base differ.
+    #[allow(clippy::too_many_lines)]
+    fn project_evidence(
+        &self,
+        repository: &Arc<RepositoryEntry>,
+        base_dir: &Path,
+        repository_root: Option<&Path>,
+        requirements: &darkmatter::markdown::compose::ContextRequirements,
+    ) -> darkmatter::markdown::compose::ContextCaptureEvidence {
         use darkmatter::markdown::compose::{ContextCaptureEvidence, ContextGroup};
 
         let mut evidence = ContextCaptureEvidence::new(self.inner.environment.clone());
-        let repository = &source.repository.inner;
         let source_evidence = {
             let mut cache = repository
                 .source_evidence
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             cache
-                .entry(source.base_dir.clone())
+                .entry(base_dir.to_path_buf())
                 .or_insert_with(|| Arc::new(SourceEvidence::default()))
                 .clone()
         };
@@ -610,7 +982,7 @@ impl InvocationContext {
                         && !matches!(repository.topology.get(), Some(Err(_)))
                     {
                         evidence = evidence.with_repository(
-                            source.repository_root.clone(),
+                            repository_root.map(Path::to_path_buf),
                             repository.repo_info().cloned(),
                         );
                     }
@@ -637,7 +1009,7 @@ impl InvocationContext {
                         .languages
                         .get_or_init(|| {
                             captured = true;
-                            detect_source_filesystem(repository, &source.base_dir, true, false)
+                            detect_source_filesystem(repository, base_dir, true, false)
                                 .map(|filesystem| filesystem.languages)
                                 .map_err(Arc::new)
                         })
@@ -651,7 +1023,7 @@ impl InvocationContext {
                         .documents
                         .get_or_init(|| {
                             captured = true;
-                            detect_source_filesystem(repository, &source.base_dir, false, true)
+                            detect_source_filesystem(repository, base_dir, false, true)
                                 .map(|filesystem| filesystem.docs)
                                 .map_err(Arc::new)
                         })
@@ -659,8 +1031,8 @@ impl InvocationContext {
                     {
                         evidence = evidence.with_documents_for_source(
                             documents.clone(),
-                            &source.base_dir,
-                            source.repository_root.as_deref(),
+                            base_dir,
+                            repository_root,
                             repository.repo_info(),
                         );
                     }
@@ -885,6 +1257,17 @@ impl InvocationContext {
             .work
             .ambient_fallbacks
             .fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Record that a canonical consumer received a populated epoch snapshot.
+    pub fn record_prepared_context_consumer(&self, consumer: PreparedContextConsumer) {
+        let mut consumers = self
+            .inner
+            .work
+            .prepared_context_consumers
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *consumers.entry(consumer.as_str().to_string()).or_default() += 1;
     }
 }
 

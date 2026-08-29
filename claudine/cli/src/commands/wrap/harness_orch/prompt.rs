@@ -34,6 +34,7 @@ pub(crate) fn materialized_harness_prompt_from_prepared(
         inline_closure_plan,
         file_resolution_context: prepared.input_layers.file_resolution_context.clone(),
         compose_context: Some(prepared.compose_context.clone()),
+        document_epoch: prepared.document_epoch.clone(),
         lifecycle: Some(prepared.lifecycle.clone()),
         live_frontmatter,
         runtime_state,
@@ -109,6 +110,9 @@ fn load_overlaid_source(
         }
     })?;
     let mut markdown: darkmatter::markdown::Markdown = source_text.clone().into();
+    markdown = markdown.with_source(darkmatter::markdown::compose::ComposeSource::File(
+        state.source_path.clone(),
+    ));
     super::super::overlay::merge_frontmatter_overlay(
         markdown.frontmatter_mut().as_map_mut(),
         &state.overlay,
@@ -127,8 +131,15 @@ fn load_overlaid_source(
 /// This is the single input-layer assembly point the harness re-entry uses; the
 /// composition commands' first preparation assembles the same shape in
 /// `compose/prep.rs`.
+///
+/// The prepared context follows the document-epoch contract: a retry or resume
+/// constructs one fresh launch capture (a new epoch), while the stabilized
+/// reread and any same-document refresh extend the retained epoch snapshot in
+/// place — the capture anchor, environment capture, and target overrides never
+/// change within an epoch. Every launch-facing field comes from the invocation
+/// owner either way.
 fn harness_prepare_options(
-    state: &HarnessPromptState,
+    state: &mut HarnessPromptState,
     source: &claudine::composition::ResolvedCompositionSource,
     child_cwd: &Path,
 ) -> claudine::composition::PrepareOptions {
@@ -161,6 +172,10 @@ fn harness_prepare_options(
         .source_context
         .as_ref()
         .or(compatibility_source_context.as_ref());
+    // The launch-anchored epoch snapshot. Constructed through the invocation
+    // owner — never from this document's source context — so a harness
+    // re-materialization (bootstrap read, stabilized reread, retry, resume,
+    // loop refresh) cannot re-anchor prepared `ctx.*` on the prompt directory.
     let propagated = state
         .invocation_context
         .as_ref()
@@ -169,12 +184,26 @@ fn harness_prepare_options(
             let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
                 &source.markdown,
             );
-            let evidence = invocation.runtime_evidence(source_context, &requirements);
-            let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-                source_context.base_dir(),
-                &requirements,
-                &evidence,
-            );
+            let context = if state.epoch_context.is_none() {
+                let epoch = invocation.begin_document_epoch();
+                let context = epoch.capture_launch_context(&requirements);
+                state.document_epoch = Some(epoch);
+                context
+            } else {
+                let mut retained = state
+                    .epoch_context
+                    .clone()
+                    .expect("epoch snapshot checked above");
+                if let Some(epoch) = state.document_epoch.as_ref() {
+                    epoch.extend_launch_context(&mut retained, &requirements);
+                } else {
+                    invocation.extend_launch_context(&mut retained, &requirements);
+                }
+                retained
+            };
+            // A fresh epoch replaces the retained snapshot; a same-epoch
+            // reread keeps the (now possibly extended) one for later stages.
+            state.epoch_context = Some(context.clone());
             (context, source_context.file_resolution_context().clone())
         });
     let mut options = input_layers.apply_to(claudine::composition::PrepareOptions {
@@ -184,6 +213,7 @@ fn harness_prepare_options(
     });
     if let Some((context, file_resolution)) = propagated {
         options.prepared_context = Some(context);
+        options.document_epoch = state.document_epoch.clone();
         options.file_resolution_context = Some(file_resolution);
     } else if let Some(source_context) = source_context {
         options.file_resolution_context = Some(source_context.file_resolution_context().clone());
@@ -191,8 +221,8 @@ fn harness_prepare_options(
     options
 }
 
-/// Run the proxied target document's own pre-flight shell audit and fold any
-/// newly-approved commands into the invocation's approved set.
+/// Run the active document's pre-flight shell audit and fold any newly-approved
+/// commands into the invocation's approved set.
 ///
 /// Only [`HarnessPromptMode::Compose`] re-runs a body compose that expands
 /// shell; `Inline` runs its own `prepare_inline` audit and `Passthrough` has no
@@ -204,7 +234,7 @@ fn harness_prepare_options(
 /// routes it through the standard `blocked`/`finalize` path.
 ///
 /// [`CompositionError`]: claudine::composition::CompositionError
-pub(crate) fn preflight_proxy_target(
+pub(crate) fn preflight_harness_document(
     state: &mut HarnessPromptState,
     approval_options: &claudine::harness::ShellApprovalOptions,
     child_cwd: &Path,
@@ -222,7 +252,7 @@ pub(crate) fn preflight_proxy_target(
 }
 
 pub(crate) fn materialize_harness_prompt(
-    state: &HarnessPromptState,
+    state: &mut HarnessPromptState,
     _repo_root: Option<&Path>,
     child_cwd: &Path,
     // The resume follow-up recorded on the active document's provider-attempt
@@ -278,6 +308,7 @@ pub(crate) fn materialize_harness_prompt(
     };
     let file_resolution_context = prepared.input_layers.file_resolution_context.clone();
     let compose_context = prepared.compose_context;
+    let document_epoch = prepared.document_epoch;
     let mut prompt = prepared.prompt;
     let frontmatter = prepared.effective_frontmatter;
     let lifecycle = prepared.lifecycle;
@@ -318,6 +349,7 @@ pub(crate) fn materialize_harness_prompt(
         inline_closure_plan,
         file_resolution_context,
         compose_context: Some(compose_context),
+        document_epoch,
         lifecycle: Some(lifecycle),
         live_frontmatter,
         runtime_state: std::sync::Arc::clone(&state.runtime_state),
@@ -345,6 +377,8 @@ mod tests {
             last_final_output: None,
             entry: DocumentEntryReason::ProxyTarget,
             invocation_context: None,
+            epoch_context: None,
+            document_epoch: None,
             source_context: None,
         }
     }
@@ -363,7 +397,7 @@ mod tests {
         let mut env = BTreeMap::new();
         env.insert("AGENT".to_string(), "codex".to_string());
         env.insert("MODEL".to_string(), "gpt-5".to_string());
-        let state = compose_state(
+        let mut state = compose_state(
             &target,
             CallerInputLayers {
                 env_overrides: env,
@@ -371,11 +405,184 @@ mod tests {
             },
         );
 
-        let materialized = materialize_harness_prompt(&state, None, dir.path(), None, SchemaStage::Validate).unwrap();
+        let materialized = materialize_harness_prompt(&mut state, None, dir.path(), None, SchemaStage::Validate).unwrap();
         assert_eq!(
             materialized.prompt.trim(),
             "codex/gpt-5",
             "ctx.agent/ctx.model must resolve from the carried env, not the fallbacks",
+        );
+    }
+
+    #[test]
+    fn harness_reentry_epochs_keep_launch_values_and_source_ownership() {
+        let temp = tempfile::tempdir().unwrap();
+        let launch_repo = temp.path().join("launch");
+        let launch_dir = launch_repo.join("alpha/lib");
+        let source_repo = temp.path().join("source");
+        let source_dir = source_repo.join("nested");
+        std::fs::create_dir_all(&launch_dir).unwrap();
+        std::fs::create_dir_all(&source_dir).unwrap();
+        for repo in [&launch_repo, &source_repo] {
+            assert!(std::process::Command::new("git")
+                .args(["init", "--quiet"])
+                .current_dir(repo)
+                .status()
+                .unwrap()
+                .success());
+        }
+        std::fs::write(
+            launch_repo.join("Cargo.toml"),
+            "[workspace]\nmembers = [\"alpha/lib\", \"sibling\"]\nresolver = \"2\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            launch_dir.join("Cargo.toml"),
+            "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        std::fs::create_dir_all(launch_repo.join("sibling")).unwrap();
+        std::fs::write(
+            launch_repo.join("sibling/Cargo.toml"),
+            "[package]\nname = \"sibling\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            launch_dir.join("schema.yaml"),
+            "launch_only: string(required)\n",
+        )
+        .unwrap();
+        std::fs::write(launch_dir.join("fragment.md"), "LAUNCH-FRAGMENT\n").unwrap();
+        std::fs::write(
+            source_dir.join("schema.yaml"),
+            "source_marker: string(required)\nspec: 'file(eager; required)'\nprepared_area: \
+             string(required)\nprepared_agent: string(required)\nprepared_model: string(required)\n",
+        )
+        .unwrap();
+        std::fs::write(source_dir.join("spec.md"), "SOURCE-SPEC\n").unwrap();
+        std::fs::write(source_dir.join("fragment.md"), "SOURCE-FRAGMENT\n").unwrap();
+        let target = source_dir.join("target.md");
+        std::fs::write(
+            &target,
+            concat!(
+                "---\n",
+                "$schema: ./schema.yaml\n",
+                "source_marker: source-owned\n",
+                "spec: spec.md\n",
+                "prepared_area: '{{ ctx.area }}'\n",
+                "prepared_agent: '{{ ctx.agent }}'\n",
+                "prepared_model: '{{ ctx.model }}'\n",
+                "---\n",
+                "AREA={{ ctx.area }} AGENT={{ ctx.agent }} MODEL={{ ctx.model }} ",
+                "ENV={{ env.AGENT }}/{{ env.MODEL }} FILE={{ file_exists(spec) }}\n",
+                "SOURCE-BODY\n",
+            ),
+        )
+        .unwrap();
+
+        let env = BTreeMap::from([
+            ("AGENT".to_string(), "codex".to_string()),
+            ("MODEL".to_string(), "gpt-5".to_string()),
+        ]);
+        let mut state = compose_state(
+            &target,
+            CallerInputLayers {
+                env_overrides: env,
+                file_ref_fallback_dir: Some(launch_dir.clone()),
+                ..CallerInputLayers::default()
+            },
+        );
+        let invocation = claudine::invocation_context::InvocationContext::capture_at(&launch_dir);
+        state.source_context = Some(invocation.derive_source(&target).unwrap());
+        state.invocation_context = Some(invocation.clone());
+        let approval_options = claudine::harness::ShellApprovalOptions::default();
+
+        let assert_materialized = |entry: DocumentEntryReason,
+                                   materialized: &MaterializedHarnessPrompt| {
+            assert!(
+                materialized
+                    .prompt
+                    .contains("AREA=alpha AGENT=codex MODEL=gpt-5 ENV=codex/gpt-5 FILE=true"),
+                "entry {entry:?} lost launch or target identity: {}",
+                materialized.prompt
+            );
+            assert!(
+                materialized.prompt.contains("SOURCE-BODY")
+                    && !materialized.prompt.contains("LAUNCH-FRAGMENT"),
+                "entry {entry:?} did not keep the document body source-owned: {}",
+                materialized.prompt
+            );
+            assert_eq!(materialized.frontmatter["prepared_area"], serde_json::json!("alpha"));
+            assert_eq!(materialized.frontmatter["prepared_agent"], serde_json::json!("codex"));
+            assert_eq!(materialized.frontmatter["prepared_model"], serde_json::json!("gpt-5"));
+            assert_eq!(materialized.frontmatter["source_marker"], serde_json::json!("source-owned"));
+        };
+
+        preflight_harness_document(&mut state, &approval_options, &launch_dir).unwrap();
+        let proxy = materialize_harness_prompt(
+            &mut state,
+            Some(&source_repo),
+            &launch_dir,
+            None,
+            SchemaStage::Validate,
+        )
+        .unwrap();
+        assert_materialized(DocumentEntryReason::ProxyTarget, &proxy);
+        assert_eq!(
+            proxy.document_epoch.as_ref().unwrap().work_snapshot(),
+            claudine::invocation_context::DocumentEpochWork {
+                launch_context_constructions: 1,
+                launch_context_extensions: 0,
+                ambient_fallbacks: 0,
+                prepared_context_consumers: BTreeMap::from([
+                    ("body".to_string(), 1),
+                    ("effective-frontmatter".to_string(), 1),
+                    ("preflight".to_string(), 1),
+                ]),
+            },
+            "the proxy target's first canonical read must be one complete epoch"
+        );
+
+        // Model an initialize-time rewrite that adds a group the bootstrap
+        // document did not require. The next materialization is the
+        // stabilized reread in the same epoch and must extend, not recapture.
+        let original = std::fs::read_to_string(&target).unwrap();
+        std::fs::write(
+            &target,
+            original.replace(
+                "SOURCE-BODY\n",
+                "SOURCE-BODY OS={{ ctx.os }} REPO={{ ctx.repo_root }}\n",
+            ),
+        )
+        .unwrap();
+
+        preflight_harness_document(&mut state, &approval_options, &launch_dir).unwrap();
+        let stabilized = materialize_harness_prompt(
+            &mut state,
+            Some(&source_repo),
+            &launch_dir,
+            None,
+            SchemaStage::Validate,
+        )
+        .unwrap();
+        assert_materialized(DocumentEntryReason::ProxyTarget, &stabilized);
+        assert!(
+            stabilized.prompt.contains(" OS=") && !stabilized.prompt.contains("OS= REPO="),
+            "the stabilized reread must populate the newly required OS group: {}",
+            stabilized.prompt
+        );
+        assert_eq!(
+            stabilized.document_epoch.as_ref().unwrap().work_snapshot(),
+            claudine::invocation_context::DocumentEpochWork {
+                launch_context_constructions: 1,
+                launch_context_extensions: 1,
+                ambient_fallbacks: 0,
+                prepared_context_consumers: BTreeMap::from([
+                    ("body".to_string(), 2),
+                    ("effective-frontmatter".to_string(), 2),
+                    ("preflight".to_string(), 2),
+                ]),
+            },
+            "the stabilized reread stays inside the proxy epoch and only extends it"
         );
     }
 
@@ -415,7 +622,7 @@ mod tests {
         // target's own frontmatter shell command.
         assert!(state.input_layers.pre_approved_commands.is_none());
 
-        preflight_proxy_target(&mut state, &approval_options, dir.path())
+        preflight_harness_document(&mut state, &approval_options, dir.path())
             .expect("whitelisted proxy-target command must pre-flight cleanly");
 
         let approved = state
@@ -430,7 +637,7 @@ mod tests {
 
         // The re-materialize compose now expands the frontmatter command against
         // the augmented pre-approved set instead of failing NotPreApproved.
-        let materialized = materialize_harness_prompt(&state, None, dir.path(), None, SchemaStage::Validate).unwrap();
+        let materialized = materialize_harness_prompt(&mut state, None, dir.path(), None, SchemaStage::Validate).unwrap();
         assert_eq!(materialized.prompt.trim(), "reviewing spec.md");
     }
 }

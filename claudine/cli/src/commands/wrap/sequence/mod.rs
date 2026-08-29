@@ -57,6 +57,7 @@ pub(super) fn run_was_interrupted(exit_code: i32, interrupted: &AtomicBool) -> b
 /// contribute their template `::shell` directives through the same pass, which
 /// is what makes "no approval prompts once the sequence starts" honest for work
 /// several hops from the sequence document.
+#[allow(clippy::too_many_arguments)]
 fn approve_preflight_graph(
     graph: &composition::PreflightGraph,
     source: &ResolvedCompositionSource,
@@ -65,6 +66,7 @@ fn approve_preflight_graph(
     shared: &SharedComposeArgs,
     launch_area: Option<&std::path::Path>,
     invocation: &claudine::invocation_context::InvocationContext,
+    graph_context: &darkmatter::markdown::compose::ComposeContext,
 ) -> Result<HashSet<String>> {
     if graph.shell_commands.is_empty() && graph.prompt_documents.is_empty() {
         return Ok(HashSet::new());
@@ -86,15 +88,15 @@ fn approve_preflight_graph(
             .expect("resolved prompt document always has a parent directory");
         let document = darkmatter::markdown::Markdown::try_from(path)
             .expect("preflight graph already loaded the prompt document");
+        // The graph's launch snapshot, extended with any group this referenced
+        // document needs: plain `ctx.*` stays launch-anchored no matter where
+        // the prompt document is stored, while the document's own
+        // `SourceContext` below still drives its file resolution.
         let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
             &document,
         );
-        let evidence = invocation.runtime_evidence(&source_context, &requirements);
-        let context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-            source_context.base_dir(),
-            &requirements,
-            &evidence,
-        );
+        let mut context = graph_context.clone();
+        invocation.extend_launch_context(&mut context, &requirements);
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(context)
             .with_source_file(path)
             .with_file_resolution_context(source_context.file_resolution_context().clone())
@@ -244,21 +246,24 @@ pub(crate) fn execute_sequence(
     // ones behind `when:` guards that read false today — is resolved to bytes
     // and approved. A failure at this point is abort-all regardless of
     // `fail_fast`, and `--dry-run` performs this identical walk.
+    // One base launch context for the whole graph, captured before per-task
+    // target selection: every launch-facing graph expression (`when:` guards,
+    // command interpolation, task/group variable defaults) projects the
+    // caller's launch repository and package area from this snapshot, no
+    // matter which repository a referenced task, group, or prompt document is
+    // stored in. Per-task epochs below clone or extend this base and apply
+    // their own resolved target overrides (D4).
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_document(
         &source.markdown,
     );
-    let evidence = prep_context
-        .invocation
-        .runtime_evidence(&prep_context.source_context, &requirements);
-    let graph_context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-        prep_context.source_context.base_dir(),
-        &requirements,
-        &evidence,
+    let graph_context = prep_context.invocation.capture_launch_context(&requirements);
+    prep_context.invocation.record_prepared_context_consumer(
+        claudine::invocation_context::PreparedContextConsumer::Preflight,
     );
     let graph = composition::build_preflight_graph_with_invocation(
         &plan,
         source,
-        graph_context,
+        graph_context.clone(),
         &prep_context.invocation,
         &prep_context.source_context,
     )?;
@@ -270,6 +275,7 @@ pub(crate) fn execute_sequence(
         shared,
         Some(prep_context.launch_workspace.launch_cwd.as_path()),
         &prep_context.invocation,
+        &graph_context,
     )?;
     let catalog = match prep_context.selection_config.as_ref() {
         Some(cfg) => claudine::model_catalog::ModelCatalogService::with_overrides(

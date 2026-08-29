@@ -1000,6 +1000,7 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
         name_coercion_keys: Vec::new(),
         allow_empty_body: false,
         invocation_context: None,
+        document_epoch: None,
     };
 
     let err = prepare_direct(&source, options).unwrap_err();

@@ -1686,6 +1686,29 @@ pub enum CompositionError {
         task: String,
     },
 
+    /// A graph-phase shell command references the resolved target's identity.
+    ///
+    /// Graph preflight resolves shell bytes before per-task target selection,
+    /// and execution runs exactly those bytes, so a `ctx.agent`/`ctx.model`/
+    /// `env.AGENT`/`env.MODEL` reference here would expand a pre-selection
+    /// value with no second resolution to catch the divergence. Task-scoped
+    /// commands — where the selected target's environment is available — keep
+    /// permitting these roots.
+    #[error(
+        "shell command `{command}` in {task} references `{root}`, which depends on the \
+         selected agent/model; sequence shell commands are resolved before any task's target \
+         is selected, so move this command into the task that owns the target"
+    )]
+    SequenceShellTargetIdentity {
+        /// The authored command.
+        command: String,
+        /// The offending canonical identity path, or a computed `ctx`/`env`
+        /// access that could select one.
+        root: String,
+        /// A label locating the task.
+        task: String,
+    },
+
     /// A task's shell command failed early-binding resolution at preflight.
     #[error("shell command `{command}` in {task} could not be resolved at preflight: {message}")]
     SequenceShellResolution {

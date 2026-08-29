@@ -71,8 +71,9 @@ The library pipeline lives in `claudine/lib/src/system_prompt/`:
 3. each selected file receives a source-derived `SourceContext` and
    `FileResolutionContext`
 4. `ContextRequirements` scans the primary prompt and appendix candidates as a
-   union; the invocation supplies one demand-driven runtime snapshot for their
-   composition
+   union; the invocation captures one **launch-anchored** runtime snapshot for
+   their composition, so plain `ctx.*` projects the caller's launch
+   repository/package area no matter where the source file is stored
 5. `prepare_system_prompt()` composes the selected file through Darkmatter
 6. non-interactive sessions append `.claudine/non-interactive.md`,
    `~/.claudine/non-interactive.md`, or the built-in fallback message

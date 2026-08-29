@@ -176,7 +176,7 @@ fn a_target_only_command_prompts_while_a_shared_command_reuses_the_approval() {
     let (mut context, handler) = recording_context(&source, Some(dir.path()));
 
     let mut source_state = prompt_state(&source);
-    preflight_proxy_target(&mut source_state, context.shell_options(), dir.path())
+    preflight_harness_document(&mut source_state, context.shell_options(), dir.path())
         .expect("the source's own command is approved by the recording handler");
     assert_eq!(
         handler.prompted(),
@@ -189,7 +189,7 @@ fn a_target_only_command_prompts_while_a_shared_command_reuses_the_approval() {
     context.refresh(&target, Some(dir.path()));
 
     let mut target_state = prompt_state(&target);
-    preflight_proxy_target(&mut target_state, context.shell_options(), dir.path())
+    preflight_harness_document(&mut target_state, context.shell_options(), dir.path())
         .expect("the target's new command must reach the approval handler, not a silent denial");
 
     assert_eq!(
@@ -233,7 +233,7 @@ fn approved_bytes_equal_the_bytes_a_with_value_resolves_to() {
         serde_json::Value::String("from-overlay".to_string()),
     );
 
-    preflight_proxy_target(&mut state, context.shell_options(), dir.path())
+    preflight_harness_document(&mut state, context.shell_options(), dir.path())
         .expect("the overlay-influenced command is approved");
 
     assert_eq!(
@@ -245,7 +245,7 @@ fn approved_bytes_equal_the_bytes_a_with_value_resolves_to() {
 
     // ...and the bytes that execute are the bytes that were approved.
     let materialized = materialize_harness_prompt(
-        &state,
+        &mut state,
         None,
         dir.path(),
         None,

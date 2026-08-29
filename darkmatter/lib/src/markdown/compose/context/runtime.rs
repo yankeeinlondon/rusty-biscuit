@@ -2,7 +2,10 @@
 //! deterministic output across the transclusion graph.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Duration;
+
+use super::capture::ContextRequirements;
 
 /// Runtime context captured at compose start for deterministic output.
 ///
@@ -22,6 +25,13 @@ pub struct ComposeContext {
 /// Inner storage for ComposeContext, shared via Arc.
 #[derive(Debug, Clone)]
 struct ComposeContextInner {
+    /// The directory the capture was anchored on. Retained so a later
+    /// group extension cannot silently re-anchor the snapshot.
+    anchor: PathBuf,
+    /// The groups this context's values were captured for. A later
+    /// [`ComposeContext::extend_with_evidence`] populates only the groups
+    /// missing from this set.
+    captured: ContextRequirements,
     now: String,
     now_utc: String,
     today: String,
@@ -141,6 +151,8 @@ impl ComposeContext {
                     diagnostics,
                     Vec::new(),
                     std::env::vars().collect(),
+                    PathBuf::new(),
+                    ContextRequirements::for_content(""),
                 )
             }
         }
@@ -169,7 +181,15 @@ impl ComposeContext {
     pub fn capture_for_dir(base_dir: &std::path::Path) -> Self {
         let (values, capture_diagnostics, timings, environment) =
             super::capture::capture_runtime_context(base_dir);
-        Self::from_values(values, capture_diagnostics, timings, environment)
+        let requirements = super::capture::ContextRequirements::all();
+        Self::from_values(
+            values,
+            capture_diagnostics,
+            timings,
+            environment,
+            base_dir.to_path_buf(),
+            requirements,
+        )
     }
 
     /// Demand-driven capture: scans `content` for `ctx.*` references and
@@ -185,7 +205,15 @@ impl ComposeContext {
     pub fn capture_for_content(base_dir: &std::path::Path, content: &str) -> Self {
         let (values, capture_diagnostics, timings, environment) =
             super::capture::capture_runtime_context_for_content(base_dir, content);
-        Self::from_values(values, capture_diagnostics, timings, environment)
+        let requirements = super::capture::ContextRequirements::for_content(content);
+        Self::from_values(
+            values,
+            capture_diagnostics,
+            timings,
+            environment,
+            base_dir.to_path_buf(),
+            requirements,
+        )
     }
 
     /// Demand-driven capture that scans both frontmatter values and body
@@ -219,7 +247,14 @@ impl ComposeContext {
                 requirements,
                 evidence,
             );
-        Self::from_values(values, diagnostics, timings, environment)
+        Self::from_values(
+            values,
+            diagnostics,
+            timings,
+            environment,
+            base_dir.to_path_buf(),
+            requirements.clone(),
+        )
     }
 
     /// Demand-driven supplied capture for one content fragment.
@@ -248,6 +283,8 @@ impl ComposeContext {
         capture_diagnostics: Vec<super::ContextMergeDiagnostic>,
         capture_timings: Vec<(String, Duration)>,
         env: HashMap<String, String>,
+        anchor: PathBuf,
+        captured: ContextRequirements,
     ) -> Self {
         let get_str = |key: &str| -> String {
             values
@@ -259,6 +296,8 @@ impl ComposeContext {
 
         Self {
             inner: std::sync::Arc::new(ComposeContextInner {
+                anchor,
+                captured,
                 now: get_str("now"),
                 now_utc: get_str("now_utc"),
                 today: get_str("today"),
@@ -277,6 +316,81 @@ impl ComposeContext {
                 capture_timings,
             }),
         }
+    }
+
+    /// The groups this snapshot's values were captured for.
+    pub fn capture_requirements(&self) -> &ContextRequirements {
+        &self.inner.captured
+    }
+
+    /// The directory this snapshot was anchored on at capture time.
+    pub fn anchor(&self) -> &std::path::Path {
+        &self.inner.anchor
+    }
+
+    /// The groups of `required` this snapshot did not capture.
+    pub fn missing_requirements(&self, required: &ContextRequirements) -> ContextRequirements {
+        let missing = required
+            .iter()
+            .filter(|group| !self.inner.captured.contains(*group))
+            .collect::<Vec<_>>();
+        ContextRequirements::from_groups(missing)
+    }
+
+    /// Extend this snapshot in place with the groups of `required` it is
+    /// missing, populated from supplied evidence.
+    ///
+    /// This is the same-epoch extension operation: it never re-anchors (the
+    /// retained anchor is reused), never replaces the environment (the
+    /// existing env map — including any compose-time overrides already
+    /// installed through [`Self::env_mut`] — is what new groups derive from),
+    /// and never overwrites an already-captured value. Original date/time
+    /// fields, environment, anchor, and diagnostics are preserved; diagnostics
+    /// and timings from the extension are appended.
+    ///
+    /// Returns `true` when at least one missing group was populated. A call
+    /// whose requirements are already satisfied is a no-op returning `false`.
+    pub fn extend_with_evidence(
+        &mut self,
+        required: &ContextRequirements,
+        evidence: &super::capture::ContextCaptureEvidence,
+    ) -> bool {
+        let missing = self.missing_requirements(required);
+        if missing.iter().next().is_none() {
+            return false;
+        }
+        let (mut values, mut diagnostics, mut timings, environment) =
+            super::capture::capture_runtime_context_with_evidence(
+                &self.inner.anchor,
+                &missing,
+                evidence,
+            );
+        // The Agent group derives from the environment the snapshot already
+        // carries, so compose-time overrides remain the effective identity.
+        if missing.contains(super::capture::ContextGroup::Agent) {
+            values.insert(
+                "agent".into(),
+                serde_json::Value::String(env_agent_or(&self.inner.env, "AGENT", "unknown")),
+            );
+            values.insert(
+                "model".into(),
+                serde_json::Value::String(env_agent_or(&self.inner.env, "MODEL", "default")),
+            );
+        }
+        let inner = std::sync::Arc::make_mut(&mut self.inner);
+        inner.values.extend(values);
+        inner.capture_diagnostics.append(&mut diagnostics);
+        inner.capture_timings.append(&mut timings);
+        for group in missing.iter() {
+            inner.captured = inner.captured.clone().with(group);
+        }
+        // New values can change what an effective lookup resolves to; discard
+        // any memoized effective map the same way `env_mut` does.
+        inner.overrides = std::sync::OnceLock::new();
+        // `environment` was rebuilt from the evidence bundle; the snapshot's
+        // own env map (with overrides) is authoritative and is left as-is.
+        drop(environment);
+        true
     }
 
     /// Looks up a value from the backing store.
@@ -384,6 +498,8 @@ impl ComposeContext {
 
         Self {
             inner: std::sync::Arc::new(ComposeContextInner {
+                anchor: PathBuf::new(),
+                captured: ContextRequirements::from_groups([super::capture::ContextGroup::DateTime]),
                 now: get_str("now"),
                 now_utc: get_str("now_utc"),
                 today: get_str("today"),
@@ -437,6 +553,11 @@ fn normalized_env_value(
             trimmed.to_string()
         }
     })
+}
+
+/// The trimmed `key` env value (or `default`), as required by the Agent group.
+fn env_agent_or(env: &HashMap<String, String>, key: &str, default: &str) -> String {
+    normalized_env_value(env, key, default).unwrap_or_else(|| default.to_string())
 }
 
 #[cfg(test)]
@@ -525,6 +646,64 @@ mod evidence_tests {
         assert_eq!(
             context.get("agent"),
             Some(&serde_json::Value::String("captured-agent".to_string()))
+        );
+    }
+
+    #[test]
+    fn extension_populates_only_missing_groups_and_preserves_the_epoch() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let context = ComposeContext::capture_for_content(
+            directory.path(),
+            "{{ ctx.os }}",
+        );
+        assert!(context.capture_requirements().contains(ContextGroup::Os));
+        assert!(!context.capture_requirements().contains(ContextGroup::Gpu));
+        let original_now = context.now().to_string();
+        let mut context = context;
+
+        let mut environment = HashMap::new();
+        environment.insert("AGENT".to_string(), "extension-agent".to_string());
+        let evidence = ContextCaptureEvidence::new(environment).with_gpus(Vec::new());
+        let required = ContextRequirements::for_content("{{ ctx.os }} {{ ctx.gpu }}");
+
+        assert!(
+            context.extend_with_evidence(&required, &evidence),
+            "the gpu group was missing and must be populated"
+        );
+        assert!(context.capture_requirements().contains(ContextGroup::Gpu));
+        assert_eq!(context.get("os"), context.get("os"));
+        assert_eq!(context.now(), original_now);
+        assert_eq!(
+            context.anchor(),
+            directory.path(),
+            "extension must not re-anchor"
+        );
+
+        assert!(
+            !context.extend_with_evidence(&required, &evidence),
+            "a satisfied requirement set is a no-op"
+        );
+    }
+
+    #[test]
+    fn extension_keeps_installed_env_overrides_for_derived_identity() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let mut context =
+            ComposeContext::capture_for_content(directory.path(), "{{ ctx.repo_root }}");
+        let mut environment = HashMap::new();
+        environment.insert("AGENT".to_string(), "launch-agent".to_string());
+        let evidence = ContextCaptureEvidence::new(environment);
+        context
+            .env_mut()
+            .insert("AGENT".to_string(), "override-agent".to_string());
+
+        let required = ContextRequirements::for_content("{{ ctx.agent }}");
+        assert!(context.extend_with_evidence(&required, &evidence));
+
+        assert_eq!(
+            context.get("agent"),
+            Some(&serde_json::Value::String("override-agent".to_string())),
+            "the snapshot env (with overrides) drives derived identity"
         );
     }
 }

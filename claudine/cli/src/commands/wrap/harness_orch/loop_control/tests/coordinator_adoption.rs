@@ -443,7 +443,7 @@ fn inline_closure_ownership_follows_the_adopted_target() {
 
     // Before the hand-off, the router owns closure.
     let before = super::super::super::materialize_harness_prompt(
-        &state,
+        &mut state,
         Some(fx._dir.path()),
         fx._dir.path(),
         None,
@@ -469,7 +469,7 @@ fn inline_closure_ownership_follows_the_adopted_target() {
         .expect("the hop is resolvable and uncontested");
 
     let after = super::super::super::materialize_harness_prompt(
-        &state,
+        &mut state,
         Some(fx._dir.path()),
         fx._dir.path(),
         None,

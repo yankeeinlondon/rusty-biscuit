@@ -87,8 +87,11 @@ pub(super) fn run_step_task(
         }
     };
 
-    let (task_source_context, task_context) =
+    let (task_source_context, task_context, document_epoch) =
         prepare_task_context(&run.prep_context.invocation, task, env_overrides);
+    document_epoch.record_prepared_context_consumer(
+        claudine::invocation_context::PreparedContextConsumer::Lifecycle,
+    );
 
     // A task stack mutates relative to the document that authored the task,
     // including when that document lives outside the sequence repository.
@@ -200,23 +203,26 @@ fn prepare_task_context(
     invocation: &InvocationContext,
     task: &PreflightTask,
     env_overrides: &BTreeMap<String, String>,
-) -> (SourceContext, darkmatter::markdown::compose::ComposeContext) {
+) -> (
+    SourceContext,
+    darkmatter::markdown::compose::ComposeContext,
+    claudine::invocation_context::DocumentEpoch,
+) {
     let task_source_context = invocation
         .derive_source(&task.origin_path)
         .expect("resolved task document always has a parent directory");
     let scan = task_context_scan(task);
     let requirements = darkmatter::markdown::compose::ContextRequirements::for_content(&scan);
-    let evidence = invocation.runtime_evidence(&task_source_context, &requirements);
-    let mut task_context = darkmatter::markdown::compose::ComposeContext::capture_with_evidence(
-        task_source_context.base_dir(),
-        &requirements,
-        &evidence,
-    );
+    // One launch-anchored snapshot per task epoch: launch repository and
+    // package facts come from the invocation owner, while the task document's
+    // own `SourceContext` (returned alongside) still drives file resolution.
+    let document_epoch = invocation.begin_document_epoch();
+    let mut task_context = document_epoch.capture_launch_context(&requirements);
     for (key, value) in env_overrides {
         task_context.env_mut().insert(key.clone(), value.clone());
     }
 
-    (task_source_context, task_context)
+    (task_source_context, task_context, document_epoch)
 }
 
 /// Every authored surface of `task` that can carry a `{{ … }}` expression,
@@ -531,6 +537,7 @@ mod tests {
     struct Fixture {
         _root: tempfile::TempDir,
         launch_repo: PathBuf,
+        launch_dir: PathBuf,
         task_repo: PathBuf,
         task_dir: PathBuf,
     }
@@ -539,15 +546,33 @@ mod tests {
         fn new() -> Self {
             let root = tempfile::tempdir().unwrap();
             let launch_repo = root.path().join("launch");
+            let launch_dir = launch_repo.join("alpha/lib");
             let task_repo = root.path().join("tasks");
             let task_dir = task_repo.join("nested");
-            std::fs::create_dir_all(&launch_repo).unwrap();
+            std::fs::create_dir_all(&launch_dir).unwrap();
             std::fs::create_dir_all(&task_dir).unwrap();
             init_git_repo(&launch_repo);
             init_git_repo(&task_repo);
+            std::fs::write(
+                launch_repo.join("Cargo.toml"),
+                "[workspace]\nmembers = [\"alpha/lib\", \"sibling\"]\nresolver = \"2\"\n",
+            )
+            .unwrap();
+            std::fs::write(
+                launch_dir.join("Cargo.toml"),
+                "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+            )
+            .unwrap();
+            std::fs::create_dir_all(launch_repo.join("sibling")).unwrap();
+            std::fs::write(
+                launch_repo.join("sibling/Cargo.toml"),
+                "[package]\nname = \"sibling\"\nversion = \"0.1.0\"\nedition = \"2024\"\n",
+            )
+            .unwrap();
             Self {
                 _root: root,
                 launch_repo,
+                launch_dir,
                 task_repo,
                 task_dir,
             }
@@ -578,18 +603,20 @@ mod tests {
     }
 
     #[test]
-    fn task_stack_context_belongs_to_the_authoring_repository() {
+    fn task_source_belongs_to_the_authoring_repo_context_to_the_launch_repo() {
         let fixture = Fixture::new();
         let origin_path = fixture.origin_path();
         let mut task = fixture.task();
         task.action = PreflightAction::SideEffect {
             action: json!({"stderr": CTX_REF}),
         };
-        let invocation = InvocationContext::capture_at(&fixture.launch_repo);
+        let invocation = InvocationContext::capture_at(&fixture.launch_dir);
         let env = BTreeMap::from([("TASK_MARKER".to_string(), "owned".to_string())]);
 
-        let (source, context) = prepare_task_context(&invocation, &task, &env);
+        let (source, context, _) = prepare_task_context(&invocation, &task, &env);
 
+        // File resolution stays source-relative: the task document's own
+        // repository drives references and provenance.
         assert_eq!(source.base_dir(), fixture.task_dir);
         assert_eq!(source.repository_root(), Some(fixture.task_repo.as_path()));
         assert_eq!(
@@ -600,11 +627,49 @@ mod tests {
             source.file_resolution_context().repository_root(),
             Some(fixture.task_repo.as_path())
         );
+        // Prepared `ctx.*` is launch-anchored: the task may be authored in a
+        // different repository, but `ctx.repo_root` still reports the one the
+        // caller launched from (D1/AC7).
         assert_eq!(
             context.get("repo_root").and_then(Value::as_str),
-            Some(fixture.task_repo.to_string_lossy().as_ref())
+            Some(biscuit_file::to_portable_string(&fixture.launch_repo).as_str())
         );
         assert_eq!(context.env().get("TASK_MARKER").map(String::as_str), Some("owned"));
+    }
+
+    #[test]
+    fn distributed_task_uses_launch_area_and_selected_target_identity() {
+        let fixture = Fixture::new();
+        std::fs::write(
+            fixture.origin_path(),
+            "kind: task\naction: {stderr: task}\n",
+        )
+        .unwrap();
+        let mut task = fixture.task();
+        task.action = PreflightAction::SideEffect {
+            action: json!({
+                "stderr": "{{ ctx.repo_root }}|{{ ctx.area }}|{{ ctx.agent }}|{{ ctx.model }}|{{ env.AGENT }}|{{ env.MODEL }}"
+            }),
+        };
+        let invocation = InvocationContext::capture_at(&fixture.launch_dir);
+        let env = BTreeMap::from([
+            ("AGENT".to_string(), "codex".to_string()),
+            ("MODEL".to_string(), "gpt-5".to_string()),
+        ]);
+
+        let (source, context, _) = prepare_task_context(&invocation, &task, &env);
+
+        assert_eq!(source.repository_root(), Some(fixture.task_repo.as_path()));
+        assert_eq!(
+            context.get("repo_root").and_then(Value::as_str),
+            Some(biscuit_file::to_portable_string(&fixture.launch_repo).as_str())
+        );
+        assert_eq!(context.get("area").and_then(Value::as_str), Some("alpha"));
+        let effective = context.as_object();
+        assert_eq!(effective.get("agent").and_then(Value::as_str), Some("codex"));
+        assert_eq!(effective.get("model").and_then(Value::as_str), Some("gpt-5"));
+        assert_eq!(context.env().get("AGENT").map(String::as_str), Some("codex"));
+        assert_eq!(context.env().get("MODEL").map(String::as_str), Some("gpt-5"));
     }
 
     /// The control the per-field cases are read against: without a reference the
@@ -613,9 +678,10 @@ mod tests {
     #[test]
     fn a_task_with_no_ctx_reference_captures_no_repository_group() {
         let fixture = Fixture::new();
-        let invocation = InvocationContext::capture_at(&fixture.launch_repo);
+        let invocation = InvocationContext::capture_at(&fixture.launch_dir);
 
-        let (_, context) = prepare_task_context(&invocation, &fixture.task(), &BTreeMap::new());
+        let (_, context, _) =
+            prepare_task_context(&invocation, &fixture.task(), &BTreeMap::new());
 
         assert_eq!(context.get("repo_root"), None);
     }
@@ -623,7 +689,7 @@ mod tests {
     #[test]
     fn every_expression_bearing_field_is_scanned_for_ctx_references() {
         let fixture = Fixture::new();
-        let invocation = InvocationContext::capture_at(&fixture.launch_repo);
+        let invocation = InvocationContext::capture_at(&fixture.launch_dir);
 
         #[allow(clippy::type_complexity)]
         let cases: Vec<(&str, Box<dyn Fn(&mut PreflightTask)>)> = vec![
@@ -685,11 +751,11 @@ mod tests {
             let mut task = fixture.task();
             plant(&mut task);
 
-            let (_, context) = prepare_task_context(&invocation, &task, &BTreeMap::new());
+            let (_, context, _) = prepare_task_context(&invocation, &task, &BTreeMap::new());
 
             assert_eq!(
                 context.get("repo_root").and_then(Value::as_str),
-                Some(fixture.task_repo.to_string_lossy().as_ref()),
+                Some(biscuit_file::to_portable_string(&fixture.launch_repo).as_str()),
                 "`{field}` was not scanned for runtime-context references"
             );
         }
@@ -698,7 +764,7 @@ mod tests {
     #[test]
     fn group_variables_and_member_tasks_are_scanned_for_ctx_references() {
         let fixture = Fixture::new();
-        let invocation = InvocationContext::capture_at(&fixture.launch_repo);
+        let invocation = InvocationContext::capture_at(&fixture.launch_dir);
 
         let group_of = |variables: Map<String, Value>, member: PreflightTask| PreflightAction::Group(
             PreflightGroup {
@@ -727,11 +793,11 @@ mod tests {
             let mut task = fixture.task();
             task.action = action;
 
-            let (_, context) = prepare_task_context(&invocation, &task, &BTreeMap::new());
+            let (_, context, _) = prepare_task_context(&invocation, &task, &BTreeMap::new());
 
             assert_eq!(
                 context.get("repo_root").and_then(Value::as_str),
-                Some(fixture.task_repo.to_string_lossy().as_ref()),
+                Some(biscuit_file::to_portable_string(&fixture.launch_repo).as_str()),
                 "`{label}` was not scanned for runtime-context references"
             );
         }

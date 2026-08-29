@@ -630,6 +630,11 @@ pub struct PreparedComposition {
     /// instead would silently answer `ctx.area` from wherever the process CWD
     /// had drifted to by the time it asked.
     pub compose_context: darkmatter::markdown::compose::ComposeContext,
+    /// Claudine-local recorder that attributes work to this exact epoch.
+    ///
+    /// This remains outside Darkmatter's context value: it observes Claudine
+    /// ownership and consumer wiring without adding runtime identity plumbing.
+    pub document_epoch: Option<crate::invocation_context::DocumentEpoch>,
 }
 
 /// How the composition result should be applied after provider execution.

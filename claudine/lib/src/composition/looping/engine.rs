@@ -66,7 +66,13 @@ pub fn execute_loop(
     let Some(config) = resolve_loop_config(source)? else {
         return Ok(None);
     };
+    let document_epoch = prepare_options.document_epoch.clone();
     let initial_frontmatter = build_loop_seed(source, &config, prepare_options, mode)?;
+    if let Some(epoch) = document_epoch.as_ref() {
+        epoch.record_prepared_context_consumer(
+            crate::invocation_context::PreparedContextConsumer::LoopCondition,
+        );
+    }
     execute_loop_with_config(
         &source.resolved_path,
         &config,
@@ -261,6 +267,7 @@ pub fn execute_loop_with_config(
                     source_path: prompt_path,
                     fallback_dir: None,
                     context: None,
+                    prepared_context: None,
                 },
             )?
         {
@@ -313,6 +320,7 @@ pub fn execute_loop_with_lifecycle<E>(
     shell_runner: &dyn ShellRunner,
     emitter: &dyn LifecycleEmitter,
     file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
+    document_epoch: Option<&crate::invocation_context::DocumentEpoch>,
     mut executor: E,
 ) -> Result<LoopExecutionResult, CompositionError>
 where
@@ -321,6 +329,16 @@ where
         &mut LifecycleRunGuard<'_>,
     ) -> Result<LoopIterationOutput, CompositionError>,
 {
+    if let Some(epoch) = document_epoch {
+        epoch.record_prepared_context_consumer(
+            crate::invocation_context::PreparedContextConsumer::LoopCondition,
+        );
+        if lifecycle_ctx.context.is_some() {
+            epoch.record_prepared_context_consumer(
+                crate::invocation_context::PreparedContextConsumer::Lifecycle,
+            );
+        }
+    }
     let max_iterations = options
         .max_iterations
         .or(config.max_iterations)
@@ -515,7 +533,8 @@ where
                 LoopExpressionLookup::new(&frontmatter, &pre_mutation_ambient)
                     .with_base_dir(base_dir)
                     .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
-                    .with_file_resolution_context(file_resolution_context, prompt_path);
+                    .with_file_resolution_context(file_resolution_context, prompt_path)
+                    .with_prepared_context(lifecycle_ctx.context);
             !evaluate_condition(&config.condition, &pre_mutation_lookup)?
         };
         let ambient = LoopAmbient::new(
@@ -695,6 +714,7 @@ where
                     source_path: prompt_path,
                     fallback_dir: lifecycle_ctx.launch_area,
                     context: file_resolution_context,
+                    prepared_context: lifecycle_ctx.context,
                 },
             )?
         {
@@ -906,7 +926,8 @@ fn run_loop_gate(
     let lookup = LoopExpressionLookup::new(frontmatter, ambient)
         .with_base_dir(base_dir)
         .with_file_ref_fallback_dir(lifecycle_ctx.launch_area)
-        .with_file_resolution_context(file_resolution_context, prompt_path);
+        .with_file_resolution_context(file_resolution_context, prompt_path)
+        .with_prepared_context(lifecycle_ctx.context);
     if !evaluate_condition(&config.condition, &lookup)? {
         return Ok(LoopGateOutcome::Exit);
     }
@@ -1167,7 +1188,8 @@ fn should_continue_after_cap(
     let lookup = LoopExpressionLookup::new(frontmatter, &ambient)
         .with_base_dir(resolution.source_path.parent())
         .with_file_ref_fallback_dir(resolution.fallback_dir)
-        .with_file_resolution_context(resolution.context, resolution.source_path);
+        .with_file_resolution_context(resolution.context, resolution.source_path)
+        .with_prepared_context(resolution.prepared_context);
     evaluate_condition(&config.condition, &lookup)
 }
 
@@ -1176,6 +1198,7 @@ struct LoopFileResolution<'a> {
     source_path: &'a Path,
     fallback_dir: Option<&'a Path>,
     context: Option<&'a biscuit_file::FileResolutionContext>,
+    prepared_context: Option<&'a darkmatter::markdown::compose::ComposeContext>,
 }
 
 #[cfg(test)]

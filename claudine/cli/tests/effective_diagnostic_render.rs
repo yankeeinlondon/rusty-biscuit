@@ -169,7 +169,7 @@ Body
 /// Regression test for the `Box` un-downcastability recorded in `decisions.md`
 /// D-7, caught at Phase 7 by driving this route through a real terminal.
 ///
-/// `preflight_proxy_target` returns `Result<(), Box<CompositionError>>`, and
+/// `preflight_harness_document` returns `Result<(), Box<CompositionError>>`, and
 /// `loop_control.rs` handed that straight to `Report::from`. A `Report` built
 /// from `Box<E>` publishes **`Box<E>`** to the cause chain — `Box<E>` is itself
 /// an `Error` — so `as_diagnostic`'s downcast allowlist, which is keyed on the

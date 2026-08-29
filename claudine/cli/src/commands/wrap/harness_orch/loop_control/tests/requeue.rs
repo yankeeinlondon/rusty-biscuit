@@ -20,6 +20,8 @@ fn requeue_prompt_state(source: &Path) -> HarnessPromptState {
         input_layers: Default::default(),
         entry: claudine::composition::DocumentEntryReason::Direct,
         invocation_context: None,
+        epoch_context: None,
+        document_epoch: None,
         source_context: None,
     }
 }
@@ -37,6 +39,7 @@ fn requeue_materialized(prompt: &str) -> MaterializedHarnessPrompt {
         inline_closure_plan: None,
         file_resolution_context: None,
         compose_context: None,
+        document_epoch: None,
         live_frontmatter,
         runtime_state: std::sync::Arc::new(claudine::composition::RuntimeState::new()),
         lifecycle: None,

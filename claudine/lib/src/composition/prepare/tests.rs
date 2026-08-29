@@ -97,7 +97,50 @@ fn canonical_preparation_records_each_compose_on_the_request_owner() {
     )
     .unwrap();
 
-    assert_eq!(invocation.work_snapshot().compose_operations, 2);
+    let work = invocation.work_snapshot();
+    assert_eq!(work.compose_operations, 2);
+    assert_eq!(work.ambient_fallbacks, 2);
+    assert!(work.prepared_context_consumers.is_empty());
+}
+
+#[test]
+fn canonical_preparation_observes_populated_snapshot_consumers() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &[("prepared", json!("{{ ctx.os }}"))],
+        "{{ ctx.os }}",
+    );
+    let invocation = crate::invocation_context::InvocationContext::capture_at(dir.path());
+    let requirements =
+        darkmatter::markdown::compose::ContextRequirements::for_document(&source.markdown);
+    let document_epoch = invocation.begin_document_epoch();
+    let context = document_epoch.capture_launch_context(&requirements);
+
+    let prepared = prepare_direct(
+        &source,
+        PrepareOptions {
+            invocation_context: Some(invocation.clone()),
+            document_epoch: Some(document_epoch),
+            prepared_context: Some(context),
+            ..PrepareOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert_eq!(
+        prepared.document_epoch.unwrap().work_snapshot(),
+        crate::invocation_context::DocumentEpochWork {
+            launch_context_constructions: 1,
+            launch_context_extensions: 0,
+            ambient_fallbacks: 0,
+            prepared_context_consumers: std::collections::BTreeMap::from([
+                ("body".to_string(), 1),
+                ("effective-frontmatter".to_string(), 1),
+            ]),
+        },
+        "direct canonical preparation must be one exact epoch"
+    );
 }
 
 #[test]
