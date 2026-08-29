@@ -19,9 +19,20 @@ fn point_endpoint_at(endpoint: &LocalEndpoint) {
     unsafe { std::env::set_var(ENDPOINT_ENV_VAR, endpoint_env_value(endpoint)) };
 }
 
-/// Boot a daemon on a fresh private endpoint and point the reporter at it.
+/// Boot a daemon on a fresh private endpoint, point the reporter at it, and
+/// return only once the endpoint accepts a connection.
+///
+/// The reporter under test gives a report [`super::REPORT_TIMEOUT`] (250 ms)
+/// end to end, by design: a session report must never delay launching the
+/// agent. A daemon that `spawn_local_server` returned a heartbeat ago is not
+/// necessarily listening yet, and on a loaded Windows runner its first
+/// named-pipe accept alone exceeded that budget — so the first report was
+/// dropped and `session_id` came back `None`. Waiting here keeps the 250 ms
+/// budget an assertion about the reporter, not about daemon boot time.
 #[cfg(feature = "daemon-tests")]
-fn boot_daemon(tmp: &tempfile::TempDir) -> (rendezvous_daemon::server::ServerHandle, LocalEndpoint) {
+async fn boot_daemon(
+    tmp: &tempfile::TempDir,
+) -> (rendezvous_daemon::server::ServerHandle, LocalEndpoint) {
     let endpoint = private_endpoint(tmp.path(), "daemon");
     point_endpoint_at(&endpoint);
 
@@ -31,6 +42,17 @@ fn boot_daemon(tmp: &tempfile::TempDir) -> (rendezvous_daemon::server::ServerHan
     config.networking = None;
     let handle = rendezvous_daemon::local_transport::spawn_local_server(endpoint.clone(), config)
         .expect("spawn daemon");
+
+    let deadline = Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        match rendezvous_client::connect(&endpoint).await {
+            Ok(_) => break,
+            Err(_) if Instant::now() < deadline => {
+                tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+            }
+            Err(error) => panic!("daemon never accepted a connection within 10s: {error}"),
+        }
+    }
     (handle, endpoint)
 }
 
@@ -73,7 +95,7 @@ async fn kill_switch_disables_reporting() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn round_trip_against_live_daemon() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let (daemon, endpoint) = boot_daemon(&tmp);
+    let (daemon, endpoint) = boot_daemon(&tmp).await;
 
     let child_env: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString> =
         [(
@@ -127,7 +149,7 @@ async fn round_trip_against_live_daemon() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn status_reporter_flips_and_clears_waiting() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let (daemon, endpoint) = boot_daemon(&tmp);
+    let (daemon, endpoint) = boot_daemon(&tmp).await;
 
     let child_env: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString> = [(
         std::ffi::OsString::from("CLAUDINE_SESSION_ID"),
@@ -200,7 +222,7 @@ async fn report_status_kill_switch_and_missing_session_are_fast_noops() {
 async fn report_status_flips_idle_and_clears_to_active() {
     unsafe { std::env::remove_var(ENABLE_ENV) };
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let (daemon, endpoint) = boot_daemon(&tmp);
+    let (daemon, endpoint) = boot_daemon(&tmp).await;
 
     let child_env: std::collections::HashMap<std::ffi::OsString, std::ffi::OsString> = [(
         std::ffi::OsString::from("CLAUDINE_SESSION_ID"),
@@ -237,7 +259,7 @@ async fn report_status_flips_idle_and_clears_to_active() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn started_records_permission_signal_per_provider() {
     let tmp = tempfile::TempDir::new().expect("tempdir");
-    let (daemon, endpoint) = boot_daemon(&tmp);
+    let (daemon, endpoint) = boot_daemon(&tmp).await;
 
     let child_env = |session: &str| {
         [(
