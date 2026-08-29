@@ -673,11 +673,21 @@ impl ProcessTree {
     /// establishing it: a child observed outside its own group means the
     /// isolation the deadline depends on does not exist, and the command must
     /// not run.
+    ///
+    /// A child that already exited is still owned: its group id was its pid by
+    /// construction, and any descendant that outlives it stays in that group.
+    /// macOS answers `getpgid` with `ESRCH` for an exited-but-unreaped process
+    /// (Linux still reports the zombie's group), so a command as fast as
+    /// `printf` would otherwise fail ownership on macOS purely by timing.
     fn own(child: &Child) -> Result<Self, std::io::Error> {
         let pid = child.id() as i32;
         let pgid = unsafe { libc::getpgid(pid) };
         if pgid < 0 {
-            return Err(std::io::Error::last_os_error());
+            let error = std::io::Error::last_os_error();
+            if error.raw_os_error() == Some(libc::ESRCH) {
+                return Ok(Self { pgid: pid });
+            }
+            return Err(error);
         }
         if pgid != pid {
             return Err(std::io::Error::other(format!(

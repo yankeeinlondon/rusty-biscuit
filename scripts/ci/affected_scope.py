@@ -15,6 +15,7 @@ import re
 import subprocess
 from datetime import date
 from pathlib import Path, PurePosixPath
+from collections.abc import Callable
 from typing import Any
 
 
@@ -680,12 +681,73 @@ def validate_no_shadow_workspaces(metadata: dict[str, Any], root: Path) -> None:
         )
 
 
-def global_trigger(files: list[str]) -> str | None:
-    """Return the first changed path that forces full workspace scope, if any."""
+def is_global_path(raw_file: str) -> bool:
+    normalized = raw_file.replace("\\", "/").removeprefix("./")
+    return normalized in GLOBAL_PATHS or normalized.startswith(GLOBAL_PREFIXES)
+
+
+def diff_against(base_ref: str, path: str) -> str | None:
+    """Unified diff of `path` between `base_ref` and the working tree.
+
+    `None` when Git cannot produce it (unknown ref, shallow clone, no Git),
+    which callers must treat as "undecidable": the global trigger then stands.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "diff", "--no-color", "--unified=0", base_ref, "--", path],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=ROOT,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def diff_changes_more_than_comments(diff_text: str) -> bool:
+    """True when a unified diff adds or removes a line that is not a `#` comment
+    or blank.
+
+    Every global input — justfiles, TOML, workflow YAML, this script — uses `#`
+    line comments, so one rule covers them all. It is deliberately naive about
+    context: a changed `#` line inside a shell heredoc is still ignored, which
+    can only ever make CI *smaller* by not noticing text no build executes.
+    """
+    for line in diff_text.splitlines():
+        if line.startswith(("+++", "---")):
+            continue
+        if not line.startswith(("+", "-")):
+            continue
+        body = line[1:].strip()
+        if body and not body.startswith("#"):
+            return True
+    return False
+
+
+def global_trigger(
+    files: list[str],
+    base_ref: str | None = None,
+    differ: Callable[[str, str], str | None] = diff_against,
+) -> str | None:
+    """Return the first changed path that forces full workspace scope, if any.
+
+    With `base_ref`, a global path whose diff touches only comments and blank
+    lines is not a trigger: nine comment lines in the root justfile once
+    scheduled all 72 packages (PR #59). Without `base_ref`, or when the diff is
+    unobtainable, the path stays a trigger — the fallback is always wider.
+    """
     for raw_file in files:
+        if not is_global_path(raw_file):
+            continue
         normalized = raw_file.replace("\\", "/").removeprefix("./")
-        if normalized in GLOBAL_PATHS or normalized.startswith(GLOBAL_PREFIXES):
-            return normalized
+        if base_ref is not None:
+            diff = differ(base_ref, normalized)
+            if diff is not None and not diff_changes_more_than_comments(diff):
+                continue
+        return normalized
     return None
 
 
@@ -808,7 +870,7 @@ def changed_package_ids(
 
     for raw_file in files:
         normalized = raw_file.replace("\\", "/").removeprefix("./")
-        if normalized in GLOBAL_PATHS or normalized.startswith(GLOBAL_PREFIXES):
+        if is_global_path(normalized):
             return set(packages), True
 
         if normalized == LOCKFILE_PATH:
@@ -965,13 +1027,21 @@ def calculate_scope(
     policy: dict[str, dict[str, Any]],
     force_all: bool = False,
     base_lockfile: str | None = None,
+    base_ref: str | None = None,
+    differ: Callable[[str, str], str | None] = diff_against,
 ) -> dict[str, Any]:
     packages = workspace_packages(metadata)
 
     if force_all:
         affected_ids = set(packages)
         full_scope = True
+    elif global_trigger(files, base_ref, differ) is not None:
+        affected_ids = set(packages)
+        full_scope = True
     else:
+        # Any global path still present is comment-only (proved above) and
+        # selects nothing: no build executes it.
+        files = [raw for raw in files if not is_global_path(raw)]
         lock_impacted = None
         if any(
             raw.replace("\\", "/").removeprefix("./") == LOCKFILE_PATH for raw in files
@@ -1024,7 +1094,7 @@ def calculate_scope(
         )
 
     change_class, preflight_os, preflight_reason = classify_preflight(
-        files, matrix, full_scope, force_all, environments
+        files, matrix, full_scope, force_all, environments, base_ref, differ
     )
 
     top_dirs = {
@@ -1060,6 +1130,8 @@ def classify_preflight(
     full_scope: bool,
     force_all: bool,
     environments: list[dict[str, Any]],
+    base_ref: str | None = None,
+    differ: Callable[[str, str], str | None] = diff_against,
 ) -> tuple[str, list[str], str]:
     """Classify the change and derive its bootstrap-preflight OS matrix (D3).
 
@@ -1072,7 +1144,7 @@ def classify_preflight(
         if force_all:
             reason = "explicit full-scope request selects every runner OS"
         else:
-            trigger = global_trigger(files)
+            trigger = global_trigger(files, base_ref, differ)
             reason = (
                 f"global CI/tooling input changed ({trigger}); "
                 "preflight runs on every runner OS before fan-out"
@@ -1120,6 +1192,14 @@ def parse_args() -> argparse.Namespace:
             "undecidable and selects the full workspace"
         ),
     )
+    parser.add_argument(
+        "--base-ref",
+        help=(
+            "the base revision to diff global inputs against. With it, a "
+            "justfile/TOML/workflow change that touches only comments and blank "
+            "lines does not select the full workspace"
+        ),
+    )
     parser.add_argument("files", nargs="*", help="changed repository-relative paths")
     return parser.parse_args()
 
@@ -1138,7 +1218,14 @@ def main() -> None:
             base_lockfile = candidate.read_text(encoding="utf-8")
 
     scope = calculate_scope(
-        args.files, ROOT, metadata, environments, policy, args.all, base_lockfile
+        args.files,
+        ROOT,
+        metadata,
+        environments,
+        policy,
+        args.all,
+        base_lockfile,
+        base_ref=args.base_ref,
     )
     print(json.dumps(scope, separators=(",", ":")))
 

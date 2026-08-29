@@ -196,7 +196,11 @@ OS). `.github/workflows/ci.yml` calculates changed workspace packages and their
 reverse Cargo dependencies, reads each package's policy from its
 `[package.metadata.ci]`, and fans the resulting matrix into the reusable
 `.github/workflows/_package-ci.yml`. Platform behavior is uniform without starting
-jobs for unrelated packages.
+jobs for unrelated packages. Global inputs (`justfile`, `just/`, `Cargo.toml`,
+the workflows, `.config/nextest.toml`, ...) select the whole workspace — but by
+*content*, not by name: the scope step passes `--base-ref`, and a global file
+whose diff touches only `#` comments and blank lines is scoped like
+documentation. An unobtainable diff keeps the trigger (widened, never narrowed).
 
 A bootstrap `preflight` job runs first (3 OSes for global CI/tooling changes, a
 scoped OS set for package-local changes) and gates the package fan-out via
@@ -206,6 +210,24 @@ expensive `l2`/`browser` tiers stage behind `test`. Lint deliberately does not
 gate L1 — one clippy hint used to delete every L1 leg's evidence for a whole
 directory of packages, which is how Claudine's Windows tests never ran.
 Independent packages run in parallel (`fail-fast: false`).
+
+### Running the CI gates locally
+
+`just ci-local` runs, on this host, the same two gates CI runs for every
+package CI would schedule — `just _lint <pkg>` (clippy, `--all-targets`, **no
+features**) and `just _test <pkg> --no-fail-fast <declared CI features>` —
+with the scope computed by the same `scripts/ci/affected_scope.py` from the
+files that differ from `origin/main` (`--base <ref>` to change it). Use it as the
+discovery loop before pushing; CI remains the proof. `--lint-only` is the cheap
+first pass: the no-features clippy build is where incomplete `terminal-tests` /
+`daemon-tests` gating surfaces, and it is what caught four of the seven CI
+rounds on 2026-08-27. `--dry-run` prints the scope without building; named
+packages or areas skip the scope calculation. L2/L3/browser tiers, WSL
+archives, and the Windows runner are not replicated.
+
+The versioned pre-push hook (`.githooks/pre-push`, installed by `just init`
+into `.git/hooks`) runs `just lint` for the changed areas before `just test`
+for the same reason.
 
 ### Toolchain
 

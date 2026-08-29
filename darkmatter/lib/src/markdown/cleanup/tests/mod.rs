@@ -3,6 +3,7 @@ use super::*;
 mod blockquote;
 mod brackets;
 mod emphasis;
+mod escapes;
 mod lists;
 mod parse_count;
 mod reflow;
