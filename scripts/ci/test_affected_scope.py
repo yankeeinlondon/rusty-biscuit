@@ -1288,7 +1288,17 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
         )
 
     def test_sniff_change_selects_exact_direct_dependents(self) -> None:
+        # Deliberate friction: this exact list makes a human acknowledge a
+        # change to sniff's direct dependents. On mismatch, the message below
+        # hands back the computed list ready to paste into this fixture.
         scope = self.scope("sniff/lib/src/lib.rs")
+        computed = scope["packages"]
+        paste_ready = "\n".join(f'                "{name}",' for name in computed)
+        hint = (
+            "\nsniff's direct dependents changed (a workspace dependency edge "
+            "was added or removed). If intentional, replace the expected list "
+            f"in {__file__} :: {self._testMethodName} with:\n{paste_ready}"
+        )
         self.assertEqual(
             [
                 "biscuit-speaks",
@@ -1313,7 +1323,8 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
                 "worktree",
                 "worktree-cli",
             ],
-            scope["packages"],
+            computed,
+            hint,
         )
 
 

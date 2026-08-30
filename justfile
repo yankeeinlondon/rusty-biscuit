@@ -128,6 +128,14 @@ pre-push *areas="claudine darkmatter":
     @just _orchestrate lint {{ areas }}
     @just test {{ areas }}
 
+# run one package's L1 suite on the standing build-host clones (real Linux +
+# native Windows) against the LOCAL tree — no commit or push needed. The
+# expected pre-push step for changes touching path semantics, process
+# spawning, or terminal behavior, which macOS L1 cannot exercise.
+# Usage: just cross-check <package> [--host linux|windows|all] [nextest args]
+cross-check *args:
+    @./scripts/cross-check.sh {{ args }}
+
 # run Level 1 tests for the .githooks/pre-push shell hook itself
 test-pre-push-hook:
     @./.githooks/tests/test-pre-push.sh
