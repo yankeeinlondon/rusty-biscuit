@@ -400,7 +400,9 @@ fn verbatim_anchor_resolves_a_slash_separated_reference() {
 
 /// A caller-supplied repository root and base commonly reach the resolver from
 /// different producers (`gix` discovery yields legacy, `canonicalize` yields
-/// verbatim). Two spellings of one directory must not become two candidates.
+/// verbatim). Two spellings of one directory must not become two candidates,
+/// and the survivor carries the same source provenance as the same-spelling
+/// collapse in [`implicit_when_base_is_repository_root_dedupes_to_one_candidate`].
 #[cfg(windows)]
 #[test]
 fn verbatim_and_legacy_spellings_of_one_root_dedupe_to_one_candidate() {
@@ -417,7 +419,7 @@ fn verbatim_and_legacy_spellings_of_one_root_dedupe_to_one_candidate() {
     assert_eq!(candidates.len(), 1, "one directory yields one candidate");
     assert_eq!(
         candidates[0].candidate().provenance(),
-        RootProvenance::Repository,
+        RootProvenance::Source,
     );
     assert_eq!(detailed.matched_path(), Some(plain.join("top.md").as_path()));
 }

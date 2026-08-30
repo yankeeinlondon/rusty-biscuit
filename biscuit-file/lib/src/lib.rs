@@ -135,7 +135,7 @@ pub use format::DataFormat;
 pub use list_format::{ListFormat, classify_list};
 
 // Re-export the path→text rendering boundary
-pub use path_text::{to_portable_string, try_portable_string};
+pub use path_text::{canonicalize_simplified, to_portable_string, try_portable_string};
 
 // Re-export format-specific types
 #[cfg(feature = "toml")]

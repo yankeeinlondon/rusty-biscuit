@@ -820,7 +820,9 @@ edition = "2024"
     }
 
     let ctx = resolve_launch_workspace_context(&docs_dir, None);
-    let canonical_repo_root = repo_root.path().canonicalize().unwrap();
+    // `canonical_or_self` yields the legacy (dunce-simplified) spelling, so
+    // the expectation must not carry a verbatim `\\?\` prefix on Windows.
+    let canonical_repo_root = biscuit_file::canonicalize_simplified(repo_root.path()).unwrap();
 
     assert_eq!(ctx.launch_cwd, docs_dir);
     assert_eq!(

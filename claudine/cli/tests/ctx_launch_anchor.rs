@@ -8,7 +8,7 @@
 //! canonical capture owner — no hand-built `ComposeContext` is injected.
 
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tempfile::tempdir;
 
 mod common;
@@ -50,6 +50,21 @@ const PROBE_DOC: &str =
 
 fn write_probe(path: &Path) {
     write(path, &format!("{PROBE_DOC}{PROBE_BODY}"));
+}
+
+/// The spelling the launched CLI reports for a fixture path.
+///
+/// On Unix the child's `current_dir()` is symlink-resolved (macOS tempdirs
+/// live under the `/var` → `/private/var` symlink), so expectations must
+/// canonicalize. On Windows `set_current_dir` preserves the given spelling
+/// (including 8.3 short names on CI), and `canonicalize` would instead
+/// produce a verbatim `\\?\` long-name form the CLI never emits.
+fn launched_spelling(path: &Path) -> PathBuf {
+    if cfg!(windows) {
+        path.to_path_buf()
+    } else {
+        path.canonicalize().expect("canonical launch path")
+    }
 }
 
 fn run_dry_run(launch_dir: &Path, home: &Path, doc: &Path) -> String {
@@ -95,9 +110,7 @@ fn dry_run_reports_the_launch_area_for_root_and_package_prompts() {
         assert!(
             output.contains(&format!(
                 "CWD={}",
-                biscuit_file::to_portable_string(
-                    &launch_dir.canonicalize().expect("canonical launch directory")
-                )
+                biscuit_file::to_portable_string(&launched_spelling(&launch_dir))
             )),
             "launch CWD must be reported for {}\noutput:\n{output}",
             doc.display()
@@ -223,9 +236,7 @@ fn opposing_area_real_route_separates_launch_surfaces_from_source_files() {
         provider.contains("AREA=alpha") && provider.contains("FILE=true"),
         "provider-bound body must contain launch area and source-owned eager file: {provider}"
     );
-    let expected_cwd = biscuit_file::to_portable_string(
-        &launch_dir.canonicalize().expect("canonical launch directory"),
-    );
+    let expected_cwd = biscuit_file::to_portable_string(&launched_spelling(&launch_dir));
     assert!(provider.contains(&format!("CWD={expected_cwd}")), "{provider}");
     assert!(
         provider.contains("SOURCE-BODY") && !provider.contains("LAUNCH-FRAGMENT"),
@@ -322,19 +333,23 @@ fn caller_file_anchor_survives_direct_and_proxy_success_guards() {
             .success();
     }
 
-    let expected = biscuit_file::to_portable_string(
-        &launch_spec.canonicalize().expect("canonical launch spec"),
-    );
+    let expected = biscuit_file::to_portable_string(&launched_spelling(&launch_spec));
     let provider = fs::read_to_string(&provider_log).unwrap_or_default();
     assert_eq!(provider.matches("TARGET SPEC=").count(), 2, "{provider}");
     assert!(provider.contains(&format!("TARGET SPEC={expected}")), "{provider}");
     let events = fs::read_to_string(root.join("events.log")).unwrap_or_default();
-    let expected_cwd = biscuit_file::to_portable_string(
-        &launch_dir.canonicalize().expect("canonical launch directory"),
-    );
+    // D8.4: `{{ spec }}` in a lifecycle action carries the eager file()'s
+    // NATIVE identity; only body/Markdown presentation is portable. ctx.cwd
+    // is portable on every surface.
+    let expected_spec_native = launched_spelling(&launch_spec)
+        .components()
+        .collect::<PathBuf>()
+        .display()
+        .to_string();
+    let expected_cwd = biscuit_file::to_portable_string(&launched_spelling(&launch_dir));
     assert_eq!(
         events
-            .matches(&format!("anchored={expected} cwd={expected_cwd}"))
+            .matches(&format!("anchored={expected_spec_native} cwd={expected_cwd}"))
             .count(),
         2,
         "{events}"
@@ -393,12 +408,8 @@ fn loop_route_keeps_launch_area_for_root_and_package_documents() {
     let provider = fs::read_to_string(&provider_log).unwrap_or_default();
     assert!(provider.contains("root:AREA=alpha"));
     assert!(provider.contains("area:AREA=alpha"));
-    let expected_cwd = biscuit_file::to_portable_string(
-        &launch_dir.canonicalize().expect("canonical launch directory"),
-    );
-    let expected_spec = biscuit_file::to_portable_string(
-        &launch_spec.canonicalize().expect("canonical launch spec"),
-    );
+    let expected_cwd = biscuit_file::to_portable_string(&launched_spelling(&launch_dir));
+    let expected_spec = biscuit_file::to_portable_string(&launched_spelling(&launch_spec));
     assert_eq!(provider.matches(&format!("CWD={expected_cwd}")).count(), 4);
     assert_eq!(provider.matches(&format!("SPEC={expected_spec}")).count(), 4);
     assert_eq!(
@@ -407,11 +418,18 @@ fn loop_route_keeps_launch_area_for_root_and_package_documents() {
         "each equivalent loop document must run its seed attempt and one iteration: {provider}"
     );
     let events = fs::read_to_string(root.join("loop-events.log")).unwrap_or_default();
+    // D8.4: the lifecycle `{{ spec }}` surface carries the native identity,
+    // unlike the portable body rendering asserted through the provider log.
+    let expected_spec_native = launched_spelling(&launch_spec)
+        .components()
+        .collect::<PathBuf>()
+        .display()
+        .to_string();
     assert!(events.contains(&format!(
-        "root:ctx=alpha:cwd={expected_cwd}:fm=alpha/{expected_cwd}:spec={expected_spec}"
+        "root:ctx=alpha:cwd={expected_cwd}:fm=alpha/{expected_cwd}:spec={expected_spec_native}"
     )));
     assert!(events.contains(&format!(
-        "area:ctx=alpha:cwd={expected_cwd}:fm=alpha/{expected_cwd}:spec={expected_spec}"
+        "area:ctx=alpha:cwd={expected_cwd}:fm=alpha/{expected_cwd}:spec={expected_spec_native}"
     )));
 }
 

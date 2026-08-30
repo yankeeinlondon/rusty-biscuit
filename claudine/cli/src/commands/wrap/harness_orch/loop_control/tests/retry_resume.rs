@@ -147,7 +147,9 @@ fn canonical_retry_and_resume_reentry_each_produce_exact_epoch_work() {
     let expected_cwd = biscuit_file::to_portable_string(fx._dir.path());
     assert!(retried.prompt.contains(&format!("cwd={expected_cwd}")));
     assert_eq!(retried.frontmatter["prepared_cwd"], serde_json::json!(expected_cwd));
-    let expected_spec = biscuit_file::to_portable_string(&fx._dir.path().join("spec.md"));
+    // D8.4: an eager file() materializes the winning absolute NATIVE path —
+    // unlike ctx.cwd above, this value is never portable-converted.
+    let expected_spec = fx._dir.path().join("spec.md").display().to_string();
     assert_eq!(retried.frontmatter["spec"], serde_json::json!(expected_spec));
     guard.set_config(retried.lifecycle.clone().unwrap());
     let start = run_start_lifecycle_event(

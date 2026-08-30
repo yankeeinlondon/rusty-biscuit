@@ -145,7 +145,11 @@ fn recording_action(observed: &Path) -> (String, String) {
 fn recording_action(observed: &Path) -> (String, String) {
     (
         "cmd.exe".to_string(),
-        format!(r#"/D /C "echo %AGENT_CWD%>\"{}\"""#, observed.display()),
+        // Params are shell_words-split into argv. Single quotes keep the
+        // backslashed path intact and vanish in the split; an embedded `"`
+        // would instead be re-escaped as `\"` for CreateProcess, which
+        // cmd.exe does not un-escape. Fixture paths contain no spaces.
+        format!("/D /C echo %AGENT_CWD%>'{}'", observed.display()),
     )
 }
 

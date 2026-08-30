@@ -2580,8 +2580,11 @@ mod tests {
         let launch = tempfile::tempdir().unwrap();
         let target = tempfile::tempdir().unwrap();
         std::env::set_current_dir(launch.path()).unwrap();
+        // The anchor is captured as `current_dir()` reports it (symlink-resolved
+        // on macOS, legacy short-name spelling on Windows) — not `canonicalize`,
+        // whose verbatim `\\?\` form never enters the context.
+        let expected = std::env::current_dir().unwrap();
         let mut options = ComposeOptions::new();
-        let expected = std::fs::canonicalize(launch.path()).unwrap();
 
         std::env::set_current_dir(target.path()).unwrap();
         options.source = ComposeSource::File(target.path().join("prompt.md"));

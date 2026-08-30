@@ -127,7 +127,7 @@ fn explicit_context_is_shared_by_enumeration_graph_and_validation() {
     let refs = md.transclusions_with_options(&compose).unwrap();
     assert_eq!(
         refs[0].resolved_target.as_deref(),
-        Some(repo.path().join("docs/shared.md").to_string_lossy().as_ref())
+        Some(repo.path().join("docs").join("shared.md").to_string_lossy().as_ref())
     );
 
     let graph = md.reference_graph(graph_options.clone()).unwrap();

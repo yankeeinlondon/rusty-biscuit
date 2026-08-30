@@ -60,12 +60,14 @@ fn prompt_magic_roots_skip_absent_anchors() {
 
 #[test]
 fn prompt_magic_candidates_interleave_conventions_and_intrinsic_scopes_once() {
-    let repo = Path::new("/repo");
-    let area = Path::new("/repo/claudine");
-    let package = Path::new("/repo/claudine/lib");
-    let home = Path::new("/home/u");
+    // Roots must be host-absolute for the scope catalog; none need to exist.
+    let fixture = TempDir::new().unwrap();
+    let repo = fixture.path().join("repo");
+    let area = repo.join("claudine");
+    let package = area.join("lib");
+    let home = fixture.path().join("home");
     let catalog = biscuit_file::RepositoryScopeCatalog::new(
-        repo,
+        repo.clone(),
         vec![area.to_path_buf()],
         vec![package.to_path_buf()],
         biscuit_file::PackageAreaFallback::FirstComponent,
@@ -77,7 +79,7 @@ fn prompt_magic_candidates_interleave_conventions_and_intrinsic_scopes_once() {
         HashMap::new(),
     )
     .with_repository_scope_catalog(catalog);
-    for root in prompt_magic_roots(Some(repo), Some(area), Some(package), Some(home)) {
+    for root in prompt_magic_roots(Some(&repo), Some(&area), Some(&package), Some(&home)) {
         context = context.add_magic_path(root, PathPosition::Start);
     }
 

@@ -117,7 +117,7 @@ mod loading {
         assert_eq!(graph.prompt_documents.len(), 1);
         assert_eq!(
             graph.prompt_documents[0].path,
-            fs::canonicalize(task_repo.join("repo-prompt.md")).unwrap(),
+            dunce::canonicalize(task_repo.join("repo-prompt.md")).unwrap(),
             "the nested bare reference must search the task document's repository root",
         );
         assert_eq!(invocation.work_snapshot().topology_probes, 2);
@@ -235,7 +235,7 @@ mod loading {
             graph
                 .prompt_documents
                 .iter()
-                .any(|document| document.path == fs::canonicalize(nested.join("magic.md")).unwrap()),
+                .any(|document| document.path == dunce::canonicalize(nested.join("magic.md")).unwrap()),
             "the nested task's prompt must resolve from the external group/task authoring base",
         );
     }
@@ -326,7 +326,7 @@ mod loading {
         let graph = graph_for(&source).unwrap();
         let document = &graph.prompt_documents[0];
         assert!(
-            document.path.starts_with(fs::canonicalize(&nested).unwrap()),
+            document.path.starts_with(dunce::canonicalize(&nested).unwrap()),
             "the task file's sibling must win, got {}",
             document.path.display(),
         );

@@ -1296,6 +1296,7 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
                 "biscuit-terminal-cli",
                 "claudine",
                 "claudine-cli",
+                "claudine-gen",
                 "darkmatter",
                 "darkmatter-cli",
                 "messenger",

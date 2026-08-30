@@ -129,7 +129,10 @@ fn validate_one(
     assignments: &[Assignment],
     no_trigger_schemas: bool,
 ) -> FileOutcome {
-    let discovery_path = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    // Legacy-spelling canonicalization: a verbatim `\\?\` result would gain a
+    // path segment the gix-derived boundary lacks, disabling trigger discovery.
+    let discovery_path =
+        biscuit_file::canonicalize_simplified(file).unwrap_or_else(|_| file.to_path_buf());
     let mut md = match Markdown::try_from(discovery_path.as_path()) {
         Ok(md) => md,
         Err(err) => return FileOutcome::ParseError(err.to_string()),

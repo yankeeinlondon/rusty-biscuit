@@ -11,7 +11,10 @@ use std::path::Path;
 
 /// Prints repository roots, shadowing, and arm-by-arm trigger results.
 pub fn run_triggers(file: &Path) -> Result<()> {
-    let document_path = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    // Legacy-spelling canonicalization: a verbatim `\\?\` result would gain a
+    // path segment the gix-derived boundary lacks, failing `normalize_path`.
+    let document_path =
+        biscuit_file::canonicalize_simplified(file).unwrap_or_else(|_| file.to_path_buf());
     let markdown = Markdown::try_from(document_path.as_path())?;
     let boundary = capture_file_resolution_context(document_path.parent().unwrap_or(&document_path))
         .repository_root()

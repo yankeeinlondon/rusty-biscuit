@@ -282,7 +282,10 @@ exit 0
         .env("NO_COLOR", "1")
         .env("PATH", &path_dir)
         .env("TERM", "dumb")
-        .env("TERM_WIDTH", "80")
+        // Wide enough that no env-value line ever wraps: wrap position depends
+        // on the UNREDACTED tempdir path length, which varies by host (macOS
+        // /var/folders vs Linux /tmp), so at 80 the snapshot is host-dependent.
+        .env("TERM_WIDTH", "200")
         .env("OPENAI_API_KEY", "keep")
         .env("INTERNAL_TOKEN", "remove")
         .current_dir(&cwd_dir)

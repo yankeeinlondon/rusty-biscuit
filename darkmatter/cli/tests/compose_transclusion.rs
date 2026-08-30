@@ -50,6 +50,15 @@ fn compose_with_the_shipped_baseline_renders_ctx_cwd_from_the_launch_directory()
     let prompt = launch.path().join("cwd.md");
     std::fs::write(&prompt, "Launch: {{ ctx.cwd }}\n").unwrap();
 
+    // ctx.cwd carries the child's `current_dir()` spelling: symlink-resolved
+    // on Unix (macOS /var/folders), exactly as-launched on Windows, where CI
+    // tempdirs use 8.3 short names that `canonicalize` would re-spell.
+    #[cfg(windows)]
+    let expected_launch = launch.path().to_path_buf();
+    #[cfg(not(windows))]
+    let expected_launch =
+        std::fs::canonicalize(launch.path()).expect("canonical launch directory");
+
     md_cmd()
         .current_dir(launch.path())
         .arg("compose")
@@ -58,9 +67,7 @@ fn compose_with_the_shipped_baseline_renders_ctx_cwd_from_the_launch_directory()
         .success()
         .stdout(predicate::str::contains(format!(
             "Launch: {}",
-            biscuit_file::to_portable_string(
-                &std::fs::canonicalize(launch.path()).expect("canonical launch directory")
-            )
+            biscuit_file::to_portable_string(&expected_launch)
         )));
 }
 

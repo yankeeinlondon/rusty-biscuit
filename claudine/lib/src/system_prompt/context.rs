@@ -147,8 +147,11 @@ fn select_package_area_root(cwd: &Path, repo_root: &Path, packages: &[Package]) 
         .max_by_key(|area_root| area_root.components().count())
 }
 
+/// Legacy-spelling canonicalization: these paths are stored on the context
+/// and later re-enter repository discovery and reference resolution, where a
+/// verbatim `\\?\` spelling is rejected as a device-prefix path.
 fn canonical_or_self(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]

@@ -65,8 +65,9 @@ fn one_launch_observation_projects_every_existing_context() {
 
     assert_eq!(file_resolution.base_dir(), fixture.path());
     // `LaunchContext` canonicalizes every path it projects so search-dir
-    // dedup compares one form; the authored roots below are unaffected.
-    let canonical_fixture = fixture.path().canonicalize().unwrap();
+    // dedup compares one form — in the legacy (dunce-simplified) spelling,
+    // never verbatim; the authored roots below are unaffected.
+    let canonical_fixture = biscuit_file::canonicalize_simplified(fixture.path()).unwrap();
     assert_eq!(launch.repo_root.as_deref(), Some(canonical_fixture.as_path()));
     assert_eq!(workspace.repo_root.as_deref(), Some(fixture.path()));
     assert_eq!(environment.git.as_ref().map(|git| git.repo_root.as_path()), Some(fixture.path()));
