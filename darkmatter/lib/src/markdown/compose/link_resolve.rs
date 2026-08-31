@@ -6,9 +6,7 @@
 //! back to portable forms in the Finalization stage.
 
 use crate::markdown::Markdown;
-use crate::markdown::compose::util::{
-    document_resolution_context, find_git_root_from, package_area_for_reference,
-};
+use crate::markdown::compose::util::document_resolution_context;
 use crate::markdown::compose::{ComposeOptions, ComposeReport, ComposeSource};
 use crate::markdown::reference::{
     ReferenceKind, ReferenceTarget,
@@ -155,7 +153,7 @@ fn resolve_absolute(
 
     // Resolve through the shared document-backed context so relative and `@`
     // references anchor on the document directory (implicit paths
-    // repository-first then source), never the ambient process CWD. Magic roots
+    // document-first then repository), never the ambient process CWD. Magic roots
     // live on the context, not on the reference. We intentionally do NOT use
     // resolve_relative here — link resolve's job is to produce absolute paths,
     // not make them relative again.
@@ -163,21 +161,13 @@ fn resolve_absolute(
         let resolution_ctx = match options.file_resolution_context.as_ref() {
             Some(snapshot) => snapshot.for_base(dir),
             None => {
-                let repo_root = find_git_root_from(dir);
-                let package_area =
-                    package_area_for_reference(&file_ref, dir, repo_root.as_deref());
-                document_resolution_context(
-                    dir,
-                    None,
-                    &options.magic_paths,
-                    repo_root.as_deref(),
-                    package_area.as_deref(),
-                )
+                let snapshot = crate::markdown::compose::capture_file_resolution_context(dir);
+                document_resolution_context(dir, None, &options.magic_paths, Some(&snapshot))
             }
         };
         // An existing target resolves to its matched path; a clean miss (a link
         // to a not-yet-created file) is absolutized to the FIRST shared
-        // candidate — repository-first for an implicit bare path — via the same
+        // candidate — document-first for an implicit bare path — via the same
         // `FileReference` grammar execution uses, never a source-first
         // `dir.join(raw)` that would bypass shared classification. A hard
         // resolver failure (invalid context, missing anchor) leaves the link
@@ -295,7 +285,7 @@ mod tests {
         let package_target = package_area.join("shared.md");
         fs::write(&package_target, "package").unwrap();
         let source = member.join("docs/guide.md");
-        let mut md = Markdown::new("[package](!shared.md)");
+        let mut md = Markdown::new("[package](^shared.md)");
         let options = ComposeOptions::new().with_source_file(source);
         let mut report = ComposeReport::new();
 
@@ -491,12 +481,12 @@ mod tests {
         assert_eq!(report.link_resolves_applied, 1);
     }
 
-    /// A missing IMPLICIT bare reference is absolutized repository-first — the
+    /// A missing IMPLICIT bare reference is absolutized document-first — the
     /// same anchoring an existing implicit reference resolves with — rather than
     /// source-joined. This is the D2/D3 precedence: `link_resolve` no longer
     /// falls back to `source_dir.join(raw)` after a miss.
     #[test]
-    fn test_link_resolve_non_existent_implicit_is_repository_first() {
+    fn test_link_resolve_non_existent_implicit_is_document_first() {
         let dir = tempdir().unwrap();
         // Plant a `.git` marker so the tempdir is a repository root distinct
         // from the nested document directory.
@@ -507,7 +497,7 @@ mod tests {
         std::fs::write(&source, "source").unwrap();
 
         // `missing.md` exists nowhere; as an implicit bare reference its shape
-        // anchors on the repository root, not the source directory.
+        // anchors on the source directory, not the repository root.
         let content = "[link](missing.md)";
         let mut md = Markdown::new(content);
         let options = ComposeOptions::new().with_source_file(&source);
@@ -515,16 +505,16 @@ mod tests {
 
         link_resolve(&mut md, &options, &mut report).unwrap();
 
-        let repo_first = biscuit_file::to_portable_string(&dir.path().join("missing.md"));
+        let repo_candidate = biscuit_file::to_portable_string(&dir.path().join("missing.md"));
         let source_first = biscuit_file::to_portable_string(&nested.join("missing.md"));
         assert!(
-            md.content().contains(&format!("({repo_first})")),
-            "expected repository-first shape {repo_first}. Content: {}",
+            md.content().contains(&format!("({source_first})")),
+            "expected document-first shape {source_first}. Content: {}",
             md.content()
         );
         assert!(
-            !md.content().contains(&format!("({source_first})")),
-            "must not source-join a missing implicit reference. Content: {}",
+            !md.content().contains(&format!("({repo_candidate})")),
+            "must not repository-join a missing implicit reference. Content: {}",
             md.content()
         );
         assert_eq!(report.link_resolves_applied, 1);

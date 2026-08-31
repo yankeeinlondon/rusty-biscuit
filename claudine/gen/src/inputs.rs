@@ -18,7 +18,6 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::FileResolutionContext;
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::find_git_root_from;
 use darkmatter::markdown::schemas::{DarkmatterSchemas, coerce};
 use serde_json::Value;
 
@@ -246,7 +245,11 @@ fn load_validated_frontmatter_with_api(
 }
 
 fn generator_schemas(area: &Path) -> DarkmatterSchemas {
-    let Some(repository_root) = find_git_root_from(area) else {
+    let Some(repository_root) = sniff::filesystem::git::GitRepo::discover(area)
+        .ok()
+        .flatten()
+        .map(|repository| repository.repo_root().to_path_buf())
+    else {
         return DarkmatterSchemas::new();
     };
     let context = FileResolutionContext::new(area)

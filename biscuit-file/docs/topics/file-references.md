@@ -11,7 +11,7 @@ blast_radius:
 # File References in `biscuit-file`
 
 A **file reference** is a compact string — `README.md`, `@docs/spec.md`,
-`!Cargo.toml`, `~/.config/app.toml` — that describes *where a file lives
+`&Cargo.toml`, `~/.config/app.toml` — that describes *where a file lives
 relative to project structure* instead of committing to an absolute path at
 authoring time. You parse the string once, then resolve it against captured
 state to get a real path:
@@ -52,7 +52,7 @@ Rust but nothing about this library.
      Fine for simple CLI tools and one-off lookups.
 
 3. **Each reference kind has a fixed, closed candidate list.** The sigil
-   (`@`, `!`, `~`, `./`, none, …) selects an ordered list of base directories.
+   (`@`, `&`, `^`, `~`, `./`, none, …) selects an ordered list of base directories.
    Resolution joins the path onto each base in order and takes the **first
    existing regular file**. There is no cross-kind fallback: a missed `./foo`
    is never retried as a magic path, a missed `@foo` never falls back to a
@@ -67,20 +67,21 @@ Rust but nothing about this library.
      configured, no home directory, …).
 
 5. **Anchors are supplied, not guessed.** In explicit-context mode the caller
-   tells the context where the repository root and package area are;
+   supplies a repository scope catalog;
    `biscuit-file` deliberately performs no trusted discovery of its own.
-   (Ambient mode discovers them live, as a compatibility convenience.)
+   ambient mode discovers only the repository root live as a compatibility convenience.
 
 ## Syntax Quick Reference
 
 | Prefix                | Kind                  | Resolves against                                                | Example                            |
 |-----------------------|-----------------------|-----------------------------------------------------------------|------------------------------------|
 | `./` or `../`         | **Explicit relative** | The base directory only; no fallback                            | `./src/main.rs`, `../a.md`         |
-| _(none)_              | **Implicit relative** | Git repository root, then the base directory                    | `README.md`, `docs/spec.md`        |
+| _(none)_              | **Implicit relative** | The base directory, then the git repository root                | `README.md`, `docs/spec.md`        |
 | `/`, drive, or UNC    | **Absolute**          | Used verbatim                                                   | `/etc/config.toml`, `C:\\cfg.toml` |
 | `~` or `~/`           | **Home**              | The user's home directory only (`~user` unsupported)            | `~/.config/app.toml`               |
-| `@` or `@/`           | **Magic**             | Configurable search roots (custom paths, git root, HOME)        | `@docs/spec.md`                    |
-| `!`                   | **Package**           | The Cargo workspace "package area" (or repository fallback)     | `!README.md`                       |
+| `@` or `@/`           | **Magic**             | Custom, package, package-area, repository, and HOME roots       | `@docs/spec.md`                    |
+| `&` or `&/`           | **Repository root**   | The repository root only; repository-contained                  | `&README.md`                       |
+| `^` or `^/`           | **Repository scoped** | Package, package area, then repository; repository-contained    | `^README.md`                       |
 | `vault:` or `vault::` | **Vault**             | Configured vault root directories                               | `vault:notes/today.md`             |
 | `http://`, `https://` | **Remote URL**        | A typed remote target; never a local candidate                  | `https://example.com/a.md`         |
 
@@ -93,22 +94,29 @@ Two modifiers compose with the kinds above:
 context's `base_dir` in explicit-context mode (typically the directory of the
 document that authored the reference).
 
+The grammar reserves recognized introducers. A value beginning with `@`, `&`,
+`^`, `%`, `~`, `vault:`, `http://`, or `https://` must satisfy that form's
+grammar; malformed input is not reinterpreted as an implicit path. The removed
+`!` sigil is also reserved and returns `InvalidSyntax` with a suggestion to use
+`^`. Environment interpolation cannot inject a sigil into an otherwise
+implicit reference.
+
 ### Which sigil should an author use?
 
 | The file's identity is…                              | Write        |
 |------------------------------------------------------|--------------|
 | "belongs to this document" (moves with it)           | `./` / `../` |
-| "belongs to the repository" (lives at a repo path)   | bare path    |
+| "try beside this document, then at the repository"   | bare path    |
+| "belongs exactly at a repository path"               | `&`          |
+| "belongs to the nearest repository sub-project"      | `^`          |
 | "find it in the usual places"                        | `@`          |
-| "belongs to whichever sub-project I'm working in"    | `!`          |
 | "belongs to this user"                               | `~`          |
 | "lives in my notes/knowledge-base vault"             | `vault:`     |
 | "is exactly this path"                               | absolute     |
 
-The distinction that trips people up in monorepos: bare paths are
-**repository-root-first**, so `README.md` written anywhere inside a monorepo
-finds the *top-level* README even when the sub-project has its own. If you
-mean "the current sub-project's README," write `!README.md`.
+Bare paths are base-first, so a document-local copy shadows the repository
+copy. Use `&README.md` when the repository-root identity is required, or
+`^README.md` for package → package-area → repository fallback.
 
 ## Reference Kinds
 
@@ -129,22 +137,21 @@ with it — an image next to a markdown file, a fragment included by a template.
 
 A bare path with no recognized prefix gets two candidates, in this order:
 
-1. the **root of the enclosing git repository** (when one is known), then
-2. the **base directory**.
+1. the **base directory**, then
+2. the **root of the enclosing git repository** (when one is known).
 
 ```text
-docs/spec.md        → <git_root>/docs/spec.md, then <base>/docs/spec.md
+docs/spec.md        → <base>/docs/spec.md, then <git_root>/docs/spec.md
 ```
 
-Repository-shaped bare paths are the primary authoring form, which is why the
-repository candidate outranks the local one. If no repository is known, the
+If no repository is known, the
 base directory is the only candidate. When the base *is* the repository root,
 the two candidates collapse into one. A miss returns `Ok(None)`.
 
 ```rust,no_run
 use biscuit_file::FileReference;
 
-// From <repo>/some/deep/dir, this finds <repo>/README.md.
+// From <repo>/some/deep/dir, this tries the deep directory before the repo root.
 let path = FileReference::new("README.md")?.resolve()?;
 # Ok::<(), biscuit_file::FileReferenceError>(())
 ```
@@ -201,23 +208,25 @@ The search order is:
 
 1. **Prepended roots** — added via `add_magic_path(path, PathPosition::Start)`,
    in registration order;
-2. **the git repository root** (when known);
-3. **the home directory** (when known);
-4. **Appended roots** — added via `add_magic_path(path, PathPosition::End)`.
+2. **the package root** selected for the reference base (when known);
+3. **the package-area root** selected for the reference base (when known);
+4. **the git repository root** (when known);
+5. **the home directory** (when known);
+6. **Appended roots** — added via `add_magic_path(path, PathPosition::End)`.
 
 The first candidate confirmed to be a regular file wins. Missing and
 non-file candidates advance the search; any other I/O failure stops it with a
 typed error.
 
 ```text
-@docs/spec.md       → <git_root>/docs/spec.md, then ~/docs/spec.md
-@.bashrc            → <git_root>/.bashrc, then ~/.bashrc
+@docs/spec.md       → <package>/docs/spec.md, <area>/docs/spec.md, <repo>/docs/spec.md, ~/docs/spec.md
+@.bashrc            → <package>/.bashrc, <area>/.bashrc, <repo>/.bashrc, ~/.bashrc
 ```
 
 ```rust,no_run
 use biscuit_file::{FileReference, PathPosition};
 
-// Out of the box: git root → HOME.
+// Out of the box: package → package area → repository → HOME.
 let path = FileReference::new("@docs/spec.md")?.resolve()?;
 
 // With application convention directories:
@@ -233,69 +242,25 @@ let path = FileReference::new("@config.toml")?
 embedding this library typically prepend their own convention roots so that
 `@name.md` checks the nearest, most specific location first.
 
-#### Monorepo-aware magic: `with_package_area_magic_path()`
+### Repository Root (`&`) and Repository Scoped (`^`)
 
-In a monorepo you often want `@` to search your current sub-project *before*
-the workspace root. This ambient builder detects the Cargo workspace
-[package area](#package-) and prepends it:
+`&path` has exactly one candidate: `<repository_root>/path`. `^path` searches
+the package root containing the reference base, then its package-area root,
+then the repository root. Missing levels and duplicate roots are skipped.
+Both forms require a repository and reject lexical `..` escapes plus existing
+symlink, junction, or reparse targets that resolve outside it.
 
-```rust,no_run
-use biscuit_file::FileReference;
+Containment is checked twice: lexically after component normalization, then
+canonically against an existing target or its deepest existing ancestor. This
+closes ordinary symlink, junction, and reparse-point escapes at resolution
+time, but it is still subject to filesystem time-of-check/time-of-use races. A
+different process can replace a checked path before a later open. `biscuit-file`
+is a resolver, not a filesystem sandbox; consumers needing adversarial
+confinement must use operating-system sandboxing or handle-relative secure-open
+primitives.
 
-// If CWD is /repo/biscuit-file/lib/src/, this prepends /repo/biscuit-file/.
-// Search order becomes: <package_area> → <git_root> → HOME.
-let path = FileReference::new("@prompts/commit.md")?
-    .with_package_area_magic_path()
-    .resolve()?;
-# Ok::<(), biscuit_file::FileReferenceError>(())
-```
-
-It is a no-op when the current directory is not inside a Cargo workspace.
-
-### Package (`!`)
-
-Package references resolve against the **package area**: in a Cargo
-workspace, the first path component of the workspace member that contains the
-working directory. In a monorepo laid out as one top-level directory per
-sub-project (each possibly holding several crates — `myproj/lib`,
-`myproj/cli`, …), the package area is that top-level directory. With CWD at
-`/repo/biscuit-file/lib/src/`, the package area is `/repo/biscuit-file/`, so:
-
-```text
-!README.md          → /repo/biscuit-file/README.md
-!docs/spec.md       → /repo/biscuit-file/docs/spec.md
-```
-
-**Use it when** the file belongs to "whichever sub-project I'm in":
-
-- it is immune to repository-root shadowing (`README.md` finds the *repo's*
-  README; `!README.md` finds *your sub-project's*);
-- it points at the shared area directory, not the specific crate, so it means
-  the same thing from `myproj/lib` and `myproj/cli`;
-- it is depth-stable — the answer doesn't change as you `cd` deeper.
-
-How the area root is chosen, in strict precedence:
-
-1. **Explicit context:** a package area supplied via `with_package_area()` is
-   authoritative and is the single candidate. If none was supplied, the
-   supplied repository root is the fallback; if both are absent, resolution
-   reports the typed `MissingPackageContext` — the explicit path never runs
-   live discovery.
-2. **Ambient mode:** the library finds the git root from CWD, loads the Cargo
-   workspace metadata at that root, computes each member's first path
-   component (its "area"), and picks the area containing the CWD. A
-   single-crate repository has no area, so the git root is used instead. If
-   no git repository is found at all, no candidates are generated and the
-   result is a clean `Ok(None)`.
-
-```rust,no_run
-use biscuit_file::FileReference;
-
-// From within /repo/biscuit-file/lib/src:
-let path = FileReference::new("!README.md")?.resolve()?;
-// → checks /repo/biscuit-file/README.md
-# Ok::<(), biscuit_file::FileReferenceError>(())
-```
+In a shell, `&` is a control operator. Quote repository-root references passed
+as arguments or setter values, for example `spec='&docs/plan.md'`.
 
 ### Vault (`vault:` / `vault::`)
 
@@ -394,9 +359,9 @@ resolves as an absolute reference instead of silently joining the expansion
 onto a search root. The detailed resolver exposes both the authored kind
 (`class().kind`) and the effective anchoring (`effective_kind()`), so this is
 observable. What interpolation may **not** do is inject a sigil: a local
-reference whose expanded payload begins with `@`, `!`, `%`, `vault:`, or a
+reference whose expanded payload begins with `@`, `&`, `^`, `%`, `vault:`, or a
 case-insensitive HTTP(S) scheme is rejected with `InvalidSyntax` rather than
-reinterpreted. Sigils remain author-controlled; authored `@`/`!`/vault/URL
+reinterpreted. Sigils remain author-controlled; authored `@`/`&`/`^`/vault/URL
 references keep their classification and interpolate within it.
 
 ## Capturing State: `FileResolutionContext`
@@ -407,25 +372,34 @@ ambient in between.**
 ```rust,no_run
 use std::collections::HashMap;
 use std::path::PathBuf;
-use biscuit_file::{FileReference, FileResolutionContext, PathPosition};
+use biscuit_file::{
+    FileReference, FileResolutionContext, PackageAreaFallback, PathPosition,
+    RepositoryScopeCatalog,
+};
 
 let launch_dir = PathBuf::from("/work/repo");
 let repo_root = launch_dir.clone();
 let package_area = repo_root.join("biscuit-file");
+let package_root = package_area.join("lib");
+let scopes = RepositoryScopeCatalog::new(
+    repo_root.clone(),
+    vec![package_area],
+    vec![package_root],
+    PackageAreaFallback::FirstComponent,
+)?;
 let env = HashMap::from([("DOCS_DIR".to_string(), "docs".to_string())]);
 
 // Capture request-wide inputs once, at the start of the request.
 let request = FileResolutionContext::new(&launch_dir)
-    .with_repository_root(&repo_root)
-    .with_package_area(&package_area)
+    .with_repository_scope_catalog(scopes)
     .with_env(env)
     .add_magic_path(repo_root.join("prompts"), PathPosition::Start)
     .add_vault(repo_root.join("notes"));
 
 // A file-backed document becomes the authoring source: its references
 // resolve with base_dir = the document's parent directory, while every
-// request-wide input (repo root, package area, env, magic/vault roots)
-// carries over unchanged.
+// process-state inputs carry over while repository scopes are selected again
+// from the catalog for the document's base.
 let document = request.for_source(repo_root.join("docs/guide.md"));
 let resolved = FileReference::new("./images/diagram.png")?
     .resolve_in_context(&document)?;
@@ -438,8 +412,8 @@ assert_eq!(nested.base_dir(), repo_root.join("includes"));
 ```
 
 `FileResolutionContext::new(base_dir)` captures the process environment and
-the cross-platform home directory once. Everything trusted — repository root,
-package area, magic and vault roots — is *supplied by you*; `biscuit-file`
+the cross-platform home directory once. Everything trusted — the repository
+scope catalog plus magic and vault roots — is *supplied by you*; `biscuit-file`
 deliberately leaves that discovery to the caller so the context is a pure
 data snapshot. The base should be an absolute directory.
 
@@ -455,8 +429,10 @@ derive a child context instead of building a new one:
 - `with_source_path(path)` records provenance *without* moving `base_dir`;
   use a derivation method when both must move together.
 
-Derivations clone the captured snapshot — they never re-read process state or
-perform discovery.
+Derivations clone the captured snapshot and recompute repository, package-area,
+and package anchors from the catalog for the new base. A trusted external base
+outside the catalog clears those anchors. No derivation re-reads process state
+or performs discovery.
 
 ### Trust boundaries and containment
 
@@ -485,12 +461,14 @@ snapshot into a valid one.
 | `for_trusted_external_source(source_path)` | File-backed child across an accepted external trust root |
 | `for_trusted_external_base(base_dir)` | In-memory child across an accepted external trust root |
 | `with_repository_root(root)` | Supply the trusted worktree root |
+| `with_repository_scope_catalog(catalog)` | Supply topology and select repository/package scopes for this base |
+| `with_package_root(package)` | Supply a package root for compatibility callers without a catalog |
 | `with_package_area(area)` | Supply the authoritative package-area root |
 | `with_home_dir(home)` / `without_home_dir()` | Override or explicitly clear captured home |
 | `with_env(env)` | Replace the captured interpolation/`VAULT` environment |
 | `add_magic_path(path, position)` | Add an authoritative magic root |
 | `add_vault(path)` | Add an authoritative vault root |
-| `source_path()`, `base_dir()`, `repository_root()`, `package_area()`, `home_dir()`, `env()` | Inspect captured inputs |
+| `source_path()`, `base_dir()`, `repository_root()`, `package_root()`, `package_area()`, `home_dir()`, `env()` | Inspect captured inputs |
 | `validate()` | Check repository containment of request and derived bases |
 
 ## Choosing an Entry Point
@@ -521,12 +499,12 @@ own `add_magic_path()` / `add_vault()` builders apply **only** to the ambient
 | `raw()` | The authored string |
 | `class()` | `FileReferenceClass { kind, recursive }` — branch on typed kind, not prefixes |
 | `add_magic_path(path, position)` | Add an ambient-path magic root |
-| `with_package_area_magic_path()` | Ambiently discover and prepend the package-area magic root |
 | `add_vault(path)` | Add an ambient-path vault root |
 | `resolve()` / `resolve_from(base)` | Resolve through the ambient compatibility APIs |
 | `resolve_in_context(ctx)` | Resolve through the explicit API; no-match maps to `Ok(None)` |
 | `resolve_detailed(ctx)` | Keep the detailed success/failure record |
 | `candidate_plan(ctx)` | Build the complete ordered plan, no filesystem probes |
+| `validate_repository_candidate(candidate, repository_root)` | Apply the shared `&`/`^` containment check |
 | `complete_partial(token, base)` | Expand an ambient completion token |
 | `complete_partial_in_context(token, ctx)` | Expand a completion token from the same roots as execution |
 | `resolve_relative(base)` | Resolve ambiently, return a lexical relative path |
@@ -565,14 +543,15 @@ data — never re-derive it from the reference kind:
 | Variant | Meaning |
 |---------|---------|
 | `InvalidReference` | Syntax or an effective-anchoring invariant is invalid |
-| `MissingContext` | A required environment, home, vault, repository, or package input is unavailable |
+| `MissingContext` | A required environment, home, vault, or repository input is unavailable |
 | `NoMatch` | The complete applicable search found no regular file |
 | `Io` | CWD access or a candidate metadata probe failed |
 | `UnsupportedRemote` | A remote reference was sent through local-path resolution |
 
 Every `ResolutionCandidate` exposes `path()` and `provenance()`; the
-`RootProvenance` vocabulary is `Repository`, `Source`, `Package`, `Home`,
-`Magic`, `Vault`, and `Absolute`. Every attempted `ProbedCandidate` adds a
+`RootProvenance` vocabulary is `Repository`, `Source`, `PackageRoot`,
+`PackageArea`, `Home`, `Magic`, `Vault`, and `Absolute`. Every attempted
+`ProbedCandidate` adds a
 `ProbeDisposition`:
 
 | Disposition | Meaning |
@@ -585,8 +564,9 @@ Every `ResolutionCandidate` exposes `path()` and `provenance()`; the
 
 ## Completion
 
-`complete_partial_in_context()` supports magic (`@`) and implicit-relative
-tokens; other entry forms return `Ok(None)` rather than being reinterpreted.
+`complete_partial_in_context()` supports magic (`@`), repository-root (`&`),
+repository-scoped (`^`), and implicit-relative tokens. Recursive forms return
+`Ok(None)` rather than being reinterpreted.
 A `PartialCompletion` exposes `entry_form()`, the ordered `roots()`, the
 `active_segment()`, and the `rendered_prefix()` a completion consumer uses to
 construct the emitted token. A rooted magic token is invalid grammar and
@@ -595,8 +575,9 @@ unsupported token recursive.
 
 The parity guarantee: with one shared `FileResolutionContext`, completion and
 execution consume the same captured roots in the same precedence (implicit:
-repository, then base; magic: configured prepends, repository, home,
-configured appends; duplicates removed in first-seen order). A consumer that
+base, then repository; magic: configured prepends, package, package area,
+repository, home, configured appends; duplicates removed in first-seen order).
+A consumer that
 enumerates those roots in order can pass its emitted value unchanged to
 `FileReference::new()` + `resolve_in_context()` and get the file it
 displayed. The ambient `complete_partial()` cannot see request-configured
@@ -614,11 +595,11 @@ The complete `FileReferenceError` vocabulary:
 | `CurrentDirectory(source)` | An ambient operation could not read the CWD |
 | `Git(source)` | Ambient repository discovery failed for a reason other than "not a repository" |
 | `BareRepository` | Repository discovery found no working directory |
-| `Workspace(source)` | Ambient Cargo workspace/package-area inspection failed |
 | `VaultNotConfigured` | A vault reference has no explicit or captured `$VAULT` roots |
 | `UnsupportedUserHome(raw)` | A non-portable `~user` reference was authored |
 | `MissingHomeContext` | A home reference has no home directory in the explicit context |
-| `MissingPackageContext` | A package reference has neither package-area nor repository anchor |
+| `OutsideRepository { sigil, reference_cwd }` | `&` or `^` was used without a repository containing the reference base |
+| `RepositoryEscape { .. }` | A repository sigil's lexical or resolved target escapes the repository |
 | `RepositoryRootNotContainingSource { repository_root, source_path }` | The request base or a normal derived base fails lexical root containment |
 | `RelativePath { from, to }` | `resolve_relative()` cannot produce the requested lexical relative path |
 | `Io { path, source }` | A direct candidate metadata probe failed; records the candidate path |
@@ -632,7 +613,7 @@ which belongs to the optional fetching API rather than local resolution.
 
 1. **Parse once.** `FileReference::new()` records the `%` modifier, the
    authored kind, and literal or `{{VAR}}` template segments. Detection order
-   is HTTP(S) URL (ASCII-case-insensitive) → `vault::` → `vault:` → `@` → `!`
+   is HTTP(S) URL (ASCII-case-insensitive) → `vault::` → `vault:` → `@` → `&` → `^`
    → `~` → absolute (POSIX, Windows drive, or UNC) → explicit relative →
    implicit relative. No filesystem, environment, or CWD access.
 
@@ -653,11 +634,12 @@ which belongs to the optional fetching API rather than local resolution.
    | Effective/authored kind | Direct candidate or recursive-root order |
    |-------------------------|------------------------------------------|
    | Explicit relative | Base only |
-   | Implicit relative | Repository root, then base |
+   | Implicit relative | Base, then repository root |
    | Absolute | The authored path only |
    | Home | Home directory only |
-   | Magic | Configured prepends, repository, home, configured appends |
-   | Package | Package area, or repository fallback |
+   | Magic | Configured prepends, package, package area, repository, home, configured appends |
+   | Repository root | Repository only |
+   | Repository scoped | Package, package area, repository |
    | Vault | Configured roots, then captured `$VAULT` paths |
    | Remote URL | No local candidates |
 
@@ -688,7 +670,7 @@ lexical relative path can be produced, it reports `RelativePath`.
 ## Feature Flag
 
 File-reference support is gated behind the default `file-reference` feature,
-which enables repository discovery, Cargo metadata, recursive traversal,
+which enables repository discovery, recursive traversal,
 cross-platform home discovery, and URL classification.
 
 ```toml

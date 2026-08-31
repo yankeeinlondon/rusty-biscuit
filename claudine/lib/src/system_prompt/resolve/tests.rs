@@ -159,11 +159,11 @@ fn explicit_append_tilde_resolves_against_home() {
     assert_eq!(text, "# home sys\n");
 }
 
-/// A bare (implicit) `--append-system-prompt` reference is repository-first
-/// (D4): with the same basename at the repository root and the launch
-/// directory, the repository-root copy wins.
+/// A bare (implicit) `--append-system-prompt` reference is launch-relative
+/// first: with the same basename at the repository root and launch directory,
+/// the launch-directory copy wins.
 #[test]
-fn explicit_append_implicit_is_repository_first() {
+fn explicit_append_implicit_is_launch_relative_first() {
     let repo = TempDir::new().unwrap();
     std::fs::write(repo.path().join("sys.md"), "# repo\n").unwrap();
     let sub = repo.path().join("area");
@@ -186,8 +186,8 @@ fn explicit_append_implicit_is_repository_first() {
         .unwrap()
         .expect("implicit reference resolves");
     assert_eq!(
-        text, "# repo\n",
-        "implicit reference must resolve repository-first, not launch-relative",
+        text, "# area\n",
+        "implicit reference must resolve from the launch directory first",
     );
 }
 

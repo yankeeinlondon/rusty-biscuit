@@ -332,18 +332,19 @@ mod classification_tests {
         fn expected_slug(error: &FileReferenceError) -> &'static str {
             use FileReferenceError as E;
             match error {
-                E::InvalidSyntax(_) | E::UnsupportedUserHome(_) | E::InvalidUrl(_) => {
-                    "invalid_syntax"
-                }
+                E::InvalidSyntax(_)
+                | E::UnsupportedScheme { .. }
+                | E::UnsupportedUserHome(_)
+                | E::InvalidUrl(_) => "invalid_syntax",
                 E::MissingEnvironmentVariable { .. }
                 | E::BareRepository
                 | E::VaultNotConfigured
                 | E::MissingHomeContext
-                | E::MissingPackageContext
+                | E::OutsideRepository { .. }
                 | E::RepositoryRootNotContainingSource { .. } => "missing_context",
                 E::CurrentDirectory(_)
                 | E::Git(_)
-                | E::Workspace(_)
+                | E::RepositoryEscape { .. }
                 | E::RelativePath { .. }
                 | E::Io { .. } => "permission_io",
                 E::RemoteNotLocal(_) => "unsupported_remote",
@@ -356,9 +357,16 @@ mod classification_tests {
                 name: "X".to_string(),
             },
             FileReferenceError::CurrentDirectory(std::io::Error::other("cwd")),
+            FileReferenceError::UnsupportedScheme {
+                scheme: "ftp".to_string(),
+                reference: "ftp://example.com/spec.md".to_string(),
+            },
             FileReferenceError::UnsupportedUserHome("other".to_string()),
             FileReferenceError::MissingHomeContext,
-            FileReferenceError::MissingPackageContext,
+            FileReferenceError::OutsideRepository {
+                sigil: '^',
+                reference_cwd: PathBuf::from("/elsewhere"),
+            },
             FileReferenceError::VaultNotConfigured,
             FileReferenceError::BareRepository,
             FileReferenceError::RepositoryRootNotContainingSource {
@@ -368,6 +376,12 @@ mod classification_tests {
             FileReferenceError::RelativePath {
                 from: PathBuf::from("/from"),
                 to: PathBuf::from("/to"),
+            },
+            FileReferenceError::RepositoryEscape {
+                sigil: '&',
+                reference: "&escape/spec.md".to_string(),
+                repository_root: PathBuf::from("/repo"),
+                escaped_candidate: PathBuf::from("/outside/spec.md"),
             },
             FileReferenceError::RemoteNotLocal("http://x".to_string()),
             FileReferenceError::InvalidUrl("not a URL".to_string()),

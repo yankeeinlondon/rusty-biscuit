@@ -341,7 +341,7 @@ fn compose_magic_keeps_sigil_and_renders_filename() {
 
 #[test]
 fn compose_magic_dedups_duplicate_basename_across_tiers() {
-    let ws = TestWorkspace::named("complete-compose-magic-repo-first");
+    let ws = TestWorkspace::named("complete-compose-magic-priority");
     seed_cargo_workspace(ws.path());
     let home = fake_home(ws.path());
 

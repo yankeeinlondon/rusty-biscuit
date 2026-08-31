@@ -455,9 +455,10 @@ mod tests {
         std::fs::write(
             source_dir.join("schema.yaml"),
             "source_marker: string(required)\nspec: 'file(eager; required)'\nprepared_area: \
-             string(required)\nprepared_agent: string(required)\nprepared_model: string(required)\n",
+             string(required)\nprepared_cwd: string(required)\nprepared_agent: string(required)\nprepared_model: string(required)\n",
         )
         .unwrap();
+        std::fs::write(launch_dir.join("spec.md"), "LAUNCH-SPEC\n").unwrap();
         std::fs::write(source_dir.join("spec.md"), "SOURCE-SPEC\n").unwrap();
         std::fs::write(source_dir.join("fragment.md"), "SOURCE-FRAGMENT\n").unwrap();
         let target = source_dir.join("target.md");
@@ -467,12 +468,12 @@ mod tests {
                 "---\n",
                 "$schema: ./schema.yaml\n",
                 "source_marker: source-owned\n",
-                "spec: spec.md\n",
                 "prepared_area: '{{ ctx.area }}'\n",
+                "prepared_cwd: '{{ ctx.cwd }}'\n",
                 "prepared_agent: '{{ ctx.agent }}'\n",
                 "prepared_model: '{{ ctx.model }}'\n",
                 "---\n",
-                "AREA={{ ctx.area }} AGENT={{ ctx.agent }} MODEL={{ ctx.model }} ",
+                "AREA={{ ctx.area }} CWD={{ ctx.cwd }} AGENT={{ ctx.agent }} MODEL={{ ctx.model }} ",
                 "ENV={{ env.AGENT }}/{{ env.MODEL }} FILE={{ file_exists(spec) }}\n",
                 "SOURCE-BODY\n",
             ),
@@ -483,15 +484,18 @@ mod tests {
             ("AGENT".to_string(), "codex".to_string()),
             ("MODEL".to_string(), "gpt-5".to_string()),
         ]);
+        let invocation = claudine::invocation_context::InvocationContext::capture_at(&launch_dir);
+        let materialized_spec = biscuit_file::to_portable_string(&launch_dir.join("spec.md"));
         let mut state = compose_state(
             &target,
             CallerInputLayers {
+                set_overrides: Some(serde_json::json!({ "spec": materialized_spec.clone() })),
                 env_overrides: env,
                 file_ref_fallback_dir: Some(launch_dir.clone()),
+                file_resolution_context: Some(invocation.launch_file_resolution_context().clone()),
                 ..CallerInputLayers::default()
             },
         );
-        let invocation = claudine::invocation_context::InvocationContext::capture_at(&launch_dir);
         state.source_context = Some(invocation.derive_source(&target).unwrap());
         state.invocation_context = Some(invocation.clone());
         let approval_options = claudine::harness::ShellApprovalOptions::default();
@@ -501,7 +505,10 @@ mod tests {
             assert!(
                 materialized
                     .prompt
-                    .contains("AREA=alpha AGENT=codex MODEL=gpt-5 ENV=codex/gpt-5 FILE=true"),
+                    .contains(&format!(
+                        "AREA=alpha CWD={} AGENT=codex MODEL=gpt-5 ENV=codex/gpt-5 FILE=true",
+                        biscuit_file::to_portable_string(&launch_dir)
+                    )),
                 "entry {entry:?} lost launch or target identity: {}",
                 materialized.prompt
             );
@@ -512,9 +519,18 @@ mod tests {
                 materialized.prompt
             );
             assert_eq!(materialized.frontmatter["prepared_area"], serde_json::json!("alpha"));
+            assert_eq!(
+                materialized.frontmatter["prepared_cwd"],
+                serde_json::json!(biscuit_file::to_portable_string(&launch_dir))
+            );
             assert_eq!(materialized.frontmatter["prepared_agent"], serde_json::json!("codex"));
             assert_eq!(materialized.frontmatter["prepared_model"], serde_json::json!("gpt-5"));
             assert_eq!(materialized.frontmatter["source_marker"], serde_json::json!("source-owned"));
+            assert_eq!(
+                materialized.frontmatter["spec"],
+                serde_json::json!(materialized_spec),
+                "entry {entry:?} must preserve the caller-materialized launch file"
+            );
         };
 
         preflight_harness_document(&mut state, &approval_options, &launch_dir).unwrap();

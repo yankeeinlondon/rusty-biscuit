@@ -69,10 +69,14 @@ failure message prints the up-to-date block to paste back.
 > derive from the directory that _executed_ the `md compose` command (most discovery
 > leverages the `sniff` library), **not** the directory where the composed document
 > lives. File *reference* resolution is separate: implicit references resolve
-> **repository-root first, then the source document's directory** — see
+> **the source document's directory first, then the repository root** — see
 > [magic paths](./magic-paths.md).
 
 <!-- BEGIN GENERATED: ctx catalog (source: md schema about / context_catalog_markdown) -->
+**Invocation**
+
+- **ctx.cwd** — `string` _(optional)_ — Absolute launch directory captured when the composition request began, or null when ambient capture failed.
+
 **Date and Time**
 
 - **ctx.now** — `datetime` — Local date and time in ISO-8601 format.

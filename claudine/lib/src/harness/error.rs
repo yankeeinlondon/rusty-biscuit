@@ -261,7 +261,7 @@ impl HarnessError {
     /// The ordered candidate plan a resolution failure attempted, when one was
     /// retained. Empty for every other arm and for a failure drawn before a
     /// filesystem probe. The renderer enumerates it as the report's "Tried:"
-    /// list so a miss shows repository-then-source order, not just its winner.
+    /// list so a miss shows source-then-repository order, not just its winner.
     pub fn resolution_candidates(&self) -> &[ProbedCandidate] {
         match self {
             HarnessError::PathResolutionFailed {
@@ -423,17 +423,19 @@ impl Diagnostic for HarnessError {
 fn file_reference_failure_slug(error: &FileReferenceError) -> &'static str {
     use FileReferenceError as E;
     match error {
-        E::InvalidSyntax(_) | E::UnsupportedUserHome(_) => "invalid_syntax",
+        E::InvalidSyntax(_) | E::UnsupportedScheme { .. } | E::UnsupportedUserHome(_) => {
+            "invalid_syntax"
+        }
         E::MissingEnvironmentVariable { .. }
         | E::MissingHomeContext
-        | E::MissingPackageContext
         | E::VaultNotConfigured
+        | E::OutsideRepository { .. }
         | E::RepositoryRootNotContainingSource { .. }
         | E::BareRepository => "missing_context",
         E::RemoteNotLocal(_) => "unsupported_remote",
         E::CurrentDirectory(_)
         | E::Git(_)
-        | E::Workspace(_)
+        | E::RepositoryEscape { .. }
         | E::RelativePath { .. }
         | E::Io { .. } => "permission_io",
         E::InvalidUrl(_) => "invalid_syntax",
@@ -449,7 +451,8 @@ fn file_reference_kind_slug(kind: FileReferenceKind) -> &'static str {
         K::ImplicitRelative => "implicit_relative",
         K::Absolute => "absolute",
         K::Magic => "magic",
-        K::Package => "package",
+        K::RepositoryRoot => "repository_root",
+        K::RepositoryScoped => "repository_scoped",
         K::Home => "home",
         K::Vault => "vault",
         K::Url => "url",
@@ -463,7 +466,8 @@ fn root_provenance_slug(provenance: RootProvenance) -> &'static str {
     match provenance {
         P::Repository => "repository",
         P::Source => "source",
-        P::Package => "package",
+        P::PackageRoot => "package_root",
+        P::PackageArea => "package_area",
         P::Home => "home",
         P::Magic => "magic",
         P::Vault => "vault",
@@ -486,7 +490,7 @@ fn probe_disposition_slug(disposition: ProbeDisposition) -> &'static str {
 
 /// Project the ordered probe record into the `candidates` detail array: one
 /// object per attempt carrying its path, root provenance, and probe
-/// disposition, in first-seen (repository-then-source) order.
+/// disposition, in first-seen resolution order.
 fn resolution_candidates_detail(candidates: &[ProbedCandidate]) -> Value {
     Value::Array(
         candidates

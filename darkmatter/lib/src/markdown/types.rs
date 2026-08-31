@@ -211,6 +211,17 @@ pub enum MarkdownError {
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
     },
+
+    /// A caller-supplied schema-typed file value could not be materialized.
+    #[error("Parameter binding failed for `{property}` value `{provided}`: {reason}")]
+    ParameterBinding {
+        /// Top-level frontmatter property receiving the caller value.
+        property: String,
+        /// Raw caller input retained for diagnostics and fresh preparation.
+        provided: String,
+        /// Actionable reason the value could not acquire a stable path shape.
+        reason: String,
+    },
 }
 
 impl From<crate::markdown::compose::TransclusionError> for MarkdownError {
@@ -341,6 +352,11 @@ impl BlockError for MarkdownError {
                 // and `problems` only.
                 source: _,
             } => blocks::schema_validation_failed_block(path, problems, summary, description),
+            MarkdownError::ParameterBinding {
+                property,
+                provided,
+                reason,
+            } => blocks::parameter_binding_block(property, provided, reason),
         }
     }
 

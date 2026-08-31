@@ -33,6 +33,7 @@
 mod group;
 mod shell;
 
+use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
@@ -183,6 +184,11 @@ pub struct PromptTaskRequest {
     /// The fully layered `set_overrides` object: task `params` < sequence user
     /// setters < accumulated runtime mutations < the reserved overlay.
     pub set_overrides: Value,
+    /// Source directories for effective task-parameter properties.
+    ///
+    /// Higher-precedence sequence layers remove their property from this map,
+    /// leaving ordinary CLI setters anchored to the invocation launch area.
+    pub set_override_file_ref_origins: HashMap<String, std::path::PathBuf>,
     /// The evaluated `params` alone, for diagnostics and reporting.
     pub params: Map<String, Value>,
     /// Effective operation after group defaults and task overrides.
@@ -494,6 +500,7 @@ impl TaskExecution<'_> {
                 .prompt_document(path)
                 .is_some_and(|document| document.inline_compose),
             set_overrides: self.layered_overrides(&params),
+            set_override_file_ref_origins: self.active_param_file_ref_origins(&params),
             params,
             operation: self.task.operation.clone(),
             flow: self.task.flow.clone(),
@@ -749,6 +756,30 @@ impl TaskExecution<'_> {
             snapshot.as_ref(),
             self.overlay,
         )
+    }
+
+    /// Retain task-document provenance only for parameter properties that win
+    /// the sequence's top-level precedence fold.
+    fn active_param_file_ref_origins(
+        &self,
+        params: &Map<String, Value>,
+    ) -> HashMap<String, std::path::PathBuf> {
+        let mut origins: HashMap<_, _> = params
+            .keys()
+            .map(|key| (key.clone(), self.task.origin_dir.clone()))
+            .collect();
+        if let Some(Value::Object(setters)) = self.user_setters {
+            origins.retain(|key, _| !setters.contains_key(key));
+        }
+        if let Some(runtime) = self.runtime {
+            let snapshot = runtime.snapshot();
+            origins.retain(|key, _| !snapshot.mutations.contains_key(key));
+        }
+        if let Some(Value::Object(overlay)) = self.overlay {
+            origins.retain(|key, _| !overlay.contains_key(key));
+        }
+        origins.remove(super::super::runtime_state::OUTPUTS_KEY);
+        origins
     }
 
     /// The per-command budget: the authored `timeout:`, else 30 seconds.

@@ -49,9 +49,7 @@ fn detailed_success_retains_ordered_candidates_and_provenance() {
     let repo = canonical(tmp.path());
     git_init(&repo);
 
-    // File exists only in the base sub-directory; the repository root lacks it,
-    // so the search advances past the (repository-first) candidate to the
-    // source candidate.
+    // File exists in the base sub-directory, so the base-first search stops there.
     let base = repo.join("pkg");
     fs::create_dir_all(&base).unwrap();
     let base = canonical(&base);
@@ -60,28 +58,22 @@ fn detailed_success_retains_ordered_candidates_and_provenance() {
     let ctx = ctx_with_repo(&base, &repo);
     let detailed = FileReference::new("notes.md").unwrap().resolve_detailed(&ctx);
 
-    // The winner is the source-local candidate (the repository candidate missed).
+    // The winner is the source-local candidate.
     assert_eq!(
         detailed.matched_path(),
         Some(base.join("notes.md").as_path()),
-        "implicit reference falls back to the source candidate when the repo lacks it",
+        "implicit reference selects the source candidate first",
     );
     assert!(matches!(detailed.outcome(), DetailedOutcome::Matched(_)));
     assert_eq!(detailed.repository_root(), Some(repo.as_path()));
     assert!(detailed.error().is_none());
 
-    // Two candidates were attempted, in repository-first order, with provenance.
+    // Resolution stops after the first match.
     let candidates = detailed.candidates();
-    assert_eq!(candidates.len(), 2, "repo then source candidate");
-    assert_eq!(
-        candidates[0].candidate().provenance(),
-        RootProvenance::Repository
-    );
-    assert_eq!(candidates[0].disposition(), ProbeDisposition::Missing);
-    assert_eq!(candidates[0].candidate().path(), repo.join("notes.md"));
-    assert_eq!(candidates[1].candidate().provenance(), RootProvenance::Source);
-    assert_eq!(candidates[1].disposition(), ProbeDisposition::Matched);
-    assert_eq!(candidates[1].candidate().path(), base.join("notes.md"));
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].candidate().provenance(), RootProvenance::Source);
+    assert_eq!(candidates[0].disposition(), ProbeDisposition::Matched);
+    assert_eq!(candidates[0].candidate().path(), base.join("notes.md"));
 }
 
 #[test]
@@ -112,15 +104,15 @@ fn detailed_no_match_retains_candidates_and_repository_root() {
     assert!(detailed.error().is_none(), "NoMatch has no underlying error");
     assert_eq!(detailed.repository_root(), Some(repo.as_path()));
 
-    // Both candidates were probed and both missed, in repository-first order.
+    // Both candidates were probed and both missed, in base-first order.
     let candidates = detailed.candidates();
     assert_eq!(candidates.len(), 2);
     assert_eq!(
         candidates[0].candidate().provenance(),
-        RootProvenance::Repository
+        RootProvenance::Source
     );
     assert_eq!(candidates[0].disposition(), ProbeDisposition::Missing);
-    assert_eq!(candidates[1].candidate().provenance(), RootProvenance::Source);
+    assert_eq!(candidates[1].candidate().provenance(), RootProvenance::Repository);
     assert_eq!(candidates[1].disposition(), ProbeDisposition::Missing);
 }
 
@@ -143,8 +135,8 @@ fn candidate_plan_matches_the_probed_order() {
     // The plan a consumer inspects is exactly what execution probes, in order.
     let plan_paths: Vec<_> = plan.iter().map(|c| c.path().to_path_buf()).collect();
     assert_eq!(plan_paths, candidate_paths(&detailed));
-    assert_eq!(plan[0].provenance(), RootProvenance::Repository);
-    assert_eq!(plan[1].provenance(), RootProvenance::Source);
+    assert_eq!(plan[0].provenance(), RootProvenance::Source);
+    assert_eq!(plan[1].provenance(), RootProvenance::Repository);
 }
 
 #[test]
@@ -233,32 +225,31 @@ fn non_file_candidate_advances_the_search() {
     let repo = canonical(tmp.path());
     git_init(&repo);
 
-    // A *directory* named like the target sits at the repository root (the
-    // first candidate under repository-first precedence); the regular file sits
-    // in the base. The directory must not win -- it advances the search.
+    // A directory named like the target sits at the base; the regular file sits
+    // at the repository root. The directory must not win.
     let base = repo.join("pkg");
     fs::create_dir_all(&base).unwrap();
-    fs::create_dir_all(repo.join("thing.md")).unwrap();
+    fs::create_dir_all(base.join("thing.md")).unwrap();
     let base = canonical(&base);
-    fs::write(base.join("thing.md"), b"real").unwrap();
+    fs::write(repo.join("thing.md"), b"real").unwrap();
 
     let ctx = ctx_with_repo(&base, &repo);
     let detailed = FileReference::new("thing.md")
         .unwrap()
         .resolve_detailed(&ctx);
 
-    assert_eq!(detailed.matched_path(), Some(base.join("thing.md").as_path()));
+    assert_eq!(detailed.matched_path(), Some(repo.join("thing.md").as_path()));
     let candidates = detailed.candidates();
     assert_eq!(
         candidates[0].candidate().provenance(),
-        RootProvenance::Repository
+        RootProvenance::Source
     );
     assert_eq!(
         candidates[0].disposition(),
         ProbeDisposition::NonFile,
-        "the repository directory candidate is a non-file that advances the search",
+        "the source directory candidate is a non-file that advances the search",
     );
-    assert_eq!(candidates[1].candidate().provenance(), RootProvenance::Source);
+    assert_eq!(candidates[1].candidate().provenance(), RootProvenance::Repository);
     assert_eq!(candidates[1].disposition(), ProbeDisposition::Matched);
 }
 
@@ -372,102 +363,6 @@ fn supplied_repository_root_anchors_and_suppresses_ancestor_discovery() {
             probed.candidate().path(),
         );
     }
-}
-
-#[test]
-fn workspace_error_carries_a_chainable_source() {
-    // A malformed `Cargo.toml` makes `cargo_metadata` fail; the resulting
-    // `Workspace` error must retain the underlying cause via `#[source]`.
-    //
-    // Package-area discovery via `cargo metadata` now lives only in the ambient
-    // compatibility methods (`resolve`/`resolve_from`); the explicit
-    // document-backed path consumes a supplied package area instead. This test
-    // therefore drives the ambient `resolve_from` path, where the Cargo probe --
-    // and its chainable error -- still occurs.
-    let tmp = TempDir::new().unwrap();
-    let repo = canonical(tmp.path());
-    git_init(&repo);
-    fs::write(repo.join("Cargo.toml"), b"this is not valid toml : : :").unwrap();
-
-    // `!` is a package reference, which triggers ambient package-area discovery.
-    let err = FileReference::new("!lib/src/lib.rs")
-        .unwrap()
-        .resolve_from(&repo)
-        .expect_err("malformed Cargo.toml must surface a Workspace error");
-
-    match &err {
-        FileReferenceError::Workspace(_) => {
-            use std::error::Error;
-            assert!(
-                err.source().is_some(),
-                "Workspace error must expose its cargo_metadata cause via source()",
-            );
-        }
-        other => panic!("expected a Workspace error, got {other:?}"),
-    }
-}
-
-/// The explicit document-backed path consumes a supplied package area for a
-/// `!` reference and never invokes `cargo metadata`: a malformed `Cargo.toml`
-/// at the repository root is irrelevant because the area is passed in.
-#[test]
-fn explicit_package_reference_consumes_supplied_package_area() {
-    let tmp = TempDir::new().unwrap();
-    let repo = canonical(tmp.path());
-    git_init(&repo);
-    // A malformed manifest would make any Cargo probe fail; it must not run.
-    fs::write(repo.join("Cargo.toml"), b"this is not valid toml : : :").unwrap();
-
-    let area = repo.join("claudine");
-    fs::create_dir_all(&area).unwrap();
-    fs::write(area.join("README.md"), b"pkg").unwrap();
-
-    let base = repo.join("claudine/lib");
-    fs::create_dir_all(&base).unwrap();
-    let ctx = FileResolutionContext::new(base)
-        .with_repository_root(&repo)
-        .with_package_area(&area);
-
-    let detailed = FileReference::new("!README.md").unwrap().resolve_detailed(&ctx);
-
-    assert_eq!(
-        detailed.matched_path(),
-        Some(area.join("README.md").as_path()),
-        "package reference resolves under the supplied package area",
-    );
-    assert!(
-        detailed.error().is_none(),
-        "no Cargo probe runs, so a malformed manifest yields no Workspace error: {:?}",
-        detailed.error(),
-    );
-    let candidates = detailed.candidates();
-    assert_eq!(candidates.len(), 1);
-    assert_eq!(candidates[0].candidate().provenance(), RootProvenance::Package);
-}
-
-/// A `!` reference with neither a supplied package area nor a repository root is
-/// a typed missing-context outcome on the explicit path -- not a live
-/// `cargo metadata` discovery.
-#[test]
-fn explicit_package_reference_without_anchor_is_missing_context() {
-    let tmp = TempDir::new().unwrap();
-    let base = canonical(tmp.path());
-
-    let ctx = FileResolutionContext::new(base);
-    let detailed = FileReference::new("!README.md").unwrap().resolve_detailed(&ctx);
-
-    assert!(
-        matches!(
-            detailed.error(),
-            Some(FileReferenceError::MissingPackageContext)
-        ),
-        "expected MissingPackageContext, got {:?}",
-        detailed.error(),
-    );
-    assert!(matches!(
-        detailed.outcome(),
-        DetailedOutcome::Failed(ResolutionFailure::MissingContext)
-    ));
 }
 
 /// The explicit path performs no live git discovery: an implicit reference whose

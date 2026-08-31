@@ -22,7 +22,7 @@
 //!   never a validation keyword.)
 //! - [`validate`] — `Validator` construction + LRU [`ValidatorCache`].
 //! - [`rewrite`] — eager-`file` value normalization: rewrites a present
-//!   `file(eager)`-typed value to its repo-relative resolved path after
+//!   `file(eager)`-typed value to its document-relative resolved path after
 //!   validation accepts it.
 //! - [`resolve`] — `$schema` resolution and baseline merge.
 //! - [`about`] — typed descriptor catalog that backs `md schema about`.
@@ -279,7 +279,7 @@ impl DarkmatterSchemas {
     ///
     /// Per D2 the launch area is **not** a resolution input for a
     /// document-authored `format: darkmatter-file` value: those resolve
-    /// repository-first then against the document directory, never the launch
+    /// document-first then against the repository root, never the launch
     /// area or the ambient CWD. This anchor is retained for structural parity
     /// with the validator-cache identity (it still participates in
     /// `ComposeOptions`/cache identity) but does not change the resolved path.
@@ -694,7 +694,7 @@ pub struct EffectiveSchema {
     /// `None` for ordinary schemas.
     arm_validators: Option<Vec<Arc<Validator>>>,
     /// Prompt document directory used to reproduce the validator's
-    /// repository-first, then source-relative candidate plan in diagnostics.
+    /// document-first, then repository-relative candidate plan in diagnostics.
     base_dir: Option<PathBuf>,
     /// Captured launch-area metadata retained for file-reference diagnostics.
     file_ref_fallback_dir: Option<PathBuf>,
@@ -732,7 +732,7 @@ impl EffectiveSchema {
     /// will carry no line/column information).
     ///
     /// Read-only: the caller's `frontmatter` is never mutated. To rewrite
-    /// eager-`file` values to their resolved repo-relative paths, call
+    /// eager-`file` values to their resolved document-relative paths, call
     /// [`Self::normalize_frontmatter`] explicitly.
     pub fn validate(&self, frontmatter: &Value) -> ValidationReport {
         self.validate_with_positions(frontmatter, &PositionMap::new())
@@ -748,7 +748,7 @@ impl EffectiveSchema {
     /// [`coerce::coerce_frontmatter`]) on a working copy before validation, so
     /// the report reflects post-coercion validity. No input is mutated —
     /// eager-`file` values are left in their raw caller-supplied form. To
-    /// rewrite them to their resolved repo-relative paths, call
+    /// rewrite them to their resolved document-relative paths, call
     /// [`Self::normalize_frontmatter`] explicitly on an already-valid
     /// instance.
     pub fn validate_with_positions(
@@ -890,7 +890,7 @@ impl EffectiveSchema {
     }
 
     /// Normalizes eager-`file`-typed frontmatter values to their resolved
-    /// repo-relative paths.
+    /// document-relative paths.
     ///
     /// Walks the compiled schema for every present, non-null value under an
     /// eager `format: darkmatter-file` marker and rewrites it to the same
@@ -918,7 +918,7 @@ impl EffectiveSchema {
     /// ## Examples
     ///
     /// A raw caller-supplied reference under an eager `file(eager)` property is
-    /// rewritten to its repo-relative resolved path — the same projection
+    /// rewritten to its document-relative resolved path — the same projection
     /// `relative(value)` / `dirname(value)` already produce:
     ///
     /// ```no_run
@@ -939,8 +939,8 @@ impl EffectiveSchema {
     ///
     /// let input = serde_json::json!({ "spec": "./spec.md" });
     /// let outcome = effective.normalize_frontmatter(&input, &HashSet::new());
-    /// // Raw `./spec.md` -> repo-relative `area/spec.md`.
-    /// assert_eq!(outcome.value["spec"], serde_json::json!("area/spec.md"));
+    /// // Raw `./spec.md` -> document-relative `spec.md`.
+    /// assert_eq!(outcome.value["spec"], serde_json::json!("spec.md"));
     /// // The caller's input is never mutated.
     /// assert_eq!(input["spec"], serde_json::json!("./spec.md"));
     /// ```
@@ -2051,12 +2051,12 @@ mod claudine_compat_tests {
     }
 
     /// `normalize_frontmatter` rewrites a present eager-`file` value to its
-    /// repo-relative resolved path, and the caller's input `Value` is left
+    /// document-relative resolved path, and the caller's input `Value` is left
     /// byte-identical (Decision #3: pure).
     #[test]
     fn normalize_frontmatter_rewrites_eager_file_and_leaves_input_untouched() {
         let repo = tempfile::tempdir().expect("tempdir");
-        // A `.git` marker makes the projection git-root-relative.
+        // The repository marker provides the secondary implicit candidate.
         std::fs::create_dir_all(repo.path().join(".git")).expect("git marker");
         std::fs::create_dir_all(repo.path().join("area")).expect("area dir");
         std::fs::write(repo.path().join("area/spec.md"), "# Spec\n").expect("write spec");
@@ -2071,7 +2071,7 @@ mod claudine_compat_tests {
         let pending = HashSet::new();
         let outcome = effective.normalize_frontmatter(&input, &pending);
         assert!(outcome.changed, "expected the eager-file value to be rewritten");
-        assert_eq!(outcome.value["spec"], serde_json::json!("area/spec.md"));
+        assert_eq!(outcome.value["spec"], serde_json::json!("spec.md"));
         // Decision #3: the caller's input is never mutated.
         assert_eq!(input, snapshot, "normalize_frontmatter must not mutate its input");
     }
@@ -2102,7 +2102,7 @@ mod claudine_compat_tests {
         // Pending key is left verbatim.
         assert_eq!(outcome.value["spec"], serde_json::json!("$(echo spec.md)"));
         // Concrete sibling is rewritten.
-        assert_eq!(outcome.value["design"], serde_json::json!("area/design.md"));
+        assert_eq!(outcome.value["design"], serde_json::json!("design.md"));
     }
 
     /// Decision #3 regression: `validate_with_positions` keeps the documented
@@ -2185,6 +2185,26 @@ mod claudine_compat_tests {
             md.frontmatter().as_map().get("spec"),
             Some(&serde_json::json!("./spec.md")),
             "DarkmatterSchemas::validate must not rewrite the stored eager-file value",
+        );
+    }
+
+    #[test]
+    fn darkmatter_schemas_validate_does_not_materialize_lazy_file_frontmatter() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let prompt_path = dir.path().join("prompt.md");
+        std::fs::write(
+            &prompt_path,
+            "---\n$schema:\n  spec: file\nspec: missing.md\n---\nbody\n",
+        )
+        .expect("write prompt");
+
+        let md = Markdown::try_from(prompt_path.as_path()).expect("read prompt");
+        let report = DarkmatterSchemas::new().validate(&md).expect("validate");
+        assert!(report.valid, "expected valid: {:?}", report.problems);
+        assert_eq!(
+            md.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("missing.md")),
+            "validation-only APIs must not materialize a lazy caller-style value",
         );
     }
 

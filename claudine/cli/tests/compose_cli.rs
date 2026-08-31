@@ -151,16 +151,16 @@ fn compose_dry_run_malformed_whole_value_spec_path_aborts_without_leaking() {
 }
 
 // ============================================================================
-// Cross-surface repository-first parity (2026-07-13-file-resolution, AC6)
+// Cross-surface source-first parity (2026-07-13-file-resolution, AC6)
 // ============================================================================
 
 /// A Darkmatter `::file` transclusion run by Claudine resolves a bare implicit
-/// reference **repository-first** on a real collision.
+/// reference **source-first** on a real collision.
 ///
 /// This is the cross-surface half of the file-resolution feature (AC6): the
 /// lifecycle-proxy surface is proven end-to-end by the L2 file-resolution
 /// capture; this proves the *transclusion* surface obeys the identical
-/// repository-first contract when Claudine composes the document.
+/// source-first contract when Claudine composes the document.
 ///
 /// The fixture is a genuine collision — the transcluded basename exists at
 /// **both** the repository root and the source document's directory — so the
@@ -172,12 +172,12 @@ fn compose_dry_run_malformed_whole_value_spec_path_aborts_without_leaking() {
 /// wrapper's delivery mechanism.
 #[cfg(unix)]
 #[test]
-fn compose_transclusion_resolves_repository_first_on_collision() {
+fn compose_transclusion_resolves_source_first_on_collision() {
     let workspace = tempdir().unwrap();
     let root = workspace.path();
     assert!(
         init_git_repo(root),
-        "repository-first transclusion needs a real git worktree root"
+        "source-first transclusion needs a real git worktree root"
     );
 
     let path_dir = root.join("bin");
@@ -199,7 +199,7 @@ exit 0
     );
 
     // Genuine collision: same basename at the repository root and beside the
-    // source document. Repository-first must transclude the root copy.
+    // source document. Source-first must transclude the neighboring copy.
     write(&root.join("shared.md"), "REPO_ROOT_TRANSCLUSION_MARKER\n");
     write(
         &root.join("prompts/shared.md"),
@@ -220,13 +220,13 @@ exit 0
 
     let delivered = fs::read_to_string(&capture).unwrap_or_default();
     assert!(
-        delivered.contains("REPO_ROOT_TRANSCLUSION_MARKER"),
-        "the bare `::file shared.md` transclusion must resolve repository-first \
-         to <repo>/shared.md.\ndelivered prompt:\n{delivered}"
+        delivered.contains("SOURCE_LOCAL_TRANSCLUSION_MARKER"),
+        "the bare `::file shared.md` transclusion must resolve source-first \
+         beside the document.\ndelivered prompt:\n{delivered}"
     );
     assert!(
-        !delivered.contains("SOURCE_LOCAL_TRANSCLUSION_MARKER"),
-        "repository-first must win the collision — the source-local copy must \
+        !delivered.contains("REPO_ROOT_TRANSCLUSION_MARKER"),
+        "source-first must win the collision — the repository-root copy must \
          not be transcluded.\ndelivered prompt:\n{delivered}"
     );
 }
@@ -289,8 +289,8 @@ fn compose_transclusion_uses_source_doc_repository_not_launch_cwd() {
     let prompts_dir = repo_root.join("prompts");
     fs::create_dir_all(&prompts_dir).unwrap();
     let doc = prompts_dir.join("uses_snippet.md");
-    // Bare transclusion resolves repository-first: with the fix, the source's
-    // repo (repo_root) wins, not the launch CWD's repo (decoy_root).
+    // Bare transclusion resolves from its authoring source: the source's repo
+    // wins, not the launch CWD's decoy repository.
     write(&doc, "---\n---\n::file nested.md\n");
 
     let path_dir = workspace.path().join("bin");

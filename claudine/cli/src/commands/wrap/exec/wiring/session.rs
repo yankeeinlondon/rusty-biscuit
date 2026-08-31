@@ -39,6 +39,12 @@ pub(crate) fn run_kimi_wire_session(
 ) -> Result<ProcessResult<StreamExecutionSummary>> {
     debug_assert!(config.env.contains_key(&OsString::from("PATH")));
     debug_assert!(config.env.contains_key(&OsString::from("HOME")));
+    debug_assert!(
+        config
+            .env
+            .get(&OsString::from(claudine::child_environment::AGENT_CWD_ENV))
+            .is_some_and(|value| Path::new(value).is_absolute())
+    );
 
     let started_at = Instant::now();
     let span = info_span!("kimi_wire_session");
@@ -55,6 +61,7 @@ pub(crate) fn run_kimi_wire_session(
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    claudine::child_environment::contribute_child_environment(&mut command)?;
 
     #[cfg(unix)]
     {

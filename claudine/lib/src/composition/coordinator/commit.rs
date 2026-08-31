@@ -27,7 +27,7 @@ use super::invocation::RunLedger;
 const PROXY_TARGET_HINT: &str =
     "A `proxy` target must name an existing Markdown document: an absolute path, \
      an explicit `./` or `../` path relative to the document that declares it, a \
-     bare path (tried at the repository root first, then next to the document), \
+     bare path (tried next to the document first, then at the repository root), \
      `@`-prefixed for a magic-root search, or `~`-prefixed for a home path.";
 
 /// Why a proxy request could not become a handoff.

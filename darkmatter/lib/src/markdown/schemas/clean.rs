@@ -40,7 +40,7 @@ use super::{
     ValidationProblemCode, ValidationReport, validate,
 };
 use crate::markdown::Markdown;
-use crate::markdown::compose::find_git_root_from;
+use crate::markdown::compose::capture_file_resolution_context;
 
 /// The baseline-schema choice for a clean run (decision D7).
 ///
@@ -135,8 +135,7 @@ impl CleanSchemaConfig {
     /// `document_path` is the resolved Markdown file path when the input is
     /// file-backed; trigger discovery is silently inert without it (stdin
     /// parity with compose's non-file sources). Discovery walks from the
-    /// document to the Git root found by the existing
-    /// [`find_git_root_from`] path — no new filesystem/OS discovery logic.
+    /// document to the repository root captured at this command boundary.
     /// At most one context is built per clean invocation.
     ///
     /// ## Errors
@@ -153,7 +152,11 @@ impl CleanSchemaConfig {
         };
         if self.trigger_schemas
             && let Some(path) = document_path
-            && let Some(boundary) = find_git_root_from(path)
+            && let Some(boundary) = capture_file_resolution_context(
+                path.parent().unwrap_or(path),
+            )
+                .repository_root()
+                .map(Path::to_path_buf)
         {
             builder = builder.with_trigger_discovery(path, boundary)?;
         }

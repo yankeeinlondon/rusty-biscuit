@@ -400,10 +400,27 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             .run
             .compose
             .for_referenced_document(request.inline_compose, &prompt_source_context);
+        let mut binding_options = darkmatter::markdown::compose::ComposeOptions::new()
+            .with_source_file(&source.resolved_path)
+            .with_file_resolution_context(
+                prompt_source_context.file_resolution_context().clone(),
+            )
+            .with_set_overrides(request.set_overrides.clone())
+            .with_set_override_file_ref_origins(
+                request.set_override_file_ref_origins.clone(),
+            );
+        if let Some(launch_area) = self.run.compose.launch_area {
+            binding_options = binding_options.with_file_ref_fallback_dir(launch_area);
+        }
+        let materialized_overrides = darkmatter::markdown::compose::materialize_caller_overrides(
+            &source.markdown,
+            &binding_options,
+        )
+        .map_err(CompositionError::ComposeFailed)?;
         let composed = super::jit::compose_step(
             &source,
             &prompt_compose_context,
-            &request.set_overrides,
+            &materialized_overrides,
             self.env_overrides,
             self.run.approved.clone(),
             // A referenced prompt document *is* its body; composing it to

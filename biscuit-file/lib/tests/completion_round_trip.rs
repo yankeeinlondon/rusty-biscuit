@@ -82,21 +82,20 @@ fn pick_first_candidate(token: &str, ctx: &FileResolutionContext) -> Emitted {
 }
 
 /// An implicit-relative value emitted by completion resolves to the same file
-/// completion displayed — repository-first, even when a same-named decoy exists
-/// under the base directory.
+/// completion displayed — base-first, even when a same-named repository copy exists.
 #[test]
 fn implicit_relative_completion_value_resolves_to_the_displayed_file() {
     let tmp = TempDir::new().unwrap();
     let repo_root = canonical(tmp.path());
     git_init(&repo_root);
 
-    // The repository-root target and a same-named decoy under the base dir, so
+    // The repository-root target and a same-named copy under the base dir, so
     // completion and execution must agree on *which* one wins.
     fs::create_dir_all(repo_root.join("prompts")).unwrap();
     fs::write(repo_root.join("prompts/plan.md"), b"repo").unwrap();
     let base = repo_root.join("pkg");
     fs::create_dir_all(base.join("prompts")).unwrap();
-    fs::write(base.join("prompts/plan.md"), b"base decoy").unwrap();
+    fs::write(base.join("prompts/plan.md"), b"base").unwrap();
 
     let ctx = FileResolutionContext::new(base.clone())
         .with_source_path(base.join("router.md"))
@@ -107,9 +106,7 @@ fn implicit_relative_completion_value_resolves_to_the_displayed_file() {
         emitted.token, "prompts/plan.md",
         "the consumer inserts the scope + basename verbatim",
     );
-    // Completion enumerates the repository root first, so the displayed file is
-    // the repository-root twin, not the base decoy.
-    assert_eq!(emitted.displayed, repo_root.join("prompts/plan.md"));
+    assert_eq!(emitted.displayed, base.join("prompts/plan.md"));
 
     let resolved = FileReference::new(&emitted.token)
         .unwrap()
@@ -123,12 +120,9 @@ fn implicit_relative_completion_value_resolves_to_the_displayed_file() {
 }
 
 /// The published completion order for an implicit-relative token is the
-/// repository root first, then the base directory (Phase 4 precedence). This
-/// pins the corrected `CompletionEntryForm::ImplicitRelative` and
-/// `complete_partial` rustdoc, which previously advertised the reverse
-/// (`{base, git_root}`).
+/// base directory first, then the repository root.
 #[test]
-fn implicit_relative_completion_roots_are_repository_first() {
+fn implicit_relative_completion_roots_are_base_first() {
     let tmp = TempDir::new().unwrap();
     let repo_root = canonical(tmp.path());
     let base = repo_root.join("prompts");
@@ -142,8 +136,8 @@ fn implicit_relative_completion_roots_are_repository_first() {
 
     assert_eq!(
         completion.roots(),
-        &[repo_root.join("sub"), base.join("sub")],
-        "implicit-relative completion enumerates the repository root before the base",
+        &[base.join("sub"), repo_root.join("sub")],
+        "implicit-relative completion enumerates the base before the repository root",
     );
 }
 

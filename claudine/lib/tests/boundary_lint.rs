@@ -201,7 +201,7 @@ fn darkmatter_path_shape_functions_do_not_source_join_a_missing_reference() {
 }
 
 /// Local Markdown link resolution must absolutize a missing reference through
-/// the shared candidate plan (repository-first for implicit), never a
+/// the shared candidate plan (source-first for implicit), never a
 /// source-first `dir.join(raw)` that bypasses classification (spec Current
 /// Drift #8, D2). Guards the exact fallback this finding removed.
 #[test]

@@ -18,10 +18,10 @@
 //! 6. Sort by source rank then candidate text.
 //! 7. Render tokens.
 //!
-//! Magic paths (`@...`) are a filename search: they resolve against the
-//! scope priority order and are rendered as `@<basename>` (the `@` is kept;
-//! only the filename is inserted), deduped by basename. The committed
-//! `@<basename>` is resolved to the closest matching file at launch. A
+//! Sigil paths (`@...`, `&...`, and `^...`) are filename searches through the
+//! exact ordered roots supplied by `FileReference`; their sigil is retained in
+//! the rendered candidate. Magic candidates are deduped by basename, and the
+//! committed value resolves to the closest matching file at launch. A
 //! committed directory token (ending in `/`) shortcuts the pipeline to walk
 //! only inside that directory.
 
@@ -71,13 +71,25 @@ struct Candidate {
 pub(crate) fn run(mode: ComposeMode, ctx: &ScopeContext, partial_token: &str) -> Vec<String> {
     let scope_set = scopes::resolve_compose_scopes(ctx, mode);
     let resolution = scopes::file_resolution_context(ctx);
-    let Ok(Some(completion)) = FileReference::complete_partial_in_context(partial_token, &resolution)
+    // Execution correctly rejects a bare sigil, but completion must still
+    // enumerate its roots before the user has typed the first payload byte.
+    let completion_token = match partial_token {
+        "@" => "@_",
+        "&" => "&_",
+        "^" => "^_",
+        token => token,
+    };
+    let empty_sigil = (completion_token != partial_token).then_some("");
+    let Ok(Some(completion)) =
+        FileReference::complete_partial_in_context(completion_token, &resolution)
     else {
         return Vec::new();
     };
 
     let candidates = match completion.entry_form() {
-        CompletionEntryForm::Magic => gather_magic(mode, &completion),
+        CompletionEntryForm::Magic
+        | CompletionEntryForm::RepositoryRoot
+        | CompletionEntryForm::RepositoryScoped => gather_magic(mode, &completion, empty_sigil),
         CompletionEntryForm::ImplicitRelative => {
             gather_implicit(mode, ctx, &scope_set, partial_token, &completion)
         }

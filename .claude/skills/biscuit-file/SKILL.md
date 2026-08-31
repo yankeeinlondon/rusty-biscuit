@@ -5,7 +5,7 @@ description: >
 ---
 
 - Read [references/format-conversion.md](references/format-conversion.md) when converting between TOML, YAML, JSON, JSON5, or PDF formats
-- Read [references/file-references.md](references/file-references.md) when resolving file references (`@`, `!`, `vault:`, `%`, `{{ENV}}`)
+- Read [references/file-references.md](references/file-references.md) when resolving file references (`@`, `&`, `^`, `vault:`, `%`, `{{ENV}}`)
 - Read [references/cli.md](references/cli.md) when working with the `bf` CLI tool
 - Read [references/detect.md](references/detect.md) when using file type detection (`detect_file_type`, `detect_file_type_from_bytes`, `FileType`)
 - Read [references/api.md](references/api.md) for full API surface of all types (Toml, Yaml, Json5, Pdf, FileReference, FileType, DataFormat, detect, PdfConfig)

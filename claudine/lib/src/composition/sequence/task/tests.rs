@@ -31,6 +31,31 @@ use crate::events::GlobalSettings;
 use crate::messaging::RuntimeMessagingSettings;
 use crate::render::{TaskLiveOutput, TaskStreamSink};
 
+#[test]
+fn system_task_shell_observes_agent_cwd() {
+    let expected = crate::child_environment::initialize_process_launch_directory(
+        crate::child_environment::LaunchDirectoryMode::Ordinary,
+    )
+    .unwrap()
+    .to_string_lossy()
+    .into_owned();
+    let output = SystemTaskShell::default()
+        .run(agent_cwd_echo_source(), Duration::from_secs(5), None, None)
+        .unwrap();
+    assert_eq!(output.exit_code, 0);
+    assert_eq!(output.stdout.trim(), expected);
+}
+
+#[cfg(windows)]
+fn agent_cwd_echo_source() -> &'static str {
+    "echo %AGENT_CWD%"
+}
+
+#[cfg(not(windows))]
+fn agent_cwd_echo_source() -> &'static str {
+    "printf %s \"$AGENT_CWD\""
+}
+
 // -- fixtures ---------------------------------------------------------------
 
 /// Which of a [`TaskStreamSink`]'s two channels a write arrived on.
@@ -2273,7 +2298,8 @@ mod prompt_tasks {
 
         fixture.execute(&wiring);
 
-        let overrides = prompt.last().set_overrides;
+        let request = prompt.last();
+        let overrides = request.set_overrides;
         assert_eq!(overrides["only_param"], json!("from-params"));
         assert_eq!(
             overrides["shared"],
@@ -2291,6 +2317,11 @@ mod prompt_tasks {
             "the reserved overlay outranks everything",
         );
         assert_eq!(overrides["outputs"], json!([]));
+        assert_eq!(
+            request.set_override_file_ref_origins,
+            HashMap::from([("only_param".to_string(), fixture.source_path.parent().unwrap().to_path_buf())]),
+            "only a task parameter that survives all higher layers keeps the task document origin",
+        );
     }
 
     #[test]

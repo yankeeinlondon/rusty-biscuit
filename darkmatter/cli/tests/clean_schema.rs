@@ -26,7 +26,15 @@ impl Repo {
     fn new() -> Self {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().to_path_buf();
-        fs::create_dir_all(root.join(".git")).unwrap();
+        let git_dir = root.join(".git");
+        fs::create_dir_all(git_dir.join("objects")).unwrap();
+        fs::create_dir_all(git_dir.join("refs/heads")).unwrap();
+        fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        fs::write(
+            git_dir.join("config"),
+            "[core]\nrepositoryformatversion = 0\nbare = false\n",
+        )
+        .unwrap();
         fs::create_dir_all(root.join("schemas")).unwrap();
         fs::create_dir_all(root.join("docs")).unwrap();
         Self { _dir: dir, root }

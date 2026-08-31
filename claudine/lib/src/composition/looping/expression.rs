@@ -60,8 +60,8 @@ impl LoopAmbient {
 /// When constructed with a base directory ([`with_base_dir`](Self::with_base_dir)),
 /// the lookup exposes a [`ResolutionContext`] rooted at the prompt's parent so
 /// read-side expression functions (`file_exists`, `absolute`, `relative`, …)
-/// resolve implicit document-authored references repository-first, then against
-/// the document directory. The probe re-runs each iteration while the request
+/// resolve implicit document-authored references against the document directory
+/// before the repository fallback. The probe re-runs each iteration while the request
 /// snapshot and source remain fixed.
 ///
 /// [`with_file_ref_fallback_dir`](Self::with_file_ref_fallback_dir) retains the
@@ -104,8 +104,8 @@ impl<'a> LoopExpressionLookup<'a> {
     /// Retain the captured launch area as `file_ref_fallback_dir` diagnostic
     /// metadata.
     ///
-    /// References authored by the loop document resolve repository-first, then
-    /// source-relative; this directory is never an additional candidate.
+    /// References authored by the loop document resolve source-relative, then
+    /// against the repository; this directory is never an additional candidate.
     #[must_use]
     pub fn with_file_ref_fallback_dir(mut self, fallback: Option<&'a Path>) -> Self {
         self.file_ref_fallback_dir = fallback;

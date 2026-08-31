@@ -25,6 +25,14 @@ case "$MODE" in
         ;;
 esac
 
+# Git exports repo-pinning environment (GIT_DIR and friends) into hook
+# processes. If the test suite inherits it, every `git` a test fixture spawns
+# operates on THIS repository regardless of the fixture's cwd — tests have
+# committed to this repo through that leak (2026-08-31: two fixture commits
+# landed on a feature branch mid-push). The hook's cwd is the worktree root,
+# so plain cwd-based discovery still serves everything below.
+unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_OBJECT_DIRECTORY GIT_COMMON_DIR GIT_PREFIX
+
 # Areas to test during pre-push
 # Override: set RUSTY_BISCUIT_PRE_PUSH_AREAS to a space-separated list
 AREAS="${RUSTY_BISCUIT_PRE_PUSH_AREAS:-}"
