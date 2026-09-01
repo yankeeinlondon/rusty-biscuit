@@ -77,6 +77,28 @@ do not belong here.
 - For renames, include both old and new paths in the same pathspec list. Passing
   only the destination path commits only the `A` half and leaves the staged
   deletion behind.
+- **`git status --short`'s `R` only proves the index has two similar-content
+  endpoints — it does not prove either endpoint is the "right" one.** Git's
+  rename detector infers `R` at display time from blob similarity; the index
+  itself stores the pair as independent M (or D) + A entries. When the caller
+  stages a rename via `git add` on each endpoint rather than an explicit
+  `git mv`, `git commit --only -- <old> <new>` commits each endpoint's blob
+  independently, and a similarity-detected "rename" can land in the tree as a
+  modify+add pair with two completely different contents at the two paths.
+  Confirmed in a 5-group batch where `git status --short` showed
+  `R  prompts/_reviews/.../review-1.md -> claudine/fixes/.../review-1.md`
+  but the actual staging held a fresh review at the old path (different
+  findings, different verdict) and the implementation-flipped review at the
+  new path; the commit's `git show --name-status` came back `M` + `A` with
+  different blobs, not `R`. **Before relying on a staged `R`:** inspect
+  `git ls-files -s <old> <new>` (compare the stage-0 blob hashes) or
+  `git diff --cached -- <old> <new>` to confirm the OLD endpoint is a
+  deletion (or a zero-content modification) of the expected blob, not an
+  unrelated substitution. If the blobs diverge, surface the discrepancy to
+  the orchestrator and do not commit both endpoints as a "rename" — the
+  resulting tree preserves both contents and the developer's intent is
+  ambiguous. The hard rule "do not amend, do not reset, do not restage peers"
+  still applies; report and let the developer decide.
 - Put Git options before `--`. For very large explicit path lists, use
   `--pathspec-from-file` and inspect the generated list.
 - Feed commit messages through `-F -` with a single-quoted heredoc, or through a
