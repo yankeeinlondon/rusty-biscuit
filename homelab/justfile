@@ -205,9 +205,17 @@ install-server:
 install-frontend:
     @cd server/frontend && pnpm install
 
+# publish local research on Unifi as an Agent Skill
 publish-unifi-skill:
     @echo
     @echo "Publishing the 'unifi' agent skill"
+    @echo
+    @mkdir -p ../.claude/skills/unifi
+    @cp ./docs/unifi/* ../.claude/skills/unifi
+    @mv ../.claude/skills/unifi/index.md ../.claude/skills/unifi/SKILL.md
+    @bt dir ../.claude/skills/unifi
+    @echo
+    @echo -e "{{ BOLD }}unifi{{ RESET }} agent skill published"
 
 # Discover the Unfolded Circle integration packages.
 #
