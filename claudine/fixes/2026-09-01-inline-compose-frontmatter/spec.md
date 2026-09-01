@@ -6,6 +6,8 @@ area: claudine
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-09-01
+review_iterations: 1
+implemented: true
 packages:
     - claudine
     - darkmatter
