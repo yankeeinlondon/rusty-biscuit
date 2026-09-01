@@ -112,7 +112,7 @@ pub(crate) fn try_inline_closure(
         source_path.strip_prefix(child_cwd).unwrap_or(source_path),
     );
 
-    let replacement_body = match claudine::composition::closure::extract_replacement_body(
+    let replacement = match claudine::composition::closure::extract_replacement_parts(
         final_response,
     ) {
         Ok(body) => body,
@@ -127,19 +127,12 @@ pub(crate) fn try_inline_closure(
         }
     };
 
-    // Read post-run frontmatter for comparison (best-effort)
-    let post_run_fm = std::fs::read_to_string(source_path).ok().map(|text| {
-        let md: darkmatter::markdown::Markdown = text.into();
-        md.frontmatter().as_map().clone()
-    });
-
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
     match claudine::composition::closure::apply_inline_closure(
         closure_plan,
-        &replacement_body,
+        &replacement,
         source_path,
         &today,
-        post_run_fm.as_ref(),
     ) {
         Ok(result) => {
             if show_checks {
@@ -155,18 +148,58 @@ pub(crate) fn try_inline_closure(
                     term,
                 ));
 
-                for key in &result.new_properties {
+                for key in &result.inserted_properties {
                     log::message(&crate::output::fm_check_ok(
-                        &format!("Merged new frontmatter property <bold>\"{key}\"</bold>"),
+                        &format!("Inserted response frontmatter property <bold>\"{key}\"</bold>"),
                         term,
                     ));
                 }
 
-                for key in &result.reverted_properties {
+                for key in &result.refreshed_properties {
+                    log::message(&crate::output::fm_check_ok(
+                        &format!("Refreshed response frontmatter property <bold>\"{key}\"</bold>"),
+                        term,
+                    ));
+                }
+
+                for notice in &result.ignored_properties {
                     let status = Status::from_prose(format!(
-                        "Agent modified frontmatter property <b>\"{key}\"</b> — reverted to original value"
+                        "Response frontmatter property <b>\"{}\"</b> at line {} was not authorized — ignored",
+                        notice.key, notice.line
                     ))
                     .state(StatusState::Warning);
+                    log::message(&status.render(term));
+                }
+
+                for key in &result.missing_properties {
+                    let status = Status::from_prose(format!(
+                        "Allowed response frontmatter property <b>\"{key}\"</b> was not returned"
+                    ))
+                    .state(StatusState::Warning);
+                    log::message(&status.render(term));
+                }
+
+                for key in &result.restored_frontmatter_properties {
+                    let status = Status::from_prose(format!(
+                        "Frontmatter property <b>\"{key}\"</b> changed on disk during the run — restored the authored value"
+                    ))
+                    .state(StatusState::Warning);
+                    log::message(&status.render(term));
+                }
+
+                if result.unclassified_frontmatter_drift_restored {
+                    let status = Status::from_prose(
+                        "The document frontmatter changed on disk during the run and could not be compared property by property — restored the authored frontmatter",
+                    )
+                    .state(StatusState::Warning);
+                    log::message(&status.render(term));
+                }
+
+                if result.body_drift_restored {
+                    let status = Status::from_prose(
+                        "The document body changed on disk during the run — applied the captured replacement body",
+                    )
+                    .state(StatusState::Info);
                     log::message(&status.render(term));
                 }
             }
@@ -233,6 +266,7 @@ mod tests {
                 darkmatter::markdown::hash::MdHashKind::Simple,
                 &claudine::composition::closure::inline_hash_options(),
             ),
+            response_frontmatter: Vec::new(),
         };
 
         let term = Terminal::new_optimistic(120);
@@ -279,6 +313,7 @@ mod tests {
                 darkmatter::markdown::hash::MdHashKind::Simple,
                 &claudine::composition::closure::inline_hash_options(),
             ),
+            response_frontmatter: Vec::new(),
         };
 
         let term = Terminal::new_optimistic(120);

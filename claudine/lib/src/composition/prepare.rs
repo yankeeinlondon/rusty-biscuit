@@ -508,6 +508,8 @@ pub fn prepare_inline(
 ) -> Result<PreparedComposition, CompositionError> {
     let override_keys = top_level_override_keys(options.set_overrides.as_ref());
     let fm = source.markdown.frontmatter();
+    let (response_frontmatter, response_frontmatter_warnings) =
+        authored_response_frontmatter(source)?;
     if let Some((key, replacement)) =
         super::lifecycle::scan_removed_validation_keys(&frontmatter_to_value(fm))
     {
@@ -626,6 +628,7 @@ pub fn prepare_inline(
     let guardrails = load_or_create_guardrails(source_repo_root.as_deref());
     prompt.push_str("\n\n");
     prompt.push_str(&guardrails);
+    append_response_frontmatter_protocol(&mut prompt, &response_frontmatter);
 
     // Capture pre-execution hash for closure
     let original_hash = source.markdown.compute_hash(
@@ -644,17 +647,149 @@ pub fn prepare_inline(
         selection_hints,
         closure: CompositionClosurePlan::Inline(InlineClosurePlan {
             original_document_text: source.original_text.clone(),
+            response_frontmatter,
             original_hash,
         }),
         lifecycle,
         deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
-        warnings: report.warnings.clone(),
+        warnings: report
+            .warnings
+            .iter()
+            .cloned()
+            .chain(response_frontmatter_warnings)
+            .collect(),
         input_layers,
         compose_context: ctx,
         document_epoch: options.document_epoch,
     })
+}
+
+const RESPONSE_FRONTMATTER_PROPERTY: &str = "response_frontmatter";
+const RESPONSE_FRONTMATTER_RESERVED: &[&str] = &[
+    "prompt",
+    RESPONSE_FRONTMATTER_PROPERTY,
+    "hash",
+    "last_updated",
+];
+const INTERPRETED_RESPONSE_FRONTMATTER: &[&str] = &[
+    "$schema",
+    "agent",
+    "model",
+    "interactive",
+    "sequence",
+    "loop",
+    "fail_fast",
+    "timeout",
+    "step_timeout",
+];
+
+fn authored_response_frontmatter(
+    source: &ResolvedCompositionSource,
+) -> Result<(Vec<String>, Vec<darkmatter::markdown::compose::ComposeWarning>), CompositionError> {
+    let Some(value) = source
+        .markdown
+        .frontmatter()
+        .as_map()
+        .get(RESPONSE_FRONTMATTER_PROPERTY)
+    else {
+        return Ok((Vec::new(), Vec::new()));
+    };
+    let Some(values) = value.as_array() else {
+        return Err(response_frontmatter_error(
+            source,
+            "must be a list of unique, non-empty string property names",
+        ));
+    };
+    if values.is_empty() {
+        return Err(response_frontmatter_error(
+            source,
+            "must contain at least one property name",
+        ));
+    }
+
+    let mut names = Vec::with_capacity(values.len());
+    let mut seen = std::collections::HashSet::with_capacity(values.len());
+    for (index, value) in values.iter().enumerate() {
+        let Some(name) = value.as_str() else {
+            return Err(response_frontmatter_error(
+                source,
+                format!("item {} must be a string", index + 1),
+            ));
+        };
+        if name.trim().is_empty() {
+            return Err(response_frontmatter_error(
+                source,
+                format!("item {} must not be empty", index + 1),
+            ));
+        }
+        if RESPONSE_FRONTMATTER_RESERVED.contains(&name) {
+            return Err(response_frontmatter_error(
+                source,
+                format!("property `{name}` is managed by the inline closure and cannot be authorized"),
+            ));
+        }
+        if !seen.insert(name.to_string()) {
+            return Err(response_frontmatter_error(
+                source,
+                format!("property `{name}` is listed more than once"),
+            ));
+        }
+        names.push(name.to_string());
+    }
+
+    let line = source
+        .original_text
+        .lines()
+        .position(|line| line.trim_start().starts_with("response_frontmatter:"))
+        .map(|index| index + 1);
+    let warnings = names
+        .iter()
+        .filter(|name| {
+            INTERPRETED_RESPONSE_FRONTMATTER.contains(&name.as_str())
+                || LIFECYCLE_EVENT_KEYS.contains(&name.as_str())
+        })
+        .map(|name| {
+            let warning = darkmatter::markdown::compose::ComposeWarning::new(
+                "response_frontmatter",
+                format!(
+                    "authorized response property `{name}` is interpreted by Claudine and may change future execution semantics"
+                ),
+            );
+            match line {
+                Some(line) => warning.at_line(line),
+                None => warning,
+            }
+        })
+        .collect();
+
+    Ok((names, warnings))
+}
+
+fn response_frontmatter_error(
+    source: &ResolvedCompositionSource,
+    reason: impl Into<String>,
+) -> CompositionError {
+    CompositionError::ResponseFrontmatterInvalid {
+        source_path: source.resolved_path.clone(),
+        reason: reason.into(),
+    }
+}
+
+fn append_response_frontmatter_protocol(prompt: &mut String, names: &[String]) {
+    if names.is_empty() {
+        return;
+    }
+
+    prompt.push_str("\n\nAllowed response frontmatter properties (exact names):\n");
+    for name in names {
+        prompt.push_str("\n- ");
+        prompt.push_str(
+            &serde_json::to_string(name)
+                .expect("serializing a response frontmatter property name cannot fail"),
+        );
+    }
 }
 
 /// Convert a `Frontmatter` to a `serde_json::Value::Object`.
