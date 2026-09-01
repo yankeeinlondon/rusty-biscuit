@@ -29,7 +29,6 @@ DOCS := ""
 
 PACKAGE := "Homelab"
 
-
 default:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -49,12 +48,11 @@ default:
 # build Homelab packages (lib, cli, server)
 build *args="":
     @echo ""
-    @echo -e "Build {{BOLD}}Homelab{{RESET}} Packages (Library, Homey CLI, Server)"
+    @echo -e "Build {{ BOLD }}Homelab{{ RESET }} Packages (Library, Homey CLI, Server)"
     @echo "---------------------------------------------------"
     @echo ""
     @just build-frontend
-    @cargo build -p homelab -p homelab-cli -p homelab-server -p unfolded-integration-helper -p arcam-amp-integration -p eversolo-integration -p sony-receiver-integration {{args}}
-
+    @cargo build -p homelab -p homelab-cli -p homelab-server -p unfolded-integration-helper -p arcam-amp-integration -p eversolo-integration -p sony-receiver-integration {{ args }}
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 3) -------
 
@@ -138,30 +136,30 @@ all:
 # run opt-in ignored tests against real devices
 test-integrations-real-base *args="":
     @echo ""
-    @echo -e "Testing {{BOLD}}Homelab{{RESET}} Real Devices ({{ITALIC}}ignored tests only{{RESET}})"
+    @echo -e "Testing {{ BOLD }}Homelab{{ RESET }} Real Devices ({{ ITALIC }}ignored tests only{{ RESET }})"
     @echo ""
     @echo "Required env vars by package:"
     @echo "  Arcam:    ARCAM_REAL_HOST [ARCAM_REAL_PORT]"
     @echo "  Sony:     SONY_REAL_HOST [SONY_REAL_PORT]"
     @echo "  Eversolo: EVERSOLO_REAL_HOST [EVERSOLO_REAL_PORT]"
     @echo ""
-    @cargo test -p arcam-amp-integration real_device -- --ignored --nocapture {{args}}
-    @cargo test -p sony-receiver-integration real_device -- --ignored --nocapture {{args}}
-    @cargo test -p eversolo-integration real_device -- --ignored --nocapture {{args}}
+    @cargo test -p arcam-amp-integration real_device -- --ignored --nocapture {{ args }}
+    @cargo test -p sony-receiver-integration real_device -- --ignored --nocapture {{ args }}
+    @cargo test -p eversolo-integration real_device -- --ignored --nocapture {{ args }}
 
 # run opt-in ignored write tests against real devices; tests restore prior state
 test-integrations-real-destructive *args="":
     @echo ""
-    @echo -e "Testing {{BOLD}}Homelab{{RESET}} Real Devices ({{ITALIC}}destructive ignored tests{{RESET}})"
+    @echo -e "Testing {{ BOLD }}Homelab{{ RESET }} Real Devices ({{ ITALIC }}destructive ignored tests{{ RESET }})"
     @echo ""
     @echo "Required env vars by package:"
     @echo "  Arcam:    ARCAM_REAL_HOST [ARCAM_REAL_PORT] ARCAM_REAL_ALLOW_DESTRUCTIVE=1"
     @echo "  Sony:     SONY_REAL_HOST [SONY_REAL_PORT] SONY_REAL_ALLOW_DESTRUCTIVE=1"
     @echo "  Eversolo: EVERSOLO_REAL_HOST [EVERSOLO_REAL_PORT] EVERSOLO_REAL_ALLOW_DESTRUCTIVE=1"
     @echo ""
-    @cargo test -p arcam-amp-integration destructive_real_device -- --ignored --nocapture {{args}}
-    @cargo test -p sony-receiver-integration destructive_real_device -- --ignored --nocapture {{args}}
-    @cargo test -p eversolo-integration destructive_real_device -- --ignored --nocapture {{args}}
+    @cargo test -p arcam-amp-integration destructive_real_device -- --ignored --nocapture {{ args }}
+    @cargo test -p sony-receiver-integration destructive_real_device -- --ignored --nocapture {{ args }}
+    @cargo test -p eversolo-integration destructive_real_device -- --ignored --nocapture {{ args }}
 
 # run clippy on Homelab packages
 lint:
@@ -181,32 +179,35 @@ lint:
 # Builds library and CLI and installs the CLI's binary
 install *args="":
     @echo ""
-    @echo -e "{{BOLD}}Building Homelab Library{{RESET}}"
+    @echo -e "{{ BOLD }}Building Homelab Library{{ RESET }}"
     @cargo build -p homelab --release  || ( just _play error-2 --background && exit 1 )
     @echo ""
-    @echo -e "{{BOLD}}{{YELLOW}}Installing Homelab CLI ({{ITALIC}}homey{{RESET}}{{BOLD}}{{YELLOW}}){{RESET}}"
+    @echo -e "{{ BOLD }}{{ YELLOW }}Installing Homelab CLI ({{ ITALIC }}homey{{ RESET }}{{ BOLD }}{{ YELLOW }}){{ RESET }}"
     @echo
-    @cargo install --path ./cli {{args}}  || ( just _play error-2 --background && exit 1 )
+    @cargo install --path ./cli {{ args }}  || ( just _play error-2 --background && exit 1 )
     @echo ""
-    @echo -e "{{BOLD}}{{BLUE}}Homelab CLI ({{ITALIC}}homey{{RESET}}{{BOLD}}{{BLUE}}) installed{{RESET}}"
+    @echo -e "{{ BOLD }}{{ BLUE }}Homelab CLI ({{ ITALIC }}homey{{ RESET }}{{ BOLD }}{{ BLUE }}) installed{{ RESET }}"
     @echo ""
-    @just install-integrations {{args}}
+    @just install-integrations {{ args }}
     @just _play drop-4
 
 # install server binary
 install-server:
     @just build-frontend
     @echo ""
-    @echo -e "{{BOLD}}{{YELLOW}}Installing Homelab Server{{RESET}}"
+    @echo -e "{{ BOLD }}{{ YELLOW }}Installing Homelab Server{{ RESET }}"
     @cargo install --path ./server  || ( just _play error-2 --background  && exit 1 )
     @echo ""
-    @echo -e "{{BOLD}}{{BLUE}}Homelab Server installed{{RESET}}"
+    @echo -e "{{ BOLD }}{{ BLUE }}Homelab Server installed{{ RESET }}"
     @echo ""
-
 
 # install frontend dependencies
 install-frontend:
     @cd server/frontend && pnpm install
+
+publish-unifi-skill:
+    @echo
+    @echo "Publishing the 'unifi' agent skill"
 
 # Discover the Unfolded Circle integration packages.
 #
@@ -224,23 +225,22 @@ _integrations:
     fi
     sniff repo packages integration --plain | tr -d ',' | tr ' ' '\n' | grep -- '-integration$' | tr '\n' ' '
 
-
 build-local-integrations *args="":
     #!/usr/bin/env bash
     set -euo pipefail
     if ! command -v cargo-zigbuild &> /dev/null; then
-        echo -e "{{RED}}{{BOLD}}Error:{{RESET}} {{BOLD}}cargo-zigbuild{{RESET}} is not installed. Install it with: {{DIM}}cargo install cargo-zigbuild{{RESET}}"
+        echo -e "{{ RED }}{{ BOLD }}Error:{{ RESET }} {{ BOLD }}cargo-zigbuild{{ RESET }} is not installed. Install it with: {{ DIM }}cargo install cargo-zigbuild{{ RESET }}"
         exit 1
     fi
     echo
-    echo -e "Build all {{BOLD}}Unfolded Circle Integrations{{RESET}} for the UC Remote (aarch64-linux-musl)"
-    echo -e "{{DIM}}using cargo-zigbuild for cross-compilation{{RESET}}"
+    echo -e "Build all {{ BOLD }}Unfolded Circle Integrations{{ RESET }} for the UC Remote (aarch64-linux-musl)"
+    echo -e "{{ DIM }}using cargo-zigbuild for cross-compilation{{ RESET }}"
     echo
     for integration in $(just _integrations); do
-        echo -e "- building {{BOLD}}${integration}{{RESET}}"
+        echo -e "- building {{ BOLD }}${integration}{{ RESET }}"
         echo
-        cargo zigbuild -p "${integration}" --release --target aarch64-unknown-linux-musl {{args}}
-        echo -e "{{DIM}}  → ../target/aarch64-unknown-linux-musl/release/${integration}{{RESET}}"
+        cargo zigbuild -p "${integration}" --release --target aarch64-unknown-linux-musl {{ args }}
+        echo -e "{{ DIM }}  → ../target/aarch64-unknown-linux-musl/release/${integration}{{ RESET }}"
         echo
     done
 
@@ -250,11 +250,11 @@ install-integrations args="":
     set -euo pipefail
     for integration in $(just _integrations); do
         echo
-        echo -e "Installing the {{BOLD}}{{BLUE}}${integration}{{RESET}} integration"
+        echo -e "Installing the {{ BOLD }}{{ BLUE }}${integration}{{ RESET }} integration"
         echo
-        cargo install --path "./${integration}" {{args}} || (
+        cargo install --path "./${integration}" {{ args }} || (
             just _play error-2 --background &&
-            echo -e "{{RED}}{{BOLD}}Error: {{RESET}}problems installing the {{BOLD}}${integration}{{RESET}}!" &&
+            echo -e "{{ RED }}{{ BOLD }}Error: {{ RESET }}problems installing the {{ BOLD }}${integration}{{ RESET }}!" &&
             exit 1
         )
         echo
@@ -267,7 +267,7 @@ docker-build-arcam:
     #!/usr/bin/env bash
     set -euo pipefail
     echo
-    echo -e "Building a docker image for the {{BOLD}}Arcam{{RESET}} integration for the Unfolded Circle Remote"
+    echo -e "Building a docker image for the {{ BOLD }}Arcam{{ RESET }} integration for the Unfolded Circle Remote"
     echo
     docker build -f arcam-amp-integration/Dockerfile -t arcam-amp-integration .. || (
         echo "Failed to build a Docker image for the Arcam integration!" &&
@@ -275,7 +275,7 @@ docker-build-arcam:
         just _speak "f"
     )
     echo
-    echo -e "The {{BOLD}}Arcam{{RESET}}"
+    echo -e "The {{ BOLD }}Arcam{{ RESET }}"
 
 check:
     @echo ""
@@ -286,30 +286,27 @@ check:
 # run server in dev mode
 server *args="":
     @echo ""
-    @echo "{{BOLD}}Running Homelab Server{{RESET}} ({{ITALIC}}development mode{{RESET}})"
+    @echo "{{ BOLD }}Running Homelab Server{{ RESET }} ({{ ITALIC }}development mode{{ RESET }})"
     @echo ""
-    cargo run -p homelab-server {{args}}
+    cargo run -p homelab-server {{ args }}
 
 # run tests for server only
 test-server *args="":
     @just _test homelab-server {{ args }}
 
-
 # build frontend SPA (installs deps if needed)
 build-frontend:
     @echo ""
-    @echo -e "{{BOLD}}Building Frontend SPA{{RESET}}"
+    @echo -e "{{ BOLD }}Building Frontend SPA{{ RESET }}"
     @cd ./server/frontend && (pnpm install --frozen-lockfile 2>/dev/null || pnpm install) && pnpm build
     @echo ""
 
 # run frontend dev server (Vite on :5173 with proxy to :3000)
 dev-frontend:
     @echo ""
-    @echo -e "{{BOLD}}Running Frontend Dev Server{{RESET}} ({{ITALIC}}Vite on :5173{{RESET}})"
+    @echo -e "{{ BOLD }}Running Frontend Dev Server{{ RESET }} ({{ ITALIC }}Vite on :5173{{ RESET }})"
     @echo ""
     @cd server/frontend && pnpm dev
-
-
 
 # lint frontend code with oxlint
 #
@@ -404,7 +401,7 @@ typecheck-frontend:
 # stages all files in package area and then commits and pushes
 cp:
     @echo ""
-    @echo -e "Staging all {{BOLD}}modified{{RESET}} or {{BOLD}}untracked{{RESET}} files for the {{PACKAGE}} package area."
+    @echo -e "Staging all {{ BOLD }}modified{{ RESET }} or {{ BOLD }}untracked{{ RESET }} files for the {{ PACKAGE }} package area."
     @echo ""
     @git add *
     @echo ""
@@ -415,63 +412,61 @@ cp:
     @git push
     @echo ""
     @just -play select-4
-    @echo -e "All committed files from {{BOLD}}{{PACKAGE}}{{RESET}} have now been pushed to remote."
+    @echo -e "All committed files from {{ BOLD }}{{ PACKAGE }}{{ RESET }} have now been pushed to remote."
     @echo
 
 create-integration name="" prompt="":
     #!/usr/bin/env bash
-    if [ -z "{{name}}" ]; then
-        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} no {{BOLD}}name{{RESET}} provided for the integration!"
+    if [ -z "{{ name }}" ]; then
+        echo -e "{{ BOLD }}{{ RED }}Error:{{ RESET }} no {{ BOLD }}name{{ RESET }} provided for the integration!"
         echo
-        echo -e "syntax: {{BOLD}}just create-integration{{RESET}} {{DIM}}{{ITALIC}} [name] [prompt]"
+        echo -e "syntax: {{ BOLD }}just create-integration{{ RESET }} {{ DIM }}{{ ITALIC }} [name] [prompt]"
         echo
         exit 99
     fi
 
-    if [ -z "{{prompt}}" ]; then
-        echo -e "{{BOLD}}{{RED}}Error:{{RESET}} no {{BOLD}}prompt{{RESET}} provided for the {{name}} integration! Exiting..."
+    if [ -z "{{ prompt }}" ]; then
+        echo -e "{{ BOLD }}{{ RED }}Error:{{ RESET }} no {{ BOLD }}prompt{{ RESET }} provided for the {{ name }} integration! Exiting..."
         echo
-        echo -e "syntax: {{BOLD}}just create-integration{{RESET}} {{DIM}}{{ITALIC}} [name] [prompt]"
+        echo -e "syntax: {{ BOLD }}just create-integration{{ RESET }} {{ DIM }}{{ ITALIC }} [name] [prompt]"
         echo
         exit 99
     fi
 
     mkdir -p "./docs/integrations/"
-    touch "./docs/integration/{{name}}.md"
-
+    touch "./docs/integration/{{ name }}.md"
 
 # build the 'homelab' skill
 skill-homelab:
     @echo
-    @echo -e "Refreshing {{BOLD}}Homelab{{RESET}} skill"
+    @echo -e "Refreshing {{ BOLD }}Homelab{{ RESET }} skill"
     @claudine --yolo -p \'"$(cat docs/skills-homelab.md)"\'
 
 # build the 'unfolded-circle' skill and deploy in this repo as well as User scope
 skill-unfolded-circle:
     @echo
-    @echo "Publishing skill for {{BOLD}}unfolded-circle{{RESET}} locally to {{BLUE}}repo{{RESET}}"
+    @echo "Publishing skill for {{ BOLD }}unfolded-circle{{ RESET }} locally to {{ BLUE }}repo{{ RESET }}"
     @echo
     @mkdir -p "../.claude/skills/unfolded-circle"
     @cp -r ./docs/unfolded-circle ../.claude/skills
     @echo
-    @echo -e "Skill published to {{BOLD}}rusty-biscuit{{RESET}} monorepo"
+    @echo -e "Skill published to {{ BOLD }}rusty-biscuit{{ RESET }} monorepo"
     @echo
 
 # fix documentation drift, refresh the skill, and review CLAUDE.md
 drift *args="":
     @echo
-    @printf "%b\n" "Running drift workflow for {{BOLD}}homelab{{RESET}} via Rust drift script"
+    @printf "%b\n" "Running drift workflow for {{ BOLD }}homelab{{ RESET }} via Rust drift script"
     @echo
     @echo "- step 1: update package docs for code drift"
     @echo "- step 2: refresh package skill from updated docs"
     @echo "- step 3: review CLAUDE.md for needed updates"
     @echo "- export PREFER_AGENT=codex to force codex (default is claude)"
     @echo
-    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- homelab {{DOCS}} {{args}}
+    @cargo run --manifest-path ../scripts/Cargo.toml --bin drift -- homelab {{ DOCS }} {{ args }}
     @_speak "the drift recipe for the homelab package has completed; documentation and agent skills have been updated and possibly some adjustments to the CLAUDE.md file where appropriate."
-
 
 # No-op recipe: reference color vars so linters won't report them as unused.
 # Run `just _colors` if you want to exercise this (it does nothing).
 _colors:
-    @: {{BOLD}} {{ITALIC}} {{RESET}} {{YELLOW2}} {{BLACK}} {{RED}} {{GREEN}} {{YELLOW}} {{BLUE}} {{MAGENTA}} {{CYAN}} {{WHITE}} >/dev/null || true
+    @: {{ BOLD }} {{ ITALIC }} {{ RESET }} {{ YELLOW2 }} {{ BLACK }} {{ RED }} {{ GREEN }} {{ YELLOW }} {{ BLUE }} {{ MAGENTA }} {{ CYAN }} {{ WHITE }} >/dev/null || true
