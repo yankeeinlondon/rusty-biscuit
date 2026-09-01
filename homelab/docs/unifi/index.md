@@ -1,3 +1,9 @@
+---
+kind: agent-skill
+name: unifi
+description: provides details on the Unifi brand, Ubiquiti as a company, all the core products offered, the software applications provided, and the API's used to interact with the Unifi service lines.
+---
+
 # Unifi
 
 ## Company and Brand
