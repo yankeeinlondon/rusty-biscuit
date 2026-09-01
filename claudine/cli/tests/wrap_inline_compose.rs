@@ -351,6 +351,70 @@ exit 0
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn inline_compose_reports_canonical_value_and_body_drift() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    seed_minimal_config(workspace.path());
+
+    let md_file = workspace.path().join("doc.md");
+    let original = concat!(
+        "---\n",
+        "prompt: |-\n",
+        "  First\n",
+        "  Second\n",
+        "title: Mine\n",
+        "---\n",
+        "Original body\n",
+    );
+    fs::write(&md_file, original).unwrap();
+    write_executable(
+        &path_dir.join("goose"),
+        r#"#!/bin/sh
+printf '%s' "$CLAUDINE_DRIFT_CONTENT" > "$CLAUDINE_DRIFT_TARGET"
+printf 'Replacement body\n'
+exit 0
+"#,
+    );
+
+    let drifted = concat!(
+        "---\n",
+        "prompt: \"First\\nSecond\"\n",
+        "title: Theirs\n",
+        "---\n",
+        "Changed body\n",
+    );
+    let assert = assert_cmd::Command::cargo_bin("claudine")
+        .unwrap()
+        .current_dir(workspace.path())
+        .env("NO_COLOR", "1")
+        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+        .env("HOME", workspace.path())
+        .env("PATH", &path_dir)
+        .env("CLAUDINE_DRIFT_CONTENT", drifted)
+        .env("CLAUDINE_DRIFT_TARGET", &md_file)
+        .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    let normalized_stderr = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(normalized_stderr.contains(
+        "Frontmatter property \"title\" changed on disk during the run — restored the authored value"
+    ));
+    assert!(normalized_stderr.contains(
+        "The document body changed on disk during the run — applied the captured replacement body"
+    ));
+    assert!(!normalized_stderr.contains("agent changed"));
+
+    let written = fs::read_to_string(md_file).unwrap();
+    assert!(written.contains("prompt: |-\n  First\n  Second\n"));
+    assert!(written.contains("title: Mine\n"));
+    assert!(written.ends_with("---\nReplacement body\n"));
+}
+
 /// Phase 4 dry-run: `inline-compose --dry-run` runs the full composition
 /// pipeline up to (but not including) provider launch, leaves the source
 /// file byte-identical (no write-back, `last_updated` untouched), and prints

@@ -1,6 +1,20 @@
 use super::*;
 use tempfile::TempDir;
 
+const AC1_ORIGINAL_DOCUMENT: &str = concat!(
+    "---\n",
+    "prompt: |-\n",
+    "    Keep four spaces  \n",
+    "\n",
+    "    and literal \\\"quotes\\\"\n",
+    "hash:\n",
+    "  kind: structured\n",
+    "  value: a000000000000000-b000000000000000-c000000000000000-d000000000000000\n",
+    "last_updated: '2026-01-01'\n",
+    "---\n",
+    "Old body\n",
+);
+
 fn plan(original: &str, allowed: &[&str]) -> InlineClosurePlan {
     let markdown: darkmatter::markdown::Markdown = original.to_string().into();
     InlineClosurePlan {
@@ -159,39 +173,99 @@ fn apply_closure_harvests_only_authorized_properties() {
 }
 
 #[test]
-fn apply_closure_preserves_authored_frontmatter_bytes_and_stamps_clean_hash() {
+fn removing_response_authorization_leaves_generated_value_untouched_on_later_run() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("doc.md");
     let original = concat!(
         "---\n",
-        "prompt: |-\n",
-        "    Keep four spaces  \n",
-        "\n",
-        "    and literal \\\"quotes\\\"\n",
-        "hash:\n",
-        "  kind: structured\n",
-        "  value: a000000000000000-b000000000000000-c000000000000000-d000000000000000\n",
-        "last_updated: '2026-01-01'\n",
+        "prompt: test\n",
+        "response_frontmatter: [generated_by]\n",
+        "last_updated: 2026-01-01\n",
         "---\n",
         "Old body\n",
     );
     std::fs::write(&file, original).unwrap();
+
+    let first_replacement = extract_replacement_parts(
+        "---\ngenerated_by: first-run\n---\nFirst generated body\n",
+    )
+    .unwrap();
+    apply_inline_closure(
+        &plan(original, &["generated_by"]),
+        &first_replacement,
+        &file,
+        "2026-09-01",
+    )
+    .unwrap();
+
+    let without_authorization = std::fs::read_to_string(&file)
+        .unwrap()
+        .replace("response_frontmatter: [generated_by]\n", "");
+    std::fs::write(&file, &without_authorization).unwrap();
+    let second_replacement = extract_replacement_parts(
+        "---\ngenerated_by: second-run\n---\nSecond generated body\n",
+    )
+    .unwrap();
+    let result = apply_inline_closure(
+        &plan(&without_authorization, &[]),
+        &second_replacement,
+        &file,
+        "2026-09-01",
+    )
+    .unwrap();
+
+    assert_eq!(
+        result.ignored_properties,
+        [InlinePropertyNotice {
+            key: "generated_by".into(),
+            line: 2,
+        }]
+    );
+    let written = std::fs::read_to_string(file).unwrap();
+    assert!(written.contains("generated_by: first-run\n"));
+    assert!(!written.contains("generated_by: second-run\n"));
+    assert!(!written.contains("response_frontmatter:"));
+    assert!(written.contains("Second generated body\n"));
+}
+
+#[test]
+fn apply_closure_preserves_authored_frontmatter_bytes_and_stamps_clean_hash() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("doc.md");
+    std::fs::write(&file, AC1_ORIGINAL_DOCUMENT).unwrap();
     let replacement = extract_replacement_parts("New body\n").unwrap();
-    apply_inline_closure(&plan(original, &[]), &replacement, &file, "2026-09-01").unwrap();
+    apply_inline_closure(
+        &plan(AC1_ORIGINAL_DOCUMENT, &[]),
+        &replacement,
+        &file,
+        "2026-09-01",
+    )
+    .unwrap();
     let written = std::fs::read_to_string(&file).unwrap();
-    assert!(written.contains(concat!(
-        "prompt: |-\n",
-        "    Keep four spaces  \n",
-        "\n",
-        "    and literal \\\"quotes\\\"\n",
-    )));
-    assert!(!written.contains("prompt: \""));
-    assert!(written.contains("last_updated: '2026-09-01'"));
-    let markdown: darkmatter::markdown::Markdown = written.into();
+    let markdown: darkmatter::markdown::Markdown = written.clone().into();
     let options = inline_hash_options();
     let stored = parse_inline_stored_hash(&markdown, &options)
         .unwrap()
         .unwrap();
+    let darkmatter::markdown::hash::StoredHashValue::Flat(hash_value) = &stored.value else {
+        panic!("inline closure must downgrade the managed hash to Simple")
+    };
+    let expected = format!(
+        concat!(
+            "---\n",
+            "prompt: |-\n",
+            "    Keep four spaces  \n",
+            "\n",
+            "    and literal \\\"quotes\\\"\n",
+            "hash: {}\n",
+            "last_updated: '2026-09-01'\n",
+            "---\n",
+            "New body\n",
+        ),
+        hash_value
+    );
+    assert_eq!(written, expected);
+    assert!(!written.contains("prompt: \""));
     assert_eq!(stored.kind, MdHashKind::Simple);
     let comparison = markdown.compare_hash(&stored, &options).unwrap();
     assert!(!comparison.frontmatter_changed && !comparison.body_changed);
@@ -482,10 +556,15 @@ fn apply_closure_is_deterministic_for_fixed_inputs() {
 fn apply_closure_second_identical_run_is_byte_idempotent() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("doc.md");
-    let original = "---\nprompt: test\nlast_updated: 2026-01-01\n---\nOld body\n";
-    std::fs::write(&file, original).unwrap();
+    std::fs::write(&file, AC1_ORIGINAL_DOCUMENT).unwrap();
     let replacement = extract_replacement_parts("New body\n").unwrap();
-    apply_inline_closure(&plan(original, &[]), &replacement, &file, "2026-09-01").unwrap();
+    apply_inline_closure(
+        &plan(AC1_ORIGINAL_DOCUMENT, &[]),
+        &replacement,
+        &file,
+        "2026-09-01",
+    )
+    .unwrap();
     let first = std::fs::read_to_string(&file).unwrap();
     let error = apply_inline_closure(
         &plan(&first, &[]),

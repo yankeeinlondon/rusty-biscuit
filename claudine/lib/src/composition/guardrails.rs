@@ -149,6 +149,7 @@ mod tests {
         }
     }
 
+    #[tracing_test::traced_test]
     #[test]
     fn failed_migration_uses_new_protocol_without_truncating_old_file() {
         let dir = TempDir::new().unwrap();
@@ -165,5 +166,7 @@ mod tests {
             fs::read_to_string(path).unwrap(),
             SHIPPED_GUARDRAILS_2026_03_27
         );
+        assert!(logs_contain("failed to migrate guardrails file"));
+        assert!(logs_contain("injected"));
     }
 }
