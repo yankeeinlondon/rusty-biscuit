@@ -5,6 +5,8 @@ area: claudine
 packages:
     - claudine
 reviewed: true
+implemented: true
+review_iterations: 1
 reviewed_by: codex/default
 reviewed_on: 2026-09-01
 ---
