@@ -4,50 +4,65 @@ created: 2026-09-01
 area: claudine
 packages:
     - claudine
+reviewed: true
+reviewed_by: codex/default
+reviewed_on: 2026-09-01
 ---
 
-# A failed path-shaped operation-file reference is laundered through prompt autocomplete instead of reporting file-not-found
+# A failed explicit operation-file reference is laundered through prompt autocomplete instead of reporting file-not-found
 
 ## Summary
 
-When `claudine compose|inline-compose|sequence <file>` fails to resolve its
-operation-file reference, the CLI unconditionally hands the failed token to
-the interactive autocomplete picker as a literal substring query. For a
-path-shaped token — the way users most often spell an explicit target, e.g.
-`./docs/unifi/access.md` — that fallback is nonsensical by construction:
+When `claudine compose|inline-compose|sequence <file>` cannot resolve its
+operation-file reference, the CLI currently hands every clean no-match to the
+interactive autocomplete picker as a literal substring query. That recovery is
+useful for a bare discovery token such as `access`, but it is the wrong contract
+for an explicit reference such as `./docs/unifi/access.md`, `docs/unifi/access.md`,
+`@access.md`, or `C:\\docs\\access.md`: the user selected reference semantics and
+needs to know which concrete candidates those semantics tried.
 
-1. the query can never match (`path_matches_query` does a literal substring
-   `contains`, and no walked path contains the text `./`); and
-2. the picker never looks where the user pointed (its scope set walks only
-   `prompts/` directories — repo, area, package, `.claudine/`, user — never
-   the directory named in the path).
+For the motivating `./docs/unifi/access.md` case, the fallback is nonsensical by
+construction:
 
-The user therefore sees `CompositionError: no autocomplete matches … Check
-the query token or run without a query to see all candidates` for what is a
-plain wrong-CWD or typo'd path. The one fact that would resolve the incident
-instantly — *"no such file: `<cwd>/docs/unifi/access.md`"* — is never
-stated. In a non-interactive session the same failure reports
-`autocomplete not available`, which is equally unrelated to the actual
-problem.
+1. `path_matches_query` performs a literal substring match, while walked
+   candidate paths do not contain the authored `./` prefix; and
+2. the picker searches its configured high-profile scopes, not the directory
+   selected by the explicit-relative reference.
 
-This fix classifies the failed token: path-shaped references get a typed
-file-not-found diagnostic naming the absolute candidates tried, the CWD, and
-a bounded did-you-mean; only bare name-shaped tokens enter the autocomplete
-picker, whose behavior is unchanged.
+The user therefore sees `CompositionError: no autocomplete matches …` for a
+plain wrong-CWD or mistyped path. In a non-interactive session the same failure
+reports `autocomplete not available`. Neither diagnostic states the file
+reference that failed, the launch directory against which it was resolved, or
+the candidates the shared `FileReference` resolver actually probed.
 
-## Observed behavior (verified 2026-09-01, installed claudine of 2026-08-28)
+This fix makes autocomplete an explicitly narrow recovery policy: only a
+non-recursive, unsigiled, single-component implicit reference may enter the
+picker. Every other well-formed reference that cleanly misses produces the
+existing `composition.invalid_file_reference` diagnostic, enriched from
+`FileReference::resolve_detailed` with the ordered probe record and a bounded,
+best-effort basename suggestion search.
+
+> **Reader's note (inline review, 2026-09-01):** The initial draft proposed a
+> second file-not-found variant/code, raw prefix-based classification, and
+> normalization inside the shared `path_matches_query` predicate. The reviewed
+> design instead preserves the established `composition.invalid_file_reference`
+> identity, makes `FileReference` the grammar authority, and leaves the shared
+> matcher unchanged. This avoids splitting one authoring mistake across two
+> diagnostic codes and avoids changing schema-file matching as a side effect of
+> an operation-file routing fix.
+
+## Observed behavior (verified 2026-09-01, installed Claudine of 2026-08-28)
 
 Incident: `inline-compose ./docs/unifi/access.md -y --claude --model opus`
 failed with "no autocomplete matches" while the byte-similar `protect.md`
-composed fine. The files were identical in every relevant way; the actual
-difference was the invoking shell's CWD. From `homelab/` all three documents
-resolve and compose; from the repository root (a different terminal tab) the
-relative path does not exist and the fallback produces the incident error
-verbatim:
+composed successfully. The files were identical in every relevant way; the
+actual difference was the invoking shell's CWD. From `homelab/` all three
+documents resolve and compose; from the repository root the relative path does
+not exist and the fallback produces the incident error verbatim:
 
 ```console
 $ cd <repo root>
-$ claudine inline-compose ./docs/unifi/access.md -y --dry-run   # under a pty
+$ claudine inline-compose ./docs/unifi/access.md -y --dry-run   # under a PTY
  CompositionError: no autocomplete matches
 ┃
 ┃ No files matched autocomplete query `./docs/unifi/access.md`.
@@ -55,131 +70,265 @@ $ claudine inline-compose ./docs/unifi/access.md -y --dry-run   # under a pty
 ┃ Check the query token or run without a query to see all candidates.
 ```
 
-The same invocation without a TTY reports `autocomplete not available`
-instead. Neither message mentions the path that was tried, the CWD it was
+The same invocation without a TTY reports `autocomplete not available`.
+Neither message mentions the candidate path, the launch directory it was
 resolved against, or that the file simply was not found there. The user
-reasonably concluded the two documents were being treated differently;
+reasonably concluded that the documents were being treated differently;
 diagnosing the real cause required reproducing from multiple directories.
 
 ## Root cause
 
-The ENTER-path autocomplete (2026-06-14 auto-complete feature, Phase 3;
-`claudine/cli/src/completion/operation_file.rs`) was designed to help
-discover *prompt* files from bare, name-shaped tokens. The entry seam,
-however, engages it for **every** failed `FileReference` lookup, with the
-raw failed token as the query:
+The ENTER-path autocomplete introduced by the 2026-06-14 auto-complete feature
+was designed to discover prompt files from bare name queries. Its two operation
+entry seams (`commands/compose/prep.rs` and `commands/sequence.rs`) instead key
+only on `CompositionError::FileNotFound`, so every clean `FileReference`
+no-match is converted into a picker query:
 
-- `autocomplete_operation_file` gates only on TTY-ness
-  (`operation_file.rs:46-57`); there is no token classification.
-- `path_matches_query` (`completion/scopes.rs:115`) lowercases the query and
-  requires it to appear as a substring of a candidate path. Walked paths
-  never contain `./`, so any `./`-prefixed reference is guaranteed zero
-  matches regardless of what exists.
-- `resolve_compose_scopes` (`completion/scopes.rs:306`) walks
-  `<repo>/prompts/`, `<area>/prompts/`, `<pkg>/prompts/`,
-  `<repo>/.claudine/prompts/`, and `~/.claudine/prompts/` — never the
-  directory a path-shaped reference names, so even a `./`-stripped
-  `docs/unifi/access.md` could not be found.
+- `autocomplete_operation_file` gates on TTY availability; it receives no
+  typed reference classification.
+- `path_matches_query` lowercases the provided query and requires it to occur
+  literally in a candidate path. An authored anchoring prefix such as `./`
+  therefore guarantees zero matches.
+- `resolve_compose_scopes` walks configured prompt scopes for all three modes,
+  plus repository `docs/` and agent-skill peers for `inline-compose` and
+  `sequence`. These are discovery scopes; they do not and must not reinterpret
+  the directory selected by an explicit reference.
+- `resolve_composition_source_in_context` and the YAML branch of
+  `resolve_sequence_source` call the convenience `resolve_in_context` API. Its
+  clean `Ok(None)` projection discards the ordered candidates and provenance
+  already available from `resolve_detailed`, leaving `FileNotFound(String)` too
+  weak to render the actual resolution attempt.
 
-Two structurally-blind layers stack, and the resulting errors
-(`AutocompleteNoMatches`, `AutocompleteNotInteractive`) describe the
-fallback's internals rather than the user's failure.
+The resulting `AutocompleteNoMatches` or `AutocompleteNotInteractive` describes
+the failed recovery mechanism rather than the user's error.
 
 ## Design decisions
 
-### D1 — Classify the failed token before choosing a recovery path
+### D1 — Parse first; autocomplete only a bare discovery name
 
-A failed operation-file token is **path-shaped** when it contains a path
-separator (`/`, or `\` on Windows), starts with `./`, `../`, or `~`, or is
-absolute. Everything else — a bare stem such as `access` or `plan` — is
-**name-shaped**. Classification happens once at the seam that currently
-invokes `autocomplete_operation_file`, on the original token as typed (not a
-partially-resolved form).
+The fallback must parse the original token with `FileReference::new()` and use
+`FileReference::class()` as the reference-kind authority. It must not recreate
+the shared grammar with `starts_with` checks.
 
-### D2 — Path-shaped failures report file-not-found, never autocomplete
+A failed token is eligible for operation-file autocomplete only when all of
+the following are true:
 
-A path-shaped failure produces a typed composition error (new variant; follow
-the Error Architecture reference before adding it — one discovery seam, the
-`Semantic`/`Transparent` role contract, and a catalog code) that renders:
+- its parsed kind is `FileReferenceKind::ImplicitRelative`;
+- it is not recursive;
+- the original implicit payload contains neither `/` nor `\\`; and
+- it contains no `{{...}}` environment interpolation.
 
-- the reference exactly as typed;
-- the absolute candidate path(s) the `FileReference` resolution actually
-  tried, in order, each labeled with its anchor (CWD, repo root, magic
-  root) so the resolution order is visible rather than implied;
-- the invoking CWD; and
-- a bounded did-you-mean (D3) when it finds anything.
+This admits bare names such as `access` and `access.md`. A multi-component bare
+reference (`docs/access.md`) is still an implicit `FileReference`, but it is an
+explicit location for recovery-policy purposes and therefore does not enter the
+picker. Every sigiled kind (`./`, `../`, absolute, `~`, `@`, `!`, `vault:`, URL)
+and every recursive reference is likewise explicit, even when its payload has
+only one component. Invalid syntax and missing-context/I/O failures retain their
+existing typed errors; only a genuine `ResolutionFailure::NoMatch` is eligible
+for either recovery branch.
 
-This variant applies identically in interactive and non-interactive
-sessions: TTY-ness no longer changes which error a path typo yields. The
-picker is never launched for a path-shaped token — a user who typed a path
-asked for that file, not a browse session over prompt directories.
+The `/` and `\\` payload test is deliberately host-independent so a Windows
+spelling is classified consistently when unit-tested on macOS or Linux. It is
+applied only after `FileReference` has classified the token as implicit; it is
+not a competing prefix grammar.
 
-### D3 — Did-you-mean searches for the basename, bounded
+### D2 — Preserve the established diagnostic identity and detailed probe record
 
-When the path-shaped reference's basename (e.g. `access.md`) exists
-elsewhere under the effective repo root, list up to a small fixed number of
-matches (reusing the existing capped scope walker mechanics, widened to the
-repo root for this search only) as `did you mean:` lines rendered as
-portable relative paths. The incident case must self-diagnose: running from
-the repo root with `./docs/unifi/access.md` names
-`homelab/docs/unifi/access.md`. The search is best-effort — cap, skip
-ignored/hidden trees per the existing walker rules, and omit the section
-entirely when nothing is found or the walk overruns its cap.
+Do not add a new diagnostic code. A missing top-level operation file is the same
+correctable authoring mistake already represented by
+`composition.invalid_file_reference`.
 
-### D4 — Name-shaped tokens keep the picker, with the query normalized
+Evolve the existing `CompositionError::FileNotFound` representation (or replace
+it with a structured successor that keeps the same semantic identity) so the
+no-match retains a typed projection of `FileReference::resolve_detailed` before
+the convenience API discards it. Reuse or extract the existing
+`harness::ResolutionDetail` projection rather than defining a second candidate
+model. The diagnostic must populate the already-declared catalog fields from
+typed data:
 
-Bare tokens retain the existing interactive picker flow and its
-`AutocompleteNoMatches`/`AutocompleteOverCap`/`AutocompleteCancelled`/
-`AutocompleteNotInteractive` behavior. As defense in depth,
-`path_matches_query` receives a normalized query (leading `./` stripped)
-so a stray prefix can never again zero out matching — but after D1/D2 no
-path-shaped token reaches it.
+- `reference`: the exact authored token;
+- `kind` and `effective_kind`: the shared resolver's parsed and post-interpolation
+  classifications;
+- `base_dir`: the captured launch/base directory used for this top-level
+  resolution;
+- `repository_root`: the captured root, or `null` when unavailable;
+- `candidates`: every actually probed candidate, in order, with its existing
+  provenance and disposition vocabulary;
+- `failure`: `no_match`; and
+- `suggestions`: the same ordered list shown to the human, or an empty array.
+
+Compatibility fields declared by the catalog remain present and retain their
+established meanings; unavailable values are `null`, never omitted. The change
+must not invent a surface-specific code, derive provenance from path text, or
+parse `Display` prose.
+
+The terminal `StatusBlock` names the authored reference and the captured base
+directory, then renders the ordered candidates with `TerminalRenderable`
+components (`Prose` and `UnorderedList` are appropriate). Candidate labels come
+from `RootProvenance` (`repository`, `source`, `package`, `home`, `magic`,
+`vault`, or `absolute`). At this top-level seam, explain `source` provenance to
+the user as the launch directory; do not relabel other roots by guessing from
+their path. Render paths with `biscuit_file::to_portable_string`; do not
+canonicalize a missing path or reconstruct candidates by joining strings.
+
+Interactive and non-interactive sessions select and render this same semantic
+diagnostic for an explicit reference. TTY state may affect styling only, not
+the error identity or detail payload.
+
+### D3 — Basename suggestions are repository-local, deterministic, and bounded
+
+For an explicit no-match with a non-empty filename, search for that exact
+filename under the captured effective repository root. The motivating case
+must be able to suggest `homelab/docs/unifi/access.md` for the missing
+`./docs/unifi/access.md` invoked from the repository root.
+
+The suggestion search is diagnostic assistance, not alternate resolution:
+
+- compare the complete filename, not the stem, using exact case-sensitive
+  equality for deterministic behavior across filesystems;
+- use the existing `.gitignore`, `_`-prefix, and curated directory-skip rules;
+- do not follow directory symlinks, so a repository-local diagnostic cannot
+  escape its captured root;
+- stop after 20,000 visited entries or five matches, whichever comes first;
+- deduplicate matches and sort the final portable repository-relative paths
+  lexically before rendering and projecting them;
+- do not apply compose/inline/sequence frontmatter gates—the suggestion answers
+  "where does this filename exist?", and normal source validation remains
+  authoritative if the user invokes it; and
+- omit the human suggestion section when there is no captured repository root,
+  the reference has no filename, no match was found within the budget, or the
+  walk cannot continue. Budget exhaustion and walk errors must never replace
+  the primary file-not-found diagnostic.
+
+The search must run only after an explicit no-match. It must not broaden
+`FileReference` resolution, silently select a different file, or run on a bare
+name before the user has had the existing picker opportunity.
+
+### D4 — One recovery policy covers compose, inline-compose, and sequence
+
+The two current fallback seams must share one pure eligibility helper and one
+diagnostic-enrichment path so Markdown and YAML sources cannot drift. The
+operation mode may still select the existing picker/frontmatter behavior, and
+`sequence` may retain its YAML load branch, but all three commands must make the
+same recovery decision from the original token and detailed no-match.
+
+`path_matches_query` remains unchanged. Correct routing makes `./` normalization
+unnecessary, and modifying that shared predicate would also change the schema
+`file(match)` candidate path.
+
+### D5 — Documentation describes recovery, not just the picker UI
+
+Update both the authoritative completion topic
+(`claudine/docs/topics/completions/shell-completions.md`) and its portable
+Claudine-skill snapshot
+(`.claude/skills/claudine/completions/shell-completions.md`). The ENTER-path
+section must distinguish:
+
+- an omitted operation-file positional, which is rejected as a missing required
+  argument before reference resolution;
+- an unresolved bare discovery name, which may open the filtered picker; and
+- an unresolved explicit reference, which reports the typed no-match and never
+  opens a picker.
+
+The first item corrects existing documentation drift; it does not add missing-
+argument autocomplete. Both command paths currently reject the absent positional
+before reaching `autocomplete_operation_file`, and changing that behavior is
+outside this fix.
+
+Update the composition topic only if it independently states the old fallback
+contract. Keep the authoritative topic and skill-local snapshot byte-consistent
+for the changed passage.
 
 ## Scope
 
-- `claudine/cli/src/completion/` — token classification at the fallback
-  seam; did-you-mean basename walk; query normalization; tests.
-- `claudine/lib/src/composition/error/` — the new file-not-found variant and
-  its render (candidate list, CWD, did-you-mean), per the error-architecture
-  contract; catalog code; tests.
-- Portable docs: update the autocomplete section of
-  `.claude/skills/claudine/completions/shell-completions.md` and the
-  composition docs where the fallback is described.
+- `claudine/cli/src/commands/compose/` and `claudine/cli/src/commands/sequence.rs`
+  — shared recovery routing for direct compose, inline-compose, Markdown
+  sequence, and YAML sequence.
+- `claudine/cli/src/completion/` — bare-name eligibility and the bounded
+  repository-local suggestion walk; no change to `path_matches_query`.
+- `claudine/lib/src/composition/resolve.rs` and
+  `claudine/lib/src/composition/error/` — retain detailed no-match data, render
+  the candidate/base/suggestion report, and project the existing catalog shape.
+- `claudine/lib/src/diagnostics/registry.rs` only if comments or tests need to
+  record that the previously reserved fields are now populated for top-level
+  operation-file misses; no new code or detail keys are expected.
+- The authoritative completion topic and its skill-local portable snapshot,
+  plus any composition documentation that currently promises unconditional
+  fallback.
 
 ## Acceptance criteria
 
-- **AC1 (path-shaped → not-found).** From a directory where
-  `./docs/unifi/access.md` does not exist, `inline-compose` reports the new
-  file-not-found error naming the reference as typed, each absolute
-  candidate tried with its anchor, and the CWD. No autocomplete error text
-  appears.
-- **AC2 (TTY-independent).** The same invocation with and without an
-  interactive terminal yields the same file-not-found variant —
-  `autocomplete not available` no longer surfaces for path-shaped tokens.
-- **AC3 (did-you-mean resolves the incident).** With
-  `homelab/docs/unifi/access.md` present, the AC1 error includes a
-  did-you-mean line naming it as a portable relative path; when no basename
-  match exists the section is absent; an over-cap walk omits the section
-  rather than erroring.
-- **AC4 (name-shaped unchanged).** A bare token (`access`) still enters the
-  interactive picker; the existing picker tests — no-matches, over-cap,
-  cancelled, not-interactive — remain green unmodified.
-- **AC5 (normalized query).** `path_matches_query` matching is proven
-  insensitive to a leading `./` on the query.
-- **AC6 (Windows spelling).** Classification treats `\`-separated and
-  drive-absolute references as path-shaped; candidate and did-you-mean
-  rendering uses portable path spelling per the existing Windows
-  path-spelling contracts.
+- **AC1 (explicit reference → typed no-match).** From a directory where
+  `./docs/unifi/access.md` does not exist, each of `compose`, `inline-compose`,
+  and `sequence` reports `composition.invalid_file_reference` with the exact
+  authored reference, captured base directory, `failure: no_match`, and every
+  ordered probe candidate. No autocomplete error text appears.
+- **AC2 (all reference forms route intentionally).** L1 table tests cover a
+  multi-component implicit reference, POSIX and Windows explicit-relative
+  spellings, POSIX absolute, Windows drive-absolute and UNC spellings, home,
+  magic, package, vault, recursive, and interpolation-bearing references.
+  Every well-formed no-match is ineligible for autocomplete. Invalid,
+  missing-context, I/O, URL, and other non-no-match outcomes retain their
+  existing typed error rather than being reclassified.
+- **AC3 (bare-name discovery remains).** `access` and `access.md` still enter
+  the interactive picker after a clean no-match. The existing no-match,
+  over-cap, cancellation, non-interactive, confirmation, and chooser behaviors
+  remain compatible.
+- **AC4 (diagnostic parity).** The human block and `Diagnostic::detail()` expose
+  the same candidate order and suggestion order. All declared
+  `composition.invalid_file_reference` keys remain present; unavailable values
+  are `null` and `suggestions` is an empty array when none were found.
+- **AC5 (bounded did-you-mean).** With
+  `homelab/docs/unifi/access.md` present, the motivating failure suggests that
+  portable repository-relative path. Duplicate hits are removed, results are
+  lexically ordered and capped at five, ignored, underscore-prefixed, and
+  skip-list trees and symlink escapes are excluded, and scan exhaustion or I/O
+  failure leaves the primary diagnostic intact.
+- **AC6 (TTY-independent explicit failure).** L2 coverage invokes the same
+  explicit miss with and without a PTY and proves the same diagnostic identity
+  and substantive body. The PTY case must terminate without waiting for input
+  and must use a self-isolating harness that never focuses a terminal window.
+- **AC7 (all operation modes).** L1 routing tests cover direct compose,
+  inline-compose, Markdown sequence, and YAML sequence; focused L2 coverage
+  exercises at least the motivating inline-compose incident and one sequence
+  source so the duplicated entry seams cannot drift.
+- **AC8 (cross-platform rendering).** Windows separators and absolute forms
+  classify correctly on every host. Candidate and suggestion text uses
+  `biscuit_file::to_portable_string`; tests do not assume that a foreign-platform
+  absolute path can be probed on the current OS.
+- **AC9 (shared matcher unchanged).** Existing `path_matches_query` and schema
+  file-matching tests remain unchanged and green; no query-prefix normalization
+  is introduced.
+- **AC10 (documentation parity).** The authoritative completion topic and its
+  skill snapshot describe the three outcomes in D5, no longer claim that an
+  omitted positional opens the picker, and remain synchronized.
 
-Verification through the package-area recipes (`just test`, `just lint`,
-`just ci-local` before push); all new tests are L1.
+Verification uses the package-area recipes: `just test`, `just test-l2`, and
+`just lint` from `claudine/`. Before push, run `just ci-local claudine` from the
+repository root. L1 covers pure classification, diagnostic projection,
+rendering, walker bounds, and per-mode routing; L2 is required for the real TTY
+versus non-TTY contract.
 
 ## Non-goals
 
-- **Changing primary `FileReference` resolution.** Which candidates are
-  tried, and in what order, is untouched — this fix only reports that order
-  honestly on failure.
-- **Fuzzy path correction.** Did-you-mean is an exact-basename search, not
-  edit-distance matching over the tree.
-- **Autocomplete scope expansion.** The picker's prompts-directory scope set
-  is intentional for name-shaped discovery and is not widened.
+- **Changing primary `FileReference` resolution.** Candidate construction,
+  precedence, and matching remain owned by `biscuit-file`; this fix retains and
+  reports the detailed result.
+- **Fuzzy path correction.** Suggestions use exact filename equality, not edit
+  distance or stem matching.
+- **Autocomplete scope expansion.** Existing discovery scopes, ranking,
+  frontmatter gates, and picker UI are unchanged.
+- **Automatic recovery.** A suggestion is never selected or retried without a
+  new user invocation.
+- **Changing nested document references.** Proxy, transclusion, schema, and
+  lifecycle references already follow their own
+  `composition.invalid_file_reference` surfaces and are outside this operation-
+  positional routing fix.
+- **Adding missing-positional autocomplete.** An omitted operation-file argument
+  retains its current required-argument error; only failed resolution of a
+  provided token participates in this recovery policy.
+
+## Open Questions
+
+None. The review resolves recovery eligibility, diagnostic identity, suggestion
+bounds, and test-tier requirements above.
