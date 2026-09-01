@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-39b4d8e587eee969
-last_updated: 2026-08-26
+hash: ef46db3751d8e999-b545c5cf2c4c6108
+last_updated: 2026-09-01
 ---
 # Claudine Composition
 
@@ -234,13 +234,14 @@ Steps:
 6. **Execute** — run the provider session
 7. **Closure** — Claudine rewrites the file:
    - The replacement body is the agent's **final response only** — the output text emitted after the agent's last tool call. Interstitial narration between tool calls (e.g. "Let me read the docs…") is dropped, so process commentary never leaks into the artifact. Providers that recover their final message post-hoc (e.g. Codex's `--output-last-message`) supply that message directly.
-   - The provider returns replacement body content only (no frontmatter)
-   - Original frontmatter properties are preserved byte-for-byte
-   - If the provider modified an existing frontmatter property, Claudine reverts it to the original value and emits a warning
-   - If the provider added a new frontmatter property, Claudine merges it into the document (inserted before `last_updated`)
+   - By default the response is body-only. An authored `response_frontmatter` list may authorize exact property names that the provider can return in a leading YAML frontmatter block.
+   - The authorization is captured from the authored source before setters, interpolation, or schema defaults. Invalid declarations fail before provider launch, and authorizing a Claudine-interpreted property emits a warning because it may change later executions.
+   - Authorized properties are inserted in declaration order before `last_updated` or refreshed in place on later runs. Undeclared proposals are ignored with response-line warnings; response-provided `hash` and `last_updated` are ignored silently.
+   - A delimited metadata attempt with malformed YAML, duplicate keys, a non-mapping root, or no replacement body fails without modifying the source. Missing authorized properties are reported but do not fail a valid body.
+   - Authored frontmatter bytes remain authoritative. If the source changes while the provider runs, Claudine completes the run, restores the pre-run frontmatter snapshot byte-for-byte, and reports each added, removed, or value-changed property without attributing a writer. Structurally invalid frontmatter gets a generic restoration warning because property-level comparison is impossible. Value-preserving reformatting remains silent. Mid-run body drift is compared independently, then replaced and reported.
    - `last_updated` is set to today's date (local time, `YYYY-MM-DD`)
-    - The file is written atomically
-    - A cleanup pass normalizes the body markdown without touching frontmatter
+   - The file is written atomically
+   - A cleanup pass normalizes the body markdown without touching authored frontmatter
 
 ### `hash` property (auto-stamped)
 
@@ -253,6 +254,9 @@ that persists the body.
 - **Kind is forced to `Simple`** — even if the document previously held a valid
   `structured` or `detailed` hash, the next `inline-compose` run normalizes it
   to the `Simple` shorthand.
+- **Textual write-back** — the managed hash and `last_updated` nodes are edited
+  in the reconstructed source text. Unmanaged authored frontmatter and the
+  replacement body are not reserialized through a YAML emitter.
 - **Self-reference stability** — `hash` and `last_updated` are excluded from the
   frontmatter segment when the hash is computed, so re-running `inline-compose`
   on an already-stamped, otherwise-unchanged document does not perturb the
@@ -264,7 +268,7 @@ that persists the body.
 
 This behavior is implemented by [`apply_inline_closure`] in the closure module,
 using `inline_hash_options`, `parse_inline_stored_hash`, `plan_hash_save`, and
-`apply_hash_save`.
+`apply_hash_save_text`.
 
 [`apply_inline_closure`]: ../../lib/src/composition/closure.rs
 
@@ -272,6 +276,7 @@ using `inline_hash_options`, `parse_inline_stored_hash`, `plan_hash_save`, and
 
 
 - **`prompt`** (required) — the prompt text; composed through Darkmatter before execution
+- **`response_frontmatter`** — optional ordered allowlist of generated properties accepted from a leading response frontmatter block
 - **`last_updated`** — auto-updated by Claudine on each successful write
 - **`hash`** — auto-stamped Darkmatter `Simple` content hash on each successful write (see [`hash` property (auto-stamped)](#hash-property-auto-stamped))
 - **`agent`** — optional provider hint (see Provider Selection)
