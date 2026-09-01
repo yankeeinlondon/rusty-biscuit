@@ -1,5 +1,6 @@
 ---
 implementation_1: "2026-09-01T20:54:36+01:00"
+implementation_2: "2026-09-01T22:04:23+01:00"
 ---
 
 ## Implementation of Review Findings #1
@@ -65,3 +66,33 @@ The implementation of review cycle 1 has completed successfully in 27 minutes 55
         - `claudine/fixes/2026-09-01-inline-compose-frontmatter/review-1.md`
         - `claudine/fixes/2026-09-01-inline-compose-frontmatter/log.md`
 - the Claudine package-wide test remains blocked by unrelated shipped-prompt contract failures; all review-focused tests and both package-area lint gates passed, and the Darkmatter package-wide test passed
+
+## Implementation of Review Findings #2
+
+> **started at:** 2026-09-01T22:04:23+01:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'claudine/fixes/2026-09-01-inline-compose-frontmatter/review-2.md'
+- this is iteration 2 of the review-to-implement cycle
+- starting the work on 'Trimming before delimiter detection violates the exact-leading-delimiter contract and shifts response line diagnostics' at 22:05:09
+        - GitNexus classified `extract_replacement_parts` as HIGH risk: 18 direct dependents, 22 total impacted symbols, and no indexed execution processes; the orchestrator acknowledged the risk before implementation continued
+        - confirmed D2 requires response-frontmatter recognition only when the original response begins at byte zero with the exact `---` opener; blank lines before the opener therefore remain ordinary body, while blank lines within a recognized block count toward response line diagnostics
+        - changed delimiter detection to inspect the original response and retained body trimming only after protocol classification
+        - added L1 coverage for whitespace-prefixed delimiter body handling, exact leading response frontmatter with blank lines, source-accurate unauthorized-property locations, and the direct `try_inline_closure` production caller
+        - focused results: all 27 closure tests passed and the direct CLI caller regression passed
+        - `just test` in the Claudine package area ran 4,593 tests before fail-fast cancellation: 4,592 passed, 1 unrelated shipped-prompt contract test failed, 11 were skipped, and 2,053 were not run; the failure was caused by unresolved/generated prompt artifacts outside this finding
+        - `just lint` passed for all five Claudine crates and the diagnostic guards
+        - final `git diff --check` passed; GitNexus detected no affected execution processes in the shared dirty worktree
+- work completed for 'Trimming before delimiter detection violates the exact-leading-delimiter contract and shifts response line diagnostics' at 22:11:33
+
+### Successful Completion
+
+The implementation of review cycle 2 has completed successfully in 7 minutes 45 seconds. During this implementation all 1 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+- the files changed by this implementation cycle are:
+        - `claudine/lib/src/composition/closure.rs`
+        - `claudine/lib/src/composition/closure/tests.rs`
+        - `claudine/cli/src/commands/wrap/inline.rs`
+        - `claudine/fixes/2026-09-01-inline-compose-frontmatter/review-2.md`
+        - `claudine/fixes/2026-09-01-inline-compose-frontmatter/log.md`
+- the Claudine package-wide test remains blocked by unrelated shipped-prompt contract failures; all review-focused tests and the package-area lint gate passed
