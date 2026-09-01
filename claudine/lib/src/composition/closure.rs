@@ -44,16 +44,15 @@ pub struct InlinePropertyNotice {
 pub fn extract_replacement_parts(
     provider_output: &str,
 ) -> Result<InlineReplacementParts, CompositionError> {
-    let trimmed = provider_output.trim();
-    if trimmed.is_empty() {
+    if provider_output.trim().is_empty() {
         return Err(CompositionError::InvalidInlineResponse(
             "provider returned an empty response".into(),
         ));
     }
 
-    let Some(parts) = split_frontmatter_parts(trimmed) else {
+    let Some(parts) = split_frontmatter_parts(provider_output) else {
         return Ok(InlineReplacementParts {
-            body: trimmed.to_string(),
+            body: provider_output.trim().to_string(),
             frontmatter: None,
         });
     };

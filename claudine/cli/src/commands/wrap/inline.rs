@@ -299,6 +299,40 @@ mod tests {
     }
 
     #[test]
+    fn try_inline_closure_treats_whitespace_prefixed_delimiter_as_body() {
+        let dir = TempDir::new().unwrap();
+        let file = dir.path().join("doc.md");
+        let original = "---\nprompt: test\n---\nOld body\n";
+        std::fs::write(&file, original).unwrap();
+
+        let original_md: darkmatter::markdown::Markdown = original.to_string().into();
+        let plan = InlineClosurePlan {
+            original_document_text: original.to_string(),
+            original_hash: original_md.compute_hash(
+                darkmatter::markdown::hash::MdHashKind::Simple,
+                &claudine::composition::closure::inline_hash_options(),
+            ),
+            response_frontmatter: Vec::new(),
+        };
+
+        try_inline_closure(
+            &plan,
+            "  ---\nnot: metadata\n---\nNew body\n",
+            &file,
+            file.parent().unwrap(),
+            false,
+            &Terminal::new_optimistic(120),
+        )
+        .expect("whitespace-prefixed delimiter should remain body content");
+
+        let on_disk = std::fs::read_to_string(file).unwrap();
+        assert!(
+            on_disk.contains("\n---\nnot: metadata\n---\n\nNew body\n"),
+            "whitespace-prefixed delimiter content should be written as body; got:\n{on_disk}"
+        );
+    }
+
+    #[test]
     fn try_inline_closure_cleans_table_alignment() {
         let dir = TempDir::new().unwrap();
         let file = dir.path().join("doc.md");

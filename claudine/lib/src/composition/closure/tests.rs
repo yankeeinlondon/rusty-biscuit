@@ -39,6 +39,13 @@ fn replacement_parts_preserves_unclosed_delimiter_as_body() {
 }
 
 #[test]
+fn replacement_parts_treats_whitespace_prefixed_delimiter_as_body() {
+    let parts = extract_replacement_parts("  ---\nnot: metadata\n---\nBody\n").unwrap();
+    assert_eq!(parts.body, "---\nnot: metadata\n---\nBody");
+    assert!(parts.frontmatter.is_none());
+}
+
+#[test]
 fn replacement_parts_parses_mapping_and_source_lines() {
     let parts = extract_replacement_parts(
         "---\naccess_points:\n  - Office\n'generated:by': inventory\n---\nNew body\n",
@@ -48,6 +55,51 @@ fn replacement_parts_parses_mapping_and_source_lines() {
     assert_eq!(frontmatter["access_points"].line, 2);
     assert_eq!(frontmatter["generated:by"].line, 4);
     assert_eq!(parts.body, "New body");
+}
+
+#[test]
+fn exact_response_frontmatter_allows_blank_lines_before_an_unauthorized_key() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("doc.md");
+    let original = "---\nprompt: test\n---\nOld body\n";
+    std::fs::write(&file, original).unwrap();
+    let replacement = extract_replacement_parts("---\n\n\nundeclared: value\n---\nNew body\n")
+        .unwrap();
+
+    let result = apply_inline_closure(&plan(original, &[]), &replacement, &file, "2026-09-01")
+        .unwrap();
+
+    assert_eq!(
+        result.ignored_properties,
+        [InlinePropertyNotice {
+            key: "undeclared".into(),
+            line: 4,
+        }]
+    );
+    assert!(std::fs::read_to_string(file).unwrap().ends_with("---\nNew body\n"));
+}
+
+#[test]
+fn unauthorized_property_warning_line_counts_every_response_protocol_line() {
+    let dir = TempDir::new().unwrap();
+    let file = dir.path().join("doc.md");
+    let original = "---\nprompt: test\n---\nOld body\n";
+    std::fs::write(&file, original).unwrap();
+    let replacement = extract_replacement_parts(
+        "---\n\n# provider note\n\nundeclared: value\n---\nNew body\n",
+    )
+    .unwrap();
+
+    let result = apply_inline_closure(&plan(original, &[]), &replacement, &file, "2026-09-01")
+        .unwrap();
+
+    assert_eq!(
+        result.ignored_properties,
+        [InlinePropertyNotice {
+            key: "undeclared".into(),
+            line: 5,
+        }]
+    );
 }
 
 #[test]
