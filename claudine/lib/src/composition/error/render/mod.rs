@@ -286,6 +286,7 @@ impl Diagnostic for CompositionError {
             CompositionError::ComposeFailed(md) => compose_failed_code(md),
             CompositionError::InvalidReference { .. }
             | CompositionError::FileNotFound { .. }
+            | CompositionError::FileReferenceNoMatch { .. }
             | CompositionError::InvalidFileReference { .. } => {
                 "composition.invalid_file_reference"
             }
@@ -405,14 +406,23 @@ impl Diagnostic for CompositionError {
                 base["property"] = json!(context.property);
                 base["event"] = json!(context.event);
             }
-            // The remaining `composition.invalid_file_reference` constructors
-            // (the typed-source and resolved-not-found variants) carry no
-            // `FileReferenceDiagnostic`, so only `reference` is recoverable.
+            // The typed-source and legacy resolved-not-found constructors
+            // carry no `FileReferenceDiagnostic`, so only `reference` is
+            // recoverable. The detailed no-match arm below retains the probe.
             CompositionError::InvalidReference { reference, .. } => {
                 base["reference"] = json!(reference);
             }
             CompositionError::FileNotFound(reference) => {
                 base["reference"] = json!(reference);
+            }
+            CompositionError::FileReferenceNoMatch {
+                resolution,
+                suggestions,
+                ..
+            } => {
+                resolution.apply_to_diagnostic(&mut base);
+                base["failure"] = json!("no_match");
+                base["suggestions"] = json!(suggestions);
             }
             CompositionError::SchemaParse {
                 source_path,

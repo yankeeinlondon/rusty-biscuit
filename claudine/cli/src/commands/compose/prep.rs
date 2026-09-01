@@ -688,9 +688,8 @@ fn validate_timeout_flags(shared: &SharedComposeArgs) -> Result<()> {
     Ok(())
 }
 
-/// Resolve the composition source, with inline-specific error reporting
-/// for reference-resolution failures and an ENTER-path autocomplete fallback
-/// when the file reference is not found.
+/// Resolve the composition source, with inline-specific error reporting and
+/// bare-name autocomplete recovery for a clean file-reference no-match.
 pub(crate) fn resolve_composition_source(
     file: &str,
     kind: CompositionKind,
@@ -701,27 +700,37 @@ pub(crate) fn resolve_composition_source(
         || std::env::var_os("FORCE_COLOR").is_some();
     match claudine::composition::resolve_composition_source_in_context(file, file_resolution_context) {
         Ok(source) => Ok(source),
-        Err(CompositionError::FileNotFound(_)) => {
-            let mode = match kind {
-                CompositionKind::Direct => crate::completion::scopes::ComposeMode::Compose,
-                CompositionKind::Inline => {
-                    crate::completion::scopes::ComposeMode::InlineCompose
+        Err(no_match @ CompositionError::FileReferenceNoMatch { .. }) => {
+            match crate::completion::operation_file::recover_operation_file(file, no_match) {
+                crate::completion::operation_file::OperationFileRecovery::AttemptAutocomplete => {
+                    let mode = match kind {
+                        CompositionKind::Direct => {
+                            crate::completion::scopes::ComposeMode::Compose
+                        }
+                        CompositionKind::Inline => {
+                            crate::completion::scopes::ComposeMode::InlineCompose
+                        }
+                    };
+                    let selected =
+                        crate::completion::operation_file::autocomplete_operation_file(file, mode)?;
+                    claudine::composition::resolve_composition_source_in_context(
+                        &selected,
+                        file_resolution_context,
+                    )
+                    .map_err(|e| {
+                        claudine::composition::enrich_composition_source_load_error_in_context(
+                            &selected,
+                            e,
+                            stderr_is_tty,
+                            file_resolution_context,
+                        )
+                        .into()
+                    })
                 }
-            };
-            let selected =
-                crate::completion::operation_file::autocomplete_operation_file(file, mode)?;
-            claudine::composition::resolve_composition_source_in_context(
-                &selected,
-                file_resolution_context,
-            ).map_err(|e| {
-                claudine::composition::enrich_composition_source_load_error_in_context(
-                    &selected,
-                    e,
-                    stderr_is_tty,
-                    file_resolution_context,
-                )
-                .into()
-            })
+                crate::completion::operation_file::OperationFileRecovery::ExplicitNoMatch(err) => {
+                    Err(err.into())
+                }
+            }
         }
         Err(e) => {
             let e = claudine::composition::enrich_composition_source_load_error_in_context(

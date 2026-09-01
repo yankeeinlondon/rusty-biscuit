@@ -3,7 +3,10 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::{FileReference, FileResolutionContext, PathPosition, home_dir};
+use biscuit_file::{
+    DetailedOutcome, FileReference, FileResolutionContext, PathPosition, ResolutionFailure,
+    home_dir,
+};
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::{Markdown, MarkdownError};
 
@@ -202,13 +205,25 @@ pub fn resolve_composition_source_in_context(
         }
     })?;
 
-    let resolved_path = reference
-        .resolve_in_context(context)
-        .map_err(|e| CompositionError::InvalidReference {
-            reference: file_ref.to_string(),
-            source: e,
-        })?
-        .ok_or_else(|| CompositionError::FileNotFound(file_ref.to_string()))?;
+    let detailed = reference.resolve_detailed(context);
+    let resolved_path = match detailed.outcome() {
+        DetailedOutcome::Matched(path) => path.clone(),
+        DetailedOutcome::Failed(ResolutionFailure::NoMatch) => {
+            return Err(CompositionError::from_detailed_no_match(&detailed));
+        }
+        DetailedOutcome::Failed(_) => {
+            let source = match detailed.into_convenience() {
+                Err(source) => source,
+                Ok(_) => biscuit_file::FileReferenceError::InvalidSyntax(format!(
+                    "resolver returned a failed outcome without a typed error for `{file_ref}`"
+                )),
+            };
+            return Err(CompositionError::InvalidReference {
+                reference: file_ref.to_string(),
+                source,
+            });
+        }
+    };
 
     // Validate markdown extension
     let ext = resolved_path

@@ -27,6 +27,7 @@ use crate::diagnostics::{
     Category, Diagnostic, DiagnosticRole, DiagnosticSnapshot, Disposition, Origin, code_spec,
     null_detail_for,
 };
+use crate::harness::ResolutionDetail;
 use crate::provider::Provider;
 use thiserror::Error;
 
@@ -148,9 +149,24 @@ pub enum CompositionError {
         source: crate::harness::HarnessError,
     },
 
-    /// The resolved file does not exist.
+    /// Legacy unstructured representation of a resolved file that does not exist.
+    ///
+    /// New top-level resolution uses [`Self::FileReferenceNoMatch`] so the
+    /// candidate record is retained. This arm remains for compatibility with
+    /// callers that construct the historical error directly.
     #[error("file not found: {0}")]
     FileNotFound(String),
+
+    /// A top-level operation-file reference produced a clean resolver no-match.
+    #[error("file not found: {reference}")]
+    FileReferenceNoMatch {
+        /// The exact reference authored at the command boundary.
+        reference: String,
+        /// The captured resolver inputs and ordered probe record.
+        resolution: Box<ResolutionDetail>,
+        /// Repository-local advisory paths computed by the recovery layer.
+        suggestions: Vec<String>,
+    },
 
     /// The file is not a Markdown document.
     #[error("not a Markdown file (expected .md or .markdown): {0}")]
@@ -2887,6 +2903,44 @@ pub struct SequenceSelectionFailure {
 }
 
 impl CompositionError {
+    /// Preserve a shared resolver no-match as a structured composition error.
+    pub fn from_detailed_no_match(detailed: &biscuit_file::DetailedResolution) -> Self {
+        debug_assert!(matches!(
+            detailed.outcome(),
+            biscuit_file::DetailedOutcome::Failed(biscuit_file::ResolutionFailure::NoMatch)
+        ));
+        Self::FileReferenceNoMatch {
+            reference: detailed.raw().to_string(),
+            resolution: Box::new(ResolutionDetail::from_detailed(detailed)),
+            suggestions: Vec::new(),
+        }
+    }
+
+    /// Attach the final ordered advisory paths to a structured no-match.
+    pub fn with_file_reference_suggestions(mut self, paths: Vec<String>) -> Self {
+        if let Self::FileReferenceNoMatch { suggestions, .. } = &mut self {
+            *suggestions = paths
+                .into_iter()
+                .map(|path| biscuit_file::to_portable_string(Path::new(&path)))
+                .collect();
+        }
+        self
+    }
+
+    /// Inspect the retained no-match evidence without coupling to rendering.
+    pub fn file_reference_no_match(
+        &self,
+    ) -> Option<(&str, &ResolutionDetail, &[String])> {
+        match self {
+            Self::FileReferenceNoMatch {
+                reference,
+                resolution,
+                suggestions,
+            } => Some((reference, resolution, suggestions)),
+            _ => None,
+        }
+    }
+
     /// Build a [`Self::LifecycleEvaluationError`] from the raised lifecycle
     /// error snapshot.
     ///

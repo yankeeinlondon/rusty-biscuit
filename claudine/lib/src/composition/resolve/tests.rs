@@ -3,6 +3,10 @@ use std::error::Error as _;
 use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::PathBuf;
+use biscuit_terminal::errors::BlockError;
+use biscuit_terminal::prelude::TerminalRenderable;
+use biscuit_terminal::terminal::Terminal;
+use crate::diagnostics::Diagnostic;
 use tempfile::TempDir;
 
 #[test]
@@ -132,7 +136,96 @@ fn resolve_rejects_non_markdown() {
 #[test]
 fn resolve_missing_file() {
     let err = resolve_composition_source("/nonexistent/path/test.md").unwrap_err();
-    assert!(matches!(err, CompositionError::FileNotFound(_)));
+    assert!(matches!(
+        err,
+        CompositionError::FileReferenceNoMatch { .. }
+    ));
+}
+
+#[test]
+fn detailed_no_match_preserves_probe_order_and_diagnostic_shape() {
+    let repo = TempDir::new().unwrap();
+    let launch = repo.path().join("launch");
+    fs::create_dir_all(&launch).unwrap();
+    let context = FileResolutionContext::new(&launch).with_repository_root(repo.path());
+
+    let err = resolve_composition_source_in_context("missing.md", &context).unwrap_err();
+    let (reference, resolution, suggestions) = err.file_reference_no_match().unwrap();
+    assert_eq!(reference, "missing.md");
+    assert_eq!(resolution.reference(), "missing.md");
+    assert_eq!(resolution.base_dir(), launch);
+    assert_eq!(resolution.repository_root(), Some(repo.path()));
+    assert!(suggestions.is_empty());
+
+    let detail = err.detail();
+    assert_eq!(detail["reference"], serde_json::json!("missing.md"));
+    assert_eq!(detail["kind"], serde_json::json!("implicit_relative"));
+    assert_eq!(detail["effective_kind"], serde_json::json!("implicit_relative"));
+    assert_eq!(
+        detail["base_dir"],
+        serde_json::json!(biscuit_file::to_portable_string(&launch))
+    );
+    assert_eq!(
+        detail["repository_root"],
+        serde_json::json!(biscuit_file::to_portable_string(repo.path()))
+    );
+    assert_eq!(detail["failure"], serde_json::json!("no_match"));
+    assert_eq!(detail["suggestions"], serde_json::json!([]));
+    assert_eq!(detail["fallback_dir"], serde_json::Value::Null);
+    assert_eq!(detail["source_path"], serde_json::Value::Null);
+    assert_eq!(detail["property"], serde_json::Value::Null);
+    assert_eq!(detail["event"], serde_json::Value::Null);
+
+    let candidates = detail["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(candidates[0]["provenance"], serde_json::json!("repository"));
+    assert_eq!(candidates[1]["provenance"], serde_json::json!("source"));
+    assert_eq!(candidates[0]["disposition"], serde_json::json!("missing"));
+    assert_eq!(candidates[1]["disposition"], serde_json::json!("missing"));
+}
+
+#[test]
+fn detailed_no_match_rendering_matches_suggestion_order_and_uses_portable_paths() {
+    let repo = TempDir::new().unwrap();
+    let launch = repo.path().join("windows\\style");
+    fs::create_dir_all(&launch).unwrap();
+    let context = FileResolutionContext::new(&launch).with_repository_root(repo.path());
+    let err = resolve_composition_source_in_context("./missing.md", &context)
+        .unwrap_err()
+        .with_file_reference_suggestions(vec![
+            "zeta\\missing.md".to_string(),
+            "alpha/missing.md".to_string(),
+        ]);
+
+    let detail = err.detail();
+    assert_eq!(
+        detail["suggestions"],
+        serde_json::json!(["zeta/missing.md", "alpha/missing.md"])
+    );
+
+    let term = Terminal::default();
+    let rendered = err.status_block(&term).render(&term);
+    assert!(rendered.contains("launch directory"), "{rendered}");
+    assert!(!rendered.contains('\\'), "{rendered}");
+    let first = rendered.find("zeta/missing.md").unwrap();
+    let second = rendered.find("alpha/missing.md").unwrap();
+    assert!(first < second, "{rendered}");
+}
+
+#[test]
+fn detailed_resolution_preserves_non_no_match_typed_errors() {
+    let context = FileResolutionContext::new("/tmp");
+    let err = resolve_composition_source_in_context("https://example.com/prompt.md", &context)
+        .unwrap_err();
+    match err {
+        CompositionError::InvalidReference { source, .. } => {
+            assert!(matches!(
+                source,
+                biscuit_file::FileReferenceError::RemoteNotLocal(_)
+            ));
+        }
+        other => panic!("expected typed InvalidReference, got: {other:?}"),
+    }
 }
 
 #[test]
@@ -175,7 +268,11 @@ fn resolve_four_dash_fence_maps_to_frontmatter_parse() {
         "must not fall back to MarkdownLoad: {err:?}"
     );
     assert!(
-        !matches!(err, CompositionError::FileNotFound(_)),
+        !matches!(
+            err,
+            CompositionError::FileNotFound(_)
+                | CompositionError::FileReferenceNoMatch { .. }
+        ),
         "must not report file not found: {err:?}"
     );
     let msg = err.to_string();

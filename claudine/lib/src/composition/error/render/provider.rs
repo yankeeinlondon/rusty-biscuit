@@ -6,6 +6,8 @@
 //! The dispatcher in [`super`] routes this family here, including its `_` arm.
 
 use super::super::*;
+use biscuit_file::RootProvenance;
+use biscuit_terminal::components::list::UnorderedList;
 use crate::composition::types::CompositionMode;
 
 /// Render the [`StatusBlock`] for a provider/execution/file-reference-family
@@ -58,6 +60,64 @@ pub(super) fn status_block(err: &CompositionError, term: &Terminal) -> StatusBlo
             // block, and captured stderr/stdout all survive the claudine
             // boundary instead of being flattened by the catch-all arm.
             error.status_block(term)
+        }
+        CompositionError::FileReferenceNoMatch {
+            reference,
+            resolution,
+            suggestions,
+        } => {
+            let mut body = Prose::new(format!(
+                "Cannot resolve <cyan>`{}`</cyan> from launch directory <cyan>`{}`</cyan>.",
+                Prose::escape_text(reference),
+                Prose::escape_text(&biscuit_file::to_portable_string(resolution.base_dir())),
+            ))
+            .render(term);
+
+            if !resolution.candidates().is_empty() {
+                body.push_str("\n\n");
+                body.push_str(&Prose::new("<b>Tried:</b>").render(term));
+                body.push('\n');
+                let mut candidates = UnorderedList::empty();
+                for probed in resolution.candidates() {
+                    let provenance = match probed.candidate().provenance() {
+                        RootProvenance::Repository => "repository",
+                        RootProvenance::Source => "launch directory",
+                        RootProvenance::Package => "package",
+                        RootProvenance::Home => "home",
+                        RootProvenance::Magic => "magic",
+                        RootProvenance::Vault => "vault",
+                        RootProvenance::Absolute => "absolute",
+                    };
+                    let path = biscuit_file::to_portable_string(probed.candidate().path());
+                    candidates.add(Prose::new(format!(
+                        "<b>{provenance}</b>: <cyan>`{}`</cyan>",
+                        Prose::escape_text(&path),
+                    )));
+                }
+                body.push_str(&candidates.render(term));
+            }
+
+            if !suggestions.is_empty() {
+                body.push_str("\n\n");
+                body.push_str(&Prose::new("<b>Did you mean:</b>").render(term));
+                body.push('\n');
+                let mut paths = UnorderedList::empty();
+                for path in suggestions {
+                    paths.add(Prose::new(format!(
+                        "<cyan>`{}`</cyan>",
+                        Prose::escape_text(path),
+                    )));
+                }
+                body.push_str(&paths.render(term));
+            }
+
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "CompositionError",
+                    "Unresolvable file reference",
+                ))
+                .body(body)
+                .hint("Correct the reference and try again.")
         }
         _ => {
             let msg = err.to_string();

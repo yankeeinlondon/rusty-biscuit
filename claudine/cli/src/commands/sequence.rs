@@ -107,13 +107,25 @@ fn resolve_sequence_source(
             source,
         }
     })?;
-    let resolved_path = reference
-        .resolve_in_context(context)
-        .map_err(|e| CompositionError::InvalidReference {
-            reference: file_ref.to_string(),
-            source: e,
-        })?
-        .ok_or_else(|| CompositionError::FileNotFound(file_ref.to_string()))?;
+    let detailed = reference.resolve_detailed(context);
+    let resolved_path = match detailed.outcome() {
+        biscuit_file::DetailedOutcome::Matched(path) => path.clone(),
+        biscuit_file::DetailedOutcome::Failed(biscuit_file::ResolutionFailure::NoMatch) => {
+            return Err(CompositionError::from_detailed_no_match(&detailed));
+        }
+        biscuit_file::DetailedOutcome::Failed(_) => {
+            let source = match detailed.into_convenience() {
+                Err(source) => source,
+                Ok(_) => biscuit_file::FileReferenceError::InvalidSyntax(format!(
+                    "resolver returned a failed outcome without a typed error for `{file_ref}`"
+                )),
+            };
+            return Err(CompositionError::InvalidReference {
+                reference: file_ref.to_string(),
+                source,
+            });
+        }
+    };
 
     if !composition::is_yaml_source(&resolved_path) {
         return Err(CompositionError::NotMarkdown(
@@ -237,19 +249,26 @@ fn run_sequence_inner(
     let file_resolution_context = invocation.launch_file_resolution_context().clone();
     let source = match resolve_sequence_source(&file, &file_resolution_context) {
         Ok(source) => source,
-        Err(CompositionError::FileNotFound(_)) => {
-            let selected = crate::completion::operation_file::autocomplete_operation_file(
-                &file,
-                crate::completion::scopes::ComposeMode::Sequence,
-            )?;
-            resolve_sequence_source(&selected, &file_resolution_context).map_err(|e| {
-                composition::enrich_composition_source_load_error_in_context(
-                    &selected,
-                    e,
-                    stderr_is_tty,
-                    &file_resolution_context,
-                )
-            })?
+        Err(no_match @ CompositionError::FileReferenceNoMatch { .. }) => {
+            match crate::completion::operation_file::recover_operation_file(&file, no_match) {
+                crate::completion::operation_file::OperationFileRecovery::AttemptAutocomplete => {
+                    let selected = crate::completion::operation_file::autocomplete_operation_file(
+                        &file,
+                        crate::completion::scopes::ComposeMode::Sequence,
+                    )?;
+                    resolve_sequence_source(&selected, &file_resolution_context).map_err(|e| {
+                        composition::enrich_composition_source_load_error_in_context(
+                            &selected,
+                            e,
+                            stderr_is_tty,
+                            &file_resolution_context,
+                        )
+                    })?
+                }
+                crate::completion::operation_file::OperationFileRecovery::ExplicitNoMatch(err) => {
+                    return Err(err.into());
+                }
+            }
         }
         Err(e) => {
             return Err(
@@ -495,6 +514,48 @@ mod tests {
                 );
             }
             other => panic!("expected WithFrontmatter, got: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn markdown_and_yaml_sequence_misses_share_explicit_recovery() {
+        use claudine::diagnostics::Diagnostic;
+
+        let dir = TempDir::new().unwrap();
+        fs::create_dir_all(dir.path().join(".git")).unwrap();
+        let suggestion = dir.path().join("flows/missing-sequence.yaml");
+        fs::create_dir_all(suggestion.parent().unwrap()).unwrap();
+        fs::write(&suggestion, "kind: sequence\nsequence:\n  - one\n").unwrap();
+        let context = biscuit_file::FileResolutionContext::new(dir.path())
+            .with_repository_root(dir.path());
+
+        for reference in ["./docs/missing-sequence.md", "./docs/missing-sequence.yaml"] {
+            let no_match = resolve_sequence_source(reference, &context).unwrap_err();
+            let recovery = crate::completion::operation_file::recover_operation_file(
+                reference,
+                no_match,
+            );
+            let crate::completion::operation_file::OperationFileRecovery::ExplicitNoMatch(err) =
+                recovery
+            else {
+                panic!("explicit sequence reference must not attempt autocomplete");
+            };
+            let detail = err.detail();
+            assert_eq!(detail["reference"], reference);
+            assert_eq!(detail["failure"], "no_match");
+            assert_eq!(
+                detail["base_dir"],
+                biscuit_file::to_portable_string(dir.path())
+            );
+            assert_eq!(detail["candidates"].as_array().unwrap().len(), 1);
+            if reference.ends_with(".yaml") {
+                assert_eq!(
+                    detail["suggestions"],
+                    serde_json::json!(["flows/missing-sequence.yaml"])
+                );
+            } else {
+                assert_eq!(detail["suggestions"], serde_json::json!([]));
+            }
         }
     }
 }
