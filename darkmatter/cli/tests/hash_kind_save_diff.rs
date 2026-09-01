@@ -207,6 +207,93 @@ fn test_hash_save_writes_baseline_and_exits_zero() {
 }
 
 #[test]
+fn test_hash_save_preserves_raw_frontmatter_and_is_idempotent() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    let source = concat!(
+        "---\r\n",
+        "title: T # keep\r\n",
+        "prompt: |-\r\n",
+        "    Keep trailing space  \r\n",
+        "\r\n",
+        "    Keep indentation.\r\n",
+        "---\r\n",
+        "# H\r\n\r\nBody.\r\n"
+    );
+    std::fs::write(&file, source).unwrap();
+
+    md_cmd().arg("hash").arg("--save").arg(&file).assert().success();
+    let first = std::fs::read_to_string(&file).unwrap();
+    assert!(first.contains("title: T # keep\r\nprompt: |-\r\n    Keep trailing space  \r\n"));
+    assert!(first.ends_with("---\r\n# H\r\n\r\nBody.\r\n"));
+
+    md_cmd().arg("hash").arg("--save").arg(&file).assert().success();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), first);
+    md_cmd().arg("hash").arg("--diff").arg(&file).assert().success();
+}
+
+#[test]
+fn test_hash_save_failure_does_not_modify_flow_mapping() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    let source = "---\n{title: T}\n---\nBody.\n";
+    std::fs::write(&file, source).unwrap();
+
+    md_cmd().arg("hash").arg("--save").arg(&file).assert().failure();
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+}
+
+#[test]
+fn test_hash_save_honors_quoted_custom_property() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    let source = concat!(
+        "---\n",
+        "title: T # keep\n",
+        "'fingerprint': aaaa111111111111-bbbb222222222222\n",
+        "---\n",
+        "Changed body.\n"
+    );
+    std::fs::write(&file, source).unwrap();
+
+    md_cmd()
+        .env("HASH_PROPERTY", "fingerprint")
+        .arg("hash")
+        .arg("--save")
+        .arg(&file)
+        .assert()
+        .success();
+    let written = std::fs::read_to_string(&file).unwrap();
+    assert!(written.contains("title: T # keep\n'fingerprint': "));
+    assert!(!written.contains("\nhash:"));
+    md_cmd()
+        .env("HASH_PROPERTY", "fingerprint")
+        .arg("hash")
+        .arg("--diff")
+        .arg(&file)
+        .assert()
+        .success();
+}
+
+#[test]
+fn test_hash_save_detailed_value_preserves_authored_neighbors() {
+    let dir = tempfile::tempdir().unwrap();
+    let file = dir.path().join("doc.md");
+    let source = "---\ntitle: T # keep\n---\n# Heading\n\nBody.\n";
+    std::fs::write(&file, source).unwrap();
+
+    md_cmd()
+        .args(["hash", "--kind", "detailed", "--save"])
+        .arg(&file)
+        .assert()
+        .success();
+    let written = std::fs::read_to_string(&file).unwrap();
+    assert!(written.contains("title: T # keep\nhash:\n  kind: detailed\n"));
+    assert!(written.ends_with("---\n# Heading\n\nBody.\n"));
+    md_cmd().arg("hash").arg("--diff").arg(&file).assert().success();
+}
+
+#[test]
 fn test_hash_save_requires_file_not_stdin() {
     md_cmd()
         .args(["hash", "--save", "-"])

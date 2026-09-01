@@ -69,6 +69,13 @@ pub enum MarkdownError {
     #[error("Failed to merge frontmatter: {0}")]
     FrontmatterMerge(String),
 
+    /// Source-preserving frontmatter editing could not locate a safe edit.
+    #[error("Cannot edit frontmatter text safely: {reason}")]
+    FrontmatterTextEdit {
+        /// Why applying the requested textual edit would be ambiguous or unsafe.
+        reason: String,
+    },
+
     /// Failed to load file.
     #[error("Failed to load file: {0}")]
     FileLoad(#[from] std::io::Error),
@@ -311,6 +318,7 @@ impl BlockError for MarkdownError {
                 blocks::frontmatter_fence_mismatch_block(ctx.as_ref().clone(), found, *line)
             }
             MarkdownError::FrontmatterMerge(message) => blocks::frontmatter_merge_block(message),
+            MarkdownError::FrontmatterTextEdit { reason } => blocks::transform_block(reason),
             MarkdownError::FileLoad(source) => blocks::file_load_block(source),
             MarkdownError::UrlFetch(source) => blocks::url_fetch_block(source),
             MarkdownError::ThemeLoad(message) => blocks::theme_load_block(message),
