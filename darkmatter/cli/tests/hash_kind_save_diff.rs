@@ -345,3 +345,168 @@ fn test_hash_diff_changed_exits_two() {
 
     md_cmd().arg("hash").arg("--diff").arg(&file).assert().code(2);
 }
+
+#[test]
+fn test_hash_save_preservation_matrix_covers_representations_and_newlines() {
+    struct Case {
+        name: &'static str,
+        kind: Option<&'static str>,
+        property: &'static str,
+        authored_key: &'static str,
+        old_node: &'static str,
+    }
+
+    let cases = [
+        Case {
+            name: "simple",
+            kind: None,
+            property: "hash",
+            authored_key: "hash",
+            old_node: "hash: 0000000000000000-0000000000000000",
+        },
+        Case {
+            name: "structured",
+            kind: Some("structured"),
+            property: "hash",
+            authored_key: "hash",
+            old_node: concat!(
+                "hash:\n",
+                "  kind: structured\n",
+                "  value: 0000000000000000-0000000000000000-0000000000000000-0000000000000000"
+            ),
+        },
+        Case {
+            name: "detailed",
+            kind: Some("detailed"),
+            property: "hash",
+            authored_key: "hash",
+            old_node: concat!(
+                "hash:\n",
+                "  kind: detailed\n",
+                "  value:\n",
+                "    frontmatter:\n",
+                "      fm: '0000000000000000'\n",
+                "      keys: '0000000000000000'\n",
+                "    preamble: null\n",
+                "    sections:\n",
+                "      - [1, Heading, '0000000000000000']"
+            ),
+        },
+        Case {
+            name: "custom-property",
+            kind: None,
+            property: "fingerprint",
+            authored_key: "fingerprint",
+            old_node: "fingerprint: 0000000000000000-0000000000000000",
+        },
+        Case {
+            name: "quoted-key",
+            kind: None,
+            property: "hash",
+            authored_key: "'hash'",
+            old_node: "'hash': 0000000000000000-0000000000000000",
+        },
+    ];
+
+    for newline in ["\n", "\r\n"] {
+        for case in &cases {
+            let dir = tempfile::tempdir().unwrap();
+            let file = dir.path().join(format!("{}-doc.md", case.name));
+            let prefix = [
+                "---",
+                "title: Kept # authored",
+                "prompt: |-",
+                "    First line  ",
+                "",
+                "    Second line.",
+            ]
+            .join(newline)
+                + newline;
+            let old_node = case.old_node.replace('\n', newline);
+            let suffix = [
+                "# boundary comment",
+                "author: A",
+                "---",
+                "# Heading",
+                "",
+                "Body with trailing spaces.  ",
+                "",
+            ]
+            .join(newline);
+            let source = format!(
+                "{prefix}{old_node}{newline}last_updated: '2026-01-01' # managed{newline}{suffix}"
+            );
+            std::fs::write(&file, source).unwrap();
+
+            let mut save = md_cmd();
+            save.arg("hash");
+            if let Some(kind) = case.kind {
+                save.args(["--kind", kind]);
+            }
+            if case.property != "hash" {
+                save.env("HASH_PROPERTY", case.property);
+            }
+            save.arg("--save").arg(&file).assert().success();
+
+            let written = std::fs::read_to_string(&file).unwrap();
+            assert!(
+                written.starts_with(&prefix),
+                "{} {newline:?} changed the authored prefix:\n{written}",
+                case.name
+            );
+            assert!(
+                written.ends_with(&suffix),
+                "{} {newline:?} changed the authored suffix:\n{written}",
+                case.name
+            );
+            assert!(
+                written.contains(&format!("{}:", case.authored_key)),
+                "{} {newline:?} did not preserve the managed key spelling:\n{written}",
+                case.name
+            );
+            if let Some(kind) = case.kind {
+                assert!(
+                    written.contains(&format!("kind: {kind}")),
+                    "{} {newline:?} did not use longhand output:\n{written}",
+                    case.name
+                );
+            }
+            if newline == "\r\n" {
+                assert!(
+                    !written.replace("\r\n", "").contains('\n'),
+                    "{} introduced a bare LF into CRLF output:\n{written}",
+                    case.name
+                );
+            }
+
+            let mut diff = md_cmd();
+            diff.arg("hash");
+            if case.property != "hash" {
+                diff.env("HASH_PROPERTY", case.property);
+            }
+            diff.arg("--diff").arg(&file).assert().success();
+        }
+    }
+}
+
+#[test]
+fn test_hash_save_flow_root_no_write_matrix_covers_newlines() {
+    for newline in ["\n", "\r\n"] {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("flow.md");
+        let source = [
+            "---",
+            "{title: Kept, prompt: \"First line  ",
+            "  Second line\", hash: 0000000000000000-0000000000000000}",
+            "---",
+            "First body line.  ",
+            "Second body line.",
+            "",
+        ]
+        .join(newline);
+        std::fs::write(&file, &source).unwrap();
+
+        md_cmd().arg("hash").arg("--save").arg(&file).assert().failure();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), source);
+    }
+}

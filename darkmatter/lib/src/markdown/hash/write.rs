@@ -746,6 +746,173 @@ mod tests {
         ));
     }
 
+    #[test]
+    fn textual_save_preservation_matrix_covers_representations_and_newlines() {
+        struct Case {
+            name: &'static str,
+            kind: MdHashKind,
+            property: &'static str,
+            authored_key: &'static str,
+            old_node: &'static str,
+        }
+
+        let cases = [
+            Case {
+                name: "simple",
+                kind: MdHashKind::Simple,
+                property: "hash",
+                authored_key: "hash",
+                old_node: "hash: 0000000000000000-0000000000000000",
+            },
+            Case {
+                name: "structured",
+                kind: MdHashKind::Structured,
+                property: "hash",
+                authored_key: "hash",
+                old_node: concat!(
+                    "hash:\n",
+                    "  kind: structured\n",
+                    "  value: 0000000000000000-0000000000000000-0000000000000000-0000000000000000"
+                ),
+            },
+            Case {
+                name: "detailed",
+                kind: MdHashKind::Detailed,
+                property: "hash",
+                authored_key: "hash",
+                old_node: "hash: old",
+            },
+            Case {
+                name: "custom-property",
+                kind: MdHashKind::Simple,
+                property: "fingerprint",
+                authored_key: "fingerprint",
+                old_node: "fingerprint: 0000000000000000-0000000000000000",
+            },
+            Case {
+                name: "quoted-key",
+                kind: MdHashKind::Simple,
+                property: "hash",
+                authored_key: "\"hash\"",
+                old_node: "\"hash\": 0000000000000000-0000000000000000",
+            },
+        ];
+
+        for newline in ["\n", "\r\n"] {
+            for case in &cases {
+                let prefix = [
+                    "---",
+                    "title: Kept # authored",
+                    "prompt: |-",
+                    "    First line  ",
+                    "",
+                    "    Second line.",
+                ]
+                .join(newline)
+                    + newline;
+                let old_node = case.old_node.replace('\n', newline);
+                let suffix = [
+                    "# boundary comment",
+                    "author: A",
+                    "---",
+                    "# Heading",
+                    "",
+                    "Body with trailing spaces.  ",
+                    "",
+                ]
+                .join(newline);
+                let source = format!(
+                    "{prefix}{old_node}{newline}last_updated: '2026-01-01' # managed{newline}{suffix}"
+                );
+                let options = MdHashOptions {
+                    property: case.property.to_string(),
+                    ..MdHashOptions::default()
+                };
+                let doc = md(&source);
+                let stored = StoredFromDoc::stored(&doc, case.kind, &options);
+                let written = apply_hash_save_text(
+                    &source,
+                    &textual_decision(stored, true),
+                    &options,
+                    "2026-09-01",
+                )
+                .unwrap()
+                .unwrap();
+
+                assert!(
+                    written.starts_with(&prefix),
+                    "{} {newline:?} changed the authored prefix:\n{written}",
+                    case.name
+                );
+                assert!(
+                    written.ends_with(&suffix),
+                    "{} {newline:?} changed the authored suffix:\n{written}",
+                    case.name
+                );
+                assert!(
+                    written.contains(&format!("{}:", case.authored_key)),
+                    "{} {newline:?} did not preserve the managed key spelling:\n{written}",
+                    case.name
+                );
+                if matches!(case.kind, MdHashKind::Structured | MdHashKind::Detailed) {
+                    assert!(
+                        written.contains(&format!("kind: {}", case.kind)),
+                        "{} {newline:?} did not use longhand output:\n{written}",
+                        case.name
+                    );
+                }
+                if newline == "\r\n" {
+                    assert!(
+                        !written.replace("\r\n", "").contains('\n'),
+                        "{} introduced a bare LF into CRLF output:\n{written}",
+                        case.name
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn textual_save_flow_root_no_write_matrix_covers_newlines() {
+        for newline in ["\n", "\r\n"] {
+            let source = [
+                "---",
+                "{title: Kept, prompt: \"First line  ",
+                "  Second line\", hash: 0000000000000000-0000000000000000}",
+                "---",
+                "First body line.  ",
+                "Second body line.",
+                "",
+            ]
+            .join(newline);
+            let error = apply_hash_save_text(
+                &source,
+                &textual_decision(
+                    simple_stored("1111111111111111-2222222222222222"),
+                    false,
+                ),
+                &MdHashOptions::default(),
+                "2026-09-01",
+            )
+            .unwrap_err();
+
+            assert!(matches!(error, MarkdownError::FrontmatterTextEdit { .. }));
+            assert_eq!(
+                source,
+                [
+                    "---",
+                    "{title: Kept, prompt: \"First line  ",
+                    "  Second line\", hash: 0000000000000000-0000000000000000}",
+                    "---",
+                    "First body line.  ",
+                    "Second body line.",
+                    "",
+                ]
+                .join(newline)
+            );
+        }
+    }
+
     /// Test helper: a stored hash computed from a document at a kind.
     struct StoredFromDoc;
     impl StoredFromDoc {
