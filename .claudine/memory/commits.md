@@ -94,6 +94,24 @@ do not belong here.
   /tmp/commit_msg_$$.txt` shell-expands to a different PID and the file is not
   where the commit looks. Use a static name (`/tmp/commit_msg.txt`) or echo
   the agent's actual `$$` value before writing.
+- **Parallel-batch temp-file race on `/tmp/commit_msg.txt`.** A static shared
+  name like `/tmp/commit_msg.txt` is a single hot slot when N sub-agents
+  commit concurrently. Each agent's `Write` of its own body overwrites the
+  previous one; whichever `git commit -F /tmp/commit_msg.txt` reads last
+  wins, and the others' trees ship with the wrong subject/body. Observed in a
+  4-group batch: the codebook `chore(codebook): …` commit landed with the
+  homelab `docs(homelab): add unifi product documentation` body because the
+  codebook agent's write lost the race. Signatures are unaffected, trees are
+  correct, but two commits in the log share a subject. **Mitigation in the
+  brief:** when the orchestrator dispatches a parallel commit batch, give
+  each sub-agent a unique message filename derived from its scope (e.g.
+  `/tmp/commit_msg_codebook.txt`, `/tmp/commit_msg_homelab_unifi.txt`,
+  `/tmp/commit_msg_homelab_justfile.txt`, `/tmp/commit_msg_ha_skill.txt`).
+  The `Write`/`-F` round trip still composes with the lock-retry loop and
+  costs nothing; the static name only made sense in single-agent flows.
+  **Recovery from a wrong-body commit:** per the existing rule, do not amend
+  in batch; report the wrong body and let the developer rewrite or
+  `update-ref`-rewind after the batch settles.
 - `--` between `-F -` and the pathspec list is mandatory, even with `--only`.
   Without it, git parses the first path as a subcommand (e.g. `git commit
   --only -F - claudine/lib/...` tries to invoke `git-claudine`) and may also
