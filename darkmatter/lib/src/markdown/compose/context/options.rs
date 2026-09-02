@@ -16,6 +16,36 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 use url::Url;
 
+/// One immutable caller override paired with the context that authored it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallerInputRecord {
+    raw: serde_json::Value,
+    origin: biscuit_file::FileResolutionContext,
+}
+
+impl CallerInputRecord {
+    /// Pair an unmodified caller value with its captured resolution context.
+    pub fn new(
+        raw: serde_json::Value,
+        origin: biscuit_file::FileResolutionContext,
+    ) -> Self {
+        Self { raw, origin }
+    }
+
+    /// The unmodified value supplied by the caller.
+    pub fn raw(&self) -> &serde_json::Value {
+        &self.raw
+    }
+
+    /// The immutable context in which the caller authored the value.
+    pub fn origin(&self) -> &biscuit_file::FileResolutionContext {
+        &self.origin
+    }
+}
+
+/// Immutable caller overrides keyed by the winning top-level property.
+pub type CallerInputRecords = std::collections::BTreeMap<String, CallerInputRecord>;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum SourceDerivation {
     #[default]
@@ -100,6 +130,9 @@ pub struct ComposeOptions {
     /// Unlike `external_state` which only fills missing/null keys,
     /// these values always win regardless of what the frontmatter says.
     pub(crate) set_overrides: Option<serde_json::Value>,
+
+    /// Raw caller overrides and their per-property authoring contexts.
+    pub(crate) caller_input_records: CallerInputRecords,
 
     // ── Transclusion ───────────────────────────────────────────────
     /// Maximum recursive transclusion depth before the pipeline
@@ -400,6 +433,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("source", &self.source)
             .field("external_state", &self.external_state)
             .field("set_overrides", &self.set_overrides)
+            .field("caller_input_records", &self.caller_input_records)
             .field("max_transclusion_depth", &self.max_transclusion_depth)
             .field("allow_remote_transclusion", &self.allow_remote_transclusion)
             .field("allow_local_markdown", &self.allow_local_markdown)
@@ -531,6 +565,7 @@ impl ComposeOptions {
             source: ComposeSource::Unknown,
             external_state: None,
             set_overrides: None,
+            caller_input_records: CallerInputRecords::new(),
             max_transclusion_depth: 16,
             allow_remote_transclusion: false,
             allow_local_markdown: true,
@@ -647,6 +682,18 @@ impl ComposeOptions {
     pub fn with_set_overrides(mut self, overrides: serde_json::Value) -> Self {
         self.set_overrides = Some(overrides);
         self
+    }
+
+    /// Installs immutable raw caller values with their per-property origins.
+    #[must_use]
+    pub fn with_caller_input_records(mut self, records: CallerInputRecords) -> Self {
+        self.caller_input_records = records;
+        self
+    }
+
+    /// Immutable caller values retained independently from effective overrides.
+    pub fn caller_input_records(&self) -> &CallerInputRecords {
+        &self.caller_input_records
     }
 
     /// Sets the list spacing mode for the cleanup stage.
@@ -1881,6 +1928,7 @@ impl ComposeOptions {
             source,
             external_state,
             set_overrides,
+            caller_input_records,
             max_transclusion_depth,
             allow_remote_transclusion,
             allow_local_markdown,
@@ -1991,6 +2039,13 @@ impl ComposeOptions {
                 enc.str(&canonical_json_sorted(v));
             }
             None => enc.tag(0),
+        }
+        enc.field("caller_input_records");
+        enc.count(caller_input_records.len());
+        for (property, record) in caller_input_records {
+            enc.str(property);
+            enc.str(&canonical_json_sorted(record.raw()));
+            encode_file_resolution_context(&mut enc, &Some(record.origin().clone()));
         }
 
         enc.field("max_transclusion_depth");
@@ -2339,6 +2394,13 @@ impl ComposeOptions {
                 cenc.str(&canonical_json_sorted(v));
             }
             None => cenc.tag(0),
+        }
+        cenc.field("caller_input_records");
+        cenc.count(caller_input_records.len());
+        for (property, record) in caller_input_records {
+            cenc.str(property);
+            cenc.str(&canonical_json_sorted(record.raw()));
+            encode_file_resolution_context(&mut cenc, &Some(record.origin().clone()));
         }
         cenc.field("baseline_schema");
         match &baseline_canonical {
@@ -2741,6 +2803,40 @@ mod tests {
                 ["echo", "ls", "cat"].iter().map(|s| s.to_string()).collect(),
             );
         assert_eq!(id(&a), id(&b));
+    }
+
+    #[test]
+    fn caller_input_origin_participates_in_graph_and_cache_identity() {
+        let records = |base: &str| {
+            [(
+                "spec".to_string(),
+                CallerInputRecord::new(
+                    serde_json::json!("fixes/case/spec.md"),
+                    biscuit_file::FileResolutionContext::from_snapshot(
+                        base,
+                        None,
+                        std::collections::HashMap::new(),
+                    ),
+                ),
+            )]
+            .into_iter()
+            .collect()
+        };
+        let a = fixed_opts().with_caller_input_records(records("/repo/one"));
+        let b = fixed_opts().with_caller_input_records(records("/repo/two"));
+        let cloned = a.clone();
+
+        assert_ne!(id(&a), id(&b));
+        assert_ne!(a.compose_cache_fingerprint(), b.compose_cache_fingerprint());
+        assert_eq!(id(&a), id(&cloned));
+        assert_eq!(
+            a.compose_cache_fingerprint(),
+            cloned.compose_cache_fingerprint()
+        );
+        assert_eq!(
+            a.caller_input_records()["spec"].raw(),
+            &serde_json::json!("fixes/case/spec.md")
+        );
     }
 
     #[test]

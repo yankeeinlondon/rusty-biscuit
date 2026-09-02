@@ -148,6 +148,21 @@ impl Markdown {
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion),
             );
 
+            // Caller file parameters are invocation-owned semantic inputs.
+            // Project them from their captured origins before the
+            // first frontmatter dependency graph consumes their values. The
+            // same schema assembly and projection are retained for validation,
+            // post-shell trigger matching, and final body presentation.
+            let mut trigger_registry = None;
+            let prepared_schemas =
+                schema_validation::prepare_schemas(self, &options, &mut trigger_registry)?;
+            let caller_projection = schema_validation::prepare_caller_projection(
+                self,
+                &options,
+                &prepared_schemas,
+            )?;
+            caller_projection.install(self);
+
             let shell_expansion_enabled =
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion);
 
@@ -224,15 +239,13 @@ impl Markdown {
             // disk; the post-shell pass below reuses that registry instead of
             // re-walking it (F8). Matching is re-evaluated against the current
             // frontmatter in each pass regardless.
-            let mut trigger_registry = None;
-            let mut presentation_overrides = std::collections::HashMap::new();
             {
                 let sv_start = perf.is_enabled().then(std::time::Instant::now);
                 schema_validation::run_with_registry(
                     self,
                     &options,
-                    &mut trigger_registry,
-                    &mut presentation_overrides,
+                    &prepared_schemas,
+                    &caller_projection,
                 )?;
                 if let Some(start) = sv_start {
                     perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
@@ -316,8 +329,8 @@ impl Markdown {
                     schema_validation::run_with_registry(
                         self,
                         &options,
-                        &mut trigger_registry,
-                        &mut presentation_overrides,
+                        &prepared_schemas,
+                        &caller_projection,
                     )?;
                 }
             }
@@ -343,7 +356,7 @@ impl Markdown {
                 .with_context(options.context().clone())
                 .with_allow_ctx_override(options.allow_ctx_override)
                 .with_name_coercion_keys(options.name_coercion_keys.clone())
-                .with_presentation_values(presentation_overrides)
+                .with_presentation_values(caller_projection.presentation_values())
                 .build()?;
             if let Some(start) = esb_start {
                 perf.record(perf::PerfMetricKind::EffectiveStateBuild, start.elapsed());

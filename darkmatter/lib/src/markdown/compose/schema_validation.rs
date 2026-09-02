@@ -30,14 +30,15 @@
 //! unresolved `{{ ... }}` template — are left untouched here; their real type
 //! is resolved at post-shell re-validation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::{ComposeOperation, ComposeSource};
 use crate::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, SchemaOriginKind, SimplifiedSchema,
+    DarkmatterSchemas, EffectiveSchema, FileReferenceDiagnostic, JsonPointer, SchemaOriginKind,
+    SimplifiedSchema, ValidationProblem, ValidationProblemCode, ValidationProblemKind,
 };
 use crate::markdown::schemas::coerce::coerce_frontmatter_with_pending;
 use crate::markdown::types::{MarkdownError, MarkdownResult};
@@ -45,7 +46,44 @@ use crate::markdown::types::{MarkdownError, MarkdownResult};
 /// Single-pass convenience wrapper used by this module's tests.
 #[cfg(test)]
 pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> MarkdownResult<()> {
-    run_with_registry(markdown, options, &mut None, &mut HashMap::new())
+    let mut trigger_registry = None;
+    let prepared = prepare_schemas(markdown, options, &mut trigger_registry)?;
+    let projection = prepare_caller_projection(markdown, options, &prepared)?;
+    projection.install(markdown);
+    run_with_registry(markdown, options, &prepared, &projection)
+}
+
+/// Request-owned schema state assembled once before frontmatter interpolation.
+pub(crate) struct PreparedSchemas {
+    schemas: Option<DarkmatterSchemas>,
+}
+
+/// Caller-file values projected from the captured launch context.
+#[derive(Default)]
+pub(crate) struct CallerProjection {
+    native: serde_json::Map<String, serde_json::Value>,
+    presentation: HashMap<String, serde_json::Value>,
+    modes: HashMap<String, CallerFileMode>,
+    classified: HashSet<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CallerFileMode {
+    Eager,
+    Lazy,
+}
+
+impl CallerProjection {
+    pub(crate) fn install(&self, markdown: &mut Markdown) {
+        let frontmatter = markdown.frontmatter_mut().as_map_mut();
+        for (key, value) in &self.native {
+            frontmatter.insert(key.clone(), value.clone());
+        }
+    }
+
+    pub(crate) fn presentation_values(&self) -> HashMap<String, serde_json::Value> {
+        self.presentation.clone()
+    }
 }
 
 fn trigger_discovery_boundary(options: &ComposeOptions, document_path: &Path) -> Option<PathBuf> {
@@ -53,6 +91,65 @@ fn trigger_discovery_boundary(options: &ComposeOptions, document_path: &Path) ->
         Some(context) => context.repository_root().map(Path::to_path_buf),
         None => crate::markdown::compose::find_git_root_from(document_path),
     }
+}
+
+pub(crate) fn prepare_schemas(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+    trigger_registry: &mut Option<crate::markdown::schemas::triggers::TriggerRegistry>,
+) -> MarkdownResult<PreparedSchemas> {
+    let has_document_schema = markdown.frontmatter().as_map().contains_key("$schema");
+    if !has_document_schema && options.baseline_schema.is_none() && !options.trigger_schemas {
+        return Ok(PreparedSchemas { schemas: None });
+    }
+
+    let path = source_path(markdown, options);
+    let description = markdown
+        .frontmatter()
+        .as_map()
+        .get("description")
+        .and_then(|value| value.as_str().map(String::from));
+    let prepare_error = |summary: String, source| MarkdownError::SchemaValidationFailed {
+        path: path.clone(),
+        problems: Vec::new(),
+        summary,
+        description: description.clone(),
+        source: Some(Box::new(source)),
+    };
+
+    let mut schemas = DarkmatterSchemas::new();
+    if let Some(fallback) = options.file_ref_fallback_dir.clone() {
+        schemas = schemas.with_file_ref_fallback_dir(fallback);
+    }
+    if let Some(context) = options.file_resolution_context.clone() {
+        schemas = schemas.with_file_resolution_context(context);
+    }
+    if let Some(baseline) = options.baseline_schema.clone() {
+        schemas = schemas.with_baseline(baseline).map_err(|err| {
+            prepare_error(format!("schema could not be prepared: {err}"), err)
+        })?;
+    }
+    if options.trigger_schemas
+        && let Some(ComposeSource::File(document_path)) = markdown.source()
+        && let Some(boundary) = trigger_discovery_boundary(options, document_path)
+    {
+        schemas = if let Some(registry) = trigger_registry.take() {
+            schemas.with_trigger_registry(registry)
+        } else {
+            schemas
+                .with_trigger_discovery(document_path, boundary)
+                .map_err(|err| {
+                    prepare_error(format!("trigger schemas could not be prepared: {err}"), err)
+                })?
+        };
+        if let Some(registry) = schemas.trigger_registry() {
+            *trigger_registry = Some(registry.clone());
+        }
+    }
+
+    Ok(PreparedSchemas {
+        schemas: Some(schemas),
+    })
 }
 
 /// Runs schema validation against the document's effective frontmatter,
@@ -86,30 +183,19 @@ fn trigger_discovery_boundary(options: &ComposeOptions, document_path: &Path) ->
 /// 7. Converts `ValidationReport { valid: false, problems }` into the same
 ///    error variant. On success, returns `Ok(())`.
 ///
-/// `trigger_registry` carries a trigger-schema registry across the two compose
-/// passes (pre- and post-shell): the first pass that performs discovery fills
-/// the slot, and the second reuses it instead of re-scanning the `schemas/`
-/// ancestry from disk (F8). Matching is re-evaluated against the current
-/// frontmatter in each pass regardless.
-///
-/// `presentation_overrides` receives caller-originated eager-file values in a
-/// portable spelling for later Markdown body interpolation. Effective
-/// frontmatter retains the absolute native values used by path operations,
-/// comparisons, and lifecycle state. Static member and index interpolation can
-/// select within the presentation values without changing that native state.
+/// `prepared` owns the schema assembly and trigger registry discovered before
+/// frontmatter interpolation. `projection` owns launch-resolved caller values;
+/// this stage verifies their selected file mode is still stable before it
+/// mutates frontmatter for validation.
 pub(crate) fn run_with_registry(
     markdown: &mut Markdown,
     options: &ComposeOptions,
-    trigger_registry: &mut Option<crate::markdown::schemas::triggers::TriggerRegistry>,
-    presentation_overrides: &mut HashMap<String, serde_json::Value>,
+    prepared: &PreparedSchemas,
+    projection: &CallerProjection,
 ) -> MarkdownResult<()> {
-    presentation_overrides.clear();
-    let has_document_schema = markdown.frontmatter().as_map().contains_key("$schema");
-    let has_baseline = options.baseline_schema.is_some();
-
-    if !has_document_schema && !has_baseline && !options.trigger_schemas {
+    let Some(schemas) = prepared.schemas.as_ref() else {
         return Ok(());
-    }
+    };
 
     let path = source_path(markdown, options);
     let description = markdown
@@ -117,51 +203,6 @@ pub(crate) fn run_with_registry(
         .as_map()
         .get("description")
         .and_then(|v| v.as_str().map(String::from));
-
-    let schemas = {
-        let mut builder = DarkmatterSchemas::new();
-        if let Some(fallback) = options.file_ref_fallback_dir.clone() {
-            builder = builder.with_file_ref_fallback_dir(fallback);
-        }
-        if let Some(context) = options.file_resolution_context.clone() {
-            builder = builder.with_file_resolution_context(context);
-        }
-        if let Some(baseline) = options.baseline_schema.clone() {
-            builder = builder.with_baseline(baseline).map_err(|err| {
-                MarkdownError::SchemaValidationFailed {
-                    path: path.clone(),
-                    problems: Vec::new(),
-                    summary: format!("schema could not be prepared: {err}"),
-                    description: description.clone(),
-                    source: Some(Box::new(err)),
-                }
-            })?;
-        }
-        if options.trigger_schemas
-            && let Some(ComposeSource::File(document_path)) = markdown.source()
-            && let Some(boundary) = trigger_discovery_boundary(options, document_path)
-        {
-            builder = if let Some(registry) = trigger_registry.take() {
-                builder.with_trigger_registry(registry)
-            } else {
-                builder
-                    .with_trigger_discovery(document_path, boundary)
-                    .map_err(|err| MarkdownError::SchemaValidationFailed {
-                        path: path.clone(),
-                        problems: Vec::new(),
-                        summary: format!("trigger schemas could not be prepared: {err}"),
-                        description: description.clone(),
-                        source: Some(Box::new(err)),
-                    })?
-            };
-            // Preserve the scanned registry so a later compose pass reuses it
-            // rather than re-walking the `schemas/` ancestry from disk.
-            if let Some(registry) = builder.trigger_registry() {
-                *trigger_registry = Some(registry.clone());
-            }
-        }
-        builder
-    };
 
     // Build the effective schema once; the same instance is reused for the
     // eager-`file` rewrite pass after validation accepts the instance.
@@ -184,25 +225,11 @@ pub(crate) fn run_with_registry(
         }
     };
 
+    ensure_projection_stable(effective.as_ref(), options, projection)?;
+
     if let Some(effective) = effective.as_ref() {
         materialize_optional_document_bindings(markdown, effective);
     }
-
-    let caller_file_overrides = effective
-        .as_ref()
-        .map(|effective| resolve_eager_caller_file_overrides(effective, options))
-        .unwrap_or_default();
-    if !caller_file_overrides.native.is_empty() {
-        let fm_map = markdown.frontmatter_mut().as_map_mut();
-        for (key, value) in &caller_file_overrides.native {
-            fm_map.insert(key.clone(), value.clone());
-        }
-    }
-    *presentation_overrides = caller_file_overrides
-        .presentation
-        .iter()
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
 
     if let Some(effective) = effective.as_ref() {
         // Coerce schema-recognized scalars to their declared types and write the
@@ -278,7 +305,7 @@ pub(crate) fn run_with_registry(
             {
                 return false;
             }
-            // Caller-originated eager files were resolved against their
+            // Caller-originated files were materialized against their
             // invocation-fixed launch context above. A target document may
             // live across a repository boundary, where rechecking that
             // absolute value as document-authored can only produce a
@@ -287,7 +314,7 @@ pub(crate) fn run_with_registry(
                 p.code,
                 crate::markdown::schemas::ValidationProblemCode::InvalidFileReference
             ) && top_level_pointer_segment(&p.path)
-                .is_some_and(|name| caller_file_overrides.native.contains_key(&name))
+                .is_some_and(|name| projection.native.contains_key(&name))
             {
                 return false;
             }
@@ -334,7 +361,7 @@ pub(crate) fn run_with_registry(
                 if composition_pending.contains(&key) {
                     continue;
                 }
-                let value = caller_file_overrides
+                let value = projection
                     .native
                     .get(&key)
                     .cloned()
@@ -375,8 +402,64 @@ fn materialize_optional_document_bindings(markdown: &mut Markdown, effective: &E
     }
 }
 
-/// Resolve eager-file values supplied through `set_overrides` against the
-/// caller's launch-area context before document schema validation.
+pub(crate) fn prepare_caller_projection(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+    prepared: &PreparedSchemas,
+) -> MarkdownResult<CallerProjection> {
+    let Some(schemas) = prepared.schemas.as_ref() else {
+        return Ok(CallerProjection::default());
+    };
+    let effective = match schemas.effective_for(markdown) {
+        Ok(effective) => effective,
+        Err(_) if options.defer_schema_verdict => None,
+        Err(err) => {
+            return Err(MarkdownError::SchemaValidationFailed {
+                path: source_path(markdown, options),
+                problems: Vec::new(),
+                summary: format!("schema could not be prepared: {err}"),
+                description: markdown
+                    .frontmatter()
+                    .as_map()
+                    .get("description")
+                    .and_then(|value| value.as_str().map(String::from)),
+                source: Some(Box::new(err)),
+            });
+        }
+    };
+    resolve_caller_file_overrides(effective.as_ref(), options).map_err(|failure| {
+        MarkdownError::SchemaValidationFailed {
+            path: source_path(markdown, options),
+            problems: vec![*failure.problem],
+            summary: "frontmatter did not satisfy the schema".to_string(),
+            description: markdown
+                .frontmatter()
+                .as_map()
+                .get("description")
+                .and_then(|value| value.as_str().map(String::from)),
+            source: None,
+        }
+    })
+}
+
+fn ensure_projection_stable(
+    effective: Option<&EffectiveSchema>,
+    options: &ComposeOptions,
+    projection: &CallerProjection,
+) -> MarkdownResult<()> {
+    let current = classify_caller_overrides(effective, options);
+    for key in &projection.classified {
+        if projection.modes.get(key) != current.get(key) {
+            return Err(MarkdownError::CallerFileClassificationChanged {
+                property: key.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+/// Resolve schema-selected file values from immutable caller records before
+/// frontmatter interpolation.
 ///
 /// A value authored in the document resolves from the document. A value passed
 /// by a caller is a different provenance class: it resolves from the caller's
@@ -384,44 +467,148 @@ fn materialize_optional_document_bindings(markdown: &mut Markdown, effective: &E
 /// consumers do not reinterpret it as document-authored. The schema tells us
 /// which override strings are file references; ordinary string overrides are
 /// never probed.
-fn resolve_eager_caller_file_overrides(
-    effective: &crate::markdown::schemas::EffectiveSchema,
+fn resolve_caller_file_overrides(
+    effective: Option<&crate::markdown::schemas::EffectiveSchema>,
     options: &ComposeOptions,
-) -> ResolvedCallerFileOverrides {
-    let Some(fallback) = options.file_ref_fallback_dir.as_ref() else {
-        return ResolvedCallerFileOverrides::default();
-    };
-    let Some(overrides) = options
-        .set_overrides
-        .as_ref()
-        .and_then(serde_json::Value::as_object)
-    else {
-        return ResolvedCallerFileOverrides::default();
-    };
-    let context = options
-        .file_resolution_context
-        .as_ref()
-        // The launch area is invocation state already accepted by the caller,
-        // and may be outside a proxied target's repository. The target's own
-        // references keep its normal authoring context; only caller-originated
-        // overrides cross back to this captured boundary.
-        .map(|context| context.for_trusted_external_base(fallback))
-        .unwrap_or_else(|| biscuit_file::FileResolutionContext::new(fallback));
-    let mut resolved = ResolvedCallerFileOverrides::default();
-    for (key, value) in overrides {
+) -> Result<CallerProjection, CallerProjectionFailure> {
+    let records = caller_input_records(options);
+    let mut resolved = CallerProjection::default();
+    for (key, record) in &records {
+        if options.exclude_keys.contains(key) {
+            continue;
+        }
+        resolved.classified.insert(key.clone());
+        let Some(effective) = effective else { continue };
         let mut fragments = Vec::new();
         collect_property_schema_fragments(&effective.json_schema, key, &mut fragments);
-        if let Some(value) = fragments
-            .into_iter()
-            .find_map(|fragment| resolve_eager_caller_value(value, fragment, &context))
-        {
-            resolved.native.insert(key.clone(), value.native);
-            resolved
-                .presentation
-                .insert(key.clone(), value.presentation);
+        let selections: Vec<_> = fragments
+            .iter()
+            .filter_map(|fragment| select_file_mode(record.raw(), fragment, record.origin()))
+            .collect();
+        if selections.len() != 1 {
+            continue;
+        }
+        let mode = selections[0];
+        resolved.modes.insert(key.clone(), mode);
+        for fragment in fragments {
+            if select_file_mode(record.raw(), fragment, record.origin()) != Some(mode) {
+                continue;
+            }
+            if let Some(value) = resolve_caller_file_value(
+                record.raw(),
+                fragment,
+                record.origin(),
+                key,
+                mode,
+            )? {
+                resolved.native.insert(key.clone(), value.native);
+                resolved.presentation.insert(key.clone(), value.presentation);
+                break;
+            }
         }
     }
-    resolved
+    Ok(resolved)
+}
+
+fn classify_caller_overrides(
+    effective: Option<&EffectiveSchema>,
+    options: &ComposeOptions,
+) -> HashMap<String, CallerFileMode> {
+    let Some(effective) = effective else {
+        return HashMap::new();
+    };
+    caller_input_records(options)
+        .iter()
+        .filter_map(|(key, record)| {
+            if options.exclude_keys.contains(key) {
+                return None;
+            }
+            let mut fragments = Vec::new();
+            collect_property_schema_fragments(&effective.json_schema, key, &mut fragments);
+            let modes: Vec<_> = fragments
+                .iter()
+                .filter_map(|fragment| select_file_mode(record.raw(), fragment, record.origin()))
+                .collect();
+            (modes.len() == 1).then(|| (key.clone(), modes[0]))
+        })
+        .collect()
+}
+
+fn caller_input_records(options: &ComposeOptions) -> crate::markdown::compose::CallerInputRecords {
+    if !options.caller_input_records().is_empty() {
+        return options.caller_input_records().clone();
+    }
+    let Some(fallback) = options.file_ref_fallback_dir.as_ref() else {
+        return Default::default();
+    };
+    let Some(overrides) = options.set_overrides.as_ref().and_then(serde_json::Value::as_object)
+    else {
+        return Default::default();
+    };
+    let origin = options
+        .file_resolution_context
+        .as_ref()
+        .map(|context| context.for_trusted_external_base(fallback))
+        .unwrap_or_else(|| biscuit_file::FileResolutionContext::new(fallback));
+    overrides
+        .iter()
+        .map(|(key, value)| {
+            (
+                key.clone(),
+                crate::markdown::compose::CallerInputRecord::new(value.clone(), origin.clone()),
+            )
+        })
+        .collect()
+}
+
+fn select_file_mode(
+    value: &serde_json::Value,
+    schema: &serde_json::Value,
+    context: &biscuit_file::FileResolutionContext,
+) -> Option<CallerFileMode> {
+    let mode = match schema.get("format").and_then(serde_json::Value::as_str) {
+        Some(crate::markdown::schemas::format::DARKMATTER_FILE_FORMAT) => {
+            Some(CallerFileMode::Eager)
+        }
+        Some(crate::markdown::schemas::format::DARKMATTER_FILE_REFERENCE_FORMAT) => {
+            Some(CallerFileMode::Lazy)
+        }
+        _ => None,
+    };
+    if mode.is_some() {
+        return value.is_string().then_some(mode).flatten();
+    }
+    if let Some(items) = schema.get("items") && let Some(values) = value.as_array() {
+        let modes: Vec<_> = values
+            .iter()
+            .filter_map(|item| select_file_mode(item, items, context))
+            .collect();
+        if !values.is_empty() && modes.len() == values.len() && modes.iter().all(|m| *m == modes[0])
+        {
+            return Some(modes[0]);
+        }
+    }
+    for combinator in ["allOf", "anyOf", "oneOf"] {
+        if let Some(arms) = schema.get(combinator).and_then(serde_json::Value::as_array) {
+            let applicable: Vec<_> = arms
+                .iter()
+                .filter(|arm| {
+                    crate::markdown::schemas::validate::build_validator_in_context(
+                        arm,
+                        Some(context.base_dir()),
+                        None,
+                        Some(context),
+                    )
+                    .is_ok_and(|validator| validator.is_valid(value))
+                })
+                .collect();
+            if applicable.len() != 1 {
+                return None;
+            }
+            return select_file_mode(value, applicable[0], context);
+        }
+    }
+    None
 }
 
 fn collect_property_schema_fragments<'a>(
@@ -445,10 +632,8 @@ fn collect_property_schema_fragments<'a>(
     }
 }
 
-#[derive(Default)]
-struct ResolvedCallerFileOverrides {
-    native: serde_json::Map<String, serde_json::Value>,
-    presentation: serde_json::Map<String, serde_json::Value>,
+struct CallerProjectionFailure {
+    problem: Box<ValidationProblem>,
 }
 
 struct ResolvedCallerFileValue {
@@ -456,26 +641,133 @@ struct ResolvedCallerFileValue {
     presentation: serde_json::Value,
 }
 
-fn resolve_eager_caller_value(
+fn resolve_caller_file_value(
     value: &serde_json::Value,
     schema: &serde_json::Value,
     context: &biscuit_file::FileResolutionContext,
-) -> Option<ResolvedCallerFileValue> {
-    if schema.get("format").and_then(serde_json::Value::as_str)
-        == Some(crate::markdown::schemas::format::DARKMATTER_FILE_FORMAT)
+    key: &str,
+    mode: CallerFileMode,
+) -> Result<Option<ResolvedCallerFileValue>, CallerProjectionFailure> {
+    if select_file_mode(value, schema, context) == Some(mode)
+        && schema.get("format").and_then(serde_json::Value::as_str).is_some()
     {
-        let raw = value.as_str()?;
-        let reference = biscuit_file::FileReference::new(raw).ok()?;
-        let resolved = reference.resolve_in_context(context).ok()??;
+        let Some(raw) = value.as_str() else {
+            return Ok(None);
+        };
+        let reference = biscuit_file::FileReference::new(raw).map_err(|err| {
+            caller_projection_failure(
+                key,
+                format!("`{raw}` is not a valid file reference: {err}"),
+                FileReferenceDiagnostic::InvalidSyntax {
+                    raw: raw.to_string(),
+                },
+            )
+        })?;
+        if mode == CallerFileMode::Lazy {
+            if reference.class().recursive {
+                return Err(caller_projection_failure(
+                    key,
+                    format!(
+                        "recursive caller file reference `{raw}` has no single lazy identity; declare the parameter as `file(eager)`"
+                    ),
+                    FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                ));
+            }
+            if reference.class().kind == biscuit_file::FileReferenceKind::Url {
+                let target = reference.resolve_target().map_err(|err| {
+                    caller_projection_failure(
+                        key,
+                        format!("could not classify remote file reference `{raw}`: {err}"),
+                        FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                    )
+                })?;
+                let Some(biscuit_file::Resolved::Remote(url)) = target else {
+                    return Err(caller_projection_failure(
+                        key,
+                        format!("remote file reference `{raw}` did not produce a remote target"),
+                        FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                    ));
+                };
+                let value = serde_json::Value::String(url.to_string());
+                return Ok(Some(ResolvedCallerFileValue {
+                    native: value.clone(),
+                    presentation: value,
+                }));
+            }
+            let candidates = reference
+                .candidate_plan(context)
+                .map_err(|err| {
+                    caller_projection_failure(
+                        key,
+                        format!(
+                            "could not bind file reference `{raw}` from `{}`: {err}",
+                            context.base_dir().display()
+                        ),
+                        FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                    )
+                })?;
+            let candidate = candidates
+                .iter()
+                .find(|candidate| {
+                    candidate.provenance() == biscuit_file::RootProvenance::Source
+                })
+                .or_else(|| candidates.first())
+                .ok_or_else(|| {
+                    caller_projection_failure(
+                        key,
+                        format!(
+                            "file reference `{raw}` produced no candidate from `{}`",
+                            context.base_dir().display()
+                        ),
+                        FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                    )
+                })?;
+            let path = candidate.path().to_path_buf();
+            if !path.is_absolute() {
+                return Err(caller_projection_failure(
+                    key,
+                    format!(
+                        "file reference `{raw}` produced a non-absolute candidate from `{}`",
+                        context.base_dir().display(),
+                    ),
+                    FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                ));
+            }
+            let native = path.to_string_lossy().into_owned();
+            let presentation = biscuit_file::to_portable_string(&path);
+            return Ok(Some(ResolvedCallerFileValue {
+                native: serde_json::Value::String(native),
+                presentation: serde_json::Value::String(presentation),
+            }));
+        }
+        let resolved = reference.resolve_in_context(context).map_err(|err| {
+            caller_projection_failure(
+                key,
+                format!(
+                    "could not resolve file reference `{raw}` from `{}`: {err}",
+                    context.base_dir().display()
+                ),
+                FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+            )
+        })?.ok_or_else(|| {
+            caller_projection_failure(
+                key,
+                format!(
+                    "file reference `{raw}` did not match a file from `{}`",
+                    context.base_dir().display()
+                ),
+                FileReferenceDiagnostic::NoMatch {
+                    raw: raw.to_string(),
+                    resolved_from: Some(context.base_dir().to_path_buf()),
+                },
+            )
+        })?;
         let native = resolved.to_string_lossy().into_owned();
-        #[cfg(windows)]
-        let presentation = native.replace('\\', "/");
-        #[cfg(not(windows))]
-        let presentation = native.clone();
-        return Some(ResolvedCallerFileValue {
+        let presentation = biscuit_file::to_portable_string(&resolved);
+        return Ok(Some(ResolvedCallerFileValue {
             native: serde_json::Value::String(native),
             presentation: serde_json::Value::String(presentation),
-        });
+        }));
     }
     if let Some(items) = schema.get("items")
         && let Some(values) = value.as_array()
@@ -484,7 +776,7 @@ fn resolve_eager_caller_value(
         let mut native = Vec::with_capacity(values.len());
         let mut presentation = Vec::with_capacity(values.len());
         for value in values {
-            if let Some(resolved) = resolve_eager_caller_value(value, items, context) {
+            if let Some(resolved) = resolve_caller_file_value(value, items, context, key, mode)? {
                 changed = true;
                 native.push(resolved.native);
                 presentation.push(resolved.presentation);
@@ -494,22 +786,47 @@ fn resolve_eager_caller_value(
             }
         }
         if changed {
-            return Some(ResolvedCallerFileValue {
+            return Ok(Some(ResolvedCallerFileValue {
                 native: serde_json::Value::Array(native),
                 presentation: serde_json::Value::Array(presentation),
-            });
+            }));
         }
     }
     for combinator in ["allOf", "anyOf", "oneOf"] {
         if let Some(arms) = schema.get(combinator).and_then(serde_json::Value::as_array) {
             for arm in arms {
-                if let Some(resolved) = resolve_eager_caller_value(value, arm, context) {
-                    return Some(resolved);
+                if let Some(resolved) = resolve_caller_file_value(value, arm, context, key, mode)? {
+                    return Ok(Some(resolved));
                 }
             }
         }
     }
-    None
+    Ok(None)
+}
+
+fn caller_projection_failure(
+    key: &str,
+    message: String,
+    diagnostic: FileReferenceDiagnostic,
+) -> CallerProjectionFailure {
+    let pointer = format!("/{}", key.replace('~', "~0").replace('/', "~1"));
+    CallerProjectionFailure {
+        problem: Box::new(ValidationProblem {
+            path: pointer.clone(),
+            message,
+            kind: ValidationProblemKind::Invalid,
+            property: None,
+            line: None,
+            column: None,
+            arm_index: None,
+            description: None,
+            code: ValidationProblemCode::InvalidFileReference,
+            instance_path: JsonPointer::parse(&pointer),
+            schema_path: None,
+            offending_property: None,
+            file_reference: Some(diagnostic),
+        }),
+    }
 }
 
 /// Returns `true` when `value` is still composition-pending — it holds a

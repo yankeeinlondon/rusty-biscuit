@@ -218,6 +218,16 @@ pub enum MarkdownError {
         #[source]
         source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
     },
+
+    /// A present caller override changed file mode after the first
+    /// frontmatter expression pass had already consumed its value.
+    #[error(
+        "caller file parameter `{property}` changed file mode during composition"
+    )]
+    CallerFileClassificationChanged {
+        /// Top-level caller-supplied frontmatter property whose typing drifted.
+        property: String,
+    },
 }
 
 impl From<crate::markdown::compose::TransclusionError> for MarkdownError {
@@ -349,6 +359,9 @@ impl BlockError for MarkdownError {
                 // and `problems` only.
                 source: _,
             } => blocks::schema_validation_failed_block(path, problems, summary, description),
+            MarkdownError::CallerFileClassificationChanged { property } => {
+                blocks::caller_file_classification_changed_block(property)
+            }
         }
     }
 
