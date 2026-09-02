@@ -100,7 +100,10 @@ that authored the task, not the document the step composes and runs.
 `set_frontmatter` and other file-touching effects in that stack therefore
 target files next to the task's origin document, including when an
 externalized `task:`/`group:` file lives in a different repository from the
-step's `prompt:` document.
+step's `prompt:` document. Prompt-task `params` retain that same authoring
+origin when the target schema selects a file value; immutable CLI caller
+records remain a separate, higher-precedence layer with the invocation's
+launch origin.
 
 ### Positional Arguments
 
