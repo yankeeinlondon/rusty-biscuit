@@ -148,6 +148,12 @@ pub(crate) fn run_composition_inner(
     let frontmatter_load_t = std::time::Instant::now();
     let invocation = InvocationContext::capture()?;
     let provisional_context = invocation.launch_file_resolution_context().clone();
+    let caller_input_records =
+        claudine::composition::CallerInputLayers::from_caller_overrides(
+            set_overrides.clone(),
+            provisional_context.clone(),
+        )
+        .caller_input_records;
     let source = resolve_composition_source(
         &file,
         kind,
@@ -305,6 +311,7 @@ pub(crate) fn run_composition_inner(
             &mut inline_state,
             &system_prompt_args,
             set_overrides.clone(),
+            caller_input_records.clone(),
             &launch_area_fallback,
             &shared_approval_cache,
             &ledger,
@@ -401,6 +408,7 @@ pub(crate) fn prepare_and_run_active_document(
     inline_state: &mut Option<crate::commands::compose::InlinePromptState>,
     system_prompt_args: &SystemPromptArgs,
     set_overrides: Option<serde_json::Value>,
+    caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     launch_area_fallback: &Option<std::path::PathBuf>,
     shared_approval_cache: &SharedApprovalCache,
     ledger: &SharedRunLedger,
@@ -595,6 +603,7 @@ pub(crate) fn prepare_and_run_active_document(
         if let Some(ref overrides) = set_overrides {
             opts = opts.with_set_overrides(overrides.clone());
         }
+        opts = opts.with_caller_input_records(caller_input_records.clone());
         opts
     };
 
@@ -652,6 +661,7 @@ pub(crate) fn prepare_and_run_active_document(
         Arc::clone(ledger),
         system_prompt_args,
         set_overrides,
+        caller_input_records,
         kind,
         verbose,
         startup_timings,
@@ -1125,6 +1135,7 @@ fn execute_loop_or_single(
     handoff_ledger: SharedRunLedger,
     system_prompt_args: &SystemPromptArgs,
     set_overrides: Option<serde_json::Value>,
+    caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     kind: CompositionKind,
     verbose: u8,
     mut startup_timings: Option<crate::perf::StartupTimings>,
@@ -1170,6 +1181,7 @@ fn execute_loop_or_single(
         invocation_context: Some(prep_context.invocation.clone()),
         document_epoch: Some(document_epoch.clone()),
         set_overrides: set_overrides.clone(),
+        caller_input_records: caller_input_records.clone(),
         pre_approved_commands: Some(preflight.approved_commands.clone()),
         env_overrides: env_overrides.clone(),
         perf_enabled: shared.perf,
@@ -1274,6 +1286,7 @@ fn execute_loop_or_single(
                 invocation_context: Some(prep_context.invocation.clone()),
                 document_epoch: Some(document_epoch),
                 set_overrides,
+                caller_input_records,
                 pre_approved_commands: Some(preflight.approved_commands),
                 env_overrides: env_overrides.clone(),
                 perf_enabled: shared.perf,

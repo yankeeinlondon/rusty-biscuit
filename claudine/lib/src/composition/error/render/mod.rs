@@ -205,7 +205,10 @@ fn compose_failed_code(md: &MarkdownError) -> &'static str {
             "composition.frontmatter_parse"
         }
         MarkdownError::ShellExpansion(_) => "composition.shell_expansion",
-        MarkdownError::SchemaValidationFailed { .. } => "composition.schema_validation",
+        MarkdownError::SchemaValidationFailed { .. }
+        | MarkdownError::CallerFileClassificationChanged { .. } => {
+            "composition.schema_validation"
+        }
         _ => "composition.failed",
     }
 }
@@ -451,6 +454,13 @@ impl Diagnostic for CompositionError {
                 base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
                 base["problems"] = json!(problems);
                 base["pointer_paths"] = json!([]);
+            }
+            CompositionError::ComposeFailed(
+                MarkdownError::CallerFileClassificationChanged { property },
+            ) => {
+                let pointer = format!("/{property}");
+                base["problems"] = json!([pointer.clone()]);
+                base["pointer_paths"] = json!([pointer]);
             }
             // Shares the `composition.schema_validation` code; project the
             // property pointer as its single problem.

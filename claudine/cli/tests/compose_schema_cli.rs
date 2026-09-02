@@ -15,6 +15,8 @@
 //! - Schema-aware shell completion lists required properties before
 //!   optional ones for `claudine compose <prompt> key=<TAB>`.
 //! - `enum` values complete from the schema member list.
+//! - Eager caller file setters anchor before frontmatter expressions from
+//!   both repository-root and package-area launch directories.
 
 #[cfg(unix)]
 use std::fs;
@@ -1077,6 +1079,77 @@ Implement {{plan}} from {{review}}.
         !count_path.exists(),
         "no provider session should have been launched on a missing eager input"
     );
+}
+
+#[test]
+fn compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area() {
+    let workspace = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(workspace.path()).unwrap();
+    seed_cargo_workspace(&root, &["claudine"]);
+    assert!(common::init_git_repo(&root), "fixture Git init must succeed");
+
+    let prompt = root.join("prompts/plan.md");
+    write_file(
+        &prompt,
+        r#"---
+$schema:
+  - spec: file(required;match(**/*spec*.md);eager) -> path to specification file
+    design: file(match(**/*design*.md)) -> path to the design file (if exists)
+    plan: "file(required;match(**/*plan*.md)) -> The plan file this prompt will create"
+  - review: "file(required;match(**/*review.md);eager) -> review used instead of a spec"
+    plan: "file(required;match(**/*plan*.md)) -> The plan file this prompt will create"
+underlying: {{ spec || review }}
+underlying_name: '{{ spec ? "spec" : "review" }}'
+plan: "{{ dirname(spec || review) + '/plan.md' }}"
+---
+- Specification: {{spec}}
+- Save the plan as "{{plan}}"
+"#,
+    );
+
+    let case_dir = root.join("claudine/fixes/file-param-anchoring-cli");
+    write_file(&case_dir.join("spec.md"), "# Specification\n");
+
+    let area = root.join("claudine");
+    let runs = [
+        (
+            root.as_path(),
+            "prompts/plan.md",
+            "spec=claudine/fixes/file-param-anchoring-cli/spec.md",
+        ),
+        (
+            area.as_path(),
+            "../prompts/plan.md",
+            "spec=fixes/file-param-anchoring-cli/spec.md",
+        ),
+    ];
+
+    for (launch_dir, prompt_arg, setter) in runs {
+        let assert = assert_cmd::Command::cargo_bin("claudine")
+            .unwrap()
+            .env("NO_COLOR", "1")
+            .env("HOME", root.join("home"))
+            .env("CLAUDE_CODE_EXIT", "0")
+            .current_dir(launch_dir)
+            .args(["compose", "--claude", "--dry-run", prompt_arg, setter])
+            .assert()
+            .success();
+        let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+        assert!(
+            stdout.contains(
+                "Save the plan as \"claudine/fixes/file-param-anchoring-cli/plan.md\""
+            ),
+            "the complete target instruction must be launch-directory invariant; \
+             launch_dir={}\nstdout:\n{stdout}",
+            launch_dir.display()
+        );
+        assert!(
+            !stdout.contains("prompts/fixes/file-param-anchoring-cli/plan.md"),
+            "the plan expression must not retarget beneath the prompt directory; \
+             launch_dir={}\nstdout:\n{stdout}",
+            launch_dir.display()
+        );
+    }
 }
 
 // ============================================================================

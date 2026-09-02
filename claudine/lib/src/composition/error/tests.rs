@@ -984,6 +984,7 @@ fn shell_expansion_failed_via_real_markdown_preserves_rich_diagnostic() {
     let options = PrepareOptions {
         defer_schema_verdict: false,
         set_overrides: None,
+        caller_input_records: Default::default(),
         pre_approved_commands: Some(approved),
         env_overrides: BTreeMap::new(),
         perf_enabled: false,
@@ -1395,6 +1396,24 @@ fn file_ref_compose_error(diagnostic: FileReferenceDiagnostic) -> CompositionErr
         }),
         cause: Box::new(ExpressionError::FileReference(diagnostic)),
     })
+}
+
+#[test]
+fn caller_file_classification_drift_keeps_schema_diagnostic_identity() {
+    let err = CompositionError::ComposeFailed(
+        MarkdownError::CallerFileClassificationChanged {
+            property: "spec".to_string(),
+        },
+    );
+
+    assert_eq!(err.code(), "composition.schema_validation");
+    assert_eq!(err.detail()["problems"], json!(["/spec"]));
+    assert_eq!(err.detail()["pointer_paths"], json!(["/spec"]));
+    let rendered = err
+        .status_block(&biscuit_terminal::terminal::Terminal::default())
+        .render(&biscuit_terminal::terminal::Terminal::default());
+    assert!(rendered.contains("spec"), "got: {rendered}");
+    assert!(rendered.contains("eager"), "got: {rendered}");
 }
 
 #[test]

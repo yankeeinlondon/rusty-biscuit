@@ -340,6 +340,12 @@ fn run_sequence_inner(
 
     let set_overrides =
         super::compose::merge_set_overrides(shared.set.as_deref(), parsed.shorthand_setters)?;
+    let caller_input_records =
+        claudine::composition::CallerInputLayers::from_caller_overrides(
+            set_overrides.clone(),
+            invocation.launch_file_resolution_context().clone(),
+        )
+        .caller_input_records;
 
     // Schema-aware doc-level scrub: drop invalid optional values only.
     // Required-value validation is deferred to per-step pre-validation
@@ -368,6 +374,7 @@ fn run_sequence_inner(
         plan,
         &shared,
         set_overrides,
+        caller_input_records,
         execution_options,
         verbose,
         shared.perf,

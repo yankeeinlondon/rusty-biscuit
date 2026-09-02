@@ -40,6 +40,13 @@ fn sequence_step_preparation_is_one_exact_document_epoch() {
         .shared;
     let approval_cache =
         std::sync::Arc::new(std::sync::Mutex::new(std::collections::HashMap::new()));
+    let caller_input_records = BTreeMap::from([(
+        "spec".to_string(),
+        darkmatter::markdown::compose::CallerInputRecord::new(
+            serde_json::json!("fixes/case/spec.md"),
+            invocation.launch_file_resolution_context().clone(),
+        ),
+    )]);
     let context = StepComposeContext {
         source_repo_root: source_context.repository_root(),
         child_cwd: directory.path(),
@@ -48,6 +55,7 @@ fn sequence_step_preparation_is_one_exact_document_epoch() {
         approval_cache,
         inline_mode: false,
         file_resolution_context: source_context.file_resolution_context(),
+        caller_input_records: &caller_input_records,
         invocation: &invocation,
     };
     let step = compose_step(
@@ -61,6 +69,11 @@ fn sequence_step_preparation_is_one_exact_document_epoch() {
     .unwrap();
 
     assert!(step.prepared.prompt.contains("body="));
+    assert_eq!(
+        step.prepared.input_layers.caller_input_records,
+        caller_input_records,
+        "sequence preparation must retain only the immutable caller records"
+    );
     assert_eq!(
         step.prepared.document_epoch.unwrap().work_snapshot(),
         claudine::invocation_context::DocumentEpochWork {
@@ -146,7 +159,7 @@ fn template_preflight_resolves_against_document_dir() {
         &env_overrides,
         &source_path,
         &md,
-        &overrides,
+        (&overrides, &Default::default()),
         Some(launch_dir.path()),
         None,
         None,
@@ -200,7 +213,7 @@ fn template_preflight_does_not_resolve_launch_only_file() {
         &env_overrides,
         &source_path,
         &md,
-        &overrides,
+        (&overrides, &Default::default()),
         None,
         None,
         None,
@@ -300,7 +313,7 @@ fn distributed_step_keeps_launch_identity_and_source_schema_and_files() {
         &env,
         &pre.source.resolved_path,
         &pre.source.markdown,
-        &serde_json::json!({}),
+        (&serde_json::json!({}), &Default::default()),
         Some(&launch_dir),
         Some(source_context.file_resolution_context()),
         Some(&invocation),

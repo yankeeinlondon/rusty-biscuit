@@ -79,6 +79,35 @@ fn direct_and_proxy_entry_prepare_equivalent_documents() {
     assert_eq!(direct.prompt.trim(), "run phase 3");
 }
 
+#[test]
+fn caller_input_layers_round_trip_raw_values_and_origins() {
+    let launch = TempDir::new().unwrap();
+    let origin = biscuit_file::FileResolutionContext::new(launch.path());
+    let raw = serde_json::json!({
+        "spec": "fixes/example/spec.md",
+        "optional": null,
+        "iterations": 3
+    });
+    let layers = CallerInputLayers::from_caller_overrides(Some(raw.clone()), origin.clone());
+
+    assert_eq!(layers.set_overrides.as_ref(), Some(&raw));
+    assert_eq!(layers.caller_input_records.len(), 3);
+    for (property, value) in raw.as_object().unwrap() {
+        let record = layers
+            .caller_input_records
+            .get(property)
+            .expect("every explicit caller property retains a record");
+        assert_eq!(record.raw(), value);
+        assert_eq!(record.origin(), &origin);
+    }
+
+    let round_trip = CallerInputLayers::from_options(
+        &layers.apply_to(PrepareOptions::default()),
+    );
+    assert_eq!(round_trip.set_overrides, layers.set_overrides);
+    assert_eq!(round_trip.caller_input_records, layers.caller_input_records);
+}
+
 /// The entry reason is recorded on the result, so a downstream stage reads the
 /// stage row instead of re-deriving it from loop-local state. Re-deriving is
 /// how the two routes drifted.
