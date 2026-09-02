@@ -186,7 +186,7 @@ fn shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target(
         .find_map(|line| line.trim().strip_prefix("- **Specification:** @"))
         .unwrap_or_else(|| panic!("the shipped target omitted the specification mention; prompt:\n{absent_design_prompt}"));
     assert_eq!(
-        biscuit_file::to_portable_string(std::path::Path::new(specification.trim())),
+        canonical_portable(std::path::Path::new(specification.trim())),
         format!("{portable_package}/fixes/case/spec.md"),
         "the specification mention must identify the caller's spec; prompt:\n{absent_design_prompt}"
     );
@@ -910,22 +910,31 @@ fn dynamic_array_selection_keeps_complete_direct_and_proxy_diagnostics() {
             assert_eq!(diagnostic["code"], "composition.invalid_file_reference");
             assert_eq!(diagnostic["detail"]["reference"], raw, "{index} {route}");
             assert_eq!(diagnostic["detail"]["property"], "files", "{index} {route}");
+            // Compare spellings canonically: a Windows CI runner launches from an
+            // 8.3 temp path and the diagnostic keeps the launch spelling.
+            let canonical_root = canonical_portable(&caller_root);
             assert_eq!(
-                diagnostic["detail"]["base_dir"],
-                biscuit_file::to_portable_string(&caller_root),
+                canonical_portable(std::path::Path::new(
+                    diagnostic["detail"]["base_dir"].as_str().unwrap_or_default()
+                )),
+                canonical_root,
                 "{index} {route} lost the caller base"
             );
             assert_eq!(
-                diagnostic["detail"]["repository_root"],
-                biscuit_file::to_portable_string(&caller_root),
+                canonical_portable(std::path::Path::new(
+                    diagnostic["detail"]["repository_root"].as_str().unwrap_or_default()
+                )),
+                canonical_root,
                 "{index} {route} lost the caller repository root"
             );
             // A bound lazy candidate is lexically normalized, so `./missing.md`
             // selects `<root>/missing.md`.
             let selected = std::path::PathBuf::from_iter(caller_root.join(raw).components());
             assert_eq!(
-                diagnostic["detail"]["candidates"][0]["path"],
-                biscuit_file::to_portable_string(&selected),
+                canonical_portable(std::path::Path::new(
+                    diagnostic["detail"]["candidates"][0]["path"].as_str().unwrap_or_default()
+                )),
+                canonical_portable(&selected),
                 "{index} {route} lost the selected candidate"
             );
         }
@@ -944,4 +953,25 @@ fn dynamic_array_selection_keeps_complete_direct_and_proxy_diagnostics() {
         selected_candidates[0], selected_candidates[1],
         "aliased raw spellings must retain distinct references for one semantic candidate"
     );
+}
+
+/// Portable spelling of a path after canonicalizing its longest existing
+/// ancestor, so a GitHub Windows runner's 8.3 `RUNNER~1` temp spelling and the
+/// long `runneradmin` spelling compare equal without requiring the leaf to exist.
+fn canonical_portable(path: &std::path::Path) -> String {
+    let mut existing = path;
+    let mut tail = Vec::new();
+    while !existing.exists() {
+        let Some(parent) = existing.parent() else { break };
+        if let Some(name) = existing.file_name() {
+            tail.push(name.to_os_string());
+        }
+        existing = parent;
+    }
+    let mut out = biscuit_file::canonicalize_simplified(existing)
+        .unwrap_or_else(|_| existing.to_path_buf());
+    for name in tail.into_iter().rev() {
+        out.push(name);
+    }
+    biscuit_file::to_portable_string(&out)
 }

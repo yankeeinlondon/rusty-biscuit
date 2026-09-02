@@ -218,43 +218,36 @@ pub(crate) fn run_composition_inner(
     // stabilized reread reaches the verdict instead. Interactive collection goes
     // with it — prompting the caller for a value the document is about to write
     // itself would be a question with a wrong answer.
-    // Caller records need canonical projection before a file-schema verdict:
-    // the lightweight pre-validator has only raw setters and cannot preserve
-    // their immutable authoring context in a failure. It still owns
-    // interactive collection, so it runs regardless; only its schema verdict
-    // is deferred to preparation when caller records are present.
+    // The pre-validator always runs because it owns interactive collection;
+    // with caller records present only its plain schema verdict is deferred to
+    // canonical preparation, which alone can carry their authoring context
+    // into a failure.
     let (source, set_overrides) = if defers_schema_verdict_to_initialize(&source) {
         (source, set_overrides)
     } else {
         let interactive_opts = resolve_interactive_options(shared.silent);
         let term = crate::log::terminal();
-        match pre_validate_with_interactive_collection(
+        let pre = pre_validate_with_interactive_collection(
             &source,
             set_overrides.as_ref(),
             interactive_opts,
             &term,
             launch_area_fallback.as_deref(),
-        ) {
-            Ok(pre) => {
-                emit_dropped_optional_warnings(&pre.dropped_optionals);
-                // Interactive collection may have supplied a missing value or
-                // replaced a `file(match)` partial, and invalid optionals may
-                // have been dropped; the caller records must carry the same
-                // values, still anchored at the launch origin.
-                caller_input_records =
-                    claudine::composition::CallerInputLayers::from_caller_overrides(
-                        pre.set_overrides.clone(),
-                        provisional_context.clone(),
-                    )
-                    .caller_input_records;
-                (pre.source, pre.set_overrides)
-            }
-            Err(
-                CompositionError::SchemaValidation { .. }
-                | CompositionError::UnresolvedFileReference { .. },
-            ) if !caller_input_records.is_empty() => (source, set_overrides),
-            Err(e) => return Err(e.enrich_frontmatter(&source, stderr_is_tty).into()),
-        }
+            !caller_input_records.is_empty(),
+        )
+        .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
+        emit_dropped_optional_warnings(&pre.dropped_optionals);
+        // Interactive collection may have supplied a missing value or replaced
+        // a `file(match)` partial, and invalid optionals may have been dropped;
+        // the caller records must carry the same values, still anchored at
+        // the launch origin.
+        caller_input_records =
+            claudine::composition::CallerInputLayers::from_caller_overrides(
+                pre.set_overrides.clone(),
+                provisional_context.clone(),
+            )
+            .caller_input_records;
+        (pre.source, pre.set_overrides)
     };
     // Includes any interactive collection wait when stdin is a TTY; in the
     // common non-interactive / dry-run `--perf` case this is pure validation.

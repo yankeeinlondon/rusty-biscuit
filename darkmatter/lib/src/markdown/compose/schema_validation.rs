@@ -1295,6 +1295,12 @@ fn source_path(markdown: &Markdown, options: &ComposeOptions) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Native spelling of a fixture path (`join("a/b")` keeps `/` on Windows).
+    fn native(path: &std::path::Path) -> String {
+        std::path::PathBuf::from_iter(path.components())
+            .to_string_lossy()
+            .into_owned()
+    }
     use crate::markdown::schemas::{
         Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
     };
@@ -2886,11 +2892,11 @@ mod tests {
 
         assert_eq!(
             effective.get("launch_spec"),
-            Some(&serde_json::json!(launch_dir.join("launch.md").to_string_lossy())),
+            Some(&serde_json::json!(native(&launch_dir.join("launch.md")))),
         );
         assert_eq!(
             effective.get("task_spec"),
-            Some(&serde_json::json!(sequence_dir.join("task.md").to_string_lossy())),
+            Some(&serde_json::json!(native(&sequence_dir.join("task.md")))),
         );
         assert_eq!(effective.get("label"), Some(&serde_json::json!("ordinary")));
         assert_eq!(

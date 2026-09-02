@@ -99,11 +99,26 @@ pub fn pre_validate_with_interactive_collection(
     interactive: InteractiveSchemaOptions,
     term: &Terminal,
     file_ref_fallback_dir: Option<&std::path::Path>,
+    defer_schema_verdict: bool,
 ) -> Result<PreValidatedSchema, CompositionError> {
     let first = pre_validate_schema(source, set_overrides, file_ref_fallback_dir);
     let Err(err) = first else {
         return first;
     };
+
+    // Caller records need canonical projection before a file-schema verdict:
+    // this pre-validator has only raw setters and cannot preserve their
+    // authoring context in a failure. The caller may therefore defer a plain
+    // schema verdict to preparation; interactive collection below still runs
+    // here, and its own outcomes (a resolved partial, a zero-match failure)
+    // are never deferred.
+    if defer_schema_verdict && matches!(err, CompositionError::SchemaValidation { .. }) {
+        return Ok(PreValidatedSchema {
+            source: source.clone(),
+            set_overrides: set_overrides.cloned(),
+            dropped_optionals: Vec::new(),
+        });
+    }
 
     // A provided `file(match)` partial that failed literal resolution is
     // resolved via a glob+substring confirmation dialog / chooser, symmetric to
