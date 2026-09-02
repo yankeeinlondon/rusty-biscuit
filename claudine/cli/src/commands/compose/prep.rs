@@ -218,7 +218,11 @@ pub(crate) fn run_composition_inner(
     // stabilized reread reaches the verdict instead. Interactive collection goes
     // with it — prompting the caller for a value the document is about to write
     // itself would be a question with a wrong answer.
-    let defer_verdict = defers_schema_verdict_to_initialize(&source);
+    // Caller records need canonical projection before a file-schema verdict:
+    // the lightweight interactive pre-validator has only raw setters and
+    // cannot preserve their immutable authoring context in a failure.
+    let defer_verdict = defers_schema_verdict_to_initialize(&source)
+        || !caller_input_records.is_empty();
     let (source, set_overrides) = if defer_verdict {
         (source, set_overrides)
     } else {
