@@ -175,6 +175,28 @@ do not belong here.
   followed by a re-issued commit whose stdin begins with the conventional
   subject line, then a blank line, then the body bullets. Verify recovery
   with `git log -1 --format=%B <hash>`.
+- **Subject dropped because the sub-agent wrote only the body.** The
+  `-F -` subject/body separator rule above applies to any `-F` source —
+  `-F /tmp/commit_msg_*.txt` included. When the orchestrator hands a
+  sub-agent a subject line *and* body bullets and uses phrasing like "write
+  the message body to a temp file", the sub-agent can produce a temp file
+  containing ONLY the bullets (no subject on line 1, no blank-line
+  separator). `git commit -F <file>` then collapses the whole file into one
+  multi-hundred-character "subject" (`%s`) with `%B` showing that single
+  line; the signature, tree, paths, and bullet content are otherwise intact.
+  Observed in a 4-group batch on `feat/unifi`: a planning commit landed with
+  a 1297-character `%s` that absorbed all six body bullets into one line;
+  `git log -1 --format=%B <hash>` confirmed the structure collapse, and
+  the brief in the orchestrator's hand had said "write the message body to
+  `/tmp/commit_msg_planning_cycle3.txt`". Per the existing "do not amend
+  mid-batch" rule, recovery was deferred to the developer post-batch.
+  **Mitigation in the brief:** say "write the FULL commit message
+  (subject on line 1, blank line on line 2, body bullets after) to a temp
+  file" — never "write the message body". Make the FIRST line of the file
+  explicit in the brief: "the FIRST line MUST be the subject — `…`". The
+  sub-agent's post-commit `git log -1 --format=%B <hash>` check then
+  catches the structure collapse (no blank line on line 2) before the
+  orchestrator's verification step does.
 
 ## Credential and Signing Blockers
 
