@@ -534,9 +534,13 @@ fn apply_closure_cleans_body_and_hashes_the_cleaned_text() {
 
 #[test]
 fn apply_closure_preserves_quoted_last_updated_style() {
-    for (quote, expected) in [('"', "last_updated: \"2026-09-01\""), ('\'', "last_updated: '2026-09-01'")] {
+    for (label, quote, expected) in [
+        ("double", '"', "last_updated: \"2026-09-01\""),
+        ("single", '\'', "last_updated: '2026-09-01'"),
+    ] {
         let dir = TempDir::new().unwrap();
-        let file = dir.path().join(format!("quoted-{quote}.md"));
+        // A quote character is not a legal file name on Windows.
+        let file = dir.path().join(format!("quoted-{label}.md"));
         let original = format!(
             "---\nprompt: test\nlast_updated: {quote}2026-01-01{quote}\n---\nOld body\n"
         );

@@ -5,6 +5,14 @@ use super::*;
 // ============================================
 
 mod schema_validation_integration {
+    /// The native spelling of a fixture path: `Path::join("a/b")` keeps the
+    /// authored separator on Windows, while materialized values are normalized.
+    fn native(path: &std::path::Path) -> String {
+        std::path::PathBuf::from_iter(path.components())
+            .to_string_lossy()
+            .into_owned()
+    }
+
     use super::*;
 
     #[test]
@@ -615,7 +623,7 @@ mod schema_validation_integration {
                 [],
             );
             let frontmatter = composed.frontmatter().as_map();
-            let native_spec = spec.to_string_lossy().into_owned();
+            let native_spec = native(&spec);
             assert_eq!(frontmatter.get("spec"), Some(&serde_json::json!(native_spec)));
             assert_eq!(frontmatter.get("x"), frontmatter.get("spec"));
             assert_eq!(
@@ -735,7 +743,7 @@ mod schema_validation_integration {
         );
         assert_eq!(
             composed.frontmatter().as_map()["spec"],
-            serde_json::json!(spec.to_string_lossy().into_owned()),
+            serde_json::json!(native(&spec)),
         );
         assert_eq!(
             composed.frontmatter().as_map()["plan"],
@@ -799,7 +807,7 @@ mod schema_validation_integration {
         assert_eq!(markdown.frontmatter().as_map(), &once);
         assert_eq!(
             markdown.frontmatter().as_map()["spec"],
-            serde_json::json!(spec.to_string_lossy().into_owned()),
+            serde_json::json!(native(&spec)),
         );
     }
 
@@ -870,7 +878,7 @@ mod schema_validation_integration {
 
         assert_eq!(
             composed.frontmatter().as_map()["spec"],
-            serde_json::json!(spec.to_string_lossy().into_owned()),
+            serde_json::json!(native(&spec)),
         );
         assert_eq!(
             composed.frontmatter().as_map()["plan"],
@@ -927,7 +935,7 @@ mod schema_validation_integration {
 
         assert_eq!(
             composed.frontmatter().as_map()["spec"],
-            serde_json::json!(spec.to_string_lossy().into_owned()),
+            serde_json::json!(native(&spec)),
         );
         assert_eq!(
             composed.frontmatter().as_map()["plan"],
@@ -996,7 +1004,7 @@ mod schema_validation_integration {
         assert_eq!(prepared_target.frontmatter().as_map()["iteration"], serde_json::json!(2));
         assert_eq!(
             prepared_target.frontmatter().as_map()["spec"],
-            serde_json::json!(spec.to_string_lossy().into_owned()),
+            serde_json::json!(native(&spec)),
         );
     }
 
@@ -1096,7 +1104,7 @@ mod schema_validation_integration {
 
             assert_eq!(
                 composed.frontmatter().as_map()["spec"],
-                serde_json::json!(expected.to_string_lossy().into_owned()),
+                serde_json::json!(native(expected)),
                 "lazy projection must consume the first candidate for `{raw}`",
             );
             assert_eq!(
@@ -1239,7 +1247,7 @@ mod schema_validation_integration {
 
         assert_eq!(
             composed.frontmatter().as_map()["spec"],
-            serde_json::json!(spec.to_string_lossy().into_owned()),
+            serde_json::json!(native(&spec)),
         );
         assert_eq!(
             composed.content().trim(),
@@ -1302,7 +1310,7 @@ mod schema_validation_integration {
 
         assert_eq!(
             composed.frontmatter().as_map()["spec"],
-            serde_json::json!(spec.to_string_lossy().into_owned()),
+            serde_json::json!(native(&spec)),
         );
         assert_eq!(
             composed.content().trim(),
@@ -1387,11 +1395,11 @@ mod schema_validation_integration {
 
         assert_eq!(
             composed.frontmatter().as_map()["first"],
-            serde_json::json!(first.to_string_lossy().into_owned()),
+            serde_json::json!(native(&first)),
         );
         assert_eq!(
             composed.frontmatter().as_map()["second"],
-            serde_json::json!(second.to_string_lossy().into_owned()),
+            serde_json::json!(native(&second)),
         );
     }
 
@@ -1405,7 +1413,7 @@ mod schema_validation_integration {
         std::fs::write(&spec, "# Specification\n").unwrap();
 
         for (kind, expected) in [
-            ("file", spec.to_string_lossy().into_owned()),
+            ("file", native(&spec)),
             ("text", "spec.md".to_string()),
         ] {
             let prompt = repo.path().join(format!("prompts/root-{kind}.md"));
@@ -1916,7 +1924,7 @@ mod schema_validation_integration {
         assert_eq!(composed.frontmatter().as_map()["marker"], serde_json::json!("captured"));
         assert_eq!(
             composed.frontmatter().as_map()["spec"],
-            serde_json::json!(spec.to_string_lossy().into_owned()),
+            serde_json::json!(native(&spec)),
         );
     }
 
@@ -2010,8 +2018,8 @@ mod schema_validation_integration {
             [],
         );
         let frontmatter = composed.frontmatter().as_map();
-        let native_first = first.to_string_lossy().into_owned();
-        let native_union = union.to_string_lossy().into_owned();
+        let native_first = native(&first);
+        let native_union = native(&union);
         assert_eq!(frontmatter.get("specs"), Some(&serde_json::json!([native_first])));
         assert_eq!(frontmatter.get("selected"), frontmatter["specs"].get(0));
         assert_eq!(

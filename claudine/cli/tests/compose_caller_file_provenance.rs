@@ -10,11 +10,41 @@ fn install_goose(fixture: &CliProcessFixture) {
         &fixture.bin_dir().join("goose"),
         "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$HOME/provider-prompt\"\nprintf 'provider reached\\n'\n",
     );
+    // A `.cmd` stub cannot receive the multi-line shipped prompts: Rust refuses
+    // to spawn a batch file whose arguments contain newlines. Compile a tiny
+    // native provider instead, mirroring `inline_compose_hash.rs`.
     #[cfg(windows)]
-    write_executable(
-        &fixture.bin_dir().join("goose.cmd"),
-        "@echo off\r\necho %* > \"%USERPROFILE%\\provider-prompt\"\r\necho provider reached\r\nexit /b 0\r\n",
-    );
+    {
+        let source = fixture.bin_dir().join("goose-fixture.rs");
+        write(
+            &source,
+            r##"fn main() {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .expect("a home directory for the provider prompt");
+    std::fs::write(
+        std::path::Path::new(&home).join("provider-prompt"),
+        format!("{}\n", args.join(" ")),
+    )
+    .expect("write provider prompt");
+    println!("provider reached");
+}
+"##,
+        );
+        let output = std::process::Command::new("rustc")
+            .arg("--edition=2024")
+            .arg(&source)
+            .arg("-o")
+            .arg(fixture.bin_dir().join("goose.exe"))
+            .output()
+            .expect("rustc must build the Windows provider fixture");
+        assert!(
+            output.status.success(),
+            "provider fixture compilation failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[cfg(unix)]
@@ -147,8 +177,20 @@ fn shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target(
     // Paths derived from the eager caller value project to the repository-
     // relative display form, whatever spelling the temp repository carries.
     let derived_package = "packages/example";
+    // The shipped prompt builds the specification mention from an expression
+    // (`'@' + spec`), which renders the native semantic path rather than the
+    // portable presentation a direct `{{spec}}` would use; compare its spelling
+    // portably so Windows and POSIX agree on the identity.
+    let specification = absent_design_prompt
+        .lines()
+        .find_map(|line| line.trim().strip_prefix("- **Specification:** @"))
+        .unwrap_or_else(|| panic!("the shipped target omitted the specification mention; prompt:\n{absent_design_prompt}"));
+    assert_eq!(
+        biscuit_file::to_portable_string(std::path::Path::new(specification.trim())),
+        format!("{portable_package}/fixes/case/spec.md"),
+        "the specification mention must identify the caller's spec; prompt:\n{absent_design_prompt}"
+    );
     for expected in [
-        format!("**Specification:** @{portable_package}/fixes/case/spec.md"),
         format!("**Review:** @{derived_package}/fixes/case/review-4.md"),
         format!("**Log File:** {derived_package}/fixes/case/log.md"),
     ] {
@@ -878,9 +920,12 @@ fn dynamic_array_selection_keeps_complete_direct_and_proxy_diagnostics() {
                 biscuit_file::to_portable_string(&caller_root),
                 "{index} {route} lost the caller repository root"
             );
+            // A bound lazy candidate is lexically normalized, so `./missing.md`
+            // selects `<root>/missing.md`.
+            let selected = std::path::PathBuf::from_iter(caller_root.join(raw).components());
             assert_eq!(
                 diagnostic["detail"]["candidates"][0]["path"],
-                biscuit_file::to_portable_string(&caller_root.join(raw)),
+                biscuit_file::to_portable_string(&selected),
                 "{index} {route} lost the selected candidate"
             );
         }

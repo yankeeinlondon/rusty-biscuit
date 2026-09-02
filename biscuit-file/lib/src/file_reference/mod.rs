@@ -710,6 +710,11 @@ impl FileReference {
                 candidate.provenance() != RootProvenance::Source
             });
         }
+        // A bound identity is compared and displayed natively, so it must not
+        // keep the authored separator mix (`root\a/b` on Windows).
+        for candidate in &mut candidates {
+            candidate.path = resolve::normalize_components(&candidate.path);
+        }
         Ok(candidates)
     }
 
