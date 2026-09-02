@@ -1,4 +1,6 @@
 ---
+$schema:
+    yolo: boolean -> you only live once
 total_phases: 5
 created: 2026-09-01
 phase: 1
