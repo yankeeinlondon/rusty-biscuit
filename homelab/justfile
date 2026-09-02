@@ -211,7 +211,7 @@ publish-unifi-skill:
     @echo "Publishing the 'unifi' agent skill"
     @echo
     @mkdir -p ../.claude/skills/unifi
-    @cp ./docs/unifi/* ../.claude/skills/unifi
+    @cp -r ./docs/unifi ../.claude/skills
     @md compose ../.claude/skills/unifi/index.md --frontmatter > ../.claude/skills/unifi/SKILL.md
     @rm ../.claude/skills/unifi/index.md # remove the index file now that it's been composed
     @bt dir ../.claude/skills/unifi
