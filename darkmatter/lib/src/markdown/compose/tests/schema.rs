@@ -1944,4 +1944,75 @@ mod schema_validation_integration {
         assert_eq!(first.caller.as_ref().unwrap().candidate, launch.join("missing.md"));
         assert_eq!(first.caller.as_ref().unwrap().candidate, second.caller.as_ref().unwrap().candidate);
     }
+
+    #[test]
+    fn dynamic_lazy_array_index_retains_the_selected_raw_occurrence() {
+        use crate::markdown::compose::expression::{ExpressionError, FileReferenceDiagnostic};
+
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("launch");
+        let prompt = repo.path().join("prompts/target.md");
+        let source = launch.join("caller.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        let raw = serde_json::json!(["missing.md", "./missing.md"]);
+        let origin = biscuit_file::FileResolutionContext::new(&launch)
+            .with_repository_root(repo.path())
+            .with_source_path(&source);
+        let records = [(
+            "files".to_string(),
+            CallerInputRecord::new(raw.clone(), origin.clone()),
+        )]
+        .into_iter()
+        .collect::<CallerInputRecords>();
+
+        let failure_for = |index: usize| -> FileReferenceDiagnostic {
+            std::fs::write(
+                &prompt,
+                format!(
+                    "---\n$schema:\n  files: file(required)[]\nindex: {index}\nvalue: \"{{{{ frontmatter(files[index], 'value') }}}}\"\n---\nBody\n"
+                ),
+            )
+            .unwrap();
+            let error = Markdown::try_from(prompt.as_path())
+                .unwrap()
+                .compose_with(
+                    ComposeOptions::new()
+                        .with_source_file(&prompt)
+                        .with_set_overrides(serde_json::json!({ "files": raw }))
+                        .with_caller_input_records(records.clone())
+                        .only(&[
+                            ComposeOperation::FrontmatterInterpolation,
+                            ComposeOperation::Interpolation,
+                        ]),
+                )
+                .expect_err("the dynamically selected caller array item must be missing");
+            let MarkdownError::Interpolation { cause, .. } = error else {
+                panic!("expected interpolation failure, got {error:?}");
+            };
+            let ExpressionError::FileReference(diagnostic) = cause.as_ref() else {
+                panic!("expected typed file-reference cause, got {cause:?}");
+            };
+            diagnostic.clone()
+        };
+
+        let first = failure_for(0);
+        let second = failure_for(1);
+        for (diagnostic, expected_raw) in [(&first, "missing.md"), (&second, "./missing.md")] {
+            let caller = diagnostic.caller.as_ref().unwrap();
+            assert_eq!(diagnostic.reference, expected_raw);
+            assert_eq!(diagnostic.base_dir, launch);
+            assert_eq!(caller.property, "files");
+            assert_eq!(caller.origin.base_dir(), origin.base_dir());
+            assert_eq!(caller.origin.repository_root(), origin.repository_root());
+            assert_eq!(caller.origin.source_path(), Some(source.as_path()));
+            assert_eq!(caller.candidate, launch.join("missing.md"));
+            assert_eq!(
+                caller.candidate_provenance,
+                biscuit_file::RootProvenance::Source
+            );
+        }
+        assert_eq!(first.caller.as_ref().unwrap().candidate, second.caller.as_ref().unwrap().candidate);
+    }
 }

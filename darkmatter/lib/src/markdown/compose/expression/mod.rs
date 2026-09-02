@@ -721,10 +721,24 @@ fn evaluate_function<L: EvaluationLookup>(
         // Every other function evaluates its arguments eagerly and resolves
         // through the authoritative dispatch tables in `functions`.
         other => {
-            let evaluated: Vec<Value> = args
-                .iter()
-                .map(|arg| evaluate(arg, lookup))
-                .collect::<Result<_, _>>()?;
+            let mut caller_occurrence = None;
+            let evaluated: Vec<Value> = if functions::is_fs_function(other) {
+                let mut values = Vec::with_capacity(args.len());
+                for (index, arg) in args.iter().enumerate() {
+                    if index == 0 {
+                        let (value, occurrence) = evaluate_caller_file_argument(arg, lookup)?;
+                        values.push(value);
+                        caller_occurrence = occurrence;
+                    } else {
+                        values.push(evaluate(arg, lookup)?);
+                    }
+                }
+                values
+            } else {
+                args.iter()
+                    .map(|arg| evaluate(arg, lookup))
+                    .collect::<Result<_, _>>()?
+            };
             // Prefer the borrowed context (Finding 12) so a read-side function
             // dispatched here does not deep-clone the lookup's context; only
             // fall back to the owned clone for lookups that expose only the
@@ -734,7 +748,7 @@ fn evaluate_function<L: EvaluationLookup>(
                 .map(std::borrow::Cow::Borrowed)
                 .or_else(|| lookup.resolution_context().map(std::borrow::Cow::Owned));
             if let Some(context) = ctx.as_ref()
-                && let Some(occurrence) = args.first().and_then(caller_file_occurrence)
+                && let Some(occurrence) = caller_occurrence
                 && let Some(provenance) = context.caller_file_provenance.get(&occurrence).cloned()
             {
                 let mut selected = context.as_ref().clone();
@@ -774,24 +788,49 @@ fn evaluate_function<L: EvaluationLookup>(
     }
 }
 
+fn evaluate_caller_file_argument<L: EvaluationLookup>(
+    expr: &Expr,
+    lookup: &L,
+) -> Result<(Value, Option<String>), ExpressionError> {
+    match expr {
+        Expr::Index { base, index } => {
+            let (base_value, base_occurrence) = evaluate_caller_file_argument(base, lookup)?;
+            let index_value = evaluate(index, lookup)?;
+            let value = evaluate_index(&base_value, &index_value);
+            let occurrence = base_occurrence.and_then(|mut occurrence| {
+                selected_array_index(&base_value, &index_value).map(|index| {
+                    occurrence.push('/');
+                    occurrence.push_str(&index.to_string());
+                    occurrence
+                })
+            });
+            Ok((value, occurrence))
+        }
+        Expr::Paren(inner) => evaluate_caller_file_argument(inner, lookup),
+        _ => Ok((evaluate(expr, lookup)?, caller_file_occurrence(expr))),
+    }
+}
+
+fn selected_array_index(base: &Value, index: &Value) -> Option<usize> {
+    let Value::Array(items) = base else {
+        return None;
+    };
+    let index = to_number_index(index)?;
+    if index.fract() != 0.0 {
+        return None;
+    }
+    let len = items.len() as i64;
+    let index = index as i64;
+    let resolved = if index < 0 { len + index } else { index };
+    (resolved >= 0 && resolved < len).then_some(resolved as usize)
+}
+
 fn caller_file_occurrence(expr: &Expr) -> Option<String> {
     match expr {
         Expr::Variable(property) => Some(format!(
             "/{}",
             property.replace('~', "~0").replace('/', "~1")
         )),
-        Expr::Index { base, index } => {
-            let mut occurrence = caller_file_occurrence(base)?;
-            let Expr::NumberLiteral(index) = index.as_ref() else {
-                return None;
-            };
-            if index.fract() != 0.0 || *index < 0.0 {
-                return None;
-            }
-            occurrence.push('/');
-            occurrence.push_str(&(*index as usize).to_string());
-            Some(occurrence)
-        }
         Expr::Paren(inner) => caller_file_occurrence(inner),
         _ => None,
     }
