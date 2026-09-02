@@ -33,6 +33,10 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+pub(crate) static TRIGGER_DISCOVERY_COUNT: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::{ComposeOperation, ComposeSource};
@@ -142,6 +146,8 @@ pub(crate) fn prepare_schemas(
         schemas = if let Some(registry) = trigger_registry.take() {
             schemas.with_trigger_registry(registry)
         } else {
+            #[cfg(test)]
+            TRIGGER_DISCOVERY_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
             schemas
                 .with_trigger_discovery(document_path, boundary)
                 .map_err(|err| {
@@ -380,6 +386,37 @@ pub(crate) fn run_with_registry(
     Ok(())
 }
 
+/// Rechecks only caller-file classification against the current effective
+/// schema, without taking ownership of validation or frontmatter mutation.
+pub(crate) fn verify_projection_stability(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+    prepared: &PreparedSchemas,
+    projection: &CallerProjection,
+) -> MarkdownResult<()> {
+    let Some(schemas) = prepared.schemas.as_ref() else {
+        return Ok(());
+    };
+    let effective = match schemas.effective_for(markdown) {
+        Ok(effective) => effective,
+        Err(_) if options.defer_schema_verdict => return Ok(()),
+        Err(err) => {
+            return Err(MarkdownError::SchemaValidationFailed {
+                path: source_path(markdown, options),
+                problems: Vec::new(),
+                summary: format!("schema could not be prepared: {err}"),
+                description: markdown
+                    .frontmatter()
+                    .as_map()
+                    .get("description")
+                    .and_then(|value| value.as_str().map(String::from)),
+                source: Some(Box::new(err)),
+            });
+        }
+    };
+    ensure_projection_stable(effective.as_ref(), markdown, options, projection)
+}
+
 /// Adds composition bindings for eligible document-owned schema properties.
 ///
 /// Eligibility comes from the resolved SimplifiedSchema AST and origin map,
@@ -609,18 +646,21 @@ fn caller_input_records(options: &ComposeOptions) -> crate::markdown::compose::C
     if !options.caller_input_records().is_empty() {
         return options.caller_input_records().clone();
     }
-    let Some(fallback) = options.file_ref_fallback_dir.as_ref() else {
-        return Default::default();
-    };
     let Some(overrides) = options.set_overrides.as_ref().and_then(serde_json::Value::as_object)
     else {
         return Default::default();
     };
-    let origin = options
-        .file_resolution_context
-        .as_ref()
-        .map(|context| context.for_trusted_external_base(fallback))
-        .unwrap_or_else(|| biscuit_file::FileResolutionContext::new(fallback));
+    let origin = match (
+        options.file_resolution_context.as_ref(),
+        options.file_ref_fallback_dir.as_ref(),
+    ) {
+        (Some(context), Some(fallback)) => context.for_trusted_external_base(fallback),
+        (Some(context), None) => {
+            context.for_trusted_external_base(context.request_base_dir())
+        }
+        (None, Some(fallback)) => biscuit_file::FileResolutionContext::new(fallback),
+        (None, None) => return Default::default(),
+    };
     overrides
         .iter()
         .map(|(key, value)| {
@@ -709,14 +749,15 @@ fn collect_applicable_root_schema_fragments<'a>(
                 records,
                 composition_pending,
             )?;
-            if !root_schema_arm_applies(
+            if root_schema_arm_applies(
                 arm,
                 instance,
                 document_context,
                 records,
                 composition_pending,
                 &arm_fragments,
-            ) {
+            ) == RootArmApplicability::None
+            {
                 return None;
             }
             for (key, fragments) in arm_fragments {
@@ -729,7 +770,7 @@ fn collect_applicable_root_schema_fragments<'a>(
         let Some(arms) = schema.get(combinator).and_then(serde_json::Value::as_array) else {
             continue;
         };
-        let applicable: Vec<_> = arms
+        let candidates: Vec<_> = arms
             .iter()
             .filter_map(|arm| {
                 let fragments = collect_applicable_root_schema_fragments(
@@ -739,26 +780,54 @@ fn collect_applicable_root_schema_fragments<'a>(
                     records,
                     composition_pending,
                 )?;
-                root_schema_arm_applies(
+                let applicability = root_schema_arm_applies(
                     arm,
                     instance,
                     document_context,
                     records,
                     composition_pending,
                     &fragments,
-                )
-                .then_some(fragments)
+                );
+                (applicability != RootArmApplicability::None)
+                    .then_some((applicability, fragments))
             })
             .collect();
-        if applicable.len() != 1 {
-            return None;
-        }
-        for (key, fragments) in applicable.into_iter().next().unwrap() {
-            selected.entry(key).or_default().extend(fragments);
+        let exact: Vec<_> = candidates
+            .iter()
+            .filter(|(applicability, _)| *applicability == RootArmApplicability::Exact)
+            .collect();
+        let selected_arm = match exact.as_slice() {
+            [(_, fragments)] => fragments,
+            [] => {
+                let pending: Vec<_> = candidates
+                    .iter()
+                    .filter(|(applicability, _)| {
+                        *applicability == RootArmApplicability::Pending
+                    })
+                    .collect();
+                let [(_, fragments)] = pending.as_slice() else {
+                    return None;
+                };
+                fragments
+            }
+            _ => return None,
+        };
+        for (key, fragments) in selected_arm.iter() {
+            selected
+                .entry(key.clone())
+                .or_default()
+                .extend(fragments.iter().copied());
         }
     }
 
     Some(selected)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RootArmApplicability {
+    Exact,
+    Pending,
+    None,
 }
 
 fn root_schema_arm_applies(
@@ -768,10 +837,10 @@ fn root_schema_arm_applies(
     records: &crate::markdown::compose::CallerInputRecords,
     composition_pending: &HashSet<String>,
     fragments_by_property: &HashMap<String, Vec<&serde_json::Value>>,
-) -> bool {
+) -> RootArmApplicability {
     let mut candidate = coerce_frontmatter_with_pending(arm, instance, composition_pending).value;
     if !project_root_arm_caller_values(&mut candidate, records, fragments_by_property) {
-        return false;
+        return RootArmApplicability::None;
     }
     let wrapped = crate::markdown::schemas::validate::wrap_arm_as_root_schema(arm);
     let Ok(validator) = crate::markdown::schemas::validate::build_validator_in_context(
@@ -780,15 +849,15 @@ fn root_schema_arm_applies(
         None,
         document_context.file_resolution_context.as_ref(),
     ) else {
-        return false;
+        return RootArmApplicability::None;
     };
     if validator.is_valid(&candidate) {
-        return true;
+        return RootArmApplicability::Exact;
     }
     if composition_pending.is_empty() {
-        return false;
+        return RootArmApplicability::None;
     }
-    validator.iter_errors(&candidate).all(|error| {
+    if validator.iter_errors(&candidate).all(|error| {
         error
             .instance_path()
             .iter()
@@ -799,7 +868,11 @@ fn root_schema_arm_applies(
                 }
                 jsonschema::paths::LocationSegment::Index(_) => false,
             })
-    })
+    }) {
+        RootArmApplicability::Pending
+    } else {
+        RootArmApplicability::None
+    }
 }
 
 fn project_root_arm_caller_values(

@@ -26,6 +26,54 @@ fn read_to_string(path: &Path) -> String {
     fs::read_to_string(path).unwrap_or_default()
 }
 
+fn repository_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("darkmatter CLI crate should live two levels below the repository root")
+        .to_path_buf()
+}
+
+#[test]
+fn shipped_plan_prompt_anchors_caller_file_from_repository_root() {
+    let root = repository_root();
+
+    md_cmd()
+        .current_dir(&root)
+        .args([
+            "compose",
+            "prompts/plan.md",
+            "spec=claudine/fixes/2026-09-01-file-param-anchoring/spec.md",
+            "--no-baseline-schema",
+            "--no-trigger-schemas",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "claudine/fixes/2026-09-01-file-param-anchoring/plan.md",
+        ));
+}
+
+#[test]
+fn shipped_plan_prompt_anchors_caller_file_from_package_area() {
+    let root = repository_root();
+
+    md_cmd()
+        .current_dir(root.join("claudine"))
+        .args([
+            "compose",
+            "../prompts/plan.md",
+            "spec=fixes/2026-09-01-file-param-anchoring/spec.md",
+            "--no-baseline-schema",
+            "--no-trigger-schemas",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "claudine/fixes/2026-09-01-file-param-anchoring/plan.md",
+        ));
+}
+
 // ── High #2: planner-prompt CLI regression ──────────────────────────────────
 
 /// The originating bug: a document with `$schema` requiring `spec`, an empty

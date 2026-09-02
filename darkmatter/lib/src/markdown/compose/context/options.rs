@@ -986,8 +986,14 @@ impl ComposeOptions {
         self
     }
 
-    /// Supplies the immutable request snapshot used by every document-backed
-    /// file-reference surface in this compose run.
+    /// Supplies the immutable request snapshot used by every file-reference
+    /// surface in this compose run.
+    ///
+    /// Caller overrides without explicit [`CallerInputRecord`] provenance are
+    /// anchored at this context's request base. A separate
+    /// [`Self::with_file_ref_fallback_dir`] is retained for compatibility and
+    /// diagnostic metadata, but is not required for caller projection when
+    /// this context is present.
     #[must_use]
     pub fn with_file_resolution_context(
         mut self,

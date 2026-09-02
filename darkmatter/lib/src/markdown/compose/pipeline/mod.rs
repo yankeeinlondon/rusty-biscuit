@@ -323,11 +323,23 @@ impl Markdown {
                     }
                 }
 
-                // Trigger activation is a function of the current frontmatter
-                // snapshot. Re-assemble after shell expansion and interpolation
-                // pass 2 so concrete values can activate or deactivate payloads.
+                // Schema applicability is a function of the current
+                // frontmatter snapshot. Re-assemble after shell expansion and
+                // interpolation pass 2 so concrete values can select a
+                // different root-union arm as well as activate or deactivate
+                // trigger payloads. Trigger schemas retain their established
+                // full post-shell validation pass; otherwise this stage only
+                // checks caller-file classification, leaving final coercion and
+                // optional-value scrubbing with the downstream schema owner.
                 if options.trigger_schemas {
                     schema_validation::run_with_registry(
+                        self,
+                        &options,
+                        &prepared_schemas,
+                        &caller_projection,
+                    )?;
+                } else {
+                    schema_validation::verify_projection_stability(
                         self,
                         &options,
                         &prepared_schemas,
