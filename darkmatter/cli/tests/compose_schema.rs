@@ -43,14 +43,14 @@ fn shipped_plan_prompt_anchors_caller_file_from_repository_root() {
         .args([
             "compose",
             "prompts/plan.md",
-            "spec=claudine/fixes/2026-09-01-file-param-anchoring/spec.md",
+            "spec=darkmatter/cli/tests/fixtures/shipped_plan_route/spec.md",
             "--no-baseline-schema",
             "--no-trigger-schemas",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "claudine/fixes/2026-09-01-file-param-anchoring/plan.md",
+            "darkmatter/cli/tests/fixtures/shipped_plan_route/plan.md",
         ));
 }
 
@@ -59,18 +59,18 @@ fn shipped_plan_prompt_anchors_caller_file_from_package_area() {
     let root = repository_root();
 
     md_cmd()
-        .current_dir(root.join("claudine"))
+        .current_dir(root.join("darkmatter"))
         .args([
             "compose",
             "../prompts/plan.md",
-            "spec=fixes/2026-09-01-file-param-anchoring/spec.md",
+            "spec=cli/tests/fixtures/shipped_plan_route/spec.md",
             "--no-baseline-schema",
             "--no-trigger-schemas",
         ])
         .assert()
         .success()
         .stdout(predicate::str::contains(
-            "claudine/fixes/2026-09-01-file-param-anchoring/plan.md",
+            "darkmatter/cli/tests/fixtures/shipped_plan_route/plan.md",
         ));
 }
 

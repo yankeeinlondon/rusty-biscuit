@@ -1095,12 +1095,12 @@ fn compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area()
         (
             root.as_path(),
             "prompts/plan.md",
-            "spec=claudine/fixes/2026-09-01-file-param-anchoring/spec.md",
+            "spec=claudine/cli/tests/fixtures/shipped_plan_route/spec.md",
         ),
         (
             area.as_path(),
             "../prompts/plan.md",
-            "spec=fixes/2026-09-01-file-param-anchoring/spec.md",
+            "spec=cli/tests/fixtures/shipped_plan_route/spec.md",
         ),
     ];
 
@@ -1117,14 +1117,14 @@ fn compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area()
         let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
         assert!(
             stdout.contains(
-                "Save the plan as \"claudine/fixes/2026-09-01-file-param-anchoring/plan.md\""
+                "Save the plan as \"claudine/cli/tests/fixtures/shipped_plan_route/plan.md\""
             ),
             "the complete target instruction must be launch-directory invariant; \
              launch_dir={}\nstdout:\n{stdout}",
             launch_dir.display()
         );
         assert!(
-            !stdout.contains("prompts/fixes/2026-09-01-file-param-anchoring/plan.md"),
+            !stdout.contains("prompts/cli/tests/fixtures/shipped_plan_route/plan.md"),
             "the plan expression must not retarget beneath the prompt directory; \
              launch_dir={}\nstdout:\n{stdout}",
             launch_dir.display()
