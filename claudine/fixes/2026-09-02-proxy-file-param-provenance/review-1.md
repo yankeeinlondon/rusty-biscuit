@@ -4,9 +4,12 @@ ready: false
 agent: codex/default
 created: 2026-09-02T05:05:02+01:00
 spec: 2026-09-02-proxy-file-param-provenance/spec.md
-implemented: false
+log: claudine/fixes/2026-09-02-proxy-file-param-provenance/log.md
+implemented: true
+implemented_by: codex/default
 description: A **fix** review of `2026-09-02-proxy-file-param-provenance/spec.md`
 fix: 2026-09-02-proxy-file-param-provenance/review-1.md
+next: 2026-09-02-proxy-file-param-provenance/review-2.md
 ---
 
 # Review 1: Proxy File Parameter Provenance
