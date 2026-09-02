@@ -1,6 +1,7 @@
 ---
 implementation_1: "2026-09-02T09:23:08+01:00"
 implementation_2: "2026-09-02T11:13:50+01:00"
+implementation_3: "2026-09-02T13:24:12+01:00"
 ---
 
 ## Implementation of Review Findings #1
@@ -197,3 +198,55 @@ The implementation of review cycle 2 has completed successfully in 1 hour, 12 mi
         - `darkmatter/lib/tests/error_snapshots/markdown_error.rs`
         - `claudine/fixes/2026-09-02-proxy-file-param-provenance/review-2.md`
         - `claudine/fixes/2026-09-02-proxy-file-param-provenance/log.md`
+
+## Implementation of Review Findings #3
+
+> **started at:** 2026-09-02T13:24:12+01:00
+
+- this implementation is attempting to implement _all_ of the review findings found in 'claudine/fixes/2026-09-02-proxy-file-param-provenance/review-3.md'
+- this is iteration 3 of the review-to-implement cycle
+- starting the work on 'restore shipped pending-review routing behavior' at 13:26:10
+        - the required GitNexus upstream analysis could not resolve the Markdown router as an indexed code symbol, so it reported unknown risk with no affected callers or execution flows; the restored Level 1 process contract is the blast-radius gate for this prompt-only behavior.
+        - the existing provenance fixture deliberately omits `review-4.md`, so it continues through the implemented-spec branch while a separate fixture can exercise pending-review precedence.
+        - restored the shipped `pending_review` property and first-priority proxy branch, together with the dedicated Level 1 process regression for unimplemented-review precedence.
+        - the focused pending-review and provenance-fixture process tests both passed.
+        - refreshed the reviewed Darkmatter `Simple` hash pin for the restored shipped router; all three focused shipped-route drift guards passed afterward.
+        - `claudine/just test` passed all 6,684 Level 1 tests with 11 higher-tier tests skipped.
+        - `claudine/just lint` passed the 18 diagnostic guards and all five package-area crates.
+        - `git diff --check` passed.
+        - final GitNexus change detection reported low risk for this shared-worktree delta, with three indexed changed symbols, no affected execution flows, and the prompt behavior covered by the dedicated process regression.
+        - no blockers or deferrals remain for this finding.
+- work completed for 'restore shipped pending-review routing behavior' at 13:30:11
+- starting the work on 'dynamic array indexing retains caller diagnostic provenance' at 13:32:26
+        - GitNexus reported critical upstream risk for the shared `evaluate_function` seam (210 affected symbols across 13 modules) and low risk for `caller_file_occurrence`; the orchestrator was warned before edits proceeded.
+        - the repair is confined to filesystem-function first arguments: the selected array occurrence will be derived from the same evaluated base and dynamic index values, avoiding duplicate evaluation and leaving non-filesystem dispatch unchanged.
+        - added Level 1 Darkmatter coverage for variable-selected aliased array elements, asserting the raw reference, property, captured origin/base/repository root, candidate, and candidate-root provenance for both occurrences.
+        - added a non-interactive Claudine process test proving complete structured diagnostic equality across direct and proxied routes for both dynamic selections; candidate paths retain each lexical spelling while comparing as the same semantic path.
+        - the focused Darkmatter and Claudine regressions passed.
+        - `darkmatter/just test` passed all 7,579 Level 1 tests with 50 higher-tier tests skipped, and `darkmatter/just lint` passed for `darkmatter`, `darkmatter-cli`, and `dmls`.
+        - `claudine/just test` passed all 6,685 Level 1 tests with 11 higher-tier tests skipped, and `claudine/just lint` passed the 18 diagnostic guards and all five package-area crates.
+        - `git diff --check` passed.
+        - final GitNexus change detection reported low risk for the six-file shared-worktree delta, with 11 indexed changed symbols and no affected execution flows; the finding-specific runtime change remained confined to filesystem-function argument evaluation and occurrence selection.
+        - no blockers or deferrals remain for this finding.
+- work completed for 'dynamic array indexing retains caller diagnostic provenance' at 13:43:37
+- starting the work on 'final root-scoped verification' at 13:43:37
+        - `just test darkmatter claudine` passed all 14,536 selected Level 1 tests with 63 higher-tier tests skipped.
+        - `just ci-local darkmatter claudine` passed all 22 scoped lint and Level 1 gates across the 11 selected packages.
+        - the macOS linker emitted a non-fatal compact-unwind table size warning for the large `claudine-cli` test binary; the binary linked and all tests passed.
+- work completed for 'final root-scoped verification' at 13:51:50
+
+### Successful Completion
+
+The implementation of review cycle 3 has completed successfully in 27 minutes and 38 seconds. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 2 were fixed, 0 were deferred (see reasons below):
+
+- no findings were deferred
+- the files changed by this implementation cycle are:
+        - `claudine/cli/tests/compose_caller_file_provenance.rs`
+        - `claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json`
+        - `claudine/fixes/2026-09-02-proxy-file-param-provenance/log.md`
+        - `claudine/fixes/2026-09-02-proxy-file-param-provenance/review-3.md`
+        - `darkmatter/lib/src/markdown/compose/expression/mod.rs`
+        - `darkmatter/lib/src/markdown/compose/tests/schema.rs`
+        - `prompts/implement.md`
+- final GitNexus change detection reported low risk for the six indexed implementation files, with 11 changed symbols and no affected execution flows.
+- final `git diff --check` passed after the review and log metadata updates.
