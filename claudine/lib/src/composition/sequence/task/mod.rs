@@ -185,6 +185,8 @@ pub struct PromptTaskRequest {
     pub set_overrides: Value,
     /// The evaluated `params` alone, for diagnostics and reporting.
     pub params: Map<String, Value>,
+    /// Source document that authored `params`, used to retain their file origin.
+    pub params_origin_path: std::path::PathBuf,
     /// Effective operation after group defaults and task overrides.
     pub operation: Option<String>,
     /// Effective flow after group defaults and task overrides.
@@ -495,6 +497,7 @@ impl TaskExecution<'_> {
                 .is_some_and(|document| document.inline_compose),
             set_overrides: self.layered_overrides(&params),
             params,
+            params_origin_path: self.task.origin_path.clone(),
             operation: self.task.operation.clone(),
             flow: self.task.flow.clone(),
             runtime: self.runtime.map(std::sync::Arc::clone),

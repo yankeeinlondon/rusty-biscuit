@@ -1432,6 +1432,7 @@ fn file_reference_detail_serializes_kind_as_snake_case() {
             base_dir: PathBuf::from("/repo"),
             fallback_dir: None,
             source: None,
+            caller: None,
         });
         let detail = err.detail();
         assert_eq!(
@@ -1452,7 +1453,9 @@ fn file_reference_detail_emits_full_registry_field_set() {
         base_dir: PathBuf::from("/repo/area"),
         fallback_dir: None,
         source: None,
+        caller: None,
     });
+    assert_eq!(err.code(), "composition.invalid_file_reference");
     let detail = err.detail();
     // Read the field set from the registry rather than restating it: the
     // catalog is additive, so a hard-coded list would keep passing while the
@@ -1492,6 +1495,7 @@ fn file_reference_detail_reserves_the_unavailable_resolver_fields_as_null() {
         base_dir: PathBuf::from("/repo/area"),
         fallback_dir: None,
         source: None,
+        caller: None,
     });
     let detail = err.detail();
 
@@ -1526,9 +1530,82 @@ fn file_reference_detail_carries_fallback_dir_when_set() {
         base_dir: PathBuf::from("/repo/area"),
         fallback_dir: Some(PathBuf::from("/launch/area")),
         source: None,
+        caller: None,
     });
     let detail = err.detail();
     assert_eq!(detail["fallback_dir"], json!("/launch/area"));
+}
+
+#[test]
+fn file_reference_detail_projects_lazy_caller_origin_and_candidate() {
+    let origin = biscuit_file::FileResolutionContext::new("/repo/claudine")
+        .with_repository_root("/repo")
+        .with_source_path("/repo/prompts/target.md");
+    let err = file_ref_compose_error(FileReferenceDiagnostic {
+        function: "frontmatter",
+        reference: "fixes/case/spec.md".to_string(),
+        kind: FileRefFailure::NotFound,
+        base_dir: PathBuf::from("/repo/claudine"),
+        fallback_dir: Some(PathBuf::from("/repo/claudine")),
+        source: None,
+        caller: Some(std::sync::Arc::new(
+            darkmatter::markdown::compose::expression::CallerFileDiagnosticProvenance {
+                property: "spec".to_string(),
+                origin,
+                candidate: PathBuf::from("/repo/claudine/fixes/case/spec.md"),
+                candidate_provenance: biscuit_file::RootProvenance::Source,
+            },
+        )),
+    });
+    let detail = err.detail();
+
+    assert_eq!(detail["reference"], json!("fixes/case/spec.md"));
+    assert_eq!(detail["base_dir"], json!("/repo/claudine"));
+    assert_eq!(detail["source_path"], json!("/repo/prompts/target.md"));
+    assert_eq!(detail["property"], json!("spec"));
+    assert_eq!(detail["repository_root"], json!("/repo"));
+    assert_eq!(
+        detail["candidates"],
+        json!([{
+            "path": "/repo/claudine/fixes/case/spec.md",
+            "provenance": "source",
+            "disposition": null,
+        }])
+    );
+}
+
+#[test]
+fn file_reference_detail_does_not_invent_a_miss_for_a_read_io_failure() {
+    let candidate = PathBuf::from("/repo/claudine/fixes/case/spec.md");
+    let origin = biscuit_file::FileResolutionContext::new("/repo/claudine")
+        .with_repository_root("/repo")
+        .with_source_path("/repo/prompts/target.md");
+    let err = file_ref_compose_error(FileReferenceDiagnostic {
+        function: "frontmatter",
+        reference: "fixes/case/spec.md".to_string(),
+        kind: FileRefFailure::NotFound,
+        base_dir: PathBuf::from("/repo/claudine"),
+        fallback_dir: Some(PathBuf::from("/repo/claudine")),
+        source: Some(std::sync::Arc::new(
+            biscuit_file::FileReferenceError::Io {
+                path: candidate.clone(),
+                source: std::io::Error::from(std::io::ErrorKind::PermissionDenied),
+            },
+        )),
+        caller: Some(std::sync::Arc::new(
+            darkmatter::markdown::compose::expression::CallerFileDiagnosticProvenance {
+                property: "spec".to_string(),
+                origin,
+                candidate,
+                candidate_provenance: biscuit_file::RootProvenance::Source,
+            },
+        )),
+    });
+    let detail = err.detail();
+
+    assert_eq!(detail["failure"], Value::Null);
+    assert_eq!(detail["candidates"][0]["disposition"], Value::Null);
+    assert_ne!(detail["candidates"][0]["disposition"], json!("missing"));
 }
 
 #[test]
@@ -1545,6 +1622,7 @@ fn file_reference_detail_suggestions_match_rendered_did_you_mean() {
         base_dir: dir.path().to_path_buf(),
         fallback_dir: None,
         source: None,
+        caller: None,
     };
     let err = file_ref_compose_error(diagnostic.clone());
     let detail = err.detail();
@@ -1585,6 +1663,7 @@ fn file_reference_detail_suggestions_match_rendered_for_stale_directory() {
         base_dir: dir.path().to_path_buf(),
         fallback_dir: None,
         source: None,
+        caller: None,
     };
     let err = file_ref_compose_error(diagnostic.clone());
     let detail = err.detail();

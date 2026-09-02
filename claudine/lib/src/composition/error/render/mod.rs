@@ -205,10 +205,13 @@ fn compose_failed_code(md: &MarkdownError) -> &'static str {
             "composition.frontmatter_parse"
         }
         MarkdownError::ShellExpansion(_) => "composition.shell_expansion",
-        MarkdownError::SchemaValidationFailed { .. }
-        | MarkdownError::CallerFileClassificationChanged { .. } => {
-            "composition.schema_validation"
+        MarkdownError::SchemaValidationFailed { problems, .. }
+            if problems.iter().any(|problem| problem.caller_file.is_some()) =>
+        {
+            "composition.invalid_file_reference"
         }
+        MarkdownError::SchemaValidationFailed { .. }
+        | MarkdownError::CallerFileClassificationChanged { .. } => "composition.schema_validation",
         _ => "composition.failed",
     }
 }
@@ -223,14 +226,12 @@ fn compose_failed_code(md: &MarkdownError) -> &'static str {
 /// reference, `base_dir`-joined, ranked against its siblings) so
 /// `err.detail.suggestions` is byte-for-byte what the human report shows.
 ///
-/// The `FileReferenceDiagnostic` this projects from carries no authoring
-/// context, no root provenance, and no probe record, so `source_path`,
-/// `property`, `event`, `repository_root`, `candidates`, and `failure` keep
-/// their seeded `null`. In particular `failure` is **not** derived from `kind`:
-/// Darkmatter's `FileRefFailure::classify` folds permission and missing-context
-/// errors into `NotFound`, so projecting `no_match` from it would assert a
-/// classification the resolver never made (spec §D3). The file-resolution
-/// feature replaces these nulls with typed values.
+/// A schema-projected caller value also carries its raw authoring context and
+/// selected candidate. Those fields replace only the corresponding seeded
+/// `null`s. The candidate disposition and `failure` remain unavailable because
+/// the retained caller record is an unprobed candidate-plan entry and
+/// Darkmatter's read-side classifier does not distinguish clean misses from
+/// permission failures.
 fn file_reference_detail(diagnostic: &FileReferenceDiagnostic) -> Value {
     // Mirror the render gate (errors/blocks.rs): suggestions are computed only
     // for a *missing* reference — a malformed/remote reference has no sibling
@@ -252,7 +253,83 @@ fn file_reference_detail(diagnostic: &FileReferenceDiagnostic) -> Value {
             .as_ref()
             .map(|path| biscuit_file::to_portable_string(path))
     );
+    if let Some(caller) = &diagnostic.caller {
+        base["source_path"] = json!(
+            caller
+                .origin
+                .source_path()
+                .map(biscuit_file::to_portable_string)
+        );
+        base["property"] = json!(caller.property);
+        base["repository_root"] = json!(
+            caller
+                .origin
+                .repository_root()
+                .map(biscuit_file::to_portable_string)
+        );
+        base["candidates"] = json!([{
+            "path": biscuit_file::to_portable_string(&caller.candidate),
+            "provenance": caller_root_provenance_slug(caller.candidate_provenance),
+            "disposition": null,
+        }]);
+    }
     base
+}
+
+fn caller_schema_file_reference_detail(md: &MarkdownError) -> Option<Value> {
+    let MarkdownError::SchemaValidationFailed { problems, .. } = md else {
+        return None;
+    };
+    let problem = problems.iter().find(|problem| problem.caller_file.is_some())?;
+    let caller = problem.caller_file.as_ref()?;
+    let reference = match problem.file_reference.as_ref()? {
+        darkmatter::markdown::schemas::FileReferenceDiagnostic::InvalidSyntax { raw }
+        | darkmatter::markdown::schemas::FileReferenceDiagnostic::ResolutionFailed { raw }
+        | darkmatter::markdown::schemas::FileReferenceDiagnostic::NoMatch { raw, .. } => raw,
+    };
+    let mut detail = null_detail_for("composition.invalid_file_reference");
+    detail["reference"] = json!(reference);
+    detail["kind"] = json!(match problem.file_reference.as_ref()? {
+        darkmatter::markdown::schemas::FileReferenceDiagnostic::InvalidSyntax { .. } => "malformed",
+        _ => "not_found",
+    });
+    detail["base_dir"] = json!(biscuit_file::to_portable_string(caller.origin.base_dir()));
+    detail["source_path"] = json!(caller
+        .origin
+        .source_path()
+        .map(biscuit_file::to_portable_string));
+    detail["property"] = json!(problem.path.strip_prefix('/').unwrap_or(&problem.path));
+    detail["repository_root"] = json!(caller
+        .origin
+        .repository_root()
+        .map(biscuit_file::to_portable_string));
+    detail["suggestions"] = json!([]);
+    if let Some(candidate) = &caller.candidate {
+        detail["candidates"] = json!([{
+            "path": biscuit_file::to_portable_string(candidate.path()),
+            "provenance": caller_root_provenance_slug(candidate.provenance()),
+            "disposition": null,
+        }]);
+    }
+    if matches!(
+        problem.file_reference,
+        Some(darkmatter::markdown::schemas::FileReferenceDiagnostic::NoMatch { .. })
+    ) {
+        detail["failure"] = json!("no_match");
+    }
+    Some(detail)
+}
+
+fn caller_root_provenance_slug(provenance: biscuit_file::RootProvenance) -> &'static str {
+    match provenance {
+        biscuit_file::RootProvenance::Repository => "repository",
+        biscuit_file::RootProvenance::Source => "source",
+        biscuit_file::RootProvenance::Package => "package",
+        biscuit_file::RootProvenance::Home => "home",
+        biscuit_file::RootProvenance::Magic => "magic",
+        biscuit_file::RootProvenance::Vault => "vault",
+        biscuit_file::RootProvenance::Absolute => "absolute",
+    }
 }
 
 impl Diagnostic for CompositionError {
@@ -286,7 +363,8 @@ impl Diagnostic for CompositionError {
             // same delegation their `status_block` and `Display` already do.
             CompositionError::WithFrontmatter { inner, .. }
             | CompositionError::LifecycleEvaluationAlreadyEmitted { inner } => inner.code(),
-            CompositionError::ComposeFailed(md) => compose_failed_code(md),
+            CompositionError::ComposeFailed(md)
+            | CompositionError::PreFlightDiscoveryFailed(md) => compose_failed_code(md),
             CompositionError::InvalidReference { .. }
             | CompositionError::FileNotFound { .. }
             | CompositionError::FileReferenceNoMatch { .. }
@@ -389,6 +467,24 @@ impl Diagnostic for CompositionError {
                     base["message"] = json!(other.to_string());
                 }
             },
+            CompositionError::PreFlightDiscoveryFailed(MarkdownError::Interpolation {
+                cause,
+                ..
+            }) => {
+                if let ExpressionError::FileReference(diagnostic) = cause.as_ref() {
+                    return file_reference_detail(diagnostic);
+                }
+            }
+            CompositionError::ComposeFailed(md)
+                if caller_schema_file_reference_detail(md).is_some() =>
+            {
+                return caller_schema_file_reference_detail(md).unwrap();
+            }
+            CompositionError::PreFlightDiscoveryFailed(md)
+                if caller_schema_file_reference_detail(md).is_some() =>
+            {
+                return caller_schema_file_reference_detail(md).unwrap();
+            }
             // The semantic wrapper owns the code, so its payload is the union
             // of what the resolver knew (`reference`, `failure`, `source_path`
             // — taken from the typed source's own projection, never re-derived)
