@@ -117,6 +117,12 @@ match or terminal I/O error. Each `ResolutionCandidate` exposes its path and
 `RootProvenance`: `Repository`, `Source`, `Package`, `Home`, `Magic`, `Vault`,
 or `Absolute`.
 
+`candidate_plan_with_order()` applies an explicit `CandidatePlanOrder` to that
+unprobed plan. The default `Resolution` order matches execution.
+`AuthoringBaseFirst` stably moves `Source` candidates ahead of other roots for
+consumers binding a lazy identity to its captured authoring context; parsing,
+candidate construction, and validation remain inside `FileReference`.
+
 Direct candidates are probed with fallible `std::fs::metadata`, never
 `Path::is_file()`:
 

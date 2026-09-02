@@ -161,10 +161,10 @@ pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};
 
 #[cfg(feature = "file-reference")]
 pub use self::file_reference::{
-    CompletionEntryForm, DetailedOutcome, DetailedResolution, FileReference, FileReferenceClass,
-    FileReferenceError, FileReferenceKind, FileResolutionContext, PartialCompletion, PathPosition,
-    ProbeDisposition, ProbedCandidate, ResolutionCandidate, ResolutionFailure, RootProvenance,
-    find_git_root, find_package_area, home_dir,
+    CandidatePlanOrder, CompletionEntryForm, DetailedOutcome, DetailedResolution, FileReference,
+    FileReferenceClass, FileReferenceError, FileReferenceKind, FileResolutionContext,
+    PartialCompletion, PathPosition, ProbeDisposition, ProbedCandidate, ResolutionCandidate,
+    ResolutionFailure, RootProvenance, find_git_root, find_package_area, home_dir,
 };
 
 #[cfg(feature = "url")]
