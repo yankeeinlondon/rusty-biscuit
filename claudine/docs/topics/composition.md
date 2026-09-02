@@ -450,6 +450,40 @@ Any composition error (schema validation failure, missing file, denied shell com
 
 Composition documents can declare a `$schema` in their frontmatter to constrain the property values that drive the prompt. Schema processing is anchored on Darkmatter's `SimplifiedSchema` and runs as a stage inside the existing `Resolve → Pre-Flight → Prepare → Select → Launch → Closure` pipeline — between override application and shell expansion. The wrapper layer translates Darkmatter's structural failures into typed claudine errors so users see actionable reports instead of a generic compose failure.
 
+### Caller File Provenance and Materialization
+
+Each explicit caller setter (`key=value` or `--set`) retains an immutable,
+per-property record containing the raw value and the file-resolution context
+captured at launch. Canonical preparation keeps that record separate from the
+effective frontmatter map. Document frontmatter, schema defaults, `proxy.with`,
+runtime mutation, and sequence/task-authored values retain their own ownership
+and are not relabeled as caller input.
+
+Before frontmatter interpolation pass 1, Darkmatter applies the active
+document's effective schema to each caller record. Exactly one applicable file
+arm must be selected; ambiguous or unmatched unions remain the responsibility
+of normal schema validation. A selected local `file(eager)` value resolves from
+the caller origin and must identify an existing file. A selected non-recursive
+lazy `file` value binds to the first ordered, lexically normalized candidate
+from that same origin without checking whether it exists. Lazy HTTP(S)
+references remain remote identities and are never sent through a local
+candidate plan or filesystem probe. Recursive lazy references have no single
+unprobed identity and fail with guidance to declare `file(eager)`.
+
+The raw caller value remains unchanged for identity and fresh preparation. The
+materialized semantic value is the native absolute path or typed remote
+identity consumed by frontmatter expressions, path functions, validation, and
+lifecycle state. Markdown body interpolation uses a separate portable
+presentation value, so Windows can render `/` separators without changing the
+native identity. Absent and explicit-null properties, ordinary strings, and
+document-owned file references are not caller-materialized.
+
+Proxy, retry, resume, inline-compose, and sequence/task entry preserve the same
+raw value and per-property origin. Fresh reads rematerialize them against the
+new active schema; a reused loop plan keeps its installed semantic identity.
+Neither route recaptures process CWD, and a proxy target cannot re-anchor a
+caller-owned value merely because it declares a different file mode.
+
 ## Lifecycle Integration
 
 Composition runs execute the full seven-event lifecycle declared in the prompt's frontmatter:
