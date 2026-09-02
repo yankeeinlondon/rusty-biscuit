@@ -175,6 +175,61 @@ fn shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target(
 }
 
 #[test]
+fn shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_plan() {
+    let fixture = CliProcessFixture::named("implement-router-unimplemented-review");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    install_goose(&fixture);
+
+    let package = fixture.cwd().join("packages/example");
+    let case = package.join("fixes/case");
+    write(
+        &case.join("spec.md"),
+        "---\nstatus: draft\n---\nSpecification.\n",
+    );
+    write(
+        &case.join("plan.md"),
+        "---\ntotal_phases: 5\nphase: 5\n---\n# Plan\n",
+    );
+    write(
+        &case.join("review-1.md"),
+        "---\nready: false\nimplemented: false\n---\n# Review 1\n\nA finding to implement.\n",
+    );
+
+    let router = fixture.cwd().join("prompts/implement.md");
+    write(&router, include_str!("../../../prompts/implement.md"));
+    write(
+        &fixture
+            .cwd()
+            .join("prompts/_implement/implement-suggestions.md"),
+        include_str!("../../../prompts/_implement/implement-suggestions.md"),
+    );
+    write(
+        &fixture
+            .cwd()
+            .join("prompts/_implement/implement-plan.md"),
+        include_str!("fixtures/shipped_implement_route/_implement/implement-plan.md"),
+    );
+
+    let stderr = run_compose(
+        &fixture,
+        &package,
+        &router,
+        &["spec=fixes/case/spec.md"],
+    );
+
+    assert!(
+        stderr.contains("Implement Review Suggestions"),
+        "an existing unimplemented review must outrank the already-executed plan; stderr:\n{stderr}"
+    );
+    assert!(stderr.contains("review-1.md"), "stderr:\n{stderr}");
+    assert!(
+        !stderr.contains("Implement Phase 5 of 5"),
+        "the router must not resume the original plan once a review exists; stderr:\n{stderr}"
+    );
+}
+
+#[test]
 fn direct_and_proxy_targets_agree_and_caller_values_outrank_proxy_with() {
     let fixture = CliProcessFixture::named("caller-file-direct-proxy-equivalence");
     fixture.initialize_repository();
@@ -761,4 +816,76 @@ fn direct_and_proxy_file_failures_keep_equivalent_caller_diagnostics() {
             }
         }
     }
+}
+
+#[test]
+fn dynamic_array_selection_keeps_complete_direct_and_proxy_diagnostics() {
+    let fixture = CliProcessFixture::named("caller-file-dynamic-array-diagnostic");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    install_goose(&fixture);
+
+    let target = fixture.cwd().join("prompts/target.md");
+    let router = fixture.cwd().join("prompts/router.md");
+    write(
+        &router,
+        "---\ninitialize:\n  stack:\n    - action: {proxy: './target.md'}\n---\nRouter.\n",
+    );
+    let files = r#"files=["missing.md","./missing.md"]"#;
+    let caller_root = std::fs::canonicalize(fixture.cwd()).unwrap();
+    let mut selected_candidates = Vec::new();
+
+    for (index, raw) in [(0, "missing.md"), (1, "./missing.md")] {
+        write(
+            &target,
+            &format!(
+                "---\n$schema:\n  files: 'file(required)[]'\nindex: {index}\nvalue: \"{{{{ frontmatter(files[index], 'value') }}}}\"\n---\nTarget.\n"
+            ),
+        );
+
+        let (direct, direct_diagnostic) =
+            run_compose_failure(&fixture, fixture.cwd(), &target, &[files]);
+        let (proxied, proxied_diagnostic) =
+            run_compose_failure(&fixture, fixture.cwd(), &router, &[files]);
+
+        for (route, stderr, diagnostic) in [
+            ("direct", &direct, &direct_diagnostic),
+            ("proxy", &proxied, &proxied_diagnostic),
+        ] {
+            assert!(stderr.contains("invalid file path"), "{index} {route}: {stderr}");
+            assert!(stderr.contains(raw), "{index} {route}: {stderr}");
+            assert_eq!(diagnostic["code"], "composition.invalid_file_reference");
+            assert_eq!(diagnostic["detail"]["reference"], raw, "{index} {route}");
+            assert_eq!(diagnostic["detail"]["property"], "files", "{index} {route}");
+            assert_eq!(
+                diagnostic["detail"]["base_dir"],
+                biscuit_file::to_portable_string(&caller_root),
+                "{index} {route} lost the caller base"
+            );
+            assert_eq!(
+                diagnostic["detail"]["repository_root"],
+                biscuit_file::to_portable_string(&caller_root),
+                "{index} {route} lost the caller repository root"
+            );
+            assert_eq!(
+                diagnostic["detail"]["candidates"][0]["path"],
+                biscuit_file::to_portable_string(&caller_root.join(raw)),
+                "{index} {route} lost the selected candidate"
+            );
+        }
+        assert_eq!(
+            direct_diagnostic, proxied_diagnostic,
+            "dynamic array diagnostic changed across proxy for index {index}"
+        );
+        selected_candidates.push(std::path::PathBuf::from(
+            direct_diagnostic["detail"]["candidates"][0]["path"]
+                .as_str()
+                .unwrap(),
+        ));
+    }
+
+    assert_eq!(
+        selected_candidates[0], selected_candidates[1],
+        "aliased raw spellings must retain distinct references for one semantic candidate"
+    );
 }
