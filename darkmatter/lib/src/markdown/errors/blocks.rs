@@ -657,6 +657,7 @@ mod tests {
             base_dir: dir.path().to_path_buf(),
             fallback_dir: None,
             source: None,
+            caller: None,
         });
         let out = render_block(&interpolation_block(
             Some("result"),
@@ -684,6 +685,7 @@ mod tests {
             base_dir: PathBuf::from("/repo"),
             fallback_dir: None,
             source: None,
+            caller: None,
         });
         let source = SourceRef::Effective {
             rendered: "frontmatter('missing.md')".to_string(),
@@ -726,6 +728,7 @@ mod tests {
             base_dir: PathBuf::from("/repo"),
             fallback_dir: None,
             source: None,
+            caller: None,
         });
         let block = interpolation_block(
             Some("iteration"),
@@ -1031,6 +1034,7 @@ mod tests {
             schema_path: None,
             offending_property: None,
             file_reference: None,
+            caller_file: None,
         }
     }
 

@@ -1452,13 +1452,27 @@ fn file_reference_error(
     kind: FileRefFailure,
     source: Option<biscuit_file::FileReferenceError>,
 ) -> ExpressionError {
+    let caller = ctx.active_caller_file_provenance.as_ref().map(|provenance| {
+        Arc::new(super::CallerFileDiagnosticProvenance {
+            property: provenance.property.clone(),
+            origin: provenance.origin.clone(),
+            candidate: provenance.candidate.clone(),
+            candidate_provenance: provenance.candidate_provenance,
+        })
+    });
+    let (reference, base_dir) = ctx
+        .active_caller_file_provenance
+        .as_ref()
+        .map(|provenance| (provenance.reference.clone(), provenance.origin.base_dir().to_path_buf()))
+        .unwrap_or_else(|| (raw.to_string(), ctx.base_dir.clone()));
     ExpressionError::FileReference(FileReferenceDiagnostic {
         function,
-        reference: raw.to_string(),
+        reference,
         kind,
-        base_dir: ctx.base_dir.clone(),
+        base_dir,
         fallback_dir: ctx.file_ref_fallback_dir.clone(),
         source: source.map(Arc::new),
+        caller,
     })
 }
 

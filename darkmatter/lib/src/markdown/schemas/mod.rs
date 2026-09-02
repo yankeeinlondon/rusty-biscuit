@@ -1059,6 +1059,18 @@ pub struct ValidationProblem {
     /// [`code`](Self::code) is [`ValidationProblemCode::InvalidFileReference`];
     /// [`message`](Self::message) still carries the same rendered text.
     pub file_reference: Option<FileReferenceDiagnostic>,
+    /// Caller-owned resolution context retained when projection, rather than
+    /// ordinary document validation, produced the file-reference failure.
+    pub caller_file: Option<CallerFileReferenceProvenance>,
+}
+
+/// Resolution evidence attached to a caller-owned file validation problem.
+#[derive(Debug, Clone)]
+pub struct CallerFileReferenceProvenance {
+    /// The immutable context captured where the caller authored the value.
+    pub origin: biscuit_file::FileResolutionContext,
+    /// The selected or first attempted candidate, when the reference parsed.
+    pub candidate: Option<biscuit_file::ResolutionCandidate>,
 }
 
 /// Fine-grained classification of a [`ValidationProblem`] (R-5 Priority 1).

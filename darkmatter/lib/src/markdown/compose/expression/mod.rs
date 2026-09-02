@@ -84,7 +84,8 @@ pub use catalog::{
 };
 pub use ctx::CtxLookup;
 pub use error::{
-    ArityBound, ExpressionError, FileRefFailure, FileReferenceDiagnostic, ProviderFailureKind,
+    ArityBound, CallerFileDiagnosticProvenance, ExpressionError, FileRefFailure,
+    FileReferenceDiagnostic, ProviderFailureKind,
 };
 pub use file_suggestions::{collect_sibling_candidates, suggest_sibling_files};
 pub(crate) use path_projection::{
@@ -728,10 +729,18 @@ fn evaluate_function<L: EvaluationLookup>(
             // dispatched here does not deep-clone the lookup's context; only
             // fall back to the owned clone for lookups that expose only the
             // owned accessor.
-            let ctx = lookup
+            let mut ctx = lookup
                 .resolution_context_ref()
                 .map(std::borrow::Cow::Borrowed)
                 .or_else(|| lookup.resolution_context().map(std::borrow::Cow::Owned));
+            if let Some(context) = ctx.as_ref()
+                && let Some(occurrence) = args.first().and_then(caller_file_occurrence)
+                && let Some(provenance) = context.caller_file_provenance.get(&occurrence).cloned()
+            {
+                let mut selected = context.as_ref().clone();
+                selected.active_caller_file_provenance = Some(provenance);
+                ctx = Some(std::borrow::Cow::Owned(selected));
+            }
             if let Some(ctx) = ctx
                 && let Some(result) = functions::dispatch_fs(other, &evaluated, &ctx)
             {
@@ -762,6 +771,29 @@ fn evaluate_function<L: EvaluationLookup>(
             }
             Err(unknown_function_error(other))
         }
+    }
+}
+
+fn caller_file_occurrence(expr: &Expr) -> Option<String> {
+    match expr {
+        Expr::Variable(property) => Some(format!(
+            "/{}",
+            property.replace('~', "~0").replace('/', "~1")
+        )),
+        Expr::Index { base, index } => {
+            let mut occurrence = caller_file_occurrence(base)?;
+            let Expr::NumberLiteral(index) = index.as_ref() else {
+                return None;
+            };
+            if index.fract() != 0.0 || *index < 0.0 {
+                return None;
+            }
+            occurrence.push('/');
+            occurrence.push_str(&(*index as usize).to_string());
+            Some(occurrence)
+        }
+        Expr::Paren(inner) => caller_file_occurrence(inner),
+        _ => None,
     }
 }
 

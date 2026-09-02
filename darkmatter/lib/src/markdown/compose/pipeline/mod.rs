@@ -115,7 +115,7 @@ impl Markdown {
     #[instrument(skip_all, fields(source = ?options.source))]
     pub(crate) fn run_compose_pipeline_internal(
         &mut self,
-        options: ComposeOptions,
+        mut options: ComposeOptions,
         runtime: &mut shell_expansion::types::PipelineRuntime,
     ) -> MarkdownResult<ComposeReport> {
         let source_id = match &options.source {
@@ -162,6 +162,7 @@ impl Markdown {
                 &prepared_schemas,
             )?;
             caller_projection.install(self);
+            caller_projection.install_provenance(&mut options);
 
             let shell_expansion_enabled =
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion);

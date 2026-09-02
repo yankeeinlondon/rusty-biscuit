@@ -134,6 +134,10 @@ pub struct ComposeOptions {
     /// Raw caller overrides and their per-property authoring contexts.
     pub(crate) caller_input_records: CallerInputRecords,
 
+    /// Schema-selected property/array occurrences mapped back to caller provenance.
+    pub(crate) caller_file_provenance:
+        std::collections::HashMap<String, super::super::expression::resolve_ctx::CallerFileProvenance>,
+
     // ── Transclusion ───────────────────────────────────────────────
     /// Maximum recursive transclusion depth before the pipeline
     /// returns an error. Prevents infinite `::file` chains.
@@ -566,6 +570,7 @@ impl ComposeOptions {
             external_state: None,
             set_overrides: None,
             caller_input_records: CallerInputRecords::new(),
+            caller_file_provenance: std::collections::HashMap::new(),
             max_transclusion_depth: 16,
             allow_remote_transclusion: false,
             allow_local_markdown: true,
@@ -1086,6 +1091,7 @@ impl ComposeOptions {
         context.ctx_values = self.context_values_for_resolution();
         context.home_dir = home_dir;
         context.file_resolution_context = file_resolution_context;
+        context.caller_file_provenance = self.caller_file_provenance.clone();
         context
     }
 
@@ -1141,6 +1147,7 @@ impl ComposeOptions {
         context.ctx_values = self.context_values_for_resolution();
         context.home_dir = home_dir;
         context.file_resolution_context = file_resolution_context;
+        context.caller_file_provenance = self.caller_file_provenance.clone();
         context
     }
 
@@ -1929,6 +1936,7 @@ impl ComposeOptions {
             external_state,
             set_overrides,
             caller_input_records,
+            caller_file_provenance,
             max_transclusion_depth,
             allow_remote_transclusion,
             allow_local_markdown,
@@ -2046,6 +2054,26 @@ impl ComposeOptions {
             enc.str(property);
             enc.str(&canonical_json_sorted(record.raw()));
             encode_file_resolution_context(&mut enc, &Some(record.origin().clone()));
+        }
+        enc.field("caller_file_provenance");
+        let mut projected: Vec<_> = caller_file_provenance.iter().collect();
+        projected.sort_by_key(|(occurrence, _)| *occurrence);
+        enc.count(projected.len());
+        for (occurrence, provenance) in projected {
+            enc.str(occurrence);
+            enc.str(&provenance.property);
+            enc.str(&provenance.reference);
+            encode_file_resolution_context(&mut enc, &Some(provenance.origin.clone()));
+            enc.path(&provenance.candidate);
+            enc.tag(match provenance.candidate_provenance {
+                biscuit_file::RootProvenance::Repository => 0,
+                biscuit_file::RootProvenance::Source => 1,
+                biscuit_file::RootProvenance::Package => 2,
+                biscuit_file::RootProvenance::Home => 3,
+                biscuit_file::RootProvenance::Magic => 4,
+                biscuit_file::RootProvenance::Vault => 5,
+                biscuit_file::RootProvenance::Absolute => 6,
+            });
         }
 
         enc.field("max_transclusion_depth");
@@ -2837,6 +2865,43 @@ mod tests {
             a.caller_input_records()["spec"].raw(),
             &serde_json::json!("fixes/case/spec.md")
         );
+    }
+
+    #[test]
+    fn caller_file_occurrences_each_participate_in_request_identity() {
+        let origin = biscuit_file::FileResolutionContext::from_snapshot(
+            "/repo/launch",
+            Some("/repo".into()),
+            std::collections::HashMap::new(),
+        );
+        let candidate = std::path::PathBuf::from("/repo/launch/missing.md");
+        let provenance = |property: &str, reference: &str| {
+            crate::markdown::compose::expression::resolve_ctx::CallerFileProvenance {
+                property: property.to_string(),
+                reference: reference.to_string(),
+                origin: origin.clone(),
+                candidate: candidate.clone(),
+                candidate_provenance: biscuit_file::RootProvenance::Source,
+            }
+        };
+        let mut complete = fixed_opts();
+        complete.caller_file_provenance = [
+            ("/first".to_string(), provenance("first", "missing.md")),
+            ("/second".to_string(), provenance("second", "./missing.md")),
+        ]
+        .into_iter()
+        .collect();
+        let mut collapsed = complete.clone();
+        collapsed.caller_file_provenance.remove("/first");
+
+        assert_eq!(complete.caller_file_provenance.len(), 2);
+        assert_eq!(complete.caller_file_provenance["/first"].property, "first");
+        assert_eq!(complete.caller_file_provenance["/second"].property, "second");
+        assert_eq!(
+            complete.caller_file_provenance["/first"].candidate,
+            complete.caller_file_provenance["/second"].candidate
+        );
+        assert_ne!(id(&complete), id(&collapsed));
     }
 
     #[test]

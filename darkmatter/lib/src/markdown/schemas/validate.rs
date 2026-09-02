@@ -563,6 +563,7 @@ fn build_problem(
         schema_path,
         offending_property,
         file_reference,
+        caller_file: None,
     }
 }
 
@@ -1779,6 +1780,7 @@ mod tests {
             schema_path: None,
             offending_property: None,
             file_reference: None,
+            caller_file: None,
         }
     }
 

@@ -11,6 +11,16 @@ use std::sync::{Arc, Mutex, OnceLock};
 use super::ExpressionError;
 use crate::markdown::compose::remote_fetch::RemoteFetchRuntime;
 
+/// Caller-owned identity retained after a schema-selected file value is projected.
+#[derive(Clone, Debug)]
+pub(crate) struct CallerFileProvenance {
+    pub property: String,
+    pub reference: String,
+    pub origin: biscuit_file::FileResolutionContext,
+    pub candidate: PathBuf,
+    pub candidate_provenance: biscuit_file::RootProvenance,
+}
+
 type ProviderQueryResult = Result<Value, ExpressionError>;
 type ProviderQuerySlot = Arc<OnceLock<ProviderQueryResult>>;
 
@@ -64,6 +74,10 @@ pub struct ResolutionContext {
     /// Host-captured request snapshot. When present, all local references
     /// derive from it and never rediscover ambient process state.
     pub(crate) file_resolution_context: Option<biscuit_file::FileResolutionContext>,
+    /// Projected property/array occurrences mapped back to their immutable caller records.
+    pub(crate) caller_file_provenance: HashMap<String, CallerFileProvenance>,
+    /// Caller record selected from the source expression for the active filesystem call.
+    pub(crate) active_caller_file_provenance: Option<CallerFileProvenance>,
 }
 
 impl ResolutionContext {
@@ -81,6 +95,8 @@ impl ResolutionContext {
             ctx_values: Map::new(),
             home_dir: None,
             file_resolution_context: None,
+            caller_file_provenance: HashMap::new(),
+            active_caller_file_provenance: None,
         }
     }
 
@@ -540,6 +556,8 @@ mod tests {
             ctx_values: Map::new(),
             home_dir: None,
             file_resolution_context: None,
+            caller_file_provenance: HashMap::new(),
+            active_caller_file_provenance: None,
         };
 
         // The URL was never registered by discovery; the read-side function
@@ -571,6 +589,8 @@ mod tests {
             ctx_values: Map::new(),
             home_dir: None,
             file_resolution_context: None,
+            caller_file_provenance: HashMap::new(),
+            active_caller_file_provenance: None,
         };
 
         let result = tokio::task::spawn_blocking(move || {
