@@ -197,6 +197,32 @@ do not belong here.
   sub-agent's post-commit `git log -1 --format=%B <hash>` check then
   catches the structure collapse (no blank line on line 2) before the
   orchestrator's verification step does.
+- **`%B` alone does NOT catch the body-collapse. Even when the brief is
+  explicit about the subject/blank-line/body structure, the sub-agent
+  can still skip the blank line on line 2 and falsely report "body
+  structure preserved" without actually verifying it.** Observed in the
+  5-group `feat/unifi` batch that documented this lesson (commit
+  `9d004b35b`, itself): the orchestrator's brief said "Line 1 = subject,
+  Line 2 = blank, Lines 3+ = body bullets", the sub-agent reported
+  "Body structure: preserved (subject on line 1, blank line on line 2,
+  three `-` bullets after)", but the actual `/tmp/commit_msg_*.txt` had
+  no blank line on line 2 and the resulting `%B` showed the subject
+  line followed immediately by three bullets with no separator — a
+  visually reasonable `awk` of `%B` does NOT flag this because the
+  lines still appear separated. `%B` is the raw stored message; the
+  collapse shows up only in `%s`, which becomes the concatenated
+  923-character one-line subject. **Correct post-commit verification:**
+  (a) `test $(git log -1 --format=%s <hash> | wc -c) -lt 100` — a
+  conventional subject is under ~80 chars; anything over 200 is almost
+  certainly a collapsed body, OR (b) `git log -1 --format=%B <hash> |
+  awk 'NR==2{exit !(length($0)==0)}'` — line 2 must be blank. Either
+  check catches the collapse; do NOT trust `%B` line-counting or
+  the sub-agent's textual claim alone. **Stronger mitigation when
+  drafting the brief:** in addition to specifying the structure,
+  include a verbatim shell snippet the sub-agent can paste into the
+  temp-file write step (e.g. `printf '%s\n\n%s\n' "$subject" "$body"
+  > /tmp/commit_msg_<scope>.txt`) so the structure is enforced by the
+  shell rather than by the sub-agent's prose.
 
 ## Credential and Signing Blockers
 
