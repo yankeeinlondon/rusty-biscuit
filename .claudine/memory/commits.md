@@ -77,6 +77,20 @@ do not belong here.
 - For renames, include both old and new paths in the same pathspec list. Passing
   only the destination path commits only the `A` half and leaves the staged
   deletion behind.
+- **`git ls-files -s <new_path>` does not expose the old path's `D` entry on a
+  staged `R`.** The rename pair in the index is an independent `D` for the old
+  path plus an `A` for the new path, but `ls-files -s` only lists paths that
+  resolve to a current file entry, so a single-path probe can make the old path
+  look absent even though the `D` is still in the index and `git status --short`
+  will show it after a destination-only commit. Confirmed on `feat/unifi` in a
+  2-group batch: `ls-files -s` for the new `_completed/.../plan.md` returned
+  only the destination blob, the brief instructed the subagent to commit only
+  the new path, the resulting commit landed with `R+R+A` and left the two `D`
+  entries behind in the index, and recovery required `git reset --soft` to
+  rewind past the partial commit and re-dispatch with all five paths. Whenever
+  a staged `R` is in an assigned group, include BOTH endpoints in the brief and
+  verify with `git status --short` after the commit that no `D` entries
+  remain.
 - **`git status --short`'s `R` only proves the index has two similar-content
   endpoints — it does not prove either endpoint is the "right" one.** Git's
   rename detector infers `R` at display time from blob similarity; the index
