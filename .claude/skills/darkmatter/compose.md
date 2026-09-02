@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-3b269f70eb968efa
+hash: ef46db3751d8e999-c770ae4731a7a009
 last_updated: 2026-09-02
 ---
 # Compose Pipeline
@@ -46,6 +46,15 @@ references keep their existing source-relative and repository-aware rules.
 7. **Interpolation** - `{{ variable }}` expressions expand to values
 8. **Shell Expansion** - Execute `::shell` directives execute approved commands and inject combined `stdout` + `stderr`
 9. **Link Resolve** - Resolve all local link targets (Markdown hyperlinks/images and supported HTML embeds) to absolute paths
+
+Schema-selected `file` caller overrides are materialized during this stage.
+Lazy local values become the first unprobed absolute candidate; eager values
+become the first existing regular file. `ComposeOptions` retains the raw
+override and accepts per-property file-reference origins so independently
+authored layers—CLI setters, proxy inputs, and sequence task parameters—can be
+folded without re-anchoring. `materialize_caller_overrides` exposes that same
+schema stage for a provenance-preserving handoff; it does not run the rest of
+the compose pipeline.
 
 **Transclusion** (prepared serially, resolved concurrently via Rayon):
 

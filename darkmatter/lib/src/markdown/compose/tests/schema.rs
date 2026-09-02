@@ -1046,12 +1046,12 @@ mod schema_validation_integration {
                 "@collision/spec.md",
                 vec![
                     RootProvenance::Magic,
+                    RootProvenance::PackageArea,
                     RootProvenance::Repository,
                     RootProvenance::Home,
                     RootProvenance::Magic,
                 ],
             ),
-            ("!collision/spec.md", vec![RootProvenance::Package]),
             ("./collision/spec.md", vec![RootProvenance::Source]),
         ];
 

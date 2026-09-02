@@ -762,8 +762,8 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
             // Enumerate the ordered plan only when the resolver tried more than
             // one candidate: the single-candidate `Display` above already names
             // its one path, so a "Tried:" list adds information solely for an
-            // implicit reference that fell through repository- then
-            // source-relative candidates (spec §D8).
+            // implicit reference that fell through source- then
+            // repository-relative candidates (spec §D8).
             let candidates = source.resolution_candidates();
             if candidates.len() >= 2 {
                 body.push_str("\n\nTried:");

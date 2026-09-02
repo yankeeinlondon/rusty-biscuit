@@ -82,6 +82,37 @@ fn base_schema_file_parses_and_converts() {
 }
 
 #[test]
+fn shipped_base_schema_exposes_the_nullable_generated_ctx_cwd_contract() {
+    let darkmatter::markdown::schemas::SimplifiedSchema::Single(root) =
+        darkmatter_base_schema()
+    else {
+        panic!("base schema must be a single object shape");
+    };
+    let PropertyDef::Single(ctx) = root.properties.get("ctx").expect("ctx property") else {
+        panic!("ctx must be a single inline object");
+    };
+    let TypeExpr::InlineObject(ctx) = &ctx.ty else {
+        panic!("ctx must expose its nested shape");
+    };
+    let PropertyDef::Single(cwd) = ctx.properties.get("cwd").expect("ctx.cwd property") else {
+        panic!("ctx.cwd must be a single property atom");
+    };
+
+    assert!(matches!(
+        cwd.ty,
+        TypeExpr::Primitive(darkmatter::markdown::schemas::SimplifiedType::String)
+    ));
+    assert!(cwd.constraints.iter().any(|constraint| matches!(
+        constraint,
+        darkmatter::markdown::schemas::Constraint::Generated
+    )));
+    assert!(!cwd.constraints.iter().any(|constraint| matches!(
+        constraint,
+        darkmatter::markdown::schemas::Constraint::Required
+    )));
+}
+
+#[test]
 fn base_style_schema_matches_runtime_descriptor() {
     let darkmatter::markdown::schemas::SimplifiedSchema::Single(root) =
         darkmatter_base_schema()

@@ -344,7 +344,11 @@ fn bridge_provider_config(cfg: &MessengerProviderConfig) -> MessagingRouteConfig
 ///
 /// Returns the first existing config file path, or the default path if none exists.
 pub fn user_config_path() -> PathBuf {
-    let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("~"));
+    // `std::env::home_dir` honors `$HOME`/`%USERPROFILE%` before the platform
+    // fallback. `dirs::home_dir` consults only the known-folder API on
+    // Windows, which makes an overridden home (hermetic test fixtures, or a
+    // user override) invisible there.
+    let home = std::env::home_dir().unwrap_or_else(|| PathBuf::from("~"));
 
     for name in USER_CONFIG_NAMES {
         let path = home.join(name);

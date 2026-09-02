@@ -128,6 +128,7 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 | Runaway content guards | Three volume backstops — `exit_expressions`, `runaway_repetition` (≥30 cycles), `runaway_volume` (50k lines / 32 MiB) — mapping to `Aborted`/`AgentFailure`, never a retry | [Timeouts § Content guards](timeouts.md#content-guards-runaway-output) |
 | OpenCode stalled-generation | Live-but-dead backstop: trips only on retry churn **and** progress silence (`stall_timeout`, default `10m`); not a third timeout | [Timeouts § Stall](timeouts.md#opencode-stalled-generation-backstop) · [OpenCode Event Sources](opencode-event-sources.md) |
 | Signals | One signal-aware wait loop across every spawn path; per-press stderr feedback, `SIGTERM → SIGKILL` ladder, `_exit(130)` second-press guard, Windows parity | [Signal Handling](signal-handling.md) |
+| Child environments | One process-entry launch snapshot contributes absolute `AGENT_CWD` to every std/Tokio child; ordinary invocations overwrite inherited state, while `handle` retains only an absolute wrapper value; a committed spawn inventory guards both source trees | [Architecture](architecture.md#library-module-structure) |
 | Transient overlays | Written under `<repo_root>/.claudine/tmp/` (or `<launch_cwd>/.claudine-tmp/`), cleaned up on `Drop` | [System Prompt](system-prompt.md) |
 | Schema validation | `$schema` runs Darkmatter `SimplifiedSchema`; typed errors, `null`-as-absent, a biscuit-tui prompt loop for required-missing values | [Composition § Schema](composition.md#schema-validation) |
 | Error architecture | One discovery seam (`as_diagnostic`) + one role-based selection walk; rendering, `err.*`, and machine output all project the **same** effective diagnostic. Read before adding an error type or a catalog code | [Error Architecture](error-architecture.md) |
@@ -184,7 +185,7 @@ behavior changes.
 - [Messaging](messaging.md) — outbound routes (Discord/Slack/Signal/WhatsApp), the config-TUI route manager, webhook redaction invariants, the desktop-notification boundary
 - [Traces and Logging](traces-and-logging.md), [Log Reporting](log-reporting.md)
 - [CLI Pre-Parsing](cli-pre-parsing.md) — argv normalization pipeline; rule-by-rule reference in [argv-normalization.md](argv-normalization.md)
-- [Shell Completions](completions/shell-completions.md) — dynamic completion engine, per-mode pipelines, magic `@` resolution
+- [Shell Completions](completions/shell-completions.md) — dynamic completion engine, per-mode pipelines, and shared `@`/`&`/`^`/implicit file-reference resolution
 
 ## Research on Agentic CLI Platforms
 

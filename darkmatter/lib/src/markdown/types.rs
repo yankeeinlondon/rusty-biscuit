@@ -228,6 +228,17 @@ pub enum MarkdownError {
         /// Top-level caller-supplied frontmatter property whose typing drifted.
         property: String,
     },
+
+    /// A caller-supplied schema-typed file value could not be materialized.
+    #[error("Parameter binding failed for `{property}` value `{provided}`: {reason}")]
+    ParameterBinding {
+        /// Top-level frontmatter property receiving the caller value.
+        property: String,
+        /// Raw caller input retained for diagnostics and fresh preparation.
+        provided: String,
+        /// Actionable reason the value could not acquire a stable path shape.
+        reason: String,
+    },
 }
 
 impl From<crate::markdown::compose::TransclusionError> for MarkdownError {
@@ -362,6 +373,11 @@ impl BlockError for MarkdownError {
             MarkdownError::CallerFileClassificationChanged { property } => {
                 blocks::caller_file_classification_changed_block(property)
             }
+            MarkdownError::ParameterBinding {
+                property,
+                provided,
+                reason,
+            } => blocks::parameter_binding_block(property, provided, reason),
         }
     }
 

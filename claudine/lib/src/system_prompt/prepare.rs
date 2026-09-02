@@ -165,6 +165,16 @@ fn compose_prompt_markdown(
         options = options.with_file_resolution_context(
             source_context.file_resolution_context().clone(),
         );
+    } else if shared_ctx.is_none()
+        && shell_cwd.is_none()
+        && let Some(path) = source_path(source)
+        && let Some(parent) = path.parent()
+    {
+        let policy_root = biscuit_file::find_git_root(parent)
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| parent.to_path_buf());
+        options = options.with_shell_policy_root(policy_root);
     }
     // Attach the baseline schema for discovered `system-prompt.md` files
     // only — explicit flags carry their own mode and the non-interactive

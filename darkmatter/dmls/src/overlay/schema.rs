@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
-use darkmatter::markdown::compose::find_git_root_from;
 use darkmatter::markdown::schemas::resolve::{merge_baseline, resolve_schema};
 use darkmatter::markdown::schemas::{
     DarkmatterSchemas, EffectiveSchema, PatternKey, PropertyAtom, PropertyDef, SchemaArm,
@@ -929,11 +928,7 @@ pub fn trigger_boundary(doc_path: &Path, workspace_roots: &[PathBuf]) -> Option<
         .iter()
         .filter(|root| doc_path.starts_with(root))
         .max_by_key(|root| root.components().count())?;
-    let start = doc_path.parent().unwrap_or(doc_path);
-    match find_git_root_from(start) {
-        Some(repo) if repo.starts_with(workspace) => Some(repo),
-        _ => Some(workspace.clone()),
-    }
+    Some(workspace.clone())
 }
 
 /// The Darkmatter base baseline with matching extension baselines merged over

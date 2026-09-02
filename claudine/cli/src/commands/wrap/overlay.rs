@@ -151,6 +151,7 @@ mod tests {
                 "source_file: 'file(eager; required)'\n",
                 "prepared_area: string(required)\n",
                 "prepared_repo: string(required)\n",
+                "prepared_cwd: string(required)\n",
             ),
         )
         .unwrap();
@@ -164,6 +165,7 @@ mod tests {
                 "source_file: spec.md\n",
                 "prepared_area: '{{ ctx.area }}'\n",
                 "prepared_repo: '{{ ctx.repo_root }}'\n",
+                "prepared_cwd: '{{ ctx.cwd }}'\n",
                 "---\n",
                 "Memory body.\n",
             ),
@@ -183,6 +185,10 @@ mod tests {
         .unwrap();
 
         assert_eq!(materialized.frontmatter["prepared_area"], serde_json::json!("alpha"));
+        assert_eq!(
+            materialized.frontmatter["prepared_cwd"],
+            serde_json::json!(biscuit_file::to_portable_string(&launch_dir))
+        );
         assert_eq!(
             materialized.frontmatter["prepared_repo"],
             serde_json::json!(biscuit_file::to_portable_string(&launch_repo))

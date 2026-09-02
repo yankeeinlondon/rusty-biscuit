@@ -127,6 +127,8 @@ pub use shell_expansion::ShellTimeoutBehavior;
 pub use context::effective_state::{EffectiveState, EffectiveStateBuilder};
 pub(crate) use context::effective_state::ResolvingLookup;
 pub use context::options::{CallerInputRecord, CallerInputRecords, ComposeOptions, ComposeSource};
+pub use context::capture_file_resolution_context;
+pub use context::repository_scope_catalog;
 pub(crate) use context::options::ReferenceGraphOptionsIdentity;
 pub use context::report::{ComposeReport, ComposeWarning, SourceRange};
 pub use context::runtime::ComposeContext;
@@ -146,9 +148,7 @@ pub(crate) use context::options::TransclusionOptions;
 // Shared helpers, re-exported so in-crate callers reach them as `compose::<name>`.
 pub use util::find_git_root_from;
 pub(crate) use util::{
-    abbreviate_path, document_resolution_context, find_package_area_from, find_target_range,
-    package_area_for_reference,
-    prepare_frontmatter_for_compose,
+    abbreviate_path, document_resolution_context, find_target_range, prepare_frontmatter_for_compose,
 };
 
 use super::Markdown;

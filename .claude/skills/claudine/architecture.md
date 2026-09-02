@@ -25,6 +25,7 @@ heading.
 claudine/lib/src/
 ├── actions/      → Hook action types and response model
 ├── badges/       → Styled terminal badge constants (YOLO, Non-Interactive, Interactive, etc.)
+├── child_environment.rs → Immutable process-entry launch directory and the sole `AGENT_CWD` contribution seam for std/Tokio children and complete environment maps
 ├── composition/  → Markdown frontmatter composition (inline and chained prompt pipelines)
 │   ├── coordinator/ → Active-document ownership: the typed DocumentTransition, the two-stage proxy handoff, and the four state layers (coordinator/{transition,handoff,commit,invocation,document,active}.rs)
 │   ├── lifecycle/ → Lifecycle config/types, parsing, validation, actions, context, control, execution, and the pure transition core shared by composition preflight and the harness loop
@@ -65,6 +66,15 @@ claudine/lib/src/
 The per-provider modules under `lib/src/provider/<slug>/` split into two halves: `data.rs` is **generated** by `claudine-gen` (crate `claudine/gen`, sharing vocab enums with the leaf `claudine/catalog-types` crate) from roster + facts + research + overrides (regenerate with `claudine providers generate`; drift-checked in CI by the gen crate's drift test / `claudine-gen check`, which also verify the committed `docs/providers/catalog.json` superset), while `behavior.rs` is hand-written. Never edit a `data.rs` by hand — change the owning input file and regenerate.
 
 **Dispatch drift guard (Phase I).** Decentralized `match Provider` / `matches!` / `==` / `!=` dispatch is prevented from regrowing by one site-level guard in `claudine-cli/tests/dispatch_inventory.rs`, covering **both** `lib/src` and `cli/src` (it retired the lib crate's earlier regex `no_unauthorized_match_provider_in_lib` guard). Every conditional, non-exempt dispatch site must be grandfathered in `GUARD_ALLOWLIST` with a tag + reason (the current sites are all `keep` — genuinely behavioral wire/shadow-HOME/stderr-bridge quirks and Claude's canonical linking role); a new one fails until migrated to a `ProviderInfo` field/trait or consciously listed. The live count is the allowlist length printed by the guard; the committed census is `docs/providers/dispatch-inventory.json`.
+
+**Child-process environment guard.** `child_environment` captures one absolute
+process-entry launch directory. Ordinary invocations ignore inherited
+`AGENT_CWD`; `claudine handle` retains an absolute wrapper-supplied value and
+rejects a relative one. Every production std/Tokio child receives the snapshot
+through `contribute_child_environment`, including complete provider environment
+maps. `claudine-cli/tests/spawn_inventory.rs` scans both production source trees
+and byte-compares `docs/providers/spawn-seam-inventory.json`; regenerate with
+the command stored in that artifact after an intentional spawn change.
 
 ## Event Support Matrix
 

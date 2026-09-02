@@ -418,7 +418,7 @@ pub struct ComposeOptions {
     /// Per D2 the launch directory is a base for **top-level** references only;
     /// it is **not** a resolution fallback for references authored inside a
     /// nested document. Darkmatter's document-backed resolution is
-    /// repository-first then source-relative and never consults this directory,
+    /// document-first then repository-relative and never consults this directory,
     /// so it is retained solely as a diagnostic facet (the `fallback_dir` field
     /// of a file-reference diagnostic) and as an authored `ComposeOptions`
     /// identity input. It participates in neither the resolution candidate order
@@ -543,15 +543,29 @@ impl ComposeOptions {
         {
             return;
         }
-        let base_dir = match &self.source {
-            ComposeSource::File(path) => path
-                .parent()
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| PathBuf::from(".")),
-            _ => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-        };
+        let base_dir = self.context.anchor().to_path_buf();
         self.context = ComposeContext::capture_for_document(&base_dir, document);
         self.context_is_ambient_default = false;
+    }
+
+    /// Capture file-resolution evidence once for an ambient compatibility request.
+    pub(crate) fn ensure_file_resolution_context(&mut self) {
+        if self.file_resolution_context.is_some() {
+            return;
+        }
+        let ambient = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let base_dir = match &self.source {
+            ComposeSource::File(path) => {
+                let absolute = if path.is_absolute() {
+                    path.clone()
+                } else {
+                    ambient.join(path)
+                };
+                absolute.parent().map(Path::to_path_buf).unwrap_or(ambient)
+            }
+            _ => ambient,
+        };
+        self.file_resolution_context = Some(super::capture::capture_file_resolution_context(&base_dir));
     }
 
     /// Creates new compose options using a pre-captured context.
@@ -1078,15 +1092,7 @@ impl ComposeOptions {
                 ctx.package_area().map(Path::to_path_buf),
                 ctx.home_dir().map(Path::to_path_buf),
             ),
-            None => {
-                let repository_root =
-                    crate::markdown::compose::util::find_git_root_from(&base_dir);
-                let package_area = crate::markdown::compose::util::find_package_area_from(
-                    &base_dir,
-                    repository_root.as_deref(),
-                );
-                (repository_root, package_area, dirs::home_dir())
-            }
+            None => (None, None, dirs::home_dir()),
         };
         let mut context = super::super::expression::ResolutionContext::new(base_dir);
         context.repository_root = repository_root;
@@ -1135,15 +1141,7 @@ impl ComposeOptions {
                 ctx.package_area().map(Path::to_path_buf),
                 ctx.home_dir().map(Path::to_path_buf),
             ),
-            None => {
-                let repository_root =
-                    crate::markdown::compose::util::find_git_root_from(&base_dir);
-                let package_area = crate::markdown::compose::util::find_package_area_from(
-                    &base_dir,
-                    repository_root.as_deref(),
-                );
-                (repository_root, package_area, dirs::home_dir())
-            }
+            None => (None, None, dirs::home_dir()),
         };
         let mut context = super::super::expression::ResolutionContext::new(base_dir);
         context.repository_root = repository_root;
@@ -1175,6 +1173,7 @@ impl ComposeOptions {
             policy_root: self.shell_policy_root.clone(),
             working_directory: self.shell_working_directory.clone(),
             approval_handler: self.shell_approval_handler.clone(),
+            file_resolution_context: self.file_resolution_context.clone(),
             strip_ansi: self.shell_strip_ansi,
         }
     }
@@ -2074,7 +2073,8 @@ impl ComposeOptions {
             enc.tag(match provenance.candidate_provenance {
                 biscuit_file::RootProvenance::Repository => 0,
                 biscuit_file::RootProvenance::Source => 1,
-                biscuit_file::RootProvenance::Package => 2,
+                biscuit_file::RootProvenance::PackageRoot => 2,
+                biscuit_file::RootProvenance::PackageArea => 7,
                 biscuit_file::RootProvenance::Home => 3,
                 biscuit_file::RootProvenance::Magic => 4,
                 biscuit_file::RootProvenance::Vault => 5,
@@ -2625,6 +2625,39 @@ mod tests {
              Construct with `new_with_context(ComposeContext::capture_for_document(..))` \
              when a document is in hand, or `ComposeContext::capture()` for a deliberate \
              full snapshot.",
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn ambient_context_upgrade_keeps_the_request_launch_anchor() {
+        struct RestoreCwd(PathBuf);
+        impl Drop for RestoreCwd {
+            fn drop(&mut self) {
+                let _ = std::env::set_current_dir(&self.0);
+            }
+        }
+
+        let original = std::env::current_dir().unwrap();
+        let _restore = RestoreCwd(original);
+        let launch = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(launch.path()).unwrap();
+        // The anchor is captured as `current_dir()` reports it (symlink-resolved
+        // on macOS, legacy short-name spelling on Windows) — not `canonicalize`,
+        // whose verbatim `\\?\` form never enters the context.
+        let expected = std::env::current_dir().unwrap();
+        let mut options = ComposeOptions::new();
+
+        std::env::set_current_dir(target.path()).unwrap();
+        options.source = ComposeSource::File(target.path().join("prompt.md"));
+        let document: crate::markdown::Markdown = "{{ ctx.cwd }}".into();
+        options.upgrade_ambient_context_for(&document);
+
+        assert_eq!(options.context.anchor(), expected);
+        assert_eq!(
+            options.context.get("cwd"),
+            Some(&serde_json::json!(biscuit_file::to_portable_string(&expected))),
         );
     }
 

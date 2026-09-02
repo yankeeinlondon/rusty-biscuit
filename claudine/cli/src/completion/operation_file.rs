@@ -59,7 +59,14 @@ fn operation_file_basename(reference: &str) -> Option<&OsStr> {
             let tail = payload.strip_prefix('@')?;
             tail.strip_prefix('/').unwrap_or(tail)
         }
-        FileReferenceKind::Package => payload.strip_prefix('!')?,
+        FileReferenceKind::RepositoryRoot => {
+            let tail = payload.strip_prefix('&')?;
+            tail.strip_prefix('/').unwrap_or(tail)
+        }
+        FileReferenceKind::RepositoryScoped => {
+            let tail = payload.strip_prefix('^')?;
+            tail.strip_prefix('/').unwrap_or(tail)
+        }
         FileReferenceKind::Home => payload
             .strip_prefix("~/")
             .or_else(|| payload.strip_prefix("~\\"))

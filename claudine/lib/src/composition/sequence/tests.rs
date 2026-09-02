@@ -435,7 +435,7 @@ fn magic_reference_resolves_from_source_git_root() {
 }
 
 #[test]
-fn package_reference_resolves_from_current_package_area() {
+fn repository_scoped_reference_resolves_from_current_package_area() {
     let dir = TempDir::new().unwrap();
     init_git_repo(dir.path());
 
@@ -468,7 +468,7 @@ edition = "2024"
     fs::create_dir_all(source_path.parent().unwrap()).unwrap();
     fs::write(&source_path, "---\n---\nbody\n").unwrap();
 
-    let resolved = resolve_sequence_reference("!README.md", &source_path).unwrap();
+    let resolved = resolve_sequence_reference("^README.md", &source_path).unwrap();
     assert_eq!(
         resolved.canonicalize().unwrap(),
         target.canonicalize().unwrap()
@@ -476,12 +476,12 @@ edition = "2024"
 }
 
 /// The adapter captures the package area at the request boundary (via `sniff`)
-/// and supplies it on the explicit context, so a `!` reference resolves under
+/// and supplies it on the explicit context, so a `^` reference resolves under
 /// the package area even when a same-named file also sits at the repository
 /// root. A plain repository-root fallback would have selected the root twin;
 /// the captured package-area anchor is authoritative (D2).
 #[test]
-fn package_reference_uses_captured_package_area_over_repository_root() {
+fn repository_scoped_reference_uses_captured_package_area_over_repository_root() {
     let dir = TempDir::new().unwrap();
     init_git_repo(dir.path());
 
@@ -518,7 +518,7 @@ edition = "2024"
     fs::create_dir_all(source_path.parent().unwrap()).unwrap();
     fs::write(&source_path, "---\n---\nbody\n").unwrap();
 
-    let resolved = resolve_sequence_reference("!steps.yaml", &source_path).unwrap();
+    let resolved = resolve_sequence_reference("^steps.yaml", &source_path).unwrap();
     assert_eq!(
         resolved.canonicalize().unwrap(),
         target.canonicalize().unwrap(),
@@ -642,12 +642,12 @@ fn tilde_reference_expands_against_home_directory() {
     assert_eq!(resolved, home_dir.join("steps.yaml"));
 }
 
-/// An implicit (bare) external sequence reference is repository-first (D4):
+/// Finalized-reference D3 supersedes ctx-launch-anchor review-3 Finding 4:
+/// an implicit document-authored external sequence reference is source-first:
 /// with the same basename at the repository root and the source directory, the
-/// repository-root copy wins. The migration replaced the old source-relative
-/// join that never tried the repository root.
+/// source-directory copy wins.
 #[test]
-fn implicit_reference_is_repository_first() {
+fn implicit_reference_is_source_first() {
     let dir = TempDir::new().unwrap();
     init_git_repo(dir.path());
 
@@ -665,8 +665,13 @@ fn implicit_reference_is_repository_first() {
     let resolved = resolve_sequence_reference("steps.yaml", &source_path).unwrap();
     assert_eq!(
         resolved.canonicalize().unwrap(),
-        dir.path().join("steps.yaml").canonicalize().unwrap(),
-        "implicit reference must resolve repository-first, not source-relative",
+        source_path
+            .parent()
+            .unwrap()
+            .join("steps.yaml")
+            .canonicalize()
+            .unwrap(),
+        "implicit reference must resolve from the source directory first",
     );
 }
 
@@ -1398,12 +1403,12 @@ mod grammar_tests {
     }
 
     /// The reference families that would break a naive splitter: `@` magic,
-    /// `!` package, `~`, `vault:`, spaces, and `{{ }}` interpolation.
+    /// `^` repository scope, `~`, `vault:`, spaces, and `{{ }}` interpolation.
     #[test]
     fn reference_families_are_preserved_verbatim() {
         for raw in [
             "@prompts/steps.yaml",
-            "!lib/steps.yaml",
+            "^lib/steps.yaml",
             "~/steps.yaml",
             "vault:notes/steps.yaml",
             "./my folder/steps.yaml",

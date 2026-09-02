@@ -19,9 +19,15 @@
 # lines — so a recipe change covers the whole workspace; `--lint-only` keeps
 # that tractable.
 #
+# Also replicated: preflight's CI-infra self-test suite
+# (`scripts/ci/test_affected_scope.py`, ~1s on every run). It is what catches
+# a stale scope fixture — e.g. a new workspace dependency edge — locally
+# instead of on three preflight cells.
+#
 # Not replicated: L2/L3/browser tiers, WSL archives, companion suites, and the
-# Windows runner. Use `just test-l2` inside an area, and the `build-win-native`
-# host, for those. CI stays the proof; this is the discovery loop.
+# Windows runner. Use `just test-l2` inside an area, and `just cross-check
+# <pkg>` for the Linux/Windows build hosts. CI stays the proof; this is the
+# discovery loop.
 #
 # Usage:
 #   just ci-local                       affected packages vs origin/main
@@ -131,6 +137,18 @@ ci-local *args="":
     passed=()
     failed=()
     SECONDS=0
+
+    # Preflight parity: CI runs this exact suite on every OS before any
+    # package gate. Quiet on success; full unittest output on failure.
+    selftest_log="$(mktemp "${TMPDIR:-/tmp}/biscuit-ci-local-selftest.XXXXXX")"
+    if python3 scripts/ci/test_affected_scope.py > "${selftest_log}" 2>&1; then
+        passed+=("preflight ci-infra self-test")
+    else
+        cat "${selftest_log}"
+        failed+=("preflight ci-infra self-test")
+    fi
+    rm -f "${selftest_log}"
+
     while IFS= read -r package; do
         [[ -n "${package}" ]] || continue
         test_args="$(jq -r --arg p "${package}" '.matrix[] | select(.package == $p) | .test_args // ""' "${scope_file}")"

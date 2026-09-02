@@ -1,8 +1,8 @@
 //! Phase 4 integration tests: the implicit-relative precedence flip and the
 //! OQ1 interpolation-reclassification rule.
 //!
-//! Implicit relative references now resolve **repository root first, then the
-//! source/base directory**. Explicit `./`/`../` references keep their single
+//! Implicit relative references resolve **the source/base directory first,
+//! then the repository root**. Explicit `./`/`../` references keep their single
 //! base-relative candidate with no fallback. Environment interpolation
 //! reclassifies filesystem anchoring for the local family (OQ1 option 2) and
 //! rejects any injected grammar sigil.
@@ -45,7 +45,7 @@ fn repo_and_base(tmp: &TempDir) -> (std::path::PathBuf, std::path::PathBuf) {
 }
 
 #[test]
-fn implicit_both_exist_repository_candidate_wins() {
+fn implicit_both_exist_source_candidate_wins() {
     let tmp = TempDir::new().unwrap();
     let (repo, base) = repo_and_base(&tmp);
 
@@ -61,8 +61,8 @@ fn implicit_both_exist_repository_candidate_wins() {
 
     assert_eq!(
         resolved.as_deref(),
-        Some(repo.join("shared.md").as_path()),
-        "repository candidate wins on a name collision",
+        Some(base.join("shared.md").as_path()),
+        "source candidate wins on a name collision",
     );
 }
 
@@ -147,8 +147,8 @@ fn implicit_when_base_is_repository_root_dedupes_to_one_candidate() {
     assert_eq!(candidates.len(), 1, "equal roots collapse to one candidate");
     assert_eq!(
         candidates[0].candidate().provenance(),
-        RootProvenance::Repository,
-        "the surviving candidate carries repository provenance",
+        RootProvenance::Source,
+        "the surviving candidate carries source provenance",
     );
 }
 
@@ -231,6 +231,8 @@ fn interpolation_injecting_a_sigil_is_rejected() {
     // as that kind; grammar sigils stay author-controlled.
     for (var, injected) in [
         ("MAGIC", "@docs/spec.md"),
+        ("REPOSITORY", "&docs/spec.md"),
+        ("SCOPED", "^docs/spec.md"),
         ("PKG", "!README.md"),
         ("VAULT_REF", "vault:notes.md"),
         ("REMOTE", "https://example.com/a.md"),
@@ -293,7 +295,7 @@ fn recursive_interpolation_reclassifies_and_resolves_local_paths() {
             "implicit.md",
             repo.join("nested/implicit.md"),
             FileReferenceKind::ImplicitRelative,
-            vec![RootProvenance::Repository, RootProvenance::Source],
+            vec![RootProvenance::Source, RootProvenance::Repository],
         ),
     ];
 
@@ -326,6 +328,8 @@ fn recursive_interpolation_injecting_a_sigil_is_rejected_before_root_planning() 
 
     for (var, injected) in [
         ("MAGIC", "@docs/spec.md"),
+        ("REPOSITORY", "&docs/spec.md"),
+        ("SCOPED", "^docs/spec.md"),
         ("PACKAGE", "!README.md"),
         ("RECURSIVE", "%deep.md"),
         ("VAULT", "vault:notes.md"),
@@ -396,7 +400,9 @@ fn verbatim_anchor_resolves_a_slash_separated_reference() {
 
 /// A caller-supplied repository root and base commonly reach the resolver from
 /// different producers (`gix` discovery yields legacy, `canonicalize` yields
-/// verbatim). Two spellings of one directory must not become two candidates.
+/// verbatim). Two spellings of one directory must not become two candidates,
+/// and the survivor carries the same source provenance as the same-spelling
+/// collapse in [`implicit_when_base_is_repository_root_dedupes_to_one_candidate`].
 #[cfg(windows)]
 #[test]
 fn verbatim_and_legacy_spellings_of_one_root_dedupe_to_one_candidate() {
@@ -413,14 +419,14 @@ fn verbatim_and_legacy_spellings_of_one_root_dedupe_to_one_candidate() {
     assert_eq!(candidates.len(), 1, "one directory yields one candidate");
     assert_eq!(
         candidates[0].candidate().provenance(),
-        RootProvenance::Repository,
+        RootProvenance::Source,
     );
     assert_eq!(detailed.matched_path(), Some(plain.join("top.md").as_path()));
 }
 
 #[test]
 fn special_kinds_are_unchanged_by_the_flip() {
-    // Magic, package, and vault references keep their own root order; the
+    // Magic, repository-scoped, and vault references keep their own root order; the
     // implicit flip does not touch them.
     let tmp = TempDir::new().unwrap();
     let (repo, base) = repo_and_base(&tmp);

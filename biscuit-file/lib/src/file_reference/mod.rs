@@ -1,16 +1,16 @@
 //! File reference parsing and resolution.
 //!
 //! A file reference is a compact string descriptor (e.g. `@docs/spec.md`,
-//! `!README.md`, `vault:notes/today.md`) that can be resolved lazily against
-//! runtime context such as the working directory, git repository root,
-//! Cargo workspace layout, and configured paths.
+//! `&README.md`, `^docs/plan.md`) that can be resolved lazily against
+//! runtime context such as the working directory, a caller-supplied repository
+//! scope catalog, and configured paths.
 //!
 //! ## Examples
 //!
 //! ```rust,no_run
 //! use biscuit_file::FileReference;
 //!
-//! // Magic reference -- searches repo root, then HOME
+//! // Magic reference -- searches captured package, repository, and home scopes
 //! let file_ref = FileReference::new("@docs/spec.md")?;
 //! let resolved = file_ref.resolve()?;
 //! if let Some(path) = resolved {
@@ -35,9 +35,11 @@ pub use error::FetchError;
 
 /// Pure path-discovery helpers shared by magic (`@`) resolution. Exposed so
 /// callers can register convention magic search roots (e.g. a tool's
-/// `prompts/` directories) computed from the same git-root / package-area /
-/// home anchors the resolver itself uses.
-pub use context::{FileResolutionContext, find_git_root, find_package_area, home_dir};
+/// `prompts/` directories) around the resolver's intrinsic scope roots.
+pub use context::{
+    FileResolutionContext, PackageAreaFallback, RepositoryScope, RepositoryScopeCatalog,
+    RepositoryScopeCatalogError, find_git_root, home_dir,
+};
 
 /// The classified kind of a file reference.
 ///
@@ -56,8 +58,10 @@ pub enum FileReferenceKind {
     Absolute,
     /// `@foo` -- magic-root search.
     Magic,
-    /// `!foo` -- package-area resolution.
-    Package,
+    /// `&foo` -- repository-root resolution.
+    RepositoryRoot,
+    /// `^foo` -- repository-scoped, most-specific-first resolution.
+    RepositoryScoped,
     /// `~`, `~/foo` (and the Windows `~\foo` spelling) -- pinned to the user's
     /// home directory. `~user` is unsupported.
     Home,
@@ -89,8 +93,10 @@ pub enum RootProvenance {
     Repository,
     /// The source document/base directory.
     Source,
-    /// The Cargo package area.
-    Package,
+    /// The package root containing the reference base.
+    PackageRoot,
+    /// The package-area root containing the reference base.
+    PackageArea,
     /// The user's home directory.
     Home,
     /// A configured magic (`@`) search root.
@@ -332,6 +338,10 @@ pub enum CompletionEntryForm {
     /// `@`-prefixed magic path. Roots are the enclosing git root and the
     /// user's home directory.
     Magic,
+    /// `&`-prefixed path rooted at the repository.
+    RepositoryRoot,
+    /// `^`-prefixed path searched through package, area, and repository roots.
+    RepositoryScoped,
     /// Bare implicit-relative path. Roots are the enclosing git root and the
     /// caller-provided base directory (in that order, when distinct).
     ImplicitRelative,
@@ -503,30 +513,6 @@ impl FileReference {
         self
     }
 
-    /// Prepend the current Cargo workspace package area as a magic search root.
-    ///
-    /// When the current working directory lives inside a Cargo workspace member
-    /// (or at a workspace area root), magic (`@`) lookups will first search the
-    /// package area before falling back to the git repository root and HOME.
-    /// This is useful for monorepos where prompts or config files live alongside
-    /// the package, e.g. `@prompts/commit.md` resolving to
-    /// `<workspace>/<area>/prompts/commit.md` when invoked from inside that area.
-    ///
-    /// If the current directory is not inside a Cargo workspace (or metadata
-    /// cannot be loaded), this is a no-op.
-    pub fn with_package_area_magic_path(self) -> Self {
-        let Ok(cwd) = std::env::current_dir() else {
-            return self;
-        };
-        let Ok(Some(git_root)) = context::find_git_root(&cwd) else {
-            return self;
-        };
-        match context::find_package_area(&git_root, &cwd) {
-            Ok(Some(area)) => self.add_magic_path(area, PathPosition::Start),
-            _ => self,
-        }
-    }
-
     /// Add a vault root for `vault:` references.
     pub fn add_vault(mut self, path: impl Into<PathBuf>) -> Self {
         self.vault_roots.push(path.into());
@@ -535,8 +521,8 @@ impl FileReference {
 
     /// Resolve the reference to an absolute filesystem path.
     ///
-    /// Uses the ambient process working directory for relative, `@`, and
-    /// `!` lookups. When the reference comes from a document or file whose
+    /// Uses the ambient process working directory for relative, `@`, `&`, and
+    /// `^` lookups. When the reference comes from a document or file whose
     /// own location should drive resolution, prefer [`resolve_from`].
     ///
     /// ## Returns
@@ -557,8 +543,9 @@ impl FileReference {
 
     /// Resolve the reference treating `base` as the working directory.
     ///
-    /// This overrides the ambient process CWD used for relative, `@`
-    /// (magic), and `!` (package) lookups. Use this when a reference
+    /// This overrides the ambient process CWD used for relative, `@` (magic),
+    /// `&` (repository-root), and `^` (repository-scoped) lookups. Use this
+    /// when a reference
     /// appears inside a document or file and should be resolved relative
     /// to *that file's* location rather than wherever the current process
     /// happens to be running.
@@ -726,6 +713,23 @@ impl FileReference {
         Ok(candidates)
     }
 
+    /// Validate an unprobed `&` or `^` candidate against its repository root.
+    pub fn validate_repository_candidate(
+        &self,
+        candidate: &Path,
+        repository_root: &Path,
+    ) -> Result<(), FileReferenceError> {
+        let Some(sigil) = resolve::repository_sigil(&self.parsed.kind) else {
+            return Ok(());
+        };
+        resolve::validate_repository_containment(
+            sigil,
+            &self.raw,
+            candidate,
+            repository_root,
+        )
+    }
+
     /// Expand a partial completion token into its implied roots and segments.
     ///
     /// Given a (possibly incomplete) reference string like `@prompts/p` and
@@ -734,20 +738,22 @@ impl FileReference {
     /// last `/`), and the prefix the shell will insert in front of each
     /// candidate.
     ///
-    /// Only two entry forms are supported: `@`-prefixed magic paths and
-    /// implicit-relative paths. All other forms (`!`, `/`, `./`, `../`,
-    /// `vault:`, `%`, `{{...}}`) return `Ok(None)` so callers can cleanly
-    /// opt out rather than silently re-interpret them.
+    /// Four entry forms are supported: `@`-prefixed magic paths, `&` repository
+    /// paths, `^` repository-scoped paths, and implicit-relative paths. Other
+    /// valid forms return `Ok(None)` so callers can cleanly opt out rather than
+    /// silently re-interpret them. Malformed forms retain their parse errors.
     ///
     /// Resolution rules:
     ///
     /// - Path-separator reset: the active segment is the portion after the
     ///   last `/`. Everything up to and including that `/` is the
     ///   "scope", which is appended to each implied root.
-    /// - Magic form: roots are `{git_root, home_dir}` (in that order),
-    ///   each with the scope appended.
-    /// - Implicit relative: roots are `{git_root, base}` (distinct), each
-    ///   with the scope appended.
+    /// - Magic form: configured prepends, package root, package-area root,
+    ///   repository root, home, then configured appends.
+    /// - Repository root: the repository root only.
+    /// - Repository scoped: package root, package-area root, then repository
+    ///   root.
+    /// - Implicit relative: base first, then repository root.
     ///
     /// Markdown filtering, ranking, and typed-length policy are not
     /// applied here -- they are the caller's responsibility.
@@ -783,7 +789,7 @@ impl FileReference {
     /// `Magic` form in particular now surfaces the context's configured magic
     /// roots, which the ambient [`complete_partial`] cannot see.
     ///
-    /// The two supported entry forms and the returned shape are identical to
+    /// The supported entry forms and the returned shape are identical to
     /// [`complete_partial`].
     ///
     /// ## Returns
@@ -874,6 +880,7 @@ impl FileReference {
 
 #[derive(Debug, Clone)]
 pub(crate) struct ParsedReference {
+    pub authored: String,
     pub recursive: bool,
     pub kind: ReferenceKind,
 }
@@ -884,7 +891,9 @@ pub(crate) enum ReferenceKind {
     ImplicitRelative(PathTemplate),
     Absolute(PathTemplate),
     Magic(PathTemplate),
-    Package(PathTemplate),
+    RepositoryRoot(PathTemplate),
+    RepositoryScoped(PathTemplate),
+    #[allow(dead_code)]
     Home(PathTemplate),
     Vault(PathTemplate),
     Url(PathTemplate),
@@ -897,7 +906,8 @@ impl ReferenceKind {
             | Self::ImplicitRelative(t)
             | Self::Absolute(t)
             | Self::Magic(t)
-            | Self::Package(t)
+            | Self::RepositoryRoot(t)
+            | Self::RepositoryScoped(t)
             | Self::Home(t)
             | Self::Vault(t)
             | Self::Url(t) => t,
@@ -911,7 +921,8 @@ impl ReferenceKind {
             Self::ImplicitRelative(_) => FileReferenceKind::ImplicitRelative,
             Self::Absolute(_) => FileReferenceKind::Absolute,
             Self::Magic(_) => FileReferenceKind::Magic,
-            Self::Package(_) => FileReferenceKind::Package,
+            Self::RepositoryRoot(_) => FileReferenceKind::RepositoryRoot,
+            Self::RepositoryScoped(_) => FileReferenceKind::RepositoryScoped,
             Self::Home(_) => FileReferenceKind::Home,
             Self::Vault(_) => FileReferenceKind::Vault,
             Self::Url(_) => FileReferenceKind::Url,

@@ -10,6 +10,7 @@ Environment Variables:
 • INTERNAL_TOKEN
 • OPENAI_API_KEY
 • AGENT=codex
+• AGENT_CWD=<workspace>/cwd
 • AGENT_PARAMS=["--include","OPENAI_API_KEY","--","--version"]
 • CLAUDINE_INTERACTIVE=1
 • CLAUDINE_PID=<redacted>
@@ -17,12 +18,10 @@ Environment Variables:
 • INTERACTIVE=true
 • PWD=<workspace>/cwd
 • YOLO=false
-- Info: potentially dangerous ENV variables were removed; if you need one of
-   these to be included use the --include <ENV> CLI switch
+- Info: potentially dangerous ENV variables were removed; if you need one of these to be included use the --include <ENV> CLI switch
 
 ■ System Prompt (appended)
-┃ The system prompt was appended to; the content was composed from ./system-prom
-┃ pt.md. The composed system prompt is roughly 9 tokens.
+┃ The system prompt was appended to; the content was composed from ./system-prompt.md. The composed system prompt is roughly 9 tokens.
 ┃ 
 ┃ You are a test fixture system prompt.
 

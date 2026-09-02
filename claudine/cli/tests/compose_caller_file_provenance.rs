@@ -104,6 +104,15 @@ fn shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target(
         &spec,
         "---\nimplemented: true\nreview_iterations: 4\n---\nCase.\n",
     );
+    // The suggestions target implements an existing review; without it the
+    // derived `design` probe anchors at the prompt directory and never fires.
+    // It is already implemented so the router takes the implemented-spec
+    // branch and the target derives `review` itself rather than receiving the
+    // router's absolute `pending_review` through `proxy.with`.
+    write(
+        &package.join("fixes/case/review-4.md"),
+        "---\nimplemented: true\n---\n# Review 4\n",
+    );
 
     let router = fixture.cwd().join("prompts/implement.md");
     write(
@@ -135,7 +144,9 @@ fn shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target(
     let absent_design_prompt =
         std::fs::read_to_string(fixture.home().join("provider-prompt")).unwrap();
     let portable_package = biscuit_file::to_portable_string(&std::fs::canonicalize(&package).unwrap());
-    let derived_package = portable_package.trim_start_matches('/');
+    // Paths derived from the eager caller value project to the repository-
+    // relative display form, whatever spelling the temp repository carries.
+    let derived_package = "packages/example";
     for expected in [
         format!("**Specification:** @{portable_package}/fixes/case/spec.md"),
         format!("**Review:** @{derived_package}/fixes/case/review-4.md"),

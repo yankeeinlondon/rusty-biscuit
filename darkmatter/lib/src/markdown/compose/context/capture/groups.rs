@@ -2,11 +2,13 @@ use std::collections::HashSet;
 
 use crate::markdown::compose::expression::ExpressionFinder;
 
-use super::{agent, changes, datetime, docs, git, host, languages, repo};
+use super::{agent, changes, datetime, docs, git, host, invocation, languages, repo};
 
 /// Independently captured runtime-context domains.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ContextGroup {
+    /// Invocation-owned values that require no host or repository discovery.
+    Invocation,
     /// Clock, calendar, and timezone values.
     DateTime,
     /// Branch, worktree, and merge-conflict values.
@@ -30,8 +32,9 @@ pub enum ContextGroup {
 }
 
 impl ContextGroup {
-    pub(crate) fn all() -> [Self; 10] {
+    pub(crate) fn all() -> [Self; 11] {
         [
+            Self::Invocation,
             Self::DateTime,
             Self::Git,
             Self::Repo,
@@ -107,6 +110,7 @@ impl ContextRequirements {
 
 fn group_for_key(key: &str) -> Option<ContextGroup> {
     [
+        (ContextGroup::Invocation, invocation::KEYS),
         (ContextGroup::DateTime, datetime::KEYS),
         (ContextGroup::Git, git::KEYS),
         (ContextGroup::Repo, repo::KEYS),
@@ -163,8 +167,9 @@ mod tests {
     #[test]
     fn every_owned_key_has_exactly_one_group() {
         let domains = [
-            datetime::KEYS, git::KEYS, repo::KEYS, changes::KEYS, languages::KEYS, docs::KEYS,
-            host::OS_KEYS, host::HARDWARE_KEYS, host::GPU_KEYS, agent::KEYS,
+            invocation::KEYS, datetime::KEYS, git::KEYS, repo::KEYS, changes::KEYS,
+            languages::KEYS, docs::KEYS, host::OS_KEYS, host::HARDWARE_KEYS, host::GPU_KEYS,
+            agent::KEYS,
         ];
         let mut seen = HashSet::new();
         for keys in domains {
@@ -231,7 +236,7 @@ Today is {{ ctx.utc }} on {{ ctx.os }}.
     #[test]
     fn public_requirements_scan_every_context_group() {
         let requirements = ContextRequirements::for_content(
-            "{{ ctx.utc }} {{ ctx.branch }} {{ ctx.repo_root }} \
+            "{{ ctx.cwd }} {{ ctx.utc }} {{ ctx.branch }} {{ ctx.repo_root }} \
              {{ ctx.dirty_files }} {{ ctx.programming_languages_in_repo }} \
              {{ ctx.docs_readme }} {{ ctx.os }} {{ ctx.cpu_cores }} \
              {{ ctx.gpu }} {{ ctx.agent }}",
@@ -239,6 +244,28 @@ Today is {{ ctx.utc }} on {{ ctx.os }}.
 
         for group in ContextGroup::all() {
             assert!(requirements.contains(group), "missing group: {group:?}");
+        }
+    }
+
+    #[test]
+    fn cwd_is_owned_only_by_the_invocation_group() {
+        assert_eq!(group_for_key("cwd"), Some(ContextGroup::Invocation));
+        let requirements = ContextRequirements::for_content("{{ ctx.cwd }}");
+        assert!(requirements.contains(ContextGroup::Invocation));
+        assert!(!requirements.contains(ContextGroup::Repo));
+    }
+
+    #[test]
+    fn every_group_has_at_least_one_owned_key() {
+        for group in ContextGroup::all() {
+            assert!(
+                ["cwd", "now", "branch", "repo_root", "dirty_files",
+                    "programming_languages_in_repo", "docs_readme", "os", "cpu_cores",
+                    "gpu", "agent"]
+                    .into_iter()
+                    .any(|key| group_for_key(key) == Some(group)),
+                "capture group {group:?} has no key registry entry",
+            );
         }
     }
 }

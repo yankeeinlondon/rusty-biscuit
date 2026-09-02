@@ -121,7 +121,7 @@ pipeline, parameterised by a `ComposeMode`. Mode determines:
   set.
 
 All three also share the partial-length progression, fuzzy matching
-rules, magic-path resolution, `.gitignore` semantics, and the
+rules, file-reference resolution, `.gitignore` semantics, and the
 `MAX_CANDIDATES = 500` budget.
 
 ### Scopes
@@ -144,8 +144,9 @@ Default iteration order (`ScopeSet::iter_scopes`):
 5. **User Claudine scope** — `~/.claudine/prompts/`.
 6. **Extras** — mode-specific (see below).
 
-Magic-path roots come from Claudine's shared `prompt_magic_roots` builder and
-are expanded by `FileReference::complete_partial_in_context`:
+Magic convention roots come from Claudine's shared `prompt_magic_roots` builder
+and are expanded by `FileReference::complete_partial_in_context`. Because
+Claudine registers them as prepends, the complete effective `@` order is:
 
 1. **Discrete package** — `<pkg>/`, then `<pkg>/prompts/`.
 2. **Package area** — `<repo>/<area>/`, then `<repo>/<area>/prompts/`.
@@ -153,6 +154,7 @@ are expanded by `FileReference::complete_partial_in_context`:
 4. **Repo Claudine scope** — `<repo>/.claudine/prompts/`.
 5. **Repo document scopes** — `docs/`, then the agent-skill peers.
 6. **User Claudine scope** — `~/.claudine/prompts/`.
+7. **Intrinsic roots** — discrete package, package area, repository, then home.
 
 Runtime composition registers this identical ordered list. The package and
 area bare roots keep path-shaped values such as `@prompts/plan.md` resolvable;
@@ -258,8 +260,8 @@ Directory drilling is a Word-mode (non-`@`) behavior — type a bare path like
 
 #### Magic-path priority
 
-Magic resolution uses the shared package → package-area → repository → user
-order documented under [Scopes](#scopes).
+Magic resolution uses the full convention-prepend → package → package-area →
+repository → home order documented under [Scopes](#scopes).
 
 The user-global scope is **last**. The basename dedup keeps the closest
 occurrence, so a repo-local `plan.md` owns the `@plan.md` candidate's rank
@@ -272,6 +274,14 @@ launch by registering these same directories as magic search roots,
 closest-first; `biscuit_file::FileReference` returns the first existing
 candidate, so the nearest prompt wins. This mirrors the completion scope
 set, so anything the engine offers under `@` is resolvable at launch.
+
+### Repository `&` and `^` resolution
+
+Repository-root partials (`&...`) enumerate exactly the repository root.
+Repository-scoped partials (`^...`) enumerate the current package root, then
+the package-area root, then the repository root. Both preserve their sigil in
+the emitted value and apply the same repository-containment rules as execution.
+Unlike `@`, neither form consults convention roots or the user's home directory.
 
 ### Committed directory
 

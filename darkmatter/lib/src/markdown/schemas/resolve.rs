@@ -28,9 +28,7 @@ use std::{
 };
 
 use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext};
-use crate::markdown::compose::{
-    document_resolution_context, find_git_root_from, package_area_for_reference,
-};
+use crate::markdown::compose::document_resolution_context;
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use serde_yaml_ng::Value as YamlValue;
@@ -489,7 +487,7 @@ fn resolve_reference_in_context(
 
     // `$schema` references resolve through the shared document-backed context:
     // explicit `./`/`../` from the document directory only, implicit path
-    // references repository-root first then the document directory — the same
+    // references from the document directory first, then the repository root — the same
     // order the `file`-typed value references use. No ambient CWD is read.
     let path = resolve_file_reference_in_context(&file_ref, base_dir, request_context)
         .map_err(|source| SchemaError::Unresolved {
@@ -546,19 +544,9 @@ fn resolve_file_reference_in_context(
 ) -> Result<Option<PathBuf>, biscuit_file::FileReferenceError> {
     match request_context {
         Some(snapshot) => file_ref.resolve_in_context(&snapshot.for_base(base_dir)),
-        None => {
-            let repo_root = find_git_root_from(base_dir);
-            let package_area =
-                package_area_for_reference(file_ref, base_dir, repo_root.as_deref());
-            let context = document_resolution_context(
-                base_dir,
-                None,
-                &[],
-                repo_root.as_deref(),
-                package_area.as_deref(),
-            );
-            file_ref.resolve_in_context(&context)
-        }
+        None => file_ref.resolve_in_context(&document_resolution_context(
+            base_dir, None, &[], None,
+        )),
     }
 }
 
@@ -2789,7 +2777,7 @@ mod bare_name_phase3 {
     fn bare_name_rejects_special_and_recursive_classes() {
         for raw in [
             "@schema.yaml",
-            "!schema.yaml",
+            "^schema.yaml",
             "%schema.yaml",
             "vault:schema.yaml",
             "vault::schema.yaml",
@@ -2799,6 +2787,10 @@ mod bare_name_phase3 {
             let file_ref = FileReference::new(raw).unwrap();
             assert!(!is_bare_name(&file_ref), "{raw} must not be a bare name");
         }
+        assert!(matches!(
+            FileReference::new("!schema.yaml"),
+            Err(biscuit_file::FileReferenceError::InvalidSyntax(_))
+        ));
     }
 
     #[test]
@@ -2948,7 +2940,7 @@ mod bare_name_phase3 {
 
     #[test]
     fn bare_name_pins_to_schema_root_not_repository_root() {
-        // The precedence flip made implicit resolution repository-first. A
+        // The precedence flip made implicit resolution document-first. A
         // schema-root probe must stay pinned to its root: with a collision
         // between the repository root and a nearer configured schema root, the
         // schema root wins (feature review-1 Finding 4). An unpinned

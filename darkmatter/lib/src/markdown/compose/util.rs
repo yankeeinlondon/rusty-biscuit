@@ -8,7 +8,7 @@
 use super::Markdown;
 use super::context;
 use super::context::options::ComposeOptions;
-use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext, PathPosition};
+use biscuit_file::{FileResolutionContext, PathPosition};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -60,88 +60,26 @@ pub fn find_git_root_from(start: &Path) -> Option<PathBuf> {
     }
 }
 
-/// Resolve the package-area root containing `base_dir` within a previously
-/// captured repository boundary.
-pub(crate) fn find_package_area_from(
-    base_dir: &Path,
-    repository_root: Option<&Path>,
-) -> Option<PathBuf> {
-    let root = repository_root?;
-    let repo = sniff::filesystem::repo::detect_repo_structure(root)
-        .ok()
-        .flatten()?;
-    let area = repo.package_area_label_for_dir(base_dir)?;
-    Some(if area.as_ref() == "root" {
-        root.to_path_buf()
-    } else {
-        root.join(area.as_ref())
-    })
-}
-
-/// The package-area anchor for `file_ref`, discovered only when its kind can
-/// consume one.
-///
-/// Discovery walks the whole repository through sniff — ~530ms in this
-/// monorepo, and the dominant cost of resolving any reference that never reads
-/// the result. `biscuit_file` anchors on a package area for
-/// [`FileReferenceKind::Package`] alone, and gates repository-root discovery by
-/// kind for the same reason: an absolute, relative, home, or vault reference
-/// "cannot fail on a git error it never needed". Computing the area eagerly
-/// defeats that layering and pays the walk regardless.
-///
-/// Prefer this over calling [`find_package_area_from`] directly wherever a
-/// reference is in hand, so the gate lives in one place rather than at each
-/// ambient-fallback site.
-pub(crate) fn package_area_for_reference(
-    file_ref: &FileReference,
-    base_dir: &Path,
-    repository_root: Option<&Path>,
-) -> Option<PathBuf> {
-    (file_ref.class().kind == FileReferenceKind::Package)
-        .then(|| find_package_area_from(base_dir, repository_root))
-        .flatten()
-}
-
 /// Build an explicit, request-scoped [`FileResolutionContext`] for a
 /// document-backed reference.
 ///
 /// `base_dir` is the authoring document's directory (the base for the
 /// references it contains); `source_path`, when known, is the document file
-/// itself. The enclosing repository (worktree) root anchors implicit references
-/// repository-first then source-relative without rereading the ambient process
-/// CWD.
-///
-/// A `repository_root` computed once for the resolution pass (see
-/// [`ComposeOptions::expression_resolution_context`]) is reused when it
-/// lexically contains `base_dir` — the common case, including nested documents
-/// inside the same worktree. When the cached root does not contain `base_dir`
-/// (a nested document authored outside the entry worktree) or none was
-/// supplied, the root is discovered from `base_dir` via [`find_git_root_from`].
-/// A discovered or contained root is always an ancestor of `base_dir`, so the
-/// context's lexical-containment validation holds.
+/// itself. Repository, package, and package-area scopes come only from the
+/// request snapshot and are recomputed for the authoring document.
 ///
 /// [`ComposeOptions::expression_resolution_context`]: super::context::options::ComposeOptions::expression_resolution_context
 pub(crate) fn document_resolution_context(
     base_dir: &Path,
     source_path: Option<&Path>,
     magic_paths: &[(PathBuf, PathPosition)],
-    repository_root: Option<&Path>,
-    package_area: Option<&Path>,
+    request_context: Option<&FileResolutionContext>,
 ) -> FileResolutionContext {
-    let mut ctx = FileResolutionContext::new(base_dir);
-    if let Some(source) = source_path {
-        ctx = ctx.with_source_path(source);
-    }
-    let root = repository_root
-        .filter(|root| base_dir.starts_with(root))
-        .map(Path::to_path_buf)
-        .or_else(|| find_git_root_from(base_dir));
-    if let Some(root) = root {
-        ctx = ctx.with_repository_root(root);
-    }
-    if let Some(package_area) = package_area {
-        ctx = ctx.with_package_area(package_area);
-    }
+    let mut ctx = match (request_context, source_path) {
+        (Some(snapshot), Some(source)) => snapshot.for_source(source),
+        (Some(snapshot), None) => snapshot.for_base(base_dir),
+        (None, _) => FileResolutionContext::new(base_dir),
+    };
     for (path, position) in magic_paths {
         ctx = ctx.add_magic_path(path.clone(), *position);
     }
@@ -321,7 +259,7 @@ mod resolution_context_tests {
     //! [`FileReference::resolve_in_context`]. Cross-surface parity is therefore a
     //! property of this one helper: given the same base/source/repository inputs,
     //! every surface produces the identical context and the identical resolution.
-    //! Proving the seam repository-first on a real collision fixture proves the
+    //! Proving the seam document-first on a real collision fixture proves the
     //! shared contract for all of them at Level 1, where the resolution semantics
     //! live; only the terminal *rendering* of a failure needs Level 2.
 
@@ -330,7 +268,7 @@ mod resolution_context_tests {
     use std::fs;
 
     #[test]
-    fn seam_resolves_implicit_repository_first_and_explicit_source_only() {
+    fn seam_resolves_implicit_document_first_and_explicit_source_only() {
         let repo = tempfile::TempDir::new().unwrap();
         let root = repo.path();
         // `find_git_root_from` only needs a `.git` marker, matching the other
@@ -344,16 +282,15 @@ mod resolution_context_tests {
         fs::create_dir_all(&base).unwrap();
         fs::write(base.join("notes.md"), b"source decoy").unwrap();
 
-        let ctx: FileResolutionContext =
-            document_resolution_context(
-                &base,
-                Some(&base.join("router.md")),
-                &[],
-                Some(root),
-                None,
-            );
+        let request = FileResolutionContext::new(&base).with_repository_root(root);
+        let ctx: FileResolutionContext = document_resolution_context(
+            &base,
+            Some(&base.join("router.md")),
+            &[],
+            Some(&request),
+        );
 
-        // Implicit bare reference: repository candidate wins over the source
+        // Implicit bare reference: the source candidate wins over the repository
         // twin. Canonicalize both sides so an explicit `.` path component or a
         // `/var`->`/private/var` tempdir symlink cannot mask the anchor identity.
         let implicit = FileReference::new("notes.md")
@@ -363,9 +300,9 @@ mod resolution_context_tests {
             .map(|p| p.canonicalize().unwrap());
         assert_eq!(
             implicit,
-            Some(root.join("notes.md").canonicalize().unwrap()),
+            Some(base.join("notes.md").canonicalize().unwrap()),
             "every surface sharing this seam resolves implicit references \
-             repository-first",
+             document-first",
         );
 
         // Explicit `./` reference: pinned to the source directory, no fallback.
@@ -391,14 +328,16 @@ mod resolution_context_tests {
         fs::write(root.join("shared.md"), b"repository decoy").unwrap();
         fs::write(package_area.join("shared.md"), b"package").unwrap();
 
+        let request = FileResolutionContext::new(&base)
+            .with_repository_root(root)
+            .with_package_area(&package_area);
         let ctx = document_resolution_context(
             &base,
             Some(&base.join("guide.md")),
             &[],
-            Some(root),
-            Some(&package_area),
+            Some(&request),
         );
-        let resolved = FileReference::new("!shared.md")
+        let resolved = FileReference::new("^shared.md")
             .unwrap()
             .resolve_in_context(&ctx)
             .unwrap();

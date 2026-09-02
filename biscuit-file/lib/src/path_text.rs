@@ -44,6 +44,24 @@ pub fn to_portable_string(path: &Path) -> String {
     try_portable_string(path).unwrap_or_else(|| path.to_string_lossy().into_owned())
 }
 
+/// Canonicalize `path` and reduce a Windows verbatim-disk (`\\?\C:\...`)
+/// result to its legacy spelling when the reduction is faithful.
+///
+/// `std::fs::canonicalize` yields a verbatim path on Windows, which never
+/// compares equal — lexically or by component — to spellings from other
+/// producers (gix discovery, environment variables, CLI arguments). Any
+/// canonicalization whose result crosses a comparison or containment
+/// boundary should go through this function. On non-Windows hosts it is
+/// exactly `std::fs::canonicalize`.
+///
+/// ## Errors
+///
+/// Propagates the underlying `std::fs::canonicalize` error (for example,
+/// when `path` does not exist).
+pub fn canonicalize_simplified(path: &Path) -> std::io::Result<std::path::PathBuf> {
+    dunce::canonicalize(path)
+}
+
 #[cfg(windows)]
 fn has_non_disk_prefix(path: &Path) -> bool {
     use std::path::{Component, Prefix};

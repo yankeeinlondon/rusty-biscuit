@@ -556,12 +556,12 @@ fn effective_for_prompt(
 }
 
 /// `normalize_frontmatter` rewrites a present eager-`file` value to its
-/// repo-relative resolved path, and the caller's input `Value` is left
+/// document-relative resolved path, and the caller's input `Value` is left
 /// byte-identical (Decision #3: pure).
 #[test]
 fn normalize_frontmatter_rewrites_eager_file_and_leaves_input_untouched() {
     let repo = tempfile::tempdir().expect("tempdir");
-    // A `.git` marker makes the projection git-root-relative.
+    // The repository marker provides the secondary implicit candidate.
     std::fs::create_dir_all(repo.path().join(".git")).expect("git marker");
     std::fs::create_dir_all(repo.path().join("area")).expect("area dir");
     std::fs::write(repo.path().join("area/spec.md"), "# Spec\n").expect("write spec");
@@ -576,7 +576,7 @@ fn normalize_frontmatter_rewrites_eager_file_and_leaves_input_untouched() {
     let pending = HashSet::new();
     let outcome = effective.normalize_frontmatter(&input, &pending);
     assert!(outcome.changed, "expected the eager-file value to be rewritten");
-    assert_eq!(outcome.value["spec"], serde_json::json!("area/spec.md"));
+    assert_eq!(outcome.value["spec"], serde_json::json!("spec.md"));
     // Decision #3: the caller's input is never mutated.
     assert_eq!(input, snapshot, "normalize_frontmatter must not mutate its input");
 }
@@ -607,7 +607,7 @@ fn normalize_frontmatter_skips_pending_key_and_rewrites_sibling() {
     // Pending key is left verbatim.
     assert_eq!(outcome.value["spec"], serde_json::json!("$(echo spec.md)"));
     // Concrete sibling is rewritten.
-    assert_eq!(outcome.value["design"], serde_json::json!("area/design.md"));
+    assert_eq!(outcome.value["design"], serde_json::json!("design.md"));
 }
 
 /// Decision #3 regression: `validate_with_positions` keeps the documented

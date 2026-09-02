@@ -463,8 +463,9 @@ whether a local path exists; they operate on the resolved path shape.
 
 - Paths are resolved through `FileReference` against the document resolution
   context: explicit `./`/`../` paths from the source document's directory only,
-  bare implicit paths repository-root first then the source directory, plus the
-  document's magic (`@`) and package (`!`) roots for those reference forms.
+  bare implicit paths from the source directory first and then the repository
+  root, plus magic (`@`), repository-root (`&`), and repository-scoped (`^`)
+  forms.
 - Output paths use `/` as the separator, regardless of platform.
 - Missing local files are generally **not** an error for path helpers; existence
   is checked only when the operation genuinely needs it.

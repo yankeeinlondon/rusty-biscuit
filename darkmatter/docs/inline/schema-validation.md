@@ -101,7 +101,7 @@ A few behaviours worth knowing:
 
 - `additionalProperties` is `true` — documents may carry extra tooling-specific frontmatter without tripping the schema.
 - Unrecognized constraints are a **hard error at compile time**, so typos surface immediately rather than being silently ignored.
-- `file` is **lazy by default**: a bare `file` value is only checked for syntactic validity (it must parse as a biscuit-file reference) and is never resolved against the filesystem. Add `eager` (`file(eager)`) to require the referenced file to exist. For document-backed validation, an implicit reference such as `spec.md` searches the containing repository before the prompt document's directory; an explicit `./spec.md` or `../spec.md` is source-relative only. The captured launch area is retained for diagnostics, not searched. Only legacy callers that configure no document anchor resolve from the ambient current working directory. `match(...)` shapes path *suggestions* only and never rejects a value.
+- `file` is **lazy by default**: it builds the reference's candidate plan and materializes the first absolute candidate without probing the filesystem. Add `eager` (`file(eager)`) to require an existing regular file and materialize the first matching candidate. For document-backed validation, an implicit reference such as `spec.md` checks the prompt document's directory before the repository root; an explicit `./spec.md` or `../spec.md` is source-relative only. Caller-supplied values use the captured launch context, while the captured launch area is retained only as diagnostics for document-authored values. `match(...)` shapes path *suggestions* only and never rejects a value.
 
 ## Baseline Schemas
 
@@ -281,20 +281,36 @@ Coercion also never *parses into* a constrained string type: a number landing in
 
 For root unions, Darkmatter coerces against each arm in order and commits the first arm that validates post-coercion.
 
-### Eager-`file` value normalization
+### Schema-selected `file` value materialization
 
-Coercion has a sibling write-back pass that fires only on the **eager** `file` type. When a property is declared `file(eager)` (the eager marker is the compiled-schema `format: darkmatter-file`) and its value validates, the stored value is **rewritten to its resolved, repo-relative path** — the same projection `relative(value)` / `dirname(value)` already produce. After the rewrite, the document state is uniformly resolved: `spec` and `dirname(spec)` agree by construction, so an author never needs to hand-prepend `{{ctx.area}}` to make a derived path match.
+File materialization is a sibling of coercion. It runs only when the effective
+schema selects a `file` or `file(eager)` arm; an ordinary string is never parsed
+or probed merely because it looks path-shaped. The stored effective value is an
+**absolute native path**, while Markdown presentation keeps a separate portable
+spelling. Expressions, comparisons, lifecycle state, proxy handoffs, retries,
+and sequence tasks therefore retain one stable filesystem identity.
 
-The rewrite runs at the same two surfaces as coercion (the explicit library API and the compose stage's write-back) and is **idempotent**: re-validating an already-rewritten value is a fixpoint, so compose → re-compose never drifts.
+The materialization pass is idempotent: re-validating an already-materialized
+absolute value is a fixpoint, so compose → re-compose never drifts.
 
 **Triggered on:**
 
-- a present, non-null string value under `file(eager)` / `format: darkmatter-file` — including top-level properties, inline-object sub-properties, array-of-`file(eager)` elements, and the committed arm of a root or property union.
+- a present, non-null string selected by `file` or `file(eager)`, including
+  top-level properties, inline-object sub-properties, arrays, and the committed
+  arm of a root or property union;
+- eager values probe the ordered plan and require the first existing regular
+  file; lazy values materialize the first lexically normalized candidate
+  without probing;
+- caller-originated values use the captured launch context, document defaults
+  use that document's source context, proxy overlays use the proxying source,
+  and sequence parameters use the sequence document.
 
 **Left verbatim (never rewritten):**
 
 - `string`-typed properties, even when their value looks path-shaped — `string` is the literal-text contract.
 - document-owned bare (lazy) `file` properties — `format: darkmatter-file-reference` is syntax-only and may legitimately name a file that does not exist yet (e.g. a `review_file` this run is about to produce). Caller records selected by a lazy file arm are materialized in the pre-interpolation input prelude without adding an existence check.
+- recursive lazy `file` values — they fail with a typed binding error because a
+  recursive plan has no single path shape without I/O; use `file(eager)`;
 - a value that resolves to a remote URL — there is no local path to project.
 - an absent or `null` optional `file(eager)` property.
 - a value still holding a `$(...)` shell expression or unresolved `{{ ... }}` template — the post-shell re-validation handles it once it expands.

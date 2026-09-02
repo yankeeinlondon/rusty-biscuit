@@ -82,7 +82,8 @@ pub(super) fn status_block(err: &CompositionError, term: &Terminal) -> StatusBlo
                     let provenance = match probed.candidate().provenance() {
                         RootProvenance::Repository => "repository",
                         RootProvenance::Source => "launch directory",
-                        RootProvenance::Package => "package",
+                        RootProvenance::PackageRoot => "package",
+                        RootProvenance::PackageArea => "package area",
                         RootProvenance::Home => "home",
                         RootProvenance::Magic => "magic",
                         RootProvenance::Vault => "vault",

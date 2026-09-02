@@ -7,7 +7,7 @@
 //! - **YAML**: Parse, convert to JSON/TOML, validate against schema
 //! - **JSON5**: Parse, convert to JSON/YAML/TOML
 //! - **PDF**: Extract text, convert to Markdown, extract table of contents
-//! - **FileReference**: Parse compact file descriptors (`@`, `!`, `vault:`, `%`,
+//! - **FileReference**: Parse compact file descriptors (`@`, `&`, `^`, `vault:`, `%`,
 //!   `{{ENV}}`) and resolve them lazily against runtime context
 //! - **Fetch**: Feature-gated HTTP fetch primitive with policy-enforcing host
 //!   allowlists, conditional request headers, and structured responses
@@ -80,7 +80,7 @@
 //! ```rust,no_run
 //! use biscuit_file::{FileReference, PathPosition};
 //!
-//! // Magic reference -- searches repo root, then HOME
+//! // Magic reference -- searches captured package, repository, and home scopes
 //! let file_ref = FileReference::new("@docs/spec.md")?;
 //! if let Some(path) = file_ref.resolve()? {
 //!     println!("Found: {}", path.display());
@@ -135,7 +135,7 @@ pub use format::DataFormat;
 pub use list_format::{ListFormat, classify_list};
 
 // Re-export the path→text rendering boundary
-pub use path_text::{to_portable_string, try_portable_string};
+pub use path_text::{canonicalize_simplified, to_portable_string, try_portable_string};
 
 // Re-export format-specific types
 #[cfg(feature = "toml")]
@@ -163,8 +163,9 @@ pub use self::pdf::{Pdf, PdfConfig, PdfError, PdfMarkdown, PdfToc};
 pub use self::file_reference::{
     CandidatePlanOrder, CompletionEntryForm, DetailedOutcome, DetailedResolution, FileReference,
     FileReferenceClass, FileReferenceError, FileReferenceKind, FileResolutionContext,
-    PartialCompletion, PathPosition, ProbeDisposition, ProbedCandidate, ResolutionCandidate,
-    ResolutionFailure, RootProvenance, find_git_root, find_package_area, home_dir,
+    PackageAreaFallback, PartialCompletion, PathPosition, ProbeDisposition, ProbedCandidate,
+    RepositoryScope, RepositoryScopeCatalog, RepositoryScopeCatalogError, ResolutionCandidate,
+    ResolutionFailure, RootProvenance, find_git_root, home_dir,
 };
 
 #[cfg(feature = "url")]

@@ -96,10 +96,10 @@ impl CallerProjection {
     }
 }
 
-fn trigger_discovery_boundary(options: &ComposeOptions, document_path: &Path) -> Option<PathBuf> {
+fn trigger_discovery_boundary(options: &ComposeOptions, _document_path: &Path) -> Option<PathBuf> {
     match options.file_resolution_context.as_ref() {
         Some(context) => context.repository_root().map(Path::to_path_buf),
-        None => crate::markdown::compose::find_git_root_from(document_path),
+        None => None,
     }
 }
 
@@ -1036,6 +1036,19 @@ fn resolve_caller_file_value(
                     Some(candidate.clone()),
                 ));
             }
+            if let Some(repository_root) = context.repository_root() {
+                // `&`/`^` references must stay inside the repository that anchors
+                // them even though a lazy candidate is never probed.
+                reference
+                    .validate_repository_candidate(&path, repository_root)
+                    .map_err(|err| {
+                        failure(
+                            format!("file reference `{raw}` escapes its repository root: {err}"),
+                            FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                            Some(candidate.clone()),
+                        )
+                    })?;
+            }
             let native = path.to_string_lossy().into_owned();
             let presentation = biscuit_file::to_portable_string(&path);
             return Ok(Some(ResolvedCallerFileValue {
@@ -1326,7 +1339,7 @@ mod tests {
     }
 
     #[test]
-    fn trigger_discovery_reuses_request_repository_boundary() {
+    fn trigger_discovery_is_passive_and_reuses_request_repository_boundary() {
         let request_repo = tempfile::tempdir().unwrap();
         let nested_repo = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(request_repo.path().join(".git")).unwrap();
@@ -1342,7 +1355,7 @@ mod tests {
         );
         assert_eq!(
             trigger_discovery_boundary(&ComposeOptions::new(), &document_path).as_deref(),
-            Some(nested_repo.path()),
+            None,
         );
     }
 
@@ -2350,9 +2363,8 @@ mod tests {
 
     // ── Phase 3: eager-`file` value normalization write-back ──────────
 
-    /// A repo fixture with a `.git` marker so the rewrite projects
-    /// git-root-relative. The prompt lives in `area/` and references a file
-    /// beside it; the rewrite must store the git-root-relative form.
+    /// The prompt lives in `area/` and references a file beside it; the rewrite
+    /// must store the document-relative form selected by the shared resolver.
     #[test]
     fn eager_file_value_rewritten_to_repo_relative_after_run() {
         let repo = tempfile::tempdir().unwrap();
@@ -2366,18 +2378,17 @@ mod tests {
         );
         let options = ComposeOptions::new().with_source_file(&doc_path);
         assert!(run(&mut md, &options).is_ok());
-        // The raw `./spec.md` is rewritten to the git-root-relative
-        // `area/spec.md`, matching `relative(spec)`/`dirname(spec)`.
+        // The raw `./spec.md` is normalized to a document-relative value.
         assert_eq!(
             md.frontmatter().as_map().get("spec"),
-            Some(&serde_json::json!("area/spec.md")),
+            Some(&serde_json::json!("spec.md")),
         );
     }
 
     /// Idempotence at the compose level (Decision #6): running the stage on
     /// an already-rewritten value is a fixpoint — the stored value does not
-    /// drift across runs. The request-scoped repository root lets the
-    /// git-root-relative rewritten value re-resolve on the second pass.
+    /// drift across runs. The document-relative rewritten value resolves to
+    /// the same neighboring file on the second pass.
     #[test]
     fn eager_file_rewrite_is_idempotent_across_runs() {
         let repo = tempfile::tempdir().unwrap();
@@ -2395,13 +2406,13 @@ mod tests {
         assert!(run(&mut md, &options).is_ok());
         assert_eq!(
             md.frontmatter().as_map().get("spec"),
-            Some(&serde_json::json!("area/spec.md")),
+            Some(&serde_json::json!("spec.md")),
         );
         // Re-run on the persisted (rewritten) value — it must not change.
         assert!(run(&mut md, &options).is_ok());
         assert_eq!(
             md.frontmatter().as_map().get("spec"),
-            Some(&serde_json::json!("area/spec.md")),
+            Some(&serde_json::json!("spec.md")),
             "re-running the stage on a rewritten value must be a fixpoint",
         );
     }
@@ -2578,6 +2589,369 @@ mod tests {
         );
     }
 
+    #[test]
+    fn lazy_file_set_override_materializes_the_unprobed_launch_candidate() {
+        let dir = tempfile::tempdir().unwrap();
+        let launch_dir = dir.path().join("launch");
+        let target_dir = dir.path().join("target");
+        std::fs::create_dir_all(&launch_dir).unwrap();
+        std::fs::create_dir_all(&target_dir).unwrap();
+        std::fs::write(target_dir.join("spec.md"), "target copy").unwrap();
+        let doc_path = target_dir.join("prompt.md");
+        let md = md_with_schema_and_source("$schema:\n  spec: file\nspec: authored.md\n", &doc_path);
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!(launch_dir.join("spec.md").to_string_lossy())),
+            "lazy caller values choose the first launch-context plan candidate even when absent",
+        );
+    }
+
+    #[test]
+    fn eager_file_set_override_selects_the_first_existing_candidate() {
+        let repo = tempfile::tempdir().unwrap();
+        let launch_dir = repo.path().join("area");
+        std::fs::create_dir_all(&launch_dir).unwrap();
+        std::fs::write(repo.path().join("spec.md"), "repository copy").unwrap();
+        let doc_path = repo.path().join("prompt.md");
+        let md = md_with_schema_and_source(
+            "$schema:\n  spec: file(eager)\nspec: authored.md\n",
+            &doc_path,
+        );
+        let context = biscuit_file::FileResolutionContext::new(&launch_dir)
+            .with_repository_root(repo.path());
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_resolution_context(context)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!(repo.path().join("spec.md").to_string_lossy())),
+        );
+    }
+
+    #[test]
+    fn lazy_file_arrays_and_unions_materialize_only_the_selected_file_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let launch_dir = dir.path().join("launch");
+        std::fs::create_dir_all(&launch_dir).unwrap();
+        let doc_path = dir.path().join("prompt.md");
+        let md = md_with_schema_and_source(
+            "$schema:\n  specs: file[]\n  selected:\n    - number\n    - file\nspecs: []\nselected: 1\n",
+            &doc_path,
+        );
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_set_overrides(serde_json::json!({
+                "specs": ["one.md", "two.md"],
+                "selected": "union.md",
+            }));
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("specs"),
+            Some(&serde_json::json!([
+                launch_dir.join("one.md").to_string_lossy(),
+                launch_dir.join("two.md").to_string_lossy(),
+            ])),
+        );
+        assert_eq!(
+            composed.frontmatter().as_map().get("selected"),
+            Some(&serde_json::json!(launch_dir.join("union.md").to_string_lossy())),
+        );
+    }
+
+    #[test]
+    fn discriminated_root_union_materializes_only_the_selected_file_property() {
+        let dir = tempfile::tempdir().unwrap();
+        let launch_dir = dir.path().join("launch");
+        std::fs::create_dir_all(&launch_dir).unwrap();
+        let doc_path = dir.path().join("prompt.md");
+        let schema = "$schema:\n  - kind: literal(file)\n    spec: file\n  - kind: literal(label)\n    spec: string\nkind: label\nspec: authored\n";
+
+        let file_options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_set_overrides(serde_json::json!({ "kind": "file", "spec": "spec.md" }));
+        let (file_result, _) = md_with_schema_and_source(schema, &doc_path)
+            .compose_with(file_options)
+            .unwrap();
+        assert_eq!(
+            file_result.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!(launch_dir.join("spec.md").to_string_lossy())),
+        );
+
+        let label_options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_set_overrides(serde_json::json!({ "kind": "label", "spec": "spec.md" }));
+        let (label_result, _) = md_with_schema_and_source(schema, &doc_path)
+            .compose_with(label_options)
+            .unwrap();
+        assert_eq!(
+            label_result.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("spec.md")),
+        );
+    }
+
+    #[test]
+    fn native_and_quoted_lazy_file_schema_values_materialize_identically() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc_path = dir.path().join("prompt.md");
+        for declaration in ["file", "'file'", "\"file\""] {
+            let schema = format!("$schema:\n  spec: {declaration}\nspec: authored.md\n");
+            let options = ComposeOptions::new()
+                .with_source_file(&doc_path)
+                .with_file_ref_fallback_dir(dir.path())
+                .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
+            let (composed, _) = md_with_schema_and_source(&schema, &doc_path)
+                .compose_with(options)
+                .unwrap();
+            assert_eq!(
+                composed.frontmatter().as_map().get("spec"),
+                Some(&serde_json::json!(dir.path().join("spec.md").to_string_lossy())),
+                "declaration {declaration}",
+            );
+        }
+    }
+
+    #[test]
+    fn lazy_recursive_file_override_is_a_typed_binding_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc_path = dir.path().join("prompt.md");
+        let md = md_with_schema_and_source("$schema:\n  spec: file\nspec: authored.md\n", &doc_path);
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(dir.path())
+            .with_set_overrides(serde_json::json!({ "spec": "%spec.md" }));
+
+        let error = md.compose_with(options).unwrap_err();
+        assert!(matches!(
+            &error,
+            MarkdownError::SchemaValidationFailed { problems, .. }
+                if problems.iter().any(|problem| {
+                    problem.path == "/spec"
+                        && problem.message.contains("%spec.md")
+                        && problem.message.contains("file(eager)")
+                })
+        ), "unexpected error: {error:?}");
+    }
+
+    #[test]
+    fn lazy_remote_override_stays_a_typed_remote_reference() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc_path = dir.path().join("prompt.md");
+        let md = md_with_schema_and_source("$schema:\n  spec: file\nspec: authored.md\n", &doc_path);
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(dir.path())
+            .with_set_overrides(serde_json::json!({ "spec": "https://example.com/spec.md" }));
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert_eq!(
+            composed.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("https://example.com/spec.md")),
+        );
+    }
+
+    #[test]
+    fn removed_bang_sigil_is_rejected_for_a_lazy_file_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc_path = dir.path().join("prompt.md");
+        let md = md_with_schema_and_source("$schema:\n  spec: file\nspec: authored.md\n", &doc_path);
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(dir.path())
+            .with_set_overrides(serde_json::json!({ "spec": "!spec.md" }));
+
+        assert!(matches!(
+            md.compose_with(options).unwrap_err(),
+            MarkdownError::SchemaValidationFailed { .. }
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lazy_repository_override_rejects_a_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let repo = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let launch_dir = repo.path().join("area");
+        std::fs::create_dir_all(&launch_dir).unwrap();
+        symlink(outside.path(), repo.path().join("escape")).unwrap();
+        let doc_path = repo.path().join("prompt.md");
+        let context = biscuit_file::FileResolutionContext::new(&launch_dir)
+            .with_repository_root(repo.path());
+
+        for provided in ["&escape/missing.md", "^escape/missing.md"] {
+            let md = md_with_schema_and_source(
+                "$schema:\n  spec: file\nspec: authored.md\n",
+                &doc_path,
+            );
+            let options = ComposeOptions::new()
+                .with_source_file(&doc_path)
+                .with_file_resolution_context(context.clone())
+                .with_file_ref_fallback_dir(&launch_dir)
+                .with_set_overrides(serde_json::json!({ "spec": provided }));
+            let error = md.compose_with(options).unwrap_err();
+            assert!(matches!(
+                &error,
+                MarkdownError::SchemaValidationFailed { problems, .. }
+                    if problems.iter().any(|problem| {
+                        problem.path == "/spec" && problem.message.contains(provided)
+                    })
+            ), "unexpected error for `{provided}`: {error:?}");
+        }
+    }
+
+    #[test]
+    fn caller_origin_directory_decides_materialization_before_handoff() {
+        let dir = tempfile::tempdir().unwrap();
+        let target_dir = dir.path().join("target");
+        std::fs::create_dir_all(&target_dir).unwrap();
+        let doc_path = target_dir.join("prompt.md");
+
+        for origin in ["caller", "proxy-source", "sequence-source"] {
+            let origin_dir = dir.path().join(origin);
+            std::fs::create_dir_all(&origin_dir).unwrap();
+            let md = md_with_schema_and_source(
+                "$schema:\n  spec: file\nspec: authored.md\n",
+                &doc_path,
+            );
+            let options = ComposeOptions::new()
+                .with_source_file(&doc_path)
+                .with_file_ref_fallback_dir(&origin_dir)
+                .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
+            let (composed, _) = md.compose_with(options).unwrap();
+            assert_eq!(
+                composed.frontmatter().as_map().get("spec"),
+                Some(&serde_json::json!(origin_dir.join("spec.md").to_string_lossy())),
+                "origin {origin}",
+            );
+        }
+    }
+
+    #[test]
+    fn per_property_origins_preserve_independently_authored_override_layers() {
+        let dir = tempfile::tempdir().unwrap();
+        let launch_dir = dir.path().join("launch");
+        let sequence_dir = dir.path().join("sequence/nested");
+        let target_dir = dir.path().join("target");
+        for path in [&launch_dir, &sequence_dir, &target_dir] {
+            std::fs::create_dir_all(path).unwrap();
+        }
+        let doc_path = target_dir.join("prompt.md");
+        let md = md_with_schema_and_source(
+            "$schema:\n  launch_spec: file\n  task_spec: 'file'\n  label: string\n",
+            &doc_path,
+        );
+        let records = crate::markdown::compose::CallerInputRecords::from([
+            (
+                "launch_spec".to_string(),
+                crate::markdown::compose::CallerInputRecord::new(
+                    serde_json::json!("launch.md"),
+                    biscuit_file::FileResolutionContext::new(&launch_dir),
+                ),
+            ),
+            (
+                "task_spec".to_string(),
+                crate::markdown::compose::CallerInputRecord::new(
+                    serde_json::json!("task.md"),
+                    biscuit_file::FileResolutionContext::new(&sequence_dir),
+                ),
+            ),
+        ]);
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_caller_input_records(records)
+            .with_set_overrides(serde_json::json!({
+                "launch_spec": "launch.md",
+                "task_spec": "task.md",
+                "label": "ordinary",
+            }));
+
+        let (composed, _) = md.compose_with(options.clone()).unwrap();
+        let effective = composed.frontmatter().as_map();
+
+        assert_eq!(
+            effective.get("launch_spec"),
+            Some(&serde_json::json!(launch_dir.join("launch.md").to_string_lossy())),
+        );
+        assert_eq!(
+            effective.get("task_spec"),
+            Some(&serde_json::json!(sequence_dir.join("task.md").to_string_lossy())),
+        );
+        assert_eq!(effective.get("label"), Some(&serde_json::json!("ordinary")));
+        assert_eq!(
+            options.set_overrides.as_ref().unwrap()["task_spec"],
+            serde_json::json!("task.md"),
+            "the raw caller layer must remain available for a fresh epoch",
+        );
+    }
+
+    #[test]
+    fn caller_file_materialization_is_idempotent_and_retains_the_raw_override() {
+        let dir = tempfile::tempdir().unwrap();
+        let launch_dir = dir.path().join("launch");
+        std::fs::create_dir_all(&launch_dir).unwrap();
+        let doc_path = dir.path().join("prompt.md");
+        let md = md_with_schema_and_source("$schema:\n  spec: file\nspec: authored.md\n", &doc_path);
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
+
+        let (first, _) = md.compose_with(options.clone()).unwrap();
+        let (second, _) = first.compose_with(options.clone()).unwrap();
+        let expected = serde_json::json!(launch_dir.join("spec.md").to_string_lossy());
+        assert_eq!(first.frontmatter().as_map().get("spec"), Some(&expected));
+        assert_eq!(second.frontmatter().as_map().get("spec"), Some(&expected));
+        assert_eq!(
+            options.set_overrides.as_ref().unwrap()["spec"],
+            serde_json::json!("spec.md"),
+            "the input layer keeps the caller's raw value for a fresh epoch",
+        );
+    }
+
+    #[test]
+    fn caller_anchor_survives_target_context_for_parent_dir_sibling_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let launch_dir = dir.path().join("caller");
+        let target_dir = dir.path().join("shared-prompts");
+        std::fs::create_dir_all(&launch_dir).unwrap();
+        std::fs::create_dir_all(&target_dir).unwrap();
+        std::fs::write(
+            launch_dir.join("other-file.md"),
+            "---\nresult: caller sibling\n---\n",
+        )
+        .unwrap();
+        let doc_path = target_dir.join("review.md");
+        let md: Markdown = "---\n$schema:\n  spec: file\nspec: authored.md\n---\n{{ frontmatter(dirname(spec) + '/other-file.md', 'result') }}\n".into();
+        let md = md.with_source(ComposeSource::File(doc_path.clone()));
+        let options = ComposeOptions::new()
+            .with_source_file(&doc_path)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
+
+        let (composed, _) = md.compose_with(options).unwrap();
+        assert_eq!(composed.content(), "caller sibling\n");
+        assert_eq!(
+            composed.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!(launch_dir.join("spec.md").to_string_lossy())),
+        );
+    }
+
     // The rewrite consumes the `ResolutionContext` carried by `EffectiveSchema`
     // and must not introduce an ambient-CWD anchor. With process CWD mutated to
     // an unrelated directory, compose still produces the repository-relative
@@ -2603,9 +2977,9 @@ mod tests {
     }
 
     /// With the process CWD mutated to an unrelated directory, compose's
-    /// eager-`file` rewrite still produces the git-root-relative value. The
-    /// rewrite resolves through the document base directory (repository-first
-    /// then source), never the ambient CWD.
+    /// eager-`file` rewrite still produces the document-relative value. The
+    /// rewrite resolves through the document base directory, never the ambient
+    /// CWD.
     #[test]
     #[serial_test::serial(darkmatter_file_cwd)]
     fn eager_file_rewrite_is_independent_of_process_cwd() {
@@ -2621,10 +2995,8 @@ mod tests {
             "$schema:\n  spec: 'file(eager; required)'\nspec: ./spec.md\n",
             &doc_path,
         );
-        // The rewritten value (`area/spec.md`) is an implicit reference that
-        // re-resolves repository-first on a second pass, proving the rewrite
-        // does not depend on the ambient CWD. The launch-area anchor is set but
-        // inert for resolution (D2).
+        // The rewritten value (`spec.md`) re-resolves from the document on a
+        // second pass, proving the rewrite does not depend on ambient CWD.
         let options = ComposeOptions::new()
             .with_source_file(&doc_path)
             .with_file_ref_fallback_dir(repo.path().to_path_buf());
@@ -2633,8 +3005,8 @@ mod tests {
         assert!(run(&mut md, &options).is_ok(), "compose must succeed from an unrelated CWD");
         assert_eq!(
             md.frontmatter().as_map().get("spec"),
-            Some(&serde_json::json!("area/spec.md")),
-            "rewrite must produce the git-root-relative value regardless of process CWD",
+            Some(&serde_json::json!("spec.md")),
+            "rewrite must produce the document-relative value regardless of process CWD",
         );
     }
 }

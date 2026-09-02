@@ -7,8 +7,8 @@ prompt: |-
   - identify what CLI switches or prompt frontmatter has an impact on each step and what that impact is
 
   After fully documenting the flows add a section called `## Future Improvements` and add any improvements you think could be made to the current flow
-last_updated: 2026-07-04
-hash: 7738d51f4cfa73e2-83b6b84817b7ee16
+last_updated: 2026-08-27
+hash: 7738d51f4cfa73e2-20e4f64f887d14d3
 ---
 Let me explore the composition-related source code and documentation to trace the exact execution flows.Now let me read the existing composition topic doc and the key source files for precision:Now let me read the critical execution pipeline files:Now let me read the remaining portions of the composition executor to get the full execution pipeline:Now I have a comprehensive understanding of all three flows. Let me compose the complete Markdown body.Now I have all the details needed. Let me produce the comprehensive Markdown body content:Now I have all the details. Let me compose the full Markdown document body:
 
@@ -75,14 +75,14 @@ The generated bash/zsh/fish scripts shell out to `claudine __complete` on
 every `<TAB>`. The supplement engine applies these rules in order:
 
 - **Candidates are markdown files only** (`*.md`). Directories,
-    non-markdown files, `./`/`../` traversal tokens, `!` package sigils,
+  non-markdown files, `./`/`../` traversal tokens,
     `vault:`, `/abs`, `%`, and `{{…}}` prefixes all return zero candidates.
 
-- **Two supported entry forms**: `@`-prefixed magic paths (enumerated
-    against repo root + user home) and implicit-relative paths like
-    `prompts/…` (enumerated against the repo root only).
+- **Four supported entry forms**: `@`-prefixed magic paths, `&` repository-root
+  paths, `^` repository-scoped paths, and implicit-relative paths like
+  `prompts/…`. Each enumerates the same ordered roots its execution form uses.
 
-- **Typed-length scope**: 0–2 "meaningful characters" (leading `@` and
+- **Typed-length scope**: 0–2 "meaningful characters" (a leading `@`, `&`, or `^` and
     segments before a `/` don't count) use the curated scope only —
     `prompts/` and `sequences/` under `<repo>/`, `<package-root>/`,
     `<package-area-root>/`, `~/`, and `~/.claudine/`. 3+ characters extend
@@ -148,8 +148,8 @@ Each entry point destructures its clap args struct, then calls the shared `parse
 
 **What it does:**
 
-1. Constructs a `FileReference` with package-area magic path support
-2. Calls `.resolve()` to find the actual file on disk (supports `@` magic, `!` package, repo-relative, monorepo-package-relative, absolute paths)
+1. Constructs a `FileReference` with Claudine's convention roots
+2. Calls `.resolve()` to find the actual file on disk (supports `@` magic, `&` repository-root, `^` repository-scoped, implicit, explicit-relative, home, vault, recursive, and absolute paths)
 3. Validates `.md`/`.markdown` extension
 4. Reads file content and parses into a `Markdown` struct
 
@@ -318,6 +318,18 @@ Builds child process environment via `env::build_child_env()`:
 - Constructs `EnvPlan` with env vars, shadow HOME, sensitive var stripping
 - Sets `OPERATION` env if specified
 - Applies request-level env overrides
+- Sets `AGENT_CWD` on every Claudine-spawned child to the absolute directory
+  captured when the invocation entered. The value is immutable across retry,
+  resume, loop, and sequence re-entry and overwrites an inherited value.
+
+Ordinary invocations always use their own entry directory. The hidden
+`claudine handle` hook entry point instead retains an absolute `AGENT_CWD`
+supplied by its wrapper, because the provider may have changed its child CWD
+before invoking the hook; a missing value falls back to the hook process's
+entry directory and a relative value is rejected. `AGENT_CWD` is intentionally
+un-namespaced. Claudine's overwrite rule protects its own descendants, but an
+unrelated child tool may interpret that generic name differently; this naming
+collision is an accepted residual risk.
 
 **Affected by:**
 
@@ -580,7 +592,7 @@ claudine sequence --fail-fast false @batch.md
 3. If `sequence` is an array: normalizes via `normalize_inline_list()` → `SequenceStep` array (scalar strings or objects with required `name`)
 4. If `sequence` is a string: resolves as external YAML file reference via `resolve_sequence_reference()`:
 
-    - Supports `@`, `!`, `vault:`, `%`, `{{ENV}}`, `~`, absolute, and relative paths
+    - Supports `@`, `&`, `^`, `vault:`, `%`, `{{ENV}}`, `~`, absolute, and relative paths
     - External file form 1: `{ sequence: [...] }`
     - External file form 2: `{ kind: "sequence", list: [...], template?: {...} }` with `{{key}}` template rendering
 

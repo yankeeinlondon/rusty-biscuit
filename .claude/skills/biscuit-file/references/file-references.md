@@ -11,11 +11,12 @@ contract, see [the topic doc](../../../../biscuit-file/docs/topics/file-referenc
 | Prefix | `FileReferenceKind` | Resolution roots |
 |--------|---------------------|------------------|
 | `./`, `../` | `ExplicitRelative` | Authoring base only; no fallback |
-| _(none)_ | `ImplicitRelative` | Repository root, then authoring base |
+| _(none)_ | `ImplicitRelative` | Authoring base, then repository root |
 | POSIX root, Windows drive/UNC | `Absolute` | Authored absolute path only |
 | `~`, `~/` (`~\` on Windows) | `Home` | Captured home only; `~user` is rejected |
-| `@`, `@/` | `Magic` | Configured prepends → repository → home → configured appends |
-| `!` | `Package` | Package area, or repository fallback |
+| `@`, `@/` | `Magic` | Configured prepends → package → package area → repository → home → configured appends |
+| `&`, `&/` | `RepositoryRoot` | Repository root only; repository-contained |
+| `^`, `^/` | `RepositoryScoped` | Package → package area → repository; repository-contained |
 | `vault:`, `vault::` | `Vault` | Configured roots → captured `VAULT` paths |
 | `http://`, `https://` | `Url` | Remote target; no local candidate |
 
@@ -35,11 +36,20 @@ Document-backed consumers should capture one `FileResolutionContext` at the
 request boundary and use it for resolution and completion:
 
 ```rust,no_run
-use biscuit_file::{FileReference, FileResolutionContext, PathPosition};
+use biscuit_file::{
+    FileReference, FileResolutionContext, PackageAreaFallback, PathPosition,
+    RepositoryScopeCatalog,
+};
+
+let scopes = RepositoryScopeCatalog::new(
+    "/repo",
+    vec!["/repo/claudine".into()],
+    vec!["/repo/claudine/lib".into()],
+    PackageAreaFallback::FirstComponent,
+)?;
 
 let request = FileResolutionContext::new("/repo")
-    .with_repository_root("/repo")
-    .with_package_area("/repo/claudine")
+    .with_repository_scope_catalog(scopes)
     .add_magic_path("/repo/prompts", PathPosition::Start)
     .add_vault("/notes");
 
@@ -51,15 +61,15 @@ let target = FileReference::new("prompts/next.md")?
 ```
 
 `FileResolutionContext::new(base_dir)` snapshots the process environment and
-cross-platform home once. Supply the trusted repository root and package area,
+cross-platform home once. Supply a validated repository scope catalog,
 and override the snapshot with `with_env()`, `with_home_dir()`, or
 `without_home_dir()` when the caller has authoritative values. Context-owned
 `add_magic_path()` and `add_vault()` configure the roots used by explicit APIs.
 
 Use `for_source(source)` for each in-repository nested file-backed document. It
 sets the source and changes the authoring base to `source.parent()`, while
-preserving the repository, package, home, environment, magic, and vault
-snapshot. Use `for_base(base)` for an in-repository in-memory child document.
+preserving process-state inputs while selecting repository/package scopes for
+the new base. Use `for_base(base)` for an in-repository in-memory child document.
 Both methods validate the request boundary and their new authoring base.
 
 Use `for_trusted_external_source(source)` or
@@ -78,16 +88,13 @@ itself apply only to ambient resolution; add request-scoped roots to the context
 
 ### Ambient compatibility APIs
 
-- `resolve()` reads ambient CWD, environment/home, repository, and package
-  state when called.
+- `resolve()` reads ambient CWD, environment/home, and repository state when called.
 - `resolve_from(base)` fixes the authoring base but still reads the other live
   state. `base` is a directory; pass a source file's parent.
 - `resolve_relative(base)` resolves ambiently and then computes a lexical
   relative path.
 - `complete_partial(token, base)` performs live repository/home discovery and
   cannot see request-configured magic roots.
-- `with_package_area_magic_path()` is an ambient convenience that discovers and
-  prepends the current package-area magic root.
 
 Use these for compatibility and simple top-level calls. Do not use them inside
 a request that requires a stable snapshot.
@@ -114,8 +121,8 @@ outcomes retain a `FileReferenceError`.
 `candidate_plan()` returns the complete ordered, unprobed plan. By contrast,
 `DetailedResolution::candidates()` contains only attempts made before the first
 match or terminal I/O error. Each `ResolutionCandidate` exposes its path and
-`RootProvenance`: `Repository`, `Source`, `Package`, `Home`, `Magic`, `Vault`,
-or `Absolute`.
+`RootProvenance`: `Repository`, `Source`, `PackageRoot`, `PackageArea`, `Home`,
+`Magic`, `Vault`, or `Absolute`.
 
 `candidate_plan_with_order()` applies an explicit `CandidatePlanOrder` to that
 unprobed plan. The default `Resolution` order matches execution.
@@ -145,23 +152,31 @@ handled as `Absolute`.
 Missing variables are errors on the local-path resolver. The remote-target API
 retains an unresolved placeholder verbatim as part of its existing URL behavior.
 
-Interpolation cannot inject a leading `@`, `!`, `%`, `vault:`, or
+Interpolation cannot inject a leading `@`, `&`, `^`, `%`, `vault:`, or
 case-insensitive HTTP(S) scheme into a local reference. Both direct and
 recursive resolution reject the result with `InvalidSyntax`; grammar sigils
-must be authored. Authored magic/package/vault/URL references keep their kind
+must be authored. Authored magic/repository/vault/URL references keep their kind
 and interpolate within it.
+
+Recognized introducers are reserved: malformed `@`, `&`, `^`, `%`, `~`,
+`vault:`, or HTTP(S) forms fail instead of becoming implicit references. The
+removed `!` form fails with a `^` migration hint. Repository-root and
+repository-scoped candidates receive lexical and canonical containment checks,
+including the deepest existing ancestor for a missing lazy target. This is a
+TOCTOU-aware resolver boundary, not a filesystem sandbox. Quote `&` in shell
+arguments, such as `spec='&docs/plan.md'`.
 
 ### Completion/execution parity
 
 Use `complete_partial_in_context(token, &ctx)` and
-`resolve_in_context(&ctx)` with the same context. Completion supports magic and
-implicit-relative tokens and returns `Ok(None)` for other forms. Its
+`resolve_in_context(&ctx)` with the same context. Completion supports direct
+magic, repository-root, repository-scoped, and implicit-relative tokens. Its
 `PartialCompletion` provides `entry_form()`, ordered `roots()`,
 `active_segment()`, and `rendered_prefix()`.
 
-The completion roots mirror execution: implicit is repository then base; magic
-is configured prepends, repository, home, then configured appends, with stable
-deduplication. Enumerate roots in order and execute the emitted string unchanged
+The completion roots mirror execution: implicit is base then repository; magic
+is configured prepends, package, package area, repository, home, then configured
+appends, with stable deduplication. Enumerate roots in order and execute the emitted string unchanged
 through `FileReference::new()` plus `resolve_in_context()` so the displayed and
 executed candidate cannot diverge. Completion rejects rooted magic tokens with
 `InvalidSyntax`, including invalid recursive magic tokens that completion does
@@ -175,11 +190,11 @@ MissingEnvironmentVariable { name }
 CurrentDirectory(io::Error)
 Git(Box<gix::discover::Error>)
 BareRepository
-Workspace(Box<cargo_metadata::Error>)
 VaultNotConfigured
 UnsupportedUserHome(String)
 MissingHomeContext
-MissingPackageContext
+OutsideRepository { sigil, reference_cwd }
+RepositoryEscape { sigil, reference, repository_root, escaped_candidate }
 RepositoryRootNotContainingSource { repository_root, source_path }
 RelativePath { from, to }
 Io { path, source }
@@ -190,7 +205,6 @@ InvalidUrl(String)                    # with `url`
 `InvalidSyntax` also covers rooted magic payloads and interpolation-injected
 sigils.
 `RepositoryRootNotContainingSource` is the lexical containment check on the
-request base and normal derived authoring bases. `MissingPackageContext` means
-neither package-area nor repository fallback was supplied. `RemoteNotLocal`
+request base and normal derived authoring bases. `RemoteNotLocal`
 means a URL reached a local path API; use the `url`-gated `resolve_target()`
 when the caller accepts `Resolved::Remote`.

@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-fce2dc04b4df88da
-last_updated: 2026-09-01
+hash: ef46db3751d8e999-eaf791ed7c8ba12b
+last_updated: 2026-09-02
 ---
 # Claudine Composition
 
@@ -84,12 +84,12 @@ The generated bash/zsh/fish scripts shell out to `claudine __complete` on
 every `<TAB>`. The supplement engine applies these rules in order:
 
 - **Candidates are markdown files only** (`*.md`). Directories,
-  non-markdown files, `./`/`../` traversal tokens, `!` package sigils,
+  non-markdown files, `./`/`../` traversal tokens,
   `vault:`, `/abs`, `%`, and `{{…}}` prefixes all return zero candidates.
-- **Two supported entry forms**: `@`-prefixed magic paths (enumerated
-  against repo root + user home) and implicit-relative paths like
-  `prompts/…` (enumerated against the repo root only).
-- **Typed-length scope**: 0–2 "meaningful characters" (leading `@` and
+- **Four supported entry forms**: `@`-prefixed magic paths, `&` repository-root
+  paths, `^` repository-scoped paths, and implicit-relative paths like
+  `prompts/…`. Each enumerates the same ordered roots its execution form uses.
+- **Typed-length scope**: 0–2 "meaningful characters" (a leading `@`, `&`, or `^` and
   segments before a `/` don't count) use the curated scope only —
   `prompts/` and `sequences/` under `<repo>/`, `<package-root>/`,
   `<package-area-root>/`, `~/`, and `~/.claudine/`. 3+ characters extend
@@ -124,7 +124,7 @@ claudine compose --codex @commit.md
 
 Steps:
 
-1. **Resolve** — resolve the file reference using `biscuit-file::FileReference`. A bare **implicit** path (`foo.md`, `dir/foo.md`) resolves repository-root first, then the source document's directory; an **explicit** `./`/`../` path resolves from the source directory only; `@` is a magic-root search, `!` a monorepo-package path, `~/` the user's home, `vault:` a configured vault, `%` a recursive modifier, and absolute paths resolve to themselves
+1. **Resolve** — resolve the file reference using `biscuit-file::FileReference`. A bare **implicit** path (`foo.md`, `dir/foo.md`) resolves from the source document's directory first, then the repository root; an **explicit** `./`/`../` path resolves from the source directory only; `@` is a magic-root search, `&` pins to the repository root, `^` searches package root then package-area root then repository root, `~/` is the user's home, `vault:` a configured vault, `%` a recursive modifier, and absolute paths resolve to themselves
 2. **Compose** — run the Markdown through Darkmatter's compose pipeline (transclusion, interpolation, shell commands, conditionals)
 3. **Prepare** — extract the effective (composed) frontmatter; this is the single source of truth for all downstream decisions
 4. **Select provider** — choose which agentic CLI to use (see Provider Selection below)
@@ -522,7 +522,7 @@ A frontmatter `loop:` block turns the prompt into a repeating run. The first ite
 
 ### Authoring
 
-`$schema` accepts the same forms Darkmatter accepts: inline `SimplifiedSchema` mappings, references to external YAML/JSON schema files (resolved through the shared `FileReference` contract — a bare implicit reference is repository-root first, then the prompt document's parent directory; an explicit `./`/`../` reference is the document's parent only), and root-level unions. Raw JSON Schema also validates, but it does not expose typed property metadata, so it does not feed the interactive prompts or shell completion described below.
+`$schema` accepts the same forms Darkmatter accepts: inline `SimplifiedSchema` mappings, references to external YAML/JSON schema files (resolved through the shared `FileReference` contract — a bare implicit reference uses the prompt document's parent directory first, then the repository root; an explicit `./`/`../` reference uses the document's parent only), and root-level unions. Raw JSON Schema also validates, but it does not expose typed property metadata, so it does not feed the interactive prompts or shell completion described below.
 
 ```yaml
 $schema:

@@ -77,6 +77,8 @@ pub enum CatalogFetchError {
     },
     /// The CLI output could not be parsed.
     ParseFailed(String),
+    /// The process launch directory could not be contributed to the child.
+    ChildEnvironment(crate::child_environment::ChildEnvironmentError),
 }
 
 impl std::fmt::Display for CatalogFetchError {
@@ -91,11 +93,25 @@ impl std::fmt::Display for CatalogFetchError {
                 )
             }
             Self::ParseFailed(reason) => write!(f, "failed to parse provider output: {reason}"),
+            Self::ChildEnvironment(error) => error.fmt(f),
         }
     }
 }
 
-impl std::error::Error for CatalogFetchError {}
+impl std::error::Error for CatalogFetchError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::ChildEnvironment(error) => Some(error),
+            _ => None,
+        }
+    }
+}
+
+impl From<crate::child_environment::ChildEnvironmentError> for CatalogFetchError {
+    fn from(error: crate::child_environment::ChildEnvironmentError) -> Self {
+        Self::ChildEnvironment(error)
+    }
+}
 
 // ============================================================================
 // Dynamic sources
@@ -116,11 +132,14 @@ pub(super) async fn fetch_shell_command_models(
     program: &'static str,
     args: &'static [&'static str],
 ) -> Result<Vec<String>, CatalogFetchError> {
-    let child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .kill_on_drop(true)
+        .kill_on_drop(true);
+    crate::child_environment::contribute_child_environment(&mut command)?;
+    let child = command
         .spawn()
         .map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
@@ -294,6 +313,25 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(models, vec!["model-a", "model-b"]);
+    }
+
+    #[tokio::test]
+    async fn fetch_shell_command_models_child_observes_agent_cwd() {
+        let expected = crate::child_environment::initialize_process_launch_directory(
+            crate::child_environment::LaunchDirectoryMode::Ordinary,
+        )
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+        #[cfg(windows)]
+        let models = fetch_shell_command_models("cmd", &["/D", "/C", "echo %AGENT_CWD%"])
+            .await
+            .unwrap();
+        #[cfg(not(windows))]
+        let models = fetch_shell_command_models("sh", &["-c", "printf %s \"$AGENT_CWD\""])
+            .await
+            .unwrap();
+        assert_eq!(models, vec![expected]);
     }
 
     #[tokio::test]

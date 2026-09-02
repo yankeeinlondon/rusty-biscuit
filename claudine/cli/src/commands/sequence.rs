@@ -186,8 +186,15 @@ fn expand_shell_source(
             source: SequenceShellCause::Approval(e),
         })?;
 
-    let output = std::process::Command::new(&approved.executable)
-        .args(&approved.args)
+    let mut child = std::process::Command::new(&approved.executable);
+    child.args(&approved.args);
+    claudine::child_environment::contribute_child_environment(&mut child).map_err(|e| {
+        CompositionError::SequenceShellFailed {
+            command: command.to_string(),
+            source: SequenceShellCause::Spawn(std::io::Error::other(e)),
+        }
+    })?;
+    let output = child
         .output()
         .map_err(|e| CompositionError::SequenceShellFailed {
             command: command.to_string(),
@@ -358,8 +365,8 @@ fn run_sequence_inner(
     // deduplicated cross-step set.
     // The top-level source was resolved from launch context above. Capture that
     // directory before `chdir` as stable `file_ref_fallback_dir` diagnostic
-    // metadata; document-authored values resolve repository-first, then
-    // source-relative, never through launch as another candidate.
+    // metadata; document-authored values resolve source-relative, then against
+    // the repository, never through launch as another candidate.
     let launch_area_fallback = Some(invocation.launch_cwd().to_path_buf());
     let (source, set_overrides, dropped_optionals) =
         composition::drop_invalid_optionals(source, set_overrides, launch_area_fallback.as_deref());

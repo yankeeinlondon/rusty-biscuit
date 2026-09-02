@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 
 use biscuit_file::{
     DetailedOutcome, FileReference, FileResolutionContext, PathPosition, ResolutionFailure,
-    home_dir,
 };
 use darkmatter::markdown::compose::ComposeSource;
 use darkmatter::markdown::{Markdown, MarkdownError};
@@ -71,27 +70,16 @@ pub fn capture_file_resolution_context() -> Result<FileResolutionContext, Compos
     let repo_info = git_root
         .as_deref()
         .and_then(|root| sniff::filesystem::repo::detect_repo_structure(root).ok().flatten());
-    let package_area = repo_info.as_ref().and_then(|repo| {
-        repo.package_area_label_for_dir(&cwd).map(|area| {
-            if area.as_ref() == "root" {
-                repo.root.clone()
-            } else {
-                repo.root.join(area.as_ref())
-            }
-        })
-    });
-    let package = repo_info
-        .as_ref()
-        .and_then(|repo| repo.package_for_dir(&cwd))
-        .map(|package| package.path.clone());
-
     let mut context = FileResolutionContext::new(&cwd);
-    if let Some(root) = git_root.as_ref() {
+    if let (Some(root), Some(repo)) = (git_root.as_ref(), repo_info.as_ref()) {
+        let catalog = darkmatter::markdown::compose::repository_scope_catalog(repo, root)
+            .expect("observed repository topology must project to valid absolute scopes");
+        context = context.with_repository_scope_catalog(catalog);
+    } else if let Some(root) = git_root.as_ref() {
         context = context.with_repository_root(root);
     }
-    if let Some(area) = package_area.as_ref() {
-        context = context.with_package_area(area);
-    }
+    let package_area = context.package_area().map(Path::to_path_buf);
+    let package = context.package_root().map(Path::to_path_buf);
     for root in prompt_magic_roots(
         git_root.as_deref(),
         package_area.as_deref(),
@@ -151,32 +139,21 @@ pub fn derive_request_context_for_source(
     let repo_info = git_root
         .as_deref()
         .and_then(|root| sniff::filesystem::repo::detect_repo_structure(root).ok().flatten());
-    let package_area = repo_info.as_ref().and_then(|repo| {
-        repo.package_area_label_for_dir(base_dir).map(|area| {
-            if area.as_ref() == "root" {
-                repo.root.clone()
-            } else {
-                repo.root.join(area.as_ref())
-            }
-        })
-    });
-    let package = repo_info
-        .as_ref()
-        .and_then(|repo| repo.package_for_dir(base_dir))
-        .map(|package| package.path.clone());
-
     let mut context = FileResolutionContext::from_snapshot(
         base_dir,
         provisional_context.home_dir().map(Path::to_path_buf),
         provisional_context.env().clone(),
     )
     .with_source_path(source_path);
-    if let Some(root) = git_root.as_ref() {
+    if let (Some(root), Some(repo)) = (git_root.as_ref(), repo_info.as_ref()) {
+        let catalog = darkmatter::markdown::compose::repository_scope_catalog(repo, root)
+            .expect("observed repository topology must project to valid absolute scopes");
+        context = context.with_repository_scope_catalog(catalog);
+    } else if let Some(root) = git_root.as_ref() {
         context = context.with_repository_root(root);
     }
-    if let Some(area) = package_area.as_ref() {
-        context = context.with_package_area(area);
-    }
+    let package_area = context.package_area().map(Path::to_path_buf);
+    let package = context.package_root().map(Path::to_path_buf);
     for root in prompt_magic_roots(
         git_root.as_deref(),
         package_area.as_deref(),
@@ -396,85 +373,31 @@ pub fn reload_composition_source(
     }))
 }
 
-/// Build a [`FileReference`] for a top-level Claudine prompt argument with the
-/// convention prompt directories registered as magic (`@`) search roots.
+/// Parse a top-level Claudine prompt argument with the shared file-reference
+/// grammar.
 ///
-/// The prompt magic roots (package area, `<area>/prompts`, `<repo>/prompts`,
-/// `<repo>/.claudine/prompts`, `~/.claudine/prompts`) are the explicit
-/// `FileReference` configuration Claudine layers on top of the shared grammar
-/// (D1). Every top-level `compose`/`sequence`/`inline-compose` source resolver
-/// shares this builder so a bare or `@`-prefixed reference resolves through the
-/// identical roots regardless of the file's extension — `@foo.yaml` and
-/// `@foo.md` can no longer diverge.
+/// Request capture registers Claudine's convention roots on the associated
+/// [`FileResolutionContext`]. Keeping parsing independent of ambient discovery
+/// prevents this builder from creating a second, request-unstable root order.
 ///
 /// ## Errors
 ///
 /// Returns [`CompositionError::InvalidReference`] when the reference string is
 /// syntactically invalid.
 pub fn build_prompt_reference(file_ref: &str) -> Result<FileReference, CompositionError> {
-    Ok(with_prompt_magic_paths(FileReference::new(file_ref).map_err(
-        |e| CompositionError::InvalidReference {
-            reference: file_ref.to_string(),
-            source: e,
-        },
-    )?))
-}
-
-/// Register the convention prompt directories as magic (`@`) search roots.
-///
-/// Mirrors the completion engine's magic scope set so a value the user
-/// tab-completed to `@<file>` resolves at launch: the roots are the
-/// package-area, repo, and HOME `prompts/` directories, registered
-/// **closest-first**. Because [`FileReference::resolve`] returns the first
-/// existing candidate, the nearest prompt wins.
-///
-/// The package area is also registered as a bare root (replacing
-/// `with_package_area_magic_path`), so the single `cargo metadata` probe
-/// serves both the bare `@<file>` form and the path-shaped
-/// `@prompts/<file>` form.
-fn with_prompt_magic_paths(reference: FileReference) -> FileReference {
-    let Ok(cwd) = std::env::current_dir() else {
-        return reference;
-    };
-    let git_root = sniff::filesystem::git::GitRepo::discover(&cwd)
-        .ok()
-        .flatten()
-        .map(|repo| repo.repo_root().to_path_buf());
-    let repo_info = git_root
-        .as_deref()
-        .and_then(|root| sniff::filesystem::repo::detect_repo_structure(root).ok().flatten());
-    let package_area = repo_info
-        .as_ref()
-        .and_then(|repo| {
-            repo.package_area_label_for_dir(&cwd)
-                .map(|area| repo.root.join(area.as_ref()))
-        });
-    let package = repo_info
-        .as_ref()
-        .and_then(|repo| repo.package_for_dir(&cwd))
-        .map(|package| package.path.clone());
-
-    prompt_magic_roots(
-        git_root.as_deref(),
-        package_area.as_deref(),
-        package.as_deref(),
-        home_dir().as_deref(),
-    )
-    .into_iter()
-    .fold(reference, |reference, root| {
-        reference.add_magic_path(root, PathPosition::Start)
+    FileReference::new(file_ref).map_err(|e| CompositionError::InvalidReference {
+        reference: file_ref.to_string(),
+        source: e,
     })
 }
 
 /// The ordered magic roots shared by composition completion and execution.
 ///
-/// Roots are **closest-first**: discrete package, package area, repository
-/// prompt/document scopes, then the user prompt scope. Package and area roots
-/// are included both bare and with `prompts/` appended so filename-only
-/// `@plan.md` and path-shaped `@prompts/plan.md` use one ordered candidate
-/// builder. Repository document and skill roots support the established
-/// inline-compose and sequence completion surfaces without creating a second
-/// runtime-only order.
+/// Roots are **closest-first**: the discrete package's prompt directory, the
+/// package-area prompt directory, repository prompt/document/peer-skill
+/// conventions, then the user prompt directory. Bare package, package-area,
+/// repository, and home roots are intrinsic `@` scopes supplied by
+/// [`FileResolutionContext`] and are intentionally not registered again.
 ///
 /// This function is pure; callers are responsible for discovering the anchors
 /// once for their request.
@@ -487,11 +410,9 @@ pub fn prompt_magic_roots(
 ) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     if let Some(package) = package {
-        push_unique_root(&mut roots, package.to_path_buf());
         push_unique_root(&mut roots, package.join("prompts"));
     }
     if let Some(area) = package_area {
-        push_unique_root(&mut roots, area.to_path_buf());
         push_unique_root(&mut roots, area.join("prompts"));
     }
     if let Some(root) = git_root {
@@ -548,12 +469,9 @@ pub fn enrich_composition_source_load_error_in_context(
 }
 
 fn read_source_text_for_enrichment(file_ref: &str) -> Option<String> {
-    // Re-resolve through the SAME prompt magic roots the launch-time resolver
-    // used ([`build_prompt_reference`]); resolving through only the package-area
-    // root would fail to re-find a file that launched via a `prompts/` root and
-    // silently degrade the enriched render.
+    let context = capture_file_resolution_context().ok()?;
     let reference = build_prompt_reference(file_ref).ok()?;
-    let resolved_path = reference.resolve().ok()??;
+    let resolved_path = reference.resolve_in_context(&context).ok()??;
 
     let ext = resolved_path
         .extension()

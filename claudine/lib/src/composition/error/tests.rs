@@ -1890,7 +1890,7 @@ fn invalid_file_reference_body_does_not_leak_escape_backslashes() {
 
 /// Stage a bare-implicit `reference` under `<repo>/prompts/run.md` and wrap the
 /// resulting harness resolution failure in the authoring surface, so the block
-/// renders against a real (repository-first) candidate plan.
+/// renders against a real source-first candidate plan.
 fn implicit_reference_error(reference: &str, repo: &std::path::Path) -> CompositionError {
     let source = repo.join("prompts/run.md");
     std::fs::create_dir_all(source.parent().unwrap()).unwrap();
@@ -1918,7 +1918,7 @@ fn implicit_reference_error(reference: &str, repo: &std::path::Path) -> Composit
 #[test]
 fn invalid_file_reference_block_enumerates_the_plan_only_for_a_multi_candidate_miss() {
     // The ordered "Tried:" list is enumerated only when more than one candidate
-    // was probed: an implicit miss (repository + source) shows it; an explicit
+    // was probed: an implicit miss (source + repository) shows it; an explicit
     // `./` miss (one candidate) does not, since its single path is already named
     // (spec §D8).
     let term = biscuit_terminal::terminal::Terminal::default();

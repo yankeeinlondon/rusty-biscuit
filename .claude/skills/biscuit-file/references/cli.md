@@ -39,8 +39,8 @@ Mutually exclusive: `--json` (default for data), `--json5`, `--yaml`, `--toml`, 
 
 ```sh
 bf reference @docs/spec.md           # magic: search repo root, HOME
- 
-bf reference !README.md              # package: search Cargo workspace area
+bf reference &README.md              # repository root only
+bf reference ^README.md              # repository scopes, most specific first
 bf reference %foo.md                  # recursive: walk directories for a match
 bf ref ./Cargo.toml                   # alias for 'reference'
 bf reference --relative-cwd @docs/spec.md  # relative to CWD

@@ -15,9 +15,21 @@ fn write(root: &Path, relative: &str, content: &str) -> PathBuf {
     path
 }
 
+fn initialize_repository(root: &Path) {
+    let git_dir = root.join(".git");
+    std::fs::create_dir_all(git_dir.join("objects")).unwrap();
+    std::fs::create_dir_all(git_dir.join("refs/heads")).unwrap();
+    std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+    std::fs::write(
+        git_dir.join("config"),
+        "[core]\nrepositoryformatversion = 0\nbare = false\n",
+    )
+    .unwrap();
+}
+
 fn fixture(document_frontmatter: &str) -> (TempDir, PathBuf) {
     let temp = TempDir::new().unwrap();
-    std::fs::create_dir(temp.path().join(".git")).unwrap();
+    initialize_repository(temp.path());
     write(
         temp.path(),
         "schemas/prompt.trigger.yaml",
@@ -38,7 +50,7 @@ fn fixture(document_frontmatter: &str) -> (TempDir, PathBuf) {
 
 fn dialect_fixture() -> TempDir {
     let temp = TempDir::new().unwrap();
-    std::fs::create_dir(temp.path().join(".git")).unwrap();
+    initialize_repository(temp.path());
     let source = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../tests/fixtures/schema-triggers");
     for directory in ["schemas", "docs"] {
@@ -131,7 +143,7 @@ fn triggers_command_prints_shared_trace() {
 #[test]
 fn sibling_only_bare_reference_suggests_explicit_relative_path() {
     let temp = TempDir::new().unwrap();
-    std::fs::create_dir(temp.path().join(".git")).unwrap();
+    initialize_repository(temp.path());
     write(temp.path(), "schemas/placeholder.yaml", "$schema:\n  title: string\n");
     write(temp.path(), "docs/local.yaml", "$schema:\n  title: string(required)\n");
     let document = write(

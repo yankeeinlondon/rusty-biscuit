@@ -281,6 +281,12 @@ async fn async_main(
     process_start: std::time::Instant,
 ) -> Result<()> {
     let mut cli = parse_cli_from(&argv);
+    let launch_mode = if matches!(cli.command, Some(Commands::Handle(_))) {
+        claudine::child_environment::LaunchDirectoryMode::ProviderHook
+    } else {
+        claudine::child_environment::LaunchDirectoryMode::Ordinary
+    };
+    claudine::child_environment::initialize_process_launch_directory(launch_mode)?;
     // Attach the partitioned agent tail to the composition command. The tail is
     // captured before clap and never reconstructed from clap matches or argv.
     inject_provider_tail(&mut cli, provider_tail);

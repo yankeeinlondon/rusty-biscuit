@@ -324,7 +324,8 @@ fn caller_root_provenance_slug(provenance: biscuit_file::RootProvenance) -> &'st
     match provenance {
         biscuit_file::RootProvenance::Repository => "repository",
         biscuit_file::RootProvenance::Source => "source",
-        biscuit_file::RootProvenance::Package => "package",
+        biscuit_file::RootProvenance::PackageRoot => "package",
+        biscuit_file::RootProvenance::PackageArea => "package-area",
         biscuit_file::RootProvenance::Home => "home",
         biscuit_file::RootProvenance::Magic => "magic",
         biscuit_file::RootProvenance::Vault => "vault",

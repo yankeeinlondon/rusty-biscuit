@@ -128,6 +128,14 @@ pre-push *areas="claudine darkmatter":
     @just _orchestrate lint {{ areas }}
     @just test {{ areas }}
 
+# run one package's L1 suite on the standing build-host clones (real Linux +
+# native Windows) against the LOCAL tree — no commit or push needed. The
+# expected pre-push step for changes touching path semantics, process
+# spawning, or terminal behavior, which macOS L1 cannot exercise.
+# Usage: just cross-check <package> [--host linux|windows|all] [nextest args]
+cross-check *args:
+    @./scripts/cross-check.sh {{ args }}
+
 # run Level 1 tests for the .githooks/pre-push shell hook itself
 test-pre-push-hook:
     @./.githooks/tests/test-pre-push.sh
@@ -974,10 +982,11 @@ _ensure-cargo-sweep:
     fi
 
 # prune Cargo target/ dirs, which cargo never garbage-collects. Passes:
-# uninstalled toolchains, untouched >14d, then a 120GB default backstop cap per
-# root, then out-of-tree target dirs under ~/.cache left behind by --target-dir
-# builds (docs/kache-strategy.md). Constrained Windows hosts use the native 80GB
-# policy below. Roots default to this repo; override with paths.
+# uninstalled toolchains, untouched >14d, then a 120GB cap only when the target
+# filesystem has less than 100 GiB free, then out-of-tree target dirs under
+# ~/.cache left behind by --target-dir builds (docs/kache-strategy.md).
+# Constrained Windows hosts use the native 80GB policy below. Roots default to
+# this repo; override with paths.
 sweep *args="": _ensure-cargo-sweep
     @scripts/sweep.sh {{ args }}
 
