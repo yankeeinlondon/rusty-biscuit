@@ -16915,6 +16915,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "zed-dmls-cli"
+version = "0.1.0"
+dependencies = [
+ "assert_cmd",
+ "biscuit-terminal",
+ "clap 4.6.1",
+ "color-eyre",
+ "dirs",
+ "predicates",
+ "sniff",
+ "tempfile",
+ "thiserror 2.0.18",
+ "toml 1.1.2+spec-1.1.0",
+ "wait-timeout",
+]
+
+[[package]]
 name = "zerocopy"
 version = "0.8.48"
 source = "registry+https://github.com/rust-lang/crates.io-index"
