@@ -107,6 +107,17 @@ pub enum RootProvenance {
     Absolute,
 }
 
+/// Ordering policy for an unprobed candidate plan.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum CandidatePlanOrder {
+    /// Preserve the reference kind's normal resolution order.
+    #[default]
+    Resolution,
+    /// Prefer candidates rooted at the authoring base, preserving the relative
+    /// order of all source and non-source candidates.
+    AuthoringBaseFirst,
+}
+
 /// One ordered resolution candidate: a concrete path plus the provenance of the
 /// root it was derived from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -675,6 +686,36 @@ impl FileReference {
             ctx.vault_roots(),
             &internal,
         )
+    }
+
+    /// Build an unprobed candidate plan with an explicit ordering policy.
+    ///
+    /// [`CandidatePlanOrder::AuthoringBaseFirst`] is intended for callers that
+    /// bind a lazy reference to the context that authored it. It changes only
+    /// the order of candidates carrying [`RootProvenance::Source`]; reference
+    /// parsing, root construction, normalization, and containment checks remain
+    /// owned by `FileReference`.
+    ///
+    /// ## Errors
+    ///
+    /// Returns the same typed errors as [`candidate_plan`](Self::candidate_plan).
+    pub fn candidate_plan_with_order(
+        &self,
+        ctx: &FileResolutionContext,
+        order: CandidatePlanOrder,
+    ) -> Result<Vec<ResolutionCandidate>, FileReferenceError> {
+        let mut candidates = self.candidate_plan(ctx)?;
+        if order == CandidatePlanOrder::AuthoringBaseFirst {
+            candidates.sort_by_key(|candidate| {
+                candidate.provenance() != RootProvenance::Source
+            });
+        }
+        // A bound identity is compared and displayed natively, so it must not
+        // keep the authored separator mix (`root\a/b` on Windows).
+        for candidate in &mut candidates {
+            candidate.path = resolve::normalize_components(&candidate.path);
+        }
+        Ok(candidates)
     }
 
     /// Validate an unprobed `&` or `^` candidate against its repository root.

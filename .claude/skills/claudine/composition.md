@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-160720f30a749a74
-last_updated: 2026-08-27
+hash: ef46db3751d8e999-2e96c27d20ce4e90
+last_updated: 2026-09-02
 ---
 # Claudine Composition
 
@@ -106,7 +106,10 @@ that authored the task, not the document the step composes and runs.
 `set_frontmatter` and other file-touching effects in that stack therefore
 target files next to the task's origin document, including when an
 externalized `task:`/`group:` file lives in a different repository from the
-step's `prompt:` document.
+step's `prompt:` document. Prompt-task `params` retain that same authoring
+origin when the target schema selects a file value; immutable CLI caller
+records remain a separate, higher-precedence layer with the invocation's
+launch origin.
 
 ### Positional Arguments
 
@@ -240,13 +243,14 @@ Steps:
 6. **Execute** — run the provider session
 7. **Closure** — Claudine rewrites the file:
    - The replacement body is the agent's **final response only** — the output text emitted after the agent's last tool call. Interstitial narration between tool calls (e.g. "Let me read the docs…") is dropped, so process commentary never leaks into the artifact. Providers that recover their final message post-hoc (e.g. Codex's `--output-last-message`) supply that message directly.
-   - The provider returns replacement body content only (no frontmatter)
-   - Original frontmatter properties are preserved byte-for-byte
-   - If the provider modified an existing frontmatter property, Claudine reverts it to the original value and emits a warning
-   - If the provider added a new frontmatter property, Claudine merges it into the document (inserted before `last_updated`)
+   - By default the response is body-only. An authored `response_frontmatter` list may authorize exact property names that the provider can return in a leading YAML frontmatter block.
+   - The authorization is captured from the authored source before setters, interpolation, or schema defaults. Invalid declarations fail before provider launch, and authorizing a Claudine-interpreted property emits a warning because it may change later executions.
+   - Authorized properties are inserted in declaration order before `last_updated` or refreshed in place on later runs. Undeclared proposals are ignored with response-line warnings; response-provided `hash` and `last_updated` are ignored silently.
+   - A delimited metadata attempt with malformed YAML, duplicate keys, a non-mapping root, or no replacement body fails without modifying the source. Missing authorized properties are reported but do not fail a valid body.
+   - Authored frontmatter bytes remain authoritative. If the source changes while the provider runs, Claudine completes the run, restores the pre-run frontmatter snapshot byte-for-byte, and reports each added, removed, or value-changed property without attributing a writer. Structurally invalid frontmatter gets a generic restoration warning because property-level comparison is impossible. Value-preserving reformatting remains silent. Mid-run body drift is compared independently, then replaced and reported.
    - `last_updated` is set to today's date (local time, `YYYY-MM-DD`)
-    - The file is written atomically
-    - A cleanup pass normalizes the body markdown without touching frontmatter
+   - The file is written atomically
+   - A cleanup pass normalizes the body markdown without touching authored frontmatter
 
 ### `hash` property (auto-stamped)
 
@@ -259,6 +263,9 @@ that persists the body.
 - **Kind is forced to `Simple`** — even if the document previously held a valid
   `structured` or `detailed` hash, the next `inline-compose` run normalizes it
   to the `Simple` shorthand.
+- **Textual write-back** — the managed hash and `last_updated` nodes are edited
+  in the reconstructed source text. Unmanaged authored frontmatter and the
+  replacement body are not reserialized through a YAML emitter.
 - **Self-reference stability** — `hash` and `last_updated` are excluded from the
   frontmatter segment when the hash is computed, so re-running `inline-compose`
   on an already-stamped, otherwise-unchanged document does not perturb the
@@ -270,7 +277,7 @@ that persists the body.
 
 This behavior is implemented by [`apply_inline_closure`] in the closure module,
 using `inline_hash_options`, `parse_inline_stored_hash`, `plan_hash_save`, and
-`apply_hash_save`.
+`apply_hash_save_text`.
 
 [`apply_inline_closure`]: ../../lib/src/composition/closure.rs
 
@@ -278,6 +285,7 @@ using `inline_hash_options`, `parse_inline_stored_hash`, `plan_hash_save`, and
 
 
 - **`prompt`** (required) — the prompt text; composed through Darkmatter before execution
+- **`response_frontmatter`** — optional ordered allowlist of generated properties accepted from a leading response frontmatter block
 - **`last_updated`** — auto-updated by Claudine on each successful write
 - **`hash`** — auto-stamped Darkmatter `Simple` content hash on each successful write (see [`hash` property (auto-stamped)](#hash-property-auto-stamped))
 - **`agent`** — optional provider hint (see Provider Selection)
@@ -531,6 +539,40 @@ Any composition error (schema validation failure, missing file, denied shell com
 ## Schema Validation
 
 Composition documents can declare a `$schema` in their frontmatter to constrain the property values that drive the prompt. Schema processing is anchored on Darkmatter's `SimplifiedSchema` and runs as a stage inside the existing `Resolve → Pre-Flight → Prepare → Select → Launch → Closure` pipeline — between override application and shell expansion. The wrapper layer translates Darkmatter's structural failures into typed Claudine errors so users see actionable reports instead of a generic compose failure.
+
+### Caller File Provenance and Materialization
+
+Each explicit caller setter (`key=value` or `--set`) retains an immutable,
+per-property record containing the raw value and the file-resolution context
+captured at launch. Canonical preparation keeps that record separate from the
+effective frontmatter map. Document frontmatter, schema defaults, `proxy.with`,
+runtime mutation, and sequence/task-authored values retain their own ownership
+and are not relabeled as caller input.
+
+Before frontmatter interpolation pass 1, Darkmatter applies the active
+document's effective schema to each caller record. Exactly one applicable file
+arm must be selected; ambiguous or unmatched unions remain the responsibility
+of normal schema validation. A selected local `file(eager)` value resolves from
+the caller origin and must identify an existing file. A selected non-recursive
+lazy `file` value binds to the first ordered, lexically normalized candidate
+from that same origin without checking whether it exists. Lazy HTTP(S)
+references remain remote identities and are never sent through a local
+candidate plan or filesystem probe. Recursive lazy references have no single
+unprobed identity and fail with guidance to declare `file(eager)`.
+
+The raw caller value remains unchanged for identity and fresh preparation. The
+materialized semantic value is the native absolute path or typed remote
+identity consumed by frontmatter expressions, path functions, validation, and
+lifecycle state. Markdown body interpolation uses a separate portable
+presentation value, so Windows can render `/` separators without changing the
+native identity. Absent and explicit-null properties, ordinary strings, and
+document-owned file references are not caller-materialized.
+
+Proxy, retry, resume, inline-compose, and sequence/task entry preserve the same
+raw value and per-property origin. Fresh reads rematerialize them against the
+new active schema; a reused loop plan keeps its installed semantic identity.
+Neither route recaptures process CWD, and a proxy target cannot re-anchor a
+caller-owned value merely because it declares a different file mode.
 
 ## Lifecycle Integration
 

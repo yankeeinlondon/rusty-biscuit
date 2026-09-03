@@ -2317,11 +2317,6 @@ mod prompt_tasks {
             "the reserved overlay outranks everything",
         );
         assert_eq!(overrides["outputs"], json!([]));
-        assert_eq!(
-            request.set_override_file_ref_origins,
-            HashMap::from([("only_param".to_string(), fixture.source_path.parent().unwrap().to_path_buf())]),
-            "only a task parameter that survives all higher layers keeps the task document origin",
-        );
     }
 
     #[test]

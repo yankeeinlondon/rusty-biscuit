@@ -1452,13 +1452,27 @@ fn file_reference_error(
     kind: FileRefFailure,
     source: Option<biscuit_file::FileReferenceError>,
 ) -> ExpressionError {
+    let caller = ctx.active_caller_file_provenance.as_ref().map(|provenance| {
+        Arc::new(super::CallerFileDiagnosticProvenance {
+            property: provenance.property.clone(),
+            origin: provenance.origin.clone(),
+            candidate: provenance.candidate.clone(),
+            candidate_provenance: provenance.candidate_provenance,
+        })
+    });
+    let (reference, base_dir) = ctx
+        .active_caller_file_provenance
+        .as_ref()
+        .map(|provenance| (provenance.reference.clone(), provenance.origin.base_dir().to_path_buf()))
+        .unwrap_or_else(|| (raw.to_string(), ctx.base_dir.clone()));
     ExpressionError::FileReference(FileReferenceDiagnostic {
         function,
-        reference: raw.to_string(),
+        reference,
         kind,
-        base_dir: ctx.base_dir.clone(),
+        base_dir,
         fallback_dir: ctx.file_ref_fallback_dir.clone(),
         source: source.map(Arc::new),
+        caller,
     })
 }
 
@@ -1962,9 +1976,16 @@ pub fn dirname_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Expr
     if any_null(args) {
         return Ok(Value::Null);
     }
-    let raw = require_string_expr("dirname", &args[0])?;
     let path = resolve_path_arg("dirname", &args[0], ctx)?;
-    if Path::new(raw).is_absolute() {
+    // A path outside every projection root (repository, base directory, home)
+    // has no relative display form; its absolute parent is the only anchor
+    // that still resolves when another file name is appended to it.
+    let projected = make_portable_relative_in_context(
+        &path,
+        &ctx.base_dir,
+        ctx.file_resolution_context.as_ref(),
+    );
+    if Path::new(&projected).is_absolute() {
         return Ok(Value::String(
             path.parent()
                 .map(biscuit_file::to_portable_string)
@@ -1993,23 +2014,12 @@ pub fn ext_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, Expressi
 
 /// `parent_dir(file) -> string` — the directory segment immediately above the
 /// basename, or an empty string when there is none.
-///
-/// An absolute input returns its absolute parent so it remains a stable anchor
-/// when another file name is appended.
 pub fn parent_dir_fn(args: &[Value], ctx: &ResolutionContext) -> Result<Value, ExpressionError> {
     require_args_expr("parent_dir", args, 1)?;
     if any_null(args) {
         return Ok(Value::Null);
     }
-    let raw = require_string_expr("parent_dir", &args[0])?;
     let path = resolve_path_arg("parent_dir", &args[0], ctx)?;
-    if Path::new(raw).is_absolute() {
-        return Ok(Value::String(
-            path.parent()
-                .map(biscuit_file::to_portable_string)
-                .unwrap_or_default(),
-        ));
-    }
     let (dirs, _) = path_display_components(&path, &ctx.base_dir, ctx.file_resolution_context.as_ref());
     Ok(Value::String(dirs.last().cloned().unwrap_or_default()))
 }

@@ -618,27 +618,34 @@ own completion alive in those edge cases.
 
 ## ENTER-path autocomplete
 
-When a composition command runs interactively and a required file value
-is missing, Claudine can prompt for it at runtime instead of failing.
-This applies to two surfaces:
+Runtime operation-file recovery distinguishes three outcomes for
+`claudine compose <file>`, `claudine inline-compose <file>`, and
+`claudine sequence <file>`:
 
-1. **The composition positional argument** — `claudine compose <file>`,
-   `claudine inline-compose <file>`, and `claudine sequence <file>`.
-   When the positional file is omitted or does not resolve, Claudine
-   offers every markdown candidate in scope.
-2. **Missing `$schema` properties** — when a frontmatter schema declares
-   a property typed `file` or `file[]`, the value can be supplied
-   interactively at runtime.
+1. **Omitted positional** — argument parsing rejects the command before
+   operation-file recovery runs.
+2. **Unresolved bare discovery name** — a single-component implicit name
+   such as `access` or `access.md` is eligible for the interactive picker.
+3. **Unresolved explicit reference** — a typed path or reference such as
+   `./docs/access.md`, `~/access.md`, or `@access.md` reports the existing
+   `composition.invalid_file_reference` typed no-match diagnostic without
+   opening a picker. Repository-local basename suggestions, when present,
+   are advisory and do not select or retry another file.
 
-The prompt is gated by the same rules as the missing-property prompt:
+Interactive file collection also applies to **missing `$schema`
+properties**: when a frontmatter schema declares
+a property typed `file` or `file[]`, the value can be supplied
+interactively at runtime.
+
+Both the bare-name picker and missing-property prompt use the same gates:
 stdin and stderr must be TTYs, `--silent` must be off, and
 `prompt_for_missing` must be true in config. If any gate is closed,
 Claudine prints the non-interactive remediation block instead.
 
 ### Type-driven chooser
 
-- A property typed `file` (or the single positional argument) uses a
-  single-select `ChooseOne` chooser.
+- A property typed `file` (or an eligible bare operation-file name) uses
+  a single-select `ChooseOne` chooser.
 - A property typed `file[]` uses a multi-select `ChooseMany` chooser:
   press `Space` to toggle items, then `Enter` to submit the set.
 

@@ -9,7 +9,7 @@ use std::path::Path;
 
 use darkmatter::markdown::MarkdownResult;
 use darkmatter::markdown::hash::{ComputedHash, MdHashKind, MdHashOptions, StoredHash};
-use indexmap::IndexMap;
+use indexmap::{IndexMap, IndexSet};
 
 use crate::composition::error::CompositionError;
 use crate::composition::types::InlineClosurePlan;
@@ -18,36 +18,96 @@ use crate::composition::types::InlineClosurePlan;
 // Public API
 // ---------------------------------------------------------------------------
 
-/// Strip accidental frontmatter fences from provider output and validate
-/// that the resulting body is non-empty.
-pub fn extract_replacement_body(provider_output: &str) -> Result<String, CompositionError> {
-    let trimmed = provider_output.trim();
-    if trimmed.is_empty() {
+/// Provider output split into its replacement body and optional metadata.
+#[derive(Debug, Clone)]
+pub struct InlineReplacementParts {
+    body: String,
+    frontmatter: Option<IndexMap<String, ResponseProperty>>,
+}
+
+#[derive(Debug, Clone)]
+struct ResponseProperty {
+    value: serde_json::Value,
+    line: usize,
+}
+
+/// An ignored response-frontmatter proposal and its response line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InlinePropertyNotice {
+    /// Proposed property name.
+    pub key: String,
+    /// One-based line in the provider response.
+    pub line: usize,
+}
+
+/// Parse the provider's final response into replacement body and metadata.
+pub fn extract_replacement_parts(
+    provider_output: &str,
+) -> Result<InlineReplacementParts, CompositionError> {
+    if provider_output.trim().is_empty() {
         return Err(CompositionError::InvalidInlineResponse(
             "provider returned an empty response".into(),
         ));
     }
 
-    // If the provider ignored the guardrail and wrapped its output in
-    // frontmatter fences, strip them.
-    let body = strip_leading_frontmatter(trimmed);
-    let body = body.trim();
+    let Some(parts) = split_frontmatter_parts(provider_output) else {
+        return Ok(InlineReplacementParts {
+            body: provider_output.trim().to_string(),
+            frontmatter: None,
+        });
+    };
+
+    let body = parts.body.trim();
     if body.is_empty() {
         return Err(CompositionError::InvalidInlineResponse(
             "provider response contained only frontmatter with no body".into(),
         ));
     }
 
-    Ok(body.to_string())
+    let parsed: serde_json::Value = biscuit_file::serde_yaml_ng::from_str(parts.yaml)
+        .map_err(|source| CompositionError::InlineResponseFrontmatterYaml { source })?;
+    let map = parsed.as_object().ok_or_else(|| {
+        CompositionError::InvalidInlineResponse(
+            "response frontmatter must be a YAML mapping".into(),
+        )
+    })?;
+    let locations = top_level_key_locations(parts.yaml)?;
+    let frontmatter = map
+        .iter()
+        .map(|(key, value)| {
+            (
+                key.clone(),
+                ResponseProperty {
+                    value: value.clone(),
+                    line: locations.get(key).copied().unwrap_or(2),
+                },
+            )
+        })
+        .collect();
+
+    Ok(InlineReplacementParts {
+        body: body.to_string(),
+        frontmatter: Some(frontmatter),
+    })
 }
 
 /// Result of applying inline closure, reporting frontmatter changes.
 #[derive(Debug, Clone, Default)]
 pub struct InlineClosureResult {
-    /// Keys that were added by the agent and merged into the document.
-    pub new_properties: Vec<String>,
-    /// Keys that were modified by the agent and reverted to original values.
-    pub reverted_properties: Vec<String>,
+    /// Authorized response properties inserted into the document.
+    pub inserted_properties: Vec<String>,
+    /// Authorized response properties refreshed in their existing positions.
+    pub refreshed_properties: Vec<String>,
+    /// Unauthorized response properties that were ignored.
+    pub ignored_properties: Vec<InlinePropertyNotice>,
+    /// Authorized properties omitted from the response.
+    pub missing_properties: Vec<String>,
+    /// Authored properties whose on-disk values drifted and were restored.
+    pub restored_frontmatter_properties: Vec<String>,
+    /// Whether frontmatter drift was restored but could not be classified by property.
+    pub unclassified_frontmatter_drift_restored: bool,
+    /// Whether on-disk body drift was overwritten by the replacement body.
+    pub body_drift_restored: bool,
     /// Whether the frontmatter segment differed from the pre-run baseline.
     ///
     /// `hash` and `last_updated` are excluded from this comparison, so the
@@ -65,11 +125,11 @@ pub struct InlineClosureResult {
 /// original frontmatter, and write atomically to `target_path`.
 pub fn apply_inline_closure(
     plan: &InlineClosurePlan,
-    replacement_body: &str,
+    replacement: &InlineReplacementParts,
     target_path: &Path,
     today: &str,
-    post_run_frontmatter: Option<&IndexMap<String, serde_json::Value>>,
 ) -> Result<InlineClosureResult, CompositionError> {
+    let replacement_body = replacement.body.as_str();
     if replacement_body.trim().is_empty() {
         return Err(CompositionError::InvalidInlineResponse(
             "replacement body is empty".into(),
@@ -93,55 +153,79 @@ pub fn apply_inline_closure(
         ));
     }
 
-    // Compare frontmatter to detect new and modified properties
-    let (new_properties, reverted_properties) = match post_run_frontmatter {
-        Some(post_run_fm) => compare_frontmatter(&plan.original_document_text, post_run_fm),
-        None => (vec![], vec![]),
-    };
-
-    let serialized_props: Vec<(String, String)> = new_properties
+    let original_md: darkmatter::markdown::Markdown =
+        plan.original_document_text.clone().into();
+    let original_fm = original_md.frontmatter().as_map();
+    let allowed: IndexSet<&str> = plan
+        .response_frontmatter
         .iter()
-        .filter_map(|key| {
-            post_run_frontmatter
-                .and_then(|fm| fm.get(key))
-                .map(|value| (key.clone(), serialize_frontmatter_property(key, value)))
-        })
+        .map(String::as_str)
         .collect();
+    let mut harvested = IndexMap::new();
+    let mut ignored_properties = Vec::new();
+    if let Some(response_fm) = &replacement.frontmatter {
+        for (key, property) in response_fm {
+            if matches!(key.as_str(), "hash" | "last_updated") {
+                continue;
+            }
+            if allowed.contains(key.as_str()) {
+                harvested.insert(key.clone(), serialize_frontmatter_property(key, &property.value)?);
+            } else {
+                ignored_properties.push(InlinePropertyNotice {
+                    key: key.clone(),
+                    line: property.line,
+                });
+            }
+        }
+    }
+    let inserted_properties = plan
+        .response_frontmatter
+        .iter()
+        .filter(|key| harvested.contains_key(*key) && !original_fm.contains_key(*key))
+        .cloned()
+        .collect::<Vec<_>>();
+    let refreshed_properties = plan
+        .response_frontmatter
+        .iter()
+        .filter(|key| harvested.contains_key(*key) && original_fm.contains_key(*key))
+        .cloned()
+        .collect::<Vec<_>>();
+    let missing_properties = plan
+        .response_frontmatter
+        .iter()
+        .filter(|key| !harvested.contains_key(*key))
+        .cloned()
+        .collect::<Vec<_>>();
 
     let doc_string = rewrite_inline_document(
         &plan.original_document_text,
         replacement_body,
-        today,
-        &serialized_props,
+        &harvested,
+        &plan.response_frontmatter,
     )
     .map_err(CompositionError::InlineRewriteFailed)?;
 
-    // Stamp a Darkmatter Simple hash into the `hash:` frontmatter property
-    // in the same atomic write that persists the body.
-    //
-    // We avoid parsing `doc_string` directly into `Markdown` because
-    // Darkmatter's frontmatter parser splits on `lines()` and rejoins with
-    // `\n`, which strips trailing newlines and normalizes CRLF. Instead, parse
-    // only the frontmatter block and build the Markdown with the verbatim body.
-    let md = if let Some(parts) = split_frontmatter_parts(&doc_string) {
-        let fm_only = format!("{}{}{}", parts.opening, parts.yaml, parts.closing);
-        let fm_md: darkmatter::markdown::Markdown = fm_only.into();
-        let body_start = parts.opening.len() + parts.yaml.len() + parts.closing.len();
-        let body = &doc_string[body_start..];
-        darkmatter::markdown::Markdown::with_frontmatter(fm_md.frontmatter().clone(), body)
-    } else {
-        doc_string.into()
-    };
+    let md: darkmatter::markdown::Markdown = doc_string.clone().into();
 
     let opts = inline_hash_options();
     let stored = parse_inline_stored_hash(&md, &opts)
         .map_err(CompositionError::InlineHashMalformed)?;
-    let decision = md
+    let mut decision = md
         .plan_hash_save(stored.as_ref(), &opts)
         .map_err(CompositionError::InlineHashMalformed)?;
-    let final_text = md
-        .apply_hash_save(&decision, &opts, today)
-        .unwrap_or_else(|| md.as_string());
+    // Hash-save treats a missing stored hash as baseline creation, but every
+    // successful inline closure is a known body mutation and must date it.
+    decision.bump_last_updated = true;
+    let final_text = darkmatter::markdown::hash::apply_hash_save_text(
+        &doc_string,
+        &decision,
+        &opts,
+        today,
+    )
+    .map_err(CompositionError::InlineHashMalformed)?
+    .unwrap_or(doc_string);
+
+    let source_drift = detect_source_drift(&plan.original_document_text, target_path);
 
     crate::config::atomic::atomic_write(target_path, final_text.as_bytes())
         .map_err(|e| CompositionError::AtomicWriteFailed {
@@ -158,36 +242,36 @@ pub fn apply_inline_closure(
     let frontmatter_changed = simple_fm(&final_hash) != simple_fm(&plan.original_hash);
 
     Ok(InlineClosureResult {
-        new_properties,
-        reverted_properties,
+        inserted_properties,
+        refreshed_properties,
+        ignored_properties,
+        missing_properties,
+        restored_frontmatter_properties: source_drift.restored_frontmatter_properties,
+        unclassified_frontmatter_drift_restored: source_drift
+            .unclassified_frontmatter_drift_restored,
+        body_drift_restored: source_drift.body_drift_restored,
         frontmatter_changed,
         body_cleaned,
     })
 }
 
-/// Reconstruct a Markdown document from `frontmatter_source` (for its
-/// frontmatter) and `body` (new body), updating `last_updated` to `today`.
+/// Reconstruct a Markdown document from authored frontmatter and a new body.
 ///
 /// ## Errors
 ///
-/// Only the fallback path — taken when `frontmatter_source` has no parseable
-/// frontmatter block — can fail, and only at its `fm_insert` of `last_updated`.
-/// The typed [`MarkdownError`] is returned so the caller can retain it as a
-/// source rather than flatten it; the "failed to update last_updated" context
-/// this function used to `format!` in now lives on
-/// [`CompositionError::InlineRewriteFailed`], the variant that renders it.
+/// The typed [`MarkdownError`] is retained for API compatibility with the
+/// fallback Markdown reconstruction path.
 ///
 /// [`MarkdownError`]: darkmatter::markdown::MarkdownError
 pub fn rewrite_inline_document(
     frontmatter_source: &str,
     body: &str,
-    today: &str,
-    new_properties: &[(String, String)],
+    harvested: &IndexMap<String, String>,
+    declaration_order: &[String],
 ) -> Result<String, darkmatter::markdown::MarkdownError> {
     if let Some(parts) = split_frontmatter_parts(frontmatter_source) {
         let newline = detect_newline(frontmatter_source);
-        let prop_lines: Vec<String> = new_properties.iter().map(|(_, v)| v.clone()).collect();
-        let yaml = upsert_last_updated_in_frontmatter(parts.yaml, today, newline, &prop_lines);
+        let yaml = rewrite_harvested_frontmatter(parts.yaml, harvested, declaration_order, newline);
         let mut document = String::with_capacity(
             parts.opening.len() + yaml.len() + parts.closing.len() + body.len(),
         );
@@ -199,7 +283,6 @@ pub fn rewrite_inline_document(
     }
 
     let mut markdown: darkmatter::markdown::Markdown = frontmatter_source.to_string().into();
-    markdown.fm_insert("last_updated", today)?;
     *markdown.content_mut() = body.to_string();
     Ok(markdown.as_string())
 }
@@ -262,34 +345,11 @@ fn parse_inline_stored_hash(
     }
 }
 
-/// Strip a leading frontmatter block (```---\n...\n---\n```) from text,
-/// returning only the body that follows.
-fn strip_leading_frontmatter(text: &str) -> &str {
-    let mut lines = text.split_inclusive('\n');
-    let first = match lines.next() {
-        Some(l) => l,
-        None => return text,
-    };
-    if trim_line_ending(first) != "---" {
-        return text;
-    }
-
-    let mut offset = first.len();
-    for line in lines {
-        offset += line.len();
-        if trim_line_ending(line) == "---" {
-            return &text[offset..];
-        }
-    }
-
-    // No closing delimiter — return as-is.
-    text
-}
-
 struct FrontmatterParts<'a> {
     opening: &'a str,
     yaml: &'a str,
     closing: &'a str,
+    body: &'a str,
 }
 
 fn split_frontmatter_parts(text: &str) -> Option<FrontmatterParts<'_>> {
@@ -308,6 +368,7 @@ fn split_frontmatter_parts(text: &str) -> Option<FrontmatterParts<'_>> {
                 opening: &text[..yaml_start],
                 yaml: &text[yaml_start..offset],
                 closing: &text[offset..next_offset],
+                body: &text[next_offset..],
             });
         }
         offset = next_offset;
@@ -316,81 +377,148 @@ fn split_frontmatter_parts(text: &str) -> Option<FrontmatterParts<'_>> {
     None
 }
 
-fn upsert_last_updated_in_frontmatter(
-    yaml: &str,
-    today: &str,
-    newline: &str,
-    new_properties: &[String],
-) -> String {
-    let mut updated = String::with_capacity(yaml.len() + today.len() + 32);
-    let mut found = false;
-    let mut had_trailing_newline = yaml.is_empty();
-
-    for line in yaml.split_inclusive('\n') {
-        let line_ending = if line.ends_with("\r\n") {
-            "\r\n"
-        } else if line.ends_with('\n') {
-            "\n"
-        } else {
-            ""
-        };
-        let content = trim_line_ending(line);
-
-        if let Some(rewritten) = rewrite_last_updated_line(content, today) {
-            // Inject new properties just before last_updated
-            for prop in new_properties {
-                updated.push_str(prop);
-            }
-            updated.push_str(&rewritten);
-            updated.push_str(line_ending);
-            found = true;
-        } else {
-            updated.push_str(line);
-        }
-
-        had_trailing_newline = !line_ending.is_empty();
-    }
-
-    if !found {
-        if !updated.is_empty() && !had_trailing_newline {
-            updated.push_str(newline);
-        }
-        // Inject new properties before last_updated
-        for prop in new_properties {
-            updated.push_str(prop);
-        }
-        updated.push_str("last_updated: ");
-        updated.push_str(today);
-        updated.push_str(newline);
-    }
-
-    updated
+#[derive(Debug)]
+struct TopLevelNode {
+    key: String,
+    start: usize,
+    end: usize,
 }
 
-fn rewrite_last_updated_line(line: &str, today: &str) -> Option<String> {
-    let trimmed = line.trim_start();
-    let rest = trimmed.strip_prefix("last_updated:")?;
-    let indent = &line[..line.len() - trimmed.len()];
-    if !indent.is_empty() {
+fn rewrite_harvested_frontmatter(
+    yaml: &str,
+    harvested: &IndexMap<String, String>,
+    declaration_order: &[String],
+    newline: &str,
+) -> String {
+    let nodes = top_level_nodes(yaml);
+    let existing: IndexSet<&str> = nodes.iter().map(|node| node.key.as_str()).collect();
+    let mut edits = nodes
+        .iter()
+        .filter_map(|node| {
+            harvested.get(&node.key).map(|fragment| {
+                (
+                    node.start,
+                    node.end,
+                    with_newline_style(fragment, newline),
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+
+    let insertion = nodes
+        .iter()
+        .find(|node| node.key == "last_updated")
+        .map_or(yaml.len(), |node| node.start);
+    let inserted = declaration_order
+        .iter()
+        .filter(|key| !existing.contains(key.as_str()))
+        .filter_map(|key| harvested.get(key))
+        .map(|fragment| with_newline_style(fragment, newline))
+        .collect::<String>();
+    if !inserted.is_empty() {
+        edits.push((insertion, insertion, inserted));
+    }
+
+    edits.sort_by_key(|(start, _, _)| *start);
+    let mut rewritten = yaml.to_string();
+    for (start, end, replacement) in edits.into_iter().rev() {
+        rewritten.replace_range(start..end, &replacement);
+    }
+    rewritten
+}
+
+fn top_level_nodes(yaml: &str) -> Vec<TopLevelNode> {
+    let lines = yaml
+        .split_inclusive('\n')
+        .scan(0usize, |offset, line| {
+            let start = *offset;
+            *offset += line.len();
+            Some((start, *offset, trim_line_ending(line)))
+        })
+        .collect::<Vec<_>>();
+    let roots = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(index, (start, _, line))| {
+            semantic_top_level_key(line).map(|key| (index, *start, key))
+        })
+        .collect::<Vec<_>>();
+
+    roots
+        .iter()
+        .enumerate()
+        .map(|(root_index, (line_index, start, key))| {
+            let next_line = roots
+                .get(root_index + 1)
+                .map_or(lines.len(), |(index, _, _)| *index);
+            let mut end = roots
+                .get(root_index + 1)
+                .map_or(yaml.len(), |(_, start, _)| *start);
+            for (line_start, _, line) in &lines[line_index + 1..next_line] {
+                if line.starts_with('#') {
+                    end = *line_start;
+                    break;
+                }
+            }
+            TopLevelNode {
+                key: key.clone(),
+                start: *start,
+                end,
+            }
+        })
+        .collect()
+}
+
+fn semantic_top_level_key(line: &str) -> Option<String> {
+    if line.is_empty()
+        || line.chars().next().is_some_and(char::is_whitespace)
+        || line.starts_with('#')
+    {
         return None;
     }
-    let quote = rest
-        .trim_start()
-        .chars()
-        .next()
-        .filter(|quote| matches!(quote, '"' | '\''));
-
-    let mut rewritten = String::from(indent);
-    rewritten.push_str("last_updated: ");
-    match quote {
-        Some(quote) => {
-            rewritten.push(quote);
-            rewritten.push_str(today);
-            rewritten.push(quote);
+    let mut quote = None;
+    let mut escaped = false;
+    let colon = line.char_indices().find_map(|(index, character)| {
+        match quote {
+            Some('"') if escaped => escaped = false,
+            Some('"') if character == '\\' => escaped = true,
+            Some(active) if character == active => quote = None,
+            Some(_) => {}
+            None if matches!(character, '"' | '\'') => quote = Some(character),
+            None if character == ':' => return Some(index),
+            None => {}
         }
-        None => rewritten.push_str(today),
+        None
+    })?;
+    let key_source = line[..colon].trim_end();
+    let probe = format!("{key_source}: null");
+    let parsed: serde_json::Value = biscuit_file::serde_yaml_ng::from_str(&probe).ok()?;
+    parsed.as_object()?.keys().next().cloned()
+}
+
+fn top_level_key_locations(
+    yaml: &str,
+) -> Result<IndexMap<String, usize>, CompositionError> {
+    let mut locations = IndexMap::new();
+    for (index, line) in yaml.lines().enumerate() {
+        let Some(key) = semantic_top_level_key(line) else {
+            continue;
+        };
+        if locations.insert(key.clone(), index + 2).is_some() {
+            return Err(CompositionError::InvalidInlineResponse(format!(
+                "response frontmatter contains duplicate property {key:?}"
+            )));
+        }
     }
-    Some(rewritten)
+    Ok(locations)
+}
+
+fn with_newline_style(fragment: &str, newline: &str) -> String {
+    if newline == "\r\n" {
+        fragment.replace('\n', "\r\n")
+    } else {
+        fragment.to_string()
+    }
 }
 
 fn detect_newline(text: &str) -> &str {
@@ -401,65 +529,117 @@ fn trim_line_ending(line: &str) -> &str {
     line.trim_end_matches(['\r', '\n'])
 }
 
-/// Compare post-run frontmatter against the original document's frontmatter.
-///
-/// Returns `(new_keys, modified_keys)` where:
-/// - `new_keys`: present in post-run but absent in original
-/// - `modified_keys`: present in both but with different values
-fn compare_frontmatter(
-    original_document_text: &str,
-    post_run_fm: &IndexMap<String, serde_json::Value>,
-) -> (Vec<String>, Vec<String>) {
-    let original_md: darkmatter::markdown::Markdown = original_document_text.to_string().into();
-    let original_fm = original_md.frontmatter().as_map();
+#[derive(Default)]
+struct SourceDrift {
+    restored_frontmatter_properties: Vec<String>,
+    unclassified_frontmatter_drift_restored: bool,
+    body_drift_restored: bool,
+}
 
-    let mut new_keys = Vec::new();
-    let mut modified_keys = Vec::new();
+fn detect_source_drift(original: &str, target_path: &Path) -> SourceDrift {
+    let Ok(current) = std::fs::read_to_string(target_path) else {
+        return SourceDrift::default();
+    };
+    if current == original {
+        return SourceDrift::default();
+    }
+    let original_parts = split_frontmatter_parts(original);
+    let current_parts = split_frontmatter_parts(&current);
+    let original_body = original_parts.as_ref().map_or(original, |parts| parts.body);
+    let current_body = source_body_region(&current, original_body);
+    let body_drift_restored = original_body != current_body;
 
-    for (key, post_value) in post_run_fm {
-        // Skip last_updated — managed by the closure itself
-        if key == "last_updated" {
-            continue;
-        }
-        match original_fm.get(key) {
-            None => new_keys.push(key.clone()),
-            Some(original_value) if original_value != post_value => {
-                modified_keys.push(key.clone());
-            }
-            Some(_) => {} // unchanged
-        }
+    let comparable = original_parts
+        .as_ref()
+        .zip(current_parts.as_ref())
+        .and_then(|(original, current)| {
+            let original: serde_json::Value =
+                biscuit_file::serde_yaml_ng::from_str(original.yaml).ok()?;
+            let current: serde_json::Value =
+                biscuit_file::serde_yaml_ng::from_str(current.yaml).ok()?;
+            Some((original.as_object()?.clone(), current.as_object()?.clone()))
+        });
+
+    let Some((original, current)) = comparable else {
+        return SourceDrift {
+            unclassified_frontmatter_drift_restored: source_frontmatter_region(
+                original,
+                original_body,
+            ) != source_frontmatter_region(&current, current_body),
+            body_drift_restored,
+            ..SourceDrift::default()
+        };
+    };
+
+    let mut keys: IndexSet<&str> = original.keys().map(String::as_str).collect();
+    keys.extend(current.keys().map(String::as_str));
+    let restored_frontmatter_properties = keys
+        .into_iter()
+        .filter(|key| {
+            !matches!(*key, "hash" | "last_updated") && original.get(*key) != current.get(*key)
+        })
+        .map(str::to_string)
+        .collect();
+
+    SourceDrift {
+        restored_frontmatter_properties,
+        body_drift_restored,
+        ..SourceDrift::default()
+    }
+}
+
+fn source_body_region<'a>(text: &'a str, original_body: &str) -> &'a str {
+    if let Some(parts) = split_frontmatter_parts(text) {
+        return parts.body;
+    }
+    if text.ends_with(original_body) {
+        return &text[text.len() - original_body.len()..];
     }
 
-    (new_keys, modified_keys)
+    let mut offset = 0;
+    let mut body_start = None;
+    for line in text.split_inclusive('\n') {
+        offset += line.len();
+        if trim_line_ending(line) == "---" {
+            body_start = Some(offset);
+        }
+    }
+    body_start.map_or(text, |start| &text[start..])
+}
+
+fn source_frontmatter_region<'a>(text: &'a str, body: &'a str) -> &'a str {
+    &text[..text.len() - body.len()]
 }
 
 /// Serialize a single frontmatter property as a YAML fragment.
 ///
 /// Simple scalars produce `key: value\n`. Complex types (arrays, objects)
 /// delegate to `serde_yaml_ng` for the value portion.
-fn serialize_frontmatter_property(key: &str, value: &serde_json::Value) -> String {
-    match value {
-        serde_json::Value::String(_)
-        | serde_json::Value::Number(_)
-        | serde_json::Value::Bool(_)
-        | serde_json::Value::Null => {
-            let yaml_value = biscuit_file::serde_yaml_ng::to_string(value)
-                .unwrap_or_else(|_| format!("{value}"));
-            let yaml_value = yaml_value.trim_end_matches('\n');
-            format!("{key}: {yaml_value}\n")
-        }
-        complex => {
-            let yaml_value = biscuit_file::serde_yaml_ng::to_string(complex)
-                .unwrap_or_else(|_| format!("{complex}"));
-            let yaml_value = yaml_value.trim_end_matches('\n');
-            let indented = yaml_value
-                .lines()
-                .map(|line| format!("  {line}"))
-                .collect::<Vec<_>>()
-                .join("\n");
-            format!("{key}:\n{indented}\n")
-        }
+fn serialize_frontmatter_property(
+    key: &str,
+    value: &serde_json::Value,
+) -> Result<String, CompositionError> {
+    let mut map = serde_json::Map::new();
+    map.insert(key.to_string(), value.clone());
+    let serialized = biscuit_file::serde_yaml_ng::to_string(&serde_json::Value::Object(map))
+        .map_err(|source| CompositionError::InlineResponseFrontmatterSerialize {
+            key: key.to_string(),
+            source,
+        })?;
+    let mut lines = serialized.lines();
+    let Some(first) = lines.next() else {
+        return Err(CompositionError::InvalidInlineResponse(format!(
+            "response frontmatter property {key:?} serialized to an empty node"
+        )));
+    };
+    let mut node = String::from(first);
+    node.push('\n');
+    for line in lines {
+        node.push_str("  ");
+        node.push_str(line);
+        node.push('\n');
     }
+    Ok(node)
 }
 
 // ---------------------------------------------------------------------------

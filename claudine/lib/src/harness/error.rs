@@ -60,8 +60,10 @@ impl PathResolutionFailure {
 /// root, and each attempted candidate's provenance and probe disposition.
 #[derive(Debug, Clone)]
 pub struct ResolutionDetail {
+    reference: String,
     kind: FileReferenceKind,
     effective_kind: FileReferenceKind,
+    base_dir: PathBuf,
     repository_root: Option<PathBuf>,
     candidates: Vec<ProbedCandidate>,
 }
@@ -70,16 +72,47 @@ impl ResolutionDetail {
     /// Project the retained detail out of a shared [`DetailedResolution`].
     pub fn from_detailed(detailed: &DetailedResolution) -> Self {
         Self {
+            reference: detailed.raw().to_string(),
             kind: detailed.class().kind,
             effective_kind: detailed.effective_kind(),
+            base_dir: detailed.base_dir().to_path_buf(),
             repository_root: detailed.repository_root().map(Path::to_path_buf),
             candidates: detailed.candidates().to_vec(),
         }
     }
 
+    /// The reference exactly as authored.
+    pub fn reference(&self) -> &str {
+        &self.reference
+    }
+
+    /// The captured directory against which source-relative candidates resolve.
+    pub fn base_dir(&self) -> &Path {
+        &self.base_dir
+    }
+
+    /// The repository root used by repository-relative candidates, when known.
+    pub fn repository_root(&self) -> Option<&Path> {
+        self.repository_root.as_deref()
+    }
+
     /// The ordered candidates the resolver attempted, each with its disposition.
     pub fn candidates(&self) -> &[ProbedCandidate] {
         &self.candidates
+    }
+
+    /// Populate the resolver-owned fields in the shared file-reference payload.
+    pub(crate) fn apply_to_diagnostic(&self, detail: &mut Value) {
+        detail["reference"] = json!(self.reference);
+        detail["kind"] = json!(file_reference_kind_slug(self.kind));
+        detail["effective_kind"] = json!(file_reference_kind_slug(self.effective_kind));
+        detail["base_dir"] = json!(biscuit_file::to_portable_string(&self.base_dir));
+        detail["repository_root"] = json!(
+            self.repository_root
+                .as_ref()
+                .map(|path| biscuit_file::to_portable_string(path))
+        );
+        detail["candidates"] = resolution_candidates_detail(&self.candidates);
     }
 }
 
@@ -350,10 +383,10 @@ impl Diagnostic for HarnessError {
             HarnessError::RepoRootRequired { path } => json!({ "path": path }),
             // Seeded from the catalog so every declared key is present.
             // `reference`, `source_path`, and the typed `failure` are always
-            // known; `kind`, `repository_root`, and the ordered `candidates`
-            // are populated from the shared resolver's retained plan when a
-            // probe ran, and stay `null` when the failure was drawn before
-            // resolution (spec §D8). `failure` is the typed
+            // known; `kind`, `effective_kind`, `base_dir`, `repository_root`,
+            // and the ordered `candidates` are populated from the shared
+            // resolver's retained plan when a probe ran, and stay `null` when
+            // the failure was drawn before resolution (spec §D8). `failure` is the typed
             // `PathResolutionFailure`, never back-derived from `kind`.
             HarnessError::PathResolutionFailed {
                 raw,
@@ -368,16 +401,7 @@ impl Diagnostic for HarnessError {
                 base["source_path"] =
                     json!(source_path.as_deref().map(biscuit_file::to_portable_string));
                 if let Some(detail) = resolution {
-                    base["kind"] = json!(file_reference_kind_slug(detail.kind));
-                    base["effective_kind"] =
-                        json!(file_reference_kind_slug(detail.effective_kind));
-                    base["repository_root"] = json!(
-                        detail
-                            .repository_root
-                            .as_ref()
-                            .map(|path| biscuit_file::to_portable_string(path))
-                    );
-                    base["candidates"] = resolution_candidates_detail(&detail.candidates);
+                    detail.apply_to_diagnostic(&mut base);
                 }
                 base
             }
@@ -397,16 +421,7 @@ impl Diagnostic for HarnessError {
                 base["source_path"] =
                     json!(source_path.as_deref().map(biscuit_file::to_portable_string));
                 if let Some(detail) = resolution {
-                    base["kind"] = json!(file_reference_kind_slug(detail.kind));
-                    base["effective_kind"] =
-                        json!(file_reference_kind_slug(detail.effective_kind));
-                    base["repository_root"] = json!(
-                        detail
-                            .repository_root
-                            .as_ref()
-                            .map(|path| biscuit_file::to_portable_string(path))
-                    );
-                    base["candidates"] = resolution_candidates_detail(&detail.candidates);
+                    detail.apply_to_diagnostic(&mut base);
                 }
                 base
             }

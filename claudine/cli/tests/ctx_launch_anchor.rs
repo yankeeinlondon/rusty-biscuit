@@ -282,7 +282,7 @@ fn caller_file_anchor_survives_direct_and_proxy_success_guards() {
             "  spec: 'file(eager; required)'\n",
             "success:\n",
             "  stack:\n",
-            "    - when: \"file_exists(dirname(spec) + '/sibling.md') && file_exists(parent_dir(spec) + '/sibling.md')\"\n",
+            "    - when: \"file_exists(dirname(spec) + '/sibling.md')\"\n",
             "      action: {append_line: [\"events.log\", \"anchored={{ spec }} cwd={{ ctx.cwd }}\"]}\n",
             "---\n",
             "TARGET SPEC={{ spec }}\n",

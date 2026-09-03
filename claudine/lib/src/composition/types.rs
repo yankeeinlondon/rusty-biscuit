@@ -500,6 +500,8 @@ pub struct EffectiveSelectionHints {
 pub struct CallerInputLayers {
     /// Frontmatter `--set` overrides (JSON object) the caller supplied.
     pub set_overrides: Option<serde_json::Value>,
+    /// Immutable raw caller overrides paired with their launch-time origins.
+    pub caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     /// Launch-area directory that anchors caller-supplied file references.
     pub file_ref_fallback_dir: Option<PathBuf>,
     /// Immutable request-scoped resolution inputs captured before the first
@@ -523,11 +525,43 @@ pub struct CallerInputLayers {
 }
 
 impl CallerInputLayers {
+    /// Capture explicit caller overrides without materializing or re-anchoring
+    /// their raw values.
+    pub fn from_caller_overrides(
+        set_overrides: Option<serde_json::Value>,
+        origin: biscuit_file::FileResolutionContext,
+    ) -> Self {
+        let caller_input_records = set_overrides
+            .as_ref()
+            .and_then(serde_json::Value::as_object)
+            .map(|values| {
+                values
+                    .iter()
+                    .map(|(property, raw)| {
+                        (
+                            property.clone(),
+                            darkmatter::markdown::compose::CallerInputRecord::new(
+                                raw.clone(),
+                                origin.clone(),
+                            ),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        Self {
+            set_overrides,
+            caller_input_records,
+            ..Self::default()
+        }
+    }
+
     /// The layers `options` carries, retained so a later canonical preparation
     /// reapplies exactly them.
     pub fn from_options(options: &super::PrepareOptions) -> Self {
         Self {
             set_overrides: options.set_overrides.clone(),
+            caller_input_records: options.caller_input_records.clone(),
             file_ref_fallback_dir: options.file_ref_fallback_dir.clone(),
             file_resolution_context: options.file_resolution_context.clone(),
             pre_approved_commands: options.pre_approved_commands.clone(),
@@ -539,6 +573,7 @@ impl CallerInputLayers {
     /// canonical preparation goes through.
     pub fn apply_to(&self, mut options: super::PrepareOptions) -> super::PrepareOptions {
         options.set_overrides = self.set_overrides.clone();
+        options.caller_input_records = self.caller_input_records.clone();
         options.file_ref_fallback_dir = self.file_ref_fallback_dir.clone();
         options.file_resolution_context = self.file_resolution_context.clone();
         options.pre_approved_commands = self.pre_approved_commands.clone();
@@ -651,6 +686,12 @@ pub enum CompositionClosurePlan {
 pub struct InlineClosurePlan {
     /// The original on-disk document text (frontmatter + body).
     pub original_document_text: String,
+    /// Authored frontmatter properties the provider response may generate.
+    ///
+    /// Snapshotted before composition so setters, interpolation, schema
+    /// defaults, and mid-run source changes cannot expand the authorization.
+    /// Declaration order controls insertion order for newly generated nodes.
+    pub response_frontmatter: Vec<String>,
     /// Full pre-run hash of the document, always [`MdHashKind::Simple`].
     ///
     /// Computed with `hash` and `last_updated` excluded via

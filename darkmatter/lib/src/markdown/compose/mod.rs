@@ -126,19 +126,8 @@ pub use shell_expansion::ShellExpansionError;
 pub use shell_expansion::ShellTimeoutBehavior;
 pub use context::effective_state::{EffectiveState, EffectiveStateBuilder};
 pub(crate) use context::effective_state::ResolvingLookup;
-pub use context::options::{ComposeOptions, ComposeSource};
+pub use context::options::{CallerInputRecord, CallerInputRecords, ComposeOptions, ComposeSource};
 pub use context::capture_file_resolution_context;
-
-/// Materialize schema-typed caller overrides without composing the document.
-///
-/// This is the provenance-preserving handoff seam for callers that must merge
-/// independently authored override layers before canonical composition.
-pub fn materialize_caller_overrides(
-    markdown: &crate::markdown::Markdown,
-    options: &ComposeOptions,
-) -> crate::markdown::types::MarkdownResult<serde_json::Value> {
-    schema_validation::materialize_caller_overrides(markdown, options)
-}
 pub use context::repository_scope_catalog;
 pub(crate) use context::options::ReferenceGraphOptionsIdentity;
 pub use context::report::{ComposeReport, ComposeWarning, SourceRange};

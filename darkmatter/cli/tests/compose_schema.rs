@@ -26,6 +26,54 @@ fn read_to_string(path: &Path) -> String {
     fs::read_to_string(path).unwrap_or_default()
 }
 
+fn repository_root() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("darkmatter CLI crate should live two levels below the repository root")
+        .to_path_buf()
+}
+
+#[test]
+fn shipped_plan_prompt_anchors_caller_file_from_repository_root() {
+    let root = repository_root();
+
+    md_cmd()
+        .current_dir(&root)
+        .args([
+            "compose",
+            "prompts/plan.md",
+            "spec=darkmatter/cli/tests/fixtures/shipped_plan_route/spec.md",
+            "--no-baseline-schema",
+            "--no-trigger-schemas",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "darkmatter/cli/tests/fixtures/shipped_plan_route/plan.md",
+        ));
+}
+
+#[test]
+fn shipped_plan_prompt_anchors_caller_file_from_package_area() {
+    let root = repository_root();
+
+    md_cmd()
+        .current_dir(root.join("darkmatter"))
+        .args([
+            "compose",
+            "../prompts/plan.md",
+            "spec=cli/tests/fixtures/shipped_plan_route/spec.md",
+            "--no-baseline-schema",
+            "--no-trigger-schemas",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(
+            "darkmatter/cli/tests/fixtures/shipped_plan_route/plan.md",
+        ));
+}
+
 // ── High #2: planner-prompt CLI regression ──────────────────────────────────
 
 /// The originating bug: a document with `$schema` requiring `spec`, an empty

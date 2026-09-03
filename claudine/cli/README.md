@@ -228,7 +228,7 @@ Wrapper behavior:
 Composition turns a Markdown document with frontmatter into a provider session, optionally merging the result back into the source file or running a sequence of steps. All three commands reuse the wrapper pipeline (env setup, harness detection, structured streaming, lifecycle-stack recovery).
 
 - **`claudine compose [flags] <file-ref> [key=value ...]`** — compose a Markdown file (Darkmatter transclusion/interpolation/conditionals/`::shell`) and send the result as a prompt. No file mutation.
-- **`claudine inline-compose [flags] <file-ref> [key=value ...]`** — compose the frontmatter `prompt` property and replace the document body with the provider's response. Original frontmatter is preserved byte-for-byte; `last_updated` is set to today's date; new frontmatter keys added by the provider are merged in.
+- **`claudine inline-compose [flags] <file-ref> [key=value ...]`** — compose the frontmatter `prompt` property and replace the document body with the provider's response. Original frontmatter is preserved byte-for-byte, `last_updated` is set to today's date, and a Darkmatter `Simple` `hash:` is stamped. The provider may return new properties only when the document authors a `response_frontmatter` allowlist naming them; every other frontmatter property is immutable, and any mid-run change to the source is restored from the pre-run snapshot and reported.
 - **`claudine sequence [flags] <file-ref> [key=value ...]`** — run a serial sequence of composition steps declared in a single document, with a shared approval cache across steps and `FAIL_FAST` propagation on failure.
 
 Positional arguments include exactly one file reference plus zero or more `key=value` setters in any order:

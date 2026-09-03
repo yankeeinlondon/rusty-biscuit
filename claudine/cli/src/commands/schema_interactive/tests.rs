@@ -214,7 +214,7 @@ fn pre_validate_with_interactive_returns_missing_when_not_allowed() {
     assert!(!interactive.allowed());
 
     let term = Terminal::default();
-    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None)
+    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, false)
         .unwrap_err();
     assert!(
         matches!(err, CompositionError::MissingProperties { .. }),
@@ -242,7 +242,7 @@ fn pre_validate_with_interactive_returns_missing_for_file_property_when_not_allo
     assert!(!interactive.allowed());
 
     let term = Terminal::default();
-    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None)
+    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, false)
         .unwrap_err();
     assert!(
         matches!(err, CompositionError::MissingProperties { .. }),
@@ -271,6 +271,7 @@ fn pre_validate_with_interactive_succeeds_when_overrides_supply_value() {
         InteractiveSchemaOptions::default(),
         &term,
         None,
+        false,
     )
     .unwrap();
     let fm = pre.set_overrides.unwrap();
@@ -303,7 +304,7 @@ fn pre_validate_with_interactive_returns_unsupported_for_object_shape() {
     assert!(interactive.allowed());
 
     let term = Terminal::default();
-    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None)
+    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, false)
         .unwrap_err();
     assert!(
         matches!(err, CompositionError::UnsupportedInteractiveSchema { .. }),

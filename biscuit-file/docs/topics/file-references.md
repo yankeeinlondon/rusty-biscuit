@@ -504,6 +504,7 @@ own `add_magic_path()` / `add_vault()` builders apply **only** to the ambient
 | `resolve_in_context(ctx)` | Resolve through the explicit API; no-match maps to `Ok(None)` |
 | `resolve_detailed(ctx)` | Keep the detailed success/failure record |
 | `candidate_plan(ctx)` | Build the complete ordered plan, no filesystem probes |
+| `candidate_plan_with_order(ctx, order)` | Build the unprobed plan using an explicit `CandidatePlanOrder` |
 | `validate_repository_candidate(candidate, repository_root)` | Apply the shared `&`/`^` containment check |
 | `complete_partial(token, base)` | Expand an ambient completion token |
 | `complete_partial_in_context(token, ctx)` | Expand a completion token from the same roots as execution |
@@ -513,6 +514,12 @@ own `add_magic_path()` / `add_vault()` builders apply **only** to the ambient
 All builder methods consume and return `self` for chaining.
 `PathPosition::Start` inserts a magic root before the default roots;
 `PathPosition::End` inserts one after them.
+
+`CandidatePlanOrder::Resolution` preserves the reference kind's normal order.
+`CandidatePlanOrder::AuthoringBaseFirst` stably moves `Source` candidates first
+for a consumer binding a lazy identity to the context that authored it. The
+policy does not change parsing, candidate construction, or filesystem probing;
+the consumer still selects from the plan explicitly.
 
 ## Diagnostics: `resolve_detailed()`
 

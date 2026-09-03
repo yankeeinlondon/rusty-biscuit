@@ -52,10 +52,17 @@ properties, and defaulted properties do not materialize. A compose run with no
 effective schema and all validation-only APIs remain non-mutating. Repeated
 schema passes are idempotent, and present values are preserved exactly.
 
-Caller-originated eager-file overrides instead retain an absolute native value
-in effective frontmatter. Markdown body interpolation reads a separate portable
-presentation value, including through static member and index selection; path
-operations, comparisons, and lifecycle state keep the native identity.
+Caller records retain an immutable raw value and file-resolution origin per
+property. Before frontmatter interpolation pass 1, an exactly selected eager or
+non-recursive lazy file arm materializes that value from its caller origin.
+Eager local files must exist; lazy local files bind their first ordered
+candidate without a probe, lazy HTTP(S) values remain remote, and recursive
+lazy values fail because they have no single unprobed identity. This prelude
+does not validate or mutate document-authored values. Markdown body
+interpolation reads a separate portable presentation value, including through
+static member and index selection; path operations, comparisons, frontmatter
+expressions, and lifecycle state keep the native semantic identity. The raw
+record remains unchanged for fresh preparation against another active schema.
 
 `ValidationProblem` retains the public message plus typed code, JSON-pointer
 instance path, optional schema path, offending property, source position, and

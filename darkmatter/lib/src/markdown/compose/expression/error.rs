@@ -96,10 +96,10 @@ impl FileRefFailure {
 ///
 /// Shared by every filesystem builtin so they all inherit the same headline,
 /// OSC8-linked paths, and did-you-mean suggestions (design §3). The fields are
-/// exactly what `resolve_arg` already has in scope — `base_dir` and
-/// `fallback_dir` come straight from the [`super::ResolutionContext`] — so the
-/// typed variant simply *keeps what it already has* instead of `format!`-ing it
-/// away.
+/// normally come from `resolve_arg` and its [`super::ResolutionContext`]. When
+/// schema projection supplies the argument, `caller` retains its authoring
+/// context and selected candidate without changing the semantic argument used
+/// for evaluation.
 ///
 /// ## Notes
 ///
@@ -123,6 +123,21 @@ pub struct FileReferenceDiagnostic {
     pub fallback_dir: Option<PathBuf>,
     /// The underlying typed cause, when one exists (absent for a clean miss).
     pub source: Option<Arc<biscuit_file::FileReferenceError>>,
+    /// Caller provenance when the argument is a projected schema-selected value.
+    pub caller: Option<Arc<CallerFileDiagnosticProvenance>>,
+}
+
+/// Immutable caller evidence retained for a later read-side file failure.
+#[derive(Debug, Clone)]
+pub struct CallerFileDiagnosticProvenance {
+    /// Top-level caller property whose semantic value reached the builtin.
+    pub property: String,
+    /// Captured authoring context used to construct the selected candidate.
+    pub origin: biscuit_file::FileResolutionContext,
+    /// Candidate installed as the property's semantic value.
+    pub candidate: PathBuf,
+    /// Candidate root class selected by `FileReference`.
+    pub candidate_provenance: biscuit_file::RootProvenance,
 }
 
 /// The focused classification of a remote-provider query failure.
@@ -474,6 +489,7 @@ mod tests {
                 base_dir: PathBuf::from("/repo"),
                 fallback_dir: None,
                 source: None,
+                caller: None,
             });
             assert!(err.is_authoring_fatal());
         }
@@ -490,6 +506,7 @@ mod tests {
                 base_dir: PathBuf::from("/repo"),
                 fallback_dir: None,
                 source: None,
+                caller: None,
             });
             assert!(!err.is_authoring_fatal());
         }
@@ -575,6 +592,7 @@ mod tests {
                 base_dir: PathBuf::from("/repo"),
                 fallback_dir: None,
                 source: None,
+                caller: None,
             });
             let text = err.to_string();
             assert!(text.contains("invalid file path"), "{text}");

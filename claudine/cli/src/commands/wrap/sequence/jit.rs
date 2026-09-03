@@ -46,6 +46,8 @@ pub(super) struct StepComposeContext<'a> {
     pub(super) inline_mode: bool,
     /// Immutable request-scoped file-resolution snapshot.
     pub(super) file_resolution_context: &'a biscuit_file::FileResolutionContext,
+    /// Immutable CLI caller values, kept separate from task and runtime layers.
+    pub(super) caller_input_records: &'a darkmatter::markdown::compose::CallerInputRecords,
     pub(super) invocation: &'a claudine::invocation_context::InvocationContext,
 }
 
@@ -166,7 +168,7 @@ pub(super) fn compose_step(
         env_overrides,
         &step_source.resolved_path,
         &step_source.markdown,
-        &step_overrides,
+        (&step_overrides, ctx.caller_input_records),
         ctx.launch_area,
         Some(ctx.file_resolution_context),
         Some(ctx.invocation),
@@ -210,6 +212,7 @@ pub(super) fn compose_step(
         prepared_context: Some(prepared_context),
         file_ref_fallback_dir: ctx.launch_area.map(Path::to_path_buf),
         file_resolution_context: Some(ctx.file_resolution_context.clone()),
+        caller_input_records: ctx.caller_input_records.clone(),
         // `{{state}}`/`{{previous}}`/`{{next}}` render their `name` in string
         // context; whole-value/dotted access keeps the typed object.
         name_coercion_keys: composition::sequence::reserved::NAME_COERCION_KEYS
@@ -257,7 +260,10 @@ pub(super) fn build_template_preflight_options(
     env_overrides: &BTreeMap<String, String>,
     source_path: &Path,
     markdown: &darkmatter::markdown::Markdown,
-    set_overrides: &Value,
+    composition_inputs: (
+        &Value,
+        &darkmatter::markdown::compose::CallerInputRecords,
+    ),
     launch_area: Option<&Path>,
     file_resolution_context: Option<&biscuit_file::FileResolutionContext>,
     invocation: Option<&claudine::invocation_context::InvocationContext>,
@@ -266,6 +272,7 @@ pub(super) fn build_template_preflight_options(
     darkmatter::markdown::compose::ComposeContext,
     Option<claudine::invocation_context::DocumentEpoch>,
 ) {
+    let (set_overrides, caller_input_records) = composition_inputs;
     let anchor = launch_area
         .or_else(|| source_path.parent())
         .unwrap_or_else(|| Path::new("."));
@@ -308,6 +315,7 @@ pub(super) fn build_template_preflight_options(
         opts = opts.with_file_ref_fallback_dir(launch_area.to_path_buf());
     }
     opts = opts.with_set_overrides(set_overrides.clone());
+    opts = opts.with_caller_input_records(caller_input_records.clone());
     // Coerce `{{state}}`/`{{previous}}`/`{{next}}` to their `name` in string
     // context so a shell command's approved bytes match its executed bytes.
     opts = opts.with_name_coercion_keys(

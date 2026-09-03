@@ -30,6 +30,17 @@ fn make_source(
     }
 }
 
+fn make_source_from_text(dir: &TempDir, text: &str) -> ResolvedCompositionSource {
+    let file = dir.path().join("authored.md");
+    fs::write(&file, text).unwrap();
+    ResolvedCompositionSource {
+        original_ref: file.to_str().unwrap().to_string(),
+        resolved_path: file,
+        original_text: text.to_string(),
+        markdown: text.to_string().into(),
+    }
+}
+
 #[test]
 fn request_snapshot_prevents_prepare_time_repository_rediscovery() {
     let source_repo = TempDir::new().unwrap();
@@ -183,6 +194,143 @@ fn inline_composition_uses_effective_frontmatter() {
         }
         CompositionClosurePlan::Direct => panic!("expected Inline closure plan"),
     }
+}
+
+#[test]
+fn inline_response_frontmatter_snapshots_authored_order_and_protocol() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &[
+            ("prompt", json!("Build the inventory")),
+            (
+                "response_frontmatter",
+                json!(["access_points", "generated_by"]),
+            ),
+        ],
+        "Old content",
+    );
+
+    let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
+    let CompositionClosurePlan::Inline(plan) = prepared.closure else {
+        panic!("expected inline closure plan");
+    };
+
+    assert_eq!(
+        plan.response_frontmatter,
+        ["access_points", "generated_by"]
+    );
+    let access_points = prepared.prompt.find("- \"access_points\"").unwrap();
+    let generated_by = prepared.prompt.find("- \"generated_by\"").unwrap();
+    assert!(access_points < generated_by);
+}
+
+#[test]
+fn effective_layers_cannot_create_response_frontmatter_authorization() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[("prompt", json!("Build it"))], "Old content");
+
+    let prepared = prepare_inline(
+        &source,
+        PrepareOptions {
+            set_overrides: Some(json!({"response_frontmatter": ["injected"]})),
+            ..PrepareOptions::default()
+        },
+    )
+    .unwrap();
+    let CompositionClosurePlan::Inline(plan) = prepared.closure else {
+        panic!("expected inline closure plan");
+    };
+
+    assert!(plan.response_frontmatter.is_empty());
+    assert!(
+        !prepared
+            .prompt
+            .contains("Allowed response frontmatter properties (exact names):")
+    );
+}
+
+#[test]
+fn response_frontmatter_interpolation_does_not_expand_authorization() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source_from_text(
+        &dir,
+        "---\nprompt: Build it\nresponse_frontmatter:\n  - '{{ env.GENERATED_KEY }}'\n---\nOld content\n",
+    );
+
+    let prepared = prepare_inline(
+        &source,
+        PrepareOptions {
+            env_overrides: std::collections::BTreeMap::from([(
+                "GENERATED_KEY".to_string(),
+                "expanded".to_string(),
+            )]),
+            ..PrepareOptions::default()
+        },
+    )
+    .unwrap();
+    let CompositionClosurePlan::Inline(plan) = prepared.closure else {
+        panic!("expected inline closure plan");
+    };
+
+    assert_eq!(plan.response_frontmatter, ["{{ env.GENERATED_KEY }}"]);
+    assert!(prepared.prompt.contains("- \"{{ env.GENERATED_KEY }}\""));
+    assert!(!prepared.prompt.contains("- \"expanded\""));
+}
+
+#[test]
+fn invalid_authored_response_frontmatter_fails_before_composition() {
+    let cases = [
+        (json!("generated"), "must be a list"),
+        (json!([]), "at least one"),
+        (json!([""]), "must not be empty"),
+        (json!(["generated", 2]), "must be a string"),
+        (json!(["generated", "generated"]), "more than once"),
+        (json!(["prompt"]), "cannot be authorized"),
+        (json!(["response_frontmatter"]), "cannot be authorized"),
+        (json!(["hash"]), "cannot be authorized"),
+        (json!(["last_updated"]), "cannot be authorized"),
+    ];
+
+    for (declaration, expected) in cases {
+        let dir = TempDir::new().unwrap();
+        let source = make_source(
+            &dir,
+            &[
+                ("prompt", json!("$(printf should-not-run)")),
+                ("response_frontmatter", declaration),
+            ],
+            "Old content",
+        );
+
+        let error = prepare_inline(&source, PrepareOptions::default()).unwrap_err();
+        let CompositionError::ResponseFrontmatterInvalid { reason, .. } = error else {
+            panic!("expected response-frontmatter validation error");
+        };
+        assert!(reason.contains(expected), "got: {reason}");
+    }
+}
+
+#[test]
+fn interpreted_response_frontmatter_names_warn_at_the_authored_property() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source_from_text(
+        &dir,
+        "---\nprompt: Build it\nresponse_frontmatter: [agent, model, '$schema', success, timeout, step_timeout]\n---\nOld content\n",
+    );
+
+    let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
+    let warnings: Vec<_> = prepared
+        .warnings
+        .iter()
+        .filter(|warning| warning.stage == "response_frontmatter")
+        .collect();
+
+    assert_eq!(warnings.len(), 6);
+    assert!(warnings.iter().all(|warning| warning.line_number == Some(3)));
+    assert!(warnings.iter().all(|warning| warning
+        .message
+        .contains("may change future execution semantics")));
 }
 
 #[test]

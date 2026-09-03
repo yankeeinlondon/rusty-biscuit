@@ -273,7 +273,7 @@ pub(super) fn build_validator(
     build_validator_in_context(schema, base_dir, file_ref_fallback_dir, None)
 }
 
-pub(super) fn build_validator_in_context(
+pub(crate) fn build_validator_in_context(
     schema: &Value,
     base_dir: Option<&Path>,
     file_ref_fallback_dir: Option<&Path>,
@@ -563,6 +563,7 @@ fn build_problem(
         schema_path,
         offending_property,
         file_reference,
+        caller_file: None,
     }
 }
 
@@ -1779,6 +1780,7 @@ mod tests {
             schema_path: None,
             offending_property: None,
             file_reference: None,
+            caller_file: None,
         }
     }
 

@@ -1,9 +1,8 @@
 //! Runtime ENTER-path autocomplete for the operation-file positional.
 //!
-//! Phase 3 of the `2026-06-14-auto-complete` feature. When
-//! `claudine compose|inline-compose|sequence <file>` fails to resolve the
-//! file reference, this module offers an interactive picker: one match →
-//! confirmation dialog; many matches → two-pane chooser.
+//! Unresolved bare discovery names may enter the interactive picker: one match
+//! → confirmation dialog; many matches → two-pane chooser. Explicit references
+//! retain their typed no-match and may receive bounded repository suggestions.
 
 // `CompositionError` carries variants with several `PathBuf` and other
 // owned fields (e.g. `LoopIterationFailed`, `LoopRateLimited`) so the
@@ -13,11 +12,13 @@
 // shape they need to keep.
 #![allow(clippy::result_large_err)]
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
+use std::ffi::{OsStr, OsString};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 
-use biscuit_file::to_portable_string;
+use biscuit_file::{FileReference, FileReferenceKind, to_portable_string};
+use ignore::WalkBuilder;
 use biscuit_tui::components::choose::ChoiceOption;
 use claudine::composition::{
     CompositionError, FileDetail, extract_markdown_detail, extract_yaml_sequence_detail,
@@ -27,6 +28,183 @@ use super::autocomplete_ui::{choose_one_file, confirm_one_file};
 use super::frontmatter;
 use super::scopes::{self, ComposeMode, ScopeContext};
 use super::walker::{self, WalkOutcome, MAX_CANDIDATES};
+
+const SUGGESTION_ENTRY_BUDGET: usize = 20_000;
+const MAX_SUGGESTIONS: usize = 5;
+
+/// Whether a clean operation-file miss may fall back to interactive discovery.
+///
+/// Eligibility is intentionally narrower than `FileReference` resolution: only
+/// a bare, non-recursive, single-component implicit reference is a discovery
+/// query. Every explicit anchoring form remains authoritative on a miss.
+pub(crate) fn is_operation_file_autocomplete_eligible(reference: &str) -> bool {
+    let Ok(reference) = FileReference::new(reference) else {
+        return false;
+    };
+    let class = reference.class();
+    class.kind == FileReferenceKind::ImplicitRelative
+        && !class.recursive
+        && !reference.raw().contains(['/', '\\'])
+        && !reference.raw().contains("{{")
+}
+
+fn operation_file_basename(reference: &str) -> Option<&OsStr> {
+    let parsed = FileReference::new(reference).ok()?;
+    let mut payload = reference;
+    if parsed.class().recursive {
+        payload = payload.strip_prefix('%')?;
+    }
+    payload = match parsed.class().kind {
+        FileReferenceKind::Magic => {
+            let tail = payload.strip_prefix('@')?;
+            tail.strip_prefix('/').unwrap_or(tail)
+        }
+        FileReferenceKind::RepositoryRoot => {
+            let tail = payload.strip_prefix('&')?;
+            tail.strip_prefix('/').unwrap_or(tail)
+        }
+        FileReferenceKind::RepositoryScoped => {
+            let tail = payload.strip_prefix('^')?;
+            tail.strip_prefix('/').unwrap_or(tail)
+        }
+        FileReferenceKind::Home => payload
+            .strip_prefix("~/")
+            .or_else(|| payload.strip_prefix("~\\"))
+            .unwrap_or_default(),
+        FileReferenceKind::Vault => payload
+            .strip_prefix("vault::")
+            .or_else(|| payload.strip_prefix("vault:"))?,
+        FileReferenceKind::Url => return None,
+        FileReferenceKind::ExplicitRelative
+        | FileReferenceKind::ImplicitRelative
+        | FileReferenceKind::Absolute => payload,
+    };
+    let filename = payload.rsplit(['/', '\\']).next().unwrap_or_default();
+    (!filename.is_empty()).then(|| OsStr::new(filename))
+}
+
+#[derive(Debug)]
+struct SuggestionEntry {
+    relative_path: PathBuf,
+    file_name: OsString,
+    is_file: bool,
+}
+
+fn collect_repository_suggestions<I, E>(
+    filename: &OsStr,
+    entries: I,
+) -> Vec<String>
+where
+    I: IntoIterator<Item = Result<SuggestionEntry, E>>,
+{
+    if filename.is_empty() {
+        return Vec::new();
+    }
+
+    let mut visited = 0usize;
+    let mut matches = BTreeSet::new();
+    for result in entries {
+        let Ok(entry) = result else {
+            return Vec::new();
+        };
+        visited += 1;
+        if visited > SUGGESTION_ENTRY_BUDGET {
+            return Vec::new();
+        }
+        if entry.is_file && entry.file_name == filename {
+            matches.insert(to_portable_string(&entry.relative_path));
+            if matches.len() == MAX_SUGGESTIONS {
+                break;
+            }
+        }
+    }
+
+    matches.into_iter().collect()
+}
+
+/// Find repository-relative files whose complete basename equals `filename`.
+///
+/// This is advisory recovery only: failures and budget exhaustion deliberately
+/// return no suggestions so they can never replace the primary resolution
+/// diagnostic. Directory symlinks are not followed.
+pub(crate) fn repository_basename_suggestions(
+    repository_root: Option<&Path>,
+    filename: Option<&OsStr>,
+) -> Vec<String> {
+    let (Some(repository_root), Some(filename)) = (repository_root, filename) else {
+        return Vec::new();
+    };
+    if filename.is_empty() || !repository_root.is_dir() {
+        return Vec::new();
+    }
+
+    let mut builder = WalkBuilder::new(repository_root);
+    builder
+        .hidden(false)
+        .git_ignore(true)
+        .git_global(true)
+        .git_exclude(true)
+        .follow_links(false)
+        .filter_entry(walker::entry_passes_filters)
+        .sort_by_file_path(|left, right| left.cmp(right));
+    let walker = builder.build();
+
+    let entries = walker.filter_map(|result| match result {
+        Ok(entry) if entry.depth() == 0 => None,
+        Ok(entry) => {
+            let relative_path = match entry.path().strip_prefix(repository_root) {
+                Ok(path) => path.to_path_buf(),
+                Err(_) => return Some(Err(())),
+            };
+            let is_file = match entry.file_type() {
+                Some(kind) if kind.is_file() => true,
+                Some(kind) if kind.is_symlink() => match std::fs::metadata(entry.path()) {
+                    Ok(metadata) => metadata.is_file(),
+                    Err(_) => return Some(Err(())),
+                },
+                _ => false,
+            };
+            Some(Ok(SuggestionEntry {
+                relative_path,
+                file_name: entry.file_name().to_os_string(),
+                is_file,
+            }))
+        }
+        Err(_) => Some(Err(())),
+    });
+
+    collect_repository_suggestions(filename, entries)
+}
+
+/// The only two allowed outcomes after a structured operation-file no-match.
+#[derive(Debug)]
+pub(crate) enum OperationFileRecovery {
+    /// Invoke the existing interactive discovery path.
+    AttemptAutocomplete,
+    /// Return the authoritative miss, enriched with advisory suggestions.
+    ExplicitNoMatch(CompositionError),
+}
+
+/// Apply the shared operation-file recovery policy to a structured no-match.
+pub(crate) fn recover_operation_file(
+    reference: &str,
+    no_match: CompositionError,
+) -> OperationFileRecovery {
+    let Some((retained_reference, resolution, _)) = no_match.file_reference_no_match() else {
+        return OperationFileRecovery::ExplicitNoMatch(no_match);
+    };
+    if is_operation_file_autocomplete_eligible(reference) {
+        return OperationFileRecovery::AttemptAutocomplete;
+    }
+
+    let suggestions = repository_basename_suggestions(
+        resolution.repository_root(),
+        operation_file_basename(retained_reference),
+    );
+    OperationFileRecovery::ExplicitNoMatch(
+        no_match.with_file_reference_suggestions(suggestions),
+    )
+}
 
 /// Interactively resolve an operation-file reference when the original
 /// `FileReference` lookup failed.
@@ -234,6 +412,10 @@ fn format_relative_insert(path: &Path, ctx: &ScopeContext) -> String {
 
     to_portable_string(path)
 }
+
+#[cfg(test)]
+#[path = "operation_file/recovery_tests.rs"]
+mod recovery_tests;
 
 #[cfg(test)]
 mod tests {

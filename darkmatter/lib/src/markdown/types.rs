@@ -69,6 +69,13 @@ pub enum MarkdownError {
     #[error("Failed to merge frontmatter: {0}")]
     FrontmatterMerge(String),
 
+    /// Source-preserving frontmatter editing could not locate a safe edit.
+    #[error("Cannot edit frontmatter text safely: {reason}")]
+    FrontmatterTextEdit {
+        /// Why applying the requested textual edit would be ambiguous or unsafe.
+        reason: String,
+    },
+
     /// Failed to load file.
     #[error("Failed to load file: {0}")]
     FileLoad(#[from] std::io::Error),
@@ -212,6 +219,16 @@ pub enum MarkdownError {
         source: Option<Box<dyn std::error::Error + Send + Sync + 'static>>,
     },
 
+    /// A present caller override changed file mode after the first
+    /// frontmatter expression pass had already consumed its value.
+    #[error(
+        "caller file parameter `{property}` changed file mode during composition"
+    )]
+    CallerFileClassificationChanged {
+        /// Top-level caller-supplied frontmatter property whose typing drifted.
+        property: String,
+    },
+
     /// A caller-supplied schema-typed file value could not be materialized.
     #[error("Parameter binding failed for `{property}` value `{provided}`: {reason}")]
     ParameterBinding {
@@ -322,6 +339,7 @@ impl BlockError for MarkdownError {
                 blocks::frontmatter_fence_mismatch_block(ctx.as_ref().clone(), found, *line)
             }
             MarkdownError::FrontmatterMerge(message) => blocks::frontmatter_merge_block(message),
+            MarkdownError::FrontmatterTextEdit { reason } => blocks::transform_block(reason),
             MarkdownError::FileLoad(source) => blocks::file_load_block(source),
             MarkdownError::UrlFetch(source) => blocks::url_fetch_block(source),
             MarkdownError::ThemeLoad(message) => blocks::theme_load_block(message),
@@ -352,6 +370,9 @@ impl BlockError for MarkdownError {
                 // and `problems` only.
                 source: _,
             } => blocks::schema_validation_failed_block(path, problems, summary, description),
+            MarkdownError::CallerFileClassificationChanged { property } => {
+                blocks::caller_file_classification_changed_block(property)
+            }
             MarkdownError::ParameterBinding {
                 property,
                 provided,

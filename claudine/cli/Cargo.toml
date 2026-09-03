@@ -127,6 +127,10 @@ name = "level2_auto_complete_operation_file"
 required-features = ["terminal-tests"]
 
 [[test]]
+name = "level2_explicit_operation_file_miss"
+required-features = ["terminal-tests"]
+
+[[test]]
 name = "level2_context_capture"
 required-features = ["terminal-tests"]
 

@@ -34,6 +34,25 @@ pub fn load_markdown(path: Option<&PathBuf>) -> Result<Markdown> {
     }
 }
 
+/// Resolves and reads a Markdown file while retaining its exact UTF-8 source.
+///
+/// This file-only path is for commands that must write back without losing
+/// authored formatting. The returned [`Markdown`] is parsed from the same text
+/// returned to the caller.
+pub fn load_markdown_text(path: &PathBuf) -> Result<(PathBuf, String, Markdown)> {
+    if path.to_str() == Some("-") {
+        return Err(eyre!(
+            "--save requires an input file path (stdin is not supported)"
+        ));
+    }
+    let resolved = resolve_file_path(path)?;
+    let source = std::fs::read_to_string(&resolved)
+        .wrap_err_with(|| format!("Failed to read file: {:?}", resolved))?;
+    let markdown = Markdown::try_from_content(source.clone())
+        .wrap_err_with(|| format!("Failed to read file: {:?}", resolved))?;
+    Ok((resolved, source, markdown))
+}
+
 /// Resolves a file path through biscuit-file's `FileReference` system.
 ///
 /// If the path contains `@`-prefixed magic references or other FileReference

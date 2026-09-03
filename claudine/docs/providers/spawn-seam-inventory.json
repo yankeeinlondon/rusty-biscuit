@@ -43,7 +43,7 @@
     },
     {
       "path": "cli/src/commands/sequence.rs",
-      "line": 177,
+      "line": 189,
       "function": "expand_shell_source",
       "command_kind": "std",
       "governed_by": "contribute_child_environment"

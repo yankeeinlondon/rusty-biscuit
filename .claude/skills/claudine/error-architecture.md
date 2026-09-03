@@ -283,10 +283,12 @@ clause keeps matching. `candidates` supersedes them.
 `candidates` all project from the typed probe record. An I/O form of
 `HarnessError::FileReferenceUnresolvable` retains and projects that same plan;
 its pre-probe forms (e.g. a syntactically-invalid reference) project only
-`failure`, `reference`, and `source_path`. The lower-layer legacy path
-through `FileReferenceDiagnostic` (the markdown-interpolation arm) continues to
-supply the original five fields and reserves the six additions as `null` —
-exactly the case the additive catalog was designed to tolerate.
+`failure`, `reference`, and `source_path`. The lower-layer path through
+`FileReferenceDiagnostic` (the markdown-interpolation arm) supplies the original
+five fields. When its argument came from schema-projected caller data, it also
+projects the caller's `source_path`, `property`, `repository_root`, and selected
+candidate; otherwise the six additions remain `null`, exactly the case the
+additive catalog was designed to tolerate.
 
 **`failure` is not `kind`.** They are different vocabularies, which is why both
 are declared. The historical reason `failure` was reserved as `null` is that

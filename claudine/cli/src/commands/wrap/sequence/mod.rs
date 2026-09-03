@@ -128,6 +128,7 @@ pub(crate) fn execute_sequence(
     plan: SequencePlan,
     shared: &SharedComposeArgs,
     user_set_overrides: Option<serde_json::Value>,
+    caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     execution_options: SequenceExecutionOptions,
     verbose: u8,
     perf_enabled: bool,
@@ -556,6 +557,7 @@ pub(crate) fn execute_sequence(
         approval_cache: Arc::clone(&shared_approval_cache),
         inline_mode,
         file_resolution_context: &file_resolution_context,
+        caller_input_records: &caller_input_records,
         invocation: &prep_context.invocation,
     };
 

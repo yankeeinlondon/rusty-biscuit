@@ -172,15 +172,21 @@ Schema validation also runs as an **always-on stage inside the compose pipeline*
 
 ```
 Apply --set / --state overrides
-  └─ Frontmatter Interpolation     ({{ var }})
-      └─ Schema Validation          ◄── here (bind + coerce + validate)
-          └─ Frontmatter Shell Expansion ($(cmd))
-              └─ … rest of pipeline
+  └─ Materialize schema-selected caller files (captured per-property origin)
+      └─ Frontmatter Interpolation ({{ var }})
+          └─ Schema Validation      ◄── here (bind + coerce + validate)
+              └─ Frontmatter Shell Expansion ($(cmd))
+                  └─ … rest of pipeline
 ```
 
 This placement is deliberate:
 
-- It runs **after** `--set` / `--state` and interpolation, so a schema-required field can be satisfied by an override or a template. A document with `spec: ""` plus `--set spec=design.md` validates fine — validation sees the *effective* frontmatter.
+- Before interpolation, the narrow projection prelude materializes
+  caller-owned values selected as eager or non-recursive lazy files from each
+  property's captured origin. It does not bind, coerce, validate, or normalize
+  document-authored values. This gives frontmatter expressions one stable
+  semantic value from their first lookup.
+- Full validation runs **after** `--set` / `--state` and interpolation, so a schema-required field can be satisfied by an override or a template. A document with `spec: ""` plus `--set spec=design.md` validates fine — validation sees the *effective* frontmatter.
 - It runs **before** shell expansion, preserving fail-fast: an invalid schema aborts the run before any side-effecting `$(...)` command executes.
 
 By default, `md compose` validates documents with no `$schema` against the
@@ -302,18 +308,30 @@ absolute value is a fixpoint, so compose → re-compose never drifts.
 **Left verbatim (never rewritten):**
 
 - `string`-typed properties, even when their value looks path-shaped — `string` is the literal-text contract.
+- document-owned bare (lazy) `file` properties — `format: darkmatter-file-reference` is syntax-only and may legitimately name a file that does not exist yet (e.g. a `review_file` this run is about to produce). Caller records selected by a lazy file arm are materialized in the pre-interpolation input prelude without adding an existence check.
 - recursive lazy `file` values — they fail with a typed binding error because a
   recursive plan has no single path shape without I/O; use `file(eager)`;
 - a value that resolves to a remote URL — there is no local path to project.
 - an absent or `null` optional `file(eager)` property.
 - a value still holding a `$(...)` shell expression or unresolved `{{ ... }}` template — the post-shell re-validation handles it once it expands.
 
-**Read-only validation contract.** Library callers that use `validate` /
-`validate_with_positions` keep their passive contract: validation works on a
-copy and does not mutate the caller's `serde_json::Value` or touch the
-filesystem. Materialization is opt-in through the explicit normalization API;
-compose invokes it only after schema selection in the effectful preparation
-pipeline.
+**Read-only validation contract.** Library callers that use `validate` / `validate_with_positions` keep their current contract: validation coerces on a working copy and **does not mutate** the caller's `serde_json::Value`. The eager-`file` rewrite is opt-in via the explicit [`EffectiveSchema::normalize_frontmatter`](../../lib/src/markdown/schemas/mod.rs) API; compose calls it on its accepted effective schema so the normalized values are what downstream interpolation, lifecycle events, and `inline-compose` see.
+
+Stored values use `/` path separators on every OS, so a committed eager-`file` reference is portable across macOS, Linux, and Windows.
+
+Caller records are the exception to the document-authored rewrite. Each record
+retains its raw value and captured file-resolution origin. Before frontmatter
+interpolation pass 1, an exactly selected eager or non-recursive lazy file arm
+materializes the semantic identity from that origin. Eager local files must
+exist; lazy local files bind the first ordered candidate without probing,
+HTTP(S) values remain typed remote identities, and recursive lazy references
+fail because no single unprobed identity exists. Path functions, comparisons,
+lifecycle state, and frontmatter expressions consume the native semantic
+identity. Markdown body text uses a separate portable presentation value;
+direct variables and static member/index selections share this presentation
+behavior without changing effective frontmatter. The raw record remains
+unchanged so fresh preparation can apply another active document's schema
+without recapturing ambient state.
 
 ## Interaction With `--set` and `--state`
 
@@ -325,9 +343,9 @@ md compose doc.md --set '{spec: "design.md"}'
 
 - `--state` fills missing or null values before validation.
 - `--set` overrides values before validation.
-- An eager-file `--set` value keeps its resolved absolute native identity in
-  effective frontmatter while body interpolation renders its separate portable
-  presentation value.
+- A caller `--set` value selected as an eager or non-recursive lazy file keeps
+  its materialized native identity in effective frontmatter while body
+  interpolation renders its separate portable presentation value.
 
 So `spec: ""` + `--set spec=design.md` validates, while `spec: "design.md"` + `--set spec=""` fails. The same applies to transcluded children: a parent's `::file set=` overlay is applied before the child's schema stage, so the parent can satisfy a child's required property.
 

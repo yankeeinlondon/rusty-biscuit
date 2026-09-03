@@ -90,9 +90,9 @@ run_linux() {
         fi
         cd \"\$HOME/${LINUX_DIR}\"
         git fetch --quiet origin
-        git checkout --quiet --detach '${base_sha}'
         git reset --quiet --hard
-        git clean -fdq"
+        git clean -fdq
+        git checkout --quiet --detach '${base_sha}'"
     if [[ "${patch_lines}" != "0" ]]; then
         "${SSH[@]}" "${LINUX_HOST}" "cd \"\$HOME/${LINUX_DIR}\" && git apply" < "${patch_file}"
     fi
@@ -106,9 +106,9 @@ run_windows() {
     "${SSH[@]}" "${WIN_HOST}" "if (-not (Test-Path '${WIN_DIR}\\.git')) { git clone --quiet '${origin_url}' '${WIN_DIR}'; if (\$LASTEXITCODE -ne 0) { exit \$LASTEXITCODE } }
         Set-Location '${WIN_DIR}'
         git fetch --quiet origin
-        git checkout --quiet --detach '${base_sha}'; if (\$LASTEXITCODE -ne 0) { exit \$LASTEXITCODE }
         git reset --quiet --hard
         git clean -fdq
+        git checkout --quiet --detach '${base_sha}'; if (\$LASTEXITCODE -ne 0) { exit \$LASTEXITCODE }
         exit \$LASTEXITCODE"
     if [[ "${patch_lines}" != "0" ]]; then
         scp -q -o BatchMode=yes "${patch_file}" "${WIN_HOST}:W:/ci-verification/cross-check.patch"

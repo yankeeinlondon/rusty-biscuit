@@ -30,14 +30,20 @@
 //! unresolved `{{ ... }}` template — are left untouched here; their real type
 //! is resolved at post-shell re-validation.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+
+#[cfg(test)]
+pub(crate) static TRIGGER_DISCOVERY_COUNT: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
 
 use crate::markdown::Markdown;
 use crate::markdown::compose::ComposeOptions;
 use crate::markdown::compose::{ComposeOperation, ComposeSource};
 use crate::markdown::schemas::{
-    DarkmatterSchemas, EffectiveSchema, SchemaOriginKind, SimplifiedSchema,
+    CallerFileReferenceProvenance, DarkmatterSchemas, EffectiveSchema, FileReferenceDiagnostic,
+    JsonPointer, SchemaOriginKind, SimplifiedSchema, ValidationProblem, ValidationProblemCode,
+    ValidationProblemKind,
 };
 use crate::markdown::schemas::coerce::coerce_frontmatter_with_pending;
 use crate::markdown::types::{MarkdownError, MarkdownResult};
@@ -45,7 +51,49 @@ use crate::markdown::types::{MarkdownError, MarkdownResult};
 /// Single-pass convenience wrapper used by this module's tests.
 #[cfg(test)]
 pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> MarkdownResult<()> {
-    run_with_registry(markdown, options, &mut None, &mut HashMap::new())
+    let mut trigger_registry = None;
+    let prepared = prepare_schemas(markdown, options, &mut trigger_registry)?;
+    let projection = prepare_caller_projection(markdown, options, &prepared)?;
+    projection.install(markdown);
+    run_with_registry(markdown, options, &prepared, &projection)
+}
+
+/// Request-owned schema state assembled once before frontmatter interpolation.
+pub(crate) struct PreparedSchemas {
+    schemas: Option<DarkmatterSchemas>,
+}
+
+/// Caller-file values projected from the captured launch context.
+#[derive(Default)]
+pub(crate) struct CallerProjection {
+    native: serde_json::Map<String, serde_json::Value>,
+    presentation: HashMap<String, serde_json::Value>,
+    modes: HashMap<String, CallerFileMode>,
+    classified: HashSet<String>,
+    provenance: HashMap<String, super::expression::resolve_ctx::CallerFileProvenance>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CallerFileMode {
+    Eager,
+    Lazy,
+}
+
+impl CallerProjection {
+    pub(crate) fn install(&self, markdown: &mut Markdown) {
+        let frontmatter = markdown.frontmatter_mut().as_map_mut();
+        for (key, value) in &self.native {
+            frontmatter.insert(key.clone(), value.clone());
+        }
+    }
+
+    pub(crate) fn presentation_values(&self) -> HashMap<String, serde_json::Value> {
+        self.presentation.clone()
+    }
+
+    pub(crate) fn install_provenance(&self, options: &mut ComposeOptions) {
+        options.caller_file_provenance = self.provenance.clone();
+    }
 }
 
 fn trigger_discovery_boundary(options: &ComposeOptions, _document_path: &Path) -> Option<PathBuf> {
@@ -53,6 +101,67 @@ fn trigger_discovery_boundary(options: &ComposeOptions, _document_path: &Path) -
         Some(context) => context.repository_root().map(Path::to_path_buf),
         None => None,
     }
+}
+
+pub(crate) fn prepare_schemas(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+    trigger_registry: &mut Option<crate::markdown::schemas::triggers::TriggerRegistry>,
+) -> MarkdownResult<PreparedSchemas> {
+    let has_document_schema = markdown.frontmatter().as_map().contains_key("$schema");
+    if !has_document_schema && options.baseline_schema.is_none() && !options.trigger_schemas {
+        return Ok(PreparedSchemas { schemas: None });
+    }
+
+    let path = source_path(markdown, options);
+    let description = markdown
+        .frontmatter()
+        .as_map()
+        .get("description")
+        .and_then(|value| value.as_str().map(String::from));
+    let prepare_error = |summary: String, source| MarkdownError::SchemaValidationFailed {
+        path: path.clone(),
+        problems: Vec::new(),
+        summary,
+        description: description.clone(),
+        source: Some(Box::new(source)),
+    };
+
+    let mut schemas = DarkmatterSchemas::new();
+    if let Some(fallback) = options.file_ref_fallback_dir.clone() {
+        schemas = schemas.with_file_ref_fallback_dir(fallback);
+    }
+    if let Some(context) = options.file_resolution_context.clone() {
+        schemas = schemas.with_file_resolution_context(context);
+    }
+    if let Some(baseline) = options.baseline_schema.clone() {
+        schemas = schemas.with_baseline(baseline).map_err(|err| {
+            prepare_error(format!("schema could not be prepared: {err}"), err)
+        })?;
+    }
+    if options.trigger_schemas
+        && let Some(ComposeSource::File(document_path)) = markdown.source()
+        && let Some(boundary) = trigger_discovery_boundary(options, document_path)
+    {
+        schemas = if let Some(registry) = trigger_registry.take() {
+            schemas.with_trigger_registry(registry)
+        } else {
+            #[cfg(test)]
+            TRIGGER_DISCOVERY_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            schemas
+                .with_trigger_discovery(document_path, boundary)
+                .map_err(|err| {
+                    prepare_error(format!("trigger schemas could not be prepared: {err}"), err)
+                })?
+        };
+        if let Some(registry) = schemas.trigger_registry() {
+            *trigger_registry = Some(registry.clone());
+        }
+    }
+
+    Ok(PreparedSchemas {
+        schemas: Some(schemas),
+    })
 }
 
 /// Runs schema validation against the document's effective frontmatter,
@@ -86,30 +195,19 @@ fn trigger_discovery_boundary(options: &ComposeOptions, _document_path: &Path) -
 /// 7. Converts `ValidationReport { valid: false, problems }` into the same
 ///    error variant. On success, returns `Ok(())`.
 ///
-/// `trigger_registry` carries a trigger-schema registry across the two compose
-/// passes (pre- and post-shell): the first pass that performs discovery fills
-/// the slot, and the second reuses it instead of re-scanning the `schemas/`
-/// ancestry from disk (F8). Matching is re-evaluated against the current
-/// frontmatter in each pass regardless.
-///
-/// `presentation_overrides` receives caller-originated eager-file values in a
-/// portable spelling for later Markdown body interpolation. Effective
-/// frontmatter retains the absolute native values used by path operations,
-/// comparisons, and lifecycle state. Static member and index interpolation can
-/// select within the presentation values without changing that native state.
+/// `prepared` owns the schema assembly and trigger registry discovered before
+/// frontmatter interpolation. `projection` owns launch-resolved caller values;
+/// this stage verifies their selected file mode is still stable before it
+/// mutates frontmatter for validation.
 pub(crate) fn run_with_registry(
     markdown: &mut Markdown,
     options: &ComposeOptions,
-    trigger_registry: &mut Option<crate::markdown::schemas::triggers::TriggerRegistry>,
-    presentation_overrides: &mut HashMap<String, serde_json::Value>,
+    prepared: &PreparedSchemas,
+    projection: &CallerProjection,
 ) -> MarkdownResult<()> {
-    presentation_overrides.clear();
-    let has_document_schema = markdown.frontmatter().as_map().contains_key("$schema");
-    let has_baseline = options.baseline_schema.is_some();
-
-    if !has_document_schema && !has_baseline && !options.trigger_schemas {
+    let Some(schemas) = prepared.schemas.as_ref() else {
         return Ok(());
-    }
+    };
 
     let path = source_path(markdown, options);
     let description = markdown
@@ -117,51 +215,6 @@ pub(crate) fn run_with_registry(
         .as_map()
         .get("description")
         .and_then(|v| v.as_str().map(String::from));
-
-    let schemas = {
-        let mut builder = DarkmatterSchemas::new();
-        if let Some(fallback) = options.file_ref_fallback_dir.clone() {
-            builder = builder.with_file_ref_fallback_dir(fallback);
-        }
-        if let Some(context) = options.file_resolution_context.clone() {
-            builder = builder.with_file_resolution_context(context);
-        }
-        if let Some(baseline) = options.baseline_schema.clone() {
-            builder = builder.with_baseline(baseline).map_err(|err| {
-                MarkdownError::SchemaValidationFailed {
-                    path: path.clone(),
-                    problems: Vec::new(),
-                    summary: format!("schema could not be prepared: {err}"),
-                    description: description.clone(),
-                    source: Some(Box::new(err)),
-                }
-            })?;
-        }
-        if options.trigger_schemas
-            && let Some(ComposeSource::File(document_path)) = markdown.source()
-            && let Some(boundary) = trigger_discovery_boundary(options, document_path)
-        {
-            builder = if let Some(registry) = trigger_registry.take() {
-                builder.with_trigger_registry(registry)
-            } else {
-                builder
-                    .with_trigger_discovery(document_path, boundary)
-                    .map_err(|err| MarkdownError::SchemaValidationFailed {
-                        path: path.clone(),
-                        problems: Vec::new(),
-                        summary: format!("trigger schemas could not be prepared: {err}"),
-                        description: description.clone(),
-                        source: Some(Box::new(err)),
-                    })?
-            };
-            // Preserve the scanned registry so a later compose pass reuses it
-            // rather than re-walking the `schemas/` ancestry from disk.
-            if let Some(registry) = builder.trigger_registry() {
-                *trigger_registry = Some(registry.clone());
-            }
-        }
-        builder
-    };
 
     // Build the effective schema once; the same instance is reused for the
     // eager-`file` rewrite pass after validation accepts the instance.
@@ -184,26 +237,11 @@ pub(crate) fn run_with_registry(
         }
     };
 
+    ensure_projection_stable(effective.as_ref(), markdown, options, projection)?;
+
     if let Some(effective) = effective.as_ref() {
         materialize_optional_document_bindings(markdown, effective);
     }
-
-    let caller_file_overrides = effective
-        .as_ref()
-        .map(|effective| materialize_caller_file_overrides(markdown, effective, options))
-        .transpose()?
-        .unwrap_or_default();
-    if !caller_file_overrides.native.is_empty() {
-        let fm_map = markdown.frontmatter_mut().as_map_mut();
-        for (key, value) in &caller_file_overrides.native {
-            fm_map.insert(key.clone(), value.clone());
-        }
-    }
-    *presentation_overrides = caller_file_overrides
-        .presentation
-        .iter()
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect();
 
     if let Some(effective) = effective.as_ref() {
         // Coerce schema-recognized scalars to their declared types and write the
@@ -279,7 +317,7 @@ pub(crate) fn run_with_registry(
             {
                 return false;
             }
-            // Caller-originated eager files were resolved against their
+            // Caller-originated files were materialized against their
             // invocation-fixed launch context above. A target document may
             // live across a repository boundary, where rechecking that
             // absolute value as document-authored can only produce a
@@ -288,7 +326,7 @@ pub(crate) fn run_with_registry(
                 p.code,
                 crate::markdown::schemas::ValidationProblemCode::InvalidFileReference
             ) && top_level_pointer_segment(&p.path)
-                .is_some_and(|name| caller_file_overrides.native.contains_key(&name))
+                .is_some_and(|name| projection.native.contains_key(&name))
             {
                 return false;
             }
@@ -335,7 +373,7 @@ pub(crate) fn run_with_registry(
                 if composition_pending.contains(&key) {
                     continue;
                 }
-                let value = caller_file_overrides
+                let value = projection
                     .native
                     .get(&key)
                     .cloned()
@@ -348,32 +386,35 @@ pub(crate) fn run_with_registry(
     Ok(())
 }
 
-/// Materialize schema-typed caller overrides without running the compose pipeline.
-///
-/// The schema stage runs against a clone so document state remains unchanged.
-/// Only properties recorded in its file-presentation sidecar are copied back
-/// into the returned override object; ordinary strings and all raw caller input
-/// therefore remain untouched.
-pub(crate) fn materialize_caller_overrides(
+/// Rechecks only caller-file classification against the current effective
+/// schema, without taking ownership of validation or frontmatter mutation.
+pub(crate) fn verify_projection_stability(
     markdown: &Markdown,
     options: &ComposeOptions,
-) -> MarkdownResult<serde_json::Value> {
-    let mut effective = options
-        .set_overrides
-        .clone()
-        .unwrap_or_else(|| serde_json::Value::Object(serde_json::Map::new()));
-    let mut clone = markdown.clone();
-    let mut presentation = HashMap::new();
-    run_with_registry(&mut clone, options, &mut None, &mut presentation)?;
-    let Some(effective_map) = effective.as_object_mut() else {
-        return Ok(effective);
+    prepared: &PreparedSchemas,
+    projection: &CallerProjection,
+) -> MarkdownResult<()> {
+    let Some(schemas) = prepared.schemas.as_ref() else {
+        return Ok(());
     };
-    for key in presentation.keys() {
-        if let Some(value) = clone.frontmatter().as_map().get(key) {
-            effective_map.insert(key.clone(), value.clone());
+    let effective = match schemas.effective_for(markdown) {
+        Ok(effective) => effective,
+        Err(_) if options.defer_schema_verdict => return Ok(()),
+        Err(err) => {
+            return Err(MarkdownError::SchemaValidationFailed {
+                path: source_path(markdown, options),
+                problems: Vec::new(),
+                summary: format!("schema could not be prepared: {err}"),
+                description: markdown
+                    .frontmatter()
+                    .as_map()
+                    .get("description")
+                    .and_then(|value| value.as_str().map(String::from)),
+                source: Some(Box::new(err)),
+            });
         }
-    }
-    Ok(effective)
+    };
+    ensure_projection_stable(effective.as_ref(), markdown, options, projection)
 }
 
 /// Adds composition bindings for eligible document-owned schema properties.
@@ -404,199 +445,678 @@ fn materialize_optional_document_bindings(markdown: &mut Markdown, effective: &E
     }
 }
 
-/// Materialize schema-typed file values supplied through `set_overrides`.
+pub(crate) fn prepare_caller_projection(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+    prepared: &PreparedSchemas,
+) -> MarkdownResult<CallerProjection> {
+    let Some(schemas) = prepared.schemas.as_ref() else {
+        return Ok(CallerProjection::default());
+    };
+    let effective = match schemas.effective_for(markdown) {
+        Ok(effective) => effective,
+        Err(_) if options.defer_schema_verdict => None,
+        Err(err) => {
+            return Err(MarkdownError::SchemaValidationFailed {
+                path: source_path(markdown, options),
+                problems: Vec::new(),
+                summary: format!("schema could not be prepared: {err}"),
+                description: markdown
+                    .frontmatter()
+                    .as_map()
+                    .get("description")
+                    .and_then(|value| value.as_str().map(String::from)),
+                source: Some(Box::new(err)),
+            });
+        }
+    };
+    let (instance, composition_pending) = caller_classification_instance(markdown, options);
+    resolve_caller_file_overrides(
+        effective.as_ref(),
+        options,
+        &instance,
+        &composition_pending,
+    )
+    .map_err(|failure| {
+        MarkdownError::SchemaValidationFailed {
+            path: source_path(markdown, options),
+            problems: vec![*failure.problem],
+            summary: "frontmatter did not satisfy the schema".to_string(),
+            description: markdown
+                .frontmatter()
+                .as_map()
+                .get("description")
+                .and_then(|value| value.as_str().map(String::from)),
+            source: None,
+        }
+    })
+}
+
+fn ensure_projection_stable(
+    effective: Option<&EffectiveSchema>,
+    markdown: &Markdown,
+    options: &ComposeOptions,
+    projection: &CallerProjection,
+) -> MarkdownResult<()> {
+    let (instance, composition_pending) = caller_classification_instance(markdown, options);
+    let current = classify_caller_overrides(effective, options, &instance, &composition_pending);
+    for key in &projection.classified {
+        if projection.modes.get(key) != current.get(key) {
+            return Err(MarkdownError::CallerFileClassificationChanged {
+                property: key.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn caller_classification_instance(
+    markdown: &Markdown,
+    options: &ComposeOptions,
+) -> (serde_json::Value, HashSet<String>) {
+    let (mut instance, mut composition_pending) = build_validation_instance(markdown, options);
+    let Some(object) = instance.as_object_mut() else {
+        return (instance, composition_pending);
+    };
+    for (key, record) in caller_input_records(options) {
+        if !options.exclude_keys.contains(&key) {
+            if value_pending_composition(Some(record.raw())) {
+                composition_pending.insert(key.clone());
+            } else {
+                composition_pending.remove(&key);
+            }
+            object.insert(key, record.raw().clone());
+        }
+    }
+    (instance, composition_pending)
+}
+
+/// Resolve schema-selected file values from immutable caller records before
+/// frontmatter interpolation.
 ///
 /// A value authored in the document resolves from the document. A value passed
 /// by a caller is a different provenance class: it resolves from the caller's
 /// captured base and remains absolute in the effective frontmatter so later
-/// consumers do not reinterpret it as document-authored. Eager values select
-/// the first existing file; lazy values select the first unprobed candidate.
-/// Ordinary string overrides are never parsed as file references.
-fn materialize_caller_file_overrides(
-    markdown: &Markdown,
-    effective: &crate::markdown::schemas::EffectiveSchema,
+/// consumers do not reinterpret it as document-authored. The schema tells us
+/// which override strings are file references; ordinary string overrides are
+/// never probed.
+fn resolve_caller_file_overrides(
+    effective: Option<&crate::markdown::schemas::EffectiveSchema>,
     options: &ComposeOptions,
-) -> MarkdownResult<ResolvedCallerFileOverrides> {
-    let Some(fallback) = options.file_ref_fallback_dir.as_ref() else {
-        return Ok(ResolvedCallerFileOverrides::default());
-    };
-    let Some(overrides) = options
-        .set_overrides
-        .as_ref()
-        .and_then(serde_json::Value::as_object)
-    else {
-        return Ok(ResolvedCallerFileOverrides::default());
-    };
-    let mut resolved = ResolvedCallerFileOverrides::default();
-    let instance = serde_json::Value::Object(
-        markdown
-            .frontmatter()
-            .as_map()
-            .iter()
-            .map(|(key, value)| (key.clone(), value.clone()))
-            .collect(),
+    instance: &serde_json::Value,
+    composition_pending: &HashSet<String>,
+) -> Result<CallerProjection, CallerProjectionFailure> {
+    let records = caller_input_records(options);
+    let mut resolved = CallerProjection::default();
+    resolved.classified.extend(
+        records
+            .keys()
+            .filter(|key| !options.exclude_keys.contains(*key))
+            .cloned(),
     );
-    for (key, value) in overrides {
-        let origin = options
-            .set_override_file_ref_origins
-            .get(key)
-            .unwrap_or(fallback);
-        let context = options
-            .file_resolution_context
-            .as_ref()
-            // A caller origin is invocation state already accepted by the
-            // caller and may be outside the target document's repository.
-            .map(|context| context.for_trusted_external_base(origin))
-            .unwrap_or_else(|| biscuit_file::FileResolutionContext::new(origin));
-        let mut fragments = Vec::new();
-        collect_property_schema_fragments(
+    let document_context = options.local_expression_resolution_context();
+    let Some(fragments_by_property) = effective.and_then(|effective| {
+        collect_applicable_root_schema_fragments(
             &effective.json_schema,
-            key,
-            &instance,
-            &mut fragments,
-        );
-        if let Some(value) = materialize_caller_value_for_fragments(
-            key,
-            value,
-            &fragments,
-            &context,
-        )? {
-            resolved.native.insert(key.clone(), value.native);
-            resolved
-                .presentation
-                .insert(key.clone(), value.presentation);
+            instance,
+            &document_context,
+            &records,
+            composition_pending,
+        )
+    }) else {
+        return Ok(resolved);
+    };
+    for (key, record) in &records {
+        if options.exclude_keys.contains(key) {
+            continue;
+        }
+        let Some(fragments) = fragments_by_property.get(key) else {
+            continue;
+        };
+        let selections: Vec<_> = fragments
+            .iter()
+            .filter_map(|fragment| select_file_mode(record.raw(), fragment, record.origin()))
+            .collect();
+        if selections.len() != 1 {
+            continue;
+        }
+        let mode = selections[0];
+        resolved.modes.insert(key.clone(), mode);
+        for fragment in fragments {
+            if select_file_mode(record.raw(), fragment, record.origin()) != Some(mode) {
+                continue;
+            }
+            if let Some(value) = resolve_caller_file_value(
+                record.raw(),
+                fragment,
+                record.origin(),
+                key,
+                &caller_occurrence(key),
+                mode,
+            )? {
+                resolved.native.insert(key.clone(), value.native);
+                resolved.presentation.insert(key.clone(), value.presentation);
+                for provenance in value.provenance {
+                    resolved.provenance.insert(provenance.occurrence, provenance.value);
+                }
+                break;
+            }
         }
     }
     Ok(resolved)
 }
 
-fn collect_property_schema_fragments<'a>(
-    schema: &'a serde_json::Value,
-    key: &str,
+fn classify_caller_overrides(
+    effective: Option<&EffectiveSchema>,
+    options: &ComposeOptions,
     instance: &serde_json::Value,
-    fragments: &mut Vec<&'a serde_json::Value>,
-) {
-    if let Some(fragment) = schema
-        .get("properties")
-        .and_then(serde_json::Value::as_object)
-        .and_then(|properties| properties.get(key))
-    {
-        fragments.push(fragment);
+    composition_pending: &HashSet<String>,
+) -> HashMap<String, CallerFileMode> {
+    let Some(effective) = effective else {
+        return HashMap::new();
+    };
+    let records = caller_input_records(options);
+    let document_context = options.local_expression_resolution_context();
+    let Some(fragments_by_property) = collect_applicable_root_schema_fragments(
+        &effective.json_schema,
+        instance,
+        &document_context,
+        &records,
+        composition_pending,
+    ) else {
+        return HashMap::new();
+    };
+    records
+        .iter()
+        .filter_map(|(key, record)| {
+            if options.exclude_keys.contains(key) {
+                return None;
+            }
+            let fragments = fragments_by_property.get(key)?;
+            let modes: Vec<_> = fragments
+                .iter()
+                .filter_map(|fragment| select_file_mode(record.raw(), fragment, record.origin()))
+                .collect();
+            (modes.len() == 1).then(|| (key.clone(), modes[0]))
+        })
+        .collect()
+}
+
+fn caller_input_records(options: &ComposeOptions) -> crate::markdown::compose::CallerInputRecords {
+    if !options.caller_input_records().is_empty() {
+        return options.caller_input_records().clone();
     }
-    if let Some(arms) = schema.get("allOf").and_then(serde_json::Value::as_array) {
-        for arm in arms {
-            collect_property_schema_fragments(arm, key, instance, fragments);
+    let Some(overrides) = options.set_overrides.as_ref().and_then(serde_json::Value::as_object)
+    else {
+        return Default::default();
+    };
+    let origin = match (
+        options.file_resolution_context.as_ref(),
+        options.file_ref_fallback_dir.as_ref(),
+    ) {
+        (Some(context), Some(fallback)) => context.for_trusted_external_base(fallback),
+        (Some(context), None) => {
+            context.for_trusted_external_base(context.request_base_dir())
+        }
+        (None, Some(fallback)) => biscuit_file::FileResolutionContext::new(fallback),
+        (None, None) => return Default::default(),
+    };
+    overrides
+        .iter()
+        .map(|(key, value)| {
+            (
+                key.clone(),
+                crate::markdown::compose::CallerInputRecord::new(value.clone(), origin.clone()),
+            )
+        })
+        .collect()
+}
+
+fn select_file_mode(
+    value: &serde_json::Value,
+    schema: &serde_json::Value,
+    context: &biscuit_file::FileResolutionContext,
+) -> Option<CallerFileMode> {
+    let mode = match schema.get("format").and_then(serde_json::Value::as_str) {
+        Some(crate::markdown::schemas::format::DARKMATTER_FILE_FORMAT) => {
+            Some(CallerFileMode::Eager)
+        }
+        Some(crate::markdown::schemas::format::DARKMATTER_FILE_REFERENCE_FORMAT) => {
+            Some(CallerFileMode::Lazy)
+        }
+        _ => None,
+    };
+    if mode.is_some() {
+        return value.is_string().then_some(mode).flatten();
+    }
+    if let Some(items) = schema.get("items") && let Some(values) = value.as_array() {
+        let modes: Vec<_> = values
+            .iter()
+            .filter_map(|item| select_file_mode(item, items, context))
+            .collect();
+        if !values.is_empty() && modes.len() == values.len() && modes.iter().all(|m| *m == modes[0])
+        {
+            return Some(modes[0]);
         }
     }
+    for combinator in ["allOf", "anyOf", "oneOf"] {
+        if let Some(arms) = schema.get(combinator).and_then(serde_json::Value::as_array) {
+            let applicable: Vec<_> = arms
+                .iter()
+                .filter(|arm| {
+                    crate::markdown::schemas::validate::build_validator_in_context(
+                        arm,
+                        Some(context.base_dir()),
+                        None,
+                        Some(context),
+                    )
+                    .is_ok_and(|validator| validator.is_valid(value))
+                })
+                .collect();
+            if applicable.len() != 1 {
+                return None;
+            }
+            return select_file_mode(value, applicable[0], context);
+        }
+    }
+    None
+}
+
+fn collect_applicable_root_schema_fragments<'a>(
+    schema: &'a serde_json::Value,
+    instance: &serde_json::Value,
+    document_context: &super::expression::ResolutionContext,
+    records: &crate::markdown::compose::CallerInputRecords,
+    composition_pending: &HashSet<String>,
+) -> Option<HashMap<String, Vec<&'a serde_json::Value>>> {
+    let mut selected: HashMap<String, Vec<&serde_json::Value>> = schema
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+        .map(|properties| {
+            properties
+                .iter()
+                .map(|(key, fragment)| (key.clone(), vec![fragment]))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    if let Some(arms) = schema.get("allOf").and_then(serde_json::Value::as_array) {
+        for arm in arms {
+            let arm_fragments = collect_applicable_root_schema_fragments(
+                arm,
+                instance,
+                document_context,
+                records,
+                composition_pending,
+            )?;
+            if root_schema_arm_applies(
+                arm,
+                instance,
+                document_context,
+                records,
+                composition_pending,
+                &arm_fragments,
+            ) == RootArmApplicability::None
+            {
+                return None;
+            }
+            for (key, fragments) in arm_fragments {
+                selected.entry(key).or_default().extend(fragments);
+            }
+        }
+    }
+
     for combinator in ["anyOf", "oneOf"] {
         let Some(arms) = schema.get(combinator).and_then(serde_json::Value::as_array) else {
             continue;
         };
-        if let Some(index) =
-            crate::markdown::schemas::select_literal_discriminant_arm(arms, instance)
-        {
-            collect_property_schema_fragments(&arms[index], key, instance, fragments);
-        } else {
-            for arm in arms {
-                collect_property_schema_fragments(arm, key, instance, fragments);
+        let candidates: Vec<_> = arms
+            .iter()
+            .filter_map(|arm| {
+                let fragments = collect_applicable_root_schema_fragments(
+                    arm,
+                    instance,
+                    document_context,
+                    records,
+                    composition_pending,
+                )?;
+                let applicability = root_schema_arm_applies(
+                    arm,
+                    instance,
+                    document_context,
+                    records,
+                    composition_pending,
+                    &fragments,
+                );
+                (applicability != RootArmApplicability::None)
+                    .then_some((applicability, fragments))
+            })
+            .collect();
+        let exact: Vec<_> = candidates
+            .iter()
+            .filter(|(applicability, _)| *applicability == RootArmApplicability::Exact)
+            .collect();
+        let selected_arm = match exact.as_slice() {
+            [(_, fragments)] => fragments,
+            [] => {
+                let pending: Vec<_> = candidates
+                    .iter()
+                    .filter(|(applicability, _)| {
+                        *applicability == RootArmApplicability::Pending
+                    })
+                    .collect();
+                let [(_, fragments)] = pending.as_slice() else {
+                    return None;
+                };
+                fragments
             }
+            _ => return None,
+        };
+        for (key, fragments) in selected_arm.iter() {
+            selected
+                .entry(key.clone())
+                .or_default()
+                .extend(fragments.iter().copied());
         }
+    }
+
+    Some(selected)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RootArmApplicability {
+    Exact,
+    Pending,
+    None,
+}
+
+fn root_schema_arm_applies(
+    arm: &serde_json::Value,
+    instance: &serde_json::Value,
+    document_context: &super::expression::ResolutionContext,
+    records: &crate::markdown::compose::CallerInputRecords,
+    composition_pending: &HashSet<String>,
+    fragments_by_property: &HashMap<String, Vec<&serde_json::Value>>,
+) -> RootArmApplicability {
+    let mut candidate = coerce_frontmatter_with_pending(arm, instance, composition_pending).value;
+    if !project_root_arm_caller_values(&mut candidate, records, fragments_by_property) {
+        return RootArmApplicability::None;
+    }
+    let wrapped = crate::markdown::schemas::validate::wrap_arm_as_root_schema(arm);
+    let Ok(validator) = crate::markdown::schemas::validate::build_validator_in_context(
+        &wrapped,
+        Some(&document_context.base_dir),
+        None,
+        document_context.file_resolution_context.as_ref(),
+    ) else {
+        return RootArmApplicability::None;
+    };
+    if validator.is_valid(&candidate) {
+        return RootArmApplicability::Exact;
+    }
+    if composition_pending.is_empty() {
+        return RootArmApplicability::None;
+    }
+    if validator.iter_errors(&candidate).all(|error| {
+        error
+            .instance_path()
+            .iter()
+            .next()
+            .is_some_and(|segment| match segment {
+                jsonschema::paths::LocationSegment::Property(property) => {
+                    composition_pending.contains(property.as_ref())
+                }
+                jsonschema::paths::LocationSegment::Index(_) => false,
+            })
+    }) {
+        RootArmApplicability::Pending
+    } else {
+        RootArmApplicability::None
     }
 }
 
-#[derive(Default)]
-struct ResolvedCallerFileOverrides {
-    native: serde_json::Map<String, serde_json::Value>,
-    presentation: serde_json::Map<String, serde_json::Value>,
+fn project_root_arm_caller_values(
+    candidate: &mut serde_json::Value,
+    records: &crate::markdown::compose::CallerInputRecords,
+    fragments_by_property: &HashMap<String, Vec<&serde_json::Value>>,
+) -> bool {
+    let Some(object) = candidate.as_object_mut() else {
+        return false;
+    };
+    for (key, record) in records {
+        let Some(fragments) = fragments_by_property.get(key) else {
+            continue;
+        };
+        let modes: Vec<_> = fragments
+            .iter()
+            .filter_map(|fragment| select_file_mode(record.raw(), fragment, record.origin()))
+            .collect();
+        if modes.len() != 1 {
+            continue;
+        }
+        let mode = modes[0];
+        let projected = fragments.iter().find_map(|fragment| {
+            if select_file_mode(record.raw(), fragment, record.origin()) != Some(mode) {
+                return None;
+            }
+            match resolve_caller_file_value(
+                record.raw(),
+                fragment,
+                record.origin(),
+                key,
+                &caller_occurrence(key),
+                mode,
+            ) {
+                Ok(Some(projected)) => Some(Ok(projected)),
+                Ok(None) => None,
+                Err(error) => Some(Err(error)),
+            }
+        });
+        match projected {
+            Some(Ok(projected)) => {
+                object.insert(key.clone(), projected.native);
+            }
+            Some(Err(_)) => return false,
+            None => {}
+        }
+    }
+    true
+}
+
+struct CallerProjectionFailure {
+    problem: Box<ValidationProblem>,
 }
 
 struct ResolvedCallerFileValue {
     native: serde_json::Value,
     presentation: serde_json::Value,
+    provenance: Vec<CallerFileOccurrenceProvenance>,
 }
 
-fn materialize_caller_value_for_fragments(
-    property: &str,
-    value: &serde_json::Value,
-    fragments: &[&serde_json::Value],
-    context: &biscuit_file::FileResolutionContext,
-) -> MarkdownResult<Option<ResolvedCallerFileValue>> {
-    if fragments
-        .iter()
-        .any(|fragment| non_file_schema_matches(value, fragment))
-    {
-        return Ok(None);
-    }
-    for fragment in fragments {
-        if let Some(resolved) = materialize_caller_value(property, value, fragment, context)? {
-            return Ok(Some(resolved));
-        }
-    }
-    Ok(None)
+struct CallerFileOccurrenceProvenance {
+    occurrence: String,
+    value: super::expression::resolve_ctx::CallerFileProvenance,
 }
 
-fn materialize_caller_value(
-    property: &str,
+fn caller_occurrence(property: &str) -> String {
+    format!("/{}", property.replace('~', "~0").replace('/', "~1"))
+}
+
+fn resolve_caller_file_value(
     value: &serde_json::Value,
     schema: &serde_json::Value,
     context: &biscuit_file::FileResolutionContext,
-) -> MarkdownResult<Option<ResolvedCallerFileValue>> {
-    let format = schema.get("format").and_then(serde_json::Value::as_str);
-    let eager = format == Some(crate::markdown::schemas::format::DARKMATTER_FILE_FORMAT);
-    let lazy = format
-        == Some(crate::markdown::schemas::format::DARKMATTER_FILE_REFERENCE_FORMAT);
-    if eager || lazy {
+    key: &str,
+    occurrence: &str,
+    mode: CallerFileMode,
+) -> Result<Option<ResolvedCallerFileValue>, CallerProjectionFailure> {
+    let failure = |message, diagnostic, candidate| {
+        caller_projection_failure(key, message, diagnostic, context, candidate)
+    };
+    if select_file_mode(value, schema, context) == Some(mode)
+        && schema.get("format").and_then(serde_json::Value::as_str).is_some()
+    {
         let Some(raw) = value.as_str() else {
             return Ok(None);
         };
-        let Ok(reference) = biscuit_file::FileReference::new(raw) else {
-            return Ok(None);
-        };
-        if reference.class().kind == biscuit_file::FileReferenceKind::Url {
-            return Ok(lazy.then(|| ResolvedCallerFileValue {
-                native: value.clone(),
-                presentation: value.clone(),
-            }));
-        }
-        if lazy && reference.class().recursive {
-            return Err(MarkdownError::ParameterBinding {
-                property: property.to_string(),
-                provided: raw.to_string(),
-                reason: "a recursive lazy file reference has no single path shape; declare this property as `file(eager)`".to_string(),
-            });
-        }
-        let resolved = if eager {
-            reference.resolve_in_context(context).ok().flatten()
-        } else {
-            let plan = reference.candidate_plan(context).map_err(|error| {
-                MarkdownError::ParameterBinding {
-                    property: property.to_string(),
-                    provided: raw.to_string(),
-                    reason: error.to_string(),
-                }
+        let reference = biscuit_file::FileReference::new(raw).map_err(|err| {
+            failure(
+                format!("`{raw}` is not a valid file reference: {err}"),
+                FileReferenceDiagnostic::InvalidSyntax {
+                    raw: raw.to_string(),
+                },
+                None,
+            )
+        })?;
+        if mode == CallerFileMode::Lazy {
+            if reference.class().recursive {
+                return Err(failure(
+                    format!(
+                        "recursive caller file reference `{raw}` has no single lazy identity; declare the parameter as `file(eager)`"
+                    ),
+                    FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                    None,
+                ));
+            }
+            if reference.class().kind == biscuit_file::FileReferenceKind::Url {
+                let target = reference.resolve_target().map_err(|err| {
+                    failure(
+                        format!("could not classify remote file reference `{raw}`: {err}"),
+                        FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                        None,
+                    )
+                })?;
+                let Some(biscuit_file::Resolved::Remote(url)) = target else {
+                    return Err(failure(
+                        format!("remote file reference `{raw}` did not produce a remote target"),
+                        FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                        None,
+                    ));
+                };
+                let value = serde_json::Value::String(url.to_string());
+                return Ok(Some(ResolvedCallerFileValue {
+                    native: value.clone(),
+                    presentation: value,
+                    provenance: Vec::new(),
+                }));
+            }
+            let candidates = reference
+                .candidate_plan_with_order(
+                    context,
+                    biscuit_file::CandidatePlanOrder::AuthoringBaseFirst,
+                )
+                .map_err(|err| {
+                    failure(
+                        format!(
+                            "could not bind file reference `{raw}` from `{}`: {err}",
+                            context.base_dir().display()
+                        ),
+                        FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                        None,
+                    )
+                })?;
+            let candidate = candidates.first().ok_or_else(|| {
+                failure(
+                    format!(
+                        "file reference `{raw}` produced no candidate from `{}`",
+                        context.base_dir().display()
+                    ),
+                    FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                    None,
+                )
             })?;
-            let candidate = plan.first().map(|candidate| candidate.path().to_path_buf());
-            if let (Some(candidate), Some(repository_root)) =
-                (candidate.as_ref(), context.repository_root())
-            {
+            let path = candidate.path().to_path_buf();
+            if !path.is_absolute() {
+                return Err(failure(
+                    format!(
+                        "file reference `{raw}` produced a non-absolute candidate from `{}`",
+                        context.base_dir().display(),
+                    ),
+                    FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                    Some(candidate.clone()),
+                ));
+            }
+            if let Some(repository_root) = context.repository_root() {
+                // `&`/`^` references must stay inside the repository that anchors
+                // them even though a lazy candidate is never probed.
                 reference
-                    .validate_repository_candidate(candidate, repository_root)
-                    .map_err(|error| MarkdownError::ParameterBinding {
-                        property: property.to_string(),
-                        provided: raw.to_string(),
-                        reason: error.to_string(),
+                    .validate_repository_candidate(&path, repository_root)
+                    .map_err(|err| {
+                        failure(
+                            format!("file reference `{raw}` escapes its repository root: {err}"),
+                            FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                            Some(candidate.clone()),
+                        )
                     })?;
             }
-            candidate
-        };
-        let Some(resolved) = resolved else {
-            return Ok(None);
-        };
+            let native = path.to_string_lossy().into_owned();
+            let presentation = biscuit_file::to_portable_string(&path);
+            return Ok(Some(ResolvedCallerFileValue {
+                native: serde_json::Value::String(native),
+                presentation: serde_json::Value::String(presentation),
+                provenance: vec![CallerFileOccurrenceProvenance {
+                    occurrence: occurrence.to_string(),
+                    value: super::expression::resolve_ctx::CallerFileProvenance {
+                        property: key.to_string(),
+                        reference: raw.to_string(),
+                        origin: context.clone(),
+                        candidate: path,
+                        candidate_provenance: candidate.provenance(),
+                    },
+                }],
+            }));
+        }
+        let detailed = reference.resolve_detailed(context);
+        let resolved = detailed.matched_path().map(Path::to_path_buf).ok_or_else(|| {
+            if let Some(err) = detailed.error() {
+                return failure(
+                    format!(
+                        "could not resolve file reference `{raw}` from `{}`: {err}",
+                        context.base_dir().display()
+                    ),
+                    FileReferenceDiagnostic::ResolutionFailed { raw: raw.to_string() },
+                    detailed
+                        .candidates()
+                        .first()
+                        .map(|candidate| candidate.candidate().clone()),
+                );
+            }
+            failure(
+                format!(
+                    "file reference `{raw}` did not match a file from `{}`",
+                    context.base_dir().display()
+                ),
+                FileReferenceDiagnostic::NoMatch {
+                    raw: raw.to_string(),
+                    resolved_from: Some(context.base_dir().to_path_buf()),
+                },
+                detailed
+                    .candidates()
+                    .first()
+                    .map(|candidate| candidate.candidate().clone()),
+            )
+        })?;
+        let candidate_provenance = detailed
+            .candidates()
+            .iter()
+            .find(|candidate| candidate.candidate().path() == resolved)
+            .map(|candidate| candidate.candidate().provenance())
+            .unwrap_or(biscuit_file::RootProvenance::Absolute);
         let native = resolved.to_string_lossy().into_owned();
         let presentation = biscuit_file::to_portable_string(&resolved);
         return Ok(Some(ResolvedCallerFileValue {
             native: serde_json::Value::String(native),
             presentation: serde_json::Value::String(presentation),
+            provenance: vec![CallerFileOccurrenceProvenance {
+                occurrence: occurrence.to_string(),
+                value: super::expression::resolve_ctx::CallerFileProvenance {
+                    property: key.to_string(),
+                    reference: raw.to_string(),
+                    origin: context.clone(),
+                    candidate: resolved,
+                    candidate_provenance,
+                },
+            }],
         }));
     }
     if let Some(items) = schema.get("items")
@@ -605,11 +1125,21 @@ fn materialize_caller_value(
         let mut changed = false;
         let mut native = Vec::with_capacity(values.len());
         let mut presentation = Vec::with_capacity(values.len());
-        for value in values {
-            if let Some(resolved) = materialize_caller_value(property, value, items, context)? {
+        let mut provenance = Vec::new();
+        for (index, value) in values.iter().enumerate() {
+            let item_occurrence = format!("{occurrence}/{index}");
+            if let Some(resolved) = resolve_caller_file_value(
+                value,
+                items,
+                context,
+                key,
+                &item_occurrence,
+                mode,
+            )? {
                 changed = true;
                 native.push(resolved.native);
                 presentation.push(resolved.presentation);
+                provenance.extend(resolved.provenance);
             } else {
                 native.push(value.clone());
                 presentation.push(value.clone());
@@ -619,13 +1149,16 @@ fn materialize_caller_value(
             return Ok(Some(ResolvedCallerFileValue {
                 native: serde_json::Value::Array(native),
                 presentation: serde_json::Value::Array(presentation),
+                provenance,
             }));
         }
     }
     for combinator in ["allOf", "anyOf", "oneOf"] {
         if let Some(arms) = schema.get(combinator).and_then(serde_json::Value::as_array) {
             for arm in arms {
-                if let Some(resolved) = materialize_caller_value(property, value, arm, context)? {
+                if let Some(resolved) =
+                    resolve_caller_file_value(value, arm, context, key, occurrence, mode)?
+                {
                     return Ok(Some(resolved));
                 }
             }
@@ -634,61 +1167,35 @@ fn materialize_caller_value(
     Ok(None)
 }
 
-fn non_file_schema_matches(value: &serde_json::Value, schema: &serde_json::Value) -> bool {
-    if schema_contains_file_format(schema) {
-        return false;
+fn caller_projection_failure(
+    key: &str,
+    message: String,
+    diagnostic: FileReferenceDiagnostic,
+    origin: &biscuit_file::FileResolutionContext,
+    candidate: Option<biscuit_file::ResolutionCandidate>,
+) -> CallerProjectionFailure {
+    let pointer = format!("/{}", key.replace('~', "~0").replace('/', "~1"));
+    CallerProjectionFailure {
+        problem: Box::new(ValidationProblem {
+            path: pointer.clone(),
+            message,
+            kind: ValidationProblemKind::Invalid,
+            property: None,
+            line: None,
+            column: None,
+            arm_index: None,
+            description: None,
+            code: ValidationProblemCode::InvalidFileReference,
+            instance_path: JsonPointer::parse(&pointer),
+            schema_path: None,
+            offending_property: None,
+            file_reference: Some(diagnostic),
+            caller_file: Some(CallerFileReferenceProvenance {
+                origin: origin.clone(),
+                candidate,
+            }),
+        }),
     }
-    if schema.get("const").is_some_and(|expected| expected == value) {
-        return true;
-    }
-    if schema
-        .get("enum")
-        .and_then(serde_json::Value::as_array)
-        .is_some_and(|members| members.contains(value))
-    {
-        return true;
-    }
-    if let Some(ty) = schema.get("type").and_then(serde_json::Value::as_str) {
-        return match ty {
-            "string" => value.is_string(),
-            "number" => value.is_number(),
-            "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
-            "boolean" => value.is_boolean(),
-            "object" => value.is_object(),
-            "array" => value.is_array(),
-            "null" => value.is_null(),
-            _ => false,
-        };
-    }
-    ["allOf", "anyOf", "oneOf"].into_iter().any(|combinator| {
-        schema
-            .get(combinator)
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|arms| arms.iter().any(|arm| non_file_schema_matches(value, arm)))
-    })
-}
-
-fn schema_contains_file_format(schema: &serde_json::Value) -> bool {
-    let format = schema.get("format").and_then(serde_json::Value::as_str);
-    if matches!(
-        format,
-        Some(crate::markdown::schemas::format::DARKMATTER_FILE_FORMAT)
-            | Some(crate::markdown::schemas::format::DARKMATTER_FILE_REFERENCE_FORMAT)
-    ) {
-        return true;
-    }
-    if schema
-        .get("items")
-        .is_some_and(schema_contains_file_format)
-    {
-        return true;
-    }
-    ["allOf", "anyOf", "oneOf"].into_iter().any(|combinator| {
-        schema
-            .get(combinator)
-            .and_then(serde_json::Value::as_array)
-            .is_some_and(|arms| arms.iter().any(schema_contains_file_format))
-    })
 }
 
 /// Returns `true` when `value` is still composition-pending — it holds a
@@ -788,6 +1295,12 @@ fn source_path(markdown: &Markdown, options: &ComposeOptions) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Native spelling of a fixture path (`join("a/b")` keeps `/` on Windows).
+    fn native(path: &std::path::Path) -> String {
+        std::path::PathBuf::from_iter(path.components())
+            .to_string_lossy()
+            .into_owned()
+    }
     use crate::markdown::schemas::{
         Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema, SimplifiedType, TypeExpr,
     };
@@ -2229,12 +2742,14 @@ mod tests {
 
         let error = md.compose_with(options).unwrap_err();
         assert!(matches!(
-            error,
-            MarkdownError::ParameterBinding { property, provided, reason }
-                if property == "spec"
-                    && provided == "%spec.md"
-                    && reason.contains("file(eager)")
-        ));
+            &error,
+            MarkdownError::SchemaValidationFailed { problems, .. }
+                if problems.iter().any(|problem| {
+                    problem.path == "/spec"
+                        && problem.message.contains("%spec.md")
+                        && problem.message.contains("file(eager)")
+                })
+        ), "unexpected error: {error:?}");
     }
 
     #[test]
@@ -2294,11 +2809,14 @@ mod tests {
                 .with_file_resolution_context(context.clone())
                 .with_file_ref_fallback_dir(&launch_dir)
                 .with_set_overrides(serde_json::json!({ "spec": provided }));
+            let error = md.compose_with(options).unwrap_err();
             assert!(matches!(
-                md.compose_with(options).unwrap_err(),
-                MarkdownError::ParameterBinding { property, provided: actual, .. }
-                    if property == "spec" && actual == provided
-            ));
+                &error,
+                MarkdownError::SchemaValidationFailed { problems, .. }
+                    if problems.iter().any(|problem| {
+                        problem.path == "/spec" && problem.message.contains(provided)
+                    })
+            ), "unexpected error for `{provided}`: {error:?}");
         }
     }
 
@@ -2343,30 +2861,44 @@ mod tests {
             "$schema:\n  launch_spec: file\n  task_spec: 'file'\n  label: string\n",
             &doc_path,
         );
+        let records = crate::markdown::compose::CallerInputRecords::from([
+            (
+                "launch_spec".to_string(),
+                crate::markdown::compose::CallerInputRecord::new(
+                    serde_json::json!("launch.md"),
+                    biscuit_file::FileResolutionContext::new(&launch_dir),
+                ),
+            ),
+            (
+                "task_spec".to_string(),
+                crate::markdown::compose::CallerInputRecord::new(
+                    serde_json::json!("task.md"),
+                    biscuit_file::FileResolutionContext::new(&sequence_dir),
+                ),
+            ),
+        ]);
         let options = ComposeOptions::new()
             .with_source_file(&doc_path)
             .with_file_ref_fallback_dir(&launch_dir)
-            .with_set_override_file_ref_origins(HashMap::from([(
-                "task_spec".to_string(),
-                sequence_dir.clone(),
-            )]))
+            .with_caller_input_records(records)
             .with_set_overrides(serde_json::json!({
                 "launch_spec": "launch.md",
                 "task_spec": "task.md",
                 "label": "ordinary",
             }));
 
-        let effective = materialize_caller_overrides(&md, &options).unwrap();
+        let (composed, _) = md.compose_with(options.clone()).unwrap();
+        let effective = composed.frontmatter().as_map();
 
         assert_eq!(
-            effective["launch_spec"],
-            serde_json::json!(launch_dir.join("launch.md").to_string_lossy()),
+            effective.get("launch_spec"),
+            Some(&serde_json::json!(native(&launch_dir.join("launch.md")))),
         );
         assert_eq!(
-            effective["task_spec"],
-            serde_json::json!(sequence_dir.join("task.md").to_string_lossy()),
+            effective.get("task_spec"),
+            Some(&serde_json::json!(native(&sequence_dir.join("task.md")))),
         );
-        assert_eq!(effective["label"], serde_json::json!("ordinary"));
+        assert_eq!(effective.get("label"), Some(&serde_json::json!("ordinary")));
         assert_eq!(
             options.set_overrides.as_ref().unwrap()["task_spec"],
             serde_json::json!("task.md"),
@@ -2411,7 +2943,7 @@ mod tests {
         )
         .unwrap();
         let doc_path = target_dir.join("review.md");
-        let md: Markdown = "---\n$schema:\n  spec: file\nspec: authored.md\n---\n{{ frontmatter(parent_dir(spec) + '/other-file.md', 'result') }}\n".into();
+        let md: Markdown = "---\n$schema:\n  spec: file\nspec: authored.md\n---\n{{ frontmatter(dirname(spec) + '/other-file.md', 'result') }}\n".into();
         let md = md.with_source(ComposeSource::File(doc_path.clone()));
         let options = ComposeOptions::new()
             .with_source_file(&doc_path)

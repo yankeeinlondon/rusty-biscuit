@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-1f17b774a5a1ed90
-last_updated: 2026-08-01
+hash: ef46db3751d8e999-c770ae4731a7a009
+last_updated: 2026-09-02
 ---
 # Compose Pipeline
 
@@ -28,7 +28,16 @@ Inline Pre, Transclusion, Inline Post, and Finalization.
 
 **Inline Pre** (serial):
 
-1. **Frontmatter Interpolation (pass 1)** - `{{ variable }}` in frontmatter resolves before effective state is built; keys referencing a whole-value `$(...)` are deferred to pass 2
+Before the numbered stages, a schema-aware input prelude applies the effective
+schema to immutable caller records containing each property's raw value and
+captured file-resolution origin. An exactly selected eager or non-recursive
+lazy `file` arm installs a native semantic identity; eager requires an existing
+file, while lazy binds the first ordered candidate without probing it. Portable
+Markdown presentation is retained separately and the raw record remains
+available for fresh preparation. Ordinary strings and document-authored file
+references keep their existing source-relative and repository-aware rules.
+
+1. **Frontmatter Interpolation (pass 1)** - `{{ variable }}` in frontmatter resolves before effective state is built; materialized caller-file parameters already expose their origin-resolved native values, and keys referencing a whole-value `$(...)` are deferred to pass 2
 2. **Schema Validation** - Validate frontmatter against `$schema` or `ComposeOptions::baseline_schema`. Runs after `--set` / `--state` overrides and frontmatter interpolation, but before shell expansion. **Coerces** schema-recognized top-level scalars to their declared types (default-on, e.g. the string `"true"` → real boolean) and writes the coerced values back into frontmatter, skipping `$(...)`-pending values. Problems on fields still holding `$(...)` are deferred to downstream re-validation only when frontmatter shell expansion is enabled; when it is disabled they fail fast
 3. **Frontmatter Shell Expansion** - top-level `$(cmd)` frontmatter values execute after interpolation and write trimmed `stdout` back into frontmatter. Tokens in executed position follow the `$()` token-resolution ladder (literal → `name(...)` safe function → executable → frontmatter property → null); an all-expression `$()` is rejected with a `{{ }}` suggestion
 4. **Frontmatter Interpolation (pass 2)** - resolves the keys deferred in pass 1 against the now-concrete shell-expanded values

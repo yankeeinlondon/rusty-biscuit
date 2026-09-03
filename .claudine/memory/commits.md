@@ -49,6 +49,13 @@ belong here.
   (`:` after a parameter is parsed as a modifier), and avoid the variable
   names `status` and `path`.
 
+- A staged `R` is display-time similarity, not an index fact: the index holds
+  an independent `D` + `A`, `git ls-files -s <new>` hides the old path's `D`,
+  and the two endpoints can even hold different contents. Put BOTH endpoints
+  in the brief, confirm with `git diff --cached -- <old> <new>` that the old
+  side is a deletion of the expected blob, and check `git status --short`
+  afterwards for leftover `D` entries.
+
 ## Signing
 
 - Never disable or override signing (`commit.gpgsign`, `gpg.program`,
@@ -81,6 +88,12 @@ belong here.
   claims the staged text did not make ("smoke test failed" vs. "smoke attempt
   interrupted by host load").
 
+- A brief that says "write the message body to a temp file" yields a file
+  with no subject line, and `git commit -F` then collapses every bullet into
+  one multi-hundred-character subject. Say "write the FULL message: subject
+  on line 1, blank line 2, bullets after" and have the agent verify with
+  `git log -1 --format=%B <hash>`.
+
 ## Concurrency
 
 - Parallel groups need disjoint paths; producer commits before consumer. New
@@ -100,6 +113,10 @@ belong here.
 - Never `--no-verify`, override `core.hooksPath`, amend, or add fixup commits
   mid-batch. Report and let the orchestrator decide.
 - Run from the inherited worktree root; never push.
+
+- A shared `/tmp/commit_msg.txt` is a single hot slot: concurrent agents
+  overwrite each other and the last writer's body ships under the wrong
+  subject. Give every sub-agent a scope-unique message filename.
 
 ## Orchestration
 
