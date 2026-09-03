@@ -360,6 +360,147 @@ fn open(fixture: &ClientFixture, uri: &str, text: &str) {
     );
 }
 
+#[test]
+fn bare_sidecar_advisory_projects_to_consumer_and_tracks_dependency_changes() {
+    let workspace = tempfile::tempdir().unwrap();
+    let sidecar_path = workspace.path().join("schema.yaml");
+    let document_path = workspace.path().join("doc.md");
+    let bare_sidecar = "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n";
+    let enveloped_sidecar = "$schema:\n  source_marker: string(required)\n  spec: 'file(eager; required)'\n  caller_spec: 'file(eager; required)'\n";
+    let document = "---\n$schema: ./schema.yaml\ntitle: Hello\n---\nBody\n";
+    std::fs::write(&sidecar_path, bare_sidecar).unwrap();
+    std::fs::write(&document_path, document).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let document_uri = url::Url::from_file_path(&document_path).unwrap();
+    let sidecar_uri = url::Url::from_file_path(&sidecar_path).unwrap();
+    open(&fixture, document_uri.as_str(), document);
+
+    let initial = fixture.wait_for_diagnostics(document_uri.as_str());
+    let advisories: Vec<_> = initial
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.missing_simplified_envelope")
+        })
+        .collect();
+    assert_eq!(advisories.len(), 1, "consumer diagnostics: {initial:?}");
+    let advisory = advisories[0];
+    assert_eq!(advisory["source"], json!("darkmatter.schema"));
+    assert_eq!(advisory["severity"], json!(2));
+    assert_eq!(
+        advisory["range"],
+        json!({
+            "start": { "line": 1, "character": 9 },
+            "end": { "line": 1, "character": 22 }
+        })
+    );
+    assert!(
+        advisory["message"]
+            .as_str()
+            .unwrap()
+            .contains(&sidecar_path.display().to_string()),
+        "advisory message: {}",
+        advisory["message"]
+    );
+
+    open(&fixture, sidecar_uri.as_str(), bare_sidecar);
+    let sidecar_diagnostics = fixture.wait_for_diagnostics(sidecar_uri.as_str());
+    assert!(
+        sidecar_diagnostics.iter().all(|diagnostic| {
+            diagnostic["code"] != json!("dm.schema.missing_simplified_envelope")
+        }),
+        "the advisory belongs only to the consuming Markdown document: {sidecar_diagnostics:?}"
+    );
+    fixture.notify(
+        "textDocument/didClose",
+        json!({ "textDocument": { "uri": sidecar_uri.as_str() } }),
+    );
+    fixture.flush_server();
+    while fixture
+        .take_buffered_diagnostics(document_uri.as_str())
+        .is_some()
+    {}
+
+    std::fs::write(&sidecar_path, enveloped_sidecar).unwrap();
+    fixture.notify(
+        "textDocument/didSave",
+        json!({ "textDocument": { "uri": document_uri.as_str() } }),
+    );
+    let corrected = fixture.wait_for_diagnostics(document_uri.as_str());
+    assert!(
+        corrected.iter().all(|diagnostic| {
+            diagnostic["code"] != json!("dm.schema.missing_simplified_envelope")
+        }),
+        "correcting the sidecar must clear the advisory: {corrected:?}"
+    );
+
+    std::fs::write(&sidecar_path, bare_sidecar).unwrap();
+    fixture.notify(
+        "textDocument/didSave",
+        json!({ "textDocument": { "uri": document_uri.as_str() } }),
+    );
+    let restored = fixture.wait_for_diagnostics(document_uri.as_str());
+    assert_eq!(
+        restored
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic["code"] == json!("dm.schema.missing_simplified_envelope")
+            })
+            .count(),
+        1,
+        "the advisory must return once after a repeated read/write/read: {restored:?}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn bare_sidecar_advisory_deduplicates_root_union_and_excludes_raw_json_schema() {
+    let workspace = tempfile::tempdir().unwrap();
+    let bare_path = workspace.path().join("bare.yaml");
+    let raw_path = workspace.path().join("raw.yaml");
+    let union_path = workspace.path().join("union.md");
+    let raw_document_path = workspace.path().join("raw.md");
+    let bare = "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n";
+    let raw = "type: object\nproperties:\n  title:\n    type: string\n";
+    let union_document =
+        "---\n$schema:\n  - ./bare.yaml\n  - ./bare.yaml\ntitle: Hello\n---\nBody\n";
+    let raw_document = "---\n$schema: ./raw.yaml\ntitle: Hello\n---\nBody\n";
+    std::fs::write(&bare_path, bare).unwrap();
+    std::fs::write(&raw_path, raw).unwrap();
+    std::fs::write(&union_path, union_document).unwrap();
+    std::fs::write(&raw_document_path, raw_document).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let union_uri = url::Url::from_file_path(&union_path).unwrap();
+    open(&fixture, union_uri.as_str(), union_document);
+    let union_diagnostics = fixture.wait_for_diagnostics(union_uri.as_str());
+    assert_eq!(
+        union_diagnostics
+            .iter()
+            .filter(|diagnostic| {
+                diagnostic["code"] == json!("dm.schema.missing_simplified_envelope")
+            })
+            .count(),
+        1,
+        "duplicate reference arms must produce one advisory: {union_diagnostics:?}"
+    );
+
+    let raw_uri = url::Url::from_file_path(&raw_document_path).unwrap();
+    open(&fixture, raw_uri.as_str(), raw_document);
+    let raw_diagnostics = fixture.wait_for_diagnostics(raw_uri.as_str());
+    assert!(
+        raw_diagnostics.iter().all(|diagnostic| {
+            diagnostic["code"] != json!("dm.schema.missing_simplified_envelope")
+        }),
+        "raw JSON Schema keywords must suppress the advisory: {raw_diagnostics:?}"
+    );
+
+    fixture.shutdown();
+}
+
 /// Requests `textDocument/hover` at `(line, character)` and returns the rendered
 /// Markdown body (empty string on a null hover). Collapses the request +
 /// `contents.value` extraction that hover assertions would otherwise repeat.
