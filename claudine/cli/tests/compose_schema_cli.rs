@@ -36,6 +36,81 @@ use common::{augmented_path, strip_ansi, write_executable};
 
 #[cfg(unix)]
 #[test]
+fn compose_and_inline_bare_sidecar_advisory_render_once_and_silent_suppresses_it() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let sidecar = workspace.path().join("schema.yaml");
+    fs::write(
+        &sidecar,
+        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
+    )
+    .unwrap();
+    let md_file = workspace.path().join("plan.md");
+    fs::write(
+        &md_file,
+        "---\n$schema: ./schema.yaml\ntitle: Hello\n---\nPlan.\n",
+    )
+    .unwrap();
+    let inline_file = workspace.path().join("inline.md");
+    let inline_source =
+        "---\n$schema: ./schema.yaml\nprompt: Update the body.\n---\nOriginal body.\n";
+    fs::write(&inline_file, inline_source).unwrap();
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\nprintf 'Updated body.\\n'\nexit 0\n",
+    );
+
+    let run = |subcommand: &str, file: &std::path::Path, silent: bool| {
+        let mut command = assert_cmd::Command::cargo_bin("claudine").unwrap();
+        command
+            .env("NO_COLOR", "1")
+            .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+            .env("HOME", workspace.path())
+            .env("PATH", augmented_path(&path_dir))
+            .current_dir(workspace.path())
+            .args([subcommand, "--goose"]);
+        if silent {
+            command.arg("--silent");
+        }
+        command.arg(file).assert().success().get_output().stderr.clone()
+    };
+
+    for (subcommand, file) in [("compose", &md_file), ("inline-compose", &inline_file)] {
+        if subcommand == "inline-compose" {
+            fs::write(file, inline_source).unwrap();
+        }
+        let stderr = strip_ansi(&String::from_utf8_lossy(&run(subcommand, file, false)));
+        assert_eq!(
+            stderr
+                .matches("looks like a SimplifiedSchema but has no envelope")
+                .count(),
+            1,
+            "the {subcommand} warning must render exactly once; stderr:\n{stderr}"
+        );
+        assert!(
+            stderr.contains(&sidecar.display().to_string()),
+            "{subcommand} stderr:\n{stderr}"
+        );
+
+        if subcommand == "inline-compose" {
+            assert!(
+                fs::read_to_string(file).unwrap().contains("Updated body."),
+                "inline-compose must still persist the provider result"
+            );
+            fs::write(file, inline_source).unwrap();
+        }
+        let silent_stderr =
+            strip_ansi(&String::from_utf8_lossy(&run(subcommand, file, true)));
+        assert!(
+            !silent_stderr.contains("looks like a SimplifiedSchema but has no envelope"),
+            "--silent must suppress the {subcommand} warning; stderr:\n{silent_stderr}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
 fn compose_missing_required_property_reports_without_launching_provider() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
