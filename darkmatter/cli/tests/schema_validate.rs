@@ -115,6 +115,107 @@ fn schema_validate_quiet_suppresses_success_lines() {
 }
 
 #[test]
+fn schema_validate_pretty_reports_bare_sidecar_advisory_without_failing() {
+    let tmp = TempDir::new().unwrap();
+    let sidecar = write_file(
+        &tmp,
+        "schema.yaml",
+        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
+    );
+    let doc = write_file(
+        &tmp,
+        "doc.md",
+        "---\n$schema: ./schema.yaml\ntitle: Hello\n---\nBody\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate"])
+        .arg(&doc)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("darkmatter.schema"))
+        .stdout(predicate::str::contains(
+            "dm.schema.missing_simplified_envelope",
+        ))
+        .stdout(predicate::str::contains(sidecar.display().to_string()))
+        .stdout(predicate::str::contains(
+            "looks like a SimplifiedSchema but has no envelope",
+        ))
+        .stdout(predicate::str::contains("root `$schema:` key"))
+        .stdout(predicate::str::contains("`kind: schema` + `types:`"));
+}
+
+#[test]
+fn schema_validate_json_reports_structured_bare_sidecar_advisory() {
+    let tmp = TempDir::new().unwrap();
+    let sidecar = write_file(
+        &tmp,
+        "schema.yaml",
+        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
+    );
+    let doc = write_file(
+        &tmp,
+        "doc.md",
+        "---\n$schema: ./schema.yaml\ntitle: Hello\n---\nBody\n",
+    );
+
+    let output = md_cmd()
+        .args(["schema", "validate", "--format", "json"])
+        .arg(&doc)
+        .assert()
+        .success()
+        .get_output()
+        .stdout
+        .clone();
+    let value: serde_json::Value = serde_json::from_slice(&output).unwrap();
+
+    assert_eq!(value["valid"], true);
+    assert_eq!(value["problems"], serde_json::json!([]));
+    assert_eq!(value["warnings"].as_array().unwrap().len(), 1);
+    let warning = &value["warnings"][0];
+    assert_eq!(warning["source"], "darkmatter.schema");
+    assert_eq!(
+        warning["code"],
+        "dm.schema.missing_simplified_envelope"
+    );
+    assert_eq!(
+        warning["path"],
+        std::fs::canonicalize(&sidecar)
+            .unwrap()
+            .display()
+            .to_string()
+    );
+    assert!(
+        warning["message"]
+            .as_str()
+            .unwrap()
+            .contains("looks like a SimplifiedSchema but has no envelope")
+    );
+}
+
+#[test]
+fn schema_validate_quiet_suppresses_bare_sidecar_advisory() {
+    let tmp = TempDir::new().unwrap();
+    write_file(
+        &tmp,
+        "schema.yaml",
+        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
+    );
+    let doc = write_file(
+        &tmp,
+        "doc.md",
+        "---\n$schema: ./schema.yaml\ntitle: Hello\n---\nBody\n",
+    );
+
+    md_cmd()
+        .args(["schema", "validate", "--quiet"])
+        .arg(&doc)
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+}
+
+#[test]
 fn schema_validate_baseline_from_flag() {
     let tmp = TempDir::new().unwrap();
     let baseline = write_file(
