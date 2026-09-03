@@ -844,10 +844,13 @@ The resolution rules:
 1. **Inline mapping** at `$schema` — parsed directly as SimplifiedSchema.
 2. **String reference** at `$schema` — resolved via `FileReference`, then disambiguated:
    - Parse as YAML.
-   - If the root mapping contains a `$schema` key whose value is **itself a mapping**, treat as SimplifiedSchema.
-   - Otherwise (no `$schema` key, or the value is a string URI like `https://json-schema.org/draft/2020-12/schema`) treat as raw JSON Schema.
+   - Treat YAML as SimplifiedSchema only when it uses one of the two
+     [standalone envelopes](#standalone-schema-documents): `$schema` as the
+     sole root key, or `kind: schema` with a `types` mapping.
+   - Otherwise treat it as raw JSON Schema, including a document with a
+     `$schema` string URI such as
+     `https://json-schema.org/draft/2020-12/schema`.
    - `.json` files are always treated as JSON Schema.
-   - If the file is recognized as a standalone SimplifiedSchema document (see [Standalone Schema Documents](#standalone-schema-documents)), its payload is used directly.
 3. **YAML sequence** at `$schema` — root union; each arm is resolved by the same rules above.
 4. **No `$schema` and no baseline** — validation succeeds vacuously and `pretty` mode emits a `no schema; vacuously valid` note (suppressed by `--quiet`).
 
@@ -919,8 +922,17 @@ Existing raw JSON Schema reference support remains a distinct validation format.
 
 - does not provide `suggest(...)`;
 - cannot supply a `Name@fileref` named-import namespace;
-- does not receive SimplifiedSchema authoring diagnostics or completion; and
+- does not receive SimplifiedSchema completion or type enforcement; and
 - does not enable suggestion discovery from a hand-authored `x-darkmatter-suggest` field.
+
+A referenced YAML map without either standalone envelope remains raw JSON
+Schema even when every property value is a valid SimplifiedSchema type string.
+If that complete non-empty map parses as SimplifiedSchema and none of its keys
+is a recognized or reserved JSON Schema/custom-vocabulary key, Darkmatter emits
+the `dm.schema.missing_simplified_envelope` advisory. The advisory does not
+change validation or exit status: the map still constrains nothing as raw JSON
+Schema. Wrap the properties under a sole root `$schema:` key, or use
+`kind: schema` with a `types:` mapping, to opt into SimplifiedSchema.
 
 ## Baseline Schemas
 

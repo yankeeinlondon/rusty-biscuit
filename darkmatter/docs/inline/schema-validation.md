@@ -72,10 +72,31 @@ $schema: ./schemas/post.yaml
 
 The referenced file may be:
 
-- a YAML file whose root carries its own `$schema:` SimplifiedSchema property, or
+- a YAML file whose root uses one of the two SimplifiedSchema envelopes, or
 - a `.json` / `.yaml` file that is already a valid Draft 2020-12 JSON Schema.
 
-Darkmatter disambiguates by inspecting the file: a root `$schema` key whose value is a *mapping* means SimplifiedSchema; anything else (including a `$schema` string URI) is treated as raw JSON Schema. Remote (`http(s)://`) references are **not** supported — download the schema locally first.
+The SimplifiedSchema envelopes are either `$schema:` as the sole root key, or
+`kind: schema` together with a `types:` mapping:
+
+```yaml
+$schema:
+    title: string(required)
+```
+
+```yaml
+kind: schema
+types:
+    title: string(required)
+```
+
+Anything else is treated as raw JSON Schema, including a `$schema` string URI.
+A non-empty bare map whose string values all parse as SimplifiedSchema property
+definitions still remains raw JSON Schema and therefore constrains nothing. If
+its keys do not identify JSON Schema or a custom vocabulary, Darkmatter emits
+the `dm.schema.missing_simplified_envelope` warning without changing validity
+or exit status. Add either envelope above to make the file a SimplifiedSchema.
+Remote (`http(s)://`) references are **not** supported — download the schema
+locally first.
 
 ### 3. Root-level union
 

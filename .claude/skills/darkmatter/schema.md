@@ -30,7 +30,14 @@ types:
 
 `parse_standalone_schema_document` is the passive authority. A pure schema must
 have `$schema` as its only root key. A kinded schema must declare `kind: schema`
-and provide a `types` mapping. Raw JSON Schema stays distinct.
+and provide a `types` mapping. Referenced YAML without either envelope remains
+raw JSON Schema. When a non-empty bare map consists entirely of valid
+SimplifiedSchema property strings and has no recognized or reserved JSON
+Schema/custom-vocabulary keys, resolution emits the conservative
+`dm.schema.missing_simplified_envelope` advisory without changing validity or
+interpretation. Remedy it by wrapping the properties under the sole root
+`$schema:` key or under `kind: schema` plus `types:`. Classification is passive:
+it uses the already-parsed YAML value and performs no additional I/O.
 
 Schema-trigger documents use `kind: schema-trigger`. Preserve the kinded root
 declaration so Darkmatter and Claudine can select the right schema formally.
