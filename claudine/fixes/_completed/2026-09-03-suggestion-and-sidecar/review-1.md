@@ -4,7 +4,10 @@ ready: false
 agent: codex/default
 created: 2026-09-03T19:30:49+01:00
 spec: suggestion-and-sidecar/spec.md
-implemented: false
+log: claudine/fixes/suggestion-and-sidecar/log.md
+implemented: true
+implemented_by: codex/default
+next: suggestion-and-sidecar/review-2.md
 description: A **fix** review of `suggestion-and-sidecar/spec.md`
 fix: suggestion-and-sidecar/review-1.md
 ---
