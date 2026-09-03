@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import tempfile
 import unittest
 from datetime import date
@@ -490,6 +491,15 @@ class PackagePolicyTests(unittest.TestCase):
         validate_package_ci(
             "messenger",
             ci_policy(tests={"runner-tools": ["messenger-desktop-stubs"]}),
+            self.RUNNER_LABELS,
+            root=Path("/"),
+            today=TODAY,
+        )
+
+    def test_zed_extension_runner_tool_is_accepted(self) -> None:
+        validate_package_ci(
+            "dmls",
+            ci_policy(tests={"runner-tools": ["zed-extension"]}),
             self.RUNNER_LABELS,
             root=Path("/"),
             today=TODAY,
@@ -1287,6 +1297,54 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
             [entry["package"] for entry in scope["matrix"]],
         )
 
+    def test_workspace_excluded_zed_extension_selects_dmls_companion(self) -> None:
+        scope = self.scope("darkmatter/dmls/zed-dmls/src/lib.rs")
+        self.assertEqual(["dmls"], scope["packages"])
+        self.assertEqual(["dmls"], [entry["package"] for entry in scope["matrix"]])
+        self.assertEqual(
+            ["neovim", "zed-extension"],
+            scope["matrix"][0]["runner_tools"],
+        )
+
+        package_ci = (ROOT / ".github/workflows/_package-ci.yml").read_text()
+        self.assertIn(
+            "contains(fromJSON(inputs.runner-tools), 'zed-extension')",
+            package_ci,
+        )
+        self.assertIn("just zed-verify", package_ci)
+
+        lint_job = package_ci.split("  lint:", 1)[1].split("  # L2", 1)[0]
+        self.assertIn("Read the pinned Zed extension packager record", lint_job)
+        self.assertIn("rustup target add wasm32-wasip2", lint_job)
+        self.assertIn("sha256sum --check --strict", lint_job)
+
+        pin = json.loads((ROOT / ".github/ci/zed-extension.json").read_text())
+        self.assertEqual(1, pin["schema_version"])
+        self.assertRegex(pin["zed_commit"], r"^[0-9a-f]{40}$")
+        self.assertRegex(pin["linux_x86_64_sha256"], r"^[0-9a-f]{64}$")
+        self.assertEqual(
+            f"https://zed-extension-cli.nyc3.digitaloceanspaces.com/"
+            f"{pin['zed_commit']}/x86_64-unknown-linux-gnu/zed-extension",
+            pin["linux_x86_64_url"],
+        )
+
+        justfile = (ROOT / "darkmatter/justfile").read_text()
+        check_zed = justfile.split("check-zed:", 1)[1].split("zed-package", 1)[0]
+        self.assertIn('target="wasm32-wasip2"', check_zed)
+        self.assertIn("cargo check --locked", check_zed)
+        self.assertNotIn("\n    rustup target add", check_zed)
+        self.assertNotIn("exit 0", check_zed)
+
+        latest_stable = (ROOT / ".github/workflows/rust-latest-stable.yml").read_text()
+        for required in (
+            "targets: wasm32-wasip2",
+            ".github/ci/zed-extension.json",
+            "actions/cache@v4",
+            "sha256sum --check --strict",
+            "just zed-verify",
+        ):
+            self.assertIn(required, latest_stable)
+
     def test_sniff_change_selects_exact_direct_dependents(self) -> None:
         # Deliberate friction: this exact list makes a human acknowledge a
         # change to sniff's direct dependents. On mismatch, the message below
@@ -1322,6 +1380,7 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
                 "unchained-ai",
                 "worktree",
                 "worktree-cli",
+                "zed-dmls-cli",
             ],
             computed,
             hint,
