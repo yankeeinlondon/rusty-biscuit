@@ -50,6 +50,7 @@
 //! [`SchemaError`]: crate::markdown::schemas::errors::SchemaError
 
 pub mod about;
+mod advisory;
 pub mod clean;
 pub mod coerce;
 pub mod completion;
@@ -84,6 +85,7 @@ pub use about::{
     schema_type_descriptors, validation_behavior_descriptors, match_safe_constraint_descriptors,
     trigger_grammar_descriptors,
 };
+pub use advisory::{SchemaAdvisory, SchemaAdvisoryKind};
 pub use clean::{
     CleanBaselineSchema, CleanSchemaConfig, CleanSchemaContext, SchemaCleanAnalysis,
     analyze_frontmatter, schema_result_set_identical,
