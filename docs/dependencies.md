@@ -80,6 +80,11 @@
   `biscuit-file` (`file-reference` feature, default features off), and
   `biscuit-hash` (xxHash content-hash identity for graph invalidation). See
   [`darkmatter/docs/dependencies.md`](./darkmatter/docs/dependencies.md).
+- `darkmatter/dmls/zed-dmls-cli` (`zed-dmls-cli`) stages the Zed extension in
+  a stable per-user data directory and diagnoses the native binary, dev
+  registration, manifest, and bounded Zed log tail. It uses `sniff` for one
+  request-scoped host/executable observation, `dirs` for platform data roots,
+  and `biscuit-terminal` for `TerminalRenderable` output.
 
 ## Structure
 
@@ -102,6 +107,7 @@ This is a Rust workspace with the following modules:
 - `darkmatter/lib/Cargo.toml` - Markdown parsing, rendering, syntax highlighting
 - `darkmatter/cli/Cargo.toml` - Markdown renderer CLI (`md`)
 - `darkmatter/dmls/Cargo.toml` - Darkmatter Language Server (`dmls`) (lsp-server, lsp-types, line-index, rlsp-yaml-parser, ignore, globset, unicode-normalization, biscuit-hash)
+- `darkmatter/dmls/zed-dmls-cli/Cargo.toml` - Stable Zed extension staging and diagnostics (`zed-dmls`) (sniff, dirs, biscuit-terminal, clap, toml)
 - `homelab/lib/Cargo.toml` - Homelab device control library
 - `homelab/cli/Cargo.toml` - Homelab CLI (`homey`)
 - `model-citizen/lib/Cargo.toml` - Local LLM model management library
@@ -238,6 +244,12 @@ This is a Rust workspace with the following modules:
     _Darkmatter Language Server: LSP 3.17 over stdio for Markdown, Darkmatter DSL, and SimplifiedSchema frontmatter._
 
     _Tags: workspace, cli, lsp, markdown_
+
+- [zed-dmls-cli](./darkmatter/dmls/zed-dmls-cli) _v0.1.0_
+
+    _Stable staging and diagnostics for the DMLS Zed extension._
+
+    _Tags: workspace, cli, lsp, zed_
 
 - [homelab](./homelab) _v0.1.0_
 

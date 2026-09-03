@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-19ddabcbba01b554
+hash: ef46db3751d8e999-0ad269b0b1f6589a
 last_updated: 2026-07-12
 ---
 # Darkmatter
@@ -21,6 +21,7 @@ For details, choose one or more of the packages in this package area.
 | [**Library**](./lib/README.md) | `darkmatter`               | Core library; follow the link for a much deeper functional and technical overview of what Darkmatter provides                                                                                             |
 | [**CLI**](./cli/README.md)     | `darkmatter-cli`           | The Darkmatter CLI (binary: `md`); follow the link for a full description on how to use the CLI, what sub-commands exist, what CLI switches exist, example usage and how to get shell completions working |
 | [**LSP**](./dmls/README.md)    | `dmls`                     | The Darkmatter Language Server (binary: `dmls`); LSP 3.17 over stdio for Markdown + the Darkmatter DSL — schema-aware frontmatter, wiki links, navigation, diagnostics, rename, formatting, semantic tokens |
+| **Zed maintenance CLI**        | `zed-dmls-cli`             | Stages the DMLS Zed extension outside worktrees and diagnoses the native binary, dev-extension registration, manifest, and recent Zed log evidence (binary: `zed-dmls`)                       |
 
 ## Documentation
 
