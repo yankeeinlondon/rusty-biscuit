@@ -38,7 +38,7 @@ pub(crate) static TRIGGER_DISCOVERY_COUNT: std::sync::atomic::AtomicUsize =
     std::sync::atomic::AtomicUsize::new(0);
 
 use crate::markdown::Markdown;
-use crate::markdown::compose::ComposeOptions;
+use crate::markdown::compose::{ComposeOptions, ComposeReport};
 use crate::markdown::compose::{ComposeOperation, ComposeSource};
 use crate::markdown::schemas::{
     CallerFileReferenceProvenance, DarkmatterSchemas, EffectiveSchema, FileReferenceDiagnostic,
@@ -55,7 +55,16 @@ pub(crate) fn run(markdown: &mut Markdown, options: &ComposeOptions) -> Markdown
     let prepared = prepare_schemas(markdown, options, &mut trigger_registry)?;
     let projection = prepare_caller_projection(markdown, options, &prepared)?;
     projection.install(markdown);
-    run_with_registry(markdown, options, &prepared, &projection)
+    let consumer = source_path(markdown, options);
+    let mut report = ComposeReport::new();
+    run_with_registry(
+        markdown,
+        options,
+        &prepared,
+        &projection,
+        &consumer,
+        &mut report,
+    )
 }
 
 /// Request-owned schema state assembled once before frontmatter interpolation.
@@ -192,8 +201,9 @@ pub(crate) fn prepare_schemas(
 /// 6. Converts schema-preparation `SchemaError` into
 ///    `MarkdownError::SchemaValidationFailed`, preserving the original error
 ///    on the variant's `source` field for `Error::source()` recovery.
-/// 7. Converts `ValidationReport { valid: false, problems }` into the same
-///    error variant. On success, returns `Ok(())`.
+/// 7. Projects typed schema advisories into the root compose report, then
+///    converts an invalid validation report into the same error variant. On
+///    success, returns `Ok(())`.
 ///
 /// `prepared` owns the schema assembly and trigger registry discovered before
 /// frontmatter interpolation. `projection` owns launch-resolved caller values;
@@ -204,6 +214,8 @@ pub(crate) fn run_with_registry(
     options: &ComposeOptions,
     prepared: &PreparedSchemas,
     projection: &CallerProjection,
+    consumer: &Path,
+    compose_report: &mut ComposeReport,
 ) -> MarkdownResult<()> {
     let Some(schemas) = prepared.schemas.as_ref() else {
         return Ok(());
@@ -283,6 +295,10 @@ pub(crate) fn run_with_registry(
             source: Some(Box::new(err)),
         }
     })?;
+
+    for advisory in &report.advisories {
+        compose_report.add_schema_advisory(advisory, consumer);
+    }
 
     // Defer problems whose value will be re-resolved later in composition. The
     // compose-time validator runs after template interpolation but BEFORE shell
@@ -1273,7 +1289,7 @@ fn top_level_pointer_segment(pointer: &str) -> Option<String> {
 /// form and is semantically a *display carrier*, not a filesystem path —
 /// renderers use [`Path::to_string_lossy`] to surface it, which is correct
 /// for both file paths and the URL/`<stdin>` strings.
-fn source_path(markdown: &Markdown, options: &ComposeOptions) -> PathBuf {
+pub(crate) fn source_path(markdown: &Markdown, options: &ComposeOptions) -> PathBuf {
     fn carrier(source: &ComposeSource) -> Option<PathBuf> {
         match source {
             ComposeSource::Unknown => None,

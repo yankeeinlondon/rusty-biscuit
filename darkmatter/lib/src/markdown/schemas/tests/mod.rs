@@ -41,6 +41,117 @@ fn no_schema_no_baseline_is_vacuously_valid() {
     let report = api.validate(&md).unwrap();
     assert!(report.valid);
     assert!(report.problems.is_empty());
+    assert!(report.advisories.is_empty());
+}
+
+#[test]
+fn bare_sidecar_advisory_reaches_every_validation_entry_point() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let schema_path = dir.path().join("schema.yaml");
+    std::fs::write(
+        &schema_path,
+        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
+    )
+    .expect("write schema");
+    let md = prompt_with_source(dir.path(), "$schema: ./schema.yaml\n");
+    let api = DarkmatterSchemas::new();
+    let effective = api.effective_for(&md).unwrap().unwrap();
+    let input = serde_json::json!({});
+    let options = ValidationOptions::default();
+
+    let reports = [
+        api.validate(&md).unwrap(),
+        effective.validate(&input),
+        effective.validate_with_positions(&input, &PositionMap::new()),
+        effective.validate_raw(&input),
+        effective.validate_raw_with_positions(&input, &PositionMap::new()),
+        effective.validate_with_options(&input, &PositionMap::new(), &options),
+    ];
+
+    for report in reports {
+        assert!(report.valid, "raw JSON Schema fallback must remain valid");
+        assert!(report.problems.is_empty());
+        assert!(report.pending.is_empty());
+        assert_eq!(report.advisories.len(), 1);
+        let advisory = &report.advisories[0];
+        assert_eq!(advisory.source(), "darkmatter.schema");
+        assert_eq!(advisory.code(), "dm.schema.missing_simplified_envelope");
+        assert_eq!(advisory.path(), schema_path.as_path());
+        assert!(advisory.message().contains("root `$schema:` key"));
+        assert!(advisory.message().contains("`kind: schema` + `types:`"));
+    }
+}
+
+#[test]
+fn bare_sidecar_advisory_survives_baseline_and_reference_assembly() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let schema_path = dir.path().join("schema.yaml");
+    std::fs::write(
+        &schema_path,
+        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
+    )
+    .expect("write schema");
+    let md = prompt_with_source(dir.path(), "$schema: ./schema.yaml\ntitle: unchanged\n");
+    let baseline = SimplifiedSchema::Single(SchemaShape {
+        properties: {
+            let mut properties = indexmap::IndexMap::new();
+            properties.insert(
+                "baseline_value".into(),
+                PropertyDef::Single(PropertyAtom {
+                    ty: TypeExpr::Primitive(SimplifiedType::String),
+                    is_array: false,
+                    constraints: Vec::new(),
+                    array_constraints: Vec::new(),
+                    description: None,
+                }),
+            );
+            properties
+        },
+        ..Default::default()
+    });
+
+    let report = DarkmatterSchemas::new()
+        .with_baseline(baseline)
+        .unwrap()
+        .validate(&md)
+        .unwrap();
+
+    assert!(report.valid);
+    assert!(report.problems.is_empty());
+    assert_eq!(report.advisories.len(), 1);
+    assert_eq!(report.advisories[0].path(), schema_path.as_path());
+}
+
+#[test]
+fn excluded_bare_sidecar_shapes_remain_advisory_free_through_validation() {
+    let fixtures = [
+        ("object schema", "type: object\nproperties:\n  title:\n    type: string\n"),
+        ("format keyword", "format: string\n"),
+        ("title keyword", "title: string(required)\n"),
+        ("comment keyword", "$comment: string\n"),
+        ("custom dollar vocabulary", "$custom: string\n"),
+        ("extension vocabulary", "x-custom: string\n"),
+        ("pure envelope", "$schema:\n  title: string(required)\n"),
+        ("kinded envelope", "kind: schema\ntypes:\n  title: string(required)\n"),
+        ("mixed native scalar", "title: string\ncount: 2\n"),
+    ];
+
+    for (index, (label, body)) in fixtures.into_iter().enumerate() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let schema_path = dir.path().join(format!("schema-{index}.yaml"));
+        std::fs::write(&schema_path, body).expect("write schema");
+        let md = prompt_with_source(
+            dir.path(),
+            &format!("$schema: ./schema-{index}.yaml\ntitle: hello\ncount: 2\n"),
+        );
+
+        let report = DarkmatterSchemas::new().validate(&md).unwrap();
+        assert!(
+            report.advisories.is_empty(),
+            "{label} unexpectedly produced {:?}",
+            report.advisories
+        );
+    }
 }
 
 #[test]

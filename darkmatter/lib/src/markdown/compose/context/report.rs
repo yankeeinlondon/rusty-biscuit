@@ -4,6 +4,7 @@
 use super::super::cache::CacheStats;
 use super::super::perf::ComposePerfReport;
 use crate::markdown::normalize::NormalizationReport;
+use crate::markdown::schemas::SchemaAdvisory;
 use std::path::PathBuf;
 
 /// Report of changes made during compose execution.
@@ -256,6 +257,24 @@ impl ComposeReport {
         self.warnings.push(warning);
     }
 
+    /// Adds a schema advisory unless this report already carries the same
+    /// semantic code and referenced path.
+    pub(crate) fn add_schema_advisory(
+        &mut self,
+        advisory: &SchemaAdvisory,
+        consumer: impl Into<PathBuf>,
+    ) {
+        let warning = ComposeWarning::from_schema_advisory(advisory, consumer);
+        if self
+            .warnings
+            .iter()
+            .any(|existing| existing.same_schema_advisory(&warning))
+        {
+            return;
+        }
+        self.warnings.push(warning);
+    }
+
     /// Merges another report into this one.
     pub fn merge(&mut self, mut other: ComposeReport) {
         self.frontmatter_interpolations_applied += other.frontmatter_interpolations_applied;
@@ -281,7 +300,17 @@ impl ComposeReport {
             self.normalization_report = other.normalization_report.take();
         }
 
-        self.warnings.append(&mut other.warnings);
+        for warning in other.warnings.drain(..) {
+            if warning.is_schema_advisory()
+                && self
+                    .warnings
+                    .iter()
+                    .any(|existing| existing.same_schema_advisory(&warning))
+            {
+                continue;
+            }
+            self.warnings.push(warning);
+        }
 
         // Merge cache stats
         match (&mut self.cache_stats, other.cache_stats) {
@@ -317,6 +346,19 @@ pub struct ComposeWarning {
 
     /// Line number where the issue occurred (1-indexed), if applicable.
     pub line_number: Option<usize>,
+
+    /// Stable producer identity when the warning originates from a typed
+    /// diagnostic source.
+    pub source: Option<String>,
+
+    /// Stable machine-readable code when available.
+    pub code: Option<String>,
+
+    /// Referenced file associated with the warning, when applicable.
+    pub path: Option<PathBuf>,
+
+    /// Root document that consumed the advisory.
+    pub consumer: Option<PathBuf>,
 }
 
 impl ComposeWarning {
@@ -326,6 +368,28 @@ impl ComposeWarning {
             stage: stage.into(),
             message: message.into(),
             line_number: None,
+            source: None,
+            code: None,
+            path: None,
+            consumer: None,
+        }
+    }
+
+    /// Projects a typed schema advisory into the compose warning model.
+    pub(crate) fn from_schema_advisory(
+        advisory: &SchemaAdvisory,
+        consumer: impl Into<PathBuf>,
+    ) -> Self {
+        let path = std::fs::canonicalize(advisory.path())
+            .unwrap_or_else(|_| advisory.path().to_path_buf());
+        Self {
+            stage: "schema_validation".to_string(),
+            message: advisory.message(),
+            line_number: None,
+            source: Some(advisory.source().to_string()),
+            code: Some(advisory.code().to_string()),
+            path: Some(path),
+            consumer: Some(consumer.into()),
         }
     }
 
@@ -334,5 +398,13 @@ impl ComposeWarning {
     pub fn at_line(mut self, line: usize) -> Self {
         self.line_number = Some(line);
         self
+    }
+
+    fn is_schema_advisory(&self) -> bool {
+        self.source.as_deref() == Some(SchemaAdvisory::SOURCE) && self.code.is_some()
+    }
+
+    fn same_schema_advisory(&self, other: &Self) -> bool {
+        self.source == other.source && self.code == other.code && self.path == other.path
     }
 }
