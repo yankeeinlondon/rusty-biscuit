@@ -1,5 +1,11 @@
 use super::*;
+use biscuit_terminal::errors::BlockError;
+use biscuit_terminal::terminal::Terminal;
+use biscuit_terminal::utils::escape_codes::strip_escape_codes;
+use claudine::diagnostics::Diagnostic;
+use std::cell::Cell;
 use std::fs;
+use std::rc::Rc;
 use tempfile::TempDir;
 
 fn write(path: &Path, content: &str) {
@@ -91,6 +97,17 @@ fn repository_suggestions_match_exact_filename_and_sort() {
 }
 
 #[test]
+fn repository_suggestion_empty_iterator_returns_empty() {
+    assert!(
+        collect_repository_suggestions(
+            OsStr::new("access.md"),
+            std::iter::empty::<SuggestionWalkItem>(),
+        )
+        .is_empty()
+    );
+}
+
+#[test]
 fn repository_suggestions_are_deduplicated_and_capped_at_five() {
     let entries = [
         "a/access.md",
@@ -104,13 +121,13 @@ fn repository_suggestions_are_deduplicated_and_capped_at_five() {
     ]
     .into_iter()
     .map(|path| {
-        Ok::<_, ()>(SuggestionEntry {
+        SuggestionWalkItem::Entry(SuggestionEntry {
             relative_path: PathBuf::from(path),
             file_name: OsString::from("access.md"),
             is_file: true,
         })
     })
-    .chain(std::iter::once(Err(())));
+    .chain(std::iter::once(SuggestionWalkItem::Error));
 
     assert_eq!(
         collect_repository_suggestions(OsStr::new("access.md"), entries),
@@ -125,28 +142,79 @@ fn repository_suggestions_are_deduplicated_and_capped_at_five() {
 }
 
 #[test]
-fn repository_suggestion_budget_exhaustion_returns_empty() {
-    let entries = (0..=SUGGESTION_ENTRY_BUDGET).map(|index| {
-        Ok::<_, ()>(SuggestionEntry {
-            relative_path: PathBuf::from(format!("dir-{index}")),
-            file_name: OsString::from("not-access.md"),
-            is_file: false,
-        })
+fn repository_suggestion_raw_walk_budget_includes_root_errors_and_entries() {
+    let visits = Rc::new(Cell::new(0));
+    let observed_visits = Rc::clone(&visits);
+    let entries = std::iter::from_fn(move || {
+        let index = visits.get();
+        visits.set(index + 1);
+        assert!(
+            index < SUGGESTION_ENTRY_BUDGET,
+            "collector polled item 20,001"
+        );
+
+        if index == 0 {
+            return Some(SuggestionWalkItem::Root);
+        }
+        if index == 1 {
+            return Some(SuggestionWalkItem::Error);
+        }
+        Some(SuggestionWalkItem::Entry(SuggestionEntry {
+            relative_path: PathBuf::from(format!("dir-{index}/access.md")),
+            file_name: OsString::from(if index + 1 == SUGGESTION_ENTRY_BUDGET {
+                "access.md"
+            } else {
+                "not-access.md"
+            }),
+            is_file: true,
+        }))
     });
-    assert!(collect_repository_suggestions(OsStr::new("access.md"), entries).is_empty());
+
+    assert_eq!(
+        collect_repository_suggestions(OsStr::new("access.md"), entries),
+        vec![format!(
+            "dir-{}/access.md",
+            SUGGESTION_ENTRY_BUDGET - 1
+        )]
+    );
+    assert_eq!(observed_visits.get(), SUGGESTION_ENTRY_BUDGET);
 }
 
 #[test]
-fn repository_suggestion_walk_error_returns_empty() {
+fn repository_suggestion_first_error_keeps_later_match() {
     let entries = [
-        Ok(SuggestionEntry {
+        SuggestionWalkItem::Error,
+        SuggestionWalkItem::Entry(SuggestionEntry {
             relative_path: PathBuf::from("a/access.md"),
             file_name: OsString::from("access.md"),
             is_file: true,
         }),
-        Err(()),
     ];
-    assert!(collect_repository_suggestions(OsStr::new("access.md"), entries).is_empty());
+    assert_eq!(
+        collect_repository_suggestions(OsStr::new("access.md"), entries),
+        vec!["a/access.md"]
+    );
+}
+
+#[test]
+fn repository_suggestion_middle_error_keeps_later_match() {
+    let entries = [
+        SuggestionWalkItem::Entry(SuggestionEntry {
+            relative_path: PathBuf::from("a/other.md"),
+            file_name: OsString::from("other.md"),
+            is_file: true,
+        }),
+        SuggestionWalkItem::Error,
+        SuggestionWalkItem::Entry(SuggestionEntry {
+            relative_path: PathBuf::from("z/access.md"),
+            file_name: OsString::from("access.md"),
+            is_file: true,
+        }),
+    ];
+    assert_eq!(
+        collect_repository_suggestions(OsStr::new("access.md"), entries),
+        vec!["z/access.md"]
+    );
 }
 
 #[test]
@@ -206,22 +274,61 @@ fn recovery_attempts_autocomplete_only_for_bare_no_match() {
 fn recovery_enriches_explicit_no_match_without_selecting_suggestion() {
     let tmp = TempDir::new().unwrap();
     seed_repo(tmp.path());
-    write(&tmp.path().join("homelab/docs/unifi/access.md"), "access");
+    write(
+        &tmp.path().join("homelab/docs/unifi/apps/protect.md"),
+        "apps",
+    );
+    write(
+        &tmp
+            .path()
+            .join("homelab/docs/unifi/service-offerings/protect.md"),
+        "services",
+    );
+    for directory in ["alpha", "beta", "gamma", "zeta"] {
+        write(
+            &tmp.path().join(directory).join("protect.md"),
+            directory,
+        );
+    }
     let context = biscuit_file::FileResolutionContext::new(tmp.path())
         .with_repository_root(tmp.path());
-    let detailed = FileReference::new("./docs/unifi/access.md")
+    let detailed = FileReference::new("./docs/unifi/protect.md")
         .unwrap()
         .resolve_detailed(&context);
     let error = CompositionError::from_detailed_no_match(&detailed);
 
     let OperationFileRecovery::ExplicitNoMatch(error) =
-        recover_operation_file("./docs/unifi/access.md", error)
+        recover_operation_file("./docs/unifi/protect.md", error)
     else {
         panic!("explicit reference must not enter autocomplete");
     };
-    let (reference, _, suggestions) = error.file_reference_no_match().unwrap();
-    assert_eq!(reference, "./docs/unifi/access.md");
-    assert_eq!(suggestions, ["homelab/docs/unifi/access.md"]);
+    let (reference, resolution, suggestions) = error.file_reference_no_match().unwrap();
+    let expected = [
+        "alpha/protect.md",
+        "beta/protect.md",
+        "gamma/protect.md",
+        "homelab/docs/unifi/apps/protect.md",
+        "homelab/docs/unifi/service-offerings/protect.md",
+    ];
+    assert_eq!(reference, "./docs/unifi/protect.md");
+    assert_eq!(suggestions, expected);
+    assert_eq!(error.code(), "composition.invalid_file_reference");
+
+    let detail = error.detail();
+    assert_eq!(detail["failure"], "no_match");
+    assert_eq!(detail["suggestions"], serde_json::json!(expected));
+    assert_eq!(detail["candidates"].as_array().unwrap().len(), 1);
+    assert_eq!(resolution.candidates().len(), 1);
+    assert_eq!(detail["candidates"][0]["provenance"], "source");
+    assert_eq!(detail["candidates"][0]["disposition"], "missing");
+
+    let rendered =
+        strip_escape_codes(error.report_block_error(&Terminal::new_optimistic(100)));
+    assert!(rendered.contains("Did you mean:"), "got:\n{rendered}");
+    for suggestion in expected {
+        assert!(rendered.contains(suggestion), "got:\n{rendered}");
+    }
+    assert!(!rendered.contains("zeta/protect.md"), "got:\n{rendered}");
 }
 
 #[test]
@@ -247,6 +354,23 @@ fn repository_suggestions_do_not_follow_directory_symlinks() {
 
     assert!(
         repository_basename_suggestions(Some(repo.path()), Some(OsStr::new("access.md"))).is_empty()
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn repository_suggestions_skip_earlier_dangling_symlink() {
+    use std::os::unix::fs::symlink;
+
+    let repo = TempDir::new().unwrap();
+    seed_repo(repo.path());
+    fs::create_dir_all(repo.path().join(".aaa")).unwrap();
+    symlink("missing", repo.path().join(".aaa/broken")).unwrap();
+    write(&repo.path().join("zzz/access.md"), "match");
+
+    assert_eq!(
+        repository_basename_suggestions(Some(repo.path()), Some(OsStr::new("access.md"))),
+        vec!["zzz/access.md"]
     );
 }
 
