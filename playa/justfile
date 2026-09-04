@@ -81,7 +81,7 @@ test-browser:
 
 # Real-device/audio-output tests. Skip-clean without audio sink.
 test-real *args="":
-    @just _test_real playa {{args}}
+    @just _test_real playa --features native-playback {{args}}
     @just _test_real playa-cli {{args}}
 
 # Lint both the library and CLI

@@ -1,7 +1,8 @@
 # Playa CLI
 
-Playa CLI plays audio files by delegating to installed host players. It provides
-subcommands for playing effects, listing players, and filtering sound effects.
+Playa CLI plays audio through the native OS backend first and falls back to
+capability-ranked installed host players. It also provides durable background
+playback, completion reports, embedded effects, and player diagnostics.
 
 ## Usage
 
@@ -37,6 +38,15 @@ playa --background audio.wav
 playa effect sad-trombone --background
 ```
 
+Background jobs are durably published to a private per-user spool, globally
+serialized across Playa, biscuit-speaks, and Claudine processes, and survive the
+requesting process exiting. Delivery is best-effort and at-most-once once
+playback starts. Inspect redacted queue and journal outcomes with:
+
+```bash
+playa spool
+```
+
 List built-in sound effects:
 
 ```bash
@@ -68,6 +78,7 @@ playa --meta audio.wav
 | `players install` | Interactively install missing headless audio players |
 | `output-channels` | Show output audio devices in the same grouped format as `sniff audio-devices` (requires `sfx-native` feature) |
 | `duck-info` | Show audio ducking backend info (requires `audio-ducking` feature) |
+| `spool` | Show redacted pending, in-flight, failed, and recent journal outcomes for detached audio |
 
 `players` has no default subcommand — bare `playa players` prints the subcommand
 help.
@@ -79,7 +90,7 @@ These options apply to `play` and `effect` subcommands, as well as the default m
 | Option | Description |
 |--------|-------------|
 | `--meta` | Display playback metadata (player, volume, speed, codec, format) |
-| `--background` | Start playback in a detached process and return control immediately |
+| `--background` | Publish playback to the ordered per-user spool and return after durable handoff |
 | `--fast` | Play at 1.25x speed |
 | `--slow` | Play at 0.75x speed |
 | `--quiet` | Play at 50% volume |
@@ -125,6 +136,12 @@ bypass host players.
 ## Notes
 
 - Rendering uses the `darkmatter-lib` markdown terminal renderer for tables.
-- Playback uses the Playa library's detection and player matching.
+- Automatic playback is native-first; `--force-host` skips the native route.
+- The report-returning library APIs and detached journal retain route,
+  expected/elapsed duration, and completion verdict.
+- Positively probed mono input gains mpv's stereo-output workaround; unknown,
+  stereo, and multichannel input is passed through unchanged.
+- `PLAYA_DRY_RUN=1` performs no source, cache, spool, journal, or subprocess I/O.
+- Spool output redacts private job details, including speech preparation text.
 - This CLI enables the full `sound-effects` feature by default, embedding all 88
   effects (~27MB of audio under `playa/effects`) into the binary.

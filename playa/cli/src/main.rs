@@ -15,6 +15,7 @@ use biscuit_terminal::components::compose::Compose;
 use biscuit_terminal::components::list::UnorderedList;
 use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::components::renderable::{RenderableTerminalContent, TerminalRenderable};
+use biscuit_terminal::components::table::{Table, TableColumn};
 use biscuit_terminal::terminal::Terminal;
 use playa::{AudioFileFormat, AudioPlayer, Codec, PLAYER_LOOKUP, Playa, SoundEffect, all_players};
 #[cfg(feature = "sfx-native")]
@@ -108,6 +109,9 @@ enum Command {
     /// Show audio ducking backend info
     #[cfg(feature = "audio-ducking")]
     DuckInfo,
+
+    /// Show pending detached audio and the bounded playback journal
+    Spool,
 }
 
 #[derive(Subcommand)]
@@ -401,6 +405,32 @@ impl PlaybackOptions {
         playa
     }
 
+    fn to_detached_playback(&self) -> Result<playa::detached::DetachedPlayback, String> {
+        #[cfg(feature = "audio-ducking")]
+        let ducking = if self.no_duck {
+            None
+        } else {
+            let config = DuckConfig::new(self.duck_ramp_ms, self.duck_floor)
+                .map_err(|error| error.to_string())?;
+            Some(playa::detached::DetachedDucking {
+                ramp_ms: config.ramp_ms(),
+                floor_scalar: config.floor_scalar(),
+            })
+        };
+        #[cfg(not(feature = "audio-ducking"))]
+        let ducking = None;
+
+        Ok(playa::detached::DetachedPlayback {
+            options: self.to_lib_options(),
+            routing: if self.force_host {
+                playa::detached::PlaybackRouting::ForceHost
+            } else {
+                playa::detached::PlaybackRouting::Auto
+            },
+            ducking,
+        })
+    }
+
     #[cfg(feature = "audio-ducking")]
     fn has_ducking(&self) -> bool {
         !self.no_duck
@@ -424,27 +454,7 @@ fn has_playback_target(cli: &Cli) -> bool {
     }
 }
 
-fn spawn_background_process() -> Result<(), std::io::Error> {
-    let args: Vec<String> = std::env::args()
-        .filter(|arg| arg != "--background")
-        .collect();
-    let Some(program) = args.first() else {
-        return Err(std::io::Error::other(
-            "failed to determine executable for background playback",
-        ));
-    };
-
-    std::process::Command::new(program)
-        .args(&args[1..])
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::inherit())
-        .spawn()?;
-
-    Ok(())
-}
-
-fn maybe_spawn_background(cli: &Cli) -> bool {
+fn maybe_enqueue_background(cli: &Cli) -> bool {
     if !background_requested(cli) {
         return false;
     }
@@ -456,21 +466,134 @@ fn maybe_spawn_background(cli: &Cli) -> bool {
         );
     }
 
-    if let Err(error) = spawn_background_process() {
-        error_exit(&format!("failed to start background playback: {error}"), 1);
+    if let Err(error) = enqueue_background_target(cli) {
+        error_exit(&format!("failed to enqueue background playback: {error}"), 1);
     }
 
     true
 }
 
+fn enqueue_background_target(cli: &Cli) -> Result<playa::detached::JobId, String> {
+    let (target, options) = match &cli.command {
+        Some(Command::Play {
+            audio_file,
+            playback,
+        }) => (BackgroundTarget::File(audio_file.as_str()), playback),
+        Some(Command::Effect { name, playback }) => {
+            (BackgroundTarget::Effect(name.as_str()), playback)
+        }
+        None => (
+            BackgroundTarget::File(
+                cli.audio_file
+                    .as_deref()
+                    .ok_or_else(|| "missing audio file".to_string())?,
+            ),
+            &cli.playback,
+        ),
+        _ => return Err("background playback requires an audio target".to_string()),
+    };
+
+    let detached = options.to_detached_playback()?;
+    match target {
+        BackgroundTarget::File(reference) => {
+            let path = resolve_audio_reference(reference)?;
+            playa::detached::enqueue(playa::detached::SpoolJob::PlayFile {
+                path: playa::detached::OsValue::from(path.into_os_string()),
+                playback: detached,
+                delete_after: false,
+            })
+            .map_err(|error| error.to_string())
+        }
+        BackgroundTarget::Effect(name) => {
+            let effect = SoundEffect::from_name(name).ok_or_else(|| {
+                format!(
+                    "unknown sound effect: {name}. Use `playa list-effects` to see available effects"
+                )
+            })?;
+            playa::detached::enqueue_bytes(effect.bytes(), detached)
+                .map_err(|error| error.to_string())
+        }
+    }
+}
+
+enum BackgroundTarget<'a> {
+    File(&'a str),
+    Effect(&'a str),
+}
+
+fn resolve_audio_reference(reference: &str) -> Result<PathBuf, String> {
+    biscuit_file::FileReference::new(reference)
+        .map_err(|error| error.to_string())?
+        .resolve()
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| format!("audio file reference did not resolve: {reference}"))
+}
+
+fn show_spool() {
+    let snapshot = match playa::detached::snapshot() {
+        Ok(snapshot) => snapshot,
+        Err(error) => error_exit(&format!("failed to inspect detached spool: {error}"), 1),
+    };
+    let terminal = Terminal::default();
+    let root_name = snapshot
+        .root
+        .file_name()
+        .map(Path::new)
+        .and_then(biscuit_file::try_portable_string)
+        .unwrap_or_else(|| "<private spool>".to_string());
+    print!(
+        "{}",
+        Prose::new(format!("<b>Detached audio spool</b> <dim>{root_name}</dim>"))
+            .display(&terminal)
+    );
+
+    let mut table = Table::new().with_columns(vec![
+        TableColumn::new("Sequence"),
+        TableColumn::new("Job"),
+        TableColumn::new("State"),
+        TableColumn::new("Source"),
+        TableColumn::new("Outcome"),
+    ]);
+    let has_rows = !snapshot.pending.is_empty() || !snapshot.journal.is_empty();
+    for pending in snapshot.pending {
+        table.add_row(vec![
+            pending.sequence.to_string().into(),
+            pending.job_id.to_string().into(),
+            pending.state.into(),
+            format!("{:?}", pending.source_kind).to_lowercase().into(),
+            "pending".into(),
+        ]);
+    }
+    for entry in snapshot.journal {
+        table.add_row(vec![
+            entry.sequence.to_string().into(),
+            entry.job_id.to_string().into(),
+            "finished".into(),
+            format!("{:?}", entry.source_kind).to_lowercase().into(),
+            format!("{:?}", entry.outcome).into(),
+        ]);
+    }
+    if !has_rows {
+        print!("{}", Prose::new("<dim>No detached audio jobs.</dim>").display(&terminal));
+    } else {
+        print!("{}", table.display(&terminal));
+    }
+}
+
 #[cfg(feature = "audio-ducking")]
 #[tokio::main]
 async fn main() {
+    if let Some(code) = playa::detached::run_if_worker() {
+        std::process::exit(code);
+    }
     run_cli().await;
 }
 
 #[cfg(not(feature = "audio-ducking"))]
 fn main() {
+    if let Some(code) = playa::detached::run_if_worker() {
+        std::process::exit(code);
+    }
     run_cli_sync();
 }
 
@@ -479,7 +602,7 @@ async fn run_cli() {
     CompleteEnv::with_factory(Cli::command).complete();
 
     let cli = Cli::parse();
-    if maybe_spawn_background(&cli) {
+    if maybe_enqueue_background(&cli) {
         return;
     }
 
@@ -503,6 +626,7 @@ async fn run_cli() {
         Some(Command::DuckInfo) => {
             print_duck_info().await;
         }
+        Some(Command::Spool) => show_spool(),
         Some(Command::Effect { name, playback }) => {
             play_effect(&name, &playback).await;
         }
@@ -530,7 +654,7 @@ fn run_cli_sync() {
     CompleteEnv::with_factory(Cli::command).complete();
 
     let cli = Cli::parse();
-    if maybe_spawn_background(&cli) {
+    if maybe_enqueue_background(&cli) {
         return;
     }
 
@@ -551,6 +675,7 @@ fn run_cli_sync() {
         Some(Command::OutputChannels) => {
             list_output_channels();
         }
+        Some(Command::Spool) => show_spool(),
         Some(Command::Effect { name, playback }) => {
             play_effect_sync(&name, &playback);
         }

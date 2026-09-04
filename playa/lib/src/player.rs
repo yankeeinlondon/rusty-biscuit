@@ -1,12 +1,14 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use serde::{Deserialize, Serialize};
 use sniff::programs::{HeadlessAudio, InstalledHeadlessAudio, ProgramMetadata};
 
 use crate::types::{AudioFileFormat, AudioFormat, Codec, ResourceUsage};
 
 /// Identifier for a supported audio player.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AudioPlayer {
     /// mpv media player.
     Mpv,

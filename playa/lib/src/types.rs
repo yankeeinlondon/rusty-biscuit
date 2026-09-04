@@ -64,7 +64,7 @@ pub enum ResourceUsage {
 }
 
 /// Options for controlling audio playback.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PlaybackOptions {
     /// Volume level (0.0 = silent, 1.0 = normal, >1.0 = amplified).
     /// Only applied if selected player supports volume control.

@@ -1,12 +1,15 @@
 mod audio;
 mod channels;
+pub mod detached;
 mod detection;
 mod error;
+mod metadata;
 #[cfg(feature = "sfx-native")]
 mod native_audio;
 mod playa;
 mod playback;
 mod player;
+mod report;
 mod types;
 
 #[cfg(all(
@@ -78,18 +81,24 @@ pub use crate::detection::{
     detect_audio_format_from_bytes, detect_audio_format_from_path, detect_audio_format_from_url,
 };
 pub use crate::error::{DetectionError, InvalidAudio, PlaybackError};
+pub use crate::metadata::probe_audio_metadata;
 pub use crate::playa::Playa;
 pub use crate::playback::{
-    playa, playa_explicit, playa_explicit_with_options, playa_with_player,
-    playa_with_player_and_options,
+    playa, playa_explicit, playa_explicit_with_options, playa_explicit_with_options_and_report,
+    playa_explicit_with_report, playa_with_player,
+    playa_with_player_and_options, playa_with_player_and_options_with_report,
+    playa_with_player_with_report,
 };
 
 #[cfg(feature = "async")]
 pub use crate::playback::{
     playa_async, playa_explicit_async, playa_explicit_with_options_async,
-    playa_with_player_and_options_async, playa_with_player_async,
+    playa_explicit_async_with_report, playa_explicit_with_options_async_and_report,
+    playa_with_player_and_options_async, playa_with_player_and_options_async_with_report,
+    playa_with_player_async, playa_with_player_async_with_report,
 };
 pub use crate::player::{
     AudioPlayer, PLAYER_LOOKUP, Player, all_players, match_available_players, match_players,
 };
+pub use crate::report::{PlaybackReport, PlaybackRoute, PlaybackVerdict, ProbedAudioMetadata};
 pub use crate::types::{AudioFileFormat, AudioFormat, Codec, PlaybackOptions, ResourceUsage};

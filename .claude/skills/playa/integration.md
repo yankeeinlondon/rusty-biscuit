@@ -10,6 +10,9 @@ playa/
 │   ├── detection.rs       # Format detection (infer + extension fallback)
 │   ├── playback.rs        # Sync/async playback entry points
 │   ├── playa.rs           # Builder API (Playa struct)
+│   ├── metadata.rs        # Runtime duration/channel probing
+│   ├── report.rs          # Serializable completion reports
+│   ├── detached/          # Private spool, protocol, scheduler, delegation
 │   ├── native_player.rs   # Native file/bytes playback path
 │   ├── native_audio.rs    # Shared native timeout + circuit-breaker logic
 │   ├── sfx_player.rs      # Native sound effects playback
@@ -29,12 +32,32 @@ Prefer these rules when building on top of Playa:
 - Default to native playback first for lower latency and output-device routing
 - Fall back to host players when native decode/device open fails or when the format/path is better handled externally
 - Use `.force_host()` or `--force-host` when consistency with external players matters more than native routing
+- Use `play_with_report` when route and completion evidence matter
+- Use `play_detached` for durable, serialized fire-and-forget delivery
 
 Native playback is intentionally defensive:
 
 - device enumeration and open operations run with bounded deadlines
 - a native device-open timeout trips a process-local breaker
 - after the breaker trips, future native playback attempts fail fast and callers should fall back to host playback
+
+All automatic APIs share this strategy. Explicit-player APIs are the only
+host-only family. The `native-playback` library feature is opt-in even though
+the Playa CLI and speech consumers enable it. The mpv fallback adds a stereo
+output request only when metadata positively identifies mono input.
+
+## Detached delivery
+
+The `detached` module publishes versioned jobs to a private per-user spool.
+Queue and worker locks guarantee ordered, non-overlapping playback and close the
+final-empty handoff race. Delegation re-executes the losslessly encoded absolute
+enqueuer executable, preserving feature capabilities; incompatible or replaced
+executables fail the job without degrading options. Delivery is best-effort and
+at-most-once after a job moves in flight.
+
+Never expose preparation payloads: they can contain speech text and non-secret
+TTS configuration. Journal and `playa spool` projections are redacted.
+`PLAYA_DRY_RUN=1` must return before source reads or any cache/spool/process I/O.
 
 ## TTS Integration (`so-you-say`)
 
