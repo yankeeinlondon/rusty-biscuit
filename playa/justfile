@@ -135,7 +135,7 @@ install-linux-native *args="":
     echo
     echo -e "{{ BOLD }}{{ YELLOW }}Installing {{ CLI_NAME }} with Linux native audio{{ RESET }}"
     echo
-    cargo install --path {{ CLI_PATH }} --features sfx-native-audio {{ args }} || ( playa effect error-2 2>/dev/null; exit 1 )
+    cargo install --locked --path {{ CLI_PATH }} --features sfx-native-audio {{ args }} || ( playa effect error-2 2>/dev/null; exit 1 )
     echo -e "{{ BOLD }}{{ BLUE }}{{ CLI_NAME }} installed{{ RESET }}"
     echo
     playa effect drop-4 2>/dev/null || true

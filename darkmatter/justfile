@@ -119,7 +119,7 @@ lint:
 
 # installs the DMLS binary into binary path
 install-dmls:
-    @cargo install --path ./dmls --force
+    @cargo install --locked --path ./dmls --force
 
 # Package the DMLS VSCode extension and (re)install it into VSCode.
 #
@@ -256,7 +256,7 @@ install *args="":
     @echo
     @echo -e "{{ BOLD }}{{ YELLOW }}Installing {{ CLI_NAME }}{{ RESET }}"
     @echo
-    @cargo install --path {{ CLI_PATH }} {{ args }} || ( playa effect error-2 2>/dev/null && exit 1 )
+    @cargo install --locked --path {{ CLI_PATH }} {{ args }} || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo -e "{{ BOLD }}{{ BLUE }}{{ CLI_NAME }} installed{{ RESET }}"
     @just _play drop4
 

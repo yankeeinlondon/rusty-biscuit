@@ -172,7 +172,7 @@ install:
     @cargo build -p biscuit-file --release
     @echo ""
     @echo "{{ BOLD }}{{ YELLOW }}Installing biscuit-file CLI{{ RESET }}"
-    @cargo install --path ./cli
+    @cargo install --locked --path ./cli
     @echo ""
 
 # check biscuit-file lib and CLI
