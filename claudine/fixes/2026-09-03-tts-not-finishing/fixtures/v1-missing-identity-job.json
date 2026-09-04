@@ -1,10 +1,9 @@
 {
   "schema_version": 1,
-  "job_id": "job-0000000000000042",
-  "sequence": 42,
-  "enqueued_at": "2026-09-03T12:00:00Z",
+  "job_id": "job-0000000000000044",
+  "sequence": 44,
+  "enqueued_at": "2026-09-03T12:02:00Z",
   "enqueuer": { "unix_bytes": [47, 117, 115, 114, 47, 98, 105, 110, 47, 99, 108, 97, 117, 100, 105, 110, 101] },
-  "enqueuer_fingerprint": 6862371333114811590,
   "capability_version": 1,
   "payload": {
     "state": "ready",

@@ -38,8 +38,10 @@ Prefer these rules when building on top of Playa:
 Native playback is intentionally defensive:
 
 - device enumeration and open operations run with bounded deadlines
-- a native device-open timeout trips a process-local breaker
-- after the breaker trips, future native playback attempts fail fast and callers should fall back to host playback
+- every native failure before audio reaches the device (format, decode, stream, device-open failure or timeout, tripped breaker) falls back to a host player in the same call
+- a stall after audio was submitted is fatal (`AudioSubsystem`) and is never replayed through a host player, because part of the audio may already have sounded
+- a native device-open timeout or stall trips a process-local breaker, so later native attempts skip the device and route straight to host playback
+- detached delegates persist a tripped breaker as a 10-minute `native-disabled` memo in the spool root so each fresh delegate process does not pay the timeout again
 
 All automatic APIs share this strategy. Explicit-player APIs are the only
 host-only family. The `native-playback` library feature is opt-in even though

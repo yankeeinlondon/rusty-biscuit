@@ -29,7 +29,7 @@ Playa is no longer just a host-player wrapper.
 - Host fallback: delegate to ranked installed players when native playback is unavailable, unsupported, timed out, or forced off
 - Escape hatch: `--force-host` or `.force_host()` skips the native path
 
-Native audio uses bounded device-open deadlines. If a native device-open operation times out, Playa trips a process-local circuit breaker and future native playback attempts fall back directly to host playback for the rest of the process.
+Native audio uses bounded device-open deadlines. The retry boundary is audio submission: any native failure before audio reaches the device (unsupported format, decode error, stream or device-open failure or timeout, tripped breaker) falls back to a host player in the same call, while a stall after audio was submitted is a fatal `AudioSubsystem` error rather than a replay. A device-open timeout or stall trips a process-local circuit breaker, so later native attempts skip the device and go straight to host playback for the rest of the process. Detached delegates are fresh processes; a delegate that observes the breaker tripped records a `native-disabled` memo in the spool root, and delegates that find a memo younger than 10 minutes force host routing so each job does not pay the device-open timeout again.
 
 The library keeps `native-playback` opt-in; the Playa CLI and speech-producing
 consumers enable it explicitly. All automatic builder/free-function entry points

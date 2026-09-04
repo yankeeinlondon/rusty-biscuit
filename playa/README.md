@@ -96,7 +96,11 @@ Full flag and subcommand reference: [`playa/cli/README.md`](./cli/README.md).
 
 All automatic entry points—builder methods and the `playa*` free functions—use
 the same native-first pipeline when `native-playback` is enabled, then fall back
-to the capability-ranked host players. APIs that explicitly name an
+to the capability-ranked host players. Any native failure before audio reaches
+the device (including a device-open timeout or an already-tripped breaker) falls
+back within the same call; a stall after audio was submitted is fatal rather
+than replayed. A device-open timeout or stall disables native playback for the
+rest of the process. APIs that explicitly name an
 `AudioPlayer` remain host-only. `play_with_report` and
 `play_async_with_report` expose the selected route, expected duration, elapsed
 duration, and a non-fatal completion verdict. For positively probed mono input,

@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use fs4::fs_std::FileExt as _;
 use serde::de::DeserializeOwned;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{AudioData, PlaybackError, Playa};
 
@@ -36,6 +36,13 @@ const PENDING_SUFFIX: &str = ".pending.json";
 const IN_FLIGHT_SUFFIX: &str = ".in-flight.json";
 const QUARANTINE_SUFFIX: &str = ".quarantine.json";
 const STALE_PENDING: Duration = Duration::from_secs(10 * 60);
+const NATIVE_DISABLED_MARKER: &str = "native-disabled";
+/// Every delegate is a fresh process, so a tripped native breaker would
+/// otherwise be forgotten and each later job would pay the full device-open
+/// timeout before falling back. The memo expires because a device that stopped
+/// answering may come back; without a TTL one bad open would pin the spool to
+/// host players for good.
+const NATIVE_DISABLED_MEMO_TTL: Duration = Duration::from_secs(10 * 60);
 
 static WORKER_SEAM_INSTALLED: AtomicBool = AtomicBool::new(false);
 static TEMP_SEQUENCE: AtomicU64 = AtomicU64::new(0);
@@ -251,7 +258,7 @@ where
             sequence,
             enqueued_at: chrono::Utc::now(),
             enqueuer_executable: OsValue::from(executable.into_os_string()),
-            enqueuer_fingerprint: Some(fingerprint),
+            enqueuer_fingerprint: fingerprint,
             capability_version: CAPABILITY_VERSION,
             state: normalize_state(state, root)?,
         };
@@ -726,10 +733,10 @@ where
         quarantine(root, path, header_identity(&header), "unsupported_schema")?;
         return Ok(());
     }
-    let envelope: JobEnvelope = match serde_json::from_value(header) {
+    let envelope = match JobEnvelope::deserialize(&header) {
         Ok(value) => value,
         Err(error) => {
-            quarantine(root, path, None, "malformed_job")?;
+            quarantine(root, path, header_identity(&header), "malformed_job")?;
             tracing::warn!(%error, "quarantined malformed detached job");
             return Ok(());
         }
@@ -817,6 +824,18 @@ where
     }
 }
 
+/// Resolve the enqueuer executable and prove it is the same file that
+/// published the job.
+fn validate_enqueuer_identity(envelope: &JobEnvelope) -> Result<(PathBuf, u64), PlaybackError> {
+    let executable = envelope.enqueuer_executable.to_path_buf()?;
+    if !executable.is_absolute()
+        || fingerprint_file(&executable)? != envelope.enqueuer_fingerprint
+    {
+        return Err(protocol_error("enqueuer executable is missing or was replaced"));
+    }
+    Ok((executable, envelope.enqueuer_fingerprint))
+}
+
 fn delegate_job(
     root: &Path,
     envelope: &JobEnvelope,
@@ -825,13 +844,7 @@ fn delegate_job(
     if envelope.capability_version != CAPABILITY_VERSION {
         return Err(protocol_error("incompatible enqueuer capability version"));
     }
-    let expected_fingerprint = envelope
-        .enqueuer_fingerprint
-        .ok_or_else(|| protocol_error("enqueuer executable fingerprint is missing"))?;
-    let executable = envelope.enqueuer_executable.to_path_buf()?;
-    if !executable.is_absolute() || fingerprint_file(&executable)? != expected_fingerprint {
-        return Err(protocol_error("enqueuer executable is missing or was replaced"));
-    }
+    let (executable, expected_fingerprint) = validate_enqueuer_identity(envelope)?;
 
     let request_dir = root.join("requests");
     let request_path = request_dir.join(format!("{}.request.json", envelope.job_id));
@@ -868,7 +881,7 @@ fn delegate_job(
         || report.job_id != envelope.job_id
         || report.sequence != envelope.sequence
         || report.delegate.to_path_buf()? != executable
-        || report.delegate_fingerprint != Some(expected_fingerprint)
+        || report.delegate_fingerprint != expected_fingerprint
     {
         return Err(protocol_error("delegated report identity or version mismatch"));
     }
@@ -904,21 +917,75 @@ fn run_delegate(request_path: &Path) -> Result<(), PlaybackError> {
         return Err(protocol_error("delegated report sidecar is not private and create-new"));
     }
 
-    let outcome = execute_job(&request.job).unwrap_or_else(|error| JournalOutcome::Failed {
-        reason: redacted_failure_reason(&error),
+    let force_host = native_disabled_memo_is_fresh(root);
+    let outcome = execute_job(&request.job, force_host).unwrap_or_else(|error| {
+        JournalOutcome::Failed {
+            reason: redacted_failure_reason(&error),
+        }
     });
+    if native_breaker_tripped()
+        && let Err(error) = record_native_disabled_memo(root)
+    {
+        tracing::warn!(%error, "could not record the native-disabled memo");
+    }
     let report = DelegatedReport {
         schema_version: SCHEMA_VERSION,
         job_id: request.job_id,
         sequence: request.sequence,
         delegate: OsValue::from(current.into_os_string()),
-        delegate_fingerprint: Some(request.delegate_fingerprint),
+        delegate_fingerprint: request.delegate_fingerprint,
         outcome,
     };
     atomic_write_json(&report_path, &report)
 }
 
-fn execute_job(job: &SpoolJob) -> Result<JournalOutcome, PlaybackError> {
+fn native_breaker_tripped() -> bool {
+    #[cfg(feature = "sfx-native")]
+    {
+        !crate::native_audio::native_audio_available()
+    }
+    #[cfg(not(feature = "sfx-native"))]
+    {
+        false
+    }
+}
+
+/// Reports whether a delegate must force host routing, removing a marker that
+/// has outlived [`NATIVE_DISABLED_MEMO_TTL`] or is not a regular file.
+fn native_disabled_memo_is_fresh(root: &Path) -> bool {
+    let marker = root.join(NATIVE_DISABLED_MARKER);
+    let Ok(metadata) = fs::symlink_metadata(&marker) else {
+        return false;
+    };
+    let fresh = !metadata.file_type().is_symlink()
+        && !is_reparse_point(&metadata)
+        && metadata.is_file()
+        && metadata
+            .modified()
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|age| age < NATIVE_DISABLED_MEMO_TTL);
+    if !fresh {
+        let _ = fs::remove_file(&marker);
+    }
+    fresh
+}
+
+fn record_native_disabled_memo(root: &Path) -> Result<(), PlaybackError> {
+    let marker = root.join(NATIVE_DISABLED_MARKER);
+    let temp = unique_neighbor(&marker, "memo");
+    let result = (|| {
+        let file = OpenOptions::new().write(true).create_new(true).open(&temp)?;
+        file.sync_all()?;
+        replace_path(&temp, &marker)
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
+}
+
+fn execute_job(job: &SpoolJob, force_host: bool) -> Result<JournalOutcome, PlaybackError> {
     match job {
         SpoolJob::PlayFile { path, playback, .. } => {
             let path = path.to_path_buf()?;
@@ -929,7 +996,7 @@ fn execute_job(job: &SpoolJob) -> Result<JournalOutcome, PlaybackError> {
             let mut player = Playa::from_path(path)
                 .map_err(|error| protocol_error(format!("audio source rejected: {error}")))?
                 .with_options(playback.options.clone());
-            if playback.routing == PlaybackRouting::ForceHost {
+            if force_host || playback.routing == PlaybackRouting::ForceHost {
                 player = player.force_host();
             }
             #[cfg(feature = "audio-ducking")]
@@ -1000,8 +1067,10 @@ fn quarantine_abandoned_in_flight(root: &Path) -> Result<(), PlaybackError> {
         })
         .collect::<Vec<_>>();
     for path in paths {
-        let envelope = read_secure_json::<JobEnvelope>(&path).ok();
-        quarantine(root, &path, envelope, "abandoned_in_flight")?;
+        let header = read_secure_json::<serde_json::Value>(&path)
+            .ok()
+            .and_then(|value| header_identity(&value));
+        quarantine(root, &path, header, "abandoned_in_flight")?;
     }
     Ok(())
 }
@@ -1009,7 +1078,7 @@ fn quarantine_abandoned_in_flight(root: &Path) -> Result<(), PlaybackError> {
 fn quarantine(
     root: &Path,
     path: &Path,
-    envelope: Option<JobEnvelope>,
+    header: Option<RedactedHeader>,
     reason: &str,
 ) -> Result<(), PlaybackError> {
     validate_regular_file(path)?;
@@ -1021,28 +1090,64 @@ fn quarantine(
             .replace(IN_FLIGHT_SUFFIX, QUARANTINE_SUFFIX),
     );
     fs::rename(path, quarantine)?;
-    if let Some(envelope) = envelope {
-        append_journal(root, journal_failure(&envelope, reason))?;
+    if let Some(header) = header {
+        append_journal(root, journal_header_failure(&header, reason))?;
     }
     Ok(())
 }
 
-fn header_identity(value: &serde_json::Value) -> Option<JobEnvelope> {
-    serde_json::from_value(value.clone()).ok()
+/// The journal-safe subset of an envelope. A record that fails the full v1
+/// parse (missing required field, unknown payload) still journals from this.
+struct RedactedHeader {
+    job_id: JobId,
+    sequence: u64,
+    enqueued_at: chrono::DateTime<chrono::Utc>,
+    source_kind: JournalSourceKind,
+}
+
+impl From<&JobEnvelope> for RedactedHeader {
+    fn from(envelope: &JobEnvelope) -> Self {
+        Self {
+            job_id: envelope.job_id.clone(),
+            sequence: envelope.sequence,
+            enqueued_at: envelope.enqueued_at,
+            source_kind: state_source_kind(&envelope.state),
+        }
+    }
+}
+
+fn header_identity(value: &serde_json::Value) -> Option<RedactedHeader> {
+    #[derive(Deserialize)]
+    struct Identity {
+        job_id: JobId,
+        sequence: u64,
+        enqueued_at: chrono::DateTime<chrono::Utc>,
+    }
+    let identity = Identity::deserialize(value).ok()?;
+    let source_kind = value
+        .get("payload")
+        .and_then(|payload| JobState::deserialize(payload).ok())
+        .map_or(JournalSourceKind::Unknown, |state| state_source_kind(&state));
+    Some(RedactedHeader {
+        job_id: identity.job_id,
+        sequence: identity.sequence,
+        enqueued_at: identity.enqueued_at,
+        source_kind,
+    })
 }
 
 fn journal_failure(envelope: &JobEnvelope, reason: &str) -> JournalEntry {
+    journal_header_failure(&RedactedHeader::from(envelope), reason)
+}
+
+fn journal_header_failure(header: &RedactedHeader, reason: &str) -> JournalEntry {
     JournalEntry {
         journal_version: JOURNAL_VERSION,
-        job_id: envelope.job_id.clone(),
-        sequence: envelope.sequence,
-        enqueued_at: envelope.enqueued_at,
+        job_id: header.job_id.clone(),
+        sequence: header.sequence,
+        enqueued_at: header.enqueued_at,
         finished_at: chrono::Utc::now(),
-        source_kind: match &envelope.state {
-            JobState::Preparing { .. } => JournalSourceKind::Preparation,
-            JobState::Ready { job } => source_kind(job),
-            JobState::Failed { .. } => JournalSourceKind::Unknown,
-        },
+        source_kind: header.source_kind,
         transition: match reason {
             "stale_pending" => JournalTransition::Discarded,
             "abandoned_in_flight" | "unsupported_schema" | "malformed_job" => {
@@ -1053,6 +1158,14 @@ fn journal_failure(envelope: &JobEnvelope, reason: &str) -> JournalEntry {
         outcome: JournalOutcome::Failed {
             reason: reason.to_string(),
         },
+    }
+}
+
+fn state_source_kind(state: &JobState) -> JournalSourceKind {
+    match state {
+        JobState::Preparing { .. } => JournalSourceKind::Preparation,
+        JobState::Ready { job } => source_kind(job),
+        JobState::Failed { .. } => JournalSourceKind::Unknown,
     }
 }
 

@@ -63,9 +63,11 @@ install *args="":
 sanity:
     @just _sanity_all "playa playa-cli"
 
-# Test both library and CLI.
+# Test both library and CLI. The lib enables `native-playback,async` so the
+# async playback pipeline tests compile; nothing else in this area enables
+# `async`.
 test *args="":
-    @just _test_all "playa playa-cli" {{args}}
+    @just _test_all "playa --features native-playback,async; playa-cli" {{args}}
 
 # not applicable: playa has no real-terminal (Level-2) tests
 test-l2:

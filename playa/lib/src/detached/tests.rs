@@ -33,9 +33,8 @@ fn ready_envelope(root: &Path, sequence: u64, name: &str) -> JobEnvelope {
         sequence,
         enqueued_at: chrono::Utc::now(),
         enqueuer_executable: OsValue::from(executable.clone().into_os_string()),
-        enqueuer_fingerprint: Some(
-            fingerprint_file(&executable).expect("test executable should fingerprint"),
-        ),
+        enqueuer_fingerprint: fingerprint_file(&executable)
+            .expect("test executable should fingerprint"),
         capability_version: CAPABILITY_VERSION,
         state: JobState::Ready {
             job: SpoolJob::PlayFile {
@@ -381,10 +380,32 @@ fn private_root_has_0700_permissions_and_links_are_rejected() {
 }
 
 #[test]
+fn native_disabled_memo_forces_host_only_while_fresh() {
+    let root = TestRoot::new("native-memo");
+    let marker = root.0.join(NATIVE_DISABLED_MARKER);
+    assert!(!native_disabled_memo_is_fresh(&root.0), "no marker means native is attempted");
+
+    record_native_disabled_memo(&root.0).expect("memo should write");
+    assert!(native_disabled_memo_is_fresh(&root.0), "a fresh marker forces host routing");
+    record_native_disabled_memo(&root.0).expect("an existing memo should be refreshed");
+    assert!(native_disabled_memo_is_fresh(&root.0));
+
+    let stale = SystemTime::now() - NATIVE_DISABLED_MEMO_TTL - Duration::from_secs(1);
+    File::options()
+        .write(true)
+        .open(&marker)
+        .expect("marker should open")
+        .set_modified(stale)
+        .expect("marker mtime should be set");
+    assert!(!native_disabled_memo_is_fresh(&root.0), "a stale marker lets native be attempted");
+    assert!(!marker.exists(), "a stale marker is removed");
+}
+
+#[test]
 fn replaced_delegate_executable_is_rejected_before_launch() {
     let root = TestRoot::new("delegate-fingerprint");
     let mut envelope = ready_envelope(&root.0, 1, "fingerprint");
-    envelope.enqueuer_fingerprint = envelope.enqueuer_fingerprint.map(|value| value ^ 1);
+    envelope.enqueuer_fingerprint ^= 1;
     let job = match &envelope.state {
         JobState::Ready { job } => job,
         _ => unreachable!("fixture is ready"),
@@ -394,16 +415,83 @@ fn replaced_delegate_executable_is_rejected_before_launch() {
     assert!(error.to_string().contains("replaced"));
 }
 
+fn shipped_fixture(name: &str) -> String {
+    fs::read_to_string(
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../claudine/fixes/2026-09-03-tts-not-finishing/fixtures")
+            .join(name),
+    )
+    .expect("shipped protocol fixture should read")
+}
+
+/// The shipped corpus is dated 2026-09-03, so without a fresh `enqueued_at`
+/// the stale policy would discard a record before any later check runs.
+fn fresh_shipped_record(name: &str) -> serde_json::Value {
+    let mut record: serde_json::Value =
+        serde_json::from_str(&shipped_fixture(name)).expect("shipped fixture should be JSON");
+    record["enqueued_at"] = serde_json::json!(chrono::Utc::now());
+    record
+}
+
+fn shipped_pending_path(root: &Path, record: &serde_json::Value) -> PathBuf {
+    root.join(format!(
+        "{:020}-{}{}",
+        record["sequence"].as_u64().expect("fixture carries a sequence"),
+        record["job_id"].as_str().expect("fixture carries a job id"),
+        PENDING_SUFFIX
+    ))
+}
+
+#[test]
+fn job_envelope_round_trips_and_requires_the_enqueuer_fingerprint() {
+    let root = TestRoot::new("envelope-identity");
+    let envelope = ready_envelope(&root.0, 5, "identity");
+    let mut value = serde_json::to_value(&envelope).expect("envelope should serialize");
+    assert!(value["enqueuer_fingerprint"].is_u64());
+    let restored: JobEnvelope =
+        serde_json::from_value(value.clone()).expect("complete envelope should deserialize");
+    assert_eq!(restored, envelope);
+
+    value
+        .as_object_mut()
+        .expect("envelope is an object")
+        .remove("enqueuer_fingerprint");
+    let error = serde_json::from_value::<JobEnvelope>(value)
+        .expect_err("an envelope without executable identity must not deserialize");
+    assert!(error.to_string().contains("enqueuer_fingerprint"), "{error}");
+}
+
+#[test]
+fn delegated_report_round_trips_and_requires_the_delegate_fingerprint() {
+    let report = DelegatedReport {
+        schema_version: SCHEMA_VERSION,
+        job_id: JobId::allocated(9, 0xfeed),
+        sequence: 9,
+        delegate: OsValue::from(OsString::from("/opt/playa")),
+        delegate_fingerprint: 0x1234,
+        outcome: JournalOutcome::CommandExit {
+            code: Some(0),
+            success: true,
+        },
+    };
+    let mut value = serde_json::to_value(&report).expect("report should serialize");
+    assert!(value["delegate_fingerprint"].is_u64());
+    let restored: DelegatedReport =
+        serde_json::from_value(value.clone()).expect("complete report should deserialize");
+    assert_eq!(restored, report);
+
+    value
+        .as_object_mut()
+        .expect("report is an object")
+        .remove("delegate_fingerprint");
+    let error = serde_json::from_value::<DelegatedReport>(value)
+        .expect_err("a report without delegate identity must not deserialize");
+    assert!(error.to_string().contains("delegate_fingerprint"), "{error}");
+}
+
 #[test]
 fn shipped_v1_protocol_corpus_deserializes_and_v2_remains_unsupported() {
-    let fixture = |name: &str| {
-        fs::read_to_string(
-            PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-                .join("../../claudine/fixes/2026-09-03-tts-not-finishing/fixtures")
-                .join(name),
-        )
-        .expect("shipped protocol fixture should read")
-    };
+    let fixture = shipped_fixture;
 
     let ready: JobEnvelope = serde_json::from_str(&fixture("v1-ready-job.json"))
         .expect("shipped ready job should match the v1 parser");
@@ -414,6 +502,11 @@ fn shipped_v1_protocol_corpus_deserializes_and_v2_remains_unsupported() {
     let report: DelegatedReport = serde_json::from_str(&fixture("v1-delegated-report.json"))
         .expect("shipped delegated report should match the v1 parser");
     assert_eq!(report.sequence, 42);
+    assert_eq!(report.delegate_fingerprint, ready.enqueuer_fingerprint);
+
+    let incomplete = serde_json::from_str::<JobEnvelope>(&fixture("v1-missing-identity-job.json"))
+        .expect_err("a v1 record without executable identity must not parse");
+    assert!(incomplete.to_string().contains("enqueuer_fingerprint"), "{incomplete}");
 
     let future: serde_json::Value = serde_json::from_str(&fixture("v2-unsupported-job.json"))
         .expect("future fixture should remain valid JSON");
@@ -428,17 +521,13 @@ fn shipped_v1_protocol_corpus_deserializes_and_v2_remains_unsupported() {
 }
 
 #[test]
-fn shipped_ready_artifact_runs_through_normal_stale_policy() {
+fn stale_shipped_ready_artifact_is_discarded_without_delegation() {
     let root = TestRoot::new("shipped-artifact");
-    let source = fs::read_to_string(
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../claudine/fixes/2026-09-03-tts-not-finishing/fixtures/v1-ready-job.json"),
-    )
-    .expect("shipped ready fixture should read");
     let path = root
         .0
         .join("00000000000000000042-job-0000000000000042.pending.json");
-    fs::write(&path, source).expect("shipped fixture should enter isolated spool");
+    fs::write(&path, shipped_fixture("v1-ready-job.json"))
+        .expect("shipped fixture should enter isolated spool");
 
     let calls = AtomicU64::new(0);
     run_scheduler_with(&root.0, &mut |_, _, _| {
@@ -451,6 +540,96 @@ fn shipped_ready_artifact_runs_through_normal_stale_policy() {
     let journal = fs::read_to_string(root.0.join("journal.jsonl"))
         .expect("historical fixture should journal its stale outcome");
     assert!(journal.contains("stale_pending"));
+}
+
+#[test]
+fn shipped_ready_artifact_reaches_delegation_with_valid_identity() {
+    let root = TestRoot::new("shipped-delegation");
+    let mut record = fresh_shipped_record("v1-ready-job.json");
+    let executable = absolute_current_exe().expect("test executable should resolve");
+    record["enqueuer"] = serde_json::to_value(OsValue::from(executable.clone().into_os_string()))
+        .expect("executable should encode");
+    record["enqueuer_fingerprint"] = serde_json::json!(
+        fingerprint_file(&executable).expect("test executable should fingerprint")
+    );
+    let expected_job = match serde_json::from_value(record["payload"].clone())
+        .expect("shipped payload should parse")
+    {
+        JobState::Ready { job } => job,
+        _ => unreachable!("shipped ready fixture is ready"),
+    };
+    let path = shipped_pending_path(&root.0, &record);
+    atomic_write_json(&path, &record).expect("shipped fixture should enter isolated spool");
+
+    let observed = Mutex::new(Vec::new());
+    run_scheduler_with(&root.0, &mut |_, envelope, job| {
+        let (validated, fingerprint) = validate_enqueuer_identity(envelope)?;
+        observed
+            .lock()
+            .expect("observation lock should hold")
+            .push((envelope.job_id.clone(), envelope.sequence, job.clone(), validated, fingerprint));
+        Ok(JournalOutcome::CommandExit {
+            code: Some(0),
+            success: true,
+        })
+    })
+    .expect("complete shipped record should drain through delegation");
+
+    let observed = observed.into_inner().expect("observation lock should hold");
+    assert_eq!(observed.len(), 1, "delegation runs exactly once");
+    let (job_id, sequence, job, validated, fingerprint) = &observed[0];
+    assert_eq!(job_id.as_str(), "job-0000000000000042");
+    assert_eq!(*sequence, 42);
+    assert_eq!(job, &expected_job);
+    assert_eq!(validated, &executable);
+    assert_eq!(*fingerprint, record["enqueuer_fingerprint"].as_u64().unwrap());
+    let journal = fs::read_to_string(root.0.join("journal.jsonl"))
+        .expect("delegated record should journal its outcome");
+    let entry: JournalEntry = serde_json::from_str(journal.lines().last().unwrap())
+        .expect("journal line should parse");
+    assert_eq!(entry.transition, JournalTransition::Completed);
+    assert!(!journal.contains("stale_pending"));
+}
+
+#[test]
+fn missing_executable_identity_is_quarantined() {
+    let root = TestRoot::new("missing-identity");
+    let record = fresh_shipped_record("v1-missing-identity-job.json");
+    assert!(
+        record.get("enqueuer_fingerprint").is_none(),
+        "the fixture exists to omit the executable identity"
+    );
+    let path = shipped_pending_path(&root.0, &record);
+    atomic_write_json(&path, &record).expect("incomplete fixture should enter isolated spool");
+
+    let calls = AtomicU64::new(0);
+    run_scheduler_with(&root.0, &mut |_, _, _| {
+        calls.fetch_add(1, Ordering::SeqCst);
+        Err(protocol_error("incomplete identity must not reach delegation"))
+    })
+    .expect("scheduler should quarantine and advance");
+
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert!(!path.exists(), "the record leaves the pending queue");
+    let quarantined = path.with_file_name(
+        path.file_name()
+            .unwrap()
+            .to_string_lossy()
+            .replace(PENDING_SUFFIX, QUARANTINE_SUFFIX),
+    );
+    assert!(quarantined.exists(), "the record is moved to quarantine, not deleted");
+    let journal = fs::read_to_string(root.0.join("journal.jsonl"))
+        .expect("quarantine should journal from the redacted header");
+    let entry: JournalEntry = serde_json::from_str(journal.lines().last().unwrap())
+        .expect("journal line should parse");
+    assert_eq!(entry.transition, JournalTransition::Quarantined);
+    assert_eq!(entry.job_id.as_str(), "job-0000000000000044");
+    assert_eq!(entry.sequence, 44);
+    assert_eq!(entry.source_kind, JournalSourceKind::File);
+    assert!(
+        !journal.contains("unix_bytes") && !journal.contains("speech"),
+        "journal must not carry path text: {journal}"
+    );
 }
 
 #[cfg(unix)]

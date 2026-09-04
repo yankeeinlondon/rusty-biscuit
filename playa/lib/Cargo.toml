@@ -50,6 +50,12 @@ sfx-scifi = []      # phase jumps, phasers (~100KB, 11 files)
 sfx-atmosphere = [] # music stings, transitions (~5MB, 5 files)
 sfx-motion = []     # whooshes, air sounds (~2MB, 7 files)
 
+# The binary doubles as the `mpv` fixture executable (dispatch on its own file
+# stem), which needs a custom `main`; see the target's module docs.
+[[test]]
+name = "truncated_verdict"
+harness = false
+
 [dependencies]
 biscuit-hash = { path = "../../biscuit-hash/lib" }
 chrono = { version = "0.4", default-features = false, features = ["clock", "serde", "std"] }
@@ -103,3 +109,8 @@ reason = "Audio playback dispatch dominated by OS-native player processes; no me
 # CI policy: playa links ALSA and PulseAudio on Linux.
 [package.metadata.ci.native]
 ubuntu-latest = ["libasound2-dev", "libpulse-dev"]
+
+# CI policy: the L1 suite runs with the native and async playback pipelines
+# compiled so both `Playa::play_with_report` routes are exercised.
+[package.metadata.ci.tests]
+features = ["native-playback", "async"]

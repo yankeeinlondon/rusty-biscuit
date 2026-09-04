@@ -257,8 +257,7 @@ pub(crate) struct JobEnvelope {
     pub enqueued_at: chrono::DateTime<chrono::Utc>,
     #[serde(rename = "enqueuer")]
     pub enqueuer_executable: OsValue,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enqueuer_fingerprint: Option<u64>,
+    pub enqueuer_fingerprint: u64,
     pub capability_version: u16,
     #[serde(rename = "payload")]
     pub state: JobState,
@@ -411,14 +410,13 @@ pub(crate) struct DelegatedRequest {
     pub report_path: OsValue,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct DelegatedReport {
     pub schema_version: u16,
     pub job_id: JobId,
     pub sequence: u64,
     pub delegate: OsValue,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub delegate_fingerprint: Option<u64>,
+    pub delegate_fingerprint: u64,
     pub outcome: JournalOutcome,
 }
 
