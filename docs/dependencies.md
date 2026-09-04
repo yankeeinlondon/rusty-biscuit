@@ -2,6 +2,20 @@
 
 ## Recent Dependency Notes
 
+- `playa/lib` uses `fs4` for its private cross-process spool locks,
+  `biscuit-hash` for stable user/cache fingerprints, `chrono` for protocol
+  deadlines, and `windows-sys` for atomic replacement on Windows. `playa-cli`
+  uses the `biscuit-file` file-reference and portable-path authorities at the
+  CLI boundary; the library remains independent of CLI path syntax.
+- `biscuit-speaks/lib`'s optional `playa` feature enables
+  `playa/native-playback`; Linux CI therefore provisions `libasound2-dev`
+  alongside `espeak-ng`. It uses `biscuit-hash` xxHash for content-addressed
+  TTS audio cache names and `fs4` for detached-helper/test coordination. See
+  [`biscuit-speaks/docs/dependencies.md`](./biscuit-speaks/docs/dependencies.md).
+- Both Claudine crates explicitly enable `playa/native-playback`; their Linux
+  native policy includes `libasound2-dev`. Their direct `biscuit-file` and
+  `biscuit-hash` edges remain composition/MCP/session authorities rather than
+  substitutes for Playa's spool path and fingerprint authorities.
 - `unchained-ai/lib` aliases `xpty` as `portable-pty` so the existing
   cross-platform PTY API remains stable while Windows ConPTY sessions avoid
   cursor inheritance, whose open-time handshake cannot be answered through
@@ -93,7 +107,7 @@ This is a Rust workspace with the following modules:
 - `biscuit-hash/cli/Cargo.toml` - Hashing CLI (`bh`)
 - `biscuit-icon/lib/Cargo.toml` - Curated offline domain icons + on-demand Iconify lookup (renderable, biscuit-terminal, rusqlite bundled, reqwest, strum)
 - `biscuit-icon/cli/Cargo.toml` - Icon CLI (`icon`) (clap, clap_complete unstable-dynamic, color-eyre)
-- `biscuit-speaks/lib/Cargo.toml` - Cross-platform TTS library
+- `biscuit-speaks/lib/Cargo.toml` - Cross-platform TTS library (native-first Playa feature, xxHash audio cache, detached preparation)
 - `biscuit-terminal/lib/Cargo.toml` - Terminal detection, image rendering, diagrams
 - `biscuit-terminal/cli/Cargo.toml` - Terminal inspector CLI (`bt`)
 - `claudine/lib/Cargo.toml` - Universal hook/event handler for agentic CLIs
@@ -107,7 +121,7 @@ This is a Rust workspace with the following modules:
 - `model-citizen/lib/Cargo.toml` - Local LLM model management library
 - `model-citizen/cli/Cargo.toml` - Model management CLI (`model`)
 - `unchained-ai/model_id/Cargo.toml` - Proc-macro for model ID derivation
-- `playa/lib/Cargo.toml` - Audio playback with host player detection
+- `playa/lib/Cargo.toml` - Native-first audio playback, host-player fallback, metadata probing, and completion reports
 - `playa/cli/Cargo.toml` - Audio player CLI (`playa`)
 - `queue/lib/Cargo.toml` - TUI command scheduler library
 - `queue/cli/Cargo.toml` - TUI command scheduler CLI (`queue`)
@@ -271,7 +285,7 @@ This is a Rust workspace with the following modules:
 
 - [playa](./playa) _v0.1.0_
 
-    _Audio playback via host CLI players with format detection and 53 embedded sound effects._
+    _Native-first audio playback with host CLI fallback, format and metadata detection, completion reports, and embedded sound effects._
 
     _Tags: workspace, library, audio, playback_
 
