@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "job_id": "job-0000000000000042",
+  "sequence": 42,
+  "delegate": { "unix_bytes": [47, 117, 115, 114, 47, 98, 105, 110, 47, 99, 108, 97, 117, 100, 105, 110, 101] },
+  "outcome": {
+    "kind": "playback",
+    "report": {
+      "route": "native",
+      "expected_millis": 5970,
+      "elapsed_millis": 6330,
+      "verdict": "complete"
+    }
+  }
+}

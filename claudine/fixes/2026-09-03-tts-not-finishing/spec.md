@@ -12,6 +12,7 @@ packages:
     - claudine
 review_iterations: 1
 implemented: false
+phase_1_protocols_ratified: true
 ---
 
 # Spoken status messages stop before the sentence ends
@@ -427,6 +428,59 @@ Design: a **private, versioned spool** plus a **worker** process.
   path text uses
   `biscuit_file::try_portable_string`. Pending `Command` details are redacted.
 
+#### Ratified v1 worker protocols
+
+The owner ratified both recommended option 3 designs for Phase 1. Protocol
+version `1` therefore has one per-user scheduler queue, reserves a sequence
+before cache-miss synthesis, and delegates playback to the executable that
+accepted the job. These are one contract: a scheduler must not synthesize TTS
+or silently substitute its own compiled Playa capabilities.
+
+All persisted enum discriminants use snake_case. `schema_version`, identity,
+sequence, state, executable identity, and capability version are required and
+never receive Serde defaults. A newly added optional field must use
+`#[serde(default)]`; a newly added collection may default only when absence and
+an empty collection have identical semantics. Readers accept version 1 records
+with unknown additive fields. Any unsupported version is atomically moved to
+quarantine and journaled from its redacted header; it is never executed or
+rewritten as the current version.
+
+| Projection | Required v1 content | Private content allowed | Compatibility and terminal behavior |
+|---|---|---|---|
+| Job envelope | `schema_version`, `job_id`, durable `sequence`, `enqueued_at`, lossless absolute enqueuer executable, `capability_version`, and payload state | Paths and command arguments, because the entire spool is private | Unknown additive fields ignored; missing required fields or unsupported versions quarantine the job |
+| Preparation record | Envelope identity plus `state: preparing`, `preparation_version`, deadline, speech text, and non-secret `TtsConfig` | Speech text and non-secret synthesis configuration | Only the matching helper may replace it with the same sequence as `ready` or `failed`; it may not allocate another job |
+| Delegated-play request | Envelope identity, `delegated_play_version`, complete playback/command projection, capability version, and a create-new report-sidecar path inside the spool | Losslessly encoded path/argument data needed to execute the job | The delegate validates identity, version, capability, and sidecar ownership before playback; mismatch fails without fallback |
+| Delegated report | `schema_version`, `job_id`, sequence, delegate identity, and exactly one typed Playa report or command-exit/failure outcome | No speech text; no command arguments or credentials | Written create-new and atomically published; missing, malformed, duplicate, or mismatched reports fail the in-flight job |
+| Journal projection | IDs, sequence, timestamps, redacted source kind, state transition, and typed redacted outcome | None: no speech text, command arguments, credentials, or full paths | Versioned independently, bounded and rotated with one prior file; diagnostic readers tolerate additive defaulted fields |
+
+The scheduler marker is `PLAYA_SPOOL_WORKER`; the playback delegate marker is
+`PLAYA_DELEGATED_PLAY_WORKER`; the biscuit-speaks preparation marker is
+`BISCUIT_SPEAKS_PREPARATION_WORKER`. Each marker contains only the path of its
+private request record, never serialized JSON, speech text, command arguments,
+or credentials. A worker entry seam validates that the referenced record is a
+regular, non-linked file owned by the spool before reading it. The two Playa
+entry seams run before argument parsing in every participating executable; the
+biscuit-speaks seam runs before argument parsing in `so-you-say` and in any
+binary that advertises preparation capability.
+
+The lock order is always `queue.lock` before a worker-lock probe or worker-lock
+release; no code waits for playback while holding `queue.lock`. Publication,
+the enqueue-side ownership decision, and the worker's final empty recheck use
+that order. A `Preparing` head slot has a deadline exactly ten minutes after
+`enqueued_at`. The scheduler may wait for its atomic state replacement but may
+not run a later sequence first. At the deadline it atomically marks the slot
+failed, journals `preparation_timed_out`, removes private preparation material,
+and advances. An explicit helper failure follows the same cleanup and advance
+path with `preparation_failed`.
+
+Ready jobs atomically move to in-flight before delegation. From that point they
+are at-most-once: a scheduler or delegate crash quarantines the abandoned
+in-flight request and report sidecar rather than replaying it. A missing,
+replaced, non-absolute, incompatible, or unlaunchable enqueuer executable; a
+delegate exit without a valid report; and report identity/version mismatch all
+produce one failed journal outcome and cleanup, then advance the queue. None
+may degrade playback options or fall back to the scheduler executable.
+
 Ordering guarantee: all successfully published jobs for one OS user play in
 the durable sequence allocated under `queue.lock`, including jobs from
 different processes. Two clips never overlap because only the
@@ -445,12 +499,13 @@ fn detached_job(&self, text: &str, config: &TtsConfig)
 ```
 
 - Implemented file-producing providers (Kokoro, EchoGarden, gTTS, and
-  ElevenLabs) synthesize (or hit the audio cache) and return
-  `PlayFile { delete_after: false }` pointing at the cache path. Synthesis
-  stays in the caller because the caller has the credentials, model paths,
-  and cache; a cache hit is instant, a miss costs what the blocking path
-  costs today. Whether that satisfies the requested immediate-return contract
-  is the unresolved design choice in open question 1.
+  ElevenLabs) return a ready cached `PlayFile { delete_after: false }` on a
+  cache hit. On a cache miss, `play_detached` first reserves the ordered
+  `Preparing` slot and re-executes a detached biscuit-speaks helper. The helper
+  inherits the requester's credentials and model environment without writing
+  either to the spool, synthesizes to spool-owned temporary content or the
+  shared cache, then atomically publishes `Ready` or `Failed` into the same
+  sequence. The ten-minute D4 preparation deadline bounds abandonment.
 - Implemented streaming providers (`say`, SAPI, and eSpeak) return
   `Command { … }` built from the same argument logic `speak` uses; text is
   passed by argument or temp file, never by a pipe the caller would have to
@@ -469,12 +524,12 @@ fn detached_job(&self, text: &str, config: &TtsConfig)
   duration is not known. Deserialization defaults the new field for stored
   older results.
 
-`so-you-say --background` becomes `play_detached` and the self re-exec in
+`so-you-say --background` becomes `play_detached` and the playback self re-exec in
 `biscuit-speaks/cli/src/main.rs` is removed; `playa --background` becomes
 `enqueue` and `spawn_background_process` is removed. `playa --background`
-keeps its meaning under D4. `so-you-say --background` keeps its meaning only
-if open question 1 selects a design that moves cache-miss synthesis out of the
-caller; otherwise its contract and help text must explicitly change.
+keeps its meaning under D4. `so-you-say --background` returns after a ready job
+is durably published or a preparing slot and detached helper are durably owned,
+including cache misses.
 
 ### D6. Claudine uses the detached path everywhere it makes sound
 
@@ -482,9 +537,9 @@ caller; otherwise its contract and help text must explicitly change.
   blocking. `say_blocking`, `play_effect_blocking`, and
   `run_blocking_with_timeout` are deleted with the 30 s / 15 s budgets they
   existed for; the deprecated `emit_lifecycle_signal` follows them. The
-  composition thread continues as soon as a playable or reserved job is
-  durably published; open question 1 determines whether cache-miss synthesis
-  happens before or after that boundary.
+  composition thread continues as soon as a playable job or `Preparing` slot
+  is durably published. Cache-miss synthesis happens afterward in the detached
+  biscuit-speaks helper.
 - `audio_phases` ordering is preserved by enqueuing the phases in order; the
   spool serializes them.
 - `execute_speak_from_claudine` and `execute_sound_effect` in
@@ -499,10 +554,10 @@ caller; otherwise its contract and help text must explicitly change.
   Falling back to a potentially 300-second blocking playback after deleting
   the lifecycle timeout would violate the prompt-return contract this change
   is intended to establish.
-- Kokoro synthesis on a cache miss still runs in the composition process.
-  That makes the current proposal return promptly only on cache hits and does
-  not yet satisfy the stated fire-and-forget contract. Implementation must
-  not begin on D5/D6 until open question 1 is resolved.
+- A successfully reserved speech slot is followed by its configured effect in
+  durable sequence even while synthesis is still running. A preparation
+  timeout or failure is journaled and advances to the effect; it never lets the
+  effect overtake the reserved speech slot.
 
 ### D7. Non-decisions
 
@@ -723,9 +778,14 @@ skipping. Names use the `real_` prefix so `just test-real` selects them and
   use biscuit-file's portable-path renderer only for redacted display
   (`reference_windows_path_spelling_traps`).
 
-## Open questions for Ken
+## Ratified Phase 1 decisions
 
-### 1. Where should cache-miss synthesis run?
+### 1. Cache-miss synthesis runs in a detached helper
+
+**Ratified: option 3.** The reviewed specification and the owner's explicit
+instruction to execute Phase 1 approve the recommended reserved-slot design.
+The alternatives below remain as decision history; they are not implementation
+options.
 
 The requested contract says Claudine hands audio off and continues
 immediately. D5 as currently scoped only hands off *playback*: Kokoro,
@@ -767,7 +827,7 @@ and must be resolved before implementing D5/D6.
      preparation timeout/failure journal states, and cleanup for abandoned
      `Preparing` jobs.
 
-**Recommendation: option 3.** It is the only option that satisfies both of
+**Selected: option 3.** It is the only option that satisfies both of
 Ken's explicit requirements—immediate handoff and serialized ordering—without
 persisting credentials or making Playa depend on biscuit-speaks. Use a typed,
 versioned preparation record containing text and non-secret `TtsConfig`; keep
@@ -777,7 +837,12 @@ failure. If this complexity is rejected, option 1 is acceptable only if the
 spec explicitly weakens "continues immediately" to "continues immediately
 after synthesis" and retains a bounded lifecycle wait.
 
-### 2. Which executable owns playback for a mixed-capability spool?
+### 2. The enqueuer executable owns delegated playback
+
+**Ratified: option 3.** One scheduler preserves global ordering and delegates
+each job to its losslessly recorded absolute enqueuer executable. The
+alternatives below remain as decision history; they are not implementation
+options.
 
 D4 shares one per-user spool across `playa`, `so-you-say`, `claudine`, and
 future library consumers, but re-executes whichever binary first wins the
@@ -812,7 +877,7 @@ prove execution capability.
      deleted executable makes the job fail and must be journaled; process
      launch overhead occurs per clip.
 
-**Recommendation: option 3.** Correct ordering and option fidelity are core
+**Selected: option 3.** Correct ordering and option fidelity are core
 requirements, while optional-feature uniformity is not an enforceable library
 contract. The recorded executable path must use D4's lossless encoding and
 private-spool validation, the child must be launched directly with null stdio,
