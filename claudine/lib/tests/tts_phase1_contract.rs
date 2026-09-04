@@ -98,6 +98,7 @@ fn protocol_fixture_corpus_is_versioned_and_redacts_diagnostic_records() {
         [
             "v1-delegated-report.json",
             "v1-journal-record.json",
+            "v1-missing-identity-job.json",
             "v1-preparing-job.json",
             "v1-ready-job.json",
             "v2-unsupported-job.json",

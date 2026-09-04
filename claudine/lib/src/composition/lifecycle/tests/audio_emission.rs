@@ -2,8 +2,23 @@
 
 use super::*;
 
-#[cfg(unix)]
 use fs4::fs_std::FileExt as _;
+
+/// Copy this test executable into `<temp>/bin/<name>` so a `PATH` lookup finds
+/// a real executable on every OS. The eSpeak readiness these tests exercise is
+/// a presence check, and neither test lets playback reach the program, so the
+/// copy is never run.
+fn install_fixture_program(temp: &Path, name: &str) -> std::path::PathBuf {
+    let bin = temp.join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let exe = std::env::current_exe().unwrap();
+    std::fs::copy(
+        &exe,
+        bin.join(format!("{name}{}", std::env::consts::EXE_SUFFIX)),
+    )
+    .unwrap();
+    bin
+}
 
 #[test]
 fn audio_order_say_plus_effect() {
@@ -63,23 +78,15 @@ fn audio_order_no_audio() {
     assert!(phases.is_empty());
 }
 
-#[cfg(unix)]
 #[tokio::test]
 #[serial_test::serial]
 async fn default_emitter_publishes_audio_in_phase_order_without_waiting_for_playback() {
     use std::fs::{self, OpenOptions};
-    use std::os::unix::fs::PermissionsExt as _;
     use std::time::{Duration, Instant};
 
     let temp = tempfile::tempdir().unwrap();
     let spool = temp.path().join("spool");
-    let bin = temp.path().join("bin");
-    fs::create_dir(&bin).unwrap();
-    let espeak = bin.join("espeak");
-    fs::write(&espeak, "#!/bin/sh\n/bin/sleep 5\n").unwrap();
-    let mut permissions = fs::metadata(&espeak).unwrap().permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&espeak, permissions).unwrap();
+    let bin = install_fixture_program(temp.path(), "espeak");
 
     let path = std::env::join_paths(
         std::iter::once(bin.clone()).chain(std::env::split_paths(
@@ -93,7 +100,11 @@ async fn default_emitter_publishes_audio_in_phase_order_without_waiting_for_play
     assert_eq!(biscuit_speaks::run_if_worker().await, None);
 
     fs::create_dir(&spool).unwrap();
-    fs::set_permissions(&spool, fs::Permissions::from_mode(0o700)).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&spool, fs::Permissions::from_mode(0o700)).unwrap();
+    }
     let worker = OpenOptions::new()
         .read(true)
         .write(true)
@@ -186,22 +197,14 @@ async fn default_emitter_warns_once_when_effect_handoff_fails() {
     });
 }
 
-#[cfg(unix)]
 #[tokio::test]
 #[serial_test::serial]
 #[tracing_test::traced_test]
 async fn default_emitter_warns_once_when_speech_handoff_fails() {
     use std::fs;
-    use std::os::unix::fs::PermissionsExt as _;
 
     let temp = tempfile::tempdir().unwrap();
-    let bin = temp.path().join("bin");
-    fs::create_dir(&bin).unwrap();
-    let espeak = bin.join("espeak");
-    fs::write(&espeak, "#!/bin/sh\nexit 0\n").unwrap();
-    let mut permissions = fs::metadata(&espeak).unwrap().permissions();
-    permissions.set_mode(0o755);
-    fs::set_permissions(&espeak, permissions).unwrap();
+    let bin = install_fixture_program(temp.path(), "espeak");
     let path = std::env::join_paths(
         std::iter::once(bin).chain(std::env::split_paths(
             &std::env::var_os("PATH").unwrap_or_default(),
