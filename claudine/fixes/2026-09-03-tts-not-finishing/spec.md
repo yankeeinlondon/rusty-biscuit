@@ -3,6 +3,7 @@ status: draft
 created: 2026-09-03
 updated: 2026-09-03
 reviewed: true
+implemented: true
 reviewed_by: codex/default
 reviewed_on: 2026-09-03
 area: claudine
@@ -10,8 +11,7 @@ packages:
     - playa
     - biscuit-speaks
     - claudine
-review_iterations: 1
-implemented: false
+review_iterations: 2
 phase_1_protocols_ratified: true
 ---
 
