@@ -10,6 +10,7 @@ log: claudine/fixes/2026-09-03-tts-not-finishing/log.md
 description: "A **fix** review of `2026-09-03-tts-not-finishing/spec.md`"
 fix: 2026-09-03-tts-not-finishing/review-3.md
 previous: 2026-09-03-tts-not-finishing/review-2.md
+next: 2026-09-03-tts-not-finishing/review-4.md
 ---
 
 # Review 3: TTS Not Finishing

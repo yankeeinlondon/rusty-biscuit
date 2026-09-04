@@ -101,3 +101,40 @@ Full-sentence audibility and completed manual spool outcomes could not be
 observed while CoreAudio/Kokoro were unavailable. The deterministic worker
 tests cover completion, ordering, requester exit, and failure advancement; the
 manual run confirms prompt return and durable publication on the real host.
+
+## Review 3 sink state and recovery procedure
+
+Observed on Ken's macOS host on 2026-09-04 at 03:35 local time, before the
+review 3 implementation cycle touched any code.
+
+| Probe | Result |
+| --- | --- |
+| `afplay` of a fresh 0.5 s silent 24 kHz mono WAV | no return within 10 s; two further attempts timed out at 15 s |
+| `osascript -e 'get volume settings'` | timed out at 10 s |
+| `system_profiler SPAudioDataType` | timed out at 40 s |
+| `coreaudiod` | pid 58699, running 4 h 37 min, `launchctl` state `running`, answers no client |
+| AudioQuest DragonFly | attached; `ioreg` shows the device registered, matched, active |
+| Stale clients | four `mpv`, five `say`, five `so-you-say` from earlier sessions survived `SIGKILL` (kernel-blocked in the audio HAL); one `kokoro-tts` synthesis was killed successfully |
+
+The sink is wedged below user space. It cannot be reset from an unprivileged,
+non-interactive session. Recovery, then verification, from an interactive
+session:
+
+1. Reset the sink with one of: `sudo launchctl kickstart -kp system/com.apple.audio.coreaudiod`,
+   `sudo killall coreaudiod`, unplug and re-plug the DragonFly, or reboot.
+   The kernel-blocked player processes clear with the reset.
+2. Confirm the sink answers: `afplay` on any short WAV must return in about
+   its duration.
+3. `cd playa && PLAYA_REAL_AUDIO_REQUIRED=1 just test-real` and record the
+   `Native` / `Complete` result for the 24 kHz mono fixture, `Complete` for
+   explicit mpv, and `Complete` for every installed host player.
+4. `cd biscuit-speaks && PLAYA_REAL_AUDIO_REQUIRED=1 just test-real` and
+   record the end-to-end native `Complete` result.
+5. Two back-to-back `so-you-say --background` calls, then one lifecycle `say`
+   invocation, then `playa spool`; record the completed outcomes in order.
+
+The Windows execution of `biscuit-speaks-cli::detached_background` and
+claudine `audio_emission` (review 3 finding 3) is likewise owed to an
+interactive session: `just cross-check biscuit-speaks-cli --host windows detached_background`
+and `just cross-check claudine --host windows audio_emission` at the repo
+root, or a push so the `windows-latest` package legs run them.
