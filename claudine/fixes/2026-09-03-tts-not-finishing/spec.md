@@ -11,7 +11,7 @@ packages:
     - playa
     - biscuit-speaks
     - claudine
-review_iterations: 2
+review_iterations: 3
 phase_1_protocols_ratified: true
 ---
 

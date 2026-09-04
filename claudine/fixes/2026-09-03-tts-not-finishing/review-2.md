@@ -4,10 +4,13 @@ ready: false
 agent: codex/default
 created: 2026-09-04T01:54:49+01:00
 spec: 2026-09-03-tts-not-finishing/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/default
+log: claudine/fixes/2026-09-03-tts-not-finishing/log.md
 description: "A **fix** review of `2026-09-03-tts-not-finishing/spec.md`"
 fix: 2026-09-03-tts-not-finishing/review-2.md
 previous: 2026-09-03-tts-not-finishing/review-1.md
+next: 2026-09-03-tts-not-finishing/review-3.md
 ---
 
 # Review 2: TTS Not Finishing
