@@ -124,7 +124,7 @@ would silently exempt a package and miss its first test.
 | `features` | string[] | `[]` | forwarded to check, archive, and the canonical recipe consistently. Conflicts with `all-features` |
 | `all-features` | bool | `false` | run with `--all-features`. Conflicts with `features` |
 | `l1-include-slow` | bool | `false` | keep `slow_` tests inside the L1 selection (darkmatter's contract) |
-| `runner-tools` | string[] | `[]` | closed vocabulary: `ai-provider-stubs`, `darkmatter-md-fixture`, `messenger-desktop-stubs`, `node-22`, `pnpm-10`, `l2-parallel-self-spawn`, `neovim` |
+| `runner-tools` | string[] | `[]` | closed vocabulary: `ai-provider-stubs`, `darkmatter-md-fixture`, `messenger-desktop-stubs`, `node-22`, `pnpm-10`, `l2-parallel-self-spawn`, `neovim`, `zed-extension` |
 | `companion-suites` | string[] | `[]` | non-Cargo suites this package owns; closed vocabulary: `homelab-frontend` |
 
 `[package.metadata.ci.native]`: a map of runner OS (`ubuntu-latest`,
@@ -162,6 +162,10 @@ command surface:
   tests (claudine-cli).
 - **`neovim`** — provisions Neovim for packages whose L2 contract exercises
   the editor backend.
+- **`zed-extension`** — provisions the digest-verified official Zed extension
+  packager and the `wasm32-wasip2` target for a package-owned companion check.
+  It is a lint-producer verification tool, not an L2 backend, and never uses
+  terminal backend-proof evidence.
 
 Messenger and the three Rendezvous packages use the ordinary package grid as
 their coverage authority. Their native and `wsl2-ubuntu` L1 evidence is keyed

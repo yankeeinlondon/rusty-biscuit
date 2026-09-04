@@ -75,6 +75,7 @@ KNOWN_RUNNER_TOOLS = {
     "pnpm-10",
     "l2-parallel-self-spawn",
     "neovim",
+    "zed-extension",
 }
 
 # Companion suites are non-Cargo test suites owned by a package. Each name maps

@@ -83,5 +83,5 @@ tiers = ["L1", "L2"]
 features = ["terminal-tests"]
 local-features = []
 l2-backends = ["tmux"]
-runner-tools = ["neovim"]
+runner-tools = ["neovim", "zed-extension"]
 l1-include-slow = true

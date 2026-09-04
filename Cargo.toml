@@ -47,6 +47,7 @@ members = [
     "worktree/lib",
     "worktree/cli",
     "darkmatter/dmls",
+    "darkmatter/dmls/zed-dmls-cli",
     "tools/test-toolkit",
     "biscuit-browser-harness",
     "claudine/rendezvous/core",

@@ -70,7 +70,7 @@ dmls --version
 | Editor | Install path |
 |--------|-------------|
 | VS Code | `just install-vscode-package` (packages + installs the shipped [`vscode-dmls/`](vscode-dmls/) extension) |
-| Zed | Install [`zed-dmls/`](zed-dmls/) as a dev extension ([guide](docs/editors/zed.md)) |
+| Zed | `just install-zed`, then register the printed stable directory once ([guide](docs/editors/zed.md)) |
 | Neovim | Built-in LSP config only ([guide](docs/editors/neovim.md)) |
 | Helix | `languages.toml` entry only ([guide](docs/editors/helix.md)) |
 
@@ -138,7 +138,7 @@ against. CI wires the full per-target build.
 From the `darkmatter/` package area:
 
 ```
-just test        # L1 (unit + in-process LSP-session) across lib, cli, dmls
+just test        # L1 across darkmatter, darkmatter-cli, dmls, zed-dmls-cli
 just test-l2     # L2 real-editor tests (Neovim + tmux; skip cleanly if absent)
 just lint
 ```

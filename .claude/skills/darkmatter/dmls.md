@@ -71,3 +71,12 @@ Use package-scoped DMLS and Zed gates. Protocol behavior needs integration tests
 that open real documents through the server's normal request path. Schema or
 expression changes also require passive shipped-artifact corpus coverage in the
 Darkmatter library, so editor tests are not the only proof of grammar behavior.
+
+- `just test` runs the cross-platform L1 extension manifest and crate-shape
+  contract alongside the DMLS protocol suite.
+- `just check-zed` compiles `zed-dmls` for Zed's `wasm32-wasip2` target and
+  requires that target to have been provisioned explicitly.
+- `just zed-verify` adds Zed's pinned official packager and artifact contract;
+  CI runs this as an Ubuntu companion gate, not as L2.
+- `just zed-doctor` diagnoses the host's native binary, stable dev-extension
+  registration, manifest, and recent Zed log evidence without launching Zed.

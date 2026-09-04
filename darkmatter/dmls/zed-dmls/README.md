@@ -10,8 +10,8 @@ binary. All intelligence lives in `dmls`.
 > (per AD-7 in the DMLS design). To publish, copy this directory into its own
 > public `zed-dmls` repository, add a top-level `LICENSE`, and submit to
 > `zed-industries/extensions`. It targets `wasm32-wasip2` and depends on
-> `zed_extension_api`, so it is intentionally not built by the monorepo's
-> `just` recipes.
+> `zed_extension_api`. The Darkmatter `just lint` and `just zed-verify` gates
+> compile and package it with Zed's supported toolchain.
 
 ## Layout
 
@@ -90,9 +90,33 @@ surface a richer theme can address individually.
 ## Develop
 
 ```
-# install as a dev extension
-# Zed: command palette → "zed: install dev extension" → select this directory
+# from darkmatter/: stage outside the checkout and diagnose the launch path
+just install-zed
+just zed-doctor
 ```
+
+For the one-time registration, use **Zed: install dev extension** and select
+the stable directory printed by `just install-zed`, not this worktree directory
+and not the sibling `vscode-dmls` directory. Subsequent `just install-zed` runs
+refresh the staged copy without mutating Zed's registration. Exit status `3`
+means the copy is ready but still needs that one-time manual registration.
+Preview or custom installations can invoke `zed-dmls stage` and
+`zed-dmls doctor` with `--staging-dir`, `--zed-data-dir`, and `--zed-log`
+overrides; `--plain` provides stable automation output.
+
+## Troubleshooting
+
+Run `just zed-doctor` to check the native binary, registered extension target,
+manifest, and recent Zed log evidence without launching Zed.
+
+- `No extension manifest found for extension dmls` during startup means the
+  existing dev-extension registration points to a removed path.
+- `Failed to install dev extension: No extension manifest found for extension
+  vscode-dmls` during installation means the sibling VS Code extension was
+  selected instead of the stable directory printed by `just install-zed`.
+
+An older log error is historical context and does not make a currently valid
+registration fail.
 
 Update `REPO` in `src/lib.rs` and the asset-name mapping to match the repository
 that publishes `dmls` release archives before shipping.
