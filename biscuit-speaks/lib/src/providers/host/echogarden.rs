@@ -368,8 +368,12 @@ impl TtsExecutor for EchogardenProvider {
 
         // Play the audio file (requires playa feature)
         #[cfg(feature = "playa")]
-        crate::playback::play_audio_file(&audio_path, crate::types::AudioFormat::Wav, config)
-            .await?;
+        let playback = crate::playback::play_audio_file_with_report(
+            &audio_path,
+            crate::types::AudioFormat::Wav,
+            config,
+        )
+        .await?;
 
         #[cfg(not(feature = "playa"))]
         {
@@ -404,9 +408,41 @@ impl TtsExecutor for EchogardenProvider {
                 SpeakResult::new(TtsProvider::Host(HostTtsProvider::EchoGarden), voice)
                     .with_audio_file(audio_path)
                     .with_codec("wav")
-                    .with_cache_hit(cache_hit),
+                    .with_cache_hit(cache_hit)
+                    .with_playback(playback),
             )
         }
+    }
+
+    #[cfg(feature = "playa")]
+    async fn detached_job(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<playa::detached::SpoolJob, TtsError> {
+        let voice = self.resolve_voice(config);
+        let (path, _) = self
+            .generate_to_cache(text, voice.as_deref(), config.speed)
+            .await?;
+        Ok(crate::playa_bridge::file_job(path, config))
+    }
+
+    #[cfg(feature = "playa")]
+    async fn cached_detached_job(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<Option<playa::detached::SpoolJob>, TtsError> {
+        let voice = self.resolve_voice(config);
+        let voice_id = format!("{}:{}", self.engine.as_str(), voice.as_deref().unwrap_or("default"));
+        let mut key = CacheKey::new("echogarden", voice_id, text, "wav");
+        if config.speed != SpeedLevel::Normal {
+            key = key.with_speed(config.speed.value());
+        }
+        let path = key.cache_path();
+        Ok(path
+            .is_file()
+            .then(|| crate::playa_bridge::file_job(path, config)))
     }
 }
 

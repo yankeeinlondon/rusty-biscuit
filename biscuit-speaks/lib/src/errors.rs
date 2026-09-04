@@ -117,6 +117,13 @@ pub enum TtsError {
     #[error("No audio player available")]
     NoAudioPlayer,
 
+    /// The selected provider has no concrete detached execution implementation.
+    #[error("Detached speech is unsupported for provider '{provider}'")]
+    DetachedUnsupported {
+        /// Provider that cannot produce a detached job.
+        provider: String,
+    },
+
     /// Audio playback failed.
     #[error("Audio playback failed with '{player}': {stderr}")]
     PlaybackFailed {

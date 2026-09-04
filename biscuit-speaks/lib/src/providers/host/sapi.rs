@@ -85,6 +85,28 @@ impl SapiProvider {
         candidates.first().cloned().cloned()
     }
 
+    #[cfg(target_os = "windows")]
+    fn command_args(text: &str, config: &TtsConfig) -> Vec<std::ffi::OsString> {
+        let script = concat!(
+            "Add-Type -AssemblyName System.Speech; ",
+            "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; ",
+            "if ($args[1]) { $s.SelectVoice($args[1]) }; ",
+            "$s.Rate = [Math]::Round(([double]$args[2] - 1.0) * 5.0); ",
+            "$s.Volume = [Math]::Round([double]$args[3] * 100.0); ",
+            "$s.Speak($args[0])"
+        );
+        vec![
+            "-NoProfile".into(),
+            "-NonInteractive".into(),
+            "-Command".into(),
+            script.into(),
+            text.into(),
+            config.requested_voice.clone().unwrap_or_default().into(),
+            config.speed.value().to_string().into(),
+            config.volume.value().to_string().into(),
+        ]
+    }
+
     /// Parse PowerShell voice list output into Voice structs.
     #[allow(dead_code)]
     fn parse_voice_line(line: &str) -> Option<Voice> {
@@ -126,7 +148,7 @@ impl SapiProvider {
 }
 
 impl TtsExecutor for SapiProvider {
-    async fn speak(&self, _text: &str, _config: &TtsConfig) -> Result<(), TtsError> {
+    async fn speak(&self, text: &str, config: &TtsConfig) -> Result<(), TtsError> {
         if !Self::is_windows() {
             return Err(TtsError::ProviderFailed {
                 provider: "SAPI".to_string(),
@@ -134,14 +156,33 @@ impl TtsExecutor for SapiProvider {
             });
         }
 
-        // Windows implementation would use PowerShell here:
-        // Add-Type -AssemblyName System.Speech
-        // (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak('text')
-
-        Err(TtsError::ProviderFailed {
-            provider: "SAPI".to_string(),
-            message: "SAPI speak() not yet implemented".to_string(),
-        })
+        #[cfg(target_os = "windows")]
+        {
+            let output = tokio::process::Command::new("powershell.exe")
+                .args(Self::command_args(text, config))
+                .output()
+                .await
+                .map_err(|source| TtsError::ProcessSpawnFailed {
+                    provider: "SAPI".to_string(),
+                    source,
+                })?;
+            return if output.status.success() {
+                Ok(())
+            } else {
+                Err(TtsError::ProcessFailed {
+                    provider: "SAPI".to_string(),
+                    stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+                })
+            };
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = config;
+            Err(TtsError::ProviderFailed {
+                provider: "SAPI".to_string(),
+                message: format!("SAPI is only available on Windows ({} bytes)", text.len()),
+            })
+        }
     }
 
     async fn is_ready(&self) -> bool {
@@ -171,6 +212,28 @@ impl TtsExecutor for SapiProvider {
             TtsProvider::Host(HostTtsProvider::Sapi),
             voice,
         ))
+    }
+
+    #[cfg(feature = "playa")]
+    async fn detached_job(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<playa::detached::SpoolJob, TtsError> {
+        #[cfg(target_os = "windows")]
+        {
+            return crate::playa_bridge::command_job(
+                "powershell.exe",
+                Self::command_args(text, config),
+            );
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (text, config);
+            Err(TtsError::DetachedUnsupported {
+                provider: "SAPI".to_string(),
+            })
+        }
     }
 }
 

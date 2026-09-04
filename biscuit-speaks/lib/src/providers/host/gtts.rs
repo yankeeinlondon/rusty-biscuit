@@ -310,7 +310,12 @@ impl TtsExecutor for GttsProvider {
 
         // Play the audio file (requires playa feature)
         #[cfg(feature = "playa")]
-        crate::playback::play_audio_file(&audio_path, AudioFormat::Mp3, config).await?;
+        let playback = crate::playback::play_audio_file_with_report(
+            &audio_path,
+            AudioFormat::Mp3,
+            config,
+        )
+        .await?;
 
         #[cfg(not(feature = "playa"))]
         {
@@ -324,8 +329,33 @@ impl TtsExecutor for GttsProvider {
             SpeakResult::new(TtsProvider::Host(HostTtsProvider::Gtts), voice)
                 .with_audio_file(audio_path)
                 .with_codec("mp3")
-                .with_cache_hit(cache_hit),
+                .with_cache_hit(cache_hit)
+                .with_playback(playback),
         )
+    }
+
+    #[cfg(feature = "playa")]
+    async fn detached_job(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<playa::detached::SpoolJob, TtsError> {
+        let (path, _) = self
+            .generate_to_cache(text, Self::resolve_language(config))
+            .await?;
+        Ok(crate::playa_bridge::file_job(path, config))
+    }
+
+    #[cfg(feature = "playa")]
+    async fn cached_detached_job(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<Option<playa::detached::SpoolJob>, TtsError> {
+        let path = CacheKey::new("gtts", Self::resolve_language(config), text, "mp3").cache_path();
+        Ok(path
+            .is_file()
+            .then(|| crate::playa_bridge::file_job(path, config)))
     }
 }
 

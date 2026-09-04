@@ -353,6 +353,23 @@ impl TtsExecutor for SayProvider {
             selected_voice,
         ))
     }
+
+    #[cfg(feature = "playa")]
+    async fn detached_job(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<playa::detached::SpoolJob, TtsError> {
+        let mut args = Vec::new();
+        if let Some(voice) = Self::resolve_voice(config) {
+            args.extend(["-v".into(), voice.into()]);
+        }
+        if let Some(rate) = Self::resolve_rate(config.speed) {
+            args.extend(["-r".into(), rate.to_string().into()]);
+        }
+        args.push(text.into());
+        crate::playa_bridge::command_job("say", args)
+    }
 }
 
 impl TtsVoiceInventory for SayProvider {
