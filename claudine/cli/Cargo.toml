@@ -24,7 +24,7 @@ biscuit-file = { path = "../../biscuit-file/lib" }
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash"] }
 biscuit-speaks = { path = "../../biscuit-speaks/lib" }
 claudine = { path = "../lib" }
-playa = { path = "../../playa/lib", features = ["sound-effects"] }
+playa = { path = "../../playa/lib", features = ["sound-effects", "native-playback"] }
 sniff = { path = "../../sniff/lib" }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 # Browser-fragment types for the dual-target `dashboard` render component
@@ -113,6 +113,7 @@ url = "2"
 shellexpand = "3"
 test-toolkit = { path = "../../tools/test-toolkit" }
 biscuit-test-harness = { path = "../../biscuit-test-harness" }
+fs4 = "0.13"
 # `test-support` supplies the endpoint constructor the daemon-spawning fixtures
 # build against. Unlike the daemon itself it carries no native dependency, so it
 # is available on every target.
@@ -263,3 +264,6 @@ features = ["daemon-tests", "terminal-tests"]
 local-features = []
 l2-backends = ["tmux", "wezterm"]
 runner-tools = ["ai-provider-stubs", "darkmatter-md-fixture", "l2-parallel-self-spawn"]
+
+[package.metadata.ci.native]
+ubuntu-latest = ["libasound2-dev"]

@@ -18,7 +18,7 @@ sniff = { path = "../../sniff/lib" }
 biscuit-hash = { path = "../../biscuit-hash/lib", features = ["xx_hash", "blake3"] }
 biscuit-file = { path = "../../biscuit-file/lib", features = ["yaml", "json5"] }
 darkmatter = { path = "../../darkmatter/lib" }
-playa = { path = "../../playa/lib", features = ["sound-effects", "async"] }
+playa = { path = "../../playa/lib", features = ["sound-effects", "async", "native-playback"] }
 biscuit-speaks = { path = "../../biscuit-speaks/lib", features = ["playa"] }
 messenger = { path = "../../messenger/lib", default-features = false, features = ["discord", "slack", "signal", "whatsapp", "desktop"] }
 secrecy = "0.10"
@@ -113,3 +113,7 @@ proptest = "1.6"
 rstest = "0.25"
 tracing-test = "0.2"
 test-toolkit = { path = "../../tools/test-toolkit" }
+fs4 = "0.13"
+
+[package.metadata.ci.native]
+ubuntu-latest = ["libasound2-dev"]

@@ -834,7 +834,14 @@ If the frontmatter is not an object (e.g., a bare string or list), lifecycle par
 - **Messaging**: Requires a configured messaging route. See Configuring Actions.
 - **Desktop notifications**: Zero-config. Emitted via `notify` independently of messaging routes. Failures are non-fatal.
 - **stderr/info/warn**: Rendered as styled status badges using the terminal's capability detection (circular theme with color-coded state).
-- **Audio playback**: Blocking. Sound effects and TTS play sequentially, not in parallel, to avoid overlapping audio.
+- **Audio handoff**: `say`, `say_first`, and `effect` reserve/publish to Playa's
+  private per-user queue and return without waiting for preparation or playback.
+  The scheduler globally serializes lifecycle, hook, biscuit-speaks, and Playa
+  jobs. `say_first + effect` publishes speech first; `say + effect` publishes
+  the effect first.
+- **Failure contract**: Audio is native-first where available and best-effort
+  after handoff. Reservation/publication failure logs one warning with no
+  blocking fallback; playback is at-most-once after it starts.
 - **stdout**: The lone lifecycle channel that writes to stdout (all others target stderr, messaging, or desktop notifications). Because stdout is otherwise reserved for pipeable command output, lifecycle `stdout` text interleaves with the composed/provider output on that stream — opt in deliberately when a pipeline (`claudine compose <file> | other-tool`) should see the text.
 
 ## Related Topics

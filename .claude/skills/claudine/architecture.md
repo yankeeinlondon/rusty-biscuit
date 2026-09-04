@@ -748,7 +748,11 @@ Note: OpenCode also reads `.claude/skills/` directly
 
 - **Hook handlers must respond fast**: `claudine handle` enforces a hard **5-second execution deadline** (overridable via `CLAUDINE_HANDLE_DEADLINE_SECONDS`) to prevent blocking the parent agent session. When exceeded, the handler aborts and exits 124. Bash and messenger actions also have tighter 3s timeouts when running inside a hook handler. Phase-level tracing spans ensure any hang is diagnostic.
 - **All 10 provider identities have adapter behavior**: nine adapter implementations are registered and tested, with Kilo deliberately reusing OpenCode's wire-compatible adapter. Hook delivery mechanisms and blocking capabilities are catalog data; the event-support matrix above is the authoritative summary.
-- **Sound effects are fire-and-forget**: TTS and sound playback spawn tokio tasks to avoid blocking the event pipeline. Log and report actions run inline because they're fast.
+- **Audio is durable fire-and-forget**: TTS and sound actions synchronously
+  reserve/publish to Playa's private per-user spool, then return. A detached
+  scheduler owns serialized playback after handoff; no audio remains in a
+  process-local Tokio task. Log and report actions run inline because they are
+  fast.
 - **Atomic writes prevent config corruption**: all config file mutations go through `config::atomic` to handle concurrent hook firings safely.
 - **Runtime config precompiles regexes**: matcher patterns and Call action mapper regexes are compiled once at config load time, failing fast on invalid patterns with contextual error messages.
 - **Legacy single-brace templates are deprecated**: `{placeholder}` is automatically rewritten to `{{placeholder}}` with a tracing warning. New configs should use Handlebars-style double braces.
