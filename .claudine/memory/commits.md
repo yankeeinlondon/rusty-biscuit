@@ -18,6 +18,16 @@ belong here.
   when the working tree is a clean superset of the staged snapshot.
   Otherwise use the temp-index plumbing fallback (`update-index --index-info`
   → `write-tree` → `commit-tree -S -F -` → `git update-ref HEAD <new> <old>`).
+- `--only` on a clean-superset `MM` path still captures working-tree-only
+  content (e.g. a manifest `[[test]]` block whose source file is currently
+  untracked). The pre-flight `git show :<path>` only sees the staged blob;
+  the only way to detect that is to diff the staged snapshot against the
+  working tree (`git diff -- <path>`) before commit. If the working-tree
+  addition is meant to ship in a separate commit (typical for an actively
+  in-progress sibling change), prefer the temp-index plumbing fallback so
+  the commit body reflects only what was staged; otherwise the bullet list
+  drifts from the diff and reviewers see a `[[test]]` registration with no
+  matching source file in the same change.
 - Use `git log` for history examples; `sniff git commits` does not exist.
 
 ## Inspect First
