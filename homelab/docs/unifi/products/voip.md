@@ -1,4 +1,9 @@
 ---
+$schema: 
+    prompt: string(required;eager)
+    last_updated: string(required)
+    researched_by: string(required)
+    products: object(required)
 prompt: |-
     [Unifi](https://ui.com)'s **Talk** service offering surrounds IP-based telephony and Unifi sells a number of VOIP based telephones.
 
@@ -13,28 +18,20 @@ prompt: |-
     Once the research content has been written up as prose in this document 
     you will be expected to add frontmatter metadata:
 
-    - `$prompt` as a dictionary:
-        
-        ```yaml
-        prompt: string(required) -> the agent prompt used to perform the research
-        last_updated: date -> the date which the latest research on this topic was performed
-        researched_by: string -> the agent which performed the research
-        products: voip_product[]
-        ```
 
-        where `voip_product` is defined as (using SimpliedSchema):
+    `voip_product` is defined as (using SimpliedSchema):
 
-        ```yaml
-        id: string -> a unique dasherized identifier for a VOIP product
-        name: string -> the friendly name of the product
-        uk_price: number -> the UK price in GBP
-        us_price: number -> the US price in USD
-        description: string -> 1-2 sentence description of the product
-        metrics: object -> the key metrics which the research has identified as being useful for describing the product's capabilities
-        ```
+    ```yaml
+    id: string -> a unique dasherized identifier for a VOIP product
+    name: string -> the friendly name of the product
+    uk_price: number -> the UK price in GBP
+    us_price: number -> the US price in USD
+    description: string -> 1-2 sentence description of the product
+    metrics: object -> the key metrics which the research has identified as being useful for describing the product's capabilities
+    ```
         
-    - `last_updated` as "{[ctx.today}}"
     - `researched_by` as "{ctx.agent}/{ctx.model}"
+    - `products` as an array of objects where the objects are defined by `void_product` above.
 
     Make sure all metadata you've set is saved to the document along with the prose research and then you are done.
 hash: ca60fc771674c36b-cc6e7c6adc09c456
