@@ -9499,6 +9499,7 @@ version = "0.1.0"
 dependencies = [
  "biscuit-file",
  "biscuit-terminal",
+ "biscuit-test-harness",
  "clap 4.6.1",
  "clap_complete",
  "darkmatter",

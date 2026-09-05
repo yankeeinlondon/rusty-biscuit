@@ -71,7 +71,9 @@ fn worker_lock(root: &Path) -> File {
 }
 
 fn playa_command(root: &Path, cwd: &Path) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_playa"));
+    // `bin_exe!` reads nextest's run-time binary location, so the archive leg
+    // (wsl2-ubuntu) does not launch the compile-time path from another host.
+    let mut command = Command::new(biscuit_test_harness::bin_exe!("playa"));
     command
         .current_dir(cwd)
         .env("PLAYA_SPOOL_DIR", root)
