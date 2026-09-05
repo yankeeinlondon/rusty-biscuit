@@ -4,19 +4,20 @@ use super::*;
 
 use fs4::fs_std::FileExt as _;
 
-/// Copy this test executable into `<temp>/bin/<name>` so a `PATH` lookup finds
-/// a real executable on every OS. The eSpeak readiness these tests exercise is
-/// a presence check, and neither test lets playback reach the program, so the
-/// copy is never run.
+/// Place an empty executable named `<name>` in `<temp>/bin` so a `PATH` lookup
+/// finds it on every OS. The eSpeak readiness these tests exercise is a
+/// presence check, and neither test lets playback reach the program, so the
+/// file is never run.
 fn install_fixture_program(temp: &Path, name: &str) -> std::path::PathBuf {
     let bin = temp.join("bin");
     std::fs::create_dir(&bin).unwrap();
-    let exe = std::env::current_exe().unwrap();
-    std::fs::copy(
-        &exe,
-        bin.join(format!("{name}{}", std::env::consts::EXE_SUFFIX)),
-    )
-    .unwrap();
+    let program = bin.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+    std::fs::write(&program, b"").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
     bin
 }
 
