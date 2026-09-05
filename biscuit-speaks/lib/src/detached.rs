@@ -185,23 +185,11 @@ fn spawn_preparation(record: &Path) -> Result<(), TtsError> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    configure_detached(&mut command);
+    playa::detached::configure_detached_child(&mut command);
     command.spawn().map(|_| ()).map_err(|source| TtsError::ProcessSpawnFailed {
         provider: "detached preparation".into(),
         source,
     })
-}
-
-#[cfg(all(feature = "playa", unix))]
-fn configure_detached(command: &mut Command) {
-    use std::os::unix::process::CommandExt as _;
-    command.process_group(0);
-}
-
-#[cfg(all(feature = "playa", windows))]
-fn configure_detached(command: &mut Command) {
-    use std::os::windows::process::CommandExt as _;
-    command.creation_flags(0x0000_0008 | 0x0000_0200 | 0x0800_0000);
 }
 
 #[cfg(feature = "playa")]

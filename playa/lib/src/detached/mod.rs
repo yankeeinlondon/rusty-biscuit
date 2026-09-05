@@ -490,9 +490,20 @@ fn absolute_current_exe() -> Result<PathBuf, PlaybackError> {
     Ok(path)
 }
 
+/// An executable's on-disk identity: its size and modification time folded
+/// into one value. Any rebuild or replacement changes the modification time,
+/// and a stat costs microseconds where hashing a 100+ MB binary on every
+/// publish made one lifecycle emission take seconds. The spool is private to
+/// the user, so this guards against a binary swapped mid-flight, not against
+/// an adversary.
 fn fingerprint_file(path: &Path) -> Result<u64, PlaybackError> {
     validate_regular_file(path)?;
-    Ok(biscuit_hash::xx_hash_bytes(&fs::read(path)?))
+    let metadata = fs::metadata(path)?;
+    let modified = metadata
+        .modified()?
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |since| since.as_nanos());
+    Ok(biscuit_hash::xx_hash(&format!("{}:{modified}", metadata.len())))
 }
 
 fn open_lock(path: &Path) -> Result<File, PlaybackError> {
@@ -651,23 +662,58 @@ fn spawn_scheduler(root: &Path) -> Result<(), PlaybackError> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    configure_detached(&mut command);
+    configure_detached_child(&mut command);
     command
         .spawn()
         .map(|_| ())
         .map_err(|source| PlaybackError::DetachedWorkerSpawn { source })
 }
 
-#[cfg(unix)]
-fn configure_detached(command: &mut Command) {
-    use std::os::unix::process::CommandExt as _;
-    command.process_group(0);
+/// Configure a command so its child outlives the caller and shares neither its
+/// process group nor the pipes a parent may be reading from.
+///
+/// Callers must still give the child `Stdio::null()` (or their own handles);
+/// this only prevents the caller's inherited stdio from leaking into it.
+pub fn configure_detached_child(command: &mut Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        command.process_group(0);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt as _;
+        stop_inheriting_std_handles();
+        command.creation_flags(detached_creation_flags());
+    }
 }
 
+/// Windows children inherit every inheritable handle in the parent, and the
+/// stdio handles a parent handed this process stay inheritable even when the
+/// child is given `Stdio::null()`. A caller capturing this process's output
+/// would then wait for the detached worker to exit before its read returned,
+/// which is the blocking behavior the spool exists to avoid. Clearing the flag
+/// on this process's own copies is safe because `Stdio::inherit()` duplicates
+/// the handle with inheritance re-enabled.
 #[cfg(windows)]
-fn configure_detached(command: &mut Command) {
-    use std::os::windows::process::CommandExt as _;
-    command.creation_flags(detached_creation_flags());
+fn stop_inheriting_std_handles() {
+    use windows_sys::Win32::Foundation::{
+        HANDLE_FLAG_INHERIT, INVALID_HANDLE_VALUE, SetHandleInformation,
+    };
+    use windows_sys::Win32::System::Console::{
+        GetStdHandle, STD_ERROR_HANDLE, STD_INPUT_HANDLE, STD_OUTPUT_HANDLE,
+    };
+    for id in [STD_INPUT_HANDLE, STD_OUTPUT_HANDLE, STD_ERROR_HANDLE] {
+        // SAFETY: both calls only inspect or flag a handle this process owns;
+        // a null or invalid handle is skipped rather than passed through.
+        unsafe {
+            let handle = GetStdHandle(id);
+            if handle.is_null() || handle == INVALID_HANDLE_VALUE {
+                continue;
+            }
+            SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+        }
+    }
 }
 
 #[cfg(windows)]

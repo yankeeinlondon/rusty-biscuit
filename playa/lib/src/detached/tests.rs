@@ -639,7 +639,7 @@ fn detached_process_uses_a_new_process_group() {
     command
         .args(["-c", "printf '%s %s' \"$$\" \"$(ps -o pgid= -p $$ | tr -d ' ')\""])
         .stdout(Stdio::piped());
-    configure_detached(&mut command);
+    configure_detached_child(&mut command);
     let output = command.output().expect("process-group fixture should run");
     assert!(output.status.success());
     let ids = String::from_utf8(output.stdout).expect("fixture output should be UTF-8");
