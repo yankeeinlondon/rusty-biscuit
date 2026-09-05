@@ -274,6 +274,7 @@ impl ContextCapture {
         let need_os = groups.contains(&ContextGroup::Os);
         let need_hw = groups.contains(&ContextGroup::Hardware);
         let need_gpu = groups.contains(&ContextGroup::Gpu);
+        let need_languages = groups.contains(&ContextGroup::Languages);
 
         // ── Git discovery (near-instant — just finds .git) ───────────
         let t = Instant::now();
@@ -359,7 +360,7 @@ impl ContextCapture {
         }
 
         // ── All remaining probes run in parallel ─────────────────────
-        let (repo_info, docs, os_info, hardware_info, gpu_names) = std::thread::scope(|s| {
+        let (repo_info, docs, os_info, hardware_info, gpu_names, languages) = std::thread::scope(|s| {
                 let repo_handle = if need_repo {
                     let rr = &repo_root;
                     Some(s.spawn(move || {
@@ -417,6 +418,21 @@ impl ContextCapture {
                     None
                 };
 
+                // Repository structure is detected structure-only, which never
+                // enriches per-package languages, so the language group needs
+                // its own inventory walk of the checkout.
+                let languages_handle = if need_languages {
+                    let rr = &repo_root;
+                    Some(s.spawn(move || {
+                        let t = Instant::now();
+                        let result = rr
+                            .as_ref()
+                            .and_then(|root| sniff::filesystem::detect_languages(root).ok());
+                        (result, t.elapsed())
+                    }))
+                } else {
+                    None
+                };
                 // Collect repo first — docs depends on it
                 let (repo_info, repo_elapsed) = repo_handle
                     .map(|h| h.join().unwrap_or((None, Duration::ZERO)))
@@ -476,8 +492,13 @@ impl ContextCapture {
                     timings.push(("gpu".into(), elapsed));
                     names
                 });
+                let languages = languages_handle.and_then(|h| {
+                    let (result, elapsed) = h.join().unwrap_or((None, Duration::ZERO));
+                    timings.push(("languages".into(), elapsed));
+                    result
+                });
 
-                (repo_info, docs, os_info, hardware_info, gpu_names)
+                (repo_info, docs, os_info, hardware_info, gpu_names, languages)
             });
 
         let os_info = match os_info {
@@ -524,7 +545,7 @@ impl ContextCapture {
             git_worktree,
             merge_conflicts,
             repo_info,
-            languages: None,
+            languages,
             docs,
             best_skill,
             os_info,
