@@ -15,12 +15,11 @@ const AC1_ORIGINAL_DOCUMENT: &str = concat!(
     "Old body\n",
 );
 
-fn plan(original: &str, allowed: &[&str]) -> InlineClosurePlan {
+fn plan(original: &str) -> InlineClosurePlan {
     let markdown: darkmatter::markdown::Markdown = original.to_string().into();
     InlineClosurePlan {
         original_document_text: original.to_string(),
         original_hash: markdown.compute_hash(MdHashKind::Simple, &inline_hash_options()),
-        response_frontmatter: allowed.iter().map(|key| (*key).to_string()).collect(),
     }
 }
 
@@ -58,45 +57,47 @@ fn replacement_parts_parses_mapping_and_source_lines() {
 }
 
 #[test]
-fn exact_response_frontmatter_allows_blank_lines_before_an_unauthorized_key() {
+fn immutable_prompt_warning_reports_its_line_after_blank_lines() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("doc.md");
     let original = "---\nprompt: test\n---\nOld body\n";
     std::fs::write(&file, original).unwrap();
-    let replacement = extract_replacement_parts("---\n\n\nundeclared: value\n---\nNew body\n")
+    let replacement = extract_replacement_parts("---\n\n\nprompt: rewritten\n---\nNew body\n")
         .unwrap();
 
-    let result = apply_inline_closure(&plan(original, &[]), &replacement, &file, "2026-09-01")
+    let result = apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01")
         .unwrap();
 
     assert_eq!(
         result.ignored_properties,
         [InlinePropertyNotice {
-            key: "undeclared".into(),
+            key: "prompt".into(),
             line: 4,
         }]
     );
-    assert!(std::fs::read_to_string(file).unwrap().ends_with("---\nNew body\n"));
+    let written = std::fs::read_to_string(file).unwrap();
+    assert!(written.contains("prompt: test\n"));
+    assert!(written.ends_with("---\nNew body\n"));
 }
 
 #[test]
-fn unauthorized_property_warning_line_counts_every_response_protocol_line() {
+fn immutable_prompt_warning_line_counts_every_response_protocol_line() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("doc.md");
     let original = "---\nprompt: test\n---\nOld body\n";
     std::fs::write(&file, original).unwrap();
     let replacement = extract_replacement_parts(
-        "---\n\n# provider note\n\nundeclared: value\n---\nNew body\n",
+        "---\n\n# provider note\n\nprompt: rewritten\n---\nNew body\n",
     )
     .unwrap();
 
-    let result = apply_inline_closure(&plan(original, &[]), &replacement, &file, "2026-09-01")
+    let result = apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01")
         .unwrap();
 
     assert_eq!(
         result.ignored_properties,
         [InlinePropertyNotice {
-            key: "undeclared".into(),
+            key: "prompt".into(),
             line: 5,
         }]
     );
@@ -142,13 +143,7 @@ fn rewrite_replaces_whole_existing_nodes_and_preserves_adjacent_comments() {
         "access_points".into(),
         "access_points:\n- Office\n- Studio\n".into(),
     );
-    let rewritten = rewrite_inline_document(
-        original,
-        "New body\n",
-        &harvested,
-        &["access_points".into()],
-    )
-    .unwrap();
+    let rewritten = rewrite_inline_document(original, "New body\n", &harvested).unwrap();
     assert!(rewritten.contains("access_points:\n- Office\n- Studio\n# keep this comment\n"));
     assert!(rewritten.contains("prompt: |-\n  Preserve this\n"));
     assert!(rewritten.contains("owner: human\n"));
@@ -156,18 +151,12 @@ fn rewrite_replaces_whole_existing_nodes_and_preserves_adjacent_comments() {
 }
 
 #[test]
-fn rewrite_inserts_missing_nodes_in_declaration_order_before_last_updated() {
+fn rewrite_inserts_missing_nodes_in_response_order_before_last_updated() {
     let original = "---\nprompt: test\nlast_updated: 2026-01-01\n---\nOld\n";
     let mut harvested = IndexMap::new();
-    harvested.insert("generated:by".into(), "'generated:by': test\n".into());
     harvested.insert("access_points".into(), "access_points:\n- Office\n".into());
-    let rewritten = rewrite_inline_document(
-        original,
-        "New\n",
-        &harvested,
-        &["access_points".into(), "generated:by".into()],
-    )
-    .unwrap();
+    harvested.insert("generated:by".into(), "'generated:by': test\n".into());
+    let rewritten = rewrite_inline_document(original, "New\n", &harvested).unwrap();
     let access = rewritten.find("access_points:").unwrap();
     let generated = rewritten.find("'generated:by':").unwrap();
     let updated = rewritten.find("last_updated:").unwrap();
@@ -177,7 +166,7 @@ fn rewrite_inserts_missing_nodes_in_declaration_order_before_last_updated() {
 }
 
 #[test]
-fn apply_closure_harvests_only_authorized_properties() {
+fn apply_closure_applies_every_response_property_except_closure_owned() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("doc.md");
     let original = concat!(
@@ -194,89 +183,61 @@ fn apply_closure_harvests_only_authorized_properties() {
         "---\n",
         "access_points: [Office, Studio]\n",
         "generated_by: inventory\n",
-        "title: rejected\n",
+        "prompt: rewritten\n",
+        "title: added\n",
         "hash: rejected\n",
         "last_updated: rejected\n",
         "---\n",
         "New body\n",
     ))
     .unwrap();
-    let result = apply_inline_closure(
-        &plan(original, &["access_points", "generated_by", "missing"]),
-        &replacement,
-        &file,
-        "2026-09-01",
-    )
-    .unwrap();
-    assert_eq!(result.inserted_properties, ["generated_by"]);
+    let result = apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01")
+        .unwrap();
+    assert_eq!(result.inserted_properties, ["generated_by", "title"]);
     assert_eq!(result.refreshed_properties, ["access_points"]);
-    assert_eq!(result.missing_properties, ["missing"]);
     assert_eq!(
         result.ignored_properties,
         [InlinePropertyNotice {
-            key: "title".into(),
+            key: "prompt".into(),
             line: 4,
         }]
     );
     let written = std::fs::read_to_string(&file).unwrap();
-    assert!(written.contains("generated_by: inventory\n"));
-    assert!(!written.contains("title: rejected"));
+    assert!(written.contains("prompt: test\n"));
+    assert!(written.contains("access_points:\n  - Office\n  - Studio\n"));
+    assert!(written.contains("generated_by: inventory\ntitle: added\nlast_updated: 2026-09-01\n"));
     assert!(!written.contains("hash: rejected"));
+    assert!(!written.contains("last_updated: rejected"));
 }
 
 #[test]
-fn removing_response_authorization_leaves_generated_value_untouched_on_later_run() {
+fn apply_closure_refreshes_generated_value_on_later_run() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("doc.md");
-    let original = concat!(
-        "---\n",
-        "prompt: test\n",
-        "response_frontmatter: [generated_by]\n",
-        "last_updated: 2026-01-01\n",
-        "---\n",
-        "Old body\n",
-    );
+    let original = "---\nprompt: test\nlast_updated: 2026-01-01\n---\nOld body\n";
     std::fs::write(&file, original).unwrap();
 
     let first_replacement = extract_replacement_parts(
         "---\ngenerated_by: first-run\n---\nFirst generated body\n",
     )
     .unwrap();
-    apply_inline_closure(
-        &plan(original, &["generated_by"]),
-        &first_replacement,
-        &file,
-        "2026-09-01",
-    )
-    .unwrap();
+    let first = apply_inline_closure(&plan(original), &first_replacement, &file, "2026-09-01")
+        .unwrap();
+    assert_eq!(first.inserted_properties, ["generated_by"]);
 
-    let without_authorization = std::fs::read_to_string(&file)
-        .unwrap()
-        .replace("response_frontmatter: [generated_by]\n", "");
-    std::fs::write(&file, &without_authorization).unwrap();
+    let after_first = std::fs::read_to_string(&file).unwrap();
     let second_replacement = extract_replacement_parts(
         "---\ngenerated_by: second-run\n---\nSecond generated body\n",
     )
     .unwrap();
-    let result = apply_inline_closure(
-        &plan(&without_authorization, &[]),
-        &second_replacement,
-        &file,
-        "2026-09-01",
-    )
-    .unwrap();
+    let second = apply_inline_closure(&plan(&after_first), &second_replacement, &file, "2026-09-02")
+        .unwrap();
+    assert_eq!(second.refreshed_properties, ["generated_by"]);
+    assert!(second.inserted_properties.is_empty());
 
-    assert_eq!(
-        result.ignored_properties,
-        [InlinePropertyNotice {
-            key: "generated_by".into(),
-            line: 2,
-        }]
-    );
     let written = std::fs::read_to_string(file).unwrap();
-    assert!(written.contains("generated_by: first-run\n"));
-    assert!(!written.contains("generated_by: second-run\n"));
-    assert!(!written.contains("response_frontmatter:"));
+    assert_eq!(written.matches("generated_by:").count(), 1);
+    assert!(written.contains("generated_by: second-run\n"));
     assert!(written.contains("Second generated body\n"));
 }
 
@@ -287,7 +248,7 @@ fn apply_closure_preserves_authored_frontmatter_bytes_and_stamps_clean_hash() {
     std::fs::write(&file, AC1_ORIGINAL_DOCUMENT).unwrap();
     let replacement = extract_replacement_parts("New body\n").unwrap();
     apply_inline_closure(
-        &plan(AC1_ORIGINAL_DOCUMENT, &[]),
+        &plan(AC1_ORIGINAL_DOCUMENT),
         &replacement,
         &file,
         "2026-09-01",
@@ -335,7 +296,7 @@ fn apply_closure_reports_value_drift_but_silences_reformat_only_drift() {
     .unwrap();
     let replacement = extract_replacement_parts("New body\n").unwrap();
     let result = apply_inline_closure(
-        &plan(original, &[]),
+        &plan(original),
         &replacement,
         &file,
         "2026-09-01",
@@ -370,7 +331,7 @@ fn apply_closure_reports_added_and_removed_frontmatter_properties() {
 
     let replacement = extract_replacement_parts("New body\n").unwrap();
     let result = apply_inline_closure(
-        &plan(original, &[]),
+        &plan(original),
         &replacement,
         &file,
         "2026-09-01",
@@ -400,7 +361,7 @@ fn apply_closure_reports_unclassified_frontmatter_drift_without_body_drift() {
 
         let replacement = extract_replacement_parts("New body\n").unwrap();
         let result = apply_inline_closure(
-            &plan(original, &[]),
+            &plan(original),
             &replacement,
             &file,
             "2026-09-01",
@@ -420,22 +381,17 @@ fn apply_closure_reports_unclassified_frontmatter_drift_without_body_drift() {
 }
 
 #[test]
-fn apply_closure_rejects_unchanged_body_even_with_authorized_metadata() {
+fn apply_closure_rejects_unchanged_body_even_with_response_metadata() {
     let dir = TempDir::new().unwrap();
     let file = dir.path().join("doc.md");
-    let original = "---\nprompt: test\nresponse_frontmatter: [generated_by]\n---\nOriginal body\n";
+    let original = "---\nprompt: test\n---\nOriginal body\n";
     std::fs::write(&file, original).unwrap();
     let replacement = extract_replacement_parts(
         "---\ngenerated_by: inventory\n---\nOriginal body\n",
     )
     .unwrap();
-    let error = apply_inline_closure(
-        &plan(original, &["generated_by"]),
-        &replacement,
-        &file,
-        "2026-09-01",
-    )
-    .unwrap_err();
+    let error = apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01")
+        .unwrap_err();
     assert!(matches!(error, CompositionError::InvalidInlineResponse(_)));
     assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
 }
@@ -463,8 +419,7 @@ fn rewrite_preserves_crlf_and_authored_schema() {
         "---\r\n",
         "Old body\r\n",
     );
-    let rewritten = rewrite_inline_document(original, "New body\r\n", &IndexMap::new(), &[])
-        .unwrap();
+    let rewritten = rewrite_inline_document(original, "New body\r\n", &IndexMap::new()).unwrap();
     assert!(rewritten.contains("$schema:\r\n  title: 'string(required)'\r\n"));
     assert!(rewritten.contains("prompt: |-\r\n  Keep this formatting\r\n"));
     assert!(rewritten.contains("title: Authored\r\n"));
@@ -499,7 +454,7 @@ fn apply_closure_rejects_empty_body() {
         frontmatter: None,
     };
     assert!(matches!(
-        apply_inline_closure(&plan(original, &[]), &replacement, &file, "2026-09-01"),
+        apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01"),
         Err(CompositionError::InvalidInlineResponse(_))
     ));
     assert_eq!(std::fs::read_to_string(file).unwrap(), original);
@@ -516,7 +471,7 @@ fn apply_closure_cleans_body_and_hashes_the_cleaned_text() {
     )
     .unwrap();
     let result = apply_inline_closure(
-        &plan(original, &[]),
+        &plan(original),
         &replacement,
         &file,
         "2026-09-01",
@@ -547,7 +502,7 @@ fn apply_closure_preserves_quoted_last_updated_style() {
         std::fs::write(&file, &original).unwrap();
         let replacement = extract_replacement_parts("New body\n").unwrap();
         apply_inline_closure(
-            &plan(&original, &[]),
+            &plan(&original),
             &replacement,
             &file,
             "2026-09-01",
@@ -564,7 +519,7 @@ fn apply_closure_preserves_crlf_frontmatter_through_hash_stamp() {
     let original = "---\r\nprompt: |-\r\n  Keep\r\nlast_updated: 2026-01-01\r\n---\r\nOld body\r\n";
     std::fs::write(&file, original).unwrap();
     let replacement = extract_replacement_parts("New body\r\n").unwrap();
-    apply_inline_closure(&plan(original, &[]), &replacement, &file, "2026-09-01").unwrap();
+    apply_inline_closure(&plan(original), &replacement, &file, "2026-09-01").unwrap();
     let written = std::fs::read_to_string(file).unwrap();
     assert!(written.contains("prompt: |-\r\n  Keep\r\n"));
     assert!(written.contains("last_updated: 2026-09-01\r\n"));
@@ -578,7 +533,7 @@ fn apply_closure_rejects_malformed_hash_without_mutation() {
     std::fs::write(&file, original).unwrap();
     let replacement = extract_replacement_parts("New body\n").unwrap();
     let error = apply_inline_closure(
-        &plan(original, &[]),
+        &plan(original),
         &replacement,
         &file,
         "2026-09-01",
@@ -597,7 +552,7 @@ fn apply_closure_is_deterministic_for_fixed_inputs() {
     let run = || {
         std::fs::write(&file, original).unwrap();
         apply_inline_closure(
-            &plan(original, &[]),
+            &plan(original),
             &replacement,
             &file,
             "2026-09-01",
@@ -615,7 +570,7 @@ fn apply_closure_second_identical_run_is_byte_idempotent() {
     std::fs::write(&file, AC1_ORIGINAL_DOCUMENT).unwrap();
     let replacement = extract_replacement_parts("New body\n").unwrap();
     apply_inline_closure(
-        &plan(AC1_ORIGINAL_DOCUMENT, &[]),
+        &plan(AC1_ORIGINAL_DOCUMENT),
         &replacement,
         &file,
         "2026-09-01",
@@ -623,7 +578,7 @@ fn apply_closure_second_identical_run_is_byte_idempotent() {
     .unwrap();
     let first = std::fs::read_to_string(&file).unwrap();
     let error = apply_inline_closure(
-        &plan(&first, &[]),
+        &plan(&first),
         &replacement,
         &file,
         "2026-09-01",
@@ -641,7 +596,7 @@ fn frontmatter_changed_reports_generated_nodes_but_not_body_only_changes() {
     std::fs::write(&body_only_file, original).unwrap();
     let body = extract_replacement_parts("New body\n").unwrap();
     let body_result = apply_inline_closure(
-        &plan(original, &[]),
+        &plan(original),
         &body,
         &body_only_file,
         "2026-09-01",
@@ -656,7 +611,7 @@ fn frontmatter_changed_reports_generated_nodes_but_not_body_only_changes() {
     )
     .unwrap();
     let generated_result = apply_inline_closure(
-        &plan(original, &["generated_by"]),
+        &plan(original),
         &generated,
         &generated_file,
         "2026-09-01",

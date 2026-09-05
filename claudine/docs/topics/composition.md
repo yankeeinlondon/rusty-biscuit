@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-eaf791ed7c8ba12b
-last_updated: 2026-09-02
+hash: ef46db3751d8e999-4b7ab9892547cb77
+last_updated: 2026-09-05
 ---
 # Claudine Composition
 
@@ -153,10 +153,9 @@ Steps:
 6. **Execute** — run the provider session
 7. **Closure** — Claudine rewrites the file:
    - The replacement body is the agent's **final response only** — the output text emitted after the agent's last tool call. Interstitial narration between tool calls (e.g. "Let me read the docs…") is dropped, so process commentary never leaks into the artifact. Providers that recover their final message post-hoc (e.g. Codex's `--output-last-message`) supply that message directly.
-   - By default the response is body-only. An authored `response_frontmatter` list may authorize exact property names that the provider can return in a leading YAML frontmatter block.
-   - The authorization is captured from the authored source before setters, interpolation, or schema defaults. Invalid declarations fail before provider launch, and authorizing a Claudine-interpreted property emits a warning because it may change later executions.
-   - Authorized properties are inserted in declaration order before `last_updated` or refreshed in place on later runs. Undeclared proposals are ignored with response-line warnings; response-provided `hash` and `last_updated` are ignored silently.
-   - A delimited metadata attempt with malformed YAML, duplicate keys, a non-mapping root, or no replacement body fails without modifying the source. Missing authorized properties are reported but do not fail a valid body.
+   - When the prompt asks for frontmatter properties, the provider returns them in a leading YAML frontmatter block (`---` fenced) at the top of its response. The guardrails teach this channel; no declaration in the document is required, and the prompt author is responsible for checking that requested properties arrived.
+   - Every returned property is merged: new keys are inserted in response order immediately before `last_updated`, and existing keys are replaced in place as whole YAML nodes on later runs. Each insertion and update is reported. The only exceptions are the closure-owned keys: a returned `prompt` is ignored with a warning because it is immutable, and returned `hash` and `last_updated` are ignored silently because the closure stamps them.
+   - A delimited metadata attempt with malformed YAML, duplicate keys, a non-mapping root, or no replacement body fails without modifying the source.
    - Authored frontmatter bytes remain authoritative. If the source changes while the provider runs, Claudine completes the run, restores the pre-run frontmatter snapshot byte-for-byte, and reports each added, removed, or value-changed property without attributing a writer. Structurally invalid frontmatter gets a generic restoration warning because property-level comparison is impossible. Value-preserving reformatting remains silent. Mid-run body drift is compared independently, then replaced and reported.
    - `last_updated` is set to today's date (local time, `YYYY-MM-DD`)
    - The file is written atomically
@@ -195,7 +194,6 @@ using `inline_hash_options`, `parse_inline_stored_hash`, `plan_hash_save`, and
 
 
 - **`prompt`** (required) — the prompt text; composed through Darkmatter before execution
-- **`response_frontmatter`** — optional ordered allowlist of generated properties accepted from a leading response frontmatter block
 - **`last_updated`** — auto-updated by Claudine on each successful write
 - **`hash`** — auto-stamped Darkmatter `Simple` content hash on each successful write (see [`hash` property (auto-stamped)](#hash-property-auto-stamped))
 - **`agent`** — optional provider hint (see Provider Selection)

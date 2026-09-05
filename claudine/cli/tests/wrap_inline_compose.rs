@@ -190,7 +190,7 @@ fn inline_compose_preserves_frontmatter() {
 
 #[cfg(unix)]
 #[test]
-fn inline_compose_harvests_and_refreshes_authorized_response_frontmatter() {
+fn inline_compose_harvests_and_refreshes_response_frontmatter() {
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
@@ -207,9 +207,6 @@ fn inline_compose_harvests_and_refreshes_authorized_response_frontmatter() {
         concat!(
             "---\n",
             "{}",
-            "response_frontmatter:\n",
-            "  - access_points\n",
-            "  - generated_by\n",
             "last_updated: '2026-01-01'\n",
             "---\n",
             "Original inventory.\n",
@@ -251,22 +248,20 @@ exit 0
 
     let first = run();
     let first_stderr = strip_ansi(&String::from_utf8_lossy(&first.get_output().stderr));
-    assert!(first_stderr.contains("Inserted response frontmatter property \"access_points\""));
-    assert!(first_stderr.contains("Inserted response frontmatter property \"generated_by\""));
+    assert!(first_stderr.contains("Inserted frontmatter property \"access_points\""));
+    assert!(first_stderr.contains("Inserted frontmatter property \"generated_by\""));
     let first_content = fs::read_to_string(&md_file).unwrap();
     assert!(first_content.contains(prompt_bytes));
     assert!(first_content.contains("Office-v1"));
     assert!(first_content.contains("generated_by: obedient-stub-v1"));
 
     let delivered_prompt = fs::read_to_string(&captured_args).unwrap();
-    assert!(delivered_prompt.contains("Allowed response frontmatter properties"));
-    assert!(delivered_prompt.contains("access_points"));
-    assert!(delivered_prompt.contains("generated_by"));
+    assert!(delivered_prompt.contains("If the prompt asks you to add or update frontmatter properties"));
 
     let second = run();
     let second_stderr = strip_ansi(&String::from_utf8_lossy(&second.get_output().stderr));
-    assert!(second_stderr.contains("Refreshed response frontmatter property \"access_points\""));
-    assert!(second_stderr.contains("Refreshed response frontmatter property \"generated_by\""));
+    assert!(second_stderr.contains("Updated frontmatter property \"access_points\""));
+    assert!(second_stderr.contains("Updated frontmatter property \"generated_by\""));
     let final_content = fs::read_to_string(&md_file).unwrap();
     assert!(final_content.contains(prompt_bytes));
     assert!(final_content.contains("Office-v2"));

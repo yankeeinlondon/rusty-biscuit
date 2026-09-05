@@ -31,6 +31,12 @@ struct ResponseProperty {
     line: usize,
 }
 
+/// Frontmatter properties the closure owns; a response cannot set them.
+///
+/// `prompt` is the author's immutable interface, while `hash` and
+/// `last_updated` are stamped by the closure itself on every write.
+pub const CLOSURE_OWNED_PROPERTIES: &[&str] = &["prompt", "hash", "last_updated"];
+
 /// An ignored response-frontmatter proposal and its response line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InlinePropertyNotice {
@@ -94,14 +100,15 @@ pub fn extract_replacement_parts(
 /// Result of applying inline closure, reporting frontmatter changes.
 #[derive(Debug, Clone, Default)]
 pub struct InlineClosureResult {
-    /// Authorized response properties inserted into the document.
+    /// Response properties inserted into the document.
     pub inserted_properties: Vec<String>,
-    /// Authorized response properties refreshed in their existing positions.
+    /// Response properties that replaced an existing node in place.
     pub refreshed_properties: Vec<String>,
-    /// Unauthorized response properties that were ignored.
+    /// Response proposals for `prompt`, which is immutable and was ignored.
+    ///
+    /// `hash` and `last_updated` proposals are dropped silently because the
+    /// closure stamps them anyway.
     pub ignored_properties: Vec<InlinePropertyNotice>,
-    /// Authorized properties omitted from the response.
-    pub missing_properties: Vec<String>,
     /// Authored properties whose on-disk values drifted and were restored.
     pub restored_frontmatter_properties: Vec<String>,
     /// Whether frontmatter drift was restored but could not be classified by property.
@@ -156,52 +163,29 @@ pub fn apply_inline_closure(
     let original_md: darkmatter::markdown::Markdown =
         plan.original_document_text.clone().into();
     let original_fm = original_md.frontmatter().as_map();
-    let allowed: IndexSet<&str> = plan
-        .response_frontmatter
-        .iter()
-        .map(String::as_str)
-        .collect();
     let mut harvested = IndexMap::new();
     let mut ignored_properties = Vec::new();
     if let Some(response_fm) = &replacement.frontmatter {
         for (key, property) in response_fm {
-            if matches!(key.as_str(), "hash" | "last_updated") {
-                continue;
-            }
-            if allowed.contains(key.as_str()) {
-                harvested.insert(key.clone(), serialize_frontmatter_property(key, &property.value)?);
-            } else {
+            if key == "prompt" {
                 ignored_properties.push(InlinePropertyNotice {
                     key: key.clone(),
                     line: property.line,
                 });
+            } else if !CLOSURE_OWNED_PROPERTIES.contains(&key.as_str()) {
+                harvested.insert(key.clone(), serialize_frontmatter_property(key, &property.value)?);
             }
         }
     }
-    let inserted_properties = plan
-        .response_frontmatter
-        .iter()
-        .filter(|key| harvested.contains_key(*key) && !original_fm.contains_key(*key))
+    let (refreshed_properties, inserted_properties): (Vec<String>, Vec<String>) = harvested
+        .keys()
         .cloned()
-        .collect::<Vec<_>>();
-    let refreshed_properties = plan
-        .response_frontmatter
-        .iter()
-        .filter(|key| harvested.contains_key(*key) && original_fm.contains_key(*key))
-        .cloned()
-        .collect::<Vec<_>>();
-    let missing_properties = plan
-        .response_frontmatter
-        .iter()
-        .filter(|key| !harvested.contains_key(*key))
-        .cloned()
-        .collect::<Vec<_>>();
+        .partition(|key| original_fm.contains_key(key));
 
     let doc_string = rewrite_inline_document(
         &plan.original_document_text,
         replacement_body,
         &harvested,
-        &plan.response_frontmatter,
     )
     .map_err(CompositionError::InlineRewriteFailed)?;
 
@@ -245,7 +229,6 @@ pub fn apply_inline_closure(
         inserted_properties,
         refreshed_properties,
         ignored_properties,
-        missing_properties,
         restored_frontmatter_properties: source_drift.restored_frontmatter_properties,
         unclassified_frontmatter_drift_restored: source_drift
             .unclassified_frontmatter_drift_restored,
@@ -257,6 +240,10 @@ pub fn apply_inline_closure(
 
 /// Reconstruct a Markdown document from authored frontmatter and a new body.
 ///
+/// `harvested` maps a top-level key to its serialized YAML node. A key that
+/// already exists is replaced in place; new keys are inserted in map order
+/// immediately before `last_updated` (or appended when it is absent).
+///
 /// ## Errors
 ///
 /// The typed [`MarkdownError`] is retained for API compatibility with the
@@ -267,11 +254,10 @@ pub fn rewrite_inline_document(
     frontmatter_source: &str,
     body: &str,
     harvested: &IndexMap<String, String>,
-    declaration_order: &[String],
 ) -> Result<String, darkmatter::markdown::MarkdownError> {
     if let Some(parts) = split_frontmatter_parts(frontmatter_source) {
         let newline = detect_newline(frontmatter_source);
-        let yaml = rewrite_harvested_frontmatter(parts.yaml, harvested, declaration_order, newline);
+        let yaml = rewrite_harvested_frontmatter(parts.yaml, harvested, newline);
         let mut document = String::with_capacity(
             parts.opening.len() + yaml.len() + parts.closing.len() + body.len(),
         );
@@ -387,7 +373,6 @@ struct TopLevelNode {
 fn rewrite_harvested_frontmatter(
     yaml: &str,
     harvested: &IndexMap<String, String>,
-    declaration_order: &[String],
     newline: &str,
 ) -> String {
     let nodes = top_level_nodes(yaml);
@@ -409,11 +394,10 @@ fn rewrite_harvested_frontmatter(
         .iter()
         .find(|node| node.key == "last_updated")
         .map_or(yaml.len(), |node| node.start);
-    let inserted = declaration_order
+    let inserted = harvested
         .iter()
-        .filter(|key| !existing.contains(key.as_str()))
-        .filter_map(|key| harvested.get(key))
-        .map(|fragment| with_newline_style(fragment, newline))
+        .filter(|(key, _)| !existing.contains(key.as_str()))
+        .map(|(_, fragment)| with_newline_style(fragment, newline))
         .collect::<String>();
     if !inserted.is_empty() {
         edits.push((insertion, insertion, inserted));
