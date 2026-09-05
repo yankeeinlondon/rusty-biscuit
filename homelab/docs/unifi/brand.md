@@ -1,4 +1,6 @@
 ---
+$schema:
+    prompt: string -> The prompt which will generate the research
 prompt: |-
   Ubiquiti the company and even more specifically [Unifi](https://ui.com) the brand are a growing force in the "prosumer" networking space that continues to gather momentum.
 
