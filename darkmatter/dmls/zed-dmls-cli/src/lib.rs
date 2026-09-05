@@ -179,10 +179,16 @@ fn discover_directory_roots(
     })
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum StageStatus {
+    /// Zed's registration already resolved to the stable copy; nothing changed.
+    AlreadyRegistered,
+    /// The registration link was created or repointed; Zed loads it on its
+    /// next extension reload or restart.
     Registered,
-    ManualRegistrationRequired,
+    /// Staging succeeded but the registration could not be made automatically;
+    /// the reason says why and the user must register the stable copy in Zed.
+    ManualRegistrationRequired(String),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,6 +237,12 @@ fn stage_extension_inner(
         for file in ["extension.toml", "Cargo.toml", "Cargo.lock", "README.md"] {
             copy_regular_file(&source.join(file), &temporary.join(file))?;
         }
+        // The compiled module is checked in. Without it Zed can only use the
+        // stage after compiling it through its own install action.
+        let wasm = source.join("extension.wasm");
+        if wasm.exists() {
+            copy_regular_file(&wasm, &temporary.join("extension.wasm"))?;
+        }
         copy_directory(&source.join("src"), &temporary.join("src"))?;
 
         let had_previous = paths.staging_dir.exists();
@@ -266,15 +278,114 @@ fn stage_extension_inner(
     }
     result?;
 
-    let registration = paths.zed_data_dir.join("extensions").join("installed").join("dmls");
-    let status = match (fs::canonicalize(&registration), fs::canonicalize(&paths.staging_dir)) {
-        (Ok(registered), Ok(staged)) if registered == staged => StageStatus::Registered,
-        _ => StageStatus::ManualRegistrationRequired,
-    };
+    let status = ensure_registration(paths);
     Ok(StageReport {
         staging_dir: paths.staging_dir.clone(),
         status,
     })
+}
+
+pub fn registration_path(paths: &UserPaths) -> PathBuf {
+    paths.zed_data_dir.join("extensions").join("installed").join("dmls")
+}
+
+/// Make Zed's dev-extension registration point at the stable copy.
+///
+/// Zed records a dev extension as a link named after the extension id inside
+/// `extensions/installed`, so creating or repointing that link is the same
+/// registration its install action performs, minus the compile step the
+/// bundled `extension.wasm` makes unnecessary. A registration that is a real
+/// directory is not ours and is left untouched.
+fn ensure_registration(paths: &UserPaths) -> StageStatus {
+    if !paths.zed_data_dir.exists() {
+        return StageStatus::ManualRegistrationRequired(format!(
+            "Zed data directory `{}` does not exist",
+            paths.zed_data_dir.display()
+        ));
+    }
+    let registration = registration_path(paths);
+    let staged = match fs::canonicalize(&paths.staging_dir) {
+        Ok(path) => path,
+        Err(error) => {
+            return StageStatus::ManualRegistrationRequired(format!(
+                "cannot resolve the stable copy: {error}"
+            ));
+        }
+    };
+    match fs::symlink_metadata(&registration) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            if fs::canonicalize(&registration).is_ok_and(|current| current == staged) {
+                return StageStatus::AlreadyRegistered;
+            }
+            if let Err(error) = remove_registration_link(&registration) {
+                return StageStatus::ManualRegistrationRequired(format!(
+                    "cannot replace the existing registration link `{}`: {error}",
+                    registration.display()
+                ));
+            }
+        }
+        Ok(_) => {
+            return StageStatus::ManualRegistrationRequired(format!(
+                "`{}` is not a link, so it was left alone",
+                registration.display()
+            ));
+        }
+        Err(_) => {
+            if let Some(parent) = registration.parent()
+                && let Err(error) = fs::create_dir_all(parent)
+            {
+                return StageStatus::ManualRegistrationRequired(format!(
+                    "cannot create `{}`: {error}",
+                    parent.display()
+                ));
+            }
+        }
+    }
+    match create_registration_link(&staged, &registration) {
+        Ok(()) => StageStatus::Registered,
+        Err(error) => StageStatus::ManualRegistrationRequired(format!(
+            "cannot link `{}` to the stable copy: {error}",
+            registration.display()
+        )),
+    }
+}
+
+#[cfg(unix)]
+fn create_registration_link(target: &Path, link: &Path) -> std::io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(unix)]
+fn remove_registration_link(link: &Path) -> std::io::Result<()> {
+    fs::remove_file(link)
+}
+
+/// A directory symlink needs Developer Mode or elevation on Windows; a
+/// junction does not, and Zed resolves either.
+#[cfg(windows)]
+fn create_registration_link(target: &Path, link: &Path) -> std::io::Result<()> {
+    let symlink_error = match std::os::windows::fs::symlink_dir(target, link) {
+        Ok(()) => return Ok(()),
+        Err(error) => error,
+    };
+    // `cmd` reads a `/` inside a path as a switch, so hand it native spellings.
+    let native = |path: &Path| path.components().collect::<PathBuf>();
+    let output = Command::new("cmd")
+        .args(["/C", "mklink", "/J"])
+        .arg(native(link))
+        .arg(native(target))
+        .stdin(Stdio::null())
+        .output()?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(symlink_error)
+    }
+}
+
+#[cfg(windows)]
+fn remove_registration_link(link: &Path) -> std::io::Result<()> {
+    fs::remove_dir(link)
 }
 
 fn copy_regular_file(source: &Path, destination: &Path) -> Result<(), CliError> {
@@ -472,7 +583,7 @@ fn check_registration(paths: &UserPaths, report: &mut DoctorReport) -> bool {
         failure(
             report,
             format!(
-                "{detail} at `{}`; run `just install-zed` and select the printed stable folder",
+                "{detail} at `{}`; run `just install-dmls`",
                 paths.zed_data_dir.display()
             ),
         );
@@ -503,7 +614,7 @@ fn check_registration_target(
             failure(
                 report,
                 format!(
-                    "dev extension points at `{}`, which no longer exists (worktree removed?); run `just install-zed`",
+                    "dev extension points at `{}`, which no longer exists (worktree removed?); run `just install-dmls`",
                     target.display()
                 ),
             );
@@ -515,7 +626,7 @@ fn check_registration_target(
         failure(
             report,
             format!(
-                "selected target `{}` is not the DMLS Zed extension: {error}; run `just install-zed`",
+                "selected target `{}` is not the DMLS Zed extension: {error}; run `just install-dmls`",
                 resolved.display()
             ),
         );
@@ -528,7 +639,13 @@ fn check_registration_target(
     true
 }
 
+/// The Zed log only corroborates a broken registration. A healthy registration
+/// makes any earlier log line irrelevant, and lines about other extensions
+/// never were.
 fn check_log(paths: &UserPaths, registration_healthy: bool, report: &mut DoctorReport) {
+    if registration_healthy {
+        return;
+    }
     let Ok(tail) = read_log_tail(&paths.zed_log) else {
         report.lines.push(ReportLine {
             level: ReportLevel::Info,
@@ -536,25 +653,18 @@ fn check_log(paths: &UserPaths, registration_healthy: bool, report: &mut DoctorR
         });
         return;
     };
-    let Some(id) = newest_manifest_error_id(&tail) else {
+    let Some(id) = newest_dmls_manifest_error_id(&tail) else {
         return;
     };
     let meaning = if id == EXPECTED_EXTENSION_ID {
-        "a prior DMLS registration was broken"
+        "Zed could not load the registered DMLS extension"
     } else {
-        "the wrong folder was selected during a dev-extension install"
+        "the sibling `vscode-dmls` folder was selected during a dev-extension install"
     };
-    let text = format!(
-        "Zed log reports `No extension manifest found for extension {id}`: {meaning}"
+    failure(
+        report,
+        format!("Zed log reports `No extension manifest found for extension {id}`: {meaning}"),
     );
-    if registration_healthy {
-        report.lines.push(ReportLine {
-            level: ReportLevel::Warning,
-            text: format!("historical context: {text}; the current registration is healthy"),
-        });
-    } else {
-        failure(report, text);
-    }
 }
 
 fn read_log_tail(path: &Path) -> Result<String, std::io::Error> {
@@ -570,15 +680,16 @@ fn read_log_tail(path: &Path) -> Result<String, std::io::Error> {
     Ok(String::from_utf8_lossy(&tail).into_owned())
 }
 
-fn newest_manifest_error_id(tail: &str) -> Option<String> {
+fn newest_dmls_manifest_error_id(tail: &str) -> Option<String> {
     const PREFIX: &str = "No extension manifest found for extension ";
+    const RELEVANT: [&str; 2] = [EXPECTED_EXTENSION_ID, "vscode-dmls"];
     tail.lines().rev().find_map(|line| {
         let rest = line.split_once(PREFIX)?.1.trim();
         let id = rest
             .trim_matches(|character: char| character == '`' || character == '"')
             .split(|character: char| character.is_whitespace() || character == '`' || character == '"')
             .next()?;
-        (!id.is_empty()).then(|| id.to_string())
+        RELEVANT.contains(&id).then(|| id.to_string())
     })
 }
 
@@ -743,14 +854,21 @@ mod tests {
     fn staging_is_allowlisted_repeatable_and_removes_stale_files() {
         let temp = TempDir::new().unwrap();
         let source = source(temp.path());
-        fs::write(source.join("extension.wasm"), "excluded").unwrap();
+        fs::write(source.join("extension.wasm"), "bundled module").unwrap();
         fs::create_dir(source.join("target")).unwrap();
         fs::write(source.join("target/output"), "excluded").unwrap();
         fs::write(source.join("unrecognized"), "excluded").unwrap();
         let paths = paths(temp.path());
         let first = stage_extension(&source, &paths).unwrap();
-        assert_eq!(first.status, StageStatus::ManualRegistrationRequired);
-        assert!(!paths.staging_dir.join("extension.wasm").exists());
+        assert!(
+            matches!(first.status, StageStatus::ManualRegistrationRequired(ref reason) if reason.contains("does not exist")),
+            "{:?}",
+            first.status
+        );
+        assert_eq!(
+            fs::read_to_string(paths.staging_dir.join("extension.wasm")).unwrap(),
+            "bundled module"
+        );
         assert!(!paths.staging_dir.join("target").exists());
         assert!(!paths.staging_dir.join("unrecognized").exists());
 
@@ -766,19 +884,73 @@ mod tests {
         assert_eq!(siblings, vec!["zed-dmls"]);
     }
 
+    #[test]
+    fn staging_registers_the_stable_copy_when_zed_is_present() {
+        let temp = TempDir::new().unwrap();
+        let source = source(temp.path());
+        let paths = paths(temp.path());
+        fs::create_dir_all(&paths.zed_data_dir).unwrap();
+
+        let report = stage_extension(&source, &paths).unwrap();
+        assert_eq!(report.status, StageStatus::Registered);
+        let registration = registration_path(&paths);
+        assert!(fs::symlink_metadata(&registration).unwrap().file_type().is_symlink());
+        assert_eq!(
+            fs::canonicalize(&registration).unwrap(),
+            fs::canonicalize(&paths.staging_dir).unwrap()
+        );
+
+        let report = stage_extension(&source, &paths).unwrap();
+        assert_eq!(report.status, StageStatus::AlreadyRegistered);
+    }
+
     #[cfg(unix)]
     #[test]
-    fn linked_registration_survives_source_worktree_removal_on_unix() {
+    fn staging_repairs_a_dangling_registration() {
         use std::os::unix::fs::symlink;
 
         let temp = TempDir::new().unwrap();
+        let source = source(temp.path());
+        let paths = paths(temp.path());
+        let registration = registration_path(&paths);
+        fs::create_dir_all(registration.parent().unwrap()).unwrap();
+        symlink(temp.path().join("removed-worktree/zed-dmls"), &registration).unwrap();
+
+        let report = stage_extension(&source, &paths).unwrap();
+        assert_eq!(report.status, StageStatus::Registered);
+        assert_eq!(
+            fs::canonicalize(&registration).unwrap(),
+            fs::canonicalize(&paths.staging_dir).unwrap()
+        );
+    }
+
+    #[test]
+    fn staging_leaves_a_real_directory_registration_alone() {
+        let temp = TempDir::new().unwrap();
+        let source = source(temp.path());
+        let paths = paths(temp.path());
+        let registration = registration_path(&paths);
+        fs::create_dir_all(&registration).unwrap();
+        fs::write(registration.join("sentinel"), "theirs").unwrap();
+
+        let report = stage_extension(&source, &paths).unwrap();
+        assert!(
+            matches!(report.status, StageStatus::ManualRegistrationRequired(ref reason) if reason.contains("not a link")),
+            "{:?}",
+            report.status
+        );
+        assert_eq!(fs::read_to_string(registration.join("sentinel")).unwrap(), "theirs");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn linked_registration_survives_source_worktree_removal_on_unix() {
+        let temp = TempDir::new().unwrap();
         let source_worktree = source(temp.path());
         let paths = paths(temp.path());
-        let registration = paths.zed_data_dir.join("extensions/installed/dmls");
+        let registration = registration_path(&paths);
         fs::create_dir_all(registration.parent().unwrap()).unwrap();
 
-        stage_extension(&source_worktree, &paths).unwrap();
-        symlink(&paths.staging_dir, &registration).unwrap();
         let report = stage_extension(&source_worktree, &paths).unwrap();
         assert_eq!(report.status, StageStatus::Registered);
 
@@ -815,23 +987,13 @@ mod tests {
         let temp = TempDir::new().unwrap();
         let source_worktree = source(temp.path());
         let paths = paths(temp.path());
-        let registration = paths.zed_data_dir.join("extensions/installed/dmls");
+        let registration = registration_path(&paths);
         fs::create_dir_all(registration.parent().unwrap()).unwrap();
 
-        stage_extension(&source_worktree, &paths).unwrap();
-        let output = Command::new("cmd")
-            .args(["/C", "mklink", "/J"])
-            .arg(&registration)
-            .arg(&paths.staging_dir)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "mklink /J failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
         let report = stage_extension(&source_worktree, &paths).unwrap();
         assert_eq!(report.status, StageStatus::Registered);
+        let report = stage_extension(&source_worktree, &paths).unwrap();
+        assert_eq!(report.status, StageStatus::AlreadyRegistered);
 
         fs::remove_dir_all(&source_worktree).unwrap();
 
@@ -893,7 +1055,7 @@ mod tests {
         let output = render_lines(&report.lines, true);
         assert!(output.contains("dmls binary missing from PATH"));
         assert!(output.contains("Zed data directory is absent; dev extension not installed"));
-        assert!(output.contains("run `just install-zed`"));
+        assert!(output.contains("run `just install-dmls`"));
     }
 
     #[test]
@@ -937,7 +1099,7 @@ mod tests {
         let missing = doctor(&paths, &probe);
         let output = render_lines(&missing.lines, true);
         assert!(output.contains("is not the DMLS Zed extension"));
-        assert!(output.contains("wrong folder was selected"));
+        assert!(output.contains("`vscode-dmls` folder was selected"));
 
         fs::write(registration.join("extension.toml"), "id = \"vscode-dmls\"\n").unwrap();
         let wrong = doctor(&paths, &probe);
@@ -945,7 +1107,7 @@ mod tests {
     }
 
     #[test]
-    fn healthy_registration_keeps_old_log_error_historical() {
+    fn healthy_registration_says_nothing_about_the_log() {
         let temp = TempDir::new().unwrap();
         let paths = paths(temp.path());
         let registration = paths.zed_data_dir.join("extensions/installed/dmls");
@@ -967,7 +1129,30 @@ mod tests {
         let output = render_lines(&report.lines, true);
         assert!(output.contains("version-compatible"));
         assert!(output.contains("freshness is unverified"));
-        assert!(output.contains("historical context"));
+        assert!(!output.contains("Zed log"), "{output}");
+    }
+
+    #[test]
+    fn broken_registration_ignores_log_errors_about_other_extensions() {
+        let temp = TempDir::new().unwrap();
+        let paths = paths(temp.path());
+        fs::create_dir_all(paths.zed_data_dir.join("extensions/installed/dmls")).unwrap();
+        fs::write(
+            &paths.zed_log,
+            "No extension manifest found for extension ini\n",
+        )
+        .unwrap();
+        let report = doctor(
+            &paths,
+            &FakeProbe {
+                path: Some(PathBuf::from("/bin/dmls")),
+                version: Ok(format!("dmls {EXPECTED_DMLS_VERSION}")),
+            },
+        );
+        assert!(!report.healthy);
+        let output = render_lines(&report.lines, true);
+        assert!(output.contains("is not the DMLS Zed extension"));
+        assert!(!output.contains("Zed log"), "{output}");
     }
 
     #[test]
@@ -1024,6 +1209,6 @@ mod tests {
 
         let tail = read_log_tail(&log).unwrap();
 
-        assert_eq!(newest_manifest_error_id(&tail).as_deref(), Some("dmls"));
+        assert_eq!(newest_dmls_manifest_error_id(&tail).as_deref(), Some("dmls"));
     }
 }

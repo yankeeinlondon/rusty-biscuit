@@ -90,16 +90,18 @@ surface a richer theme can address individually.
 ## Develop
 
 ```
-# from darkmatter/: stage outside the checkout and diagnose the launch path
-just install-zed
+# from darkmatter/: install the binary, stage outside the checkout, register with Zed
+just install-dmls
 just zed-doctor
 ```
 
-For the one-time registration, use **Zed: install dev extension** and select
-the stable directory printed by `just install-zed`, not this worktree directory
-and not the sibling `vscode-dmls` directory. Subsequent `just install-zed` runs
-refresh the staged copy without mutating Zed's registration. Exit status `3`
-means the copy is ready but still needs that one-time manual registration.
+After installing the binary, `install-dmls` stages this directory when Zed's
+data directory exists. Staging copies it (including the bundled `extension.wasm`)
+to a stable per-user location and points Zed's `extensions/installed/dmls`
+link at it, repairing a dangling link from a removed worktree. Exit status `3`
+means the link could not be made automatically; the output names the stable
+directory to select via **Zed: install dev extension** — never this worktree
+directory or the sibling `vscode-dmls` directory.
 Preview or custom installations can invoke `zed-dmls stage` and
 `zed-dmls doctor` with `--staging-dir`, `--zed-data-dir`, and `--zed-log`
 overrides; `--plain` provides stable automation output.
@@ -113,10 +115,10 @@ manifest, and recent Zed log evidence without launching Zed.
   existing dev-extension registration points to a removed path.
 - `Failed to install dev extension: No extension manifest found for extension
   vscode-dmls` during installation means the sibling VS Code extension was
-  selected instead of the stable directory printed by `just install-zed`.
+  selected instead of the stable directory printed by `just install-dmls`.
 
-An older log error is historical context and does not make a currently valid
-registration fail.
+The Zed log is consulted only when the registration is broken, and only for
+lines about `dmls` or `vscode-dmls`.
 
 Update `REPO` in `src/lib.rs` and the asset-name mapping to match the repository
 that publishes `dmls` release archives before shipping.

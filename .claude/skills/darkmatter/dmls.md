@@ -78,5 +78,8 @@ Darkmatter library, so editor tests are not the only proof of grammar behavior.
   requires that target to have been provisioned explicitly.
 - `just zed-verify` adds Zed's pinned official packager and artifact contract;
   CI runs this as an Ubuntu companion gate, not as L2.
+- `just install-dmls` installs the binary and, when Zed's data directory
+  exists, stages the extension (with the bundled `extension.wasm`) to a stable
+  per-user directory and creates or repairs Zed's `installed/dmls` link.
 - `just zed-doctor` diagnoses the host's native binary, stable dev-extension
   registration, manifest, and recent Zed log evidence without launching Zed.

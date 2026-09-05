@@ -5,7 +5,7 @@ use clap::{Parser, Subcommand};
 use color_eyre::eyre::Result;
 use zed_dmls_cli::{
     HostDiscovery, PathOverrides, ReportLevel, ReportLine, StageStatus, checked_in_extension_dir,
-    default_paths, doctor, render_lines, should_run_doctor, stage_extension,
+    default_paths, doctor, registration_path, render_lines, should_run_doctor, stage_extension,
 };
 
 #[derive(Debug, Parser)]
@@ -25,7 +25,10 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    Stage,
+    Stage {
+        #[arg(long, help = "Do nothing when no Zed data directory exists")]
+        if_zed_present: bool,
+    },
     Doctor {
         #[arg(long, help = "Skip diagnostics when no Zed data or DMLS registration exists")]
         if_zed_present: bool,
@@ -66,19 +69,41 @@ fn run(cli: Cli) -> Result<ExitCode> {
     let host = HostDiscovery::capture(&overrides)?;
     let paths = default_paths(host.os, &host.roots, &overrides)?;
     match cli.command {
-        Command::Stage => {
+        Command::Stage { if_zed_present } => {
+            if if_zed_present && !paths.zed_data_dir.exists() {
+                return Ok(ExitCode::SUCCESS);
+            }
             let report = stage_extension(&checked_in_extension_dir(), &paths)?;
             let mut lines = vec![ReportLine {
                 level: ReportLevel::Success,
                 text: format!("staged the DMLS Zed extension at `{}`", report.staging_dir.display()),
             }];
             let code = match report.status {
-                StageStatus::Registered => ExitCode::SUCCESS,
-                StageStatus::ManualRegistrationRequired => {
+                StageStatus::AlreadyRegistered => {
+                    lines.push(ReportLine {
+                        level: ReportLevel::Success,
+                        text: format!(
+                            "Zed's dev-extension registration `{}` already points at it",
+                            registration_path(&paths).display()
+                        ),
+                    });
+                    ExitCode::SUCCESS
+                }
+                StageStatus::Registered => {
+                    lines.push(ReportLine {
+                        level: ReportLevel::Success,
+                        text: format!(
+                            "registered it as Zed's `dmls` dev extension at `{}`; restart Zed if it is running",
+                            registration_path(&paths).display()
+                        ),
+                    });
+                    ExitCode::SUCCESS
+                }
+                StageStatus::ManualRegistrationRequired(reason) => {
                     lines.push(ReportLine {
                         level: ReportLevel::Warning,
                         text: format!(
-                            "manual registration required: in Zed run `zed: install dev extension` and select `{}`",
+                            "manual registration required ({reason}): in Zed run `zed: install dev extension` and select `{}`",
                             report.staging_dir.display()
                         ),
                     });

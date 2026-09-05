@@ -65,7 +65,55 @@ fn stage_returns_three_when_manual_registration_remains() {
         .assert()
         .code(3)
         .stdout(predicate::str::contains(staging.display().to_string()))
-        .stdout(predicate::str::contains("manual registration required"));
+        .stdout(predicate::str::contains("manual registration required"))
+        .stdout(predicate::str::contains("does not exist"));
     assert!(staging.join("extension.toml").exists());
-    assert!(!staging.join("extension.wasm").exists());
+    assert!(staging.join("extension.wasm").exists());
+}
+
+#[test]
+fn stage_registers_and_returns_zero_when_zed_is_present() {
+    let temp = TempDir::new().unwrap();
+    let staging = temp.path().join("stable/zed-dmls");
+    let zed = temp.path().join("zed");
+    std::fs::create_dir_all(&zed).unwrap();
+    Command::cargo_bin("zed-dmls")
+        .unwrap()
+        .args([
+            "stage",
+            "--plain",
+            "--staging-dir",
+            staging.to_str().unwrap(),
+            "--zed-data-dir",
+            zed.to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("registered it as Zed's `dmls` dev extension"));
+    let registration = zed.join("extensions/installed/dmls");
+    assert_eq!(
+        std::fs::canonicalize(&registration).unwrap(),
+        std::fs::canonicalize(&staging).unwrap()
+    );
+}
+
+#[test]
+fn conditional_stage_is_silent_when_zed_is_absent() {
+    let temp = TempDir::new().unwrap();
+    let staging = temp.path().join("stable/zed-dmls");
+    Command::cargo_bin("zed-dmls")
+        .unwrap()
+        .args([
+            "stage",
+            "--if-zed-present",
+            "--plain",
+            "--staging-dir",
+            staging.to_str().unwrap(),
+            "--zed-data-dir",
+            temp.path().join("missing-zed").to_str().unwrap(),
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::is_empty());
+    assert!(!staging.exists());
 }

@@ -121,30 +121,17 @@ lint:
     @just _lint {{ DMLS_ZED_CLI }}
     @just check-zed
 
-# installs the DMLS binary into binary path
+# Install the DMLS binary; when Zed is installed, also stage and register its dev extension
 install-dmls:
     #!/usr/bin/env bash
     set -euo pipefail
     cargo install --locked --path ./dmls --force
+    if ! cargo run --quiet -p {{ DMLS_ZED_CLI }} -- stage --if-zed-present; then
+        echo "warning: dmls was installed, but its Zed extension needs attention (see above)" >&2
+    fi
     if ! cargo run --quiet -p {{ DMLS_ZED_CLI }} -- doctor --if-zed-present; then
-        echo "warning: dmls was installed, but the detected Zed integration is unhealthy; run 'just zed-doctor'" >&2
+        echo "warning: dmls was installed, but the Zed integration is unhealthy; run 'just zed-doctor'" >&2
     fi
-
-# Stage the DMLS Zed extension outside the checkout, then diagnose registration.
-install-zed *args="":
-    #!/usr/bin/env bash
-    set -u
-    cargo run --quiet -p {{ DMLS_ZED_CLI }} -- stage {{ args }}
-    stage_status=$?
-    if (( stage_status != 0 && stage_status != 3 )); then
-        exit "$stage_status"
-    fi
-    cargo run --quiet -p {{ DMLS_ZED_CLI }} -- doctor {{ args }}
-    doctor_status=$?
-    if (( stage_status == 3 )); then
-        exit 3
-    fi
-    exit "$doctor_status"
 
 # Diagnose the installed DMLS binary and Zed dev-extension registration.
 zed-doctor *args="":

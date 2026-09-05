@@ -13,27 +13,26 @@ the packaging steps.
 
 ## Install as a dev extension
 
-1. Install the native binary with `just install-dmls`, then run
-   `just install-zed`. The latter copies the allowlisted extension source to a
-   stable per-user data directory outside the checkout and prints that
-   directory. It does not modify Zed's registration.
-2. The first run exits with status `3` until the extension is registered; this
-   means staging succeeded and manual registration remains. In Zed, open
-   **command palette → `zed: install dev extension`** and select the exact
-   stable directory printed by the command — the directory itself, containing
-   `extension.toml`. Do not select the sibling `vscode-dmls` directory or a
-   checkout/worktree directory.
-3. Run `just zed-doctor`, then open a Markdown file. Zed launches `dmls` for
-   it. Check the language-server status menu (bottom bar) — `dmls` should be
-   listed and green.
+1. Run `just install-dmls` from `darkmatter/`. It installs the native binary
+   and, when Zed's data directory exists on the host, stages the extension
+   (including the bundled `extension.wasm`) to a stable per-user directory
+   outside the checkout and points Zed's `extensions/installed/dmls` link at
+   it. A dangling link left behind by a removed worktree is repaired the same
+   way. The doctor then runs and reports the result.
+2. Restart Zed if it was running, then open a Markdown file. Zed launches
+   `dmls` for it. Check the language-server status menu (bottom bar) — `dmls`
+   should be listed and green.
 
-Zed compiles the extension itself (Rust → wasm32-wasip2) during install, and
-registers the dev extension to the directory you selected. Running
-`just install-zed` again atomically refreshes the stable copy without changing
-that registration, so removing a source worktree cannot break the installed
-extension. Use the rebuild action on the Extensions page (`zed: extensions`)
-after extension-source changes; restart the language server or Zed after a
-native `dmls` update.
+The recipe warns, without failing, when the registration could not be made
+automatically (no Zed data directory, or an `installed/dmls` entry that is a
+real directory rather than a link); the output then names the stable directory
+to select via **command palette → `zed: install dev extension`**. Never select
+the sibling `vscode-dmls` directory or a checkout/worktree directory.
+
+Re-running the recipe atomically refreshes the stable copy, so removing a
+source worktree cannot break the installed extension. After extension-source
+changes, rebuild the bundled `extension.wasm` and re-run the recipe; restart
+the language server or Zed after a native `dmls` update.
 
 ## Troubleshooting
 
@@ -45,10 +44,10 @@ manifest, and recent Zed log evidence. In particular:
 - `Failed to install dev extension: No extension manifest found for extension
   vscode-dmls` during installation means the sibling VS Code extension was
   selected. The extension id in this message comes from the selected folder;
-  select the stable directory printed by `just install-zed`.
+  select the stable directory printed by `just install-dmls`.
 
-An older log error is historical context and does not make a currently valid
-registration fail.
+The Zed log is consulted only when the registration is broken, and only for
+lines about `dmls` or `vscode-dmls`.
 
 Zed Preview and custom installations can supply `--staging-dir`,
 `--zed-data-dir`, and `--zed-log` directly to `zed-dmls stage` or

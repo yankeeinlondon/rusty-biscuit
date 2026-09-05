@@ -70,7 +70,7 @@ dmls --version
 | Editor | Install path |
 |--------|-------------|
 | VS Code | `just install-vscode-package` (packages + installs the shipped [`vscode-dmls/`](vscode-dmls/) extension) |
-| Zed | `just install-zed`, then register the printed stable directory once ([guide](docs/editors/zed.md)) |
+| Zed | `just install-dmls` stages and registers the dev extension when Zed is installed; restart Zed ([guide](docs/editors/zed.md)) |
 | Neovim | Built-in LSP config only ([guide](docs/editors/neovim.md)) |
 | Helix | `languages.toml` entry only ([guide](docs/editors/helix.md)) |
 
