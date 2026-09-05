@@ -2,7 +2,7 @@
 
 use predicates::prelude::*;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 
 fn md_cmd() -> assert_cmd::Command {
@@ -114,6 +114,16 @@ fn schema_validate_quiet_suppresses_success_lines() {
         .stdout(predicate::str::is_empty());
 }
 
+/// Advisories name the referenced file in its resolved spelling, which differs
+/// from the temp path a test wrote on Windows (8.3 `RUNNER~1` versus the long
+/// name) and macOS (`/var` versus `/private/var`).
+fn resolved_display(path: &Path) -> String {
+    biscuit_file::canonicalize_simplified(path)
+        .unwrap()
+        .display()
+        .to_string()
+}
+
 #[test]
 fn schema_validate_pretty_reports_bare_sidecar_advisory_without_failing() {
     let tmp = TempDir::new().unwrap();
@@ -137,7 +147,7 @@ fn schema_validate_pretty_reports_bare_sidecar_advisory_without_failing() {
         .stdout(predicate::str::contains(
             "dm.schema.missing_simplified_envelope",
         ))
-        .stdout(predicate::str::contains(sidecar.display().to_string()))
+        .stdout(predicate::str::contains(resolved_display(&sidecar)))
         .stdout(predicate::str::contains(
             "looks like a SimplifiedSchema but has no envelope",
         ))
@@ -178,13 +188,7 @@ fn schema_validate_json_reports_structured_bare_sidecar_advisory() {
         warning["code"],
         "dm.schema.missing_simplified_envelope"
     );
-    assert_eq!(
-        warning["path"],
-        std::fs::canonicalize(&sidecar)
-            .unwrap()
-            .display()
-            .to_string()
-    );
+    assert_eq!(warning["path"], resolved_display(&sidecar));
     assert!(
         warning["message"]
             .as_str()
