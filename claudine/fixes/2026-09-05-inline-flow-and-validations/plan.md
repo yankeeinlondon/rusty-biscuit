@@ -1056,23 +1056,144 @@ and ready for review without committing.
 - [x] From `darkmatter/`, run `just build`, `just test`, and `just lint`; ensure
   the included DMLS suites and shipped-artifact corpus pass.
 - [x] From `claudine/`, run `just build`, `just test`, and `just lint`.
-- [ ] Run `just test-l2` from `claudine/` for provider-stub/terminal-harness
+- [x] Run `just test-l2` from `claudine/` for provider-stub/terminal-harness
   coverage, ensuring no terminal or browser window gains focus.
-- [ ] From the repository root, run `just ci-local` before push; record any
+- [x] From the repository root, run `just ci-local` before push; record any
   platform coverage that remains construction-only because the host is macOS.
-- [ ] Run GitNexus `detect_changes(scope: "all", worktree: <this worktree>)` and
+- [x] Run GitNexus `detect_changes(scope: "all", worktree: <this worktree>)` and
   verify changed symbols/flows match schema, DMLS, composition, launch, stream,
   and documentation scope; investigate any unexpected module.
-- [ ] Review `git diff --check` and `git status --short`, confirming no unrelated
+- [x] Review `git diff --check` and `git status --short`, confirming no unrelated
   user edits were overwritten, no generated/provider data was hand-edited, and
   no `cargo fmt` or commit was performed.
-- [ ] Report the completed AC1–AC19 matrix, exact commands/results, known
+- [x] Report the completed AC1–AC19 matrix, exact commands/results, known
   macOS-only execution limits, and any follow-up that requires native Windows
   or Linux execution.
 
 ### Validation checkpoint
 
-- [ ] All package and repository gates pass, all AC1–AC19 rows are evidenced,
+- [x] All package and repository gates pass, all AC1–AC19 rows are evidenced,
   GitNexus reports only expected affected scope, and the worktree contains only
   intentional implementation/documentation changes plus the user's preserved
   pre-existing edits.
+
+### Phase 8 evidence
+
+Phase 8 changed no implementation code. It ran the gates, re-executed the
+AC1–AC19 matrix as named tests rather than re-citing Phase 7's table, and
+recorded the residual platform limits.
+
+#### Gate results
+
+| Gate | Command | Result |
+|---|---|---|
+| Darkmatter build | `just build` (in `darkmatter/`) | pass — includes the `zed-dmls-cli` leg |
+| Darkmatter L1 | `just test` (in `darkmatter/`) | 7,689 passed, 51 skipped, 0 failed |
+| Darkmatter lint | `just lint` (in `darkmatter/`) | clean, including the `wasm32-wasip2` Zed extension check |
+| Claudine build | `just build` (in `claudine/`) | pass — CLI and catalog generator |
+| Claudine L1 | `just test` (in `claudine/`) | 6,805 passed, 11 skipped, 0 failed |
+| Claudine lint | `just lint` (in `claudine/`) | clean across lib, contract, CLI, gen |
+| Claudine L2 | `just test-l2` (in `claudine/`) | 235/236 `claudine-cli`, plus 3/3 `claudine-gen`; one host-blocked red, below |
+| Repository CI gates | `just ci-local claudine darkmatter` | 25/25 gates green in 10m 46s |
+
+`just ci-local` was scoped with explicit selectors. Unscoped, it resolves
+`class=full, full_scope=true` and 73 packages, because this branch carries 187
+commits and workspace-wide file changes unrelated to this fix. The selectors
+cover every package this fix touches — `claudine`, `claudine-catalog-types`,
+`claudine-cli`, `claudine-contract`, `claudine-gen`, `darkmatter`,
+`darkmatter-cli`, `dmls`, `rendezvous-{client,core,daemon}`, `zed-dmls-cli` —
+each under CI's own gate definitions, which are stricter than the package `just
+lint`: CI clippy is `--all-targets` with **no** features, and the test legs
+enable `daemon-tests`/`terminal-tests` (claudine-cli) and
+`terminal-tests,browser-tests` (darkmatter). The remaining 60 packages are
+outside this fix's blast radius and were left to CI.
+
+#### The one L2 red is host-blocked, not a regression
+
+`level2_typed_error_render_capture::level2_initialize_proxy_block_auto_detects_osc8_in_wezterm`
+fails identically to Phase 6. The captured pane shows the spawned WezTerm login
+shell sitting on Atuin's interactive `Atuin AI is not yet configured` dialog;
+the `claudine compose` command on the next line never executes, so the
+`claudine_rc:<code>` marker never appears and no Claudine code runs at all. The
+failure is upstream of anything this fix touches. No terminal or browser window
+took focus during the L2 run (`BISCUIT_L3_TAKE_FOCUS` unset, L3 not run).
+
+#### AC1–AC19 re-executed as named tests
+
+Rather than re-assert Phase 7's mapping, every AC row was re-run by filterset
+and each named test observed passing:
+
+- Darkmatter/DMLS (`BISCUIT_TEST_FILTER` over `schema_phase_validation`,
+  `lsp_session`, `inline_document_text`, `meta_schema_phase3`,
+  `markdown::hash::write`) — **140 passed, 0 failed**. Covers AC1, AC2, AC12,
+  AC15, AC16, and the passive shipped corpus
+  (`shipped_schema_and_trigger_corpus_parses_passively`,
+  `real_shipped_inline_schema_uses_normal_resolution_and_phase_path`,
+  `shipped_dialect_document_corpus_is_passively_readable`).
+- Claudine library (`composition::{completion,closure,prepare}`,
+  `write_grant`, `final_response_contract`, `schema_interactive`) — **160
+  passed, 0 failed**. Covers AC4, AC6, AC7, AC10, AC11, AC13, AC14, AC19.
+- Claudine CLI integration (`inline_completion_lifecycle`,
+  `wrap_inline_compose`, `inline_compose_hash`, `inline_compose_cli`,
+  `compose_schema_cli`, `shipped_prompt_contract`, `sequence_schema`,
+  `loop_cli`, `error_guards`) — **127 passed, 0 failed**. Covers AC3, AC5,
+  AC8, AC9, AC9a, AC9b, AC17, AC18, and the end-to-end shipped-artifact route
+  (`shipped_implement_plan_launches_without_a_sibling_spec`,
+  `shipped_prompts_never_declare_eager_without_required`).
+
+#### Scope verification
+
+`detect_changes(scope: "all", worktree: …)` over the uncommitted tree reports
+9 changed symbols across 10 files, `risk_level: low`, zero affected processes —
+the plan document plus the one renamed hash-write fixture. Because Phases 1–7
+were committed by a separate process, scope was also verified against the
+pre-implementation commit (`compare` from `8f02d3e83`): 645 symbols across 120
+files, and every file falls inside the declared blast radius — Claudine
+`composition/`, `wrap/`, `stream/providers/opencode`, `diagnostics/registry`;
+Darkmatter `markdown/schemas/`, `markdown/hash/`, `markdown/compose/`; DMLS
+`diagnostics/frontmatter` and `providers/frontmatter`; plus docs. No unexpected
+module appeared. Affected processes are confined to
+`Construct_argv_and_system_prompt`, `Run_compose_pipeline`, and
+`Classify_options`, which are the composition and launch flows this fix targets.
+
+#### Worktree hygiene
+
+`git diff --check` is clean and nothing is staged. No `cargo fmt` was run and
+no commit was made by this phase. No generated provider data was hand-edited:
+no `lib/src/provider/*/data.rs` file is in the diff, and
+`claudine/docs/providers/dispatch-inventory.json` was regenerated in Phase 6 via
+`CLAUDINE_UPDATE_INVENTORY=1`, not edited.
+
+While this phase ran, the separate committing process took the Phase 7
+leftovers (`fbdc8b30f`…`facef6c06`: the Claudine/Darkmatter skill files, the
+`response_frontmatter` → `reviewers` fixture rename in `hash/write.rs`, the
+plan snapshot, and its own memory notes). None of this phase's edits were lost;
+the only remaining uncommitted file is this plan.
+
+The user's `spec.md` is untouched. `homelab/docs/unifi/products/voip.md` — the
+real-world document that motivated the fix — retains its authored `prompt:` and
+body; only its `$schema` block was reconciled with the ratified phase
+vocabulary (`last_updated: date(required)`, `products: object[](required)`) in
+Phase 7's shipped-artifact pass.
+
+#### Platform coverage that remains construction-only
+
+The host is macOS, so Windows and Linux behavior is proven by construction and
+by CI, not by native execution here:
+
+- **Launch-plan and write-grant path shapes (AC5, AC19).** The
+  `write_grant::tests` table drives every provider across POSIX, Windows
+  drive-letter, and Windows verbatim (`\\?\`) spellings, including
+  `windows_verbatim_documents_are_granted_with_the_legacy_spelling`. These are
+  pure path-algebra tests and run identically on all three OSes, but no real
+  provider was spawned under a Windows sandbox on this host.
+- **Ctrl+C / exit 130 rollback (AC8).** `a_provider_exit_130_restores_the_
+  captured_baseline` exercises the rollback seam via the stub's exit code. The
+  Unix signal path is real here; native Windows Ctrl+C remains unimplemented in
+  Claudine generally, which predates this fix.
+- **L3 keyboard injection** was not run, per the tier's focus-stealing rule.
+
+CI covers Ubuntu, WSL2, and native Windows for the L1 and lint legs proved
+green locally. If native evidence is wanted beyond CI for the path-shape and
+process-spawn surfaces, `just cross-check claudine --host windows
+write_grant launch_plan` is the targeted follow-up.
