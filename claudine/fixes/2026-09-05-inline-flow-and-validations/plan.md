@@ -1,7 +1,7 @@
 ---
 total_phases: 8
 created: 2026-09-05
-phase: 6
+phase: 7
 agent: codex/default
 yolo: "true"
 source_files_during_phase_1: []
@@ -160,6 +160,159 @@ docs_updated_during_phase_6:
 docs_created_during_phase_6: []
 skills_files_updated_during_phase_6:
   - .claude/skills/claudine/composition.md
+source_files_during_phase_7:
+  - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+  - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+  - claudine/cli/tests/inline_completion_lifecycle.rs
+  - claudine/cli/tests/shipped_prompt_contract.rs
+  - darkmatter/lib/src/markdown/hash/write.rs
+  - darkmatter/lib/tests/schema_phase_validation.rs
+docs_updated_during_phase_7:
+  - claudine/cli/README.md
+  - claudine/docs/topics/composition.md
+  - claudine/docs/topics/execution-flow.md
+  - claudine/docs/topics/flow-control/sequences.md
+  - claudine/docs/topics/frontmatter-properties.md
+  - claudine/docs/topics/lifecycle.md
+  - claudine/fixes/2026-09-05-inline-flow-and-validations/plan.md
+  - darkmatter/docs/inline/schema-validation.md
+  - darkmatter/docs/topics/schema-definition.md
+  - prompts/_implement/implement-plan.md
+  - prompts/_reviews/review-implementation.md
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/claudine/architecture.md
+  - .claude/skills/claudine/cli-reference.md
+  - .claude/skills/claudine/composition.md
+  - .claude/skills/claudine/lifecycle.md
+  - .claude/skills/claudine/timeline.md
+  - .claude/skills/darkmatter/frontmatter.md
+  - .claude/skills/darkmatter/schema.md
+source_files_during_phase_8: []
+docs_updated_during_phase_8:
+  - claudine/fixes/2026-09-05-inline-flow-and-validations/plan.md
+docs_created_during_phase_8: []
+skills_files_updated_during_phase_8: []
+source_code:
+  - claudine/cli/src/commands/compose/mod.rs
+  - claudine/cli/src/commands/compose/prep.rs
+  - claudine/cli/src/commands/schema_interactive/mod.rs
+  - claudine/cli/src/commands/schema_interactive/status.rs
+  - claudine/cli/src/commands/schema_interactive/tests.rs
+  - claudine/cli/src/commands/wrap/composition/pipeline.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/active_state_wiring.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/mod.rs
+  - claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/requeue.rs
+  - claudine/cli/src/commands/wrap/harness_orch/prompt.rs
+  - claudine/cli/src/commands/wrap/harness_orch/session_key.rs
+  - claudine/cli/src/commands/wrap/harness_orch/session_key/tests.rs
+  - claudine/cli/src/commands/wrap/harness_orch/types.rs
+  - claudine/cli/src/commands/wrap/inline.rs
+  - claudine/cli/src/commands/wrap/launch_plan.rs
+  - claudine/cli/src/commands/wrap/launch_plan/tests.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/event_sink.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/mod.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/tests/final_response_contract.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/tests/golden_stderr.rs
+  - claudine/cli/src/commands/wrap/live_semantic_sink/tests/sections_and_output.rs
+  - claudine/cli/src/commands/wrap/mod.rs
+  - claudine/cli/src/commands/wrap/overlay.rs
+  - claudine/cli/src/commands/wrap/policy.rs
+  - claudine/cli/src/commands/wrap/sequence/jit.rs
+  - claudine/cli/src/commands/wrap/wrapper_stages.rs
+  - claudine/cli/src/commands/wrap/write_grant.rs
+  - claudine/cli/src/commands/wrap/write_grant/tests.rs
+  - claudine/cli/tests/common/mod.rs
+  - claudine/cli/tests/compose_caller_file_provenance.rs
+  - claudine/cli/tests/compose_header_first.rs
+  - claudine/cli/tests/compose_schema_cli.rs
+  - claudine/cli/tests/composition_outputs.rs
+  - claudine/cli/tests/dispatch_inventory.rs
+  - claudine/cli/tests/error_guards.rs
+  - claudine/cli/tests/error_guards/transport-allow.toml
+  - claudine/cli/tests/fixtures/shipped_implement_route/_implement/implement-plan.md
+  - claudine/cli/tests/fixtures/shipped_implement_route/shipped-hashes.json
+  - claudine/cli/tests/inline_completion_lifecycle.rs
+  - claudine/cli/tests/inline_compose_cli.rs
+  - claudine/cli/tests/inline_compose_hash.rs
+  - claudine/cli/tests/inline_compose_sequence_mismatch.rs
+  - claudine/cli/tests/level2_lifecycle_control.rs
+  - claudine/cli/tests/level2_schema_prompt_pty.rs
+  - claudine/cli/tests/level2_sequence_task_stream_capture.rs
+  - claudine/cli/tests/loop_cli.rs
+  - claudine/cli/tests/sequence_groups.rs
+  - claudine/cli/tests/sequence_prompt_property.rs
+  - claudine/cli/tests/shipped_prompt_contract.rs
+  - claudine/cli/tests/wrap_inline_compose.rs
+  - claudine/cli/tests/wrap_inline_compose_interactive.rs
+  - claudine/cli/tests/wrap_perf.rs
+  - claudine/lib/src/composition/closure.rs
+  - claudine/lib/src/composition/closure/tests.rs
+  - claudine/lib/src/composition/completion.rs
+  - claudine/lib/src/composition/completion/tests.rs
+  - claudine/lib/src/composition/coordinator/tests.rs
+  - claudine/lib/src/composition/error/mod.rs
+  - claudine/lib/src/composition/error/render/mod.rs
+  - claudine/lib/src/composition/error/render/schema.rs
+  - claudine/lib/src/composition/error/tests.rs
+  - claudine/lib/src/composition/guardrails.rs
+  - claudine/lib/src/composition/inline_prompt.rs
+  - claudine/lib/src/composition/mod.rs
+  - claudine/lib/src/composition/prepare.rs
+  - claudine/lib/src/composition/prepare/tests.rs
+  - claudine/lib/src/composition/schema/classify.rs
+  - claudine/lib/src/composition/schema/mod.rs
+  - claudine/lib/src/composition/schema/tests.rs
+  - claudine/lib/src/composition/schema/translate.rs
+  - claudine/lib/src/composition/select/tests.rs
+  - claudine/lib/src/composition/types.rs
+  - claudine/lib/src/diagnostics/registry.rs
+  - claudine/lib/src/stream/providers/opencode.rs
+  - claudine/lib/src/stream/providers/opencode/tests.rs
+  - darkmatter/dmls/src/diagnostics/frontmatter.rs
+  - darkmatter/dmls/src/providers/frontmatter.rs
+  - darkmatter/dmls/tests/lsp_session.rs
+  - darkmatter/lib/src/markdown/compose/context/options.rs
+  - darkmatter/lib/src/markdown/compose/schema_validation.rs
+  - darkmatter/lib/src/markdown/hash/mod.rs
+  - darkmatter/lib/src/markdown/hash/write.rs
+  - darkmatter/lib/src/markdown/schemas/about.rs
+  - darkmatter/lib/src/markdown/schemas/errors.rs
+  - darkmatter/lib/src/markdown/schemas/mod.rs
+  - darkmatter/lib/src/markdown/schemas/phase.rs
+  - darkmatter/lib/src/markdown/schemas/resolve.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/convert.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/serialize.rs
+  - darkmatter/lib/src/markdown/schemas/simplified/types.rs
+  - darkmatter/lib/src/markdown/schemas/triggers/grammar.rs
+  - darkmatter/lib/tests/inline_document_text.rs
+  - darkmatter/lib/tests/meta_schema_phase3.rs
+  - darkmatter/lib/tests/schema_phase_validation.rs
+documentation:
+  - .claude/skills/claudine/SKILL.md
+  - .claude/skills/claudine/architecture.md
+  - .claude/skills/claudine/cli-reference.md
+  - .claude/skills/claudine/composition.md
+  - .claude/skills/claudine/lifecycle.md
+  - .claude/skills/claudine/timeline.md
+  - .claude/skills/darkmatter/frontmatter.md
+  - .claude/skills/darkmatter/schema.md
+  - claudine/cli/README.md
+  - claudine/docs/providers/dispatch-inventory.json
+  - claudine/docs/topics/composition.md
+  - claudine/docs/topics/execution-flow.md
+  - claudine/docs/topics/flow-control/sequences.md
+  - claudine/docs/topics/frontmatter-properties.md
+  - claudine/docs/topics/lifecycle.md
+  - claudine/fixes/2026-09-05-inline-flow-and-validations/plan.md
+  - darkmatter/docs/inline/schema-validation.md
+  - darkmatter/docs/topics/schema-definition.md
+  - prompts/_implement/implement-plan.md
+  - prompts/_reviews/review-implementation.md
 packages:
   - claudine
   - darkmatter
@@ -773,7 +926,7 @@ contract that changed.
 
 ### Tasks
 
-- [ ] Run the full AC1–AC19 matrix and add any missing regression cases for
+- [x] Run the full AC1–AC19 matrix and add any missing regression cases for
   caller/sequence/proxy overlays, agent delta deletion, raw JSON Schema,
   generated properties, interactive-denied launch, and all three OS path
   shapes.
@@ -790,19 +943,108 @@ contract that changed.
   lifecycle docs for file-aware inline operation, owned-property restoration,
   summary output, writable permissions, completion ordering, artifact
   retention, recovery, and per-composition sequence/loop validation.
-- [ ] Update the Darkmatter and Claudine skill references/catalogs so their
+- [x] Update the Darkmatter and Claudine skill references/catalogs so their
   architecture and workflow descriptions match the implemented contracts;
   remove stale response-frontmatter/transcription guidance.
-- [ ] Review every changed symbol's `///`, `//!`, and inline comments; correct
+- [x] Review every changed symbol's `///`, `//!`, and inline comments; correct
   behavior drift (especially OpenCode's event comment and closure narration)
   without unrelated comment cleanup.
 
 ### Validation checkpoint
 
-- [ ] Confirm documentation examples and descriptor output agree with the same
+- [x] Confirm documentation examples and descriptor output agree with the same
   typed catalogs used by implementation and DMLS.
-- [ ] Search for retired response-block terminology and closure-local YAML
+- [x] Search for retired response-block terminology and closure-local YAML
   editor symbols; only historical specs may retain them.
+
+### Phase 7 evidence
+
+#### AC1–AC19 matrix
+
+Every row was executed, not merely mapped. The Darkmatter/DMLS rows ran under
+`cargo nextest -p darkmatter -p dmls`; the Claudine rows under
+`cargo nextest -p claudine -p claudine-cli`; both also ran inside their package
+`just test` gates.
+
+| AC | Evidence |
+|---|---|
+| AC1 | `darkmatter::schema_phase_validation::{launch_requires_eager_and_completion_requires_required_or_eager, all_eager_scalar_representations_are_coerced_and_checked, nested_and_union_eager_presence_is_recursive_and_hoisted, eager_array_placement_owns_items_or_property, original_voip_schema_launches_with_outputs_absent_and_enforces_them_at_completion}`; `dmls::lsp_session::{eager_schema_fixture_is_clean_and_catalog_driven, original_voip_schema_definitions_are_clean}` |
+| AC2 | `dmls::lsp_session::{schema_definition_errors_are_independent_and_property_ranged, referenced_schema_conversion_error_keeps_origin_and_reference_fallback}` |
+| AC3 | `claudine-cli::wrap_inline_compose::{inline_compose_without_an_eager_prompt_fails_before_launch_naming_it, inline_compose_uses_a_caller_supplied_prompt_without_persisting_it}`; `claudine::composition::prepare::tests` |
+| AC4 | `claudine::composition::completion::tests::{a_required_property_the_agent_never_set_fails_completion, a_value_of_the_wrong_type_fails_completion_with_the_type_message, an_explicit_null_is_absence_at_completion, a_nested_property_failure_names_its_full_path}`; `claudine-cli::inline_completion_lifecycle::{a_missing_completion_property_fails_the_run_and_keeps_the_written_artifact, a_wrong_typed_completion_property_reports_the_type_mismatch, a_satisfied_inline_run_exits_zero_and_keeps_the_summary_out_of_the_document}` |
+| AC5 | `claudine-cli::wrap_inline_compose::{inline_compose_delivers_the_native_document_path_and_file_aware_guardrails, inline_compose_writes_the_agents_file_and_reports_only_the_final_summary}`; `claudine-cli::inline_completion_lifecycle::a_satisfied_inline_run_exits_zero_and_keeps_the_summary_out_of_the_document` |
+| AC6 | `claudine::composition::closure::tests::restores_every_owned_property_the_agent_touched_and_warns_once_each`; `claudine-cli::wrap_inline_compose::inline_compose_preserves_frontmatter_and_restores_owned_properties` |
+| AC7 | `claudine::composition::closure::tests::{refuses_an_untouched_document_without_writing, refuses_a_whitespace_only_body_change, refuses_an_empty_body_even_when_frontmatter_changed}`; `claudine-cli::wrap_inline_compose::inline_compose_rejects_a_document_the_agent_never_updated` |
+| AC8 | `claudine-cli::inline_completion_lifecycle::a_provider_exit_130_restores_the_captured_baseline` |
+| AC9 | `claudine-cli::inline_completion_lifecycle::{a_failed_inline_verdict_fires_failure_with_the_typed_err_then_finalize, a_refused_body_fires_failure_with_the_body_unchanged_code, a_direct_compose_run_fails_completion_when_a_start_effect_invalidates_a_property, a_direct_compose_run_with_a_satisfied_property_reaches_success}` |
+| AC9a | `claudine-cli::compose_schema_cli::compose_conditional_required_property_fails_before_launch_when_interaction_is_denied` (interaction-denied *and* the resolvable-input control); `claudine-cli::inline_completion_lifecycle::a_conditional_required_property_never_blocks_an_inline_launch`; `claudine-cli::schema_interactive::tests::pre_validate_with_interactive_returns_missing_when_not_allowed` |
+| AC9b | `claudine-cli::inline_completion_lifecycle::a_missing_completion_property_fails_the_run_and_keeps_the_written_artifact`; `claudine-cli::inline_compose_hash::inline_compose_writes_hash_that_passes_md_diff` |
+| AC10 | `claudine::composition::completion::tests::{inline_and_direct_reach_identical_status_for_the_same_instance, problems_follow_the_status_tables_declaration_order}`; `claudine-cli::inline_completion_lifecycle::{a_sequence_applies_the_verdict_per_step_and_fail_fast_stops_at_step_two, a_loop_applies_the_verdict_per_iteration}` |
+| AC11 | `claudine-cli::live_semantic_sink::tests::final_response_contract` (one case per adapter) plus the saved `opencode-voip-2026-09-05.ndjson` replay |
+| AC12 | `darkmatter::markdown::hash::write::tests` byte-preservation matrix (`textual_save_treats_indentless_sequence_as_one_node` and the representation/newline matrix); `claudine::composition::closure::tests::{reports_the_agents_semantic_delta_excluding_owned_properties, value_preserving_reformatting_is_not_a_semantic_change, preserves_crlf_and_the_authored_last_updated_quote_style}` |
+| AC13 | `claudine-cli::wrap_inline_compose::inline_compose_uses_a_caller_supplied_prompt_without_persisting_it`; `claudine::composition::completion::tests::a_transient_caller_prompt_survives_the_owned_property_overlay`; `claudine-cli::compose_schema_cli::compose_conditional_required_property_fails_before_launch_when_interaction_is_denied` |
+| AC14 | Caller: `claudine::composition::completion::tests::a_transient_caller_value_satisfies_completion_and_removing_it_does_not`. Proxy: `claudine-cli::inline_completion_lifecycle::a_proxy_with_overlay_satisfies_the_targets_completion_schema`. **Sequence (added this phase):** `claudine-cli::inline_completion_lifecycle::sequence_step_params_satisfy_the_referenced_documents_completion_schema`. Delta: `…::{inline_layers_the_agent_delta_over_the_live_effective_instance, an_agent_deletion_is_observable_at_completion}`. Passivity: `…::validation_performs_no_filesystem_work_for_an_eager_file_property` |
+| AC15 | `darkmatter::schema_phase_validation::raw_json_schema_keeps_required_at_launch`; `claudine::composition::completion::tests::raw_json_schema_required_is_enforced_at_completion` |
+| AC16 | `darkmatter::schema_phase_validation::generated_required_keeps_authoring_compatibility_but_fails_completion`; `claudine::composition::completion::tests::a_generated_required_property_must_be_supplied_by_completion` |
+| AC17 | `claudine-cli::inline_completion_lifecycle::{a_provider_exit_one_restores_the_captured_baseline, an_empty_candidate_body_is_refused_and_rolled_back, a_duplicate_owned_key_is_refused_and_rolled_back, a_failed_rollback_reports_the_typed_cause_and_keeps_the_initiating_error}`; `claudine-cli::wrap_inline_compose::inline_compose_keeps_agent_frontmatter_and_refuses_a_malformed_document` |
+| AC18 | `claudine-cli::inline_completion_lifecycle::{a_metadata_only_retry_recovers_a_completion_schema_failure, a_provider_failure_rolls_back_before_the_retry_reads_the_document, a_failed_provider_attempt_hands_the_retry_a_restored_document, a_proxy_out_of_a_failed_verdict_captures_the_targets_own_baseline}` |
+| AC19 | `claudine-cli::wrap::write_grant::tests::{every_provider_plans_inside_and_outside_on_every_path_shape, containment_follows_the_native_path_shape, windows_verbatim_documents_are_granted_with_the_legacy_spelling, explicit_denies_refuse_before_spawn_and_are_never_widened, kilo_outside_its_worktree_is_a_typed_unsupported_capability}`; `claudine-cli::wrap_inline_compose::inline_compose_refuses_an_explicit_write_deny_before_spawn` |
+
+Only one row had a genuine gap. AC14 named three transient channels — caller
+input, sequence state, and `proxy.with` — and only two were proved. The new
+`sequence_step_params_satisfy_the_referenced_documents_completion_schema` runs a
+real `claudine sequence` whose step supplies `researched_by` through `params:`;
+the referenced document's completion schema is satisfied for that step and the
+value never reaches the file. It carries its own control: re-running the same
+document standalone fails naming `researched_by`. The first draft of its
+"never persisted" assertion matched the `$schema` declaration line as well as a
+value, which is how it was proved non-vacuous — it failed against the real
+written document before being narrowed to the value.
+
+#### Checkpoint results
+
+- **Descriptor/documentation agreement.** `md schema about` built from this
+  worktree reports `eager` with `target_types: all types` and the phase wording,
+  matching `SCHEMA_CONSTRAINT_DESCRIPTORS`, the per-type
+  `accepted_constraints` rows, and the DMLS completion item
+  (`dmls::providers::dsl::tests::text_edit_item_carries_eager_edit_and_markdown_documentation`).
+  `darkmatter/docs/topics/schema-definition.md` agrees, including the
+  launch/completion table and the explicit note that an optional-but-eager
+  property is not expressible. **Trap worth recording:** the *installed*
+  `~/.cargo/bin/md` (2026-09-05) still printed the old `eager | file | Require
+  the referenced file to exist` row, which reads exactly like drift. Confirm
+  descriptor output against a binary built from the worktree.
+- **Retired terminology sweep.** No production symbol, comment, or doc retains
+  `response_frontmatter`, response-block extraction, `InlineReplacementParts`,
+  `semantic_top_level_key`, `rewrite_harvested_frontmatter`, or a
+  closure-local YAML node editor. Two deliberate survivors:
+  `composition::guardrails::SHIPPED_GUARDRAILS_2026_09_01` / `_2026_09_05` are
+  the historical shipped defaults the migration matches byte-for-byte, and
+  `default_guardrails_state_the_file_aware_contract` asserts the retired
+  phrases are *absent* from the live default. One incidental use was cleaned
+  up: a Darkmatter hash-write fixture used `response_frontmatter:` as an
+  arbitrary indentless-sequence key and is now `reviewers:`.
+
+#### Gates
+
+- `just test` in `claudine/` — 6,805 passed, 11 skipped, zero failures (6,804
+  before this phase's added test).
+- `just lint` in `claudine/` — clean.
+- `just test` in `darkmatter/` (includes DMLS and the Zed CLI) — 7,689 passed,
+  51 skipped, zero failures.
+- `just lint` in `darkmatter/` — clean, including the `wasm32-wasip2` Zed
+  extension check.
+- No L2/L3 tier was run in this phase. Phase 6 left L2 at 235/236 with one
+  host-blocked red (`level2_initialize_proxy_block_auto_detects_osc8_in_wezterm`,
+  an Atuin onboarding dialog in the spawned WezTerm login shell), and this
+  phase changed no terminal-surface behavior; `just test-l2` remains Phase 8's
+  task.
+
+#### Note on the working tree
+
+Phases 1–6 and the first four Phase 7 tasks were committed to this branch by a
+separate process while this phase was running (`8f02d3e83`…`5bc65559e`). No
+commit or stage was performed by this phase; its changes are uncommitted.
 
 ## Phase 8 — Run final gates and prepare handoff
 
@@ -811,9 +1053,9 @@ and ready for review without committing.
 
 ### Tasks
 
-- [ ] From `darkmatter/`, run `just build`, `just test`, and `just lint`; ensure
+- [x] From `darkmatter/`, run `just build`, `just test`, and `just lint`; ensure
   the included DMLS suites and shipped-artifact corpus pass.
-- [ ] From `claudine/`, run `just build`, `just test`, and `just lint`.
+- [x] From `claudine/`, run `just build`, `just test`, and `just lint`.
 - [ ] Run `just test-l2` from `claudine/` for provider-stub/terminal-harness
   coverage, ensuring no terminal or browser window gains focus.
 - [ ] From the repository root, run `just ci-local` before push; record any
