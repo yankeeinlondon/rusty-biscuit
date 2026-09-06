@@ -257,6 +257,50 @@ fn final_response_keeps_only_text_after_last_tool_call() {
 }
 
 #[test]
+fn final_response_keeps_only_text_after_last_tool_result() {
+    let lines = Arc::new(StdMutex::new(Vec::new()));
+    let details = Arc::new(Mutex::new(StructuredSummaryDetails::default()));
+    let dispatch = Box::new(|_event: AgenticEvent, _meta: DispatchEventMeta| {});
+    let emit = {
+        let lines = lines.clone();
+        Box::new(move |line: &str| lines.lock().unwrap().push(line.to_string()))
+    };
+    let mut sink = LiveSemanticSink::new(
+        Provider::OpenCode,
+        EnvironmentContext::default(),
+        Path::new("/tmp"),
+        Verbosity::Normal,
+        details.clone(),
+        dispatch,
+        emit,
+    );
+
+    sink.on_semantic_event(SemanticEvent::OutputText {
+        text: "I will inspect the document first.".into(),
+        extra: json!({}),
+    });
+    sink.on_semantic_event(SemanticEvent::ToolResult {
+        name: Some("read".into()),
+        id: Some("tool-1".into()),
+        status: Some("completed".into()),
+        exit_code: None,
+        output: Some(json!("document contents")),
+        extra: json!({}),
+    });
+    sink.on_semantic_event(SemanticEvent::OutputText {
+        text: "Only this trailing summary remains.".into(),
+        extra: json!({}),
+    });
+
+    let details = details.lock().unwrap();
+    assert_eq!(details.final_response, "Only this trailing summary remains.");
+    assert!(
+        details.tool_names.is_empty(),
+        "a result-only event resets text but must not double-record a tool name"
+    );
+}
+
+#[test]
 fn output_text_flows_through_external_renderer() {
     let lines = Arc::new(StdMutex::new(Vec::new()));
     let dispatched = Arc::new(StdMutex::new(Vec::new()));

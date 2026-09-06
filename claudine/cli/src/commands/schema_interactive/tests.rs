@@ -1,5 +1,6 @@
 use super::status::{description_suffix, render_optional_line, render_required_line};
 use super::*;
+use claudine::composition::CompositionMode;
 use claudine::composition::{PropertyState, PropertyStatus};
 use std::path::PathBuf;
 
@@ -214,7 +215,7 @@ fn pre_validate_with_interactive_returns_missing_when_not_allowed() {
     assert!(!interactive.allowed());
 
     let term = Terminal::default();
-    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, false)
+    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, false, CompositionMode::ChainedDocument)
         .unwrap_err();
     assert!(
         matches!(err, CompositionError::MissingProperties { .. }),
@@ -242,7 +243,7 @@ fn pre_validate_with_interactive_returns_missing_for_file_property_when_not_allo
     assert!(!interactive.allowed());
 
     let term = Terminal::default();
-    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, false)
+    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, false, CompositionMode::ChainedDocument)
         .unwrap_err();
     assert!(
         matches!(err, CompositionError::MissingProperties { .. }),
@@ -272,6 +273,7 @@ fn pre_validate_with_interactive_succeeds_when_overrides_supply_value() {
         &term,
         None,
         false,
+        CompositionMode::ChainedDocument,
     )
     .unwrap();
     let fm = pre.set_overrides.unwrap();
@@ -304,7 +306,7 @@ fn pre_validate_with_interactive_returns_unsupported_for_object_shape() {
     assert!(interactive.allowed());
 
     let term = Terminal::default();
-    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, false)
+    let err = pre_validate_with_interactive_collection(&source, None, interactive, &term, None, false, CompositionMode::ChainedDocument)
         .unwrap_err();
     assert!(
         matches!(err, CompositionError::UnsupportedInteractiveSchema { .. }),

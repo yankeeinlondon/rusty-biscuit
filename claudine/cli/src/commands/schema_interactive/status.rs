@@ -20,6 +20,7 @@ use crate::log;
 /// - required + valid:   `<green>✓</green>`
 /// - required + missing: `<red>⍉</red>`
 /// - required + invalid: `!`
+/// - required + deferred (inline launch only): `<blue>…</blue>`
 /// - optional + valid:   `<green>✓</green>` (dim)
 /// - optional + missing: `<grey>⍉</grey>` (dim)
 /// - optional + invalid: `<yellow>!</yellow>` (dim)
@@ -76,6 +77,9 @@ pub(super) fn render_required_line(status: &PropertyStatus) -> String {
         PropertyState::Missing => format!(
             "<red>⍉</red> <inverse>{name}</inverse>: {ty} <i><dim>- was not defined but is required</dim></i>{desc}"
         ),
+        PropertyState::Deferred => format!(
+            "<blue>…</blue> <inverse>{name}</inverse>: {ty} <i><dim>- not defined yet; the run must supply it by completion</dim></i>{desc}"
+        ),
     }
 }
 
@@ -92,6 +96,10 @@ pub(super) fn render_optional_line(status: &PropertyStatus) -> String {
         ),
         PropertyState::Invalid => format!(
             "<yellow>!</yellow> <dim><i><inverse>{name}</inverse>: {ty}</i></dim>{desc}"
+        ),
+        // An optional property is never deferred; render it like an absent one.
+        PropertyState::Deferred => format!(
+            "<grey>⍉</grey> <dim><i><inverse>{name}</inverse>: {ty}</i></dim>{desc}"
         ),
     }
 }

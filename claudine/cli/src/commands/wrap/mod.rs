@@ -28,6 +28,7 @@ pub(crate) mod policy;
 pub(crate) mod prompt_source;
 pub(crate) mod resume;
 pub(crate) mod wrapper_stages;
+pub(crate) mod write_grant;
 pub(crate) mod wrapper_exec;
 pub(crate) mod wrapper_mcp;
 
@@ -48,7 +49,6 @@ pub(crate) use harness_orch::{
 };
 pub(crate) use inline::{
     extract_tags_from_prompt, report_inline_agent_status, strip_prompt_tags_for_provider,
-    try_inline_closure,
 };
 pub(crate) use overlay::{frontmatter_map_to_value, merge_frontmatter_overlay};
 pub(crate) use policy::{

@@ -32,6 +32,7 @@ pub(crate) fn materialized_harness_prompt_from_prepared(
         env_overrides: Vec::new(),
         selection_hints: prepared.selection_hints.clone(),
         inline_closure_plan,
+        launch_schema: prepared.launch_schema.clone(),
         file_resolution_context: prepared.input_layers.file_resolution_context.clone(),
         compose_context: Some(prepared.compose_context.clone()),
         document_epoch: prepared.document_epoch.clone(),
@@ -306,6 +307,7 @@ pub(crate) fn materialize_harness_prompt(
         claudine::composition::CompositionClosurePlan::Inline(plan) => Some(plan),
         claudine::composition::CompositionClosurePlan::Direct => None,
     };
+    let launch_schema = prepared.launch_schema;
     let file_resolution_context = prepared.input_layers.file_resolution_context.clone();
     let compose_context = prepared.compose_context;
     let document_epoch = prepared.document_epoch;
@@ -347,6 +349,7 @@ pub(crate) fn materialize_harness_prompt(
         env_overrides,
         selection_hints,
         inline_closure_plan,
+        launch_schema,
         file_resolution_context,
         compose_context: Some(compose_context),
         document_epoch,

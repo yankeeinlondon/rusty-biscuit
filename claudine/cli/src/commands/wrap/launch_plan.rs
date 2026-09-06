@@ -115,6 +115,7 @@ use claudine::provider::Provider;
 use claudine::system_prompt::ResolvedSystemPrompt;
 
 use super::profile::{OutputFormat, WrapperProfile, profile_for_provider};
+use super::write_grant::{WriteGrantError, WriteGrantRequest, plan_write_grant};
 
 const OPENCODE_CONFIG: &str = "OPENCODE_CONFIG_CONTENT";
 
@@ -204,6 +205,10 @@ pub(crate) enum LaunchPlanError {
     /// Boxed because `CompositionError` is large and this variant is the rare
     /// one.
     ProviderUnavailable(Box<claudine::composition::CompositionError>),
+    /// The inline document cannot be written under any safe launch shape for
+    /// the rebuilt provider: an explicit deny, or a missing capability. Named
+    /// before spawn so no provider ever starts a run it cannot finish.
+    WriteCapability(WriteGrantError),
 }
 
 impl std::fmt::Display for LaunchPlanError {
@@ -227,6 +232,7 @@ impl std::fmt::Display for LaunchPlanError {
                  record the inputs needed to rebuild one"
             ),
             Self::ProviderUnavailable(error) => write!(f, "{error}"),
+            Self::WriteCapability(error) => write!(f, "{error}"),
         }
     }
 }
@@ -265,6 +271,7 @@ impl std::error::Error for LaunchPlanError {
                 .as_deref()
                 .map(|diagnostic| diagnostic as &(dyn std::error::Error + 'static)),
             Self::ProviderUnavailable(error) => Some(error.as_ref()),
+            Self::WriteCapability(error) => Some(error),
             Self::NoMcpInjector(_) | Self::Producer(_) | Self::ReplayUnavailable => None,
         }
     }
@@ -339,6 +346,15 @@ pub(crate) struct LaunchPlanInputs {
     /// The invocation's own facets and the plan they produced. See the module
     /// docs' verbatim shortcut.
     pub(crate) invocation: RecordedLaunch,
+    /// The child working directory the provider treats as its workspace. The
+    /// inline write grant judges whether the active document lies inside it.
+    /// Invocation-fixed: no document surface names a directory.
+    pub(crate) workspace_cwd: PathBuf,
+    /// The ambient approval-environment variables the write grant inspects
+    /// (`GOOSE_MODE`, `OPENCODE_PERMISSION`), captured before any provider
+    /// stage wrote to the child environment, so a rebuild sees the caller's
+    /// own denies rather than a previous attempt's grant.
+    pub(crate) write_grant_env: HashMap<OsString, OsString>,
     /// Whether the slices above were actually recorded, i.e. whether a replay is
     /// possible at all. `false` for callers built by
     /// [`LaunchPlanInputs::recorded_only`], where a moved facet is a typed
@@ -384,11 +400,14 @@ impl LaunchPlanInputs {
             provider_env_baseline: HashMap::new(),
             codex_sqlite_home: None,
             credential_policy: CredentialPolicyInputs::default(),
+            workspace_cwd: PathBuf::new(),
+            write_grant_env: HashMap::new(),
             invocation: RecordedLaunch {
                 facets,
                 args,
                 env_overlay: Vec::new(),
                 structured_codex,
+                write_posture: None,
             },
             replay_supported: false,
         }
@@ -474,6 +493,9 @@ pub(crate) struct RecordedLaunch {
     pub(crate) args: Vec<String>,
     pub(crate) env_overlay: Vec<(OsString, OsString)>,
     pub(crate) structured_codex: bool,
+    /// The write-grant posture the invocation launched under; `None` when it
+    /// prepared no inline document.
+    pub(crate) write_posture: Option<String>,
 }
 
 /// The document-dependent half of a launch plan.
@@ -493,6 +515,10 @@ pub(crate) struct DocumentLaunchFacets {
     /// `#tag`s the document body selects MCP servers with, sorted and deduped.
     /// Empty when MCP is not in play.
     pub(crate) mcp_body_tags: Vec<String>,
+    /// The inline document the provider must be able to write, as its native
+    /// absolute path. `None` for direct compose and passthrough, which write
+    /// nothing. A proxy hand-off moves this facet to the adopted target.
+    pub(crate) writable_document: Option<PathBuf>,
 }
 
 impl DocumentLaunchFacets {
@@ -540,6 +566,10 @@ pub(crate) struct LaunchPlan {
     /// stages the invocation already rendered warnings for. See
     /// [`LaunchWarning`].
     pub(crate) warnings: Vec<LaunchWarning>,
+    /// The effective write-grant posture (see [`super::write_grant`]), part of
+    /// the session-compatibility permission facet. `None` when the facets name
+    /// no writable document.
+    pub(crate) write_posture: Option<String>,
 }
 
 /// Re-derive the launch plan for one set of document facets.
@@ -573,6 +603,7 @@ pub(crate) fn build_launch_plan(
             replayed: false,
             system_prompt_artifacts: Vec::new(),
             warnings: Vec::new(),
+            write_posture: inputs.invocation.write_posture.clone(),
         });
     }
     replay(inputs, facets)
@@ -655,6 +686,35 @@ fn replay(
             .map_err(|e| {
                 LaunchPlanError::producer_report("non-interactive argv replay failed", e)
             })?;
+    }
+
+    // -- inline write grant --------------------------------------------------
+    // The narrowest posture that can write the active document, judged against
+    // the same argv and approval environment the provider will see; a pinned
+    // deny or a missing capability refuses here, before any spawn.
+    let mut write_posture: Option<String> = None;
+    let mut write_overlay: Option<serde_json::Value> = None;
+    if let Some(document) = facets.writable_document.as_deref() {
+        let mut env_snapshot = inputs.write_grant_env.clone();
+        for (key, value) in &env_overlay {
+            env_snapshot.insert(key.clone(), value.clone());
+        }
+        let grant = plan_write_grant(&WriteGrantRequest {
+            provider: facets.provider,
+            document,
+            workspace: &inputs.workspace_cwd,
+            non_interactive: facets.non_interactive,
+            yolo_applied,
+            args: &args,
+            env: &env_snapshot,
+        })
+        .map_err(LaunchPlanError::WriteCapability)?;
+        args.extend(grant.args);
+        for (key, value) in grant.env {
+            env_overlay.push((key.into(), value.into()));
+        }
+        write_overlay = grant.opencode_permission;
+        write_posture = Some(grant.posture);
     }
 
     // -- model --------------------------------------------------------------
@@ -783,6 +843,7 @@ fn replay(
         facets,
         &mcp_env,
         yolo_applied,
+        write_overlay.as_ref(),
         system_prompt_opencode_config.as_deref(),
     )? {
         env_overlay.push((OPENCODE_CONFIG.into(), config.into()));
@@ -801,6 +862,7 @@ fn replay(
         replayed: true,
         system_prompt_artifacts: artifacts,
         warnings,
+        write_posture,
     })
 }
 
@@ -885,13 +947,14 @@ fn rebuild_mcp(
 }
 
 /// Fold the `OPENCODE_CONFIG_CONTENT` chain: invocation base, then the rebuilt
-/// MCP overlay, then the rebuilt YOLO permission block, then the invocation's
-/// system-prompt overlay.
+/// MCP overlay, then the rebuilt YOLO permission block, then the rebuilt inline
+/// write grant, then the invocation's system-prompt overlay.
 fn fold_opencode_config(
     inputs: &LaunchPlanInputs,
     facets: &DocumentLaunchFacets,
     mcp_env: &HashMap<String, String>,
     yolo_applied: bool,
+    write_overlay: Option<&serde_json::Value>,
     system_prompt_config: Option<&str>,
 ) -> Result<Option<String>, LaunchPlanError> {
     let mut current: Option<String> = inputs.opencode_config_base.clone();
@@ -938,6 +1001,10 @@ fn fold_opencode_config(
                 touched = true;
             }
         }
+    }
+    if let Some(overlay) = write_overlay {
+        merge(&mut current, overlay.clone())?;
+        touched = true;
     }
     if let Some(raw) = system_prompt_config {
         let overlay = serde_json::from_str(raw).map_err(|e| {

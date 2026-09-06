@@ -99,6 +99,7 @@ pub(crate) fn session_compat_key(
     canonical_args: &[String],
     document_mcp_tags: &[String],
     launch: &AttemptLaunch,
+    write_posture: Option<&str>,
 ) -> SessionCompatibilityKey {
     let child_env = &launch.env;
     SessionCompatibilityKey {
@@ -109,7 +110,7 @@ pub(crate) fn session_compat_key(
         // capability is part of the session's identity alongside its slug.
         resume_protocol: format!("{}:{}", provider.as_slug(), profile.supports_resume()),
         workspace_cwd: child_cwd.display().to_string(),
-        permission_mode: if yolo { "bypass" } else { "prompt" }.to_string(),
+        permission_mode: permission_facet(yolo, write_posture),
         interactivity: if effective_non_interactive {
             "non-interactive"
         } else {
@@ -120,6 +121,19 @@ pub(crate) fn session_compat_key(
         system_prompt: system_prompt_digest(canonical_args),
         mcp_servers: mcp_signal_set(canonical_args, child_env, document_mcp_tags),
         extra: std::collections::BTreeMap::new(),
+    }
+}
+
+/// The permission facet: the bypass-or-prompt mode plus, for an inline run,
+/// the write-grant posture the document was launched under. A refresh that
+/// moves the document's writable root or the grant a pinned mode allows
+/// therefore refuses a resume rather than reusing a session opened under a
+/// different permission shape.
+fn permission_facet(yolo: bool, write_posture: Option<&str>) -> String {
+    let mode = if yolo { "bypass" } else { "prompt" };
+    match write_posture {
+        Some(posture) => format!("{mode};write={posture}"),
+        None => mode.to_string(),
     }
 }
 

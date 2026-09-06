@@ -43,6 +43,8 @@ struct Inputs {
     child_env: HashMap<OsString, OsString>,
     /// MCP `#tag`s the refreshed document body selects servers with.
     document_mcp_tags: Vec<String>,
+    /// The inline write-grant posture, `None` for a run that writes nothing.
+    write_posture: Option<String>,
 }
 
 impl Default for Inputs {
@@ -57,6 +59,7 @@ impl Default for Inputs {
             canonical_args: Vec::new(),
             child_env: HashMap::new(),
             document_mcp_tags: Vec::new(),
+            write_posture: None,
         }
     }
 }
@@ -75,7 +78,43 @@ fn key_of(inputs: &Inputs) -> SessionCompatibilityKey {
         &inputs.canonical_args,
         &inputs.document_mcp_tags,
         &launch,
+        inputs.write_posture.as_deref(),
     )
+}
+
+/// The write-grant posture is part of the permission facet: a refresh that
+/// moves the document's writable root (or the grant a pinned mode allows)
+/// names `permission_mode`, while an unchanged posture compares equal.
+#[test]
+fn write_posture_moves_the_permission_facet() {
+    let base = key_of(&Inputs::default());
+    assert_eq!(base.permission_mode, "prompt");
+
+    let granted = key_of(&Inputs {
+        write_posture: Some("claude:accept-edits".to_string()),
+        ..Default::default()
+    });
+    assert_eq!(granted.permission_mode, "prompt;write=claude:accept-edits");
+    assert_eq!(base.incompatibilities(&granted), vec!["permission mode"]);
+
+    let moved_root = key_of(&Inputs {
+        write_posture: Some("claude:accept-edits+add-dir=/elsewhere".to_string()),
+        ..Default::default()
+    });
+    assert_eq!(granted.incompatibilities(&moved_root), vec!["permission mode"]);
+
+    let same = key_of(&Inputs {
+        write_posture: Some("claude:accept-edits".to_string()),
+        ..Default::default()
+    });
+    assert!(granted.incompatibilities(&same).is_empty());
+
+    let bypass = key_of(&Inputs {
+        yolo: true,
+        write_posture: Some("claude:bypass".to_string()),
+        ..Default::default()
+    });
+    assert_eq!(bypass.permission_mode, "bypass;write=claude:bypass");
 }
 
 fn env_with(pairs: &[(&str, &str)]) -> HashMap<OsString, OsString> {
@@ -162,6 +201,7 @@ fn swapping_the_provider_changes_provider_binary_and_resume_protocol() {
         &[],
         &[],
         &launch,
+        None,
     );
     let named = base.incompatibilities(&codex);
     assert!(named.contains(&"provider".to_string()));
@@ -299,6 +339,7 @@ fn resume_only_differences_do_not_change_the_key() {
         &system_prompt_args,
         &[],
         &resume_launch,
+        None,
     );
     assert!(
         base.is_compatible(&resume_key),

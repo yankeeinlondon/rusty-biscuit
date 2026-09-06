@@ -17,6 +17,7 @@ fn inputs_for(provider: Provider) -> LaunchPlanInputs {
         is_inline: false,
         model: None,
         mcp_body_tags: Vec::new(),
+        writable_document: None,
     };
     let mut recorded = LaunchPlanInputs {
         provider_args_tail: vec!["--tail-flag".to_string()],
@@ -34,11 +35,14 @@ fn inputs_for(provider: Provider) -> LaunchPlanInputs {
         provider_env_baseline: HashMap::new(),
         codex_sqlite_home: None,
         credential_policy: CredentialPolicyInputs::default(),
+        workspace_cwd: PathBuf::from("/repo"),
+        write_grant_env: HashMap::new(),
         invocation: RecordedLaunch {
             facets: facets.clone(),
             args: Vec::new(),
             env_overlay: vec![("YOLO".into(), "false".into())],
             structured_codex: false,
+            write_posture: None,
         },
         replay_supported: true,
     };
@@ -859,6 +863,7 @@ fn recorded_only_inputs_refuse_a_moved_facet() {
         is_inline: false,
         model: None,
         mcp_body_tags: Vec::new(),
+        writable_document: None,
     };
     let inputs =
         LaunchPlanInputs::recorded_only(facets.clone(), vec!["recorded".to_string()], None);

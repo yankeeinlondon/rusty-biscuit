@@ -41,8 +41,8 @@ use super::loop_run::{
 use super::setters::{merge_set_overrides, parse_composition_positionals};
 use super::{CompositionKind, SharedComposeArgs};
 use crate::commands::schema_interactive::{
-    emit_dropped_optional_warnings, pre_validate_with_interactive_collection,
-    resolve_interactive_options,
+    collect_missing_values, emit_dropped_optional_warnings,
+    pre_validate_with_interactive_collection, resolve_interactive_options,
 };
 use crate::commands::wrap::composition::{
     CompositionPrepContext, eagerly_resolve_target, execute_composition_request_inner,
@@ -234,6 +234,7 @@ pub(crate) fn run_composition_inner(
             &term,
             launch_area_fallback.as_deref(),
             !caller_input_records.is_empty(),
+            kind.mode(),
         )
         .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
         emit_dropped_optional_warnings(&pre.dropped_optionals);
@@ -249,6 +250,15 @@ pub(crate) fn run_composition_inner(
             .caller_input_records;
         (pre.source, pre.set_overrides)
     };
+    // The inline `prompt` verdict comes after eager collection so a collected
+    // or caller-supplied prompt can satisfy the gate that asked for it.
+    let inline_state = kind.finalize_inline_prompt_state(
+        inline_state,
+        &source,
+        set_overrides.as_ref(),
+        &shared,
+        stderr_is_tty,
+    )?;
     // Includes any interactive collection wait when stdin is a TTY; in the
     // common non-interactive / dry-run `--perf` case this is pure validation.
     record_prep_substage(
@@ -1294,14 +1304,19 @@ fn execute_loop_or_single(
             CompositionKind::Direct => info_span!("compose_prep.prepare_direct").entered(),
             CompositionKind::Inline => info_span!("compose_prep.prepare_inline").entered(),
         };
-        kind.prepare_staged(
-            &source,
+        let entry = if adopted_handoff.is_some() {
+            claudine::composition::DocumentEntryReason::ProxyTarget
+        } else {
+            claudine::composition::DocumentEntryReason::Direct
+        };
+        let options_for = |set_overrides: Option<serde_json::Value>,
+                           caller_input_records: darkmatter::markdown::compose::CallerInputRecords| {
             PrepareOptions {
                 invocation_context: Some(prep_context.invocation.clone()),
-                document_epoch: Some(document_epoch),
+                document_epoch: Some(document_epoch.clone()),
                 set_overrides,
                 caller_input_records,
-                pre_approved_commands: Some(preflight.approved_commands),
+                pre_approved_commands: Some(preflight.approved_commands.clone()),
                 env_overrides: env_overrides.clone(),
                 perf_enabled: shared.perf,
                 source_repo_root: prep_context.source_repo_root.clone(),
@@ -1314,15 +1329,52 @@ fn execute_loop_or_single(
                 name_coercion_keys: Vec::new(),
                 allow_empty_body: false,
                 defer_schema_verdict: false,
-            },
-            if adopted_handoff.is_some() {
-                claudine::composition::DocumentEntryReason::ProxyTarget
-            } else {
-                claudine::composition::DocumentEntryReason::Direct
-            },
+            }
+        };
+        let first = kind.prepare_staged(
+            &source,
+            options_for(set_overrides.clone(), caller_input_records.clone()),
+            entry,
             schema_stage,
-        )
-        .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?
+        );
+        // A required property the document's own expression left `null` (or
+        // an eager value that only the composed frontmatter can judge) is a
+        // launch gap the caller may still fill interactively — exactly as the
+        // pre-prepare collector does for a property absent from the raw source.
+        // One collection, one retry; a denied or cancelled collection keeps the
+        // typed `MissingProperties` so the non-TTY remediation renders.
+        let prepared = match first {
+            Err(CompositionError::MissingProperties { ref missing, .. })
+                if resolve_interactive_options(shared.silent).allowed()
+                    && missing.iter().all(|p| p.interactive_shape.is_some()) =>
+            {
+                match collect_missing_values(missing) {
+                    Ok(collected) if !collected.is_empty() => {
+                        let mut merged = set_overrides
+                            .as_ref()
+                            .and_then(serde_json::Value::as_object)
+                            .cloned()
+                            .unwrap_or_default();
+                        merged.extend(collected);
+                        let merged = serde_json::Value::Object(merged);
+                        let records = claudine::composition::CallerInputLayers::from_caller_overrides(
+                            Some(merged.clone()),
+                            prep_context.invocation.launch_file_resolution_context().clone(),
+                        )
+                        .caller_input_records;
+                        kind.prepare_staged(
+                            &source,
+                            options_for(Some(merged), records),
+                            entry,
+                            schema_stage,
+                        )
+                    }
+                    _ => first,
+                }
+            }
+            other => other,
+        };
+        prepared.map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?
     };
     emit_dropped_optional_warnings(&prepared.dropped_optionals);
     emit_compose_warnings(&prepared.warnings, shared.silent);

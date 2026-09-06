@@ -272,7 +272,7 @@ fn opencode_stderr_snapshot() {
 }
 
 #[test]
-fn opencode_tool_use_completion_shows_incoming_arrow_only() {
+fn opencode_tool_use_completion_shows_paired_arrows() {
     let lines = replay_to_stderr(
         Provider::OpenCode,
         &[
@@ -288,8 +288,8 @@ fn opencode_tool_use_completion_shows_incoming_arrow_only() {
         "incoming ← arrow must still render: {joined:?}"
     );
     assert!(
-        !joined.contains('\u{2192}'),
-        "outgoing → arrow must NOT render (no synthesized ToolCall): {joined:?}"
+        joined.contains('\u{2192}'),
+        "outgoing → arrow must render for the synthesized ToolCall: {joined:?}"
     );
     assert!(
         joined.contains("Bash"),
