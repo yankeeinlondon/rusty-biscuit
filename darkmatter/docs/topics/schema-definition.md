@@ -189,7 +189,8 @@ definitions:
     - [number, { nested: boolean }]
 ```
 
-Only `required`, `default(...)`, and `generated` apply to these nominal types.
+Only the universal `required`, `eager`, `default(...)`, and `generated`
+constraints apply to these nominal types.
 Semantic defaults must themselves parse as the declared artifact. Darkmatter
 does not infer either meta-type in `md schema detect`, because a carrier value
 does not establish the author's semantic intent. Terminal import syntax still
@@ -201,8 +202,43 @@ imports rather than primitive meta-type declarations.
 Every type accepts:
 
 - `required` — the property must be present.
+- `eager` — the property must be present at stabilized launch and completion.
+  It is phase metadata and is not encoded into authored JSON Schema. On a
+  `file` item ordinary schema preparation additionally retains the existing
+  existence check; the passive phase validator itself checks syntax and
+  presence without probing the filesystem.
 - `default(value)` — JSON Schema `default`. Darkmatter does **not** mutate documents; downstream tools and detection honor it.
 - `generated` — marks a property whose value the **host tool supplies at compose time** (for example the `ctx.*` context values in the Darkmatter base schema). It emits the `x-darkmatter-generated: true` annotation and suppresses the property's static `required` entry, so an authored document validates before the host fills the value in; the typed (non-null) arm is preserved. `datetime(generated; required)` therefore reads "required once generated", not "must be authored".
+
+Phase-aware validation derives presence recursively from the resolved
+SimplifiedSchema without mutating the instance or authored schema:
+
+| Constraint | Launch | Completion |
+|------------|--------|------------|
+| `eager` | Required | Required |
+| `required` | Optional; present values remain type-checked | Required |
+| `generated; required` | Optional while the host can supply it | Required |
+| none | Optional; present values remain type-checked | Optional; present values remain type-checked |
+
+Missing and explicit `null` both count as absence at these seams. Raw JSON
+Schema has no phase vocabulary, so its authored `required` behavior remains in
+force at launch and completion. Authors who need an actor *inside* the run to
+produce a value must therefore use SimplifiedSchema, which is the only surface
+where `required` and `eager` can differ.
+
+`eager` without `required` is accepted and is exactly equivalent to
+`required; eager`; the distinction is documentation only. There is no way to
+say "optional, but resolve and check it eagerly when supplied" — an optional
+input is a plain `file` / `string` / … and is checked only if present. Write
+`required; eager` when you mean it, so the declaration reads the way it
+behaves.
+
+Presence is derived recursively, so an `eager` sub-property of an inline object
+is demanded at launch under its full path (`products.uk_price`), and a property
+union hoists `eager` from any arm exactly as it hoists `required` — the
+property must be present, while the selected arm still governs the value.
+Interactive collection is a top-level-property UI, so a missing nested eager
+property is reported rather than synthesized.
 
 ### Numeric Constraints (`number`)
 
@@ -481,9 +517,10 @@ $schema:
     images:      "file(eager; match('*.png', '*.jpg'))[](min(1))"   # each item must exist
 ```
 
-`eager` is file-only; `string(eager)` and the like are a fatal schema-preparation
-error. The array form `file[]` adds the standard constraints on the array itself
-(`min`, `max`, `unique`), while `eager` and `match(...)` apply **per item**.
+`eager` is universal. Array placement determines ownership:
+`file(eager)[]` checks each present item but does not require the array property,
+while `file[](eager)` requires the array property at launch. `match(...)` still
+applies per item.
 
 ### URLs
 
@@ -772,7 +809,11 @@ $schema:
       - "string(pattern(^\\d+(px|%)$))"
 ```
 
-**Hoisting.** `required` and `default(...)` are property-level — they are extracted from whichever arm declares them and applied to the property as a whole. If `required` appears on any arm, the property is required; convention is to place it on the first arm. Differing `default(...)` values on multiple arms is a compile-time error.
+**Hoisting.** `required`, `eager`, and `default(...)` are property-level — they
+are extracted from whichever arm declares them and applied to the property as a
+whole. If `required` or `eager` appears on any arm, that presence rule governs
+the property; convention is to place it on the first arm. Differing
+`default(...)` values on multiple arms is a compile-time error.
 
 ```yaml
 $schema:
@@ -1345,6 +1386,7 @@ let detected = api.detect(&refs, DetectOptions { merge: true });
 
 - `parse_yaml_schema(&serde_yaml_ng::Value)` — parse a YAML value into a `SimplifiedSchema`.
 - `to_json_schema(&SimplifiedSchema)` — lower to Draft 2020-12 JSON Schema (`serde_json::Value`).
+- `EffectiveSchema::validate_for_phase(frontmatter, SchemaPhase)` — validate an already-resolved working instance at `Launch` or `Completion` without mutating it or resolving another schema.
 - `detect_schema(&[&Markdown], DetectOptions)` — multi-file detection entry point.
 - `detect_from_document(&Markdown)` — single-document detection (returns a `SchemaShape`).
 - `schema_to_yaml(&SimplifiedSchema)` — serialise a SimplifiedSchema back to YAML (used by `md schema detect --format yaml`).
@@ -1558,7 +1600,7 @@ without `required` is a guard: absence is allowed, but a present value of the
 wrong type defeats the match. `required` makes it a presence gate. Match-safe
 constraints are limited to structural types plus pure constraints such as
 `required`, `enum`, `pattern`, length/range, item-count, and key-count.
-Stateful or transforming constraints (`file(eager)`, imports, `example`,
+Stateful or phase-specific constraints (`eager`, imports, `example`,
 `default`, and `generated`) are rejected in trigger matches.
 
 The match grammar supports freely nested `all`, `any`, `none`, and

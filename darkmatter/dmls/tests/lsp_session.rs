@@ -3548,6 +3548,188 @@ fn meta_schema_phase7_inline_hover_completion_and_diagnostics() {
     fixture.shutdown();
 }
 
+#[test]
+fn schema_definition_errors_are_independent_and_property_ranged() {
+    let workspace = tempfile::tempdir().unwrap();
+    let text = concat!(
+        "---\n",
+        "$schema:\n",
+        "  bad_string: string(integer)\n",
+        "  valid_neighbor: string(required;eager)\n",
+        "  bad_boolean: boolean(min(1))\n",
+        "valid_neighbor: ready\n",
+        "---\n\nbody\n",
+    );
+    let path = workspace.path().join("aggregate-errors.md");
+    std::fs::write(&path, text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let mut definition_errors: Vec<&Value> = diagnostics
+        .iter()
+        .filter(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.invalid_type_definition")
+        })
+        .collect();
+    definition_errors.sort_by_key(|diagnostic| {
+        diagnostic["range"]["start"]["line"].as_u64().unwrap()
+    });
+    assert_eq!(definition_errors.len(), 2, "{diagnostics:#?}");
+    assert_eq!(
+        definition_errors[0]["range"],
+        json!({
+            "start": { "line": 2, "character": 14 },
+            "end": { "line": 2, "character": 29 }
+        })
+    );
+    assert_eq!(
+        definition_errors[1]["range"],
+        json!({
+            "start": { "line": 4, "character": 15 },
+            "end": { "line": 4, "character": 30 }
+        })
+    );
+
+    let hover = hover_markup(&mut fixture, uri.as_str(), 3, 20);
+    assert!(hover.contains("Type: **type-definition**"), "{hover}");
+    assert!(hover.contains("Declares: **string**"), "{hover}");
+    assert!(hover.contains("Eager"), "{hover}");
+    assert!(!hover.contains("bad_string"), "{hover}");
+    assert!(!hover.contains("bad_boolean"), "{hover}");
+
+    fixture.shutdown();
+}
+
+#[test]
+fn eager_schema_fixture_is_clean_and_catalog_driven() {
+    let workspace = tempfile::tempdir().unwrap();
+    let text = concat!(
+        "---\n",
+        "$schema:\n",
+        "  prompt: string(required;eager)\n",
+        "  attempts: number(eager)\n",
+        "  metadata: object(eager)\n",
+        "  researched_on: datetime(eager)\n",
+        "prompt: Research the products\n",
+        "attempts: 1\n",
+        "metadata: {}\n",
+        "researched_on: '2026-09-05T00:00:00Z'\n",
+        "---\n\nbody\n",
+    );
+    let path = workspace.path().join("eager-types.md");
+    std::fs::write(&path, text).unwrap();
+
+    let partial = "---\n$schema:\n  prompt: string(ea\n---\n\nbody\n";
+    let partial_path = workspace.path().join("eager-completion.md");
+    std::fs::write(&partial_path, partial).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), text);
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics.is_empty(),
+        "valid eager declarations must produce no diagnostics: {diagnostics:#?}"
+    );
+
+    let partial_uri = url::Url::from_file_path(partial_path).unwrap();
+    open(&fixture, partial_uri.as_str(), partial);
+    let completion = fixture
+        .request(
+            "textDocument/completion",
+            json!({
+                "textDocument": { "uri": partial_uri.as_str() },
+                "position": { "line": 2, "character": 19 }
+            }),
+        )
+        .result
+        .expect("eager constraint completion");
+    let eager = completion
+        .as_array()
+        .expect("completion array")
+        .iter()
+        .find(|item| item["label"] == json!("eager"))
+        .expect("Darkmatter's eager descriptor reaches DMLS completion");
+    assert_eq!(
+        eager["detail"],
+        json!("Requires the containing property at stabilized launch and completion. On file items it also requires each present reference to exist.")
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn original_voip_schema_definitions_are_clean() {
+    let workspace = tempfile::tempdir().unwrap();
+    let text = concat!(
+        "$schema: \n",
+        "    prompt: string(required;eager)\n",
+        "    last_updated: date(required)\n",
+        "    researched_by: string(required)\n",
+        "    products: object[](required)\n",
+    );
+    let path = workspace.path().join("voip-schema.yaml");
+    std::fs::write(&path, text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    open(&fixture, uri.as_str(), text);
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    assert!(
+        diagnostics
+            .iter()
+            .all(|diagnostic| diagnostic["source"] != json!("darkmatter.schema")),
+        "the original voip.md schema block must have no schema diagnostics: {diagnostics:#?}"
+    );
+
+    fixture.shutdown();
+}
+
+#[test]
+fn referenced_schema_conversion_error_keeps_origin_and_reference_fallback() {
+    let workspace = tempfile::tempdir().unwrap();
+    let schema = "$schema:\n  bad_string: string(integer)\n";
+    let schema_path = workspace.path().join("schema.yaml");
+    std::fs::write(&schema_path, schema).unwrap();
+
+    let text = "---\n$schema: ./schema.yaml\n---\n\nbody\n";
+    let path = workspace.path().join("document.md");
+    std::fs::write(&path, text).unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+    let uri = url::Url::from_file_path(path).unwrap();
+    let schema_uri = url::Url::from_file_path(schema_path.canonicalize().unwrap()).unwrap();
+    open(&fixture, uri.as_str(), text);
+
+    let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+    let error = diagnostics
+        .iter()
+        .find(|diagnostic| {
+            diagnostic["code"] == json!("dm.schema.invalid_type_definition")
+        })
+        .unwrap_or_else(|| panic!("referenced conversion diagnostic: {diagnostics:#?}"));
+    assert_eq!(
+        error["range"],
+        json!({
+            "start": { "line": 1, "character": 9 },
+            "end": { "line": 1, "character": 22 }
+        })
+    );
+    assert_eq!(
+        error["relatedInformation"][0]["location"]["uri"],
+        json!(schema_uri.as_str())
+    );
+
+    fixture.shutdown();
+}
+
 /// Hover activates over every region a semantic owner activates, not only the
 /// owner's own key.
 ///

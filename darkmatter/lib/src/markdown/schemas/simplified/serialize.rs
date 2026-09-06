@@ -314,6 +314,25 @@ mod tests {
     use super::super::types::*;
     use super::*;
 
+    #[test]
+    fn universal_eager_and_array_placement_round_trip() {
+        for source in [
+            "string(eager)",
+            "number(eager)",
+            "object(eager)",
+            "datetime(eager)",
+            "file(eager)[]",
+            "file[](eager)",
+        ] {
+            let parsed = super::super::grammar::parse_type_expr("value", source)
+                .unwrap_or_else(|error| panic!("parse {source}: {error}"));
+            let serialized = serialize_property_atom(&parsed);
+            let reparsed = super::super::grammar::parse_type_expr("value", &serialized)
+                .unwrap_or_else(|error| panic!("reparse {serialized}: {error}"));
+            assert_eq!(reparsed, parsed, "{source} -> {serialized}");
+        }
+    }
+
     fn round_trip(atom: PropertyAtom) {
         let s = serialize_property_atom(&atom);
         let parsed = parse_type_expr("test", &s)

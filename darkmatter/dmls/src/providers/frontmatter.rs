@@ -1229,6 +1229,15 @@ fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) -> String {
     if is_required(def) {
         lines.push("Required".to_string());
     }
+    if atoms_of(def)
+        .iter()
+        .any(|atom| atom.constraints.iter().any(|constraint| matches!(constraint, Constraint::Eager)))
+        && let Some(descriptor) = schema_constraint_descriptors()
+            .iter()
+            .find(|descriptor| descriptor.keyword == "eager")
+    {
+        lines.push(format!("Eager: {}", descriptor.description));
+    }
     lines.join("\n\n")
 }
 

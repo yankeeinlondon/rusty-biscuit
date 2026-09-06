@@ -122,7 +122,53 @@ A few behaviours worth knowing:
 
 - `additionalProperties` is `true` — documents may carry extra tooling-specific frontmatter without tripping the schema.
 - Unrecognized constraints are a **hard error at compile time**, so typos surface immediately rather than being silently ignored.
+- Conversion collects **every** independent per-property failure into one aggregate rather than stopping at the first, so a schema with two bad definitions reports two problems (and DMLS anchors one diagnostic per property). A structural failure that makes further traversal meaningless is still a single error.
 - `file` is **lazy by default**: it builds the reference's candidate plan and materializes the first absolute candidate without probing the filesystem. Add `eager` (`file(eager)`) to require an existing regular file and materialize the first matching candidate. For document-backed validation, an implicit reference such as `spec.md` checks the prompt document's directory before the repository root; an explicit `./spec.md` or `../spec.md` is source-relative only. Caller-supplied values use the captured launch context, while the captured launch area is retained only as diagnostics for document-authored values. `match(...)` shapes path *suggestions* only and never rejects a value.
+
+## Validation Phases
+
+The APIs above answer "is this document well-formed as authored?". A *runtime*
+consumer — a tool that starts a process, lets other actors write, and then
+judges the result — needs two different answers at two different moments, so
+`EffectiveSchema` also exposes a phase-aware entry point:
+
+```rust
+use darkmatter::markdown::schemas::SchemaPhase;
+
+let launch = effective.validate_for_phase(&frontmatter, SchemaPhase::Launch);
+let done   = effective.validate_for_phase(&frontmatter, SchemaPhase::Completion);
+```
+
+| Constraint | `Launch` | `Completion` |
+|------------|----------|--------------|
+| `eager` | must be present and valid | must be present and valid |
+| `required` | may be absent; a present value is still type-checked | must be present and valid |
+| `generated; required` | may be absent while the host can still supply it | must be present and valid |
+| none | may be absent; a present value is still type-checked | may be absent; a present value is still type-checked |
+
+- **`Launch` is the stabilized pre-provider seam**, not the instant the process
+  started: caller overrides, interpolation, coercion, and deferred frontmatter
+  shell expressions have all run.
+- Missing and explicit `null` are both **absence**. An eager `null` fails at
+  launch; a required-but-not-eager `null` is tolerated at launch and fails at
+  completion.
+- Both phases are **passive**: no mutation, no coercion, no expression or shell
+  execution, no schema resolution, and no filesystem access. The eager-`file`
+  existence probe belongs to ordinary schema preparation, not to phase
+  validation.
+- Presence is projected recursively from the resolved SimplifiedSchema. Array
+  placement decides ownership: `file(eager)[]` constrains each present item,
+  while `file[](eager)` makes the array property itself launch-required.
+- Raw JSON Schema has no phase vocabulary and keeps its authored `required`
+  behavior at both phases. Trigger match conditions reject `eager` outright,
+  because matching is passive and has no launch.
+- The unphased `validate` / `validate_with_positions` methods are unchanged,
+  including their `generated` exemption — phases are an addition, not a
+  redefinition.
+
+`claudine compose` and `claudine inline-compose` are the first consumers: they
+validate at `Launch` before starting a provider and at `Completion` before
+choosing between the `success` and `failure` lifecycle events.
 
 ## Baseline Schemas
 

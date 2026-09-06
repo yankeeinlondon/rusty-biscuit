@@ -7,9 +7,241 @@
 
 use super::options::{LAST_UPDATED_KEY, MdHashOptions};
 use super::save::SaveDecision;
-use crate::markdown::{Markdown, MarkdownError, MarkdownResult, extract_frontmatter_block};
+use crate::markdown::{
+    FrontmatterMap, Markdown, MarkdownError, MarkdownResult, extract_frontmatter_block,
+};
 use biscuit_file::serde_yaml_ng;
+use indexmap::IndexMap;
+use serde::Serialize;
+use std::collections::HashSet;
 use std::ops::Range;
+
+/// A semantic change to one top-level frontmatter property.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum FrontmatterDeltaEntry {
+    /// The current document added a property.
+    Addition {
+        /// Property name.
+        property: String,
+        /// Added value.
+        value: serde_json::Value,
+    },
+    /// The current document replaced a property's value.
+    Replacement {
+        /// Property name.
+        property: String,
+        /// Value in the snapshot.
+        previous_value: serde_json::Value,
+        /// Value in the current document.
+        value: serde_json::Value,
+    },
+    /// The current document deleted a property.
+    Deletion {
+        /// Property name.
+        property: String,
+        /// Value in the snapshot.
+        previous_value: serde_json::Value,
+    },
+}
+
+/// Semantic top-level frontmatter changes, in document order.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct FrontmatterDelta {
+    /// Additions and replacements follow current-document order; deletions
+    /// follow snapshot order.
+    pub entries: Vec<FrontmatterDeltaEntry>,
+}
+
+impl FrontmatterDelta {
+    /// Returns whether the two frontmatter maps are semantically equivalent.
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+}
+
+/// The result of restoring caller-owned frontmatter properties.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RestoredDocument {
+    /// Document text with owned properties restored from the snapshot.
+    pub text: String,
+    /// Owned properties whose authored text or presence was restored.
+    pub restored_properties: Vec<String>,
+    /// Agent-authored semantic changes excluding every owned property.
+    pub frontmatter_delta: FrontmatterDelta,
+}
+
+/// Restores selected top-level frontmatter nodes from a document snapshot.
+///
+/// Values outside `properties` are never rewritten. The returned semantic
+/// delta describes current-versus-snapshot additions, replacements, and
+/// deletions while ignoring formatting-only changes and all owned properties.
+/// Neither input is written or otherwise mutated.
+///
+/// ## Errors
+///
+/// Returns [`MarkdownError::FrontmatterTextEdit`] when either frontmatter block
+/// is malformed, is not a block mapping, contains duplicate semantic keys, or
+/// cannot be edited without ambiguity.
+pub fn restore_properties_text(
+    current: &str,
+    snapshot: &str,
+    properties: &[&str],
+) -> MarkdownResult<RestoredDocument> {
+    let current_frontmatter = parse_text_frontmatter(current)?;
+    let snapshot_frontmatter = parse_text_frontmatter(snapshot)?;
+    let owned: HashSet<&str> = properties.iter().copied().collect();
+    let frontmatter_delta = semantic_frontmatter_delta(
+        &snapshot_frontmatter.values,
+        &current_frontmatter.values,
+        &owned,
+    );
+
+    let mut text = current.to_string();
+    let mut restored_properties = Vec::new();
+    let mut seen = HashSet::new();
+    for property in properties.iter().copied() {
+        if !seen.insert(property) {
+            continue;
+        }
+
+        let parsed_current = parse_text_frontmatter(&text)?;
+        let current_node = parsed_current.nodes.get(property);
+        let snapshot_node = snapshot_frontmatter.nodes.get(property);
+        let current_source = node_source(&text, &parsed_current, current_node);
+        let snapshot_source = node_source(snapshot, &snapshot_frontmatter, snapshot_node);
+        if current_source == snapshot_source {
+            continue;
+        }
+
+        match (current_node, snapshot_node) {
+            (Some(current_node), Some(_)) => {
+                let range = parsed_current.absolute_node_range(current_node);
+                text.replace_range(range, snapshot_source.unwrap_or_default());
+            }
+            (Some(current_node), None) => {
+                let range = parsed_current.absolute_node_range(current_node);
+                text.replace_range(range, "");
+            }
+            (None, Some(_)) => {
+                insert_snapshot_node(&mut text, snapshot_source.unwrap_or_default())?;
+            }
+            (None, None) => continue,
+        }
+        restored_properties.push(property.to_string());
+    }
+
+    parse_text_frontmatter(&text)?;
+    Ok(RestoredDocument {
+        text,
+        restored_properties,
+        frontmatter_delta,
+    })
+}
+
+#[derive(Debug)]
+struct ParsedTextFrontmatter {
+    yaml_span: Option<Range<usize>>,
+    nodes: IndexMap<String, TextNode>,
+    values: FrontmatterMap,
+}
+
+impl ParsedTextFrontmatter {
+    fn absolute_node_range(&self, node: &TextNode) -> Range<usize> {
+        absolute_range(
+            self.yaml_span
+                .as_ref()
+                .expect("a parsed text node always belongs to frontmatter"),
+            node.range.clone(),
+        )
+    }
+}
+
+fn parse_text_frontmatter(document: &str) -> MarkdownResult<ParsedTextFrontmatter> {
+    let Some(extraction) = extract_frontmatter_block(document)? else {
+        return Ok(ParsedTextFrontmatter {
+            yaml_span: None,
+            nodes: IndexMap::new(),
+            values: FrontmatterMap::new(),
+        });
+    };
+
+    validate_block_mapping(extraction.yaml)?;
+    let nodes = locate_all_nodes(extraction.yaml)?;
+    let values = if extraction.yaml.trim().is_empty() {
+        FrontmatterMap::new()
+    } else {
+        serde_yaml_ng::from_str(extraction.yaml).map_err(|error| {
+            text_edit_error(format!("frontmatter YAML could not be parsed: {error}"))
+        })?
+    };
+    Ok(ParsedTextFrontmatter {
+        yaml_span: Some(extraction.yaml_span),
+        nodes,
+        values,
+    })
+}
+
+fn node_source<'a>(
+    document: &'a str,
+    parsed: &ParsedTextFrontmatter,
+    node: Option<&TextNode>,
+) -> Option<&'a str> {
+    node.map(|node| &document[parsed.absolute_node_range(node)])
+}
+
+fn insert_snapshot_node(document: &mut String, node_source: &str) -> MarkdownResult<()> {
+    if let Some(extraction) = extract_frontmatter_block(document)? {
+        document.insert_str(extraction.yaml_span.end, node_source);
+        return Ok(());
+    }
+
+    let newline = detect_newline(document);
+    let mut block = format!("---{newline}{node_source}");
+    if !node_source.ends_with(['\n', '\r']) {
+        block.push_str(newline);
+    }
+    block.push_str("---");
+    block.push_str(newline);
+    block.push_str(document);
+    *document = block;
+    Ok(())
+}
+
+fn semantic_frontmatter_delta(
+    snapshot: &FrontmatterMap,
+    current: &FrontmatterMap,
+    excluded: &HashSet<&str>,
+) -> FrontmatterDelta {
+    let mut entries = Vec::new();
+    for (property, value) in current {
+        if excluded.contains(property.as_str()) {
+            continue;
+        }
+        match snapshot.get(property) {
+            None => entries.push(FrontmatterDeltaEntry::Addition {
+                property: property.clone(),
+                value: value.clone(),
+            }),
+            Some(previous_value) if previous_value != value => {
+                entries.push(FrontmatterDeltaEntry::Replacement {
+                    property: property.clone(),
+                    previous_value: previous_value.clone(),
+                    value: value.clone(),
+                });
+            }
+            Some(_) => {}
+        }
+    }
+    for (property, previous_value) in snapshot {
+        if !excluded.contains(property.as_str()) && !current.contains_key(property) {
+            entries.push(FrontmatterDeltaEntry::Deletion {
+                property: property.clone(),
+                previous_value: previous_value.clone(),
+            });
+        }
+    }
+    FrontmatterDelta { entries }
+}
 
 /// Applies a hash-save decision directly to authored Markdown source.
 ///
@@ -238,6 +470,66 @@ fn locate_node(yaml: &str, target: &str) -> MarkdownResult<Option<TextNode>> {
             "frontmatter contains {count} occurrences of semantic key `{target}`"
         ))),
     }
+}
+
+fn locate_all_nodes(yaml: &str) -> MarkdownResult<IndexMap<String, TextNode>> {
+    let lines = line_spans(yaml);
+    let mut nodes = IndexMap::new();
+    let mut index = 0;
+    while index < lines.len() {
+        let line = lines[index];
+        let content = &yaml[line.start..line.content_end];
+        if content.is_empty()
+            || content.chars().next().is_some_and(char::is_whitespace)
+            || content.starts_with('#')
+        {
+            index += 1;
+            continue;
+        }
+
+        let colon = mapping_colon(content).ok_or_else(|| {
+            text_edit_error(format!("unsupported top-level YAML at byte {}", line.start))
+        })?;
+        let key_text = content[..colon].trim_end();
+        let semantic = parse_semantic_key(key_text)?;
+        let mut last_included_end = line.end;
+        let mut cursor = index + 1;
+        while cursor < lines.len() {
+            let following = lines[cursor];
+            let following_text = &yaml[following.start..following.content_end];
+            let indentless_sequence = following_text == "-" || following_text.starts_with("- ");
+            if !following_text.is_empty()
+                && !following_text
+                    .chars()
+                    .next()
+                    .is_some_and(char::is_whitespace)
+                && !indentless_sequence
+            {
+                break;
+            }
+            if !following_text.is_empty() {
+                last_included_end = following.end;
+            }
+            cursor += 1;
+        }
+        if nodes
+            .insert(
+                semantic.clone(),
+                TextNode {
+                    range: line.start..last_included_end,
+                    key_end: line.start + colon,
+                    first_line_end: line.end,
+                },
+            )
+            .is_some()
+        {
+            return Err(text_edit_error(format!(
+                "frontmatter contains more than one occurrence of semantic key `{semantic}`"
+            )));
+        }
+        index = cursor;
+    }
+    Ok(nodes)
 }
 
 fn mapping_colon(line: &str) -> Option<usize> {
@@ -927,5 +1219,183 @@ mod tests {
                 ignored: Vec::new(),
             }
         }
+    }
+
+    #[test]
+    fn restore_reports_semantic_additions_replacements_and_deletions() {
+        let snapshot = concat!(
+            "---\n",
+            "title: Original\n",
+            "replaced: before\n",
+            "typed: 42\n",
+            "deleted: remove me\n",
+            "prompt: |-\n",
+            "    Keep this exact prompt.  \n",
+            "---\n",
+            "Original body.\n",
+        );
+        let current = concat!(
+            "---\n",
+            "title: 'Original'\n",
+            "replaced: after\n",
+            "typed: '42'\n",
+            "added: 42\n",
+            "prompt: agent rewrite\n",
+            "---\n",
+            "Agent body.\n",
+        );
+
+        let restored = restore_properties_text(current, snapshot, &["prompt"]).unwrap();
+
+        assert_eq!(restored.restored_properties, ["prompt"]);
+        assert!(restored.text.contains("title: 'Original'\n"));
+        assert!(restored.text.contains("prompt: |-\n    Keep this exact prompt.  \n"));
+        assert!(restored.text.ends_with("---\nAgent body.\n"));
+        assert_eq!(
+            restored.frontmatter_delta.entries,
+            [
+                FrontmatterDeltaEntry::Replacement {
+                    property: "replaced".into(),
+                    previous_value: serde_json::json!("before"),
+                    value: serde_json::json!("after"),
+                },
+                FrontmatterDeltaEntry::Replacement {
+                    property: "typed".into(),
+                    previous_value: serde_json::json!(42),
+                    value: serde_json::json!("42"),
+                },
+                FrontmatterDeltaEntry::Addition {
+                    property: "added".into(),
+                    value: serde_json::json!(42),
+                },
+                FrontmatterDeltaEntry::Deletion {
+                    property: "deleted".into(),
+                    previous_value: serde_json::json!("remove me"),
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn restore_adds_and_deletes_owned_properties_from_the_snapshot() {
+        let added = restore_properties_text(
+            "---\ntitle: T\n---\nBody\n",
+            "---\ntitle: T\nprompt: original\n---\nOld body\n",
+            &["prompt"],
+        )
+        .unwrap();
+        assert_eq!(
+            added.text,
+            "---\ntitle: T\nprompt: original\n---\nBody\n"
+        );
+        assert_eq!(added.restored_properties, ["prompt"]);
+        assert!(added.frontmatter_delta.is_empty());
+
+        let added_block = restore_properties_text(
+            "Body\n",
+            "---\nprompt: original\n---\nOld body\n",
+            &["prompt"],
+        )
+        .unwrap();
+        assert_eq!(added_block.text, "---\nprompt: original\n---\nBody\n");
+        assert_eq!(added_block.restored_properties, ["prompt"]);
+
+        let deleted = restore_properties_text(
+            "---\ntitle: T\nprompt: added by agent\n---\nBody\n",
+            "---\ntitle: T\n---\nOld body\n",
+            &["prompt"],
+        )
+        .unwrap();
+        assert_eq!(deleted.text, "---\ntitle: T\n---\nBody\n");
+        assert_eq!(deleted.restored_properties, ["prompt"]);
+        assert!(deleted.frontmatter_delta.is_empty());
+    }
+
+    #[test]
+    fn restore_preserves_byte_forms_and_round_trips_for_lf_and_crlf() {
+        for newline in ["\n", "\r\n"] {
+            let snapshot = [
+                "---",
+                "title: Kept # authored",
+                "prompt: |-",
+                "    First line  ",
+                "",
+                "    Second line.",
+                r"windows_path: C:\Users\Ken Snyder\notes.md",
+                "unix_path: /Users/Ken Snyder/notes.md",
+                "ordered_after: true",
+                "---",
+                "Original body.",
+                "",
+            ]
+            .join(newline);
+            let current = [
+                "---",
+                "title: Kept # authored",
+                "prompt: agent rewrite",
+                r"windows_path: C:\Users\Ken Snyder\notes.md",
+                "unix_path: /Users/Ken Snyder/notes.md",
+                "ordered_after: true",
+                "---",
+                "Agent body with trailing spaces.  ",
+                "",
+            ]
+            .join(newline);
+            let expected = [
+                "---",
+                "title: Kept # authored",
+                "prompt: |-",
+                "    First line  ",
+                "",
+                "    Second line.",
+                r"windows_path: C:\Users\Ken Snyder\notes.md",
+                "unix_path: /Users/Ken Snyder/notes.md",
+                "ordered_after: true",
+                "---",
+                "Agent body with trailing spaces.  ",
+                "",
+            ]
+            .join(newline);
+
+            let first = restore_properties_text(&current, &snapshot, &["prompt"]).unwrap();
+            assert_eq!(first.text, expected, "newline {newline:?}");
+            assert_eq!(first.restored_properties, ["prompt"]);
+            assert!(first.frontmatter_delta.is_empty());
+
+            let second = restore_properties_text(&first.text, &snapshot, &["prompt"]).unwrap();
+            assert_eq!(second.text, first.text);
+            assert!(second.restored_properties.is_empty());
+            assert!(second.frontmatter_delta.is_empty());
+        }
+    }
+
+    #[test]
+    fn restore_rejects_malformed_and_duplicate_frontmatter_without_output() {
+        let malformed = "---\nprompt: [unterminated\n---\nBody\n";
+        let duplicate = "---\nprompt: first\n\"prompt\": second\n---\nBody\n";
+        let snapshot = "---\nprompt: original\n---\nOld body\n";
+
+        for current in [malformed, duplicate] {
+            let error = restore_properties_text(current, snapshot, &["prompt"]).unwrap_err();
+            assert!(matches!(error, MarkdownError::FrontmatterTextEdit { .. }));
+        }
+
+        let error = restore_properties_text(
+            "---\nprompt: current\n---\nBody\n",
+            duplicate,
+            &["prompt"],
+        )
+        .unwrap_err();
+        assert!(matches!(error, MarkdownError::FrontmatterTextEdit { .. }));
+    }
+
+    #[test]
+    fn non_strict_body_hash_ignores_boundaries_but_not_internal_whitespace() {
+        let baseline = md("---\ntitle: T\n---\nFirst line\nSecond line\n");
+        let boundary_only = md("---\ntitle: T\n---\n\n  First line\nSecond line  \n\n");
+        let internal_change = md("---\ntitle: T\n---\nFirst  line\nSecond line\n");
+
+        assert_eq!(baseline.hash_body(false), boundary_only.hash_body(false));
+        assert_ne!(baseline.hash_body(false), internal_change.hash_body(false));
     }
 }

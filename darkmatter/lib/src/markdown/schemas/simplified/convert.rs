@@ -459,6 +459,7 @@ fn inline_object_fragment(
             | Constraint::Default(_)
             | Constraint::Generated
             | Constraint::Example(_)
+            | Constraint::Eager
             | Constraint::MinKeys(_)
             | Constraint::MaxKeys(_) => {}
             other => {
@@ -499,12 +500,25 @@ fn object_body_from_shape(
 ) -> Result<Map<String, Value>, SchemaError> {
     let mut properties = Map::new();
     let mut required = Vec::new();
+    let mut errors = Vec::new();
     for (prop_name, def) in &shape.properties {
-        let (prop_schema, is_required) = property_def_to_schema(prop_name, def)?;
-        if is_required {
-            required.push(Value::String(prop_name.clone()));
+        match property_def_to_schema(prop_name, def) {
+            Ok((prop_schema, is_required)) => {
+                if is_required {
+                    required.push(Value::String(prop_name.clone()));
+                }
+                properties.insert(prop_name.clone(), prop_schema);
+            }
+            Err(SchemaError::Aggregate { errors: children }) => errors.extend(children),
+            Err(error) => errors.push(error),
         }
-        properties.insert(prop_name.clone(), prop_schema);
+    }
+    if !errors.is_empty() {
+        return Err(if errors.len() == 1 {
+            errors.pop().expect("one conversion error")
+        } else {
+            SchemaError::Aggregate { errors }
+        });
     }
 
     // Literal names feed the negative-lookahead exclusion so a key that also
@@ -689,7 +703,8 @@ fn apply_array_constraints(
             Constraint::Required
             | Constraint::Default(_)
             | Constraint::Generated
-            | Constraint::Example(_) => {
+            | Constraint::Example(_)
+            | Constraint::Eager => {
                 // Hoisted to the property level by `atom_to_schema`.
             }
             Constraint::MinItems(n) => {
@@ -722,6 +737,20 @@ fn type_fragment(
     ty: SimplifiedType,
     constraints: &[Constraint],
 ) -> Result<Value, SchemaError> {
+    // `eager` is a universal presence constraint. Only `file` also assigns it
+    // type-specific validation semantics (existence), so other fragment
+    // builders need not repeat a no-op match arm.
+    let filtered;
+    let constraints = if ty == SimplifiedType::File {
+        constraints
+    } else {
+        filtered = constraints
+            .iter()
+            .filter(|constraint| !matches!(constraint, Constraint::Eager))
+            .cloned()
+            .collect::<Vec<_>>();
+        &filtered
+    };
     match ty {
         SimplifiedType::String => string_fragment(name, constraints),
         SimplifiedType::Date => date_family_fragment(name, "date", constraints),
@@ -1100,7 +1129,8 @@ fn reject_unsupported(
             Constraint::Required
             | Constraint::Default(_)
             | Constraint::Generated
-            | Constraint::Example(_) => {}
+            | Constraint::Example(_)
+            | Constraint::Eager => {}
             other => return Err(invalid_constraint(name, type_label, other)),
         }
     }
@@ -1560,8 +1590,8 @@ flag:
 
     #[test]
     fn eager_is_accepted_on_file_and_emits_eager_format() {
-        // `eager` is a file-only constraint; on `file` it converts cleanly and
-        // flips the emitted format to the eager `darkmatter-file`.
+        // `file` retains the universal constraint's additional existence
+        // semantics by selecting the eager `darkmatter-file` format.
         let atom = parse_type_expr("test", "file(eager; required)").unwrap();
         let v = atom_to_schema("test", &atom)
             .expect("file(eager) must convert")
@@ -1570,23 +1600,18 @@ flag:
     }
 
     #[test]
-    fn eager_on_non_file_types_is_fatal() {
-        // D2: `eager` applied to any non-`file` type aborts schema preparation
-        // with a Convert error that names the offending type and constraint.
-        for input in ["string(eager)", "number(eager)"] {
+    fn eager_is_accepted_on_non_file_types_without_altering_json_schema() {
+        for (input, expected_type) in [
+            ("string(eager)", "string"),
+            ("number(eager)", "number"),
+            ("object(eager)", "object"),
+        ] {
             let atom = parse_type_expr("test", input).unwrap();
-            let err = atom_to_schema("test", &atom).unwrap_err();
-            match err {
-                SchemaError::Convert { property, message } => {
-                    assert_eq!(property, "test");
-                    assert!(message.contains("eager"), "{input}: {message}");
-                    assert!(
-                        message.contains("string") || message.contains("number"),
-                        "{input}: error must name the offending type: {message}"
-                    );
-                }
-                other => panic!("expected Convert for {input}, got {other:?}"),
-            }
+            let value = atom_to_schema("test", &atom)
+                .unwrap_or_else(|error| panic!("{input} must convert: {error}"))
+                .0;
+            assert_eq!(value["anyOf"][1]["type"], expected_type);
+            assert!(value.get("x-darkmatter-eager").is_none());
         }
     }
 

@@ -24,7 +24,7 @@ use serde_yaml_ng::Value as YamlValue;
 
 use crate::markdown::schemas::errors::SchemaError;
 use crate::markdown::schemas::simplified::{
-    Constraint, PropertyAtom, PropertyDef, SimplifiedType, TypeExpr,
+    Constraint, PropertyAtom, PropertyDef, TypeExpr,
     grammar::parse_type_expr,
 };
 
@@ -476,14 +476,17 @@ pub fn enforce_match_safe(name: &str, atom: &PropertyAtom) -> Result<(), SchemaE
             constraint: "imported type (Name@file)".into(),
         });
     }
-    // `file` may be tested only as a string-shaped value; eager existence is
-    // forbidden.
-    if matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::File))
-        && atom.constraints.iter().any(|c| matches!(c, Constraint::Eager))
+    // Trigger matching has no launch phase, so universal eager presence and
+    // eager file existence are both forbidden on every type and placement.
+    if atom
+        .constraints
+        .iter()
+        .chain(atom.array_constraints.iter())
+        .any(|c| matches!(c, Constraint::Eager))
     {
         return Err(SchemaError::TriggerForbiddenConstraint {
             property: name.to_string(),
-            constraint: "eager (file existence check)".into(),
+            constraint: "eager".into(),
         });
     }
     for constraint in &atom.constraints {
