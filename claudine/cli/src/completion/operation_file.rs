@@ -90,27 +90,25 @@ struct SuggestionEntry {
     is_file: bool,
 }
 
-fn collect_repository_suggestions<I, E>(
-    filename: &OsStr,
-    entries: I,
-) -> Vec<String>
+enum SuggestionWalkItem {
+    Root,
+    Error,
+    Entry(SuggestionEntry),
+}
+
+fn collect_repository_suggestions<I>(filename: &OsStr, entries: I) -> Vec<String>
 where
-    I: IntoIterator<Item = Result<SuggestionEntry, E>>,
+    I: IntoIterator<Item = SuggestionWalkItem>,
 {
     if filename.is_empty() {
         return Vec::new();
     }
 
-    let mut visited = 0usize;
     let mut matches = BTreeSet::new();
-    for result in entries {
-        let Ok(entry) = result else {
-            return Vec::new();
+    for item in entries.into_iter().take(SUGGESTION_ENTRY_BUDGET) {
+        let SuggestionWalkItem::Entry(entry) = item else {
+            continue;
         };
-        visited += 1;
-        if visited > SUGGESTION_ENTRY_BUDGET {
-            return Vec::new();
-        }
         if entry.is_file && entry.file_name == filename {
             matches.insert(to_portable_string(&entry.relative_path));
             if matches.len() == MAX_SUGGESTIONS {
@@ -124,9 +122,10 @@ where
 
 /// Find repository-relative files whose complete basename equals `filename`.
 ///
-/// This is advisory recovery only: failures and budget exhaustion deliberately
-/// return no suggestions so they can never replace the primary resolution
-/// diagnostic. Directory symlinks are not followed.
+/// This is advisory recovery only: an unusable root returns no suggestions,
+/// while entry failures are skipped and count toward the bounded walk. Reaching
+/// the budget retains matches already found. Directory symlinks are not
+/// followed.
 pub(crate) fn repository_basename_suggestions(
     repository_root: Option<&Path>,
     filename: Option<&OsStr>,
@@ -149,28 +148,28 @@ pub(crate) fn repository_basename_suggestions(
         .sort_by_file_path(|left, right| left.cmp(right));
     let walker = builder.build();
 
-    let entries = walker.filter_map(|result| match result {
-        Ok(entry) if entry.depth() == 0 => None,
+    let entries = walker.map(|result| match result {
+        Ok(entry) if entry.depth() == 0 => SuggestionWalkItem::Root,
         Ok(entry) => {
             let relative_path = match entry.path().strip_prefix(repository_root) {
                 Ok(path) => path.to_path_buf(),
-                Err(_) => return Some(Err(())),
+                Err(_) => return SuggestionWalkItem::Error,
             };
             let is_file = match entry.file_type() {
                 Some(kind) if kind.is_file() => true,
                 Some(kind) if kind.is_symlink() => match std::fs::metadata(entry.path()) {
                     Ok(metadata) => metadata.is_file(),
-                    Err(_) => return Some(Err(())),
+                    Err(_) => return SuggestionWalkItem::Error,
                 },
                 _ => false,
             };
-            Some(Ok(SuggestionEntry {
+            SuggestionWalkItem::Entry(SuggestionEntry {
                 relative_path,
                 file_name: entry.file_name().to_os_string(),
                 is_file,
-            }))
+            })
         }
-        Err(_) => Some(Err(())),
+        Err(_) => SuggestionWalkItem::Error,
     });
 
     collect_repository_suggestions(filename, entries)

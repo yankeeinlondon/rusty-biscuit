@@ -686,12 +686,6 @@ pub enum CompositionClosurePlan {
 pub struct InlineClosurePlan {
     /// The original on-disk document text (frontmatter + body).
     pub original_document_text: String,
-    /// Authored frontmatter properties the provider response may generate.
-    ///
-    /// Snapshotted before composition so setters, interpolation, schema
-    /// defaults, and mid-run source changes cannot expand the authorization.
-    /// Declaration order controls insertion order for newly generated nodes.
-    pub response_frontmatter: Vec<String>,
     /// Full pre-run hash of the document, always [`MdHashKind::Simple`].
     ///
     /// Computed with `hash` and `last_updated` excluded via

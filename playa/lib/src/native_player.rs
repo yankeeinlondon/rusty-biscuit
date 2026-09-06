@@ -8,9 +8,10 @@
 //! Formats that symphonia cannot decode (currently only Opus) fall back to
 //! host player delegation automatically.
 //!
-//! Native playback never terminates the process. If a native device-open
-//! operation times out, playa disables further native playback attempts for
-//! the rest of the process and future calls fall back to host players.
+//! Native playback never terminates the process. Failures before audio reaches
+//! the device fall back to host players in the same call; a device-open
+//! timeout or a post-submit stall also disables native playback for the rest
+//! of the process so later calls skip the device entirely.
 
 use std::fs::File;
 use std::io::{BufReader, Cursor};
@@ -199,6 +200,65 @@ fn native_device_open_timeout(timeout: Duration) -> NativePlaybackError {
     NativePlaybackError::DeviceOpenTimeout(timeout.as_secs())
 }
 
+#[cfg(test)]
+type NativeBackendSeam = Box<
+    dyn Fn(&AudioData, AudioFormat, &PlaybackOptions) -> Result<(), NativePlaybackError>
+        + Send
+        + Sync,
+>;
+
+#[cfg(test)]
+static NATIVE_BACKEND_SEAM: Mutex<Option<NativeBackendSeam>> = Mutex::new(None);
+
+/// Clears the injected native backend when dropped.
+#[cfg(test)]
+pub(crate) struct NativeBackendSeamGuard;
+
+#[cfg(test)]
+impl Drop for NativeBackendSeamGuard {
+    fn drop(&mut self) {
+        *NATIVE_BACKEND_SEAM
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = None;
+    }
+}
+
+/// Replaces the device-backed part of [`play_native`] for this process.
+///
+/// The seam is process-global; callers must hold
+/// `native_audio::lock_native_audio_test_state` so seam users serialize under
+/// `cargo test`, which shares one process across tests.
+#[cfg(test)]
+pub(crate) fn install_native_backend_seam_for_tests(
+    seam: NativeBackendSeam,
+) -> NativeBackendSeamGuard {
+    *NATIVE_BACKEND_SEAM
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(seam);
+    NativeBackendSeamGuard
+}
+
+#[cfg(test)]
+fn consult_native_backend_seam(
+    audio: &AudioData,
+    format: AudioFormat,
+    options: &PlaybackOptions,
+) -> Option<Result<(), NativePlaybackError>> {
+    let guard = NATIVE_BACKEND_SEAM
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let result = guard.as_ref()?(audio, format, options);
+    // The seam stands in for the device, so it must trip the breaker exactly
+    // where the device path does: an open timeout or a post-submit stall.
+    if matches!(
+        result,
+        Err(NativePlaybackError::DeviceOpenTimeout(_) | NativePlaybackError::Timeout(_))
+    ) {
+        trip_native_audio_breaker(NativeAudioFailureKind::DeviceOpenTimeout);
+    }
+    Some(result)
+}
+
 /// Errors from native audio playback.
 #[derive(Debug, Error)]
 pub enum NativePlaybackError {
@@ -242,11 +302,26 @@ pub enum NativePlaybackError {
 impl NativePlaybackError {
     /// Whether callers should fall back to a host player instead of reporting
     /// the native failure directly.
+    ///
+    /// The retry boundary is audio submission: a failure raised before any
+    /// audio reached the device is safe to replay through a host player in
+    /// the same call.
     pub(crate) fn should_fallback_to_host(&self) -> bool {
-        matches!(
-            self,
-            Self::UnsupportedFormat(_) | Self::UrlNotSupported | Self::Decode(_)
-        )
+        match self {
+            Self::UnsupportedFormat(_)
+            | Self::UrlNotSupported
+            | Self::NativePlaybackDisabled
+            | Self::Stream(_)
+            | Self::DeviceOpenTimeout(_)
+            | Self::Decode(_)
+            | Self::Io(_) => true,
+            // Nothing in this module produces `Play` today; if rodio ever does,
+            // it comes from connecting a player, which precedes `append`.
+            Self::Play(_) => true,
+            // Raised by `wait_with_progress` after `append`: part of the audio
+            // may already have sounded, so a host replay could play it twice.
+            Self::Timeout(_) => false,
+        }
     }
 }
 
@@ -271,16 +346,21 @@ pub fn can_decode_natively(format: AudioFormat) -> bool {
 /// Play audio natively using rodio/symphonia.
 ///
 /// Attempts in-process decoding and playback through the default audio output
-/// device. Returns an error if the format is unsupported, the source is a URL,
-/// or decoding/playback fails. A device-open timeout disables future native
-/// playback attempts for the current process so callers can fall back directly
-/// to host playback.
+/// device. A device-open timeout or a post-submit stall disables native
+/// playback for the rest of the process; every later call returns
+/// `NativePlaybackDisabled` without touching the device.
 ///
 /// ## Errors
 ///
 /// - `UnsupportedFormat` if `can_decode_natively()` returns false
+/// - `NativePlaybackDisabled` once the process-local breaker has tripped
 /// - `UrlNotSupported` if the audio data is a URL
-/// - `Stream`, `Decode`, `Play`, or `Io` on runtime failures
+/// - `Stream`, `DeviceOpenTimeout`, `Decode`, `Play`, or `Io` before any audio
+///   reaches the device
+/// - `Timeout` when playback stalls after audio was submitted
+///
+/// [`NativePlaybackError::should_fallback_to_host`] tells callers which of
+/// these may be retried through a host player.
 pub fn play_native(
     audio: &AudioData,
     format: AudioFormat,
@@ -293,6 +373,11 @@ pub fn play_native(
     if !native_audio_available() {
         log_native_audio_disabled_once();
         return Err(NativePlaybackError::NativePlaybackDisabled);
+    }
+
+    #[cfg(test)]
+    if let Some(result) = consult_native_backend_seam(audio, format, options) {
+        return result;
     }
 
     match audio {

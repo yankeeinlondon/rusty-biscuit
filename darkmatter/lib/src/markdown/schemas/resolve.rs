@@ -34,7 +34,7 @@ use serde_json::{Map, Value};
 use serde_yaml_ng::Value as YamlValue;
 
 use super::{
-    SchemaArm, SchemaOrigin, SchemaOriginKind, SchemaShape, SimplifiedSchema,
+    SchemaAdvisory, SchemaArm, SchemaOrigin, SchemaOriginKind, SchemaShape, SimplifiedSchema,
     errors::SchemaError,
     simplified::{
         SchemaDeclaration, parse_standalone_schema_document, parse_yaml_schema, to_json_schema,
@@ -78,6 +78,10 @@ pub struct ResolvedSchema {
     /// `$schema` mappings. These are dependency edges: a change to the schema
     /// file's own content must invalidate a cached effective schema.
     pub referenced_files: Vec<PathBuf>,
+
+    /// Non-fatal findings discovered while resolving referenced schema files,
+    /// sorted and deduplicated by semantic kind and canonical path.
+    pub advisories: Vec<SchemaAdvisory>,
 }
 
 /// Resolves a frontmatter `$schema` value into a JSON Schema.
@@ -185,6 +189,7 @@ fn resolve_yaml_schema_with_roots_in_context(
                 imports,
                 examples,
                 referenced_files: Vec::new(),
+                advisories: Vec::new(),
             })
         }
         YamlValue::Sequence(items) => {
@@ -216,6 +221,7 @@ fn resolve_root_union(
     let mut imports: BTreeSet<PathBuf> = BTreeSet::new();
     let mut examples: BTreeSet<PathBuf> = BTreeSet::new();
     let mut referenced_files: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut advisories: BTreeSet<SchemaAdvisory> = BTreeSet::new();
     for item in items {
         match item {
             YamlValue::Mapping(_) => {
@@ -258,6 +264,7 @@ fn resolve_root_union(
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
                 referenced_files.extend(resolved.referenced_files.iter().cloned());
+                advisories.extend(resolved.advisories.iter().cloned());
                 // If this arm itself came from a SimplifiedSchema file, preserve
                 // it in the simplified projection only when it is a single
                 // shape (root unions of unions are not modelled in v1).
@@ -295,6 +302,7 @@ fn resolve_root_union(
         imports: imports.into_iter().collect(),
         examples: examples.into_iter().collect(),
         referenced_files: referenced_files.into_iter().collect(),
+        advisories: advisories.into_iter().collect(),
     })
 }
 
@@ -599,9 +607,16 @@ fn parse_yaml_referenced_file(
         };
     }
 
-    // Treat the file's contents as a raw JSON Schema serialised in YAML.
-    let json: Value =
+    // Treat the file's contents as a raw JSON Schema serialized in YAML.
+    let yaml: YamlValue =
         serde_yaml_ng::from_str(text).map_err(|_| SchemaError::AmbiguousReferenced {
+            path: path.to_path_buf(),
+        })?;
+    let advisories = missing_simplified_envelope_advisory(&yaml, path)
+        .into_iter()
+        .collect();
+    let json: Value =
+        serde_json::to_value(yaml).map_err(|_| SchemaError::AmbiguousReferenced {
             path: path.to_path_buf(),
         })?;
     if !json.is_object() {
@@ -616,7 +631,102 @@ fn parse_yaml_referenced_file(
         imports: Vec::new(),
         examples: Vec::new(),
         referenced_files: Vec::new(),
+        advisories,
     })
+}
+
+/// Returns whether `key` belongs to a Draft 2020-12 vocabulary understood by
+/// JSON Schema implementations.
+fn is_draft_2020_12_keyword(key: &str) -> bool {
+    matches!(
+        key,
+        // Core vocabulary.
+        "$schema"
+            | "$id"
+            | "$vocabulary"
+            | "$anchor"
+            | "$dynamicAnchor"
+            | "$dynamicRef"
+            | "$ref"
+            | "$defs"
+            | "$comment"
+            // Applicator vocabulary.
+            | "prefixItems"
+            | "items"
+            | "contains"
+            | "additionalProperties"
+            | "properties"
+            | "patternProperties"
+            | "dependentSchemas"
+            | "propertyNames"
+            | "if"
+            | "then"
+            | "else"
+            | "allOf"
+            | "anyOf"
+            | "oneOf"
+            | "not"
+            // Validation vocabulary.
+            | "type"
+            | "const"
+            | "enum"
+            | "multipleOf"
+            | "maximum"
+            | "exclusiveMaximum"
+            | "minimum"
+            | "exclusiveMinimum"
+            | "maxLength"
+            | "minLength"
+            | "pattern"
+            | "maxItems"
+            | "minItems"
+            | "uniqueItems"
+            | "maxContains"
+            | "minContains"
+            | "maxProperties"
+            | "minProperties"
+            | "required"
+            | "dependentRequired"
+            // Metadata, format, content, and unevaluated vocabularies.
+            | "title"
+            | "description"
+            | "default"
+            | "deprecated"
+            | "readOnly"
+            | "writeOnly"
+            | "examples"
+            | "format"
+            | "contentEncoding"
+            | "contentMediaType"
+            | "contentSchema"
+            | "unevaluatedItems"
+            | "unevaluatedProperties"
+    )
+}
+
+/// Classifies only the narrow shape that would otherwise silently act as an
+/// unconstrained raw JSON Schema. The supplied YAML value is already in
+/// memory; this performs no resolution or other I/O.
+fn missing_simplified_envelope_advisory(
+    root: &YamlValue,
+    path: &Path,
+) -> Option<SchemaAdvisory> {
+    let map = root.as_mapping()?;
+    if map.is_empty() {
+        return None;
+    }
+    for (key, value) in map {
+        let key = key.as_str()?;
+        if !value.is_string()
+            || key.starts_with('$')
+            || key.starts_with("x-")
+            || is_draft_2020_12_keyword(key)
+        {
+            return None;
+        }
+    }
+    parse_yaml_schema(root).ok()?;
+    Some(SchemaAdvisory::missing_simplified_envelope(path))
 }
 
 fn resolve_standalone_schema(
@@ -647,6 +757,7 @@ fn resolve_standalone_schema(
                 imports,
                 examples,
                 referenced_files: Vec::new(),
+                advisories: Vec::new(),
             })
         }
         SimplifiedSchema::Union(arms) => {
@@ -676,6 +787,7 @@ fn resolve_standalone_root_union(
     let mut imports = BTreeSet::new();
     let mut examples = BTreeSet::new();
     let mut referenced_files = BTreeSet::new();
+    let mut advisories = BTreeSet::new();
 
     for arm in arms {
         match arm {
@@ -714,6 +826,7 @@ fn resolve_standalone_root_union(
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
                 referenced_files.extend(resolved.referenced_files.iter().cloned());
+                advisories.extend(resolved.advisories.iter().cloned());
                 if let Some(SimplifiedSchema::Single(shape)) = resolved.simplified {
                     simplified_arms.push(SchemaArm::Inline(shape));
                 } else {
@@ -737,6 +850,7 @@ fn resolve_standalone_root_union(
         imports: imports.into_iter().collect(),
         examples: examples.into_iter().collect(),
         referenced_files: referenced_files.into_iter().collect(),
+        advisories: advisories.into_iter().collect(),
     })
 }
 
@@ -757,6 +871,7 @@ fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, Sc
         imports: Vec::new(),
         examples: Vec::new(),
         referenced_files: Vec::new(),
+        advisories: Vec::new(),
     })
 }
 
@@ -1844,6 +1959,7 @@ pub fn shape_to_schema(shape: &SchemaShape) -> Result<Value, SchemaError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::schemas::SchemaAdvisoryKind;
     use serde_json::json;
 
     fn yaml_value(input: &str) -> YamlValue {
@@ -1971,6 +2087,115 @@ mod tests {
         let v = yaml_value("./no-schema.yaml");
         let resolved = resolve_yaml_schema(&v, dir.path()).unwrap();
         assert!(resolved.simplified.is_none());
+    }
+
+    #[test]
+    fn bare_simplified_map_remains_raw_json_schema_and_reports_advisory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_schema_file(
+            dir.path(),
+            "schema.yaml",
+            "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
+        );
+        let resolved = resolve_yaml_schema(&yaml_value("./schema.yaml"), dir.path()).unwrap();
+
+        assert!(resolved.simplified.is_none());
+        assert_eq!(resolved.json_schema["source_marker"], "string(required)");
+        assert_eq!(resolved.json_schema["spec"], "file(eager; required)");
+        let validator = jsonschema::validator_for(&resolved.json_schema).unwrap();
+        assert!(validator.is_valid(&json!({ "anything": true })));
+        assert_eq!(resolved.advisories.len(), 1);
+        let advisory = &resolved.advisories[0];
+        assert_eq!(
+            advisory.kind(),
+            SchemaAdvisoryKind::MissingSimplifiedEnvelope
+        );
+        assert_eq!(advisory.source(), "darkmatter.schema");
+        assert_eq!(advisory.code(), "dm.schema.missing_simplified_envelope");
+        assert_eq!(advisory.path(), path);
+        let message = advisory.message();
+        assert!(message.contains(&path.display().to_string()));
+        assert!(message.contains("`$schema:`"));
+        assert!(message.contains("`kind: schema` + `types:`"));
+    }
+
+    #[test]
+    fn bare_map_advisory_excludes_json_schema_envelopes_and_invalid_maps() {
+        let cases = [
+            (
+                "object-properties.yaml",
+                "type: object\nproperties:\n  name:\n    type: string\n",
+            ),
+            ("format.yaml", "format: string\n"),
+            ("title.yaml", "title: string(required)\n"),
+            ("comment.yaml", "$comment: string\n"),
+            ("custom-dollar.yaml", "$custom: string\n"),
+            ("custom-extension.yaml", "x-custom: string\n"),
+            ("pure.yaml", "$schema:\n  name: string(required)\n"),
+            (
+                "kinded.yaml",
+                "kind: schema\ntypes:\n  name: string(required)\n",
+            ),
+            ("mixed.yaml", "name: string(required)\ncount: 1\n"),
+            ("invalid.yaml", "name: definitely-not-a-type\n"),
+        ];
+
+        let dir = tempfile::tempdir().unwrap();
+        for (name, body) in cases {
+            write_schema_file(dir.path(), name, body);
+            let resolved =
+                resolve_yaml_schema(&yaml_value(&format!("./{name}")), dir.path()).unwrap();
+            assert!(
+                resolved.advisories.is_empty(),
+                "unexpected advisory for {name}"
+            );
+        }
+
+        write_schema_file(
+            dir.path(),
+            "target.yaml",
+            "$schema:\n  name: string(required)\n",
+        );
+        write_schema_file(dir.path(), "scalar.yaml", "$schema: ./target.yaml\n");
+        let resolved =
+            resolve_yaml_schema(&yaml_value("./scalar.yaml"), dir.path()).unwrap();
+        assert!(resolved.advisories.is_empty());
+    }
+
+    #[test]
+    fn root_union_sorts_and_deduplicates_schema_advisories() {
+        let dir = tempfile::tempdir().unwrap();
+        let z_path = write_schema_file(dir.path(), "z.yaml", "zeta: string(required)\n");
+        let a_path = write_schema_file(dir.path(), "a.yaml", "alpha: number(default(1))\n");
+        let resolved = resolve_yaml_schema(
+            &yaml_value("- ./z.yaml\n- ./a.yaml\n- ./z.yaml\n"),
+            dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolved
+                .advisories
+                .iter()
+                .map(SchemaAdvisory::path)
+                .collect::<Vec<_>>(),
+            vec![a_path.clone(), z_path.clone()]
+        );
+
+        write_schema_file(
+            dir.path(),
+            "root.yaml",
+            "$schema:\n  - ./z.yaml\n  - ./a.yaml\n  - ./z.yaml\n",
+        );
+        let nested = resolve_yaml_schema(&yaml_value("./root.yaml"), dir.path()).unwrap();
+        assert_eq!(
+            nested
+                .advisories
+                .iter()
+                .map(SchemaAdvisory::path)
+                .collect::<Vec<_>>(),
+            vec![a_path, z_path]
+        );
     }
 
     #[test]

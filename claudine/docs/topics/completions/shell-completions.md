@@ -613,7 +613,11 @@ Runtime operation-file recovery distinguishes three outcomes for
    `./docs/access.md`, `~/access.md`, or `@access.md` reports the existing
    `composition.invalid_file_reference` typed no-match diagnostic without
    opening a picker. Repository-local basename suggestions, when present,
-   are advisory and do not select or retry another file.
+   are advisory and do not select or retry another file. Their repository walk
+   examines at most 20,000 entries: unreadable entries and other per-entry
+   errors consume that budget but are skipped, so later matches and matches
+   already found within the bound remain available. An unusable repository root
+   still produces no suggestions.
 
 Interactive file collection also applies to **missing `$schema`
 properties**: when a frontmatter schema declares

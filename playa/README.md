@@ -8,8 +8,10 @@
 <p>This library leverages the host to play audio natively or via a headless audio player installed on the host.</p>
 
 <ul>
-    <li>small library (<i>native playback is off by default; opt in per feature</i>)</li>
+    <li>one native-first automatic pipeline (<i>the library feature remains opt-in</i>)</li>
     <li>audio format detection from files, URLs, or bytes</li>
+    <li>completion reports with expected and elapsed duration</li>
+    <li>durable, globally serialized background playback</li>
     <li>capability-ranked player matching with automatic failover</li>
     <li>88 embedded sound effects across 6 categories</li>
 </ul>
@@ -55,9 +57,11 @@ before the build.
 > On **all** platforms we expect you to have the
 > [**just**](https://github.com/casey/just) runner installed.
 
-The OS-native backends all sit behind one feature, `sfx-native-audio`, which the
-CLI enables by default; `target_os` decides which of them compiles in. To build
-without them — and without any ALSA / PulseAudio requirement — opt out:
+Automatic file and byte playback uses `native-playback`. OS-specific sound-effect
+routing uses `sfx-native-audio`; the CLI enables both by default and `target_os`
+decides which backend compiles. The library enables neither unless a consumer
+opts in. To build the CLI without native audio—and without any ALSA/PulseAudio
+requirement—opt out:
 
 ```sh
 cargo install --path playa/cli --no-default-features
@@ -79,6 +83,7 @@ playa effect sad-trombone --background
 # what can this host play with?
 playa players list
 playa players install
+playa spool                     # Redacted detached-queue status
 ```
 
 Speed and volume are `--fast` / `--slow` / `--speed <MULTIPLIER>` and `--quiet` /
@@ -86,6 +91,36 @@ Speed and volume are `--fast` / `--slow` / `--speed <MULTIPLIER>` and `--quiet` 
 `--force-host` skips the native decoder in favor of a host player.
 
 Full flag and subcommand reference: [`playa/cli/README.md`](./cli/README.md).
+
+## Playback and background delivery
+
+All automatic entry points—builder methods and the `playa*` free functions—use
+the same native-first pipeline when `native-playback` is enabled, then fall back
+to the capability-ranked host players. Any native failure before audio reaches
+the device (including a device-open timeout or an already-tripped breaker) falls
+back within the same call; a stall after audio was submitted is fatal rather
+than replayed. A device-open timeout or stall disables native playback for the
+rest of the process. APIs that explicitly name an
+`AudioPlayer` remain host-only. `play_with_report` and
+`play_async_with_report` expose the selected route, expected duration, elapsed
+duration, and a non-fatal completion verdict. For positively probed mono input,
+the mpv host route requests stereo output to avoid early EOF on devices that
+cannot negotiate a mono layout; stereo and multichannel input is unchanged.
+
+`--background` durably publishes a job to Playa's private per-user spool and
+returns after a scheduler owns it. Jobs from every participating process are
+played in sequence without overlap. Publication survives requester exit;
+delivery is best-effort and at-most-once after playback begins, so a scheduler
+crash can quarantine an in-flight job rather than replaying audio. Each job is
+delegated to the absolute executable that enqueued it, preserving that build's
+playback features and options. Missing, replaced, or protocol-incompatible
+executables fail the job instead of silently degrading it.
+
+The spool is private (`0700` and owner-checked on Unix, protected per-user on
+Windows). Speech text may exist only in private preparation records and is not
+shown by `playa spool` or written to the journal. `PLAYA_DRY_RUN=1` and builder
+dry-run return before source reads, cache writes, spool publication, journal
+writes, or child processes.
 
 
 
@@ -117,4 +152,6 @@ Players are ranked by capability score (speed control +4, volume control +3, str
 
 ## Overview
 
-This library is meant to leverage existing software residing on the host computer for audio playback. While you can specify a provider to use the most common situation is to just provide the library or CLI some audio (a file or a stream) and let it detect what the best software would be to use.
+This library uses an enabled native backend first and capability-ranked host
+software as fallback. Callers may force or explicitly select a host player when
+that route is required.

@@ -99,6 +99,19 @@ protocol-focused:
 - `biscuit-hash` — xxHash content-hash identity for the Phase 3 invalidation
   engine (`WorkspaceIndex`).
 
+## DMLS Zed CLI (`darkmatter/dmls/zed-dmls-cli`)
+
+- `sniff` captures the host OS and the `dmls` executable lookup once per
+  invocation.
+- `dirs` supplies cross-platform per-user data and log directory roots.
+- `biscuit-terminal` supplies `TerminalRenderable` output for staging and
+  diagnostics.
+- `clap` defines the `stage` and `doctor` command surface.
+- `toml` validates the staged and registered extension manifests and reads the
+  DMLS package version for the helper's build-time compatibility contract.
+- `wait-timeout` bounds the `dmls --version` probe.
+- `thiserror` and `color-eyre` provide typed library and CLI error reporting.
+
 ## CLI (`darkmatter/cli`)
 
 - `serde` (`derive`) — the `md clean --json` diagnostic envelope. The

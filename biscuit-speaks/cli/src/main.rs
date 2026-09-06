@@ -3,10 +3,10 @@ use std::io::{self, IsTerminal, Read};
 
 use biscuit_speaks::{
     CloudTtsProvider, ESpeakProvider, EchogardenProvider, ElevenLabsProvider, Gender, GttsProvider,
-    HostTtsProvider, KokoroTtsProvider, Language, SapiProvider, SayProvider, SpeakResult,
+    HostTtsProvider, KokoroTtsProvider, Language, SapiProvider, SayProvider, Speak, SpeakResult,
     SpeedLevel, TtsConfig, TtsError, TtsFailoverStrategy, TtsProvider, TtsVoiceInventory, Voice,
     VoiceQuality, VolumeLevel, bust_host_capability_cache, get_available_providers,
-    parse_provider_name, populate_cache_for_all_providers, read_from_cache, speak,
+    parse_provider_name, populate_cache_for_all_providers, read_from_cache, run_if_worker, speak,
     speak_with_result,
 };
 use clap::{CommandFactory, Parser, Subcommand, ValueEnum};
@@ -1156,6 +1156,9 @@ fn parse_tts_client_name(name: &str) -> Option<TtsClient> {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(code) = run_if_worker().await {
+        std::process::exit(code);
+    }
     CompleteEnv::with_factory(Cli::command).complete();
 
     let cli = Cli::parse();
@@ -1222,18 +1225,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
         }
-    }
-
-    // Handle --background: re-spawn ourselves without --background as a detached process
-    if cli.background {
-        let args: Vec<String> = std::env::args().filter(|a| a != "--background").collect();
-        std::process::Command::new(&args[0])
-            .args(&args[1..])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()?;
-        return Ok(());
     }
 
     // Handle --refresh-cache flag (does not exit early - continues with other operations)
@@ -1398,7 +1389,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     config = config.with_speed(speed);
 
     // Call the async TTS function
-    if cli.meta {
+    if cli.background {
+        if let Err(e) = Speak::new(message).with_config(config).play_detached().await {
+            eprintln!("Error: {:?}", e);
+            std::process::exit(1);
+        }
+    } else if cli.meta {
         // Use speak_with_result to get metadata
         match speak_with_result(&message, &config).await {
             Ok(result) => {

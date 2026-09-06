@@ -50,6 +50,7 @@
 //! [`SchemaError`]: crate::markdown::schemas::errors::SchemaError
 
 pub mod about;
+mod advisory;
 pub mod clean;
 pub mod coerce;
 pub mod completion;
@@ -66,7 +67,7 @@ pub mod triggers;
 pub mod validate;
 
 use std::{
-    collections::HashSet,
+    collections::{BTreeSet, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -84,6 +85,7 @@ pub use about::{
     schema_type_descriptors, validation_behavior_descriptors, match_safe_constraint_descriptors,
     trigger_grammar_descriptors,
 };
+pub use advisory::{SchemaAdvisory, SchemaAdvisoryKind};
 pub use clean::{
     CleanBaselineSchema, CleanSchemaConfig, CleanSchemaContext, SchemaCleanAnalysis,
     analyze_frontmatter, schema_result_set_identical,
@@ -256,6 +258,7 @@ struct BaselineSchema {
     /// refcount bump) instead of deep-cloning the whole baseline schema on the
     /// common baseline-only / baseline+document paths (F29).
     json_schema: Arc<Value>,
+    advisories: Vec<SchemaAdvisory>,
 }
 
 /// A resolved trigger payload layer, ready to merge into the effective schema.
@@ -267,6 +270,7 @@ struct TriggerLayer {
     json_schema: Value,
     /// Payload dependency edges (referenced files + imports + examples).
     dependencies: Vec<PathBuf>,
+    advisories: Vec<SchemaAdvisory>,
 }
 
 impl DarkmatterSchemas {
@@ -314,7 +318,7 @@ impl DarkmatterSchemas {
             message: "baseline could not be converted to JSON Schema".into(),
             source: Some(Box::new(err)),
         })?;
-        self.set_baseline_json(json)?;
+        self.set_baseline_json(json, Vec::new())?;
         Ok(self)
     }
 
@@ -340,7 +344,7 @@ impl DarkmatterSchemas {
                     source: Some(Box::new(other)),
                 },
             })?;
-        self.set_baseline_json(resolved.json_schema)?;
+        self.set_baseline_json(resolved.json_schema, resolved.advisories)?;
         Ok(self)
     }
 
@@ -351,7 +355,7 @@ impl DarkmatterSchemas {
     /// Returns [`SchemaError::Baseline`] when the value is not a simple
     /// object schema.
     pub fn with_baseline_json_schema(mut self, value: Value) -> Result<Self, SchemaError> {
-        self.set_baseline_json(value)?;
+        self.set_baseline_json(value, Vec::new())?;
         Ok(self)
     }
 
@@ -364,14 +368,22 @@ impl DarkmatterSchemas {
     pub fn with_darkmatter_baseline_json_schema(mut self) -> Result<Self, SchemaError> {
         let json_schema = Arc::clone(darkmatter_base_json_schema_arc());
         resolve::validate_baseline_schema(&json_schema)?;
-        self.baseline = Some(BaselineSchema { json_schema });
+        self.baseline = Some(BaselineSchema {
+            json_schema,
+            advisories: Vec::new(),
+        });
         Ok(self)
     }
 
-    fn set_baseline_json(&mut self, value: Value) -> Result<(), SchemaError> {
+    fn set_baseline_json(
+        &mut self,
+        value: Value,
+        advisories: Vec<SchemaAdvisory>,
+    ) -> Result<(), SchemaError> {
         resolve::validate_baseline_schema(&value)?;
         self.baseline = Some(BaselineSchema {
             json_schema: Arc::new(value),
+            advisories,
         });
         Ok(())
     }
@@ -561,6 +573,11 @@ impl DarkmatterSchemas {
             &merged_json,
         );
         let dependencies = build_dependencies(resolved.as_ref(), &trigger_layers);
+        let advisories = build_advisories(
+            self.baseline.as_ref(),
+            &trigger_layers,
+            resolved.as_ref(),
+        );
         Ok(Some(EffectiveSchema {
             simplified: resolved.and_then(|r| r.simplified),
             json_schema: merged_json,
@@ -571,6 +588,7 @@ impl DarkmatterSchemas {
             file_ref_fallback_dir: self.cache.file_ref_fallback_dir().map(Path::to_path_buf),
             file_resolution_context: self.file_resolution_context.clone(),
             dependencies,
+            advisories,
         }))
     }
 
@@ -613,20 +631,25 @@ impl DarkmatterSchemas {
             if !eval.matched {
                 continue;
             }
-            let (json_schema, dependencies) = if pre_resolved {
+            let (json_schema, dependencies, advisories) = if pre_resolved {
                 let payload = &registry.payloads[idx];
-                (payload.json_schema.clone(), payload.dependencies.clone())
+                (
+                    payload.json_schema.clone(),
+                    payload.dependencies.clone(),
+                    payload.advisories.clone(),
+                )
             } else {
                 let payload = triggers::assemble::resolve_trigger_payload(
                     eval.trigger,
                     &registry.roots,
                 )?;
-                (payload.json_schema, payload.dependencies)
+                (payload.json_schema, payload.dependencies, payload.advisories)
             };
             layers.push(TriggerLayer {
                 source: eval.trigger.source.clone(),
                 json_schema,
                 dependencies,
+                advisories,
             });
         }
         Ok(layers)
@@ -654,6 +677,7 @@ impl DarkmatterSchemas {
                 valid: true,
                 problems: Vec::new(),
                 pending: Vec::new(),
+                advisories: Vec::new(),
             }),
         }
     }
@@ -712,6 +736,9 @@ pub struct EffectiveSchema {
     /// otherwise unchanged) must invalidate a cached [`EffectiveSchema`]. The DMLS
     /// overlay cache content-hashes each entry to honor this.
     dependencies: Vec<PathBuf>,
+    /// Non-fatal findings produced while resolving the effective schema's
+    /// referenced files, sorted and deduplicated by semantic kind and path.
+    advisories: Vec<SchemaAdvisory>,
 }
 
 impl EffectiveSchema {
@@ -725,6 +752,11 @@ impl EffectiveSchema {
     /// also track these paths' content to stay correct.
     pub fn dependencies(&self) -> &[PathBuf] {
         &self.dependencies
+    }
+
+    /// Non-fatal findings discovered while resolving this effective schema.
+    pub fn advisories(&self) -> &[SchemaAdvisory] {
+        &self.advisories
     }
 
     /// Validates a frontmatter JSON value against this schema. Equivalent to
@@ -842,6 +874,7 @@ impl EffectiveSchema {
             valid: problems.is_empty(),
             problems,
             pending: Vec::new(),
+            advisories: self.advisories.clone(),
         }
     }
 
@@ -992,6 +1025,8 @@ pub struct ValidationReport {
     /// [`EffectiveSchema::validate_with_options`], which mirrors the compose
     /// deferral rules without executing anything.
     pub pending: Vec<PendingValue>,
+    /// Non-fatal findings discovered while resolving the effective schema.
+    pub advisories: Vec<SchemaAdvisory>,
 }
 
 /// Coarse classification of a validation problem.
@@ -1440,6 +1475,24 @@ fn build_dependencies(
     deps.sort();
     deps.dedup();
     deps
+}
+
+fn build_advisories(
+    baseline: Option<&BaselineSchema>,
+    trigger_layers: &[TriggerLayer],
+    resolved: Option<&resolve::ResolvedSchema>,
+) -> Vec<SchemaAdvisory> {
+    let mut advisories = BTreeSet::new();
+    if let Some(baseline) = baseline {
+        advisories.extend(baseline.advisories.iter().cloned());
+    }
+    for layer in trigger_layers {
+        advisories.extend(layer.advisories.iter().cloned());
+    }
+    if let Some(resolved) = resolved {
+        advisories.extend(resolved.advisories.iter().cloned());
+    }
+    advisories.into_iter().collect()
 }
 
 pub(crate) fn positions_for(source: &Markdown) -> PositionMap {

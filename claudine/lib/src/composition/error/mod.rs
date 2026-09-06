@@ -208,18 +208,6 @@ pub enum CompositionError {
     #[error("frontmatter `prompt` must be a string, got {0}")]
     PromptPropertyWrongType(String),
 
-    /// The authored response-frontmatter authorization is malformed.
-    ///
-    /// This is validated against the source document before composition so no
-    /// effective-frontmatter layer can create or broaden the authorization.
-    #[error("invalid `response_frontmatter` in {}: {reason}", biscuit_file::to_portable_string(source_path))]
-    ResponseFrontmatterInvalid {
-        /// The document containing the invalid declaration.
-        source_path: PathBuf,
-        /// The actionable validation failure.
-        reason: String,
-    },
-
     /// `inline-compose` was run on a document that authors both a non-null
     /// `prompt` and a non-null `sequence` — i.e. an inline sequence. Such a
     /// document must be run with `claudine sequence` so each sequence state
@@ -3106,9 +3094,6 @@ impl CompositionError {
             | CompositionError::PromptPropertyWrongType(_) => {
                 Some(FrontmatterHighlight::Property("prompt".to_string()))
             }
-            CompositionError::ResponseFrontmatterInvalid { .. } => Some(
-                FrontmatterHighlight::Property("response_frontmatter".to_string()),
-            ),
             CompositionError::AgentHintWrongType(_)
             | CompositionError::AgentResolutionFailed { .. } => {
                 Some(FrontmatterHighlight::Property("agent".to_string()))

@@ -10,8 +10,8 @@ binary. All intelligence lives in `dmls`.
 > (per AD-7 in the DMLS design). To publish, copy this directory into its own
 > public `zed-dmls` repository, add a top-level `LICENSE`, and submit to
 > `zed-industries/extensions`. It targets `wasm32-wasip2` and depends on
-> `zed_extension_api`, so it is intentionally not built by the monorepo's
-> `just` recipes.
+> `zed_extension_api`. The Darkmatter `just lint` and `just zed-verify` gates
+> compile and package it with Zed's supported toolchain.
 
 ## Layout
 
@@ -90,9 +90,35 @@ surface a richer theme can address individually.
 ## Develop
 
 ```
-# install as a dev extension
-# Zed: command palette → "zed: install dev extension" → select this directory
+# from darkmatter/: install the binary, stage outside the checkout, register with Zed
+just install-dmls
+just zed-doctor
 ```
+
+After installing the binary, `install-dmls` stages this directory when Zed's
+data directory exists. Staging copies it (including the bundled `extension.wasm`)
+to a stable per-user location and points Zed's `extensions/installed/dmls`
+link at it, repairing a dangling link from a removed worktree. Exit status `3`
+means the link could not be made automatically; the output names the stable
+directory to select via **Zed: install dev extension** — never this worktree
+directory or the sibling `vscode-dmls` directory.
+Preview or custom installations can invoke `zed-dmls stage` and
+`zed-dmls doctor` with `--staging-dir`, `--zed-data-dir`, and `--zed-log`
+overrides; `--plain` provides stable automation output.
+
+## Troubleshooting
+
+Run `just zed-doctor` to check the native binary, registered extension target,
+manifest, and recent Zed log evidence without launching Zed.
+
+- `No extension manifest found for extension dmls` during startup means the
+  existing dev-extension registration points to a removed path.
+- `Failed to install dev extension: No extension manifest found for extension
+  vscode-dmls` during installation means the sibling VS Code extension was
+  selected instead of the stable directory printed by `just install-dmls`.
+
+The Zed log is consulted only when the registration is broken, and only for
+lines about `dmls` or `vscode-dmls`.
 
 Update `REPO` in `src/lib.rs` and the asset-name mapping to match the repository
 that publishes `dmls` release archives before shipping.

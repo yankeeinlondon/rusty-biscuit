@@ -195,6 +195,20 @@ impl TtsExecutor for ESpeakProvider {
             voice,
         ))
     }
+
+    #[cfg(feature = "playa")]
+    async fn detached_job(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<playa::detached::SpoolJob, TtsError> {
+        let mut args = vec!["-v".into(), self.build_voice_arg(config).into()];
+        if let Some(rate) = Self::resolve_rate(config.speed) {
+            args.extend(["-s".into(), rate.to_string().into()]);
+        }
+        args.push(text.into());
+        crate::playa_bridge::command_job(&self.binary, args)
+    }
 }
 
 impl TtsVoiceInventory for ESpeakProvider {

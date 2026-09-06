@@ -150,30 +150,22 @@ pub(crate) fn try_inline_closure(
 
                 for key in &result.inserted_properties {
                     log::message(&crate::output::fm_check_ok(
-                        &format!("Inserted response frontmatter property <bold>\"{key}\"</bold>"),
+                        &format!("Inserted frontmatter property <bold>\"{key}\"</bold> from the response"),
                         term,
                     ));
                 }
 
                 for key in &result.refreshed_properties {
                     log::message(&crate::output::fm_check_ok(
-                        &format!("Refreshed response frontmatter property <bold>\"{key}\"</bold>"),
+                        &format!("Updated frontmatter property <bold>\"{key}\"</bold> from the response"),
                         term,
                     ));
                 }
 
                 for notice in &result.ignored_properties {
                     let status = Status::from_prose(format!(
-                        "Response frontmatter property <b>\"{}\"</b> at line {} was not authorized — ignored",
+                        "Response frontmatter property <b>\"{}\"</b> at line {} is immutable — ignored",
                         notice.key, notice.line
-                    ))
-                    .state(StatusState::Warning);
-                    log::message(&status.render(term));
-                }
-
-                for key in &result.missing_properties {
-                    let status = Status::from_prose(format!(
-                        "Allowed response frontmatter property <b>\"{key}\"</b> was not returned"
                     ))
                     .state(StatusState::Warning);
                     log::message(&status.render(term));
@@ -266,7 +258,6 @@ mod tests {
                 darkmatter::markdown::hash::MdHashKind::Simple,
                 &claudine::composition::closure::inline_hash_options(),
             ),
-            response_frontmatter: Vec::new(),
         };
 
         let term = Terminal::new_optimistic(120);
@@ -312,7 +303,6 @@ mod tests {
                 darkmatter::markdown::hash::MdHashKind::Simple,
                 &claudine::composition::closure::inline_hash_options(),
             ),
-            response_frontmatter: Vec::new(),
         };
 
         try_inline_closure(
@@ -347,7 +337,6 @@ mod tests {
                 darkmatter::markdown::hash::MdHashKind::Simple,
                 &claudine::composition::closure::inline_hash_options(),
             ),
-            response_frontmatter: Vec::new(),
         };
 
         let term = Terminal::new_optimistic(120);

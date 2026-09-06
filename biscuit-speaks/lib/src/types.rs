@@ -16,7 +16,8 @@ use sniff::programs::{InstalledTtsClients, TtsClient};
 // ============================================================================
 
 /// Volume level for TTS audio output.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum VolumeLevel {
     /// Full volume (1.0)
     Loud,
@@ -46,7 +47,8 @@ impl VolumeLevel {
 // ============================================================================
 
 /// Speed level for TTS speech rate.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SpeedLevel {
     /// Fast speech (1.25x normal)
     Fast,
@@ -670,7 +672,8 @@ impl From<CloudTtsProvider> for TtsProvider {
 
 /// Strategy for handling TTS provider failures.
 #[non_exhaustive]
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum TtsFailoverStrategy {
     /// Try providers in priority order until one succeeds.
     #[default]
@@ -699,7 +702,8 @@ pub enum TtsFailoverStrategy {
 ///     .with_gender(Gender::Female)
 ///     .with_language(Language::English);
 /// ```
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct TtsConfig {
     /// Requested voice name (provider-specific).
     pub requested_voice: Option<String>,
@@ -875,6 +879,9 @@ pub struct SpeakResult {
     /// Whether the audio was served from cache.
     #[serde(default)]
     pub cache_hit: bool,
+    /// Playback route and completion report for file-producing providers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub playback: Option<SpeakPlaybackReport>,
 }
 
 impl SpeakResult {
@@ -887,6 +894,7 @@ impl SpeakResult {
             audio_file_path: None,
             audio_codec: None,
             cache_hit: false,
+            playback: None,
         }
     }
 
@@ -899,6 +907,7 @@ impl SpeakResult {
             audio_file_path: None,
             audio_codec: None,
             cache_hit: false,
+            playback: None,
         }
     }
 
@@ -921,6 +930,84 @@ impl SpeakResult {
     pub fn with_cache_hit(mut self, hit: bool) -> Self {
         self.cache_hit = hit;
         self
+    }
+
+    /// Attach the lossless playback report for file-backed speech.
+    #[must_use]
+    pub fn with_playback(mut self, playback: SpeakPlaybackReport) -> Self {
+        self.playback = Some(playback);
+        self
+    }
+}
+
+/// Playback route represented without exposing biscuit-speaks' optional Playa dependency.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeakPlaybackRoute {
+    /// In-process native playback.
+    Native,
+    /// Host player executable selected by Playa.
+    Host(String),
+    /// Playback was intentionally skipped.
+    DryRun,
+}
+
+/// Completion verdict represented without exposing Playa in the unconditional API.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SpeakPlaybackVerdict {
+    /// Playback lasted for the expected duration.
+    Complete,
+    /// Playback ended early by the reported number of milliseconds.
+    Truncated { missing_millis: u64 },
+    /// The source duration could not be verified.
+    Unverified,
+}
+
+/// Stable, always-compiled projection of a Playa playback report.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SpeakPlaybackReport {
+    /// Route that handled playback.
+    pub route: SpeakPlaybackRoute,
+    /// Expected source duration, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_millis: Option<u64>,
+    /// Observed route duration.
+    pub elapsed_millis: u64,
+    /// Completion assessment.
+    pub verdict: SpeakPlaybackVerdict,
+}
+
+#[cfg(feature = "playa")]
+impl From<playa::PlaybackReport> for SpeakPlaybackReport {
+    fn from(report: playa::PlaybackReport) -> Self {
+        let millis = |duration: std::time::Duration| {
+            duration.as_millis().min(u128::from(u64::MAX)) as u64
+        };
+        Self {
+            route: match report.route {
+                playa::PlaybackRoute::Native => SpeakPlaybackRoute::Native,
+                playa::PlaybackRoute::Host(player) => {
+                    let name = serde_json::to_value(player)
+                        .ok()
+                        .and_then(|value| value.as_str().map(ToOwned::to_owned))
+                        .unwrap_or_else(|| format!("{player:?}").to_lowercase());
+                    SpeakPlaybackRoute::Host(name)
+                }
+                playa::PlaybackRoute::DryRun => SpeakPlaybackRoute::DryRun,
+            },
+            expected_millis: report.expected.map(millis),
+            elapsed_millis: millis(report.elapsed),
+            verdict: match report.verdict {
+                playa::PlaybackVerdict::Complete => SpeakPlaybackVerdict::Complete,
+                playa::PlaybackVerdict::Truncated { missing } => {
+                    SpeakPlaybackVerdict::Truncated {
+                        missing_millis: millis(missing),
+                    }
+                }
+                playa::PlaybackVerdict::Unverified => SpeakPlaybackVerdict::Unverified,
+            },
+        }
     }
 }
 

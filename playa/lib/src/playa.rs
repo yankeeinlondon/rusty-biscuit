@@ -1,11 +1,18 @@
 use std::path::PathBuf;
+#[cfg(feature = "native-playback")]
+use std::time::Instant;
 
 use crate::audio::Audio;
 #[cfg(feature = "native-playback")]
 use crate::audio::AudioSourceKind;
 use crate::error::{InvalidAudio, PlaybackError};
-use crate::playback::playa_with_player_and_options;
+use crate::playback::playa_with_player_and_options_report_inner;
+#[cfg(feature = "async")]
+use crate::playback::playa_with_player_and_options_async_report_inner;
 use crate::player::{AudioPlayer, PLAYER_LOOKUP, Player, match_available_players};
+use crate::report::PlaybackReport;
+#[cfg(feature = "native-playback")]
+use crate::report::PlaybackRoute;
 use crate::types::{AudioFormat, PlaybackOptions};
 
 #[cfg(feature = "audio-ducking")]
@@ -78,6 +85,11 @@ impl Playa {
         Ok(Self::new(audio))
     }
 
+    /// Create a builder from already classified audio data.
+    pub fn from_data(data: crate::AudioData, format: AudioFormat) -> Self {
+        Self::new(Audio::new(data, format))
+    }
+
     /// Enable metadata display to STDOUT when `play()` is called.
     ///
     /// When enabled, displays:
@@ -129,6 +141,26 @@ impl Playa {
         self
     }
 
+    /// Hand playback to Playa's private ordered worker and return after publication.
+    pub fn play_detached(self) -> Result<crate::detached::JobId, PlaybackError> {
+        let playback = crate::detached::DetachedPlayback {
+            options: self.options,
+            routing: if self.force_host {
+                crate::detached::PlaybackRouting::ForceHost
+            } else {
+                crate::detached::PlaybackRouting::Auto
+            },
+            #[cfg(feature = "audio-ducking")]
+            ducking: self.duck_config.map(|config| crate::detached::DetachedDucking {
+                ramp_ms: config.ramp_ms(),
+                floor_scalar: config.floor_scalar(),
+            }),
+            #[cfg(not(feature = "audio-ducking"))]
+            ducking: None,
+        };
+        crate::detached::enqueue_data(self.audio.into_data(), playback, self.dry_run)
+    }
+
     /// Enable audio ducking during playback.
     ///
     /// When enabled, system audio will be attenuated to the configured floor
@@ -162,72 +194,124 @@ impl Playa {
     /// Play the audio using the best available player.
     ///
     /// When the `native-playback` feature is enabled, attempts in-process
-    /// decoding via rodio/symphonia first. Falls back to a host player
-    /// subprocess if native decoding fails or is unavailable. If a native
-    /// device-open operation times out, playa disables further native playback
-    /// attempts for the rest of the process and subsequent calls route directly
-    /// to the host-player fallback.
+    /// decoding via rodio/symphonia first. Any native failure raised before
+    /// audio reaches the device (unsupported format, decode or file error,
+    /// device-open failure or timeout, or a breaker tripped earlier in this
+    /// process) falls back to a host player in the same call. A device that
+    /// stops making progress after audio was submitted returns
+    /// [`PlaybackError::AudioSubsystem`] instead of replaying through a host
+    /// player. A device-open timeout or stall also disables native playback
+    /// for the rest of the process, so later calls skip the device entirely.
     ///
     /// Note: If ducking is configured, use [`play_async`] instead as ducking
     /// requires an async runtime.
     pub fn play(self) -> Result<(), PlaybackError> {
+        self.play_with_report().map(|_| ())
+    }
+
+    /// Play the audio and report the selected route and completion timing.
+    pub fn play_with_report(self) -> Result<PlaybackReport, PlaybackError> {
         if self.dry_run || dry_run_env_enabled() {
             tracing::debug!("playa: dry-run enabled, skipping playback");
-            return Ok(());
+            return Ok(PlaybackReport::default());
         }
+        validate_speed(&self.options)?;
 
         let format = self.audio.format();
+        let probed = crate::probe_audio_metadata(self.audio.data_ref());
 
-        // Try native playback first (non-URL, non-forced-host)
         #[cfg(feature = "native-playback")]
-        if !self.force_host && !matches!(self.audio.source_kind(), AudioSourceKind::Url) {
-            match crate::native_player::play_native(self.audio.data_ref(), format, &self.options) {
-                Ok(()) => {
-                    if self.show_meta {
-                        self.print_native_meta(format);
-                    }
-                    return Ok(());
-                }
-                Err(error) if !error.should_fallback_to_host() => {
-                    return Err(PlaybackError::AudioSubsystem {
-                        detail: error.to_string(),
-                    });
-                }
-                Err(_) => {}
-            }
+        if self.wants_native() {
+            let result = match self.attempt_native(format, probed) {
+                NativeAttempt::Complete(report) => Ok(report),
+                NativeAttempt::Fallback => self.play_host(format, probed),
+                NativeAttempt::Fatal(detail) => Err(PlaybackError::AudioSubsystem { detail }),
+            };
+            return result.map(PlaybackReport::warn_if_truncated);
         }
 
-        // Host player fallback
+        self.play_host(format, probed)
+            .map(PlaybackReport::warn_if_truncated)
+    }
+
+    #[cfg(feature = "native-playback")]
+    fn wants_native(&self) -> bool {
+        !self.force_host && !matches!(self.audio.source_kind(), AudioSourceKind::Url)
+    }
+
+    /// One native attempt, classified by the retry boundary in
+    /// [`crate::native_player::NativePlaybackError::should_fallback_to_host`].
+    #[cfg(feature = "native-playback")]
+    fn attempt_native(
+        &self,
+        format: AudioFormat,
+        probed: Option<crate::ProbedAudioMetadata>,
+    ) -> NativeAttempt {
+        let started = Instant::now();
+        match crate::native_player::play_native(self.audio.data_ref(), format, &self.options) {
+            Ok(()) => {
+                if self.show_meta {
+                    self.print_native_meta(format);
+                }
+                NativeAttempt::Complete(PlaybackReport::completed(
+                    PlaybackRoute::Native,
+                    probed,
+                    started.elapsed(),
+                    self.options.speed.unwrap_or(1.0),
+                ))
+            }
+            Err(error) if error.should_fallback_to_host() => NativeAttempt::Fallback,
+            Err(error) => NativeAttempt::Fatal(error.to_string()),
+        }
+    }
+
+    fn play_host(
+        self,
+        format: AudioFormat,
+        probed: Option<crate::ProbedAudioMetadata>,
+    ) -> Result<PlaybackReport, PlaybackError> {
         let player = self.select_player(format)?;
         if self.show_meta {
             self.print_meta(player, format);
         }
-        playa_with_player_and_options(player, self.audio.into_data(), self.options)
+        playa_with_player_and_options_report_inner(
+            player,
+            self.audio.into_data(),
+            self.options,
+            probed,
+        )
     }
 
     /// Play the audio asynchronously with optional ducking support.
     ///
-    /// When the `native-playback` feature is enabled, attempts in-process
-    /// decoding via rodio/symphonia first. Falls back to a host player
-    /// subprocess if native decoding fails or is unavailable. If a native
-    /// device-open operation times out, playa disables further native playback
-    /// attempts for the rest of the process and subsequent calls route directly
-    /// to the host-player fallback.
+    /// Native-versus-host routing follows the same retry boundary as
+    /// [`play`](Self::play): pre-submit native failures fall back to a host
+    /// player in the same call, a post-submit stall is fatal, and a device-open
+    /// timeout or stall disables native playback for the rest of the process.
     ///
     /// Ducking (if configured) is set up **before** the native/host decision
     /// so both playback paths benefit from audio attenuation.
     ///
     /// Requires the `audio-ducking` feature flag for ducking support.
-    #[cfg(feature = "audio-ducking")]
+    #[cfg(feature = "async")]
     pub async fn play_async(self) -> Result<(), PlaybackError> {
+        self.play_async_with_report().await.map(|_| ())
+    }
+
+    /// Play asynchronously and report the selected route and completion timing.
+    #[cfg(feature = "async")]
+    pub async fn play_async_with_report(self) -> Result<PlaybackReport, PlaybackError> {
         if self.dry_run || dry_run_env_enabled() {
             tracing::debug!("playa: dry-run enabled, skipping async playback");
-            return Ok(());
+            return Ok(PlaybackReport::default());
         }
+        validate_speed(&self.options)?;
 
         let format = self.audio.format();
+        let probed = crate::probe_audio_metadata(self.audio.data_ref());
 
         // Set up ducking BEFORE playback (covers both native and host paths)
+        #[cfg(feature = "audio-ducking")]
         let guard = if let Some(config) = self.duck_config {
             let backend = create_backend();
             match DuckGuard::new(backend, config).await {
@@ -241,43 +325,40 @@ impl Playa {
             None
         };
 
-        // Try native playback first (non-URL, non-forced-host)
-        #[cfg(feature = "native-playback")]
-        if !self.force_host && !matches!(self.audio.source_kind(), AudioSourceKind::Url) {
-            match crate::native_player::play_native(self.audio.data_ref(), format, &self.options) {
-                Ok(()) => {
-                    if self.show_meta {
-                        self.print_native_meta(format);
+        let result = 'playback: {
+            #[cfg(feature = "native-playback")]
+            if self.wants_native() {
+                match self.attempt_native(format, probed) {
+                    NativeAttempt::Complete(report) => break 'playback Ok(report),
+                    NativeAttempt::Fatal(detail) => {
+                        break 'playback Err(PlaybackError::AudioSubsystem { detail });
                     }
-                    if let Some(guard) = guard {
-                        guard.restore().await;
-                    }
-                    return Ok(());
+                    NativeAttempt::Fallback => {}
                 }
-                Err(error) if !error.should_fallback_to_host() => {
-                    if let Some(guard) = guard {
-                        guard.restore().await;
-                    }
-                    return Err(PlaybackError::AudioSubsystem {
-                        detail: error.to_string(),
-                    });
-                }
-                Err(_) => {}
             }
-        }
 
-        // Host player fallback
-        let player = self.select_player(format)?;
-        if self.show_meta {
-            self.print_meta(player, format);
-        }
-        let result = playa_with_player_and_options(player, self.audio.into_data(), self.options);
+            let player = match self.select_player(format) {
+                Ok(player) => player,
+                Err(error) => break 'playback Err(error),
+            };
+            if self.show_meta {
+                self.print_meta(player, format);
+            }
+            break 'playback playa_with_player_and_options_async_report_inner(
+                player,
+                self.audio.into_data(),
+                self.options,
+                probed,
+            )
+            .await;
+        };
 
+        #[cfg(feature = "audio-ducking")]
         if let Some(guard) = guard {
             guard.restore().await;
         }
 
-        result
+        result.map(PlaybackReport::warn_if_truncated)
     }
 
     /// Select the best available player for the audio format and options.
@@ -370,6 +451,22 @@ impl Playa {
     }
 }
 
+fn validate_speed(options: &PlaybackOptions) -> Result<(), PlaybackError> {
+    if let Some(speed) = options.speed
+        && (!speed.is_finite() || speed <= 0.0)
+    {
+        return Err(PlaybackError::InvalidPlaybackSpeed { speed });
+    }
+    Ok(())
+}
+
+#[cfg(feature = "native-playback")]
+enum NativeAttempt {
+    Complete(PlaybackReport),
+    Fallback,
+    Fatal(String),
+}
+
 fn format_codec(codec: crate::types::Codec) -> String {
     use crate::types::Codec;
     match codec {
@@ -451,6 +548,275 @@ mod tests {
             .dry_run()
             .play();
         assert!(result.is_ok(), "dry-run play should succeed: {result:?}");
+    }
+
+    /// Native-versus-host routing through the public pipeline, with the
+    /// device replaced by the injected native backend seam.
+    #[cfg(feature = "native-playback")]
+    mod native_route {
+        use std::ffi::OsString;
+        use std::path::PathBuf;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, MutexGuard};
+
+        use super::*;
+        use crate::native_audio::{
+            NativeAudioTestGuard, lock_native_audio_test_state, native_audio_available,
+        };
+        use crate::native_player::{
+            NativeBackendSeamGuard, NativePlaybackError, install_native_backend_seam_for_tests,
+        };
+        use crate::{AudioData, PlaybackRoute};
+
+        static FIXTURE_SEQUENCE: AtomicUsize = AtomicUsize::new(0);
+
+        /// One WAV fixture plus a test-private `PATH`.
+        ///
+        /// On Unix the `PATH` holds a fake `mpv` that exits 0, so the real
+        /// host route (sniff detection, ranking, spawn) runs end to end
+        /// without a player installed. Elsewhere the directory is empty, so
+        /// reaching the host route ends in `NoCompatiblePlayer`.
+        struct HostFixture {
+            dir: PathBuf,
+            audio: PathBuf,
+            previous_path: Option<OsString>,
+            seam_calls: Arc<AtomicUsize>,
+            _seam: NativeBackendSeamGuard,
+            _native: NativeAudioTestGuard,
+            _env: MutexGuard<'static, ()>,
+        }
+
+        impl HostFixture {
+            fn new(
+                native: impl Fn() -> Result<(), NativePlaybackError> + Send + Sync + 'static,
+            ) -> Self {
+                let env = ENV_LOCK
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                let native_guard = lock_native_audio_test_state();
+                let seam_calls = Arc::new(AtomicUsize::new(0));
+                let calls = Arc::clone(&seam_calls);
+                let seam = install_native_backend_seam_for_tests(Box::new(move |_, _, _| {
+                    calls.fetch_add(1, Ordering::SeqCst);
+                    native()
+                }));
+
+                let dir = std::env::temp_dir().join(format!(
+                    "playa-native-route-{}-{}",
+                    std::process::id(),
+                    FIXTURE_SEQUENCE.fetch_add(1, Ordering::SeqCst)
+                ));
+                std::fs::create_dir_all(&dir).expect("fixture dir should be created");
+                let audio = dir.join("fixture.wav");
+                std::fs::write(&audio, minimal_wav()).expect("fixture audio should write");
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt as _;
+                    let fake = dir.join("mpv");
+                    std::fs::write(&fake, "#!/bin/sh\nexit 0\n").expect("fake player should write");
+                    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755))
+                        .expect("fake player should be executable");
+                }
+
+                let previous_path = std::env::var_os("PATH");
+                // SAFETY: ENV_LOCK is held for the fixture's lifetime; no other
+                // test in this binary reads or writes PATH concurrently.
+                unsafe {
+                    std::env::set_var("PATH", &dir);
+                }
+
+                Self {
+                    dir,
+                    audio,
+                    previous_path,
+                    seam_calls,
+                    _seam: seam,
+                    _native: native_guard,
+                    _env: env,
+                }
+            }
+
+            fn audio(&self) -> AudioData {
+                AudioData::FilePath(self.audio.clone())
+            }
+
+            fn seam_calls(&self) -> usize {
+                self.seam_calls.load(Ordering::SeqCst)
+            }
+        }
+
+        impl Drop for HostFixture {
+            fn drop(&mut self) {
+                // SAFETY: ENV_LOCK is still held (it drops after this body).
+                unsafe {
+                    match self.previous_path.take() {
+                        Some(previous) => std::env::set_var("PATH", previous),
+                        None => std::env::remove_var("PATH"),
+                    }
+                }
+                let _ = std::fs::remove_dir_all(&self.dir);
+            }
+        }
+
+        fn wav() -> AudioFormat {
+            AudioFormat::new(AudioFileFormat::Wav, Some(Codec::Pcm))
+        }
+
+        fn play(fixture: &HostFixture) -> Result<PlaybackReport, PlaybackError> {
+            crate::playa_explicit_with_options_and_report(
+                wav(),
+                fixture.audio(),
+                PlaybackOptions::default(),
+            )
+        }
+
+        #[cfg(feature = "async")]
+        async fn play_async(fixture: &HostFixture) -> Result<PlaybackReport, PlaybackError> {
+            crate::playa_explicit_with_options_async_and_report(
+                wav(),
+                fixture.audio(),
+                PlaybackOptions::default(),
+            )
+            .await
+        }
+
+        #[test]
+        fn free_functions_take_native_route_when_available() {
+            let fixture = HostFixture::new(|| Ok(()));
+
+            let report = play(&fixture).expect("native playback should succeed");
+            assert_eq!(report.route, PlaybackRoute::Native);
+            assert_eq!(fixture.seam_calls(), 1);
+            assert!(native_audio_available());
+
+            crate::playa_explicit_with_options(wav(), fixture.audio(), PlaybackOptions::default())
+                .expect("plain free function should succeed");
+            assert_eq!(fixture.seam_calls(), 2);
+        }
+
+        #[cfg(feature = "async")]
+        #[tokio::test]
+        async fn free_functions_take_native_route_when_available_async() {
+            let fixture = HostFixture::new(|| Ok(()));
+
+            let report = play_async(&fixture)
+                .await
+                .expect("native playback should succeed");
+            assert_eq!(report.route, PlaybackRoute::Native);
+            assert_eq!(fixture.seam_calls(), 1);
+            assert!(native_audio_available());
+
+            crate::playa_explicit_with_options_async(
+                wav(),
+                fixture.audio(),
+                PlaybackOptions::default(),
+            )
+            .await
+            .expect("plain free function should succeed");
+            assert_eq!(fixture.seam_calls(), 2);
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn device_open_timeout_falls_back_to_host_in_the_same_call_and_trips_the_breaker() {
+            let fixture = HostFixture::new(|| Err(NativePlaybackError::DeviceOpenTimeout(5)));
+
+            let report = play(&fixture).expect("device-open timeout must reach the host route");
+            assert_eq!(report.route, PlaybackRoute::Host(AudioPlayer::Mpv));
+            assert!(!native_audio_available(), "device-open timeout trips the breaker");
+            assert_eq!(fixture.seam_calls(), 1);
+
+            let report = play(&fixture).expect("tripped breaker must reach the host route");
+            assert_eq!(report.route, PlaybackRoute::Host(AudioPlayer::Mpv));
+            assert_eq!(fixture.seam_calls(), 1, "a tripped breaker never touches the device");
+        }
+
+        #[cfg(all(unix, feature = "async"))]
+        #[tokio::test]
+        async fn device_open_timeout_falls_back_to_host_in_the_same_call_async() {
+            let fixture = HostFixture::new(|| Err(NativePlaybackError::DeviceOpenTimeout(5)));
+
+            let report = play_async(&fixture)
+                .await
+                .expect("device-open timeout must reach the host route");
+            assert_eq!(report.route, PlaybackRoute::Host(AudioPlayer::Mpv));
+            assert!(!native_audio_available(), "device-open timeout trips the breaker");
+            assert_eq!(fixture.seam_calls(), 1);
+
+            let report = play_async(&fixture)
+                .await
+                .expect("tripped breaker must reach the host route");
+            assert_eq!(report.route, PlaybackRoute::Host(AudioPlayer::Mpv));
+            assert_eq!(fixture.seam_calls(), 1, "a tripped breaker never touches the device");
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn stream_open_failure_falls_back_to_host_without_tripping_the_breaker() {
+            let fixture = HostFixture::new(|| {
+                Err(NativePlaybackError::Stream(rodio::DeviceSinkError::NoDevice))
+            });
+
+            let report = play(&fixture).expect("stream failure must reach the host route");
+            assert_eq!(report.route, PlaybackRoute::Host(AudioPlayer::Mpv));
+            assert!(native_audio_available(), "a stream error is not a breaker trip");
+
+            let report = play(&fixture).expect("stream failure must reach the host route");
+            assert_eq!(report.route, PlaybackRoute::Host(AudioPlayer::Mpv));
+            assert_eq!(fixture.seam_calls(), 2, "native is retried while the breaker is intact");
+        }
+
+        #[cfg(all(unix, feature = "async"))]
+        #[tokio::test]
+        async fn stream_open_failure_falls_back_to_host_async() {
+            let fixture = HostFixture::new(|| {
+                Err(NativePlaybackError::Stream(rodio::DeviceSinkError::NoDevice))
+            });
+
+            let report = play_async(&fixture)
+                .await
+                .expect("stream failure must reach the host route");
+            assert_eq!(report.route, PlaybackRoute::Host(AudioPlayer::Mpv));
+            assert!(native_audio_available(), "a stream error is not a breaker trip");
+        }
+
+        #[test]
+        fn post_submit_stall_is_fatal_and_never_replays_through_host() {
+            let fixture = HostFixture::new(|| Err(NativePlaybackError::Timeout(5)));
+
+            let error = play(&fixture).expect_err("a post-submit stall must not replay");
+            assert!(
+                matches!(error, PlaybackError::AudioSubsystem { .. }),
+                "unexpected error: {error:?}"
+            );
+            assert!(!native_audio_available(), "a stall trips the breaker");
+            assert_eq!(fixture.seam_calls(), 1);
+
+            // The stall itself is never replayed, but the breaker it tripped
+            // sends the next call straight to the host route.
+            #[cfg(unix)]
+            {
+                let report = play(&fixture).expect("tripped breaker must reach the host route");
+                assert_eq!(report.route, PlaybackRoute::Host(AudioPlayer::Mpv));
+                assert_eq!(fixture.seam_calls(), 1, "a tripped breaker never touches the device");
+            }
+        }
+
+        #[cfg(feature = "async")]
+        #[tokio::test]
+        async fn post_submit_stall_is_fatal_and_never_replays_through_host_async() {
+            let fixture = HostFixture::new(|| Err(NativePlaybackError::Timeout(5)));
+
+            let error = play_async(&fixture)
+                .await
+                .expect_err("a post-submit stall must not replay");
+            assert!(
+                matches!(error, PlaybackError::AudioSubsystem { .. }),
+                "unexpected error: {error:?}"
+            );
+            assert!(!native_audio_available(), "a stall trips the breaker");
+            assert_eq!(fixture.seam_calls(), 1);
+        }
     }
 
     #[test]

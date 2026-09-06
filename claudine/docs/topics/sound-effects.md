@@ -1,5 +1,12 @@
 # Sound Effects
 
+Lifecycle `effect` and hook `sound_effect` actions publish into Playa's private
+per-user spool and return after durable handoff. Playback is globally serialized
+with lifecycle speech, hook speech, `so-you-say --background`, and
+`playa --background`; the requesting Claudine process may exit immediately.
+The selected route is native-first where available with host-player fallback.
+Delivery is best-effort after handoff and at-most-once after playback begins.
+
 The claudine library provides a set of built-in sound effects which can be used to 
 
 ### UI Sounds

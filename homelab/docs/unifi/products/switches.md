@@ -1,4 +1,6 @@
 ---
+$schema:
+    prompt: string(required) -> The Agent prompt that will populate the body of this research doc.
 prompt: |-
     Research all the switches offerred under the **Unifi** brand.
     

@@ -12,6 +12,7 @@ description: CLI for text-to-speech using system TTS providers. Use when working
 - Volume and speed controls
 - Provider-specific configuration
 - Cache management
+- Durable, ordered background speech through Playa's per-user spool
 
 **Binary Name**: `so-you-say` (package: `biscuit-speaks-cli`, located at `biscuit-speaks/cli`)
 
@@ -41,7 +42,16 @@ so-you-say --slow "Deliberate speech"
 # Metadata and cache
 so-you-say --meta "Show what was used"
 so-you-say --refresh-cache
+so-you-say --background "Queued speech"
 ```
+
+`--background` returns after a ready job is durably published or, on a cache
+miss, after the global sequence is reserved. A private preparation-helper mode
+performs synthesis and marks that same slot ready or failed. Playa serializes the resulting audio with other Playa,
+biscuit-speaks, and Claudine jobs, and playback survives requester exit.
+Preparation has a ten-minute deadline. Failure/timeout is recorded and the
+queue advances; there is no blocking fallback. `PLAYA_DRY_RUN=1` creates no
+cache, spool, journal, playback, or subprocess side effects.
 
 ## CLI Arguments
 
@@ -59,6 +69,7 @@ so-you-say --refresh-cache
 | `--slow` | | Slower speech rate |
 | `--meta` | | Display voice/provider metadata after speaking |
 | `--refresh-cache` | | Clear and repopulate voice cache |
+| `--background` | | Reserve/publish ordered detached speech and return immediately |
 
 ## Voice Resolution
 

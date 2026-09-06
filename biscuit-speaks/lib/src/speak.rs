@@ -208,6 +208,71 @@ impl Speak {
         self.execute_with_failover(&providers).await
     }
 
+    /// Durably hand speech to the per-user Playa queue and return immediately.
+    ///
+    /// Cache misses reserve their sequence before synthesis so later sounds
+    /// cannot overtake the speech while a detached helper prepares it.
+    pub async fn play_detached(self) -> Result<crate::detached::DetachedJobId, TtsError> {
+        #[cfg(not(feature = "playa"))]
+        {
+            let _ = self;
+            Err(TtsError::NoAudioPlayer)
+        }
+
+        #[cfg(feature = "playa")]
+        {
+            if matches!(
+                std::env::var("PLAYA_DRY_RUN").as_deref(),
+                Ok("1") | Ok("true") | Ok("TRUE") | Ok("yes")
+            ) {
+                return Ok(playa::detached::JobId::dry_run().into());
+            }
+            if let Some(audio) = &self.audio {
+                return playa::detached::enqueue_bytes(
+                    audio,
+                    crate::playa_bridge::to_detached_playback(&self.config),
+                )
+                .map(Into::into)
+                .map_err(Into::into);
+            }
+
+            let providers = get_providers_for_strategy(&self.config.failover_strategy);
+            if providers.is_empty() {
+                return Err(TtsError::NoProvidersAvailable);
+            }
+
+            let mut errors = Vec::new();
+            for provider in providers.iter().copied() {
+                match crate::detached::cached_job(provider, &self.text, &self.config).await {
+                    Ok(Some(job)) => {
+                        return playa::detached::enqueue(job)
+                            .map(Into::into)
+                            .map_err(Into::into);
+                    }
+                    Ok(None) => {}
+                    Err(error) => {
+                        errors.push((provider, error));
+                        continue;
+                    }
+                }
+
+                if crate::detached::requires_preparation(provider) {
+                    return crate::detached::reserve_preparation(self.text, self.config);
+                }
+
+                match crate::detached::build_job(provider, &self.text, &self.config).await {
+                    Ok(job) => {
+                        return playa::detached::enqueue(job)
+                            .map(Into::into)
+                            .map_err(Into::into);
+                    }
+                    Err(error) => errors.push((provider, error)),
+                }
+            }
+            Err(TtsError::AllProvidersFailed(AllProvidersFailed { errors }))
+        }
+    }
+
     /// Play the TTS audio and return metadata about the voice used.
     ///
     /// This is like `play()` but also returns a `SpeakResult` containing

@@ -178,6 +178,9 @@ fn inject_subcommand_help_flag(cmd: &mut clap::Command) {
 }
 
 fn main() -> Result<()> {
+    if let Some(code) = run_audio_worker_if_requested()? {
+        std::process::exit(code);
+    }
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -190,6 +193,17 @@ fn main() -> Result<()> {
             std::process::exit(1);
         }
     }
+}
+
+fn run_audio_worker_if_requested() -> Result<Option<i32>> {
+    if let Some(code) = playa::detached::run_if_worker() {
+        return Ok(Some(code));
+    }
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    Ok(runtime.block_on(biscuit_speaks::run_if_worker()))
 }
 
 /// Try to render `report` as a darkmatter `BlockError` via the cause-chain

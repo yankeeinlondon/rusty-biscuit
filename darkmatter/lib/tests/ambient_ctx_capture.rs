@@ -1,40 +1,120 @@
-//! `ComposeOptions::new()` must still resolve every `ctx.*` group a document
-//! names, despite capturing none of them at construction time.
+//! Ambient `ctx.*` capture parity.
 //!
-//! `new()` deliberately performs no host or repository discovery: a constructor
-//! has no document, so probing Git, repository topology, working-tree changes,
-//! languages, documents, OS, hardware, and GPU is speculative and walks the
-//! whole working tree. The compose pipeline restores what the document actually
-//! asks for, because it is the first place that sees both.
-//!
-//! This is a rendered-output test on purpose. The failure it guards against is
-//! silent: `ctx.repo_root` interpolates to an empty string rather than raising,
-//! so a document keeps composing and simply loses its values. Compose reads
-//! `ctx` from the snapshot `EffectiveState` materializes, and no later stage
-//! re-reads it, so nothing downstream can recover a group missing at that point.
+//! Both tests compare a full `ComposeContext::capture()` against the ambient
+//! `ComposeOptions::new()` path. They run inside a purpose-built fixture
+//! repository rather than the rusty-biscuit checkout: a full capture walks the
+//! whole repository (structure, documents, git status), which costs seconds on a
+//! developer machine and over a minute on a cold two-core CI guest, and none of
+//! that size adds coverage. The fixture is a two-package Cargo workspace with a
+//! commit, staged and dirty files, documents, and a skill, so every catalog
+//! category has at least one value to compare.
+
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use darkmatter::markdown::Markdown;
-use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
 use darkmatter::markdown::compose::context::catalog::context_variable_descriptors;
+use darkmatter::markdown::compose::{ComposeContext, ComposeOptions};
+use tempfile::TempDir;
 
-// This file compares *presence*, never text.
-//
-// The two renderings come from two captures taken moments apart, so any
-// clock- or memory-derived value may legitimately differ between them —
-// `time_utc` and `time_military_utc` change on a minute boundary, the memory
-// figures on any allocation. Asserting equality means maintaining a list of
-// which keys are volatile, and a stale list produces a flake rather than a
-// finding: an early draft of this test omitted the two `*_utc` keys and flaked
-// on the first full-suite run that straddled a minute.
-//
-// Presence is also the exact signature of the failure being guarded against.
-// The 2026-08-02 regression did not corrupt values, it erased them: 36
-// variables that rendered a value under a full capture rendered an empty string
-// under ambient options. Whether a captured value is *correct* is the job of
-// the per-group capture tests, which pin a fixed context and can assert text
-// without racing a clock.
+struct Fixture {
+    _temp: TempDir,
+    /// The directory a compose runs from: inside the `alpha` package.
+    cwd: PathBuf,
+}
 
-/// Composes `content` with bare `ComposeOptions::new()`.
+impl Fixture {
+    fn build() -> Self {
+        let temp = TempDir::new().expect("temp dir");
+        let root = temp.path().join("repo");
+        let write = |relative: &str, contents: &str| {
+            let path = root.join(relative);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, contents).unwrap();
+        };
+
+        write(
+            "Cargo.toml",
+            "[workspace]\nresolver = \"2\"\nmembers = [\"alpha/lib\", \"alpha/cli\"]\n",
+        );
+        write(
+            "alpha/lib/Cargo.toml",
+            "[package]\nname = \"alpha\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[lib]\npath = \"src/lib.rs\"\n",
+        );
+        write("alpha/lib/src/lib.rs", "pub fn alpha() {}\n");
+        write("alpha/lib/README.md", "# alpha\n");
+        write(
+            "alpha/cli/Cargo.toml",
+            "[package]\nname = \"alpha-cli\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\nalpha = { path = \"../lib\" }\n",
+        );
+        write("alpha/cli/src/main.rs", "fn main() {}\n");
+        write("README.md", "# fixture\n");
+        write("docs/guide.md", "# guide\n");
+        write(
+            ".claude/skills/alpha/SKILL.md",
+            "---\nname: alpha\ndescription: fixture skill\n---\n# alpha\n",
+        );
+
+        git(&root, &["init", "-q", "-b", "main"]);
+        git(&root, &["add", "-A"]);
+        git(&root, &["commit", "-q", "-m", "fixture"]);
+        // One dirty tracked file, one staged change, one untracked file, so the
+        // file-change variables have values in both captures.
+        write("alpha/lib/src/lib.rs", "pub fn alpha() {}\npub fn beta() {}\n");
+        write("alpha/cli/src/main.rs", "fn main() { alpha::alpha(); }\n");
+        git(&root, &["add", "alpha/cli/src/main.rs"]);
+        write("alpha/cli/notes.md", "untracked\n");
+
+        Self {
+            cwd: root.join("alpha").join("lib"),
+            _temp: temp,
+        }
+    }
+}
+
+/// Runs git with the repository-local identity only, so a caller's hook
+/// environment or signing configuration cannot reach the fixture.
+fn git(root: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .args([
+            "-c",
+            "user.name=fixture",
+            "-c",
+            "user.email=fixture@example.com",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .current_dir(root)
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .status()
+        .expect("git must be runnable");
+    assert!(status.success(), "git {args:?} failed");
+}
+
+/// Enters a directory for the ambient capture and restores the previous one on
+/// drop. Tests that use it are `#[serial]` because the current directory is
+/// process-wide.
+struct CwdGuard(PathBuf);
+
+impl CwdGuard {
+    fn enter(dir: &Path) -> Self {
+        let previous = std::env::current_dir().expect("current dir");
+        std::env::set_current_dir(dir).expect("enter fixture");
+        Self(previous)
+    }
+}
+
+impl Drop for CwdGuard {
+    fn drop(&mut self) {
+        let _ = std::env::set_current_dir(&self.0);
+    }
+}
+
 fn compose_ambient(content: &str) -> String {
     let md: Markdown = content.into();
     let (composed, _report) = md
@@ -43,7 +123,6 @@ fn compose_ambient(content: &str) -> String {
     composed.content().trim().to_string()
 }
 
-/// The same content under a deliberate full capture, as the reference.
 fn compose_full_capture(content: &str) -> String {
     let md: Markdown = content.into();
     let options = ComposeOptions::new_with_context(ComposeContext::capture());
@@ -54,16 +133,16 @@ fn compose_full_capture(content: &str) -> String {
 }
 
 #[test]
+#[serial_test::serial]
 fn ambient_options_resolve_date_time_without_discovery() {
+    let fixture = Fixture::build();
+    let _cwd = CwdGuard::enter(&fixture.cwd);
     let content = "today={{ ctx.today }}\n";
 
     assert_eq!(compose_ambient(content), compose_full_capture(content));
 }
 
-/// Renders one `name=value` line per catalog variable into a lookup map.
-fn render_every_variable(options: ComposeOptions) -> std::collections::HashMap<String, String> {
-    // One paragraph, not one per variable: ~50 separate blocks cost more to
-    // compose than the captures this test is actually measuring.
+fn render_every_variable(options: ComposeOptions) -> HashMap<String, String> {
     let document: String = context_variable_descriptors()
         .iter()
         .map(|descriptor| format!("<{0}={{{{ ctx.{0} }}}}>", descriptor.name))
@@ -82,8 +161,6 @@ fn render_every_variable(options: ComposeOptions) -> std::collections::HashMap<S
         .collect()
 }
 
-/// Every `ctx.*` the catalog declares must survive ambient options.
-///
 /// The 2026-08-02 regression blanked `ctx.repo_root` and `ctx.os` while the
 /// whole suite passed, because the tests that interpolate `ctx.*` overwhelmingly
 /// pin the context with `ComposeContext::fixed_for_testing()`. A pinned context
@@ -96,11 +173,38 @@ fn render_every_variable(options: ComposeOptions) -> std::collections::HashMap<S
 /// person who just fixed those two would have covered exactly those two. A new
 /// `ctx.*` variable joins this test by existing.
 #[test]
+#[serial_test::serial]
 fn every_catalog_variable_survives_ambient_options() {
+    let fixture = Fixture::build();
+    let _cwd = CwdGuard::enter(&fixture.cwd);
+
     let expected = render_every_variable(ComposeOptions::new_with_context(
         ComposeContext::capture(),
     ));
     let ambient = render_every_variable(ComposeOptions::new());
+
+    // The fixture must give the comparison something to compare: every catalog
+    // category needs at least one variable the full capture rendered non-empty,
+    // or a blanked group could hide behind an empty-equals-empty pass.
+    let mut categories: Vec<&str> = context_variable_descriptors()
+        .iter()
+        .map(|descriptor| descriptor.category)
+        .collect();
+    categories.sort_unstable();
+    categories.dedup();
+    let silent: Vec<&str> = categories
+        .into_iter()
+        .filter(|category| {
+            !context_variable_descriptors()
+                .iter()
+                .filter(|descriptor| descriptor.category == *category)
+                .any(|descriptor| expected.get(descriptor.name).is_some_and(|v| !v.is_empty()))
+        })
+        .collect();
+    assert!(
+        silent.is_empty(),
+        "the fixture rendered no value for any variable in these categories: {silent:?}"
+    );
 
     let blanked: Vec<&str> = context_variable_descriptors()
         .iter()

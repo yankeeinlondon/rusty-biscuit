@@ -25,7 +25,10 @@ Play an embedded sound effect from the `playa` library.
 | `volume` | `f32` | `1.0` | Playback volume (0.0 to 1.0) |
 | `speed` | `f32` | `1.0` | Playback speed multiplier |
 
-**Behavior:** Fire-and-forget (`tokio::spawn_blocking`). Playback runs on a blocking thread and does not delay subsequent actions. Warns if the effect name is unknown.
+**Behavior:** Fire-and-forget after durable publication to Playa's private
+per-user queue. The global scheduler serializes playback with lifecycle speech,
+hook speech, and other Playa jobs. Publication failure emits one warning; there
+is no blocking fallback or second scheduler. Unknown effect names also warn.
 
 **Return payload:** None.
 
@@ -48,7 +51,16 @@ Speak a message aloud using biscuit-speaks TTS. The message supports Handlebars-
 | `voice` | `string?` | None | Optional voice override for this action |
 | `gender` | `string?` | None | Optional gender preference (`male` or `female`) |
 
-**Behavior:** Fire-and-forget (`tokio::spawn`). TTS playback is async and does not block the event pipeline. Empty messages after interpolation are silently skipped.
+**Behavior:** Fire-and-forget after publishing a ready job or reserving an
+ordered cache-miss slot. A detached biscuit-speaks helper prepares slow TTS in
+that slot, so later sounds cannot overtake it. Empty messages after interpolation
+are silently skipped. Handoff failure emits one warning without blocking
+fallback.
+
+Both audio actions use native-first playback where available, survive the
+requesting Claudine process exiting, and remain best-effort after handoff.
+Playback is at-most-once once the scheduler begins it. Private preparation text
+is redacted from journal and `playa spool` output.
 
 **Return payload:** None.
 
