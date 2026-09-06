@@ -855,6 +855,81 @@ fn a_proxy_with_overlay_satisfies_the_targets_completion_schema() {
     );
 }
 
+/// AC14: sequence state is the third transient channel. A step's `params`
+/// satisfy the referenced document's completion schema for that step only, and
+/// the referenced file never records the value.
+#[test]
+fn sequence_step_params_satisfy_the_referenced_documents_completion_schema() {
+    let plan = concat!(
+        "---\n",
+        "agent: goose\n",
+        "sequence:\n",
+        "  - name: research\n",
+        "    prompt: research.md\n",
+        "    params:\n",
+        "      researched_by: \"{{ state.name }}\"\n",
+        "---\n",
+        "plan body\n",
+    );
+    let fixture = Fixture::new(plan);
+    let member = fixture.document.parent().unwrap().join("research.md");
+    let member_source = concat!(
+        "---\n",
+        "$schema:\n",
+        "  prompt: 'string(required;eager)'\n",
+        "  researched_by: 'string(required)'\n",
+        "prompt: Write the research\n",
+        "agent: goose\n",
+        "---\n",
+        "research body\n",
+    );
+    fs::write(&member, member_source).unwrap();
+
+    write_executable(
+        &fixture.bin.join("goose"),
+        &format!(
+            "#!/bin/sh\n{doc_from_prompt}\
+             CLAUDINE_ADD=''\n\
+             CLAUDINE_BODY='Agent wrote this.\n'\n\
+             {rewrite}\
+             printf 'wrote %s\\n' \"$CLAUDINE_DOC\"\n\
+             exit 0\n",
+            doc_from_prompt = common::INLINE_DOC_FROM_PROMPT,
+            rewrite = common::INLINE_BODY_REWRITE,
+        ),
+    );
+
+    fixture
+        .command()
+        .args(["sequence", fixture.document.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let member_after = fs::read_to_string(&member).unwrap();
+    assert!(
+        member_after.contains("Agent wrote this."),
+        "the step's document is the deliverable:\n{member_after}"
+    );
+    assert!(
+        !member_after.contains("researched_by: research"),
+        "sequence state must never be persisted to the referenced document:\n{member_after}"
+    );
+
+    // The same document run on its own fails completion, so the step's params
+    // — not a missing check — are what satisfied the schema above.
+    fs::write(&member, member_source).unwrap();
+    let alone = fixture
+        .command()
+        .args(["inline-compose", member.to_str().unwrap()])
+        .assert()
+        .failure();
+    assert!(
+        stderr_of(&alone).contains("researched_by"),
+        "stderr:\n{}",
+        stderr_of(&alone)
+    );
+}
+
 /// AC9a / AC13, inline half: a required-but-not-eager property whose authored
 /// expression legitimately resolves to `null` never prompts and never blocks
 /// launch. The agent runs, and the gap is reported by the completion verdict.
