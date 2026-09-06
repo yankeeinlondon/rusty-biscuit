@@ -1016,7 +1016,7 @@ mod tests {
     fn textual_save_treats_indentless_sequence_as_one_node() {
         let source = concat!(
             "---\n",
-            "response_frontmatter:\n",
+            "reviewers:\n",
             "- routers\n",
             "- generated_by\n",
             "hash: old\n",
@@ -1034,7 +1034,7 @@ mod tests {
         .unwrap();
 
         assert!(written.contains(
-            "response_frontmatter:\n- routers\n- generated_by\nhash: 1111111111111111-2222222222222222\nnext: kept\n"
+            "reviewers:\n- routers\n- generated_by\nhash: 1111111111111111-2222222222222222\nnext: kept\n"
         ));
     }
 
