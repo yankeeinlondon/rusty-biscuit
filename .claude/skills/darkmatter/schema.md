@@ -59,6 +59,15 @@ properties, and defaulted properties do not materialize. A compose run with no
 effective schema and all validation-only APIs remain non-mutating. Repeated
 schema passes are idempotent, and present values are preserved exactly.
 
+Runtime consumers use `SchemaPhase::Launch` and `SchemaPhase::Completion` on
+an already-resolved `EffectiveSchema`. Launch requires recursively declared
+`eager` properties; completion requires `required` or `eager`. Explicit null
+counts as absence. Completion observes the final working instance without
+coercion, while the existing unphased `validate*` authoring behavior remains
+unchanged. Raw JSON Schema retains its authored `required` behavior at both
+phases, and trigger match conditions reject `eager` because matching has no
+runtime phase.
+
 Caller records retain an immutable raw value and file-resolution origin per
 property. Before frontmatter interpolation pass 1, an exactly selected eager or
 non-recursive lazy file arm materializes that value from its caller origin.
@@ -98,6 +107,9 @@ excluded keys without executing anything.
   encoded content format.
 - `type-definition` validates one property definition.
 - `schema` validates one complete `$schema` declaration.
+- `eager` is universal phase metadata. Ordinary schema preparation retains
+  the existing `file` existence check, while phase validation stays passive;
+  `file(eager)[]` owns item validity and `file[](eager)` owns property presence.
 
 The meta-types delegate to the same passive parser used by authoring and DMLS.
 They do not perform imports, I/O, matching side effects, or rewrites.

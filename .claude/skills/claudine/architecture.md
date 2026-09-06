@@ -440,6 +440,13 @@ So when rendered prompt output shows wrong wrapping, spurious newlines, lines bl
 Goose exposes no native structured stream protocol, so it is the only compiled
 provider identity without a dedicated parser path.
 
+The live semantic sink treats both `ToolCall` and `ToolResult` as final-response
+boundaries, but records a tool name only from `ToolCall`. This accommodates
+providers that expose either half of the lifecycle without double-counting
+tools. OpenCode's completion-only `tool_use` envelope is normalized to one
+paired `ToolCall` followed immediately by `ToolResult`; Kilo inherits that
+wire-compatible behavior.
+
 ### Infrastructure
 
 - `providers/common` — shared parser skeleton the per-provider parsers delegate to: `base_extra`/`base_extra_parts` payload bases, `emit_provider_extension` + `emit_malformed_warning` fallbacks, `finish_summary` (stamps `provider` + derived badges onto a `..Default::default()`-built summary), and the `ErrorKeywords` classifier shape + `classify_error_by_keywords` cascade. The ordered tables live in generated `providers/vocabulary.rs`, projected from the schema-validated `docs/research/agent-errors/<slug>.md` frontmatter; evidence stays in research while bucket/item order survives as the runtime precedence contract. Immutable `docs/research/agent-errors/_seeds/<slug>.yaml` baselines preserve pre-graduation row identity for deterministic removal/re-kind/reorder checks. `providers/vocabulary_tests.rs` locks accepted research additions, precedence, exact numeric codes, and representative near misses. Provider files keep thin delegating methods plus their genuinely provider-specific typed dispatch.
