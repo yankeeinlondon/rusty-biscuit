@@ -13,34 +13,54 @@ mod common;
 use common::augmented_path;
 use common::wrap::seed_minimal_config;
 
-/// Write a fake `goose` provider that prints a fixed, deterministic replacement
-/// body and exits 0, discoverable on `PATH` on every platform.
+/// Write a fake `goose` provider that edits `document` the way a file-aware
+/// inline agent does, discoverable on `PATH` on every platform.
 ///
 /// Uses a shell script on Unix and compiles a tiny native executable on
 /// Windows. A batch file is not a valid stand-in here because the composed
-/// prompt intentionally contains newlines. The replacement body is
-/// intentionally *dirty* — a heading immediately followed by a paragraph with no
-/// blank line between them — so the test also covers the cleanup→hash
-/// consistency path (the document is normalized before the hash is stamped, and
-/// `md hash --diff` must still match the normalized result).
-fn write_goose_provider(bin_dir: &Path) {
+/// prompt intentionally contains newlines. The body it writes is intentionally
+/// *dirty* — a heading immediately followed by a paragraph with no blank line
+/// between them — so the test also covers the cleanup→hash consistency path
+/// (the document is normalized before the hash is stamped, and `md hash --diff`
+/// must still match the normalized result).
+fn write_goose_provider(bin_dir: &Path, document: &Path) {
     #[cfg(unix)]
     {
-        common::write_executable(
-            &bin_dir.join("goose"),
-            "#!/bin/sh\nprintf '# Replacement heading\\nReplacement body content\\n'\nexit 0\n",
-        );
+        common::InlineAgentStub::new(document)
+            .body("# Replacement heading\nReplacement body content\n")
+            .summary("Replaced the body.")
+            .install(bin_dir, "goose");
     }
     #[cfg(windows)]
     {
         let source = bin_dir.join("goose-fixture.rs");
         common::write(
             &source,
-            r##"fn main() {
-    println!("# Replacement heading");
-    println!("Replacement body content");
-}
+            &format!(
+                r##"fn main() {{
+    let target = std::path::PathBuf::from(r"{document}");
+    let current = std::fs::read_to_string(&target).expect("read the inline target");
+    let mut delimiters = 0;
+    let mut head = String::new();
+    for line in current.split_inclusive('\n') {{
+        if delimiters >= 2 {{
+            break;
+        }}
+        if line.trim_end_matches(['\r', '\n']) == "---" {{
+            delimiters += 1;
+        }}
+        head.push_str(line);
+    }}
+    std::fs::write(
+        &target,
+        format!("{{head}}# Replacement heading\nReplacement body content\n"),
+    )
+    .expect("write the inline target");
+    println!("Replaced the body.");
+}}
 "##,
+                document = document.display()
+            ),
         );
         let output = Command::new("rustc")
             .arg("--edition=2024")
@@ -71,7 +91,7 @@ fn inline_compose_writes_hash_that_passes_md_diff() {
     )
     .unwrap();
 
-    write_goose_provider(&path_dir);
+    write_goose_provider(&path_dir, &md_file);
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(workspace.path())

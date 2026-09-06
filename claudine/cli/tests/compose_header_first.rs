@@ -47,13 +47,6 @@ fn make_workspace_with_goose_inline() -> (tempfile::TempDir, std::path::PathBuf,
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
-    write_executable(
-        &path_dir.join("goose"),
-        r#"#!/bin/sh
-echo "Agent response"
-exit 0
-"#,
-    );
 
     let md_file = workspace.path().join("prompt.md");
     fs::write(
@@ -61,6 +54,11 @@ exit 0
         "---\nprompt: |\n  Hello from inline compose.\n---\n# Body\n",
     )
     .unwrap();
+    // The inline agent edits the document; a stub that only prints would be
+    // refused as a run that did no work.
+    common::InlineAgentStub::new(&md_file)
+        .body("# Body\n\nAgent response\n")
+        .install(&path_dir, "goose");
     (workspace, path_dir, md_file)
 }
 

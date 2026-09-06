@@ -311,14 +311,12 @@ fn malformed_frontmatter_keeps_parse_precedence_not_mismatch() {
 // ============================================================================
 
 #[cfg(unix)]
-fn write_goose_stub(bin_dir: &std::path::Path) {
-    // Minimal Goose stub: ignore the delivered prompt, emit a replacement
-    // body on stdout, and succeed. inline-compose rewrites the doc body with
-    // this output.
-    write_executable(
-        &bin_dir.join("goose"),
-        "#!/bin/sh\ncat > /dev/null 2>&1\necho 'composed replacement body'\nexit 0\n",
-    );
+fn write_goose_stub(bin_dir: &std::path::Path, document: &std::path::Path) {
+    // Minimal Goose stub: behave like a file-aware inline agent — replace the
+    // document's body and return a summary — so the run reaches its closure.
+    common::InlineAgentStub::new(document)
+        .body("composed replacement body\n")
+        .install(bin_dir, "goose");
 }
 
 #[cfg(unix)]
@@ -329,14 +327,13 @@ fn prompt_with_null_sequence_proceeds_to_ordinary_behavior() {
     let workspace = tempdir().unwrap();
     let bin_dir = workspace.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
-    write_goose_stub(&bin_dir);
-
     let md_file = workspace.path().join("doc.md");
     fs::write(
         &md_file,
         "---\nprompt: Do something\nsequence: null\n---\nbody\n",
     )
     .unwrap();
+    write_goose_stub(&bin_dir, &md_file);
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
@@ -361,10 +358,9 @@ fn prompt_without_sequence_retains_inline_behavior() {
     let workspace = tempdir().unwrap();
     let bin_dir = workspace.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
-    write_goose_stub(&bin_dir);
-
     let md_file = workspace.path().join("doc.md");
     fs::write(&md_file, "---\nprompt: Do something\n---\nbody\n").unwrap();
+    write_goose_stub(&bin_dir, &md_file);
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
@@ -421,10 +417,9 @@ fn override_cannot_create_mismatch() {
     let workspace = tempdir().unwrap();
     let bin_dir = workspace.path().join("bin");
     fs::create_dir_all(&bin_dir).unwrap();
-    write_goose_stub(&bin_dir);
-
     let md_file = workspace.path().join("doc.md");
     fs::write(&md_file, "---\nprompt: Do something\n---\nbody\n").unwrap();
+    write_goose_stub(&bin_dir, &md_file);
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")

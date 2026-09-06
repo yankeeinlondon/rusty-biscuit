@@ -5050,6 +5050,10 @@ exit 0
         "---\ntotal_phases: 1\nstart_phase: 1\n---\n\n# Plan\n",
     )
     .unwrap();
+    // Deliberately no sibling `feature/spec.md`. The shipped prompt derives
+    // `spec` from one and yields `null` when there is none, so these rows also
+    // stand as the end-to-end guard that an optional `spec` survives the
+    // completion verdict of a real shipped document.
 
     // File-change evidence requires a HEAD tree. Establish a disposable
     // baseline inside this isolated fixture, then make the tracked plan dirty
@@ -6552,12 +6556,22 @@ fn level2_lifecycle_sequence_step_proxy_rebuilds_target_launch_bundle() {
 /// the *active* document's body. The body is deliberately distinct from every
 /// fixture's authored body so the "unchanged body" closure guard cannot trip.
 fn write_inline_body_goose(bin_dir: &Path, events_log: &Path, new_body: &str) {
+    // File-aware: the agent is the writer, so it learns the active document
+    // from the delivered prompt header and edits it in place. A stub that only
+    // printed to stdout would be an agent that did no work, and the completion
+    // verdict would refuse the run as unchanged.
     write_executable(
         &bin_dir.join("goose"),
         &format!(
-            "#!/bin/sh\ncat > /dev/null 2>&1\nprintf 'provider-ran\\n' >> {log}\n\
-             printf '%s\\n' '{body}'\nexit 0\n",
+            "#!/bin/sh\nprintf 'provider-ran\\n' >> {log}\n\
+             {doc_from_prompt}\
+             CLAUDINE_ADD=''\n\
+             CLAUDINE_BODY='{body}\n'\n\
+             {rewrite}\
+             printf 'wrote the document\\n'\nexit 0\n",
             log = events_log.display(),
+            doc_from_prompt = common::INLINE_DOC_FROM_PROMPT,
+            rewrite = common::INLINE_BODY_REWRITE,
             body = new_body,
         ),
     );

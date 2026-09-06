@@ -364,8 +364,12 @@ fn stage_prompt(name: &str, doc_body: &str, stub: &str) -> Staged {
     let root = staged.workspace.path().to_path_buf();
 
     write_executable(&staged.bin_dir.join("claude"), stub);
+    // Direct-compose members, not inline: these rows are about task stream
+    // attribution, and a root `prompt:` would make each member an inline
+    // document whose completion verdict demands the agent write the file. The
+    // stream stubs emit a transcript and touch nothing.
     for member in ["one.md", "two.md"] {
-        write(&root.join(member), "---\nprompt: run\n---\n\nMember.\n");
+        write(&root.join(member), "---\ntitle: member\n---\n\nMember.\n");
     }
     write(&staged.doc, doc_body);
     staged.provider_flag = "--claude";

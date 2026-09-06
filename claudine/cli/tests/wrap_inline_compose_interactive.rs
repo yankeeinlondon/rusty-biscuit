@@ -64,20 +64,21 @@ fn inline_compose_interactive_codex_uses_captured_last_message() {
     )
     .unwrap();
 
-    write_executable(
-        &path_dir.join("codex"),
-        r#"#!/bin/sh
-while [ "$#" -gt 0 ]; do
-  if [ "$1" = "--output-last-message" ]; then
-    shift
-    printf 'Interactive body from codex\n' > "$1"
-    exit 0
-  fi
-  shift
-done
-exit 1
-"#,
-    );
+    // An interactive Codex session still edits the document itself; the
+    // last-message file carries only the summary.
+    common::InlineAgentStub::new(&md_file)
+        .prelude(
+            "CLAUDINE_LAST=''\n\
+             prev=''\n\
+             for arg in \"$@\"; do\n\
+             if [ \"$prev\" = '--output-last-message' ]; then CLAUDINE_LAST=\"$arg\"; fi\n\
+             prev=\"$arg\"\n\
+             done\n\
+             if [ -z \"$CLAUDINE_LAST\" ]; then exit 1; fi\n\
+             printf 'Wrote the interactive body.\\n' > \"$CLAUDINE_LAST\"\n",
+        )
+        .body("Interactive body from codex\n")
+        .install(&path_dir, "codex");
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .current_dir(workspace.path())
