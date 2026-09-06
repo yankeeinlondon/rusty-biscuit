@@ -40,6 +40,13 @@ belong here.
   the diff3 base marker `|||||||` that partial resolutions leave behind.
   `git diff --check` and hunk-only scans miss markers outside the changed hunk.
   On a hit, refuse, leave the path staged, and report `file:line`.
+- `git grep --cached` (and the other index-mode flags `--no-index`,
+  `--untracked`, `--exclude-standard`) MUST appear before the pattern, not
+  after. After the pattern, git parses them as revisions and dies with
+  `fatal: unable to resolve revision: --cached`. The `--` separator only
+  splits paths from patterns; it does not re-enable option parsing. Use
+  `git grep --cached <pattern> -- <path>` (option-before-pattern) or pipe
+  `git diff --cached | grep`.
 - `Cargo.lock` is coupled to the `Cargo.toml` that declares the dep. Check
   `git show :Cargo.lock | grep '"<dep>"'` against the staged manifest; a lock
   entry with no declaring manifest in the same commit is an orphan. In a
@@ -142,6 +149,16 @@ belong here.
   are still in context.
 - "Path no longer staged" from a sub-agent usually means a sibling or the
   developer already committed it; check `git log -3` before restaging.
+- Pre-flight status staleness: an agent's `git status --short` snapshot can
+  be invalidated by a sibling agent's commit landing between the snapshot
+  and the agent's own `git commit --only`. The agent sees the path staged,
+  but by the time the agent's commit lands, the sibling has already
+  consumed the path. After-commit `git status` is clean (no missing path),
+  which masks the staleness; verify `git show --name-status <hash>` and the
+  reflog (`git reflog --grep '<subject-substring>' -1`) to confirm the path
+  landed in the sibling's commit. `--only` itself does NOT unstage other
+  paths — empirically verified with `AM file1.txt / A  file2.txt` plus
+  `git commit --only -- file1.txt`, which leaves `A  file2.txt` staged.
 - A brief that pairs a pathspec file with `xargs -I {} git commit …` yields N
   stacked commits (a 35-path refactor landed as 35 identical commits). Say
   explicitly: one invocation with all paths positional, or
