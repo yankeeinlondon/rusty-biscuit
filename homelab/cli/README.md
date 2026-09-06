@@ -1,6 +1,6 @@
 # homey
 
-CLI for controlling homelab AV equipment from the terminal.
+CLI for controlling homelab equipment from the terminal.
 
 ## Installation
 
