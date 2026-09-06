@@ -116,7 +116,13 @@ pub(super) fn translate_schema_failure(
     }
 
     let effective = load_effective_schema(source, options.file_ref_fallback_dir.as_deref())?;
-    let categorized = categorize_problems(&problems, effective.as_ref());
+    let mut categorized = categorize_problems(&problems, effective.as_ref());
+    if matches!(mode, PrepareMode::Direct(_)) {
+        // Direct compose fills a required property its own expression left
+        // `null` at launch, through interactive collection; see
+        // `promote_null_required_to_missing`.
+        promote_null_required_to_missing(&mut categorized, effective.as_ref(), None);
+    }
 
     if !categorized.invalid_required.is_empty() {
         return Err(build_schema_validation_error(

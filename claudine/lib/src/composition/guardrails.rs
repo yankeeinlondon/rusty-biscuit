@@ -1,9 +1,11 @@
 //! Guardrail loading for inline composition workflows.
 //!
-//! Guardrails are instructions appended to every inline prompt to prevent the
-//! agent from rewriting frontmatter or otherwise defeating the composition
-//! pipeline. Users can customize the guardrails by placing a
-//! `.claudine/inline-compose.md` file in the repository root.
+//! Guardrails are instructions appended to every inline prompt that tell the
+//! agent it is editing the document named in the prompt header, which
+//! frontmatter properties the closure owns, and that its final response is a
+//! summary rather than document content. Users can customize the guardrails by
+//! placing a `.claudine/inline-compose.md` file in the repository root; the
+//! text may reference the active document with [`DOCUMENT_PATH_PLACEHOLDER`].
 
 use std::fs;
 use std::io;
@@ -13,8 +15,27 @@ use tracing::warn;
 /// Relative path (from repo root) to the user-customizable guardrails file.
 const GUARDRAILS_RELATIVE_PATH: &str = ".claudine/inline-compose.md";
 
+/// Token a guardrail template may use for the active document's native
+/// absolute path; [`render_guardrails`] replaces it with a code span.
+pub const DOCUMENT_PATH_PLACEHOLDER: &str = "{document_path}";
+
 /// Default guardrail instructions shipped with Claudine.
 const DEFAULT_GUARDRAILS: &str = "\
+> **IMPORTANT:**
+>
+> - The document you are updating is {document_path}. Write the
+>   requested content into its body and any requested properties into its
+>   frontmatter, then re-read the file to confirm it is well-formed.
+> - Never modify the `prompt`, `hash`, or `last_updated` frontmatter
+>   properties. They are owned by the caller and will be restored if changed.
+> - If the document declares a `$schema`, every property you set must match
+>   its declared type.
+> - Your final response is a summary of what you did (two or three short
+>   paragraphs), not the document content. Do not repeat the body in your
+>   response.
+";
+
+const SHIPPED_GUARDRAILS_2026_09_05: &str = "\
 > **IMPORTANT:**
 >
 > - Return the replacement Markdown body content in your final response
@@ -55,13 +76,25 @@ const SHIPPED_GUARDRAILS_2026_03_27: &str = "\
 > - Do not edit the source file directly
 ";
 
-/// Load guardrails from `.claudine/inline-compose.md` (creating it if
-/// absent), or fall back to the built-in default when no repo root is known.
+/// Every guardrail text Claudine has ever shipped as its default, oldest
+/// first. A materialized file byte-equal to one of these is Claudine's own
+/// and migrates to the current default; any other content is the user's.
+const HISTORICAL_SHIPPED_GUARDRAILS: &[&str] = &[
+    SHIPPED_GUARDRAILS_2026_03_17,
+    SHIPPED_GUARDRAILS_2026_03_27,
+    SHIPPED_GUARDRAILS_2026_09_01,
+    SHIPPED_GUARDRAILS_2026_09_05,
+];
+
+/// Load the guardrail template from `.claudine/inline-compose.md` (creating it
+/// if absent), or fall back to the built-in default when no repo root is
+/// known.
 ///
 /// ## Returns
 ///
-/// The guardrail text, ready to be appended to the composed prompt (the
-/// caller is responsible for adding the leading `\n\n`).
+/// The guardrail template, which may still contain
+/// [`DOCUMENT_PATH_PLACEHOLDER`]; pass it through [`render_guardrails`] before
+/// delivering it.
 pub fn load_or_create_guardrails(repo_root: Option<&Path>) -> String {
     load_or_create_guardrails_with(repo_root, crate::config::atomic::atomic_write)
 }
@@ -80,12 +113,7 @@ where
         let Ok(existing) = fs::read_to_string(&guardrails_path) else {
             return DEFAULT_GUARDRAILS.to_string();
         };
-        if matches!(
-            existing.as_str(),
-            SHIPPED_GUARDRAILS_2026_03_17
-                | SHIPPED_GUARDRAILS_2026_03_27
-                | SHIPPED_GUARDRAILS_2026_09_01
-        ) {
+        if HISTORICAL_SHIPPED_GUARDRAILS.contains(&existing.as_str()) {
             if let Err(error) = write(&guardrails_path, DEFAULT_GUARDRAILS.as_bytes()) {
                 warn!(
                     "failed to migrate guardrails file {}: {error}",
@@ -107,6 +135,51 @@ where
     DEFAULT_GUARDRAILS.to_string()
 }
 
+/// Bind a guardrail template to the active document.
+///
+/// Every [`DOCUMENT_PATH_PLACEHOLDER`] becomes the document's native absolute
+/// path in a code span (see [`document_path_span`]); a customized template
+/// without the placeholder is returned unchanged.
+pub fn render_guardrails(template: &str, document_path: &Path) -> String {
+    template.replace(DOCUMENT_PATH_PLACEHOLDER, &document_path_span(document_path))
+}
+
+/// The document's native absolute path as the agent must see it.
+///
+/// Native separators are kept as they are and nothing is JSON-escaped:
+/// doubled backslashes are a known way to make an agent write to the wrong
+/// path. A Windows verbatim prefix (`\\?\`) is reduced to the legacy spelling
+/// the provider's tools accept.
+pub fn native_document_path(path: &Path) -> String {
+    let native = path.display().to_string();
+    if let Some(rest) = native.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    match native.strip_prefix(r"\\?\") {
+        Some(rest)
+            if rest
+                .as_bytes()
+                .get(1)
+                .is_some_and(|byte| *byte == b':') =>
+        {
+            rest.to_string()
+        }
+        _ => native,
+    }
+}
+
+/// [`native_document_path`] inside a Markdown code span, so spaces are
+/// delimited unambiguously. A path containing a backtick is fenced with a
+/// double-backtick span.
+pub fn document_path_span(path: &Path) -> String {
+    let native = native_document_path(path);
+    if native.contains('`') {
+        format!("`` {native} ``")
+    } else {
+        format!("`{native}`")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -116,6 +189,26 @@ mod tests {
     fn returns_default_when_no_repo_root() {
         let result = load_or_create_guardrails(None);
         assert_eq!(result, DEFAULT_GUARDRAILS);
+    }
+
+    #[test]
+    fn default_guardrails_state_the_file_aware_contract() {
+        assert!(DEFAULT_GUARDRAILS.contains(DOCUMENT_PATH_PLACEHOLDER));
+        assert!(DEFAULT_GUARDRAILS.contains("re-read the file"));
+        assert!(DEFAULT_GUARDRAILS.contains("`prompt`, `hash`, or `last_updated`"));
+        assert!(DEFAULT_GUARDRAILS.contains("must match\n>   its declared type"));
+        assert!(DEFAULT_GUARDRAILS.contains("summary of what you did"));
+        for retired in [
+            "Return the replacement Markdown body",
+            "Do not edit the source file directly",
+            "Allowed response frontmatter properties",
+            "YAML frontmatter block",
+        ] {
+            assert!(
+                !DEFAULT_GUARDRAILS.contains(retired),
+                "response-harvesting language must not survive in the default: {retired}"
+            );
+        }
     }
 
     #[test]
@@ -146,12 +239,21 @@ mod tests {
     }
 
     #[test]
+    fn a_customized_file_that_differs_by_one_byte_is_preserved() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join(GUARDRAILS_RELATIVE_PATH);
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        let customized = format!("{SHIPPED_GUARDRAILS_2026_09_05}> - Also cite sources\n");
+        fs::write(&path, &customized).unwrap();
+
+        let result = load_or_create_guardrails(Some(dir.path()));
+        assert_eq!(result, customized);
+        assert_eq!(fs::read_to_string(path).unwrap(), customized);
+    }
+
+    #[test]
     fn migrates_each_known_shipped_default_atomically() {
-        for shipped in [
-            SHIPPED_GUARDRAILS_2026_03_17,
-            SHIPPED_GUARDRAILS_2026_03_27,
-            SHIPPED_GUARDRAILS_2026_09_01,
-        ] {
+        for shipped in HISTORICAL_SHIPPED_GUARDRAILS {
             let dir = TempDir::new().unwrap();
             let path = dir.path().join(GUARDRAILS_RELATIVE_PATH);
             fs::create_dir_all(path.parent().unwrap()).unwrap();
@@ -164,13 +266,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn every_historical_default_is_distinct_and_retired() {
+        for (index, shipped) in HISTORICAL_SHIPPED_GUARDRAILS.iter().enumerate() {
+            assert_ne!(*shipped, DEFAULT_GUARDRAILS, "entry {index} is the live default");
+            for later in &HISTORICAL_SHIPPED_GUARDRAILS[index + 1..] {
+                assert_ne!(shipped, later, "entry {index} is duplicated");
+            }
+        }
+    }
+
     #[tracing_test::traced_test]
     #[test]
     fn failed_migration_uses_new_protocol_without_truncating_old_file() {
         let dir = TempDir::new().unwrap();
         let path = dir.path().join(GUARDRAILS_RELATIVE_PATH);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(&path, SHIPPED_GUARDRAILS_2026_09_01).unwrap();
+        fs::write(&path, SHIPPED_GUARDRAILS_2026_09_05).unwrap();
 
         let result = load_or_create_guardrails_with(Some(dir.path()), |_, _| {
             Err(io::Error::new(io::ErrorKind::PermissionDenied, "injected"))
@@ -179,9 +291,50 @@ mod tests {
         assert_eq!(result, DEFAULT_GUARDRAILS);
         assert_eq!(
             fs::read_to_string(path).unwrap(),
-            SHIPPED_GUARDRAILS_2026_09_01
+            SHIPPED_GUARDRAILS_2026_09_05
         );
         assert!(logs_contain("failed to migrate guardrails file"));
         assert!(logs_contain("injected"));
+    }
+
+    #[test]
+    fn render_binds_the_placeholder_to_a_native_code_span() {
+        let path = Path::new("/Users/ken/My Docs/voip.md");
+        let rendered = render_guardrails(DEFAULT_GUARDRAILS, path);
+        assert!(rendered.contains("is `/Users/ken/My Docs/voip.md`."));
+        assert!(!rendered.contains(DOCUMENT_PATH_PLACEHOLDER));
+    }
+
+    #[test]
+    fn render_leaves_a_template_without_the_placeholder_unchanged() {
+        let custom = "> Custom guardrails here\n";
+        assert_eq!(render_guardrails(custom, Path::new("/tmp/x.md")), custom);
+    }
+
+    #[test]
+    fn native_document_path_reduces_windows_verbatim_spellings() {
+        assert_eq!(
+            native_document_path(Path::new(r"\\?\C:\Users\Ken\voip.md")),
+            r"C:\Users\Ken\voip.md"
+        );
+        assert_eq!(
+            native_document_path(Path::new(r"\\?\UNC\nas\share\voip.md")),
+            r"\\nas\share\voip.md"
+        );
+        assert_eq!(
+            native_document_path(Path::new("/Users/ken/voip.md")),
+            "/Users/ken/voip.md"
+        );
+    }
+
+    #[test]
+    fn document_path_span_keeps_backslashes_and_spaces_verbatim() {
+        let windows = Path::new(r"C:\Users\Ken\My Docs\voip.md");
+        assert_eq!(
+            document_path_span(windows),
+            "`C:\\Users\\Ken\\My Docs\\voip.md`"
+        );
+        let with_backtick = Path::new("/tmp/we`ird.md");
+        assert_eq!(document_path_span(with_backtick), "`` /tmp/we`ird.md ``");
     }
 }

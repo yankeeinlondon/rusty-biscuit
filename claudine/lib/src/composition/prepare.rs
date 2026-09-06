@@ -216,6 +216,7 @@ fn canonical_compose_options(
     source_path: &Path,
     ctx: &ComposeContext,
     options: &PrepareOptions,
+    schema_phase: Option<SchemaPhase>,
 ) -> ComposeOptions {
     let mut compose_opts = bind_agent_workspace(
         ComposeOptions::new_with_context(ctx.clone()),
@@ -252,7 +253,63 @@ fn canonical_compose_options(
     if let Some(context) = options.file_resolution_context.clone() {
         compose_opts = compose_opts.with_file_resolution_context(context);
     }
-    compose_opts.with_deferred_schema_verdict(options.defer_schema_verdict)
+    compose_opts
+        .with_deferred_schema_verdict(options.defer_schema_verdict)
+        .with_schema_phase(schema_phase)
+}
+
+/// Resolve the document's `$schema` once for this preparation so it can be
+/// retained on the prepared composition.
+///
+/// A deferred-verdict read tolerates a schema that cannot be prepared (the
+/// stabilized reread reports it); every other read surfaces the typed
+/// [`CompositionError::SchemaLoad`] / [`CompositionError::SchemaParse`].
+fn resolve_launch_schema(
+    source: &ResolvedCompositionSource,
+    options: &PrepareOptions,
+    phase: Option<SchemaPhase>,
+) -> Result<Option<LaunchSchema>, CompositionError> {
+    if !source.markdown.frontmatter().as_map().contains_key("$schema") {
+        return Ok(None);
+    }
+    match super::schema::load_effective_schema_in_context(
+        source,
+        options.file_ref_fallback_dir.as_deref(),
+        options.file_resolution_context.as_ref(),
+    ) {
+        Ok(effective) => Ok(effective.map(|effective| LaunchSchema {
+            effective,
+            phase,
+            report: None,
+        })),
+        Err(_) if options.defer_schema_verdict => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
+/// The `prompt` an inline run delivers.
+///
+/// The caller's overlay (`--set`, a positional setter, or a value collected
+/// interactively for an eager `prompt`) wins over the authored value, so a
+/// transient prompt can satisfy the launch gate that asked for it without
+/// ever being written to the file.
+fn inline_prompt_text(
+    fm: &darkmatter::markdown::Frontmatter,
+    set_overrides: Option<&serde_json::Value>,
+) -> Result<String, CompositionError> {
+    let overlay = set_overrides
+        .and_then(serde_json::Value::as_object)
+        .and_then(|overrides| overrides.get("prompt"))
+        .filter(|value| !value.is_null());
+    let value = overlay
+        .or_else(|| fm.as_map().get("prompt"))
+        .ok_or(CompositionError::PromptPropertyMissing)?;
+    match value {
+        serde_json::Value::String(text) => Ok(text.clone()),
+        other => Err(CompositionError::PromptPropertyWrongType(
+            json_type_name(other).to_string(),
+        )),
+    }
 }
 
 /// Discover and approve one document's own compose-time shell surfaces, ahead
@@ -285,7 +342,7 @@ pub fn preflight_document_shell(
         crate::invocation_context::PreparedContextConsumer::Preflight,
     );
     let ctx = derive_compose_context(source, options);
-    let compose_opts = canonical_compose_options(&source.resolved_path, &ctx, options);
+    let compose_opts = canonical_compose_options(&source.resolved_path, &ctx, options, None);
     match super::resolve_shell_approvals(
         Some(&source.markdown),
         Some(&compose_opts),
@@ -332,10 +389,12 @@ use super::lifecycle::{
     LIFECYCLE_EVENT_KEYS, parse_lifecycle_config, validate_no_err_in_no_error_events,
 };
 use super::hints::{ParsedAgentHint, parse_agent_hint_full, parse_interactive_hint, parse_model_hint};
+use super::guardrails::render_guardrails;
 use super::types::{
     CompositionClosurePlan, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
-    PreparedComposition, ResolvedCompositionSource,
+    LaunchSchema, PreparedComposition, ResolvedCompositionSource,
 };
+use darkmatter::markdown::schemas::SchemaPhase;
 /// Prepare a direct (chained) composition with effective frontmatter.
 ///
 /// Composes the entire document through Darkmatter and extracts the
@@ -385,7 +444,7 @@ pub(super) fn prepare_direct_with_prompt(
     for (key, value) in &options.env_overrides {
         ctx.env_mut().insert(key.clone(), value.clone());
     }
-    let compose_opts = canonical_compose_options(&source.resolved_path, &ctx, &options);
+    let compose_opts = canonical_compose_options(&source.resolved_path, &ctx, &options, None);
     // Retain the caller's inputs so a later canonical preparation of this or a
     // proxied document re-applies exactly them.
     let input_layers = super::CallerInputLayers::from_options(&options);
@@ -473,6 +532,9 @@ pub(super) fn prepare_direct_with_prompt(
     // binding time.
     validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
 
+    // Resolved after a successful compose so a schema that cannot be prepared
+    // keeps surfacing through the composer's own typed failure.
+    let launch_schema = resolve_launch_schema(source, &options, None)?;
     let source_repo_root = effective_source_repo_root(
         options.source_repo_root,
         options.file_resolution_context.as_ref(),
@@ -489,6 +551,7 @@ pub(super) fn prepare_direct_with_prompt(
         effective_frontmatter,
         selection_hints,
         closure: CompositionClosurePlan::Direct,
+        launch_schema,
         lifecycle,
         deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_perf: report.perf,
@@ -502,9 +565,12 @@ pub(super) fn prepare_direct_with_prompt(
 
 /// Prepare an inline composition with effective frontmatter.
 ///
-/// Extracts the `prompt` frontmatter property, builds a temporary
-/// document, composes through Darkmatter, and captures closure state
-/// for deterministic post-execution rewrite.
+/// The delivered `prompt` is read from the effective input layer (caller
+/// overlay over authored frontmatter), composed as the body of a temporary
+/// document so it interpolates against the same frontmatter, and wrapped in
+/// the file-aware header and guardrails. The schema verdict is judged at
+/// [`SchemaPhase::Launch`]: every `eager` property must be present, while a
+/// required-but-not-eager property may stay absent for the agent to supply.
 pub fn prepare_inline(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,
@@ -521,19 +587,7 @@ pub fn prepare_inline(
         });
     }
 
-    let prompt_value = fm
-        .as_map()
-        .get("prompt")
-        .ok_or(CompositionError::PromptPropertyMissing)?;
-
-    let prompt_text = match prompt_value {
-        serde_json::Value::String(s) => s.clone(),
-        other => {
-            return Err(CompositionError::PromptPropertyWrongType(
-                json_type_name(other).to_string(),
-            ));
-        }
-    };
+    let prompt_text = inline_prompt_text(fm, options.set_overrides.as_ref())?;
 
     observe_prepared_context(
         &options,
@@ -553,7 +607,12 @@ pub fn prepare_inline(
     }
     // Retain the composed context so pre-flight shell resolution (C3) can build
     // an early-binding lookup over the same `ctx.*`/`env.*` state main compose saw.
-    let compose_opts = canonical_compose_options(&source.resolved_path, &ctx, &options);
+    let compose_opts = canonical_compose_options(
+        &source.resolved_path,
+        &ctx,
+        &options,
+        Some(SchemaPhase::Launch),
+    );
     let input_layers = super::CallerInputLayers::from_options(&options);
     if let Some(invocation) = options.invocation_context.as_ref() {
         invocation.record_compose_operation();
@@ -610,8 +669,8 @@ pub fn prepare_inline(
     // leak / undefined-variable scans do not run over them. See `prepare_direct`.
     validate_no_err_in_no_error_events(&lifecycle, &source.resolved_path)?;
 
-    let mut prompt = composed.content().to_string();
-    if prompt.trim().is_empty() && !options.allow_empty_body {
+    let body = composed.content().to_string();
+    if body.trim().is_empty() && !options.allow_empty_body {
         return Err(CompositionError::ComposedBodyEmpty {
             source_path: source.resolved_path.clone(),
             mode: CompositionMode::InlineFrontmatterPrompt,
@@ -619,16 +678,25 @@ pub fn prepare_inline(
         });
     }
 
+    let launch_schema = resolve_launch_schema(source, &options, Some(SchemaPhase::Launch))?;
     let source_repo_root = effective_source_repo_root(
         options.source_repo_root,
         options.file_resolution_context.as_ref(),
         &source.resolved_path,
     );
 
-    // Append guardrails with the new inline contract
-    let guardrails = load_or_create_guardrails(source_repo_root.as_deref());
-    prompt.push_str("\n\n");
-    prompt.push_str(&guardrails);
+    // The agent works on the file: it is told which file, what the schema
+    // expects of it, and what it must not touch.
+    let header = super::inline_prompt::build_inline_prompt_header(
+        &source.resolved_path,
+        launch_schema.as_ref(),
+        &effective_frontmatter,
+    );
+    let guardrails = render_guardrails(
+        &load_or_create_guardrails(source_repo_root.as_deref()),
+        &source.resolved_path,
+    );
+    let prompt = format!("{header}\n\n{body}\n\n{guardrails}");
 
     // Capture pre-execution hash for closure
     let original_hash = source.markdown.compute_hash(
@@ -646,9 +714,11 @@ pub fn prepare_inline(
         effective_frontmatter,
         selection_hints,
         closure: CompositionClosurePlan::Inline(InlineClosurePlan {
+            document_path: source.resolved_path.clone(),
             original_document_text: source.original_text.clone(),
             original_hash,
         }),
+        launch_schema,
         lifecycle,
         deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_perf: report.perf,

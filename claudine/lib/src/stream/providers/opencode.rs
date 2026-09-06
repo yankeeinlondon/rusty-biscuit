@@ -365,9 +365,9 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
 
     /// Handle OpenCode's `tool_use` event, which per the run.ts contract is
     /// only emitted *after* a tool reaches `completed` or `error`. OpenCode
-    /// does not emit a paired request-side event, so we emit only a
-    /// `ToolResult` (no synthesized `ToolCall`). The `tool_calls` counter
-    /// still increments so trailer metadata matches the rendered line count.
+    /// does not emit a paired request-side event, so the adapter synthesizes a
+    /// `ToolCall` immediately before `ToolResult`. The `tool_calls` counter
+    /// increments once for the completed operation.
     ///
     /// ## Notes
     ///
@@ -406,6 +406,19 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
             result_extra.insert("input".into(), input.clone());
         }
 
+        let mut call_extra = self.base_extra(raw_kind);
+        if let Some(id) = &resolved.id {
+            call_extra.insert("tool_id".into(), Value::from(id.as_str()));
+        }
+        if let Some(name) = &resolved.name {
+            call_extra.insert("tool_name".into(), Value::from(name.as_str()));
+        }
+        self.sink.on_semantic_event(SemanticEvent::ToolCall {
+            name: resolved.name.clone(),
+            id: resolved.id.clone(),
+            input: resolved.input.clone(),
+            extra: Value::Object(call_extra),
+        });
         self.sink.on_semantic_event(SemanticEvent::ToolResult {
             name: resolved.name.clone(),
             id: resolved.id.clone(),

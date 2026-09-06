@@ -158,11 +158,20 @@ fn inline_composition_uses_effective_frontmatter() {
     let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
     assert_eq!(prepared.mode, CompositionMode::InlineFrontmatterPrompt);
     assert!(prepared.prompt.contains("List three colors"));
-    assert!(
-        prepared
-            .prompt
-            .contains("Return the replacement Markdown body content in your final response")
+    // File-aware header first, the author's prompt, then the guardrails bound
+    // to the same native path.
+    let header = format!("**Document:** `{}`", source.resolved_path.display());
+    assert!(prepared.prompt.starts_with(&header), "{}", prepared.prompt);
+    let guardrail = format!(
+        "The document you are updating is `{}`.",
+        source.resolved_path.display()
     );
+    assert!(prepared.prompt.contains(&guardrail), "{}", prepared.prompt);
+    assert!(prepared.prompt.contains("Never modify the `prompt`, `hash`, or `last_updated`"));
+    assert!(prepared.prompt.contains("summary of what you did"));
+    assert!(prepared.prompt.find("List three colors").unwrap() < prepared.prompt.find("IMPORTANT").unwrap());
+    assert!(!prepared.prompt.contains("Return the replacement Markdown body"));
+    assert!(prepared.launch_schema.is_none(), "no `$schema` declared");
 
     // Effective frontmatter should contain composed keys
     assert!(prepared.effective_frontmatter.is_object());
@@ -176,6 +185,7 @@ fn inline_composition_uses_effective_frontmatter() {
     // Closure should be Inline with captured hash
     match &prepared.closure {
         CompositionClosurePlan::Inline(plan) => {
+            assert_eq!(plan.document_path, source.resolved_path);
             assert!(!plan.original_document_text.is_empty());
             // Simple hash should produce a non-empty `<fm>-<body>` string.
             let flat = plan.original_hash.flat_string();
@@ -192,6 +202,45 @@ fn inline_composition_missing_prompt() {
 
     let err = prepare_inline(&source, PrepareOptions::default()).unwrap_err();
     assert!(matches!(err, CompositionError::PromptPropertyMissing));
+}
+
+#[test]
+fn inline_composition_prefers_a_caller_supplied_prompt_and_keeps_the_file_untouched() {
+    // AC13: the caller's `prompt` overlay wins before the first interpolation
+    // pass and is delivered verbatim; the authored file is not rewritten.
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[("prompt", json!("authored {{ title }}")), ("title", json!("T"))], "Old");
+    let before = fs::read_to_string(&source.resolved_path).unwrap();
+
+    let prepared = prepare_inline(
+        &source,
+        PrepareOptions {
+            set_overrides: Some(json!({ "prompt": "caller {{ title }}" })),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(prepared.prompt.contains("caller T"), "{}", prepared.prompt);
+    assert!(!prepared.prompt.contains("authored"), "{}", prepared.prompt);
+    assert_eq!(prepared.effective_frontmatter["prompt"], json!("caller T"));
+    assert_eq!(fs::read_to_string(&source.resolved_path).unwrap(), before);
+}
+
+#[test]
+fn inline_composition_missing_prompt_is_satisfied_by_an_override() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[("title", json!("Test"))], "Content");
+
+    let prepared = prepare_inline(
+        &source,
+        PrepareOptions {
+            set_overrides: Some(json!({ "prompt": "from the caller" })),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(prepared.prompt.contains("from the caller"));
 }
 
 #[test]

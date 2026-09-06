@@ -1,6 +1,7 @@
 //! Tests for composition schema validation.
 
 use super::*;
+use crate::composition::CompositionMode;
 use crate::composition::resolve::resolve_composition_source;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -558,12 +559,11 @@ fn optional_string_resolved_to_null_passes_inline() {
 }
 
 #[test]
-fn required_string_resolved_to_null_fails_schema_validation() {
-    // A required `string` whose ternary resolves to `null` must still be
-    // classified as an invalid required value (Type problem), producing
-    // `SchemaValidation`. If categorization read requiredness from the JSON
-    // Schema instead of the `PropertyAtom`, the null could be treated as
-    // "absent" and surface as `MissingProperties` instead.
+fn required_string_resolved_to_null_is_a_missing_property_for_direct_compose() {
+    // AC9a / AC13: a required property authored as a conditional expression
+    // that resolves to `null` is a gap the caller fills at launch, so direct
+    // compose reports it as `MissingProperties` (the interactive-collection
+    // shape, with a text widget) rather than as a wrong-type value.
     let dir = TempDir::new().unwrap();
     let source = make_source(
         &dir,
@@ -577,10 +577,217 @@ fn required_string_resolved_to_null_fails_schema_validation() {
     );
 
     let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let CompositionError::MissingProperties { missing, .. } = err else {
+        panic!("required property resolved to null must surface as MissingProperties, got: {err:?}");
+    };
+    assert_eq!(missing.len(), 1);
+    assert_eq!(missing[0].name, "design");
     assert!(
-        matches!(err, CompositionError::SchemaValidation { .. }),
-        "required property resolved to null must fail with SchemaValidation, got: {err:?}"
+        matches!(missing[0].interactive_shape, Some(InteractiveShape::Text { .. })),
+        "a null-resolved string is collectable: {:?}",
+        missing[0].interactive_shape
     );
+}
+
+#[test]
+fn required_expression_resolved_to_null_is_tolerated_at_inline_launch() {
+    // The same document under `inline-compose`: the agent supplies `design`,
+    // so launch proceeds and the launch report defers the property.
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  prompt: 'string(required;eager)'\n",
+            "  design: 'string(required)'\n",
+            "prompt: write the design\n",
+            "design: \"{{ file_exists('design.md') ? 'design.md' : null }}\"\n",
+            "---\nbody\n",
+        ),
+    );
+
+    let prepared = prepare_inline_with_schema(&source, PrepareOptions::default()).unwrap();
+    let launch = prepared.launch_schema.as_ref().expect("schema retained");
+    assert_eq!(launch.phase, Some(darkmatter::markdown::schemas::SchemaPhase::Launch));
+    let report = launch.report.as_ref().expect("launch report retained");
+    let design = report.required.iter().find(|p| p.name == "design").unwrap();
+    assert_eq!(design.state, PropertyState::Deferred);
+    let prompt = report.required.iter().find(|p| p.name == "prompt").unwrap();
+    assert_eq!(prompt.state, PropertyState::Valid);
+}
+
+/// The voip.md shape as authored on 2026-09-05: `prompt` eager, the three
+/// run outputs required but not eager.
+const VOIP_SHAPED_SCHEMA: &str = concat!(
+    "$schema:\n",
+    "  prompt: 'string(required;eager)'\n",
+    "  last_updated: 'string(required)'\n",
+    "  researched_by: 'string(required)'\n",
+    "  products: 'object(required)'\n",
+);
+
+#[test]
+fn inline_launch_succeeds_with_required_non_eager_properties_absent() {
+    // AC3: `prepare_inline` on the voip-shaped document succeeds with
+    // `products` and `researched_by` absent; the retained launch report marks
+    // them deferred, and the delivered prompt carries the path header.
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &format!("---\n{VOIP_SHAPED_SCHEMA}prompt: Research VoIP\n---\nbody\n"),
+    );
+
+    let prepared = prepare_inline_with_schema(&source, PrepareOptions::default()).unwrap();
+    let report = prepared
+        .launch_schema
+        .as_ref()
+        .and_then(|launch| launch.report.as_ref())
+        .expect("launch report retained");
+    let state = |name: &str| {
+        report
+            .required
+            .iter()
+            .find(|p| p.name == name)
+            .unwrap_or_else(|| panic!("{name} is required"))
+            .state
+    };
+    assert_eq!(state("prompt"), PropertyState::Valid);
+    assert_eq!(state("last_updated"), PropertyState::Deferred);
+    assert_eq!(state("researched_by"), PropertyState::Deferred);
+    assert_eq!(state("products"), PropertyState::Deferred);
+    assert!(prepared.prompt.contains(&format!(
+        "**Document:** `{}`",
+        source.resolved_path.display()
+    )));
+    assert!(prepared
+        .prompt
+        .contains("| `products` | `object(required)` | absent | required |"));
+}
+
+#[test]
+fn direct_compose_of_the_same_document_reports_every_required_gap() {
+    // The same document through direct compose has no later actor to fill
+    // the gaps, so launch reports them as missing (collectable).
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &format!("---\n{VOIP_SHAPED_SCHEMA}prompt: Research VoIP\n---\nbody\n"),
+    );
+
+    let err = prepare_direct_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    let CompositionError::MissingProperties { missing, .. } = err else {
+        panic!("expected MissingProperties, got: {err:?}");
+    };
+    let mut names: Vec<&str> = missing.iter().map(|p| p.name.as_str()).collect();
+    names.sort_unstable();
+    assert_eq!(names, ["last_updated", "products", "researched_by"]);
+}
+
+#[test]
+fn inline_launch_fails_naming_a_missing_eager_prompt() {
+    // AC3: with `prompt` absent the launch gate names `prompt`, through the
+    // schema (collectable) rather than the intrinsic prompt check.
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &format!("---\n{VOIP_SHAPED_SCHEMA}---\nbody\n"));
+
+    let err = pre_validate_schema_for_mode(
+        &source,
+        None,
+        None,
+        CompositionMode::InlineFrontmatterPrompt,
+    )
+    .unwrap_err();
+    let CompositionError::MissingProperties { missing, .. } = err else {
+        panic!("expected MissingProperties naming prompt, got: {err:?}");
+    };
+    let names: Vec<&str> = missing.iter().map(|p| p.name.as_str()).collect();
+    assert_eq!(names, ["prompt"], "only the eager property is launch-required");
+}
+
+#[test]
+fn inline_launch_type_checks_a_present_required_non_eager_value() {
+    // Present values remain type-checked at launch in both modes: a
+    // required-but-not-eager `object` supplied as a string is a launch error,
+    // not something deferred to completion.
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &format!("---\n{VOIP_SHAPED_SCHEMA}prompt: Research VoIP\nproducts: not-an-object\n---\nbody\n"),
+    );
+
+    let err = pre_validate_schema_for_mode(
+        &source,
+        None,
+        None,
+        CompositionMode::InlineFrontmatterPrompt,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, CompositionError::SchemaValidation { ref problems, .. } if problems.iter().any(|p| p == "/products")),
+        "got: {err:?}"
+    );
+    let err = prepare_inline_with_schema(&source, PrepareOptions::default()).unwrap_err();
+    assert!(matches!(err, CompositionError::SchemaValidation { .. }), "got: {err:?}");
+}
+
+#[test]
+fn a_caller_supplied_prompt_satisfies_the_eager_launch_gate_transiently() {
+    // AC3 / AC13: a `--set prompt=…` (or an interactively collected value)
+    // satisfies the eager gate, becomes the delivered prompt, and is never
+    // written to the file.
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &format!("---\n{VOIP_SHAPED_SCHEMA}---\nauthored body\n"));
+    let overrides = serde_json::json!({ "prompt": "Research VoIP handsets" });
+
+    let pre = pre_validate_schema_for_mode(
+        &source,
+        Some(&overrides),
+        None,
+        CompositionMode::InlineFrontmatterPrompt,
+    )
+    .unwrap();
+    let prepared = prepare_inline_with_schema(
+        &pre.source,
+        PrepareOptions {
+            set_overrides: pre.set_overrides,
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(prepared.prompt.contains("Research VoIP handsets"));
+    assert_eq!(
+        prepared.effective_frontmatter["prompt"],
+        serde_json::json!("Research VoIP handsets")
+    );
+    let on_disk = std::fs::read_to_string(&source.resolved_path).unwrap();
+    assert!(!on_disk.contains("Research VoIP handsets"), "transient prompt must not persist");
+    assert_eq!(on_disk, format!("---\n{VOIP_SHAPED_SCHEMA}---\nauthored body\n"));
+}
+
+#[test]
+fn status_report_for_inline_mode_defers_required_non_eager_gaps() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &format!("---\n{VOIP_SHAPED_SCHEMA}prompt: Research VoIP\n---\nbody\n"),
+    );
+    let inline = build_schema_status_report_for_mode(
+        &source,
+        None,
+        None,
+        CompositionMode::InlineFrontmatterPrompt,
+    )
+    .unwrap()
+    .unwrap();
+    let direct = build_schema_status_report(&source, None, None).unwrap().unwrap();
+    let state = |report: &SchemaStatusReport, name: &str| {
+        report.required.iter().find(|p| p.name == name).unwrap().state
+    };
+    assert_eq!(state(&inline, "products"), PropertyState::Deferred);
+    assert_eq!(state(&direct, "products"), PropertyState::Missing);
+    assert_eq!(state(&inline, "prompt"), PropertyState::Valid);
+    assert_eq!(state(&direct, "prompt"), PropertyState::Valid);
 }
 
 // -- interactive_shape -----------------------------------------------

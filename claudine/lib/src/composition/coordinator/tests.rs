@@ -649,6 +649,7 @@ fn prepared_composition() -> crate::composition::types::PreparedComposition {
         effective_frontmatter: serde_json::json!({}),
         selection_hints: EffectiveSelectionHints::default(),
         closure: CompositionClosurePlan::Direct,
+        launch_schema: None,
         lifecycle: crate::composition::LifecycleConfig::default(),
         compose_perf: None,
         dropped_optionals: Vec::new(),

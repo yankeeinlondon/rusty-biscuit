@@ -257,7 +257,7 @@ fn round_trip_fidelity_mixed_fixture() {
 }
 
 #[test]
-fn opencode_tool_use_emits_tool_result_only() {
+fn opencode_tool_use_emits_paired_tool_call_and_result() {
     use super::super::parser::SemanticStreamParser;
     use super::super::semantic::{SemanticEvent, SemanticEventSink};
     use std::sync::{Arc, Mutex};
@@ -286,11 +286,18 @@ fn opencode_tool_use_emits_tool_result_only() {
     let kinds: Vec<&str> = captured.iter().map(|e| e.kind_str()).collect();
     assert_eq!(
         kinds,
-        vec!["tool_result"],
-        "tool_use (completion) must emit only a ToolResult; OpenCode never emits a paired request"
+        vec!["tool_call", "tool_result"],
+        "completion-only tool_use must synthesize the paired semantic lifecycle"
     );
 
-    let SemanticEvent::ToolResult { name, status, .. } = &captured[0] else {
+    let SemanticEvent::ToolCall { name, id, input, .. } = &captured[0] else {
+        panic!("expected ToolCall");
+    };
+    assert_eq!(name.as_deref(), Some("bash"));
+    assert_eq!(id.as_deref(), Some("t1"));
+    assert_eq!(input.as_ref(), Some(&json!({"command": "ls -la"})));
+
+    let SemanticEvent::ToolResult { name, status, .. } = &captured[1] else {
         panic!("expected ToolResult");
     };
     assert_eq!(name.as_deref(), Some("bash"));
@@ -334,7 +341,7 @@ fn assistant_text_in_part_text_shape_emits_output_text() {
 }
 
 #[test]
-fn tool_use_event_emits_only_tool_result_not_synthesized_call() {
+fn tool_use_event_emits_exactly_one_paired_call_and_result() {
     let (events, mut parser) = new_parser();
     parser
         .feed_line(r#"{"type":"step_start","sessionID":"ses_1"}"#);
@@ -349,8 +356,8 @@ fn tool_use_event_emits_only_tool_result_not_synthesized_call() {
     let n_calls = kinds.iter().filter(|k| **k == "tool_call").count();
     let n_results = kinds.iter().filter(|k| **k == "tool_result").count();
     assert_eq!(
-        n_calls, 0,
-        "must not synthesize a ToolCall when only a completion was observed; got {kinds:?}"
+        n_calls, 1,
+        "must synthesize exactly one ToolCall when only completion was observed; got {kinds:?}"
     );
     assert_eq!(n_results, 1, "must emit exactly one ToolResult");
 }
@@ -600,8 +607,8 @@ fn opencode_task_completion_no_longer_synthesizes_subagent_lifecycle() {
     let ks: Vec<&str> = collected.iter().map(|e| e.kind_str()).collect();
     assert_eq!(
         ks,
-        vec!["session_start", "info", "tool_result"],
-        "task tool completion must emit only ToolResult; subagent lifecycle now comes from stderr"
+        vec!["session_start", "info", "tool_call", "tool_result"],
+        "task tool completion must emit the paired tool lifecycle; subagent lifecycle comes from stderr"
     );
 
     // Verify NO subagent_start / subagent_stop in the stdout stream
@@ -645,12 +652,12 @@ fn opencode_task_error_completion_no_longer_synthesizes_subagent_lifecycle() {
     let ks: Vec<&str> = collected.iter().map(|e| e.kind_str()).collect();
     assert_eq!(
         ks,
-        vec!["session_start", "info", "tool_result"],
-        "task tool error completion must emit only ToolResult"
+        vec!["session_start", "info", "tool_call", "tool_result"],
+        "task tool error completion must emit the paired tool lifecycle"
     );
 
     // ToolResult must still carry the error status so it is rendered.
-    match &collected[2] {
+    match &collected[3] {
         SemanticEvent::ToolResult { status, .. } => {
             assert_eq!(status.as_deref(), Some("error"));
         }
@@ -693,8 +700,8 @@ fn opencode_non_task_tool_does_not_synthesize_subagent_lifecycle() {
     );
     assert_eq!(
         ks,
-        vec!["session_start", "info", "tool_result"],
-        "bash tool must emit only Info + ToolResult"
+        vec!["session_start", "info", "tool_call", "tool_result"],
+        "bash tool must emit Info plus the paired tool lifecycle"
     );
 }
 

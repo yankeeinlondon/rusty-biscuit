@@ -632,6 +632,16 @@ pub struct PreparedComposition {
     pub selection_hints: EffectiveSelectionHints,
     /// Closure plan for post-execution file updates.
     pub closure: CompositionClosurePlan,
+    /// The document's `$schema`, resolved once at stabilized launch and
+    /// retained for the completion verdict.
+    ///
+    /// `None` when the document declares no `$schema`, when the schema is raw
+    /// JSON Schema with no SimplifiedSchema projection is still carried
+    /// (`simplified: None`), or when a deferred-verdict read could not prepare
+    /// it. Completion validation reuses this value passively: it never
+    /// re-resolves the declaration, so a run cannot weaken its own contract by
+    /// editing `$schema` mid-run.
+    pub launch_schema: Option<LaunchSchema>,
     /// Parsed lifecycle notification config from effective frontmatter.
     pub lifecycle: LifecycleConfig,
     /// Darkmatter composition performance report, when enabled.
@@ -681,9 +691,44 @@ pub enum CompositionClosurePlan {
     Inline(InlineClosurePlan),
 }
 
+/// The launch-resolved schema and its launch verdict, carried on a
+/// [`PreparedComposition`] so completion never resolves the schema again.
+#[derive(Clone)]
+pub struct LaunchSchema {
+    /// The effective schema resolved during stabilized launch preparation.
+    pub effective: darkmatter::markdown::schemas::EffectiveSchema,
+    /// The runtime phase the launch verdict was judged at: `Launch` for
+    /// `inline-compose` (required-but-not-eager properties may still be
+    /// absent), `None` for direct compose, whose launch verdict is the
+    /// unphased authoring contract.
+    pub phase: Option<darkmatter::markdown::schemas::SchemaPhase>,
+    /// The per-property launch status the preparation reached, in schema
+    /// declaration order. `None` for a raw JSON Schema or a root union, whose
+    /// property table is not modelled.
+    pub report: Option<super::schema::SchemaStatusReport>,
+}
+
+impl std::fmt::Debug for LaunchSchema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LaunchSchema")
+            .field("phase", &self.phase)
+            .field("simplified", &self.effective.simplified.is_some())
+            .field("report", &self.report)
+            .finish()
+    }
+}
+
 /// State captured before inline composition for deterministic closure.
+///
+/// This is the inline guard: the document exactly as it stood when the active
+/// document was invoked or adopted, plus the native absolute path the agent is
+/// told to edit. Both travel with the prepared composition into runtime state.
 #[derive(Debug, Clone)]
 pub struct InlineClosurePlan {
+    /// Native absolute path of the active document the agent edits. Identical
+    /// to the delivered prompt header's path, so the closure and the agent
+    /// cannot disagree about which file is the deliverable.
+    pub document_path: PathBuf,
     /// The original on-disk document text (frontmatter + body).
     pub original_document_text: String,
     /// Full pre-run hash of the document, always [`MdHashKind::Simple`].

@@ -78,6 +78,57 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 .error_header(ErrorHeader::new("CompositionError", "schema validation"))
                 .body(body)
         }
+        CompositionError::CompletionBodyUnchanged {
+            source_path,
+            reason,
+        } => {
+            let file_link = render_file_link(source_path);
+            let (what, hint) = match reason {
+                crate::composition::closure::BodyRejection::Empty => (
+                    "left the body empty",
+                    "The agent is told the document's absolute path in its prompt. Check that \
+                     it can write there, and that the prompt asks for body content.",
+                ),
+                crate::composition::closure::BodyRejection::Unchanged => (
+                    "did not change the body",
+                    "The agent's summary is shown above. Check whether it read the wrong file, \
+                     refused the task, or reported the work without performing it.",
+                ),
+            };
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "document not updated"))
+                .body(format!(
+                    "The agent {what} of {file_link}, so nothing was stamped or written."
+                ))
+                .hint(hint)
+        }
+        CompositionError::CompletionSchemaFailed {
+            source_path,
+            problems,
+        } => {
+            let file_link = render_file_link(source_path);
+            let mut body = format!(
+                "{file_link} does not satisfy its `$schema` now that the run has completed."
+            );
+            if !problems.is_empty() {
+                body.push_str("\n\n<b>Problems:</b>");
+                for problem in problems {
+                    body.push_str(&format!(
+                        "\n- <cyan>`{}`</cyan> — {}",
+                        Prose::escape_text(&problem.property),
+                        Prose::escape_text(&problem.message)
+                    ));
+                }
+            }
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "completion schema"))
+                .body(body)
+                .hint(
+                    "A property declared `required` must be present and valid when the run \
+                     finishes. Either the producing actor did not set it, or the schema \
+                     declares an obligation nothing fulfils.",
+                )
+        }
         CompositionError::MissingProperties {
             source_path,
             missing,
