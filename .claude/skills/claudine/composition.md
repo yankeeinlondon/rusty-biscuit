@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-5c9ae67802ab52b6
+hash: ef46db3751d8e999-1cbd7531a841d1a2
 last_updated: 2026-09-06
 ---
 # Claudine Composition
@@ -303,34 +303,7 @@ Steps:
      stamped, and the file is written atomically exactly once.
    - The agent's final response is a summary for the caller; it never reaches
      the document.
-10. **Completion verdict** — one passive check
-    (`composition::completion::complete_active_document`) decides `success` vs
-    `failure` for **both** modes:
-    - `evaluate_completion(schema, instance, body_evidence, path)` is pure: no
-      composition, coercion, expression or shell execution, schema
-      re-resolution, or filesystem work. The schema it judges is the one
-      retained at stabilized launch, so a run cannot weaken its own contract by
-      editing `$schema` mid-run.
-    - The instance for `inline-compose` is the live effective frontmatter with
-      the agent's on-disk delta layered on top, then the restored owned values
-      and the fresh stamps. Transient `--set`, `key=value`, sequence, and
-      `proxy.with` inputs therefore still satisfy the schema without being
-      written to the file. `compose` judges the live effective frontmatter
-      unchanged and performs no source read or write.
-    - Problems render through the same `SchemaStatusReport` the launch report
-      uses, in schema declaration order, so both ends of a run look alike.
-    - A failed verdict carries `composition.body_unchanged` (with
-      `err.detail.reason` = `empty` / `unchanged`) or
-      `composition.completion_schema` (with `err.detail.properties[]` carrying
-      `property`, `message`, and `kind`). A successfully written artifact is
-      kept even when the schema verdict fails.
-    - The verdict fires **before** the terminal event, so a failed verdict
-      enters ordinary `failure` recovery: `retry`, `resume`, and `proxy`
-      recover it exactly as they recover a provider failure, and the process
-      exits non-zero only when none of them does. `success` cannot fire first.
-    - An owned property the file does not carry is *not* an absence: a
-      transient caller-supplied `prompt` that was deliberately never persisted
-      still satisfies completion.
+10. **Completion verdict** — see [Completion Verdict](#completion-verdict).
 
 ### The inline guard and rollback
 
@@ -358,6 +331,56 @@ writes a meaningfully changed body, a later metadata-only `retry`/`resume` of
 the same document is judged on its schema rather than refused as unchanged
 (AC18) — a rollback clears the evidence, because the document is the baseline
 again. An empty body is refused regardless of evidence.
+
+### Completion Verdict
+
+One passive check (`composition::completion::complete_active_document`) decides
+`success` versus `failure` for **both** composition modes. It is the last check
+in the producing slice: caller inputs, `initialize`, `start`, the provider, and
+the inline closure have all had their opportunity.
+
+```
+initialize → launch validation → start → provider → inline closure → verdict → success | failure → finalize
+```
+
+| Check | `inline-compose` | `compose` |
+|---|---|---|
+| Body changed meaningfully and is non-empty (non-strict `Simple` body hash) | required | not applicable |
+| Owned-property restore warnings | reported | not applicable |
+| Retained `$schema` at `SchemaPhase::Completion` | live effective frontmatter **plus** the agent's on-disk delta and closure stamps | live effective frontmatter, unchanged |
+
+- `evaluate_completion(schema, instance, body_evidence, path)` is pure: no
+  composition, coercion, expression or shell execution, schema re-resolution,
+  or filesystem work. The schema it judges is the one retained at stabilized
+  launch, so a run cannot weaken its own contract by editing `$schema` mid-run;
+  the edited declaration governs the next run.
+- Transient `--set`, positional `key=value`, sequence state, and `proxy.with`
+  inputs satisfy the schema exactly as they do everywhere else in Claudine, and
+  are still never written to the source. An owned property the file does not
+  carry is *not* an absence: a caller-supplied `prompt` that was deliberately
+  never persisted still satisfies completion.
+- `compose` performs no source read or write at completion. The only way a
+  `compose` run reaches an unsatisfied requirement is a producing lifecycle
+  effect that invalidated a value, since launch collection guarantees the
+  property was satisfied when the provider started.
+- Problems render through the same `SchemaStatusReport` the launch report uses,
+  in schema declaration order, so both ends of a run look alike. A property that
+  is present and valid prints as satisfied, so the author sees the whole schema
+  and not only the failures.
+- A failed verdict carries `composition.body_unchanged` (with
+  `err.detail.reason` = `empty` / `unchanged`) or
+  `composition.completion_schema` (with `err.detail.properties[]` carrying
+  `property`, `message`, and `kind`), fires `failure` **before** `success` can
+  run, and enters ordinary recovery: `retry`, `resume`, and `proxy` recover it
+  exactly as they recover a provider failure. The process exits non-zero only
+  when none of them does.
+- The verdict routes the flow; it does not police the hooks. A `success` or
+  `finalize` stack may still write to the document, including its frontmatter,
+  exactly as before — and keeping the closure stamp coherent afterwards remains
+  the author's responsibility.
+- A schema is validated **per composition**: once per sequence step and once per
+  loop iteration. A document that needs a property to accumulate across steps
+  must not declare it `required`.
 
 ### `hash` property (auto-stamped)
 
