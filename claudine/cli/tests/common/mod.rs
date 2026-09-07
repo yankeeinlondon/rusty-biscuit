@@ -162,6 +162,11 @@ impl CliProcessFixture {
             .env_remove("HOMEDRIVE")
             .env_remove("HOMEPATH")
             .env_remove("XDG_CONFIG_HOME")
+            // Model resolution consults the generic `MODEL` environment
+            // variable ahead of frontmatter (`composition::select` precedence
+            // step 3), and a Claudine-wrapped agent session exports one — so an
+            // unscrubbed host silently replaces every fixture's model.
+            .env_remove("MODEL")
             .env("APPDATA", &self.home)
             .env("LOCALAPPDATA", &self.home)
             .env("PATH", path)

@@ -32,6 +32,13 @@ pub(crate) fn extract_tags_from_prompt(
     }
 }
 
+/// Report how the inline agent's own process ended, before the loop decides
+/// what to do about it.
+///
+/// The interrupt notice is worded prospectively ("will restore"): this runs
+/// inside the attempt, and the baseline is not put back until the loop reaches
+/// its rollback seam. A past-tense claim here would contradict the typed
+/// rollback-failure diagnostic in the one case where accuracy matters.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn report_inline_agent_status(
     provider: Provider,
@@ -73,25 +80,16 @@ pub(crate) fn report_inline_agent_status(
     }
 
     if was_interrupted && show_checks {
-        if final_response.trim().is_empty() {
-            log::message(&crate::output::fm_check_fail(
-                &format!(
-                    "<b>User interrupted the agent with CTRL+C; Claudine restored \
-                     <blue-500>{display_path}</blue-500> to its pre-run state.</b>"
-                ),
-                term,
-            ));
-        } else {
-            log::message(&crate::output::fm_check_fail(
-                &format!(
-                    "<b>User interrupted the agent with CTRL+C; Claudine restored \
-                     <blue-500>{display_path}</blue-500> to its pre-run state.</b>"
-                ),
-                term,
-            ));
+        log::message(&crate::output::fm_check_fail(
+            &format!(
+                "<b>User interrupted the agent with CTRL+C; Claudine will restore \
+                 <blue-500>{display_path}</blue-500> to its pre-run state.</b>"
+            ),
+            term,
+        ));
+        if !final_response.trim().is_empty() {
             log::message(
-                &Prose::new(format!("<b>Agent summary:</b>\n\n{final_response}"))
-                    .render(term),
+                &Prose::new(format!("<b>Agent summary:</b>\n\n{final_response}")).render(term),
             );
         }
     }

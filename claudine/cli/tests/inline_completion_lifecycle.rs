@@ -284,18 +284,45 @@ fn a_provider_exit_one_restores_the_captured_baseline() {
 }
 
 /// AC8: an interrupted agent that wrote half a document leaves the document
-/// byte-identical to the snapshot.
+/// byte-identical to the snapshot, and the operator is told so — the notice
+/// names the document and the agent's trailing text is labeled as a summary
+/// rather than presented as the run's product (review-1 #3).
 #[test]
 fn a_provider_exit_130_restores_the_captured_baseline() {
     let fixture = Fixture::new(RESEARCH_DOC);
     InlineAgentStub::new(&fixture.document)
         .body("Half of a doc\n")
+        .summary("INTERRUPT-SUMMARY-SENTINEL")
         .exit_code(130)
         .install(&fixture.bin, "goose");
 
-    fixture.inline_compose().failure();
+    let assert = fixture.inline_compose().failure();
 
     assert_eq!(fixture.document_text(), RESEARCH_DOC);
+
+    let stderr = stderr_of(&assert);
+    assert!(
+        stderr.contains("User interrupted the agent with CTRL+C"),
+        "the interrupt must be named as a user action:\n{stderr}"
+    );
+    // Scoped to the notice's own line: `doc.md` also appears in the unrelated
+    // file-reference check, so a whole-stderr `contains` would pass vacuously.
+    let restore_notice = stderr
+        .lines()
+        .find(|line| line.contains("will restore"))
+        .unwrap_or_else(|| panic!("no restore notice on stderr:\n{stderr}"));
+    assert!(
+        restore_notice.contains("doc.md") && restore_notice.contains("to its pre-run state"),
+        "the restore notice must name the document:\n{restore_notice}"
+    );
+    assert!(
+        stderr.contains("Agent summary:"),
+        "trailing agent text must be labeled a summary:\n{stderr}"
+    );
+    assert!(
+        stderr.contains("INTERRUPT-SUMMARY-SENTINEL"),
+        "the agent's own words must survive the interrupt:\n{stderr}"
+    );
 }
 
 /// AC17: an empty candidate body is refused before any stamp, and the baseline

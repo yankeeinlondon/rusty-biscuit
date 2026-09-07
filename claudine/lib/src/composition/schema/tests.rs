@@ -1359,39 +1359,6 @@ fn inline_launch_allows_absent_eager_but_rejects_present_invalid_eager() {
 }
 
 #[test]
-fn scratch_dump_file_array_problems() {
-    for (label, override_val) in [
-        ("scalar-string", serde_json::json!({ "attachments": "everywhere" })),
-        ("array-of-one", serde_json::json!({ "attachments": ["everywhere"] })),
-        (
-            "array-of-two",
-            serde_json::json!({ "attachments": ["everywhere", "here"] }),
-        ),
-    ] {
-        let dir = TempDir::new().unwrap();
-        let source = make_source(
-            &dir,
-            "---\n$schema:\n  attachments: 'file(required;match(**/*spec*.md);eager)[]'\n---\nbody\n",
-        );
-        let effective = load_effective_schema(&source, None).unwrap().unwrap();
-        let instance = build_effective_instance(&source, Some(&override_val));
-        let report = effective.validate(&instance);
-        eprintln!("=== {label} valid={} ===", report.valid);
-        if let Some(SimplifiedSchema::Single(s)) = effective.simplified.as_ref()
-            && let Some(atom) = atom_for_property(s, "attachments")
-        {
-            eprintln!("  atom.is_array={} ty={:?}", atom.is_array, atom.ty);
-        }
-        for p in &report.problems {
-            eprintln!(
-                "  problem: kind={:?} path={:?} msg={:?}",
-                p.kind, p.path, p.message
-            );
-        }
-    }
-}
-
-#[test]
 fn provided_file_match_partial_reports_unresolved_file_reference() {
     // `spec=everywhere` is a provided partial for a required `file(match)`
     // property with no literal `everywhere` file. Instead of the generic
@@ -1488,6 +1455,38 @@ fn provided_file_scalar_for_array_property_match_partial_reports_unresolved_file
             assert_eq!(property, "attachments");
             assert_eq!(provided, "everywhere");
             assert!(is_array, "scalar provided to file[] property must still report is_array: true");
+        }
+        other => panic!("expected UnresolvedFileReference, got {other:?}"),
+    }
+}
+
+#[test]
+fn provided_file_array_multi_element_partial_reports_first_element() {
+    // A multi-element `file[]` partial collapses to a single dialog anchored on
+    // the first non-empty element; the trailing elements neither suppress the
+    // typed error nor open a second unresolved-reference round.
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        "---\n$schema:\n  attachments: 'file(required;match(**/*spec*.md);eager)[]'\n---\nbody\n",
+    );
+    let overrides = serde_json::json!({ "attachments": ["everywhere", "here"] });
+
+    let err = pre_validate_schema(&source, Some(&overrides), None).expect_err(
+        "a multi-element file[](match) partial with no literal match should surface a typed error",
+    );
+    match err {
+        CompositionError::UnresolvedFileReference {
+            property,
+            provided,
+            patterns,
+            is_array,
+            ..
+        } => {
+            assert_eq!(property, "attachments");
+            assert_eq!(provided, "everywhere");
+            assert_eq!(patterns, vec!["**/*spec*.md".to_string()]);
+            assert!(is_array, "file[] property must report is_array: true");
         }
         other => panic!("expected UnresolvedFileReference, got {other:?}"),
     }

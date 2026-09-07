@@ -3,6 +3,45 @@
 use super::*;
 use claudine::composition::{EffectiveSelectionHints, ModelHint};
 
+/// Scrub an ambient `MODEL` for the duration of one rebuild.
+///
+/// Model resolution consults the generic `MODEL` environment variable *before*
+/// frontmatter (`composition::select` precedence step 3), and a Claudine-wrapped
+/// agent session exports one — so on such a host the ambient value silently
+/// replaces every fixture's model and these rows hard-fail. Same host-dependence
+/// class as [`FIXTURE_MODEL`]'s: the rebuild must be decided by the fixture, not
+/// by the developer's shell.
+fn without_ambient_model() -> test_toolkit::EnvGuard {
+    test_toolkit::EnvGuard::remove_safe("MODEL")
+}
+
+/// [`super::rebuild_launch_identity`] with [`without_ambient_model`] applied.
+///
+/// Deliberately shadows the glob-imported production function so every row in
+/// this module is hardened by construction — a new test cannot forget the guard.
+fn rebuild_launch_identity(
+    intent: &LaunchRebuildIntent,
+    cli_model: Option<&str>,
+    repo_root: Option<&Path>,
+    document: &MaterializedHarnessPrompt,
+    source_path: Option<&Path>,
+) -> Result<RebuiltLaunchIdentity, crate::commands::wrap::launch_plan::LaunchPlanError> {
+    let _no_model = without_ambient_model();
+    super::rebuild_launch_identity(intent, cli_model, repo_root, document, source_path)
+}
+
+/// [`super::rebuild_target_launch`] with [`without_ambient_model`] applied.
+fn rebuild_target_launch(
+    intent: &LaunchRebuildIntent,
+    cli_model: Option<&str>,
+    repo_root: Option<&Path>,
+    launch_area: &Path,
+    target: &MaterializedHarnessPrompt,
+) -> Result<TargetLaunchRebuild, crate::commands::wrap::launch_plan::LaunchPlanError> {
+    let _no_model = without_ambient_model();
+    super::rebuild_target_launch(intent, cli_model, repo_root, launch_area, target)
+}
+
 /// The argv the fixture's invocation recorded. Distinctive so a test can tell
 /// the verbatim shortcut from a replay at a glance.
 const RECORDED_ARGV: &str = "recorded-invocation-argv";
