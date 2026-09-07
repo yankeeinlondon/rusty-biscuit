@@ -4,10 +4,13 @@ ready: false
 agent: codex/default
 created: 2026-09-07T12:23:09-07:00
 spec: 2026-09-07-required-vs-eager/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: darkmatter/fixes/2026-09-07-required-vs-eager/log.md
 description: A **fix** review of `2026-09-07-required-vs-eager/spec.md`
 fix: 2026-09-07-required-vs-eager/review-2.md
 previous: 2026-09-07-required-vs-eager/review-1.md
+next: 2026-09-07-required-vs-eager/review-3.md
 ---
 
 # Review 2: Required vs Eager
