@@ -3,6 +3,7 @@ reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-08-31
 implemented: true
+review_iterations: 2
 ---
 
 # Wrapped runs can stall indefinitely at startup or report success with incomplete work
@@ -233,8 +234,10 @@ ledger finalization, and acceptance criteria together before coding.
   - `.claude/skills/claudine/signal-handling.md`
   - `claudine/docs/topics/non-interactive-sessions.md`
   - `.claude/skills/claudine/summaries/non-interactive-sessions.md`
-  - `claudine/docs/topics/opencode-event-sources.md`
-  - `.claude/skills/claudine/opencode-event-sources.md`
+  - `.claude/skills/claudine/opencode-event-sources.md` (skill-only by
+    design — the `2026-05-12-opencode-stderr-returns` fix that created it
+    asked for a file under `.claude/skills/claudine/`, so there is no
+    authoritative topic counterpart to pair it with)
 - Update the two-rule comments in `watchdog/evaluate.rs`, `timeouts.rs`, and
   `HarnessPlan::step_timeout`; remove all claims that startup has unbounded
   first-event grace or that completed exit code 0 alone means success.
