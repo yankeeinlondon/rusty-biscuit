@@ -3,7 +3,7 @@ $schema:
     phase: number(required;default(1)) -> the phase of the plan to start with
     total_phases: number(required) -> the total number of phases the plan has
     plan: file(eager; required; match(**/*plan*.md)) -> the _plan file_ which is being implemented
-    spec: file(match(**/*spec*.md)) -> the _specification file_ which the plan was based on
+    spec: file(eager; match(**/*spec*.md)) -> the _specification file_ which the plan was based on
     pass_icon: string
     commit_message: string -> if you pass in a git commit message then it will be used as the git message instead of using AI to calcuate it
 description: |-
