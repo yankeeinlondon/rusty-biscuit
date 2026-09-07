@@ -278,6 +278,11 @@ pub(crate) fn display_policy(
         get(field, value, "collapse_task_progress")?,
         "`collapse_task_progress`",
     )?;
+    let suppress_synthetic_tool_calls = expect_bool(
+        field,
+        get(field, value, "suppress_synthetic_tool_calls")?,
+        "`suppress_synthetic_tool_calls`",
+    )?;
     let rate_limit = expect_bool(
         field,
         get(field, value, "suppress_subscription_rate_limit")?,
@@ -292,6 +297,7 @@ pub(crate) fn display_policy(
          {inner}tool_result_summary: ToolResultSummary::{},\n\
          {inner}info_event_suppression: {},\n\
          {inner}collapse_task_progress: {collapse},\n\
+         {inner}suppress_synthetic_tool_calls: {suppress_synthetic_tool_calls},\n\
          {inner}suppress_subscription_rate_limit: {rate_limit},\n\
          {inner}silent_extension_kinds: {silent_kinds},\n\
          {inner}stdout_noise_prefixes: {stdout_noise},\n\
