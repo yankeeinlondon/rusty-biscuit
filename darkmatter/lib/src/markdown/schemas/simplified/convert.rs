@@ -742,7 +742,8 @@ fn type_fragment(
     ty: SimplifiedType,
     constraints: &[Constraint],
 ) -> Result<Value, SchemaError> {
-    // `eager` is a universal presence constraint. Only `file` also assigns it
+    // `eager` is universal timing metadata rather than a presence constraint,
+    // so it has no JSON Schema form of its own. Only `file` also assigns it
     // type-specific validation semantics (existence), so other fragment
     // builders need not repeat a no-op match arm.
     let filtered;

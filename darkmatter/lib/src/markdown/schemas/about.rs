@@ -176,8 +176,8 @@ pub const SCHEMA_CONSTRAINT_DESCRIPTORS: &[SchemaConstraintDescriptor] = &[
         form: "eager",
         target_types: "all types",
         argument_arity: "0",
-        description: "Requires the containing property at stabilized launch and completion. On file items it also requires each present reference to exist.",
-        json_schema_effect: "none for phase presence; `file(eager)` selects the existing eager file format",
+        description: "Validates a supplied value at stabilized launch. Eager alone does not require the property: absence is allowed unless `required` is also declared. `required; eager` makes presence mandatory at launch. An eager file value or item must resolve to an existing file.",
+        json_schema_effect: "does not add the property to the parent's `required` list; `file(eager)` selects the existing eager file format",
     },
     // ── shared scalar / array bounds ───────────────────────────────────
     SchemaConstraintDescriptor {

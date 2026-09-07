@@ -1449,8 +1449,10 @@ impl ComposeOptions {
     ///
     /// `Some(SchemaPhase::Launch)` lets a required-but-not-eager property stay
     /// absent (a later actor is expected to supply it) while still requiring
-    /// every `eager` property and type-checking every present value. `None`
-    /// (the default) keeps the existing unphased verdict.
+    /// every `required; eager` property and type-checking every present value.
+    /// An eager-only property stays optional: `eager` decides when a supplied
+    /// value is validated, not whether it must exist. `None` (the default)
+    /// keeps the existing unphased verdict.
     ///
     /// ## Examples
     ///

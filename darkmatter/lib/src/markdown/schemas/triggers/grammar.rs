@@ -476,8 +476,9 @@ pub fn enforce_match_safe(name: &str, atom: &PropertyAtom) -> Result<(), SchemaE
             constraint: "imported type (Name@file)".into(),
         });
     }
-    // Trigger matching has no launch phase, so universal eager presence and
-    // eager file existence are both forbidden on every type and placement.
+    // Trigger matching has no launch phase, so eager's phase metadata is
+    // meaningless here and its file-existence check would make matching
+    // effectful. Forbidden on every type and placement.
     if atom
         .constraints
         .iter()
