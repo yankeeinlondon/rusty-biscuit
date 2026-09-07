@@ -29,6 +29,7 @@ fn make_test_summary() -> StreamExecutionSummary {
         rate_limit: None,
         context_usage: None,
         badges: Vec::new(),
+        subagent_outcomes: Vec::new(),
         raw_summary: None,
         stderr_text: None,
         stderr_diagnostics: None,
@@ -418,6 +419,98 @@ fn summary_event_omits_permission_counters_when_absent() {
     let meta = summary_to_event_meta(&summary, StreamProtocol::Jsonl, &env);
     assert!(!meta.extra.contains_key("permission_prompts"));
     assert!(!meta.extra.contains_key("user_input_prompts"));
+}
+
+#[test]
+fn summary_event_projects_subagent_outcomes_at_the_top_level_of_extra() {
+    use crate::stream::task_ledger::{SubagentOutcome, TaskOutcome};
+
+    let summary = StreamExecutionSummary {
+        provider: Provider::Claude,
+        exit_code: 0,
+        is_error: true,
+        error_kind: Some("incomplete_subagents".into()),
+        subagent_outcomes: vec![
+            SubagentOutcome {
+                task_id: Some("sa_1".into()),
+                name: Some("commit-a".into()),
+                outcome: TaskOutcome::Stopped,
+                raw_status: Some("stopped".into()),
+            },
+            SubagentOutcome {
+                task_id: None,
+                name: None,
+                outcome: TaskOutcome::Unfinished,
+                raw_status: None,
+            },
+        ],
+        ..Default::default()
+    };
+    let env = EnvironmentContext::default();
+    let meta = summary_to_event_meta(&summary, StreamProtocol::StreamJson, &env);
+
+    // Top-level and stable — not buried under `provider_summary` or a
+    // provider's `raw_summary`.
+    assert!(!meta.extra.contains_key("provider_summary"));
+    let facts = meta.extra["subagent_outcomes"]
+        .as_array()
+        .expect("subagent_outcomes must be an array");
+    assert_eq!(facts.len(), 2);
+    assert_eq!(facts[0]["task_id"], Value::String("sa_1".into()));
+    assert_eq!(facts[0]["name"], Value::String("commit-a".into()));
+    assert_eq!(facts[0]["outcome"], Value::String("stopped".into()));
+    assert_eq!(facts[0]["raw_status"], Value::String("stopped".into()));
+    // The anonymous fact stays anonymous rather than gaining a fake ID.
+    assert!(facts[1].get("task_id").is_none());
+    assert_eq!(facts[1]["outcome"], Value::String("unfinished".into()));
+    // The exit code is reported honestly alongside the semantic failure.
+    assert_eq!(meta.extra["exit_code"], Value::Number(0.into()));
+    assert_eq!(
+        meta.extra["exit_reason"],
+        Value::String("incomplete_subagents".into())
+    );
+}
+
+#[test]
+fn summary_event_omits_subagent_outcomes_on_a_clean_run() {
+    let summary = StreamExecutionSummary::default();
+    let env = EnvironmentContext::default();
+    let meta = summary_to_event_meta(&summary, StreamProtocol::Jsonl, &env);
+    assert!(!meta.extra.contains_key("subagent_outcomes"));
+}
+
+#[test]
+fn subagent_outcomes_survive_the_jsonl_serialization_round_trip() {
+    use crate::events::EventMeta;
+    use crate::stream::task_ledger::{SubagentOutcome, TaskOutcome};
+
+    let summary = StreamExecutionSummary {
+        subagent_outcomes: vec![SubagentOutcome {
+            task_id: Some("sa_9".into()),
+            name: Some("verifier".into()),
+            outcome: TaskOutcome::UnknownStatus,
+            raw_status: Some("evaporated".into()),
+        }],
+        ..Default::default()
+    };
+    let env = EnvironmentContext::default();
+    let meta = summary_to_event_meta(&summary, StreamProtocol::StreamJson, &env);
+
+    // `write_summary_event` serializes exactly this; the SQLite ingest then
+    // stores `extra` verbatim as `extra_json` and `claudine logs` parses it
+    // back. Prove the payload survives that whole-value passage.
+    let line = serde_json::to_string(&meta).unwrap();
+    let restored: EventMeta = serde_json::from_str(&line).unwrap();
+    let facts = restored.extra["subagent_outcomes"].as_array().unwrap();
+    assert_eq!(facts.len(), 1);
+    assert_eq!(facts[0]["raw_status"], Value::String("evaporated".into()));
+
+    let extra_json = serde_json::to_string(&restored.extra).unwrap();
+    let reparsed: Value = serde_json::from_str(&extra_json).unwrap();
+    assert_eq!(
+        reparsed["subagent_outcomes"][0]["name"],
+        Value::String("verifier".into())
+    );
 }
 
 mod semantic_event_to_event_meta_tests {

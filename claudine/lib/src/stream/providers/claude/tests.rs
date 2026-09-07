@@ -811,3 +811,187 @@ fn round_trip_fidelity_across_mixed_events() {
         assert_eq!(v, v2, "round-trip lost fidelity for {}", event.kind_str());
     }
 }
+
+// ---------------------------------------------------------------------------
+// Terminal task normalization and the authoritative session ledger
+// ---------------------------------------------------------------------------
+
+#[test]
+fn task_progress_with_a_status_still_stays_info() {
+    // Only `task_notification` carries terminal status; `task_progress` is
+    // progress by definition and must never be promoted.
+    let (sink, mut parser) = new_parser();
+    parser.feed_line(
+        r#"{"type":"task_progress","task_id":"sa_1","name":"researcher","status":"stopped","message":"working"}"#,
+    );
+    assert_eq!(sink.kinds(), vec!["info"]);
+}
+
+#[test]
+fn terminal_task_notification_preserves_id_name_and_raw_status() {
+    let (sink, mut parser) = new_parser();
+    parser.feed_line(
+        r#"{"type":"task_notification","task_id":"sa_1","name":"researcher","status":"stopped"}"#,
+    );
+    let events = sink.snapshot();
+    assert_eq!(events.len(), 1);
+    match &events[0] {
+        SemanticEvent::SubagentStop {
+            name, id, status, ..
+        } => {
+            assert_eq!(name.as_deref(), Some("researcher"));
+            assert_eq!(id.as_deref(), Some("sa_1"));
+            assert_eq!(status.as_deref(), Some("stopped"));
+        }
+        other => panic!("expected SubagentStop, got {other:?}"),
+    }
+}
+
+#[test]
+fn a_task_notification_without_a_terminal_status_remains_info() {
+    let (sink, mut parser) = new_parser();
+    parser.feed_line(
+        r#"{"type":"task_notification","task_id":"sa_1","message":"still thinking","status":"thinking"}"#,
+    );
+    assert_eq!(sink.kinds(), vec!["info"]);
+    // And it must not have invented a completion.
+    let summary = parser.finish(0);
+    assert!(!summary.is_error);
+    assert!(summary.subagent_outcomes.is_empty());
+}
+
+#[test]
+fn stopped_task_notifications_poison_a_native_exit_zero_session() {
+    // The 2026-08-31 incident shape: two dispatched sub-agents, both reported
+    // `stopped`, the parent turn completed, and Claude exited 0.
+    let (_sink, mut parser) = new_parser();
+    for line in [
+        r#"{"type":"init","session_id":"s1","model":"claude-opus"}"#,
+        r#"{"type":"task_started","task_id":"sa_1","name":"commit-a"}"#,
+        r#"{"type":"task_started","task_id":"sa_2","name":"commit-b"}"#,
+        r#"{"type":"task_notification","task_id":"sa_1","name":"commit-a","status":"stopped"}"#,
+        r#"{"type":"task_notification","task_id":"sa_2","name":"commit-b","status":"stopped"}"#,
+        r#"{"type":"result","subtype":"success","duration_ms":600000}"#,
+    ] {
+        parser.feed_line(line);
+    }
+    let summary = parser.finish(0);
+
+    // Claudine did not kill the child: the native exit stays honest.
+    assert_eq!(summary.exit_code, 0);
+    assert!(summary.is_error);
+    assert_eq!(summary.error_kind.as_deref(), Some("incomplete_subagents"));
+    assert_eq!(summary.subagent_outcomes.len(), 2);
+    let names: Vec<_> = summary
+        .subagent_outcomes
+        .iter()
+        .map(|fact| fact.name.clone().unwrap())
+        .collect();
+    assert_eq!(names, vec!["commit-a", "commit-b"]);
+    assert!(
+        summary
+            .subagent_outcomes
+            .iter()
+            .all(|fact| fact.raw_status.as_deref() == Some("stopped"))
+    );
+    let message = summary.error_message.unwrap();
+    assert!(message.contains("commit-a"), "{message}");
+    assert!(message.contains("commit-b"), "{message}");
+}
+
+#[test]
+fn more_than_five_stopped_tasks_all_reach_the_summary() {
+    let (_sink, mut parser) = new_parser();
+    for index in 0..7 {
+        parser.feed_line(&format!(
+            r#"{{"type":"task_started","task_id":"sa_{index}","name":"agent-{index}"}}"#
+        ));
+    }
+    for index in 0..7 {
+        parser.feed_line(&format!(
+            r#"{{"type":"task_notification","task_id":"sa_{index}","name":"agent-{index}","status":"stopped"}}"#
+        ));
+    }
+    let summary = parser.finish(0);
+    assert_eq!(summary.subagent_outcomes.len(), 7);
+}
+
+#[test]
+fn a_completed_notification_clears_an_earlier_stop_for_the_same_id() {
+    let (_sink, mut parser) = new_parser();
+    for line in [
+        r#"{"type":"task_started","task_id":"sa_1","name":"retryable"}"#,
+        r#"{"type":"task_notification","task_id":"sa_1","name":"retryable","status":"stopped"}"#,
+        r#"{"type":"task_completed","task_id":"sa_1","name":"retryable","status":"completed"}"#,
+    ] {
+        parser.feed_line(line);
+    }
+    let summary = parser.finish(0);
+    assert!(!summary.is_error);
+    assert!(summary.subagent_outcomes.is_empty());
+}
+
+#[test]
+fn a_started_task_with_no_terminal_event_fails_the_session() {
+    let (_sink, mut parser) = new_parser();
+    for line in [
+        r#"{"type":"task_started","task_id":"sa_1","name":"abandoned"}"#,
+        r#"{"type":"result","subtype":"success"}"#,
+    ] {
+        parser.feed_line(line);
+    }
+    let summary = parser.finish(0);
+    assert!(summary.is_error);
+    assert_eq!(summary.error_kind.as_deref(), Some("incomplete_subagents"));
+    assert_eq!(summary.subagent_outcomes.len(), 1);
+    assert_eq!(
+        summary.subagent_outcomes[0].outcome,
+        crate::stream::task_ledger::TaskOutcome::Unfinished
+    );
+}
+
+#[test]
+fn an_unknown_terminal_status_is_preserved_and_unresolved() {
+    let (_sink, mut parser) = new_parser();
+    parser.feed_line(
+        r#"{"type":"task_completed","task_id":"sa_1","name":"odd","status":"evaporated"}"#,
+    );
+    let summary = parser.finish(0);
+    assert!(summary.is_error);
+    assert_eq!(summary.subagent_outcomes.len(), 1);
+    assert_eq!(
+        summary.subagent_outcomes[0].raw_status.as_deref(),
+        Some("evaporated")
+    );
+    assert_eq!(
+        summary.subagent_outcomes[0].outcome,
+        crate::stream::task_ledger::TaskOutcome::UnknownStatus
+    );
+}
+
+#[test]
+fn a_clean_task_session_stays_clean() {
+    let (_sink, mut parser) = new_parser();
+    for line in [
+        r#"{"type":"task_started","task_id":"sa_1","name":"alpha"}"#,
+        r#"{"type":"task_completed","task_id":"sa_1","name":"alpha","status":"success"}"#,
+        r#"{"type":"result","subtype":"success"}"#,
+    ] {
+        parser.feed_line(line);
+    }
+    let summary = parser.finish(0);
+    assert!(!summary.is_error);
+    assert!(summary.error_kind.is_none());
+    assert!(summary.subagent_outcomes.is_empty());
+    let json = serde_json::to_string(&summary).unwrap();
+    assert!(!json.contains("subagent_outcomes"));
+}
+
+#[test]
+fn a_task_free_session_never_grows_the_ledger() {
+    let (_sink, mut parser) = new_parser();
+    parser.feed_line(r#"{"type":"result","subtype":"success"}"#);
+    let summary = parser.finish(0);
+    assert!(!summary.is_error);
+    assert!(summary.subagent_outcomes.is_empty());
+}

@@ -13,8 +13,10 @@ pub struct HarnessPlan {
     pub timeout: Option<std::time::Duration>,
     /// Per-page step-silence timeout, if specified.
     ///
-    /// Resets on every stream event; when silence exceeds this budget the
-    /// child is killed. Streaming-only: ignored in capture and passthrough
+    /// The silence clock starts at child spawn and resets on every stream
+    /// event and every non-whitespace byte; when silence exceeds this budget
+    /// the child is killed. A child that spawns and then emits nothing is
+    /// bounded by it too. Streaming-only: ignored in capture and passthrough
     /// modes. Parse-time validation requires `step_timeout <= timeout` when
     /// both are present.
     pub step_timeout: Option<std::time::Duration>,
@@ -73,7 +75,23 @@ pub struct AttemptOutcome {
     /// The provider's final assistant response text.
     pub final_response: String,
     /// Process exit code.
+    ///
+    /// The provider's real exit status, never rewritten by Claudine. On its
+    /// own it does not establish success — see `is_error`.
     pub exit_code: i32,
+    /// Provider-semantic failure carried from
+    /// [`StreamExecutionSummary::is_error`].
+    ///
+    /// True when the parser judged the session a failure regardless of how
+    /// the process exited: an `is_error` result envelope, a repeated stream
+    /// error, or unresolved sub-agent work
+    /// (`error_kind: "incomplete_subagents"`). A completed attempt with this
+    /// set is an [`FailureEvent::AgentFailure`] even at exit code 0.
+    /// `false` on the capture and interactive paths, which have no stream
+    /// parser to judge anything.
+    ///
+    /// [`StreamExecutionSummary::is_error`]: crate::stream::summary::StreamExecutionSummary::is_error
+    pub is_error: bool,
     /// How the process terminated.
     pub termination: ProcessTermination,
     /// Captured stderr text, if available.

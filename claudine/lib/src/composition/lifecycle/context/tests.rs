@@ -664,6 +664,7 @@ fn provider_failure_message_precedence_survives_the_constructor() {
         session_id: None,
         final_response: String::new(),
         exit_code: 1,
+        is_error: false,
         termination: crate::harness::ProcessTermination::Completed,
         stderr_text: Some("noise\nlast stderr line".to_string()),
         error_kind: Some("agent_failure".to_string()),

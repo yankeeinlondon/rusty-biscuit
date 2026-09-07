@@ -30,6 +30,7 @@ fn full_summary() -> StreamExecutionSummary {
         rate_limit: None,
         context_usage: None,
         badges: Vec::new(),
+        subagent_outcomes: Vec::new(),
         raw_summary: None,
         stderr_text: None,
         stderr_diagnostics: None,
