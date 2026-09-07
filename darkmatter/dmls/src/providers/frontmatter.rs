@@ -1229,15 +1229,7 @@ fn meta_schema_definition_hover_body(key: &str, def: &PropertyDef) -> String {
     if is_required(def) {
         lines.push("Required".to_string());
     }
-    if atoms_of(def)
-        .iter()
-        .any(|atom| atom.constraints.iter().any(|constraint| matches!(constraint, Constraint::Eager)))
-        && let Some(descriptor) = schema_constraint_descriptors()
-            .iter()
-            .find(|descriptor| descriptor.keyword == "eager")
-    {
-        lines.push(format!("Eager: {}", descriptor.description));
-    }
+    lines.extend(eager_hover_line(def));
     lines.join("\n\n")
 }
 
@@ -1262,7 +1254,7 @@ pub(crate) fn schema_hover_body(key: &str, def: &PropertyDef) -> Option<String> 
 }
 
 /// The schema-hover body **without** the leading `**`key`**` heading: type,
-/// required, enum, default, and description. Callers that already display the
+/// required, eager, enum, default, and description. Callers that already display the
 /// property name in their own header (e.g. the interpolation hover's
 /// `**Expression**` block) use this to avoid repeating the name.
 pub(crate) fn schema_hover_details(def: &PropertyDef) -> Option<String> {
@@ -1291,6 +1283,7 @@ pub(crate) fn schema_hover_details(def: &PropertyDef) -> Option<String> {
     if is_required(def) {
         lines.push("Required".to_string());
     }
+    lines.extend(eager_hover_line(def));
     if let Some(members) = enum_members(atom) {
         let italicized: Vec<String> = members.iter().map(|m| format!("_{m}_")).collect();
         lines.push(format!("Values: {}", italicized.join(", ")));
@@ -1792,11 +1785,45 @@ fn inline_object_shape(def: &PropertyDef) -> Option<&SchemaShape> {
     })
 }
 
+/// Whether any arm of a property declares a constraint matching `predicate`,
+/// inspecting an atom's item-level constraints *and* its postfix array
+/// constraints. Both lists must be read: `file(eager)[]` writes `eager` to the
+/// item list while `file[](eager)` writes it to the array list, and the same
+/// split applies to `required`. Reading only one list silently drops the marker
+/// for the other spelling.
+fn declares_constraint(def: &PropertyDef, predicate: fn(&Constraint) -> bool) -> bool {
+    atoms_of(def).iter().any(|atom| {
+        atom.constraints
+            .iter()
+            .chain(atom.array_constraints.iter())
+            .any(predicate)
+    })
+}
+
 /// Whether any arm of a property is required.
 fn is_required(def: &PropertyDef) -> bool {
-    atoms_of(def)
+    declares_constraint(def, |c| matches!(c, Constraint::Required))
+}
+
+/// Whether any arm of a property declares `eager`, at item or array level.
+///
+/// Disclosure only — this says nothing about presence. Darkmatter's phase
+/// projection remains the sole authority for which placement makes the
+/// *property* launch-critical.
+fn is_eager(def: &PropertyDef) -> bool {
+    declares_constraint(def, |c| matches!(c, Constraint::Eager))
+}
+
+/// The hover line explaining `eager` timing, worded by the Darkmatter
+/// descriptor catalog so completion and both hover surfaces stay identical.
+fn eager_hover_line(def: &PropertyDef) -> Option<String> {
+    if !is_eager(def) {
+        return None;
+    }
+    schema_constraint_descriptors()
         .iter()
-        .any(|atom| atom.constraints.iter().any(|c| matches!(c, Constraint::Required)))
+        .find(|descriptor| descriptor.keyword == "eager")
+        .map(|descriptor| format!("Eager: {}", descriptor.description))
 }
 
 /// The enum members declared on an atom, if any.
@@ -3248,6 +3275,175 @@ mod tests {
         assert!(body.contains("Type: **type-definition**"), "{body}");
         assert!(body.contains("Declares: **string | object**"), "{body}");
         assert!(body.contains("Required"), "{body}");
+    }
+
+    /// The one authoritative `eager` wording. Every hover surface must reuse
+    /// this string byte-for-byte instead of keeping a DMLS-local copy.
+    fn eager_catalog_description() -> &'static str {
+        schema_constraint_descriptors()
+            .iter()
+            .find(|descriptor| descriptor.keyword == "eager")
+            .expect("the Darkmatter catalog declares `eager`")
+            .description
+    }
+
+    /// A root `$schema` document declaring a single property `p` as `def`.
+    fn schema_def(def: &str) -> PropertyDef {
+        let text = format!("---\n$schema:\n  p: {def}\n---\n\nbody\n");
+        with_ctx(&text, |ctx| {
+            known_shape(ctx)
+                .properties
+                .get("p")
+                .cloned()
+                .unwrap_or_else(|| panic!("`{def}` parses into the root shape"))
+        })
+    }
+
+    /// A root `$schema` document declaring `p` as a property-level union
+    /// (a YAML sequence of type expressions).
+    fn schema_union_def(arms: &[&str]) -> PropertyDef {
+        let body: String = arms.iter().map(|arm| format!("    - {arm}\n")).collect();
+        let text = format!("---\n$schema:\n  p:\n{body}---\n\nbody\n");
+        with_ctx(&text, |ctx| {
+            known_shape(ctx)
+                .properties
+                .get("p")
+                .cloned()
+                .unwrap_or_else(|| panic!("`{arms:?}` parses into the root shape"))
+        })
+    }
+
+    #[test]
+    fn constraint_markers_are_detected_at_item_and_array_level_and_across_union_arms() {
+        // `file(eager)[]` writes `eager` to the item list; `file[](eager)`
+        // writes it to the postfix array list. Reading only one list drops the
+        // marker for the other spelling — the pre-fix DMLS defect.
+        for placement in ["file(eager)[]", "file[](eager)"] {
+            let def = schema_def(placement);
+            assert!(is_eager(&def), "eager is detected for `{placement}`: {def:?}");
+            assert!(
+                !is_required(&def),
+                "eager placement alone never implies presence for `{placement}`: {def:?}"
+            );
+        }
+
+        for placement in ["file(required)[]", "file[](required)"] {
+            let def = schema_def(placement);
+            assert!(is_required(&def), "required is detected for `{placement}`: {def:?}");
+            assert!(
+                !is_eager(&def),
+                "required placement alone never implies eager timing for `{placement}`: {def:?}"
+            );
+        }
+
+        let both = schema_def("file[](required; eager)");
+        assert!(is_required(&both) && is_eager(&both), "{both:?}");
+
+        // A union discloses a marker declared on any arm, at either level.
+        let item_arm = schema_union_def(&["string", "file(eager)[]"]);
+        assert_eq!(atoms_of(&item_arm).len(), 2, "{item_arm:?}");
+        assert!(is_eager(&item_arm), "{item_arm:?}");
+        let array_arm = schema_union_def(&["string", "file[](required)"]);
+        assert_eq!(atoms_of(&array_arm).len(), 2, "{array_arm:?}");
+        assert!(is_required(&array_arm), "{array_arm:?}");
+
+        let bare = schema_def("file[]");
+        assert!(!is_eager(&bare) && !is_required(&bare), "{bare:?}");
+    }
+
+    #[test]
+    fn eager_hover_prose_is_taken_from_the_darkmatter_descriptor_catalog() {
+        let def = schema_def("string(eager)");
+        assert_eq!(
+            eager_hover_line(&def),
+            Some(format!("Eager: {}", eager_catalog_description()))
+        );
+        assert_eq!(eager_hover_line(&schema_def("string")), None);
+
+        let definition_hover = meta_schema_definition_hover_body("p", &def);
+        let instance_hover = schema_hover_body("p", &def).expect("hover body");
+        for body in [&definition_hover, &instance_hover] {
+            assert!(
+                body.contains(eager_catalog_description()),
+                "hover reuses the catalog description verbatim: {body}"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_definition_hover_separates_eager_timing_from_required_presence() {
+        let eager_only = meta_schema_definition_hover_body("p", &schema_def("string(eager)"));
+        assert!(eager_only.contains(eager_catalog_description()), "{eager_only}");
+        assert!(
+            !eager_only.contains("Required"),
+            "eager alone must not display the presence marker: {eager_only}"
+        );
+
+        let combined = meta_schema_definition_hover_body("p", &schema_def("string(required; eager)"));
+        assert!(combined.contains("Required"), "{combined}");
+        assert!(combined.contains(eager_catalog_description()), "{combined}");
+
+        let required_only = meta_schema_definition_hover_body("p", &schema_def("string(required)"));
+        assert!(required_only.contains("Required"), "{required_only}");
+        assert!(
+            !required_only.contains(eager_catalog_description()),
+            "{required_only}"
+        );
+    }
+
+    #[test]
+    fn schema_bound_instance_hover_separates_eager_timing_from_required_presence() {
+        let eager_only = schema_hover_body("p", &schema_def("string(eager)")).expect("hover body");
+        assert!(eager_only.contains(eager_catalog_description()), "{eager_only}");
+        assert!(
+            !eager_only.contains("Required"),
+            "eager alone must not display the presence marker: {eager_only}"
+        );
+
+        let combined =
+            schema_hover_body("p", &schema_def("string(required; eager)")).expect("hover body");
+        assert!(combined.contains("Required"), "{combined}");
+        assert!(combined.contains(eager_catalog_description()), "{combined}");
+
+        // Existing formatting is preserved alongside the new line.
+        let annotated = schema_hover_body(
+            "p",
+            &schema_def("enum(draft, published; eager; default(draft)) -> the publication state"),
+        )
+        .expect("hover body");
+        assert!(annotated.contains("Values: _draft_, _published_"), "{annotated}");
+        assert!(annotated.contains("Default: _\"draft\"_"), "{annotated}");
+        assert!(annotated.contains("the publication state"), "{annotated}");
+        assert!(annotated.contains(eager_catalog_description()), "{annotated}");
+    }
+
+    #[test]
+    fn both_hover_surfaces_disclose_array_placements_without_claiming_presence() {
+        for placement in ["file(eager)[]", "file[](eager)"] {
+            let def = schema_def(placement);
+            let definition_hover = meta_schema_definition_hover_body("p", &def);
+            let instance_hover = schema_hover_body("p", &def).expect("hover body");
+            for body in [&definition_hover, &instance_hover] {
+                assert!(
+                    body.contains(eager_catalog_description()),
+                    "`{placement}` discloses eager timing: {body}"
+                );
+                assert!(
+                    !body.contains("Required"),
+                    "`{placement}` must not claim presence: {body}"
+                );
+            }
+        }
+
+        let array_required = schema_def("file[](required)");
+        let definition_hover = meta_schema_definition_hover_body("p", &array_required);
+        let instance_hover = schema_hover_body("p", &array_required).expect("hover body");
+        for body in [&definition_hover, &instance_hover] {
+            assert!(
+                body.contains("Required"),
+                "array-level `required` keeps its presence marker: {body}"
+            );
+        }
     }
 
     #[test]
