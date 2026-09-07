@@ -5,6 +5,18 @@
 //! - inline `#[cfg(test)]` modules must stay under a line budget, and
 //! - focus-stealing terminal APIs must stay inside `level3_*` files.
 
+// Included directly rather than through `mod common;`: this binary needs the
+// sanitizer and nothing else, and `common/mod.rs` drags in the fixture surface
+// (`common::wrap`'s `claudine::mcp::types`/`chrono`/`serde_json`, and
+// `common::pty`'s expectrl on Unix) that a text scanner has no use for.
+// `line_at` goes unused here, hence the module-level allow — `common/mod.rs`
+// carries the same allow as an inner attribute for the same reason.
+#[allow(dead_code)]
+#[path = "common/source_scan.rs"]
+mod source_scan;
+
+use source_scan::{is_ident, sanitize};
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -78,130 +90,6 @@ struct LineCounts {
 struct InlineTestModule {
     start: usize,
     close: usize,
-}
-
-fn is_ident(byte: u8) -> bool {
-    byte == b'_' || byte.is_ascii_alphanumeric()
-}
-
-/// Blanks comments and literals while preserving bytes and newline offsets.
-fn sanitize(source: &str) -> Vec<u8> {
-    let bytes = source.as_bytes();
-    let mut output = bytes.to_vec();
-    let blank = |output: &mut [u8], from: usize, to: usize| {
-        for byte in output.iter_mut().take(to).skip(from) {
-            if !matches!(*byte, b'\n' | b'\r') {
-                *byte = b' ';
-            }
-        }
-    };
-
-    let mut index = 0;
-    while index < bytes.len() {
-        if bytes[index] == b'/' && bytes.get(index + 1) == Some(&b'/') {
-            let start = index;
-            while index < bytes.len() && !matches!(bytes[index], b'\n' | b'\r') {
-                index += 1;
-            }
-            blank(&mut output, start, index);
-        } else if bytes[index] == b'/' && bytes.get(index + 1) == Some(&b'*') {
-            let start = index;
-            let mut depth = 1usize;
-            index += 2;
-            while index < bytes.len() && depth > 0 {
-                if bytes[index] == b'/' && bytes.get(index + 1) == Some(&b'*') {
-                    depth += 1;
-                    index += 2;
-                } else if bytes[index] == b'*' && bytes.get(index + 1) == Some(&b'/') {
-                    depth -= 1;
-                    index += 2;
-                } else {
-                    index += 1;
-                }
-            }
-            blank(&mut output, start, index);
-        } else if let Some((content_start, hashes)) = raw_string_open(bytes, index) {
-            let start = index;
-            index = content_start;
-            while index < bytes.len() {
-                if bytes[index] == b'"'
-                    && bytes[index + 1..].len() >= hashes
-                    && bytes[index + 1..].iter().take(hashes).all(|&byte| byte == b'#')
-                {
-                    index += 1 + hashes;
-                    break;
-                }
-                index += 1;
-            }
-            blank(&mut output, start, index);
-        } else if bytes[index] == b'"' {
-            let start = index;
-            index += 1;
-            while index < bytes.len() {
-                if bytes[index] == b'\\' {
-                    index = (index + 2).min(bytes.len());
-                } else if bytes[index] == b'"' {
-                    index += 1;
-                    break;
-                } else {
-                    index += 1;
-                }
-            }
-            blank(&mut output, start, index);
-        } else if bytes[index] == b'\'' {
-            if let Some(end) = char_literal_end(bytes, index) {
-                blank(&mut output, index, end);
-                index = end;
-            } else {
-                index += 1;
-            }
-        } else {
-            index += 1;
-        }
-    }
-    output
-}
-
-fn raw_string_open(bytes: &[u8], index: usize) -> Option<(usize, usize)> {
-    if index > 0 && is_ident(bytes[index - 1]) {
-        return None;
-    }
-    let mut cursor = index;
-    if bytes.get(cursor) == Some(&b'b') {
-        cursor += 1;
-    }
-    if bytes.get(cursor) != Some(&b'r') {
-        return None;
-    }
-    cursor += 1;
-    let mut hashes = 0;
-    while bytes.get(cursor) == Some(&b'#') {
-        hashes += 1;
-        cursor += 1;
-    }
-    (bytes.get(cursor) == Some(&b'"')).then_some((cursor + 1, hashes))
-}
-
-fn char_literal_end(bytes: &[u8], index: usize) -> Option<usize> {
-    let mut cursor = index + 1;
-    if bytes.get(cursor) == Some(&b'\\') {
-        cursor += 1;
-        if bytes.get(cursor) == Some(&b'u') && bytes.get(cursor + 1) == Some(&b'{') {
-            cursor += 2;
-            while cursor < bytes.len() && bytes[cursor] != b'}' {
-                cursor += 1;
-            }
-        }
-        cursor += 1;
-    } else {
-        let width = std::str::from_utf8(&bytes[cursor..])
-            .ok()?
-            .chars()
-            .next()?
-            .len_utf8();
-        cursor += width;
-    }
-    (bytes.get(cursor) == Some(&b'\'')).then_some(cursor + 1)
 }
 
 fn skip_whitespace(bytes: &[u8], mut index: usize) -> usize {
