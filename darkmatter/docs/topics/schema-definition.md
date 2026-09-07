@@ -201,44 +201,52 @@ imports rather than primitive meta-type declarations.
 
 Every type accepts:
 
-- `required` — the property must be present.
-- `eager` — the property must be present at stabilized launch and completion.
-  It is phase metadata and is not encoded into authored JSON Schema. On a
-  `file` item ordinary schema preparation additionally retains the existing
-  existence check; the passive phase validator itself checks syntax and
-  presence without probing the filesystem.
+- `required` — the property must be present. Presence may still be deferred at
+  stabilized launch so an actor inside the run can supply it; it is mandatory at
+  completion.
+- `eager` — a supplied value is validated at stabilized launch. `eager` is
+  timing metadata, not a presence rule: absence is allowed unless `required` is
+  also declared. It is not encoded into authored JSON Schema. On a `file` item
+  ordinary schema preparation additionally retains the existing existence
+  check; the passive phase validator itself checks syntax and presence without
+  probing the filesystem.
 - `default(value)` — JSON Schema `default`. Darkmatter does **not** mutate documents; downstream tools and detection honor it.
 - `generated` — marks a property whose value the **host tool supplies at compose time** (for example the `ctx.*` context values in the Darkmatter base schema). It emits the `x-darkmatter-generated: true` annotation and suppresses the property's static `required` entry, so an authored document validates before the host fills the value in; the typed (non-null) arm is preserved. `datetime(generated; required)` therefore reads "required once generated", not "must be authored".
 
-Phase-aware validation derives presence recursively from the resolved
+`required` and `eager` are independent axes: `required` decides whether the
+property must be present, `eager` decides when a supplied value is validated.
+Phase-aware validation derives both recursively from the resolved
 SimplifiedSchema without mutating the instance or authored schema:
 
 | Constraint | Launch | Completion |
 |------------|--------|------------|
-| `eager` | Required | Required |
-| `required` | Optional; present values remain type-checked | Required |
-| `generated; required` | Optional while the host can supply it | Required |
 | none | Optional; present values remain type-checked | Optional; present values remain type-checked |
+| `eager` | Optional; a present value is validated eagerly | Optional; present values remain type-checked |
+| `required` | Optional; present values remain type-checked | Required |
+| `required; eager` | Required, and the value is validated eagerly | Required |
+| `generated; required` | Optional while the host can supply it | Required |
 
-Missing and explicit `null` both count as absence at these seams. Raw JSON
-Schema has no phase vocabulary, so its authored `required` behavior remains in
-force at launch and completion. Authors who need an actor *inside* the run to
-produce a value must therefore use SimplifiedSchema, which is the only surface
-where `required` and `eager` can differ.
+Missing and explicit `null` both count as absence at these seams. An
+eager-only `null` is therefore allowed at both phases, `required; eager`
+rejects it at launch, and `required` rejects it at completion. Raw JSON Schema
+has no phase vocabulary, so its authored `required` behavior remains in force
+at launch and completion. Authors who need an actor *inside* the run to produce
+a value must therefore use SimplifiedSchema, which is the only surface where
+presence and validation timing can differ.
 
-`eager` without `required` is accepted and is exactly equivalent to
-`required; eager`; the distinction is documentation only. There is no way to
-say "optional, but resolve and check it eagerly when supplied" — an optional
-input is a plain `file` / `string` / … and is checked only if present. Write
-`required; eager` when you mean it, so the declaration reads the way it
-behaves.
+`eager` without `required` is how you say "optional, but resolve and check it
+eagerly when supplied": a caller may omit the property, and any value it does
+supply must be valid before the provider starts. Write `required; eager` when
+omission is itself an error, and plain `required` when an actor inside the run
+is expected to produce the value.
 
-Presence is derived recursively, so an `eager` sub-property of an inline object
-is demanded at launch under its full path (`products.uk_price`), and a property
-union hoists `eager` from any arm exactly as it hoists `required` — the
-property must be present, while the selected arm still governs the value.
-Interactive collection is a top-level-property UI, so a missing nested eager
-property is reported rather than synthesized.
+Both constraints are derived recursively, so a `required` sub-property of an
+inline object is demanded at completion under its full path
+(`products.uk_price`), and a property union hoists `eager` from any arm exactly
+as it hoists `required` — the constraint governs the property as a whole, while
+the selected arm still governs the value. Interactive collection is a
+top-level-property UI, so a missing nested property is reported rather than
+synthesized.
 
 ### Numeric Constraints (`number`)
 
@@ -474,7 +482,8 @@ is never resolved against the filesystem, so a syntactically valid path to a
 not-yet-created output file passes. This is the right default for prompt authoring,
 where a property often names a file the run is about to *produce*.
 
-Add `eager` to opt into existence checking. `file(eager)` requires that:
+Add `eager` to opt into existence checking. When a value is supplied,
+`file(eager)` requires that:
 
 1. The string parses as a `FileReference`.
 2. The reference resolves to an existing filesystem entry **at validation time**.
@@ -510,7 +519,8 @@ the native effective value.
 
 ```yaml
 $schema:
-    review:      "file(eager; required; match('**/*review*.md'))"   # must exist
+    review:      "file(eager; required; match('**/*review*.md'))"   # must be supplied and must exist
+    spec:        "file(eager; match('**/*spec*.md'))"                # optional; must exist when supplied
     plan:        "file"                                              # lazy: may be a future output path
     doc:         "file(match('*.doc', '*.pdf', '*.md', '*.txt'))"   # lazy + completion hints
     source_code: "file(match('src/**/*.rs', '!src/**/test_*.rs'))"
@@ -518,9 +528,11 @@ $schema:
 ```
 
 `eager` is universal. Array placement determines ownership:
-`file(eager)[]` checks each present item but does not require the array property,
-while `file[](eager)` requires the array property at launch. `match(...)` still
-applies per item.
+`file(eager)[]` applies the eager existence check to each present item, while
+`file[](eager)` applies eager timing to the array property itself and leaves the
+items lazy. Neither placement makes the property required — declare `required`
+independently, and prefer `file[](required; eager)` when the array must be
+present and eagerly validated. `match(...)` still applies per item.
 
 ### URLs
 
@@ -811,8 +823,9 @@ $schema:
 
 **Hoisting.** `required`, `eager`, and `default(...)` are property-level — they
 are extracted from whichever arm declares them and applied to the property as a
-whole. If `required` or `eager` appears on any arm, that presence rule governs
-the property; convention is to place it on the first arm. Differing
+whole. `required` on any arm makes the property required; `eager` on any arm
+makes a supplied value launch-validated without requiring it. Convention is to
+place them on the first arm. Differing
 `default(...)` values on multiple arms is a compile-time error.
 
 ```yaml

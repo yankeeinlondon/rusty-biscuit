@@ -150,9 +150,10 @@ let done   = effective.validate_for_phase(&frontmatter, SchemaPhase::Completion)
 - **`Launch` is the stabilized pre-provider seam**, not the instant the process
   started: caller overrides, interpolation, coercion, and deferred frontmatter
   shell expressions have all run.
-- Missing and explicit `null` are both **absence**. An eager `null` fails at
-  launch; a required-but-not-eager `null` is tolerated at launch and fails at
-  completion.
+- Missing and explicit `null` are both **absence**, and `required` alone decides
+  whether absence is an error. An eager-only `null` is therefore allowed at both
+  phases; a `required; eager` `null` fails at launch; a required-but-not-eager
+  `null` is tolerated at launch and fails at completion.
 - Both phases are **passive**: no mutation, no coercion, no expression or shell
   execution, no schema resolution, and no filesystem access. The eager-`file`
   existence probe belongs to ordinary schema preparation, not to phase
