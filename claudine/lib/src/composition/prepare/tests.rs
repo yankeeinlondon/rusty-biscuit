@@ -261,6 +261,47 @@ fn inline_composition_prefers_a_caller_supplied_prompt_and_keeps_the_file_untouc
 }
 
 #[test]
+fn inline_prompt_table_marks_only_required_properties_required_at_completion() {
+    // The table the agent actually receives, through the normal preparation
+    // path: `eager` is a launch-timing constraint, so an eager-only property
+    // stays optional at completion.
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &[
+            (
+                "$schema",
+                json!({
+                    "spec": "string(eager)",
+                    "plan": "string(required; eager)",
+                    "summary": "string(required)",
+                    "notes": "string",
+                }),
+            ),
+            ("prompt", json!("Do the work")),
+            ("plan", json!("the plan")),
+        ],
+        "Old content",
+    );
+
+    let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
+
+    assert!(
+        prepared.prompt.contains("**Schema properties:**"),
+        "{}",
+        prepared.prompt
+    );
+    for row in [
+        "| `spec` | `string(eager)` | absent | optional |",
+        "| `plan` | `string(required;eager)` | present | required |",
+        "| `summary` | `string(required)` | absent | required |",
+        "| `notes` | `string` | absent | optional |",
+    ] {
+        assert!(prepared.prompt.contains(row), "{row}\n{}", prepared.prompt);
+    }
+}
+
+#[test]
 fn inline_composition_missing_prompt_is_satisfied_by_an_override() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("title", json!("Test"))], "Content");

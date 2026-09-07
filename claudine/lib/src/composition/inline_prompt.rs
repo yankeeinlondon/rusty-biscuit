@@ -75,8 +75,12 @@ fn type_expression(def: &PropertyDef) -> String {
     }
 }
 
-/// Completion requires a property that any arm marks `required` or `eager`
-/// (`eager` implies required-at-completion; see the Darkmatter phase table).
+/// Completion requires a property that any arm marks `required`.
+///
+/// Presence and eager validation are independent axes: `eager` only makes a
+/// supplied value launch-critical, so an eager-only property may still be
+/// absent when the run completes. The any-arm rule and the item / postfix
+/// array constraint pairing mirror Darkmatter's own `required` hoisting.
 fn def_is_required_at_completion(def: &PropertyDef) -> bool {
     let atoms: Vec<&PropertyAtom> = match def {
         PropertyDef::Single(atom) => vec![atom],
@@ -86,7 +90,7 @@ fn def_is_required_at_completion(def: &PropertyDef) -> bool {
         atom.constraints
             .iter()
             .chain(atom.array_constraints.iter())
-            .any(|constraint| matches!(constraint, Constraint::Required | Constraint::Eager))
+            .any(|constraint| matches!(constraint, Constraint::Required))
     })
 }
 
@@ -136,12 +140,56 @@ mod tests {
         assert_eq!(header.matches("\n| `").count(), 5, "one row per property:\n{header}");
     }
 
+    /// The completion cell of the row for `name`, so a matrix assertion does
+    /// not depend on how the atom happens to serialize.
+    fn completion_cell(header: &str, name: &str) -> String {
+        let prefix = format!("| `{name}` |");
+        let row = header
+            .lines()
+            .find(|line| line.starts_with(&prefix))
+            .unwrap_or_else(|| panic!("no row for `{name}`:\n{header}"));
+        row.trim_end_matches('|')
+            .rsplit('|')
+            .next()
+            .expect("a completion cell")
+            .trim()
+            .to_string()
+    }
+
     #[test]
-    fn eager_without_required_is_still_required_at_completion() {
+    fn eager_without_required_is_optional_at_completion() {
         let schema = launch_schema("---\n$schema:\n  spec: string(eager)\nspec: x\n---\n");
         let header =
             build_inline_prompt_header(Path::new("/tmp/d.md"), Some(&schema), &json!({"spec": "x"}));
-        assert!(header.contains("| `spec` | `string(eager)` | present | required |"));
+        assert!(header.contains("| `spec` | `string(eager)` | present | optional |"));
+    }
+
+    #[test]
+    fn only_required_marks_a_property_required_at_completion() {
+        // The four-cell matrix, both array placements of each constraint, and
+        // union arms. `eager` never contributes to the completion column.
+        let schema = launch_schema(
+            "---\n$schema:\n  neither: string\n  eager_only: string(eager)\n  required_only: string(required)\n  required_eager: string(required; eager)\n  items_eager: file(eager)[]\n  array_eager: file[](eager)\n  items_required: file(required)[]\n  array_required: file[](required)\n  union_eager:\n    - string(eager)\n    - number\n  union_required:\n    - string(required)\n    - number\nprompt: p\n---\n",
+        );
+        let header = build_inline_prompt_header(Path::new("/tmp/d.md"), Some(&schema), &json!({}));
+        for optional in [
+            "neither",
+            "eager_only",
+            "items_eager",
+            "array_eager",
+            "union_eager",
+        ] {
+            assert_eq!(completion_cell(&header, optional), "optional", "{optional}");
+        }
+        for required in [
+            "required_only",
+            "required_eager",
+            "items_required",
+            "array_required",
+            "union_required",
+        ] {
+            assert_eq!(completion_cell(&header, required), "required", "{required}");
+        }
     }
 
     #[test]

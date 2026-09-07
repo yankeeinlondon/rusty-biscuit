@@ -569,8 +569,9 @@ pub(super) fn prepare_direct_with_prompt(
 /// overlay over authored frontmatter), composed as the body of a temporary
 /// document so it interpolates against the same frontmatter, and wrapped in
 /// the file-aware header and guardrails. The schema verdict is judged at
-/// [`SchemaPhase::Launch`]: every `eager` property must be present, while a
-/// required-but-not-eager property may stay absent for the agent to supply.
+/// [`SchemaPhase::Launch`]: a `required; eager` property must be present and
+/// valid, while an eager-only or required-but-not-eager property may stay
+/// absent for the agent to supply.
 pub fn prepare_inline(
     source: &ResolvedCompositionSource,
     options: PrepareOptions,

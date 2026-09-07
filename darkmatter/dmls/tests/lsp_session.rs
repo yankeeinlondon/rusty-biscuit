@@ -3695,14 +3695,17 @@ fn eager_schema_fixture_is_clean_and_catalog_driven() {
 /// outside it DMLS suppresses *every* `missing_required`, so a default-mode
 /// fixture would stay green even if eager were compiled as a presence rule.
 ///
-/// `spec`/`items` (eager only, at both array placements) and `notes` (plain
-/// optional) are omitted and must stay clean; `plan` (`required; eager`) is
-/// omitted and must be the single diagnosed absence.
+/// Every property here is omitted. Four must stay clean: `spec` (eager-only
+/// scalar), `items` (`file(eager)[]`, eager owned by the items), `refs`
+/// (`file[](eager)`, eager owned by the array property), and `notes` (plain
+/// optional, the no-constraint control). `plan` (`required; eager`) is the sole
+/// permitted diagnosed absence.
 const STRICT_EAGER_ABSENCE_DOC: &str = concat!(
     "---\n",
     "$schema:\n",
     "  spec: string(eager)\n",
     "  items: file(eager)[]\n",
+    "  refs: file[](eager)\n",
     "  notes: string\n",
     "  plan: string(required; eager)\n",
     "title: Hello\n",
@@ -3735,7 +3738,7 @@ fn strict_mode_diagnoses_absent_required_eager_but_never_absent_eager_only() {
     );
     let message = missing[0]["message"].as_str().expect("message");
     assert!(message.contains("plan"), "{message}");
-    for eager_only in ["spec", "items", "notes"] {
+    for eager_only in ["spec", "items", "refs", "notes"] {
         assert!(
             !message.contains(eager_only),
             "`{eager_only}` is optional and must not be diagnosed absent: {message}"
@@ -3749,7 +3752,7 @@ fn strict_mode_diagnoses_absent_required_eager_but_never_absent_eager_only() {
         missing[0]["range"],
         json!({
             "start": { "line": 1, "character": 0 },
-            "end": { "line": 7, "character": 0 }
+            "end": { "line": 8, "character": 0 }
         }),
         "{:#?}",
         missing[0]
