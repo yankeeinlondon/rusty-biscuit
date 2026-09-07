@@ -19,6 +19,27 @@ Required-feature targets keep DuckDB, L2/L3 integration binaries, and live
 provider targets out of that compile graph. CI enables daemon and terminal
 features; explicit tier recipes enable the corresponding local targets.
 
+**The L1 spawn contract.** An L1 test obtains a `claudine` command from
+`CliProcessFixture` in `claudine/cli/tests/common/mod.rs` — `command()` for the
+hermetic default, `command_builder()` when it needs a named escape. The default
+pins `current_dir` to the fixture `cwd`, points the home variables at the
+fixture home, sets `CLAUDINE_RENDEZVOUS_REPORT=false` and `NO_COLOR=1`, and
+composes `PATH` as the fixture `bin` plus a minimal system set (`/usr/bin:/bin`;
+`%SystemRoot%\System32` on Windows) — enough for the `sh`/`cmd`/`git` claudine
+itself spawns by bare name, and short of every prefix an agentic CLI installs
+into. Three escapes exist, each requiring a call-site comment: `fake_only_path()`
+(nothing but the fixture stubs), `host_path()` (the old `augmented_path`), and
+`ambient_context(dir)` (launch CWD pinned to a repository the test built inside
+its own workspace — the rusty-biscuit checkout can never be inherited).
+`claudine/cli/tests/spawn_site_guard.rs` enforces it: a raw
+`assert_cmd::Command::cargo_bin("claudine")` or a `claudine_bin()` shell-out
+outside the builder fails the suite unless its file carries a reasoned
+`SPAWN_ALLOWLIST` entry, and an entry matching no live site fails too. Running
+the binary from the ambient CWD is both a cost (the 35-member workspace walk,
+20–77 s per test on WSL2) and a correctness hazard (the checkout's git state and
+root `system-prompt.md`, the developer's `$HOME`, the host's real provider
+binaries). See the `rust-testing` skill → "Spawning the Binary Under Test (L1)".
+
 The **local control plane** is platform-native and per stable OS user: a Unix-domain socket on macOS/Linux/WSL, a Windows named pipe on native Windows, qualified by the effective UID or process-token SID from `sniff::os::current_user_id()` — never a username. One portable `spawn_local_server` binds it to a transport-neutral daemon built exactly once. Read `claudine/docs/rendezvous/local-ipc.md` before changing endpoint, daemon-boot, or connector behavior; see [architecture.md](architecture.md) → Rendezvous Package-Area Family for the crate roles, the local-IPC rules, and the `SessionLogManager` module boundary.
 
 **Where to look next:**

@@ -2,12 +2,66 @@
 name: rust-testing
 description: |-
   Monorepo testing guide: L1/L2/L3 taxonomy, canonical just recipes,
-  `require_level!` gating, nextest filtersets, and fuzzing. Load this
+  test design, fixture isolation, `require_level!` gating, nextest filtersets,
+  suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 1acc7c1c76b11142-087cb82e7ef3825c
-last_updated: 2026-08-27
+hash: 7055b0e89017847d-124880c5260474d4
+last_updated: 2026-09-07
 ---
 # Rust Testing — Rusty Biscuit Monorepo
+
+## Test Design Contract
+
+Before adding or changing a test, identify the observable failure it must
+catch, the boundary needed to prove it, and the state that boundary consumes.
+Reuse or extend existing coverage when it already provides that proof; a new
+test is not required for every implementation edit.
+
+- **Assertion quality.** For a regression, retain the original failing input
+  and show that the relevant assertion distinguishes the broken behavior from
+  the fix when feasible. Assert dependent output/state and meaningful error
+  behavior. An exit-success check or a value compared with itself is not proof
+  of a promised result. Review names and comments when behavior changes.
+- **Boundary and cost.** Put exhaustive value/representation combinations at
+  the cheapest boundary that proves them. Keep representative real-CLI,
+  persistence, or protocol coverage where wiring matters. Stub external
+  providers, not the application behavior under test. Extend a shared passive
+  shipped-artifact corpus test rather than rescan the whole corpus in a new
+  process for every regression; keep an end-to-end case through a real shipped
+  artifact when changing its parser, schema, template, or configuration path.
+- **Explicit inputs.** Use the area's command builder and fixture-owned
+  directories, home/config/cache state, environment, and tool lookup. Disable
+  unrelated service connections. A temporary input file alone does not isolate
+  launch CWD or parent repository discovery. Host discovery tests retain the
+  real detector only when that observation is the subject of the test.
+- **Time and ownership.** Synchronize on readiness or the final condition being
+  asserted, with a deadline; do not use a fixed sleep as readiness proof. When
+  elapsed time is the contract, preserve its semantic floor and justify the
+  budget, polling cadence, and shutdown margin under CI contention. Fixtures
+  own and clean up children, threads, sockets, and directories on failure too.
+  Serialize only tests sharing an actual resource, using runner-visible
+  coordination when tests execute in separate processes.
+- **Reachability.** Confirm that the test's name, `cfg`, required features, and
+  recipe select it on the intended platforms. L1 includes hermetic subprocess
+  and filesystem tests. OS-specific behavior alone does not require L2/L3.
+  Missing tests, skipped tests, and unavailable resources are not passing
+  evidence; terminal/browser tests must preserve focus.
+- **Performance evidence.** Use stable work counters for contracts such as
+  “no repository walk” or “one request per operation”; use timings to measure
+  actual latency. Compare matched tests with the same features, profile,
+  concurrency, platform, and cache conditions. Separate build time from test
+  execution. Do not hide cost by changing tiers, dropping assertions, adding
+  retries, or raising runner limits without diagnosing the cause.
+
+When a test exposes defective shared setup, inspect its siblings even if they
+have never crossed a slow threshold. Repair the shared fixture within the
+authorized scope and record remaining consumers for follow-up. Report which
+behavior the targeted tests prove, relevant broader gates, and evidence still
+pending on CI; distinguish implementation completion from verification.
+
+For a requested comprehensive test audit or test-performance specification,
+read [test-suite-audits.md](test-suite-audits.md). Ordinary feature work does
+not require a suite-wide audit.
 
 ## Decision Tree: "What tier should my test live in?"
 
@@ -73,7 +127,7 @@ Symptoms that you have mis-tiered an OS-specific test:
 
 | Level   | Prefix     | Resource            | Skip when absent     | Hard-fail env                                              |
 |---------|------------|---------------------|----------------------|------------------------------------------------------------|
-| L1      | (none)     | In-process only     | Never                | —                                                          |
+| L1      | (none)     | In-process or hermetic subprocess/filesystem | Never | — |
 | L2      | `level2_`  | Real terminal / PTY | Harness missing      | `BISCUIT_TEST_REQUIRED_BACKENDS` (per-backend, preferred); `BISCUIT_TEST_LEVEL_REQUIRED=2` (all-or-nothing) |
 | L3      | `level3_`  | OS keyboard/mouse   | `RUN_LEVEL3` unset   | `BISCUIT_TEST_LEVEL_REQUIRED=3`                            |
 | Browser | `browser_` | Chrome/Chromium     | Browser missing      | `BISCUIT_BROWSER_REQUIRED=1`                               |
@@ -176,7 +230,7 @@ Every curated package area defines these 12 recipes:
 | `test`         | Full L1 suite.                                                                                                                                                                                                                                                                                                                               |
 | `test-l2`      | Real-terminal tests. **Default (serial):** pre-spawns one shared pane per backend via `biscuit-harness-broker`, exports `BISCUIT_SHARED_*_ID`, runs nextest `-j 1`, tears panes down in a trap; tests `<Backend>Harness::shared_or_spawn()` attach to that pane. **Parallel self-spawn mode (`BISCUIT_L2_THREADS=N`):** skips the broker, exports no `BISCUIT_SHARED_*`, runs `-j N`; every `shared_or_spawn()` then takes its owned-pane fallback, so there is no shared resource. See "Running L2 Tests" below. |
 | `test-l3`      | OS keyboard/mouse tests.                                                                                                                                                                                                                                                                                                                     |
-| `test-browser` | Headless browser tests. Runs `-j 1` (one Chrome at a time); the tier gets a 5s `leak-timeout` override for Chrome teardown.                                                                                                                                                                                                                                                                                                                      |
+| `test-browser` | Headless browser tests. Runs `-j 1` (one Chrome at a time); see `.config/nextest.toml` for the effective teardown policy. |
 | `test-real`    | External resource tests.                                                                                                                                                                                                                                                                                                                     |
 | `lint`         | Clippy + fmt check.                                                                                                                                                                                                                                                                                                                          |
 | `bench`        | Criterion benchmarks (no-op if opted out).                                                                                                                                                                                                                                                                                                   |
@@ -318,9 +372,8 @@ scoped timeout instead of masking the failure. Avoid
 the **two-phase capture race**: polling for an *intermediate* marker (a chooser
 hint) and then taking a *separate* `capture()` for the *final* content can grab a
 half-painted frame under load — poll for the content you will assert on, in the
-same loop, before capturing. Areas running parallel L2 also want a 1 s
-`leak-timeout` override (see Leaked Process Detection) for concurrent child
-teardown.
+same loop, before capturing. Check the effective leak policy before diagnosing
+concurrent child teardown; see Leaked Process Detection.
 
 ## Nextest Filtersets
 
@@ -361,27 +414,15 @@ override.
 Two complementary layers catch tests that spawn child processes and fail to
 reap them:
 
-1. **nextest `LEAK` (per test, all platforms).** `.config/nextest.toml` sets
-   `leak-timeout = { period = "100ms", result = "fail" }` on both profiles, so a
-   test that exits while a child still holds its stdout/stderr **fails the run**.
-   Clean tests are not slowed — only a leak waits the window out. Drop
-   `result = "fail"` to downgrade leaks to a non-fatal warning.
-   - **Browser-tier override.** `test(/browser_/)` raises `leak-timeout` to
-     `5s`. Headless Chrome's helper/crashpad processes inherit the test's
-     stdout and need longer than 100ms to reap; without the grace they trip
-     spurious `LEAK-FAIL`s even though the test exits cleanly. `result = "fail"`
-     is kept so a genuinely runaway browser still fails. The tier also runs
-     `-j 1` (see below) so only one Chrome tears down at a time —
-     `#[serial(browser)]` cannot serialize them under nextest's
-     process-per-test model.
-   - **Parallel-L2 grace (generalizable).** Any tier run at `-j N` whose tests
-     spawn short-lived children (tmux/PTY/git) wants the same treatment: their
-     concurrent teardown lags the 100ms pipe-drain check and trips spurious
-     `LEAK-FAIL`s on whichever test loses the race. The fix is a scoped 1s grace,
-     e.g. `filter = 'package(claudine-cli) & test(/level2_/)'` with
-     `leak-timeout = { period = "1s", result = "fail" }` (same shape as the
-     `worktree` and `tts-audio` groups). Keep `result = "fail"` — the grace only
-     widens the wait window, it does not stop catching a genuine leak.
+1. **nextest `LEAK` (per test, all platforms).** `.config/nextest.toml` is the
+   authority for the profile and per-test `leak-timeout` values. Both profiles
+   keep `result = "fail"`: a pipe still held after the effective observation
+   window fails the run. The window is not a fixed delay paid by every test.
+   Diagnose resource ownership, child reaping, and inherited handles before
+   changing it; any timing adjustment needs scoped evidence under load and
+   must retain leak failure. Browser and parallel L2 processes may have
+   different teardown costs. `#[serial(browser)]` cannot coordinate separate
+   nextest processes; the browser recipe's runner-level serialization does.
 2. **`just test-leaks` (post-run sweep, all platforms).** Wraps `just test` in
    `leak-sweep` (`tools/test-toolkit`, `--features leak-sweep`). It diffs the
    process list before/after the whole run and reports survivors whose
@@ -400,6 +441,66 @@ reap them:
 | `BISCUIT_BROWSER_REQUIRED=1`         | Missing Chrome panics instead of skipping.                                                                     |
 | `RUN_LEVEL3=1`                       | Opt-in for OS-keyboard-injection tests.                                                                        |
 | `BISCUIT_JUNIT_STAGE_DIR`            | Staging root for JUnit reports and the backend-execution evidence file. Defaults to `target/nextest/ci-reports`.|
+
+## Spawning the Binary Under Test (L1)
+
+An L1 test that runs its crate's own binary must run it against a workspace the
+test built — never against the checkout the suite was compiled from. Make that
+hold **by construction**, through one shared command builder per package area,
+rather than per-test `.env(...)` chains.
+
+Inheriting the runner's environment costs twice:
+
+- **Cost.** The ambient working directory under `cargo nextest` is the package
+  directory inside the monorepo, so anything that discovers a repository walks
+  all 35 members. That is ~220 ms on an idle 16-core Mac and 20–77 s per test in
+  a WSL2 guest reading its workspace over the Windows disk.
+- **Correctness.** The child also sees the checkout's git state and root
+  `system-prompt.md`, the developer's `$HOME`, and — with a full host `PATH` —
+  every real CLI installed on the machine. Assertions then pin a snapshot of
+  whichever machine ran them.
+
+The shape that fixes it, with claudine's `claudine-cli` L1 suite as the
+reference implementation:
+
+| Piece | Where | Contract |
+|---|---|---|
+| Fixture | `claudine/cli/tests/common/mod.rs` — `CliProcessFixture` | Temp `cwd`/`home`/`bin`; `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA` → fixture home, `HOMEDRIVE`/`HOMEPATH`/`XDG_CONFIG_HOME` removed |
+| Builder | `CliProcessFixture::command()` / `command_builder()` | The one supported spawn. `current_dir` pinned to the fixture `cwd` |
+| Guard | `claudine/cli/tests/spawn_site_guard.rs` | Source scan; a raw `Command::cargo_bin("<bin>")` outside the builder fails the suite |
+
+**Default `PATH` is the fixture `bin` plus a minimal system set** — `/usr/bin:/bin`
+on Unix, `%SystemRoot%\System32` on Windows, `PATHEXT` untouched so `.cmd` stubs
+resolve. Fake-only is stricter but breaks every test whose subject shells out
+by bare name (`sh`, `cmd`, `git`, `sleep`), so the opt-out would become the
+norm; the minimal set still excludes the Homebrew, npm, cargo, and
+`~/.local/bin` prefixes real tools install into. Escapes are named methods, and
+each requires a call-site comment naming the tool or the proof it needs:
+`fake_only_path()`, `host_path()`, and `ambient_context(dir)` — the last pins
+the launch CWD to a repository the test built *inside its own workspace* and
+panics on anything outside it.
+
+The tool roster is platform-specific: the Windows system set does not provide
+Git for Windows or Unix utilities. Use native fixture scripts or explicit
+fixture tools and `std::env::join_paths`; do not assume a Unix roster on Windows.
+This PATH convention bounds lookup, not security: tools installed in the
+allowed directories remain visible. Use fake-only lookup when absence is the
+assertion. Reject fixture roots inside the checkout, including through symlinks,
+so ancestor discovery cannot silently undo isolation.
+
+The builder must also control inherited application variables, Git plumbing
+such as `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`, and rendering inputs such as
+width and forced color. Scrub inherited values before applying intentional
+test overrides. Keep cache roots and platform home variables inside the
+fixture where the application uses them. Choose a documented deny list or a
+cleared environment based on actual runtime needs; Windows command stubs may
+need `SystemRoot`, `COMSPEC`, and `PATHEXT` restored.
+
+Give the guard an **explicit allowlist of `(file, one-line reason)` entries with
+stale-entry failure**: an entry matching no live site fails too, so the list
+burns down instead of becoming a grandfather table. Same mechanics as
+`dispatch_inventory.rs`; sanitize comments and string literals before searching,
+as `test_placement.rs` does, so prose mentions don't false-positive.
 
 ## Fixtures and Env Guards
 
