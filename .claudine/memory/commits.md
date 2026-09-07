@@ -194,5 +194,14 @@ belong here.
   files" or split them into a follow-up.
 - Use `git show --pretty=format: --name-only <hash>` when diffing the committed
   path list against a pathspec file.
+- A workspace-wide version-pin refresh that swaps the version number in a
+  `Cargo.toml` table row often leaves a stale numeric reference in the
+  surrounding prose of a sibling `docs/dependencies.md` (e.g. "Pinned to the
+  workspace-wide `0.42` used by …" three lines below the now-`0.55` row). A
+  regex pass over only the `.toml` files misses this; before staging a
+  bump, `git grep -nF '<old-version>' -- '*.md'` over the in-scope area or
+  scan each staged `docs/dependencies.md` with `git show :<path>` for the old
+  pin string. Flag the prose in the commit body as a follow-up rather than
+  silently shipping a self-contradicting paragraph.
 - After all groups finish, reconcile `git status --short` against the
   original staged set; anything left belongs to a failed or unassigned group.
