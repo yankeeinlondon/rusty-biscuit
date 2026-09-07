@@ -42,6 +42,10 @@ and it silently removed a capability a shipped artifact depended on.
 
 Everything below is ordered by severity.
 
+Every finding has since been ruled on — see [Resolutions](#resolutions). Three
+of the rulings depart from the fix this review proposed; those are called out
+there.
+
 ## Findings
 
 ### 1. High — the completion status block the spec (and the docs) promise is not rendered
@@ -375,3 +379,36 @@ Address findings 1, 2, and 3 before this is considered done — one is a documen
 behavior that does not exist, one is a ruling that belongs to Ken, and one
 actively misinforms an operator after Ctrl+C. Findings 4–8 are worth folding into
 the same pass; 9–12 can ride along or follow.
+
+## Resolutions
+
+Ruled by Ken, 2026-09-06. Each finding was presented with alternatives; the
+selected disposition is below. Three depart from the fix this review proposed
+and are marked **(departs)**.
+
+| # | Severity | Disposition |
+|---|---|---|
+| 1 | High | Carry the `SchemaStatusReport` into `CompletionSchemaFailed` and render it through the shared launch-report renderer. Docs and spec §D5 stand as written. |
+| 2 | High | **(departs)** Separate the axes rather than relaxing the prompt: `eager` = *when* a property is validated, `required` = *whether* it must be present. Restore `spec: file(eager; match(**/*spec*.md))` in `prompts/_implement/implement-plan.md`, refresh the drift pin, and delete `shipped_prompts_never_declare_eager_without_required`. Spec §D1 is rewritten, not annotated. |
+| 3 | High | Rewrite both branches of `report_inline_agent_status` in place: state that the document was restored to its pre-run state, and label the final response as the agent's summary. The failed-rollback branch already renders its own typed cause. |
+| 4 | Medium | Keep the synthesized `ToolCall` in the normalized stream and suppress its *render* via a `DisplayPolicy` facet ("this provider's call event is synthetic"). Event shape stays uniform across providers; the divergence lives in policy, not in the adapter. |
+| 5 | Medium | **(departs)** Consequent to #2, the projection is the layer that moves: `SchemaPhase::Launch` stops forcing `Eager` to `Required`. `is_required` correctly keeps ignoring `Eager`; the classifier instead gains a distinct *validated-at-launch* notion so a **present-but-invalid** eager value fails at launch rather than taking the `invalid_optional` drop-and-retry path. An absent eager property is simply absent and defers to completion. |
+| 6 | Medium | Add plain captures for `composition.completion_schema` and `composition.body_unchanged` to `level2_typed_error_render_capture.rs`, **after** #1 changes what the block emits. SGR/OSC8/`NO_COLOR` variants are not duplicated per code — the shared renderer already carries that evidence. |
+| 7 | Medium | Add a `real-tests` smoke test for Claude and Codex: spawn under the planned grant, have the agent write one byte into a temp document outside the workspace, assert it landed. Cross-OS argv shapes stay construction-only; more providers are additive later. |
+| 8 | Medium | Warn (do not refuse) at launch when a materialized guardrail file carries the retired instructions — detected structurally, e.g. no `{document_path}` plus "do not edit the source file". Name the file and the migration; the run proceeds. Never overwrite a customized file. |
+| 9 | Low | `evaluate_completion` validates once and derives both the problem list and the status rows from that single report. No projected-schema cache for now. |
+| 10 | Low | Qualify the property name in the `object_body_from_shape` loop (`format!("{context}.{prop_name}")`), which accumulates through the recursion for free. `entry_by_key_path` already accepts a path of any depth, so the only editor-side change is the hardcoded two-segment call site. **(departs)** in mechanism: keep the dotted `String` rather than adding a structured path field, and have the diagnostic try the whole string as a literal key first (frontmatter keys may contain `.`), then the split path, then the existing whole-`$schema` fallback. |
+| 11 | Low | Rewrite the `event_sink.rs` comment for the current model rather than deleting it. **(departs)** for the panics: `validate_for_phase_with_positions` returns a typed `SchemaError` instead of falling back to the unprojected schema — a silent substitution would validate against rules nobody chose, which is worse in a validation path than either a crash or a loud failure. |
+| 12 | Low | Add the missing positive assertion to `inline_compose_writes_the_agents_file_and_reports_only_the_final_summary` rather than splitting a second subprocess test out of it. |
+
+### Sequencing
+
+- **#2 and #5 are one workstream and the largest.** Together they touch
+  `phase.rs` projection, `classify.rs`, the shipped prompt plus its drift pin,
+  `shipped_prompt_contract.rs`, and spec §D1. Neither is safe to land alone —
+  today the lint is the only thing hiding the two layers' disagreement.
+- **#1 precedes #6** (the captures pin output #1 changes) **and #9** (once the
+  report is consumed, the single-validation change is a simplification rather
+  than a deletion of live code).
+- **#3, #4, #7, #8, #10, #11, #12** are independent of the above and of each
+  other.

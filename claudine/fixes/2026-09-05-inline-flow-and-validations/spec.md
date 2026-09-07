@@ -43,10 +43,10 @@ makes success mean something:
    validation is the last check before the run is routed to `success` or
    `failure`; the lifecycle hooks that then run are unrestricted, as today.
 3. SimplifiedSchema gains the phase semantics the author already relies on:
-   `eager` is a universal constraint meaning "present and valid before the
-   CLI starts", `required` means "present and valid by the time the run
-   completes". Darkmatter currently accepts `eager` only on `file`, which is
-   the false DMLS error in the screenshot.
+   `eager` is a universal constraint controlling when a supplied value is
+   validated, while `required` independently controls presence. Darkmatter
+   currently accepts `eager` only on `file`, which is the false DMLS error in
+   the screenshot.
 4. DMLS anchors schema-definition errors at the offending property and
    reports every property's error, not only the first.
 
@@ -84,13 +84,13 @@ them; if a design section and this list disagree, this list wins.
    type, failed constraint).
 5. **Completion validation applies to `compose` as well as
    `inline-compose`,** through as much shared code as possible.
-6. **`eager` versus `required`.** `eager` means the property must be
-   present and valid when the CLI is invoked. `required` means it must be
-   present and valid by the time the composition operation completes.
+6. **`eager` versus `required`.** `eager` controls when a supplied value is
+   validated; `required` independently controls whether the value must be
+   present. A property carrying both must be present and valid at launch.
    `eager` is valid on every type; Darkmatter rejecting it on `string` is a
    regression.
-7. **Launch collection.** Interactive collection asks for missing eager and
-   required properties. For a required, non-eager property the check runs
+7. **Launch collection.** Interactive collection asks for missing required
+   inputs. For a required, non-eager property the check runs
    after the document's own expression has had its chance (the
    `foo: {{ spec ? parent_dir(spec) + '/bar.md' : null }}` pattern). In
    `compose`, a value still null after that triggers interactive collection,
@@ -232,8 +232,8 @@ property the run was supposed to produce is never checked, and a property the
 run was supposed to produce cannot be declared `required` without failing
 before launch. The author's existing prompts already encode the intended
 split: `plan: file(required; match(**/*plan*.md)) -> The plan file this prompt
-will create` (an output) versus `spec: file(required; eager; match(…))` (an
-input).
+will create` (an output) versus `spec: file(eager; match(…))` (an optional
+input that is validated at launch when supplied).
 
 ## Design decisions
 
@@ -245,11 +245,11 @@ shell expression have completed, but no provider has started. It does not mean
 the instant the `claudine` process was invoked. This definition preserves the
 existing compose pipeline while making `eager` a provider-launch gate.
 
-`eager` becomes a universal constraint with one meaning across every type:
+`eager` and `required` are independent axes across every type:
 
 | Constraint | At stabilized launch (before provider start) | At the completion-verdict seam |
 |---|---|---|
-| `eager` | present and valid | present and valid |
+| `eager` | valid if present | valid if present |
 | `required` | may be absent; if present, valid | present and valid |
 | `generated` | as today: the host may supply it; absence is not an authoring error | present and valid at runtime completion if also `required` |
 | none | if present, valid | if present, valid |
@@ -260,20 +260,19 @@ the property absent is Claudine's mode rule in D5: `compose` fills the gap at
 launch through interactive collection or refuses to start, while
 `inline-compose` starts and expects the agent (or the closure) to fill it.
 
-`eager` without `required` is accepted and equivalent to `required; eager`
-for validation purposes; the distinction is documentation only. `eager` on a
+`eager` without `required` remains optional. `eager` on a
 `file` keeps its existing extra meaning (the reference must resolve to an
 existing file) because that is what "valid before launch" means for a file.
 Missing and explicit `null` are both absence for phase purposes. Therefore an
-eager `null` fails at launch, while a required-but-not-eager `null` is tolerated
-at launch and fails at completion.
+optional eager `null` is tolerated, while a `required; eager` null fails at
+launch and a required-but-not-eager null fails at completion.
 
-`eager` is a property-presence constraint, including on nested properties. In
-a property union it is hoisted like `required`: if any arm is eager, the
-property must be present at launch, while the selected arm still controls value
+`eager` is a validation-timing constraint, including on nested properties. In
+a property union it is hoisted so a supplied value is validated at launch,
+while `required` alone controls presence and the selected arm controls value
 validation. Array placement does not change presence ownership:
 `file(eager)[]` means every present item must resolve and exist, while
-`file[](eager)` makes the array property itself launch-required. Trigger match
+`file[](eager)` validates a supplied array at launch. Trigger match
 schemas reject `eager` on every type because trigger matching is passive and
 has no launch phase; this generalizes the current rejection of eager file
 existence checks.
@@ -298,9 +297,9 @@ Implementation:
   pub fn validate_for_phase(schema, instance, phase, ...) -> ValidationReport
   ```
 
-  `Launch` enforces the recursively derived eager-property set and demotes
-  every required-but-not-eager entry to optional. `Completion` enforces the
-  union of `required` and `eager`, including a `generated; required` property
+  `Launch` validates the recursively derived eager-property set when present
+  and requires only properties carrying both `required` and `eager`.
+  `Completion` enforces `required`, including a `generated; required` property
   after its host-supply opportunity. The
   existing unphased `validate` / `validate_with_positions` methods keep their
   static-authoring contract, including the existing generated-property
@@ -584,11 +583,14 @@ type is a failing step under the existing `fail_fast` rules. A document that
 needs a property to accumulate across steps must not declare it `required`.
 
 **Launch-time collection (Ken's ruling, 2026-09-05).** Interactive
-collection still exists and still asks for both eager and required
-properties, with one mode-dependent rule for `required`:
+collection still exists and asks for missing required launch inputs, with one
+mode-dependent rule for `required`:
 
-- A missing **eager** SimplifiedSchema property is asked for in both modes whenever the
-  existing Interactive Mode conditions hold; otherwise it is a launch error.
+- A missing **eager-only** SimplifiedSchema property remains optional and is
+  not collected. When supplied, it is validated at launch.
+- A missing **required; eager** property is asked for in both modes whenever
+  the existing Interactive Mode conditions hold; otherwise it is a launch
+  error.
 - A missing **required, non-eager** property is judged after the document has
   had its own chance to set it. Authors commonly write
   `foo: {{ spec ? parent_dir(spec) + '/bar.md' : null }}`: the value is
@@ -715,7 +717,7 @@ none specific to a provider:
   yields two DMLS diagnostics, each ranged at its own property; hover on a
   valid neighbor shows type documentation only.
 - **AC3 (launch phase).** `prepare_inline` on voip.md (as authored: `prompt`
-  eager, `last_updated`/`researched_by`/`products` required) succeeds with
+  required and eager, `last_updated`/`researched_by`/`products` required) succeeds with
   `products` and `researched_by` absent. The same document with `prompt`
   absent prompts when Interactive Mode is allowed and fails before launch
   naming `prompt` otherwise; a collected or CLI-supplied prompt becomes the
@@ -837,11 +839,12 @@ were checked on 2026-09-05 against `prompts/`, `.claudine/prompts/`, and
 
 ### OQ1 — Launch collection for `required` properties (resolved)
 
-Resolved by Ken's ruling 7: eager and required are both collected at launch;
-a required, non-eager property is judged after the document's own expression
-has run; `compose` asks the user only when that expression yielded `null` and
-no caller value exists, and refuses to start when it cannot ask;
-`inline-compose` never asks. Folded into D5.
+Resolved by the review-1 clarification: only missing `required; eager`
+properties are collected at launch. Eager-only properties remain optional but
+are validated when present. A required, non-eager property is judged after the
+document's own expression has run; `compose` asks the user only when that
+expression yielded `null` and no caller value exists, and refuses to start
+when it cannot ask; `inline-compose` never asks. Folded into D1 and D5.
 
 ### OQ2 — When one invocation runs the same document several times, when does `required` get enforced? (resolved)
 
