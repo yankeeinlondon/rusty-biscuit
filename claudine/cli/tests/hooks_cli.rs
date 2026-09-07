@@ -7,11 +7,8 @@
 //! and asserts the migrated tags emit real SGR styling with no raw tag
 //! markup left behind.
 
-use std::fs;
-
-
 mod common;
-use common::TestWorkspace;
+use common::CliProcessFixture;
 
 /// Atomic style tokens that must no longer appear in any hooks output.
 const ATOMIC_STYLE_TOKENS: &[&str] = &[
@@ -30,15 +27,10 @@ const ATOMIC_STYLE_TOKENS: &[&str] = &[
     "{{not-italic}}",
 ];
 
-/// Run `claudine` with `NO_COLOR` set and an isolated `HOME`, returning
-/// stdout as a string. Asserts the command exited successfully.
-fn run_hooks(home: &std::path::Path, args: &[&str]) -> String {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("HOME", home)
-        .env("NO_COLOR", "1")
-        .args(args)
-        .assert()
-        .success();
+/// Run `claudine` through the hermetic fixture, returning stdout as a string.
+/// Asserts the command exited successfully.
+fn run_hooks(fixture: &CliProcessFixture, args: &[&str]) -> String {
+    let assert = fixture.command().args(args).assert().success();
     String::from_utf8(assert.get_output().stdout.clone()).expect("stdout is utf-8")
 }
 
@@ -57,11 +49,9 @@ fn assert_no_atomic_tokens(output: &str) {
 /// (⛔️ non-hook, ❌ none) must not resurface.
 #[test]
 fn hooks_support_legend_documents_glyph_vocabulary() {
-    let workspace = TestWorkspace::named("claudine-hooks-it");
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("hooks-support-legend");
 
-    let output = run_hooks(&home, &["hooks", "--support"]);
+    let output = run_hooks(&fixture, &["hooks", "--support"]);
 
     for glyph in ["✅", "🔶", "🅐", "–"] {
         assert!(
@@ -94,11 +84,9 @@ fn hooks_support_legend_documents_glyph_vocabulary() {
 /// exist natively but have no canonical row in the tables above.
 #[test]
 fn hooks_mapping_lists_unmapped_native_events() {
-    let workspace = TestWorkspace::named("claudine-hooks-it");
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("hooks-mapping");
 
-    let output = run_hooks(&home, &["hooks", "--mapping"]);
+    let output = run_hooks(&fixture, &["hooks", "--mapping"]);
 
     assert!(
         output.contains("Not mappable — configure natively"),
@@ -115,11 +103,9 @@ fn hooks_mapping_lists_unmapped_native_events() {
 /// (template syntax) as display text while still applying styling.
 #[test]
 fn hooks_variables_preserves_literal_template_placeholders() {
-    let workspace = TestWorkspace::named("claudine-hooks-it");
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("hooks-variables");
 
-    let output = run_hooks(&home, &["hooks", "--variables"]);
+    let output = run_hooks(&fixture, &["hooks", "--variables"]);
 
     for placeholder in ["{{tool_name}}", "{{git.branch}}", "{{error}}"] {
         assert!(
@@ -130,12 +116,13 @@ fn hooks_variables_preserves_literal_template_placeholders() {
     assert_no_atomic_tokens(&output);
 }
 
-/// Command routing remains testable without redirecting the native user home.
+/// `hooks --help` routes without any user configuration present: the fixture
+/// home is empty, and no test seeds one before this runs.
 #[test]
 fn hooks_command_help_routes_without_user_config() {
-    assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
-        .env("NO_COLOR", "1")
+    let fixture = CliProcessFixture::named("hooks-help");
+    fixture
+        .command()
         .args(["hooks", "--help"])
         .assert()
         .success();
@@ -144,9 +131,7 @@ fn hooks_command_help_routes_without_user_config() {
 /// None of the static `hooks` views may emit atomic style tokens.
 #[test]
 fn hooks_views_emit_no_atomic_style_tokens() {
-    let workspace = TestWorkspace::named("claudine-hooks-it");
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("hooks-all-views");
 
     for view in [
         "--support",
@@ -155,7 +140,7 @@ fn hooks_views_emit_no_atomic_style_tokens() {
         "--variables",
         "--capture-method",
     ] {
-        let output = run_hooks(&home, &["hooks", view]);
+        let output = run_hooks(&fixture, &["hooks", view]);
         assert_no_atomic_tokens(&output);
     }
 }
@@ -168,9 +153,12 @@ fn hooks_views_emit_no_atomic_style_tokens() {
 // (a) produces real styling and (b) leaves no raw tag markup in output.
 
 /// Run `claudine` with color forced on, returning stdout.
-fn run_hooks_colored(home: &std::path::Path, args: &[&str]) -> String {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("HOME", home)
+///
+/// The fixture's default `NO_COLOR` is removed here: the subject of these
+/// tests is the ANSI the tags emit, which `NO_COLOR` would suppress outright.
+fn run_hooks_colored(fixture: &CliProcessFixture, args: &[&str]) -> String {
+    let assert = fixture
+        .command()
         .env("FORCE_COLOR", "1")
         .env_remove("NO_COLOR")
         .args(args)
@@ -218,11 +206,9 @@ fn assert_styled(output: &str) {
 
 #[test]
 fn hooks_support_view_emits_ansi_styling() {
-    let workspace = TestWorkspace::named("claudine-hooks-it");
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("hooks-support-ansi");
 
-    let output = run_hooks_colored(&home, &["hooks", "--support"]);
+    let output = run_hooks_colored(&fixture, &["hooks", "--support"]);
     assert_styled(&output);
     assert!(
         output.contains('✅'),
@@ -234,11 +220,9 @@ fn hooks_support_view_emits_ansi_styling() {
 /// rendering the styled support matrix so existing invocations don't break.
 #[test]
 fn hooks_capture_method_view_emits_ansi_styling() {
-    let workspace = TestWorkspace::named("claudine-hooks-it");
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("hooks-capture-method-ansi");
 
-    let output = run_hooks_colored(&home, &["hooks", "--capture-method"]);
+    let output = run_hooks_colored(&fixture, &["hooks", "--capture-method"]);
     assert_styled(&output);
     assert!(
         output.contains("✅"),
@@ -248,11 +232,9 @@ fn hooks_capture_method_view_emits_ansi_styling() {
 
 #[test]
 fn hooks_variables_view_styles_and_keeps_template_placeholders() {
-    let workspace = TestWorkspace::named("claudine-hooks-it");
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("hooks-variables-ansi");
 
-    let output = run_hooks_colored(&home, &["hooks", "--variables"]);
+    let output = run_hooks_colored(&fixture, &["hooks", "--variables"]);
     assert_styled(&output);
     // Literal template placeholders must survive styled rendering.
     for placeholder in ["{{tool_name}}", "{{git.branch}}", "{{error}}"] {

@@ -8,11 +8,10 @@
 //! canonical capture owner — no hand-built `ComposeContext` is injected.
 
 use std::fs;
-use std::path::Path;
-use tempfile::tempdir;
+use std::path::{Path, PathBuf};
 
 mod common;
-use common::{augmented_path, init_git_repo, write};
+use common::{CliProcessFixture, init_git_repo, write};
 
 #[cfg(unix)]
 fn write_command_stub(bin_dir: &Path, name: &str, unix_content: &str, _windows_content: &str) {
@@ -51,13 +50,30 @@ fn write_probe(path: &Path) {
     write(path, &format!("{PROBE_DOC}{PROBE_BODY}"));
 }
 
-fn run_dry_run(launch_dir: &Path, home: &Path, doc: &Path) -> String {
-    let output = assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", home)
+/// Stage the two-package-area workspace this file's launch-anchoring subjects
+/// need, returning the fixture and the repository root inside it.
+///
+/// The repository is built *inside* the fixture workspace so the
+/// ambient-context escape will accept it — no test here may inherit the
+/// rusty-biscuit checkout as its launch context.
+fn staged_fixture(name: &str) -> (CliProcessFixture, PathBuf) {
+    let fixture = CliProcessFixture::named(name);
+    fixture.seed_user_config();
+    let root = fixture.cwd().join("repo");
+    fs::create_dir_all(root.join("alpha/lib")).unwrap();
+    fs::create_dir_all(root.join("beta/lib")).unwrap();
+    stage_monorepo(&root);
+    (fixture, root)
+}
+
+/// Escape: ambient context. Every test in this file is *about* the launch
+/// directory, so each run is pinned to a directory the test built itself.
+fn run_dry_run(fixture: &CliProcessFixture, launch_dir: &Path, doc: &Path) -> String {
+    let output = fixture
+        .command_builder()
+        .ambient_context(launch_dir)
+        .build()
         .env("CLAUDE_CODE_EXIT", "0")
-        .current_dir(launch_dir)
         .args(["compose", "--claude", "--dry-run", &doc.to_string_lossy()])
         .assert()
         .success();
@@ -70,22 +86,15 @@ fn run_dry_run(launch_dir: &Path, home: &Path, doc: &Path) -> String {
 /// report the same launch area.
 #[test]
 fn dry_run_reports_the_launch_area_for_root_and_package_prompts() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("repo");
-    fs::create_dir_all(root.join("alpha/lib")).unwrap();
-    fs::create_dir_all(root.join("beta/lib")).unwrap();
-    stage_monorepo(&root);
+    let (fixture, root) = staged_fixture("ctx-anchor-root-and-package");
     let launch_dir = root.join("alpha/lib");
     let at_root = root.join("probe-root.md");
     let in_area = launch_dir.join("probe-area.md");
     write_probe(&at_root);
     write_probe(&in_area);
 
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
-
     for doc in [&at_root, &in_area] {
-        let output = run_dry_run(&launch_dir, &home, doc);
+        let output = run_dry_run(&fixture, &launch_dir, doc);
         assert!(
             output.contains("AREA=alpha"),
             "launch package area must be reported for {}\noutput:\n{output}",
@@ -107,19 +116,12 @@ fn dry_run_reports_the_launch_area_for_root_and_package_prompts() {
 /// AC2: a prompt stored in the opposing package area reports the launch area.
 #[test]
 fn dry_run_reports_the_launch_area_for_an_opposing_area_prompt() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("repo");
-    fs::create_dir_all(root.join("alpha/lib")).unwrap();
-    fs::create_dir_all(root.join("beta/lib")).unwrap();
-    stage_monorepo(&root);
+    let (fixture, root) = staged_fixture("ctx-anchor-opposing-area");
     let launch_dir = root.join("alpha/lib");
     let opposing = root.join("beta/lib/probe-beta.md");
     write_probe(&opposing);
 
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
-
-    let output = run_dry_run(&launch_dir, &home, &opposing);
+    let output = run_dry_run(&fixture, &launch_dir, &opposing);
     assert!(
         output.contains("AREA=alpha"),
         "an opposing-area prompt must report the launch area\noutput:\n{output}"
@@ -130,11 +132,7 @@ fn dry_run_reports_the_launch_area_for_an_opposing_area_prompt() {
 /// surface from source-owned file and schema resolution.
 #[test]
 fn opposing_area_real_route_separates_launch_surfaces_from_source_files() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("repo");
-    fs::create_dir_all(root.join("alpha/lib")).unwrap();
-    fs::create_dir_all(root.join("beta/lib")).unwrap();
-    stage_monorepo(&root);
+    let (fixture, root) = staged_fixture("ctx-anchor-full-matrix");
     let launch_dir = root.join("alpha/lib");
     let source_dir = root.join("beta/lib");
     let doc = source_dir.join("probe-full-matrix.md");
@@ -175,33 +173,30 @@ fn opposing_area_real_route_separates_launch_surfaces_from_source_files() {
         "prefix recordctx\n",
     );
 
-    let bin = workspace.path().join("bin");
-    let provider_log = workspace.path().join("provider.log");
-    let shell_log = workspace.path().join("shell.log");
+    let bin = fixture.bin_dir();
+    let provider_log = fixture.cwd().join("provider.log");
+    let shell_log = fixture.cwd().join("shell.log");
     write_command_stub(
-        &bin,
+        bin,
         "claude",
         "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$CTX_PROVIDER_LOG\"\ncat >> \"$CTX_PROVIDER_LOG\"\nexit 0\n",
         "@echo off\r\n> \"%CTX_PROVIDER_LOG%\" echo %*\r\nmore >> \"%CTX_PROVIDER_LOG%\"\r\nexit /b 0\r\n",
     );
     write_command_stub(
-        &bin,
+        bin,
         "recordctx",
         "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CTX_SHELL_LOG\"\n",
         "@echo off\r\n>> \"%CTX_SHELL_LOG%\" echo %*\r\n",
     );
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
 
-    assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", &home)
-        .env("PATH", augmented_path(&bin))
+    // Escape: ambient context — the launch package area is the subject.
+    fixture
+        .command_builder()
+        .ambient_context(&launch_dir)
+        .build()
         .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
         .env("CTX_PROVIDER_LOG", &provider_log)
         .env("CTX_SHELL_LOG", &shell_log)
-        .current_dir(&launch_dir)
         .args(["compose", "--claude", &doc.to_string_lossy()])
         .assert()
         .success();
@@ -232,11 +227,7 @@ fn opposing_area_real_route_separates_launch_surfaces_from_source_files() {
 /// reuse the launch snapshot through their conditions, bodies, and lifecycle.
 #[test]
 fn loop_route_keeps_launch_area_for_root_and_package_documents() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("repo");
-    fs::create_dir_all(root.join("alpha/lib")).unwrap();
-    fs::create_dir_all(root.join("beta/lib")).unwrap();
-    stage_monorepo(&root);
+    let (fixture, root) = staged_fixture("ctx-anchor-loop-route");
     let launch_dir = root.join("alpha/lib");
     let at_root = root.join("loop-root.md");
     let in_area = launch_dir.join("loop-area.md");
@@ -249,26 +240,23 @@ fn loop_route_keeps_launch_area_for_root_and_package_documents() {
         );
     }
 
-    let bin = workspace.path().join("bin");
-    let provider_log = workspace.path().join("loop-provider.log");
+    let bin = fixture.bin_dir();
+    let provider_log = fixture.cwd().join("loop-provider.log");
     write_command_stub(
-        &bin,
+        bin,
         "claude",
         "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$CTX_PROVIDER_LOG\"\ncat >> \"$CTX_PROVIDER_LOG\"\nprintf '%s\\n' '--- attempt ---' >> \"$CTX_PROVIDER_LOG\"\nexit 0\n",
         "@echo off\r\n>> \"%CTX_PROVIDER_LOG%\" echo %*\r\nmore >> \"%CTX_PROVIDER_LOG%\"\r\n>> \"%CTX_PROVIDER_LOG%\" echo --- attempt ---\r\nexit /b 0\r\n",
     );
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
 
     for doc in [&at_root, &in_area] {
-        assert_cmd::Command::cargo_bin("claudine")
-            .unwrap()
-            .env("NO_COLOR", "1")
-            .env("HOME", &home)
-            .env("PATH", augmented_path(&bin))
+        // Escape: ambient context — the launch package area is the subject.
+        fixture
+            .command_builder()
+            .ambient_context(&launch_dir)
+            .build()
             .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
             .env("CTX_PROVIDER_LOG", &provider_log)
-            .current_dir(&launch_dir)
             .args(["compose", "--claude", &doc.to_string_lossy()])
             .assert()
             .success();
@@ -292,22 +280,16 @@ fn loop_route_keeps_launch_area_for_root_and_package_documents() {
 /// no launch facts at all.
 #[test]
 fn dry_run_external_source_and_outside_launch_matrix() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("repo");
-    fs::create_dir_all(root.join("alpha/lib")).unwrap();
-    fs::create_dir_all(root.join("beta/lib")).unwrap();
-    stage_monorepo(&root);
-    let external = workspace.path().join("external");
+    let (fixture, root) = staged_fixture("ctx-anchor-external-and-outside");
+    let external = fixture.cwd().join("external");
     fs::create_dir_all(&external).unwrap();
     init_git_repo(&external);
     let external_probe = external.join("probe-external.md");
     write_probe(&external_probe);
 
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
     let launch_dir = root.join("alpha/lib");
 
-    let output = run_dry_run(&launch_dir, &home, &external_probe);
+    let output = run_dry_run(&fixture, &launch_dir, &external_probe);
     assert!(
         output.contains("AREA=alpha"),
         "an external-repository prompt must report the launch area\noutput:\n{output}"
@@ -324,11 +306,11 @@ fn dry_run_external_source_and_outside_launch_matrix() {
 
     // Inverse: launch outside every repository while the prompt lives inside
     // one. The prompt's location must not fill the absent launch facts.
-    let outside = workspace.path().join("outside");
+    let outside = fixture.cwd().join("outside");
     fs::create_dir_all(&outside).unwrap();
     let inside_probe = root.join("probe-inside.md");
     write_probe(&inside_probe);
-    let output = run_dry_run(&outside, &home, &inside_probe);
+    let output = run_dry_run(&fixture, &outside, &inside_probe);
     assert!(
         output.contains("AREA=") && !output.contains("AREA=alpha") && !output.contains("AREA=beta"),
         "no launch package area exists outside every repository\noutput:\n{output}"
@@ -345,11 +327,7 @@ fn dry_run_external_source_and_outside_launch_matrix() {
 /// though the prompt is stored at the repository root.
 #[test]
 fn lifecycle_warn_and_when_report_the_launch_area() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("repo");
-    fs::create_dir_all(root.join("alpha/lib")).unwrap();
-    fs::create_dir_all(root.join("beta/lib")).unwrap();
-    stage_monorepo(&root);
+    let (fixture, root) = staged_fixture("ctx-anchor-lifecycle");
     let launch_dir = root.join("alpha/lib");
 
     let doc = root.join("probe-lifecycle.md");
@@ -370,26 +348,21 @@ fn lifecycle_warn_and_when_report_the_launch_area() {
         ),
     );
 
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
-
     // The fake provider exits non-zero so the `failure` event (a terminal
     // interpolation surface) fires alongside `start`.
-    let bin = workspace.path().join("bin");
     write_command_stub(
-        &bin,
+        fixture.bin_dir(),
         "claude",
         "#!/bin/sh\nexit 1\n",
         "@echo off\r\nexit /b 1\r\n",
     );
 
-    let output = assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", &home)
-        .env("PATH", augmented_path(&bin))
+    // Escape: ambient context — the launch package area is the subject.
+    let output = fixture
+        .command_builder()
+        .ambient_context(&launch_dir)
+        .build()
         .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
-        .current_dir(&launch_dir)
         .args(["compose", "--claude", "--perf", &doc.to_string_lossy()])
         .assert()
         .failure();
@@ -422,22 +395,16 @@ fn lifecycle_warn_and_when_report_the_launch_area() {
 /// work note, which projects the invocation owner's counters.
 #[test]
 fn perf_reports_one_launch_capture_and_zero_ambient_fallbacks() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path().join("repo");
-    fs::create_dir_all(root.join("alpha/lib")).unwrap();
-    fs::create_dir_all(root.join("beta/lib")).unwrap();
-    stage_monorepo(&root);
+    let (fixture, root) = staged_fixture("ctx-anchor-perf");
     let launch_dir = root.join("alpha/lib");
     let at_root = root.join("probe-root.md");
     write_probe(&at_root);
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
 
-    let output = assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", &home)
-        .current_dir(&launch_dir)
+    // Escape: ambient context — the launch capture is the subject.
+    let output = fixture
+        .command_builder()
+        .ambient_context(&launch_dir)
+        .build()
         .args([
             "compose",
             "--claude",

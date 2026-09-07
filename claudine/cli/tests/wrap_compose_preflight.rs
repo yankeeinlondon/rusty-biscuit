@@ -7,12 +7,8 @@
 
 use claudine::provider::Provider;
 use std::fs;
-use tempfile::tempdir;
 mod common;
-use common::wrap::*;
-use common::{
-    CliProcessFixture, augmented_path, init_git_repo, strip_ansi, write_executable,
-};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
 /// Non-TTY dry-run gate: an unapproved `::shell` command (no approval
 /// handler, no whitelist) makes `compose --dry-run` exit non-zero with the
@@ -21,12 +17,10 @@ use common::{
 #[cfg(unix)]
 #[test]
 fn compose_dry_run_non_tty_unapproved_shell_emits_gate_error() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-dry-run-shell-gate");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("template.md");
+    let md_file = fixture.cwd().join("template.md");
     fs::write(
         &md_file,
         "---\ntitle: dry-run gate\n---\n::shell echo dryrun-needs-approval\n",
@@ -35,14 +29,12 @@ fn compose_dry_run_non_tty_unapproved_shell_emits_gate_error() {
 
     // Provider stub so target resolution succeeds before preflight aborts.
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\necho 'provider should not run' >&2\nexit 99\n",
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .args([
             "compose",
             "--goose",
@@ -87,12 +79,10 @@ fn compose_dry_run_non_tty_unapproved_shell_emits_gate_error() {
 #[cfg(unix)]
 #[test]
 fn compose_dry_run_yolo_bypasses_shell_gate() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-dry-run-yolo");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("template.md");
+    let md_file = fixture.cwd().join("template.md");
     fs::write(
         &md_file,
         "---\ntitle: yolo bypass\n---\n::shell echo yolo-marker\n",
@@ -100,14 +90,12 @@ fn compose_dry_run_yolo_bypasses_shell_gate() {
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\necho 'provider should not run' >&2\nexit 99\n",
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .args([
             "compose",
             "--goose",
@@ -134,14 +122,10 @@ fn compose_dry_run_yolo_bypasses_shell_gate() {
 #[cfg(unix)]
 #[test]
 fn compose_non_tty_uses_cwd_config_when_source_outside_git() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("compose-cwd-config-outside-git");
 
     // Set up HOME with a claudine config that has a favorite provider.
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
-    let claudine_dir = home.join(".claudine");
+    let claudine_dir = fixture.home().join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
 
     let config = claudine::config::claudine_config::ClaudineConfig {
@@ -152,23 +136,20 @@ fn compose_non_tty_uses_cwd_config_when_source_outside_git() {
     claudine::dispatch::loader::save_claudine_config(&config, &config_path).unwrap();
 
     // Create a source file outside any git repo.
-    let source_dir = workspace.path().join("source");
+    let source_dir = fixture.cwd().join("source");
     fs::create_dir_all(&source_dir).unwrap();
     let md_file = source_dir.join("prompt.md");
     fs::write(&md_file, "---\ntitle: test\n---\n# Hello\n").unwrap();
 
     // Fake provider binary so Goose is "installed".
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\necho 'goose ran'\nexit 0\n",
     );
 
     // Run in non-TTY mode (null stdin) from a CWD that is NOT a git repo.
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", &home)
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(&home)
+    let assert = fixture
+        .command()
         .args(["compose", "--dry-run", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -193,12 +174,10 @@ fn compose_non_tty_uses_cwd_config_when_source_outside_git() {
 #[cfg(unix)]
 #[test]
 fn compose_interactive_preflight_with_whitelisted_command() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-interactive-whitelist");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("template.md");
+    let md_file = fixture.cwd().join("template.md");
     fs::write(
         &md_file,
         "---\ntitle: interactive test\n---\n::shell echo whitelisted\n",
@@ -207,28 +186,23 @@ fn compose_interactive_preflight_with_whitelisted_command() {
 
     // Whitelist "echo" so the ::shell directive passes preflight.
     fs::write(
-        workspace.path().join(".darkmatter-shell-whitelist"),
+        fixture.cwd().join(".darkmatter-shell-whitelist"),
         "prefix echo\n",
     )
     .unwrap();
 
     // Also create .git so the whitelist is found (policy root = git root).
-    fs::create_dir_all(workspace.path().join(".git")).unwrap();
+    fs::create_dir_all(fixture.cwd().join(".git")).unwrap();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         "#!/bin/sh\ncat > /dev/null\necho 'provider-launched' >&2\nexit 0\n",
     );
 
-    // Include system dirs so shell expansion can find `echo`.
-    let full_path = format!("{}:/usr/bin:/bin", path_dir.display());
-
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &full_path)
-        .current_dir(workspace.path())
+    // The default PATH already carries `/usr/bin:/bin` behind the fixture bin,
+    // so shell expansion still finds `echo`.
+    let assert = fixture
+        .command()
         .args([
             "compose",
             "--interactive",
@@ -251,7 +225,7 @@ fn compose_interactive_preflight_with_whitelisted_command() {
 #[test]
 fn compose_preflight_discovers_shell_inside_false_block() {
     let fixture = CliProcessFixture::named("compose-preflight-false-block");
-    seed_minimal_config(fixture.home());
+    fixture.seed_user_config();
 
     // Preflight discovery is condition-blind: a ::shell inside a
     // ::block when="false" is still discovered and must be whitelisted, even
@@ -308,17 +282,15 @@ fn compose_preflight_discovers_shell_inside_false_block() {
 #[cfg(unix)]
 #[test]
 fn compose_dry_run_does_not_traverse_a_proxy_handoff() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-dry-run-proxy");
+    fixture.seed_user_config();
 
-    let target = workspace.path().join("target.md");
+    let target = fixture.cwd().join("target.md");
     fs::write(&target, "---\ntitle: target\n---\nTARGET-BODY\n").unwrap();
 
     // `--goose` resolves the target eagerly, so the run takes the resolved-target
     // seam rather than the earlier unresolved-selection one.
-    let router = workspace.path().join("router.md");
+    let router = fixture.cwd().join("router.md");
     fs::write(
         &router,
         "---\ntitle: router\ninitialize:\n  stack:\n    - action: {proxy: \"target.md\"}\n---\nROUTER-BODY\n",
@@ -326,14 +298,12 @@ fn compose_dry_run_does_not_traverse_a_proxy_handoff() {
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\necho 'provider should not run' >&2\nexit 99\n",
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .args([
             "compose",
             "--goose",
@@ -375,14 +345,12 @@ fn compose_dry_run_does_not_traverse_a_proxy_handoff() {
 #[cfg(unix)]
 #[test]
 fn compose_dry_run_fires_no_lifecycle_side_effects() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    assert!(init_git_repo(workspace.path()), "git init failed");
+    let fixture = CliProcessFixture::named("compose-dry-run-no-side-effects");
+    fixture.seed_user_config();
+    fixture.initialize_repository();
 
-    let events_log = workspace.path().join("events.log");
-    let md_file = workspace.path().join("doc.md");
+    let events_log = fixture.cwd().join("events.log");
+    let md_file = fixture.cwd().join("doc.md");
     let marker = |event: &str| {
         format!("{event}:\n  stack:\n    - action: {{append_line: [\"events.log\", \"{event}\"]}}\n")
     };
@@ -398,15 +366,12 @@ fn compose_dry_run_fires_no_lifecycle_side_effects() {
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\necho 'provider should not run' >&2\nexit 99\n",
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", "--goose", "--dry-run", md_file.to_str().unwrap()])
         .assert()
         .success();

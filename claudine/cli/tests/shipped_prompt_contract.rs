@@ -29,6 +29,31 @@ fn shipped_prompt_paths() -> Vec<PathBuf> {
     paths
 }
 
+/// Copy the shipped prompt corpus into `destination`, byte-for-byte and with
+/// its relative layout intact.
+///
+/// Composition anchors repository discovery on the *document's* directory, so a
+/// test that composes the monorepo copy in place pays for a full rusty-biscuit
+/// topology walk however isolated its workspace is. Relative `::file` spans and
+/// `@` references resolve against that same layout, so the corpus has to move
+/// as a tree rather than as one file.
+fn copy_shipped_prompts(destination: &Path) {
+    let source_root = repository_root().join("prompts");
+    let sources = shipped_prompt_paths();
+    assert!(
+        !sources.is_empty(),
+        "the shipped prompt corpus must not be empty"
+    );
+    for source in &sources {
+        let relative = source
+            .strip_prefix(&source_root)
+            .expect("shipped prompt paths are rooted at the corpus directory");
+        let target = destination.join(relative);
+        std::fs::create_dir_all(target.parent().expect("a copied prompt has a parent")).unwrap();
+        std::fs::copy(source, &target).unwrap();
+    }
+}
+
 fn record_expression_errors(
     prompt: &Path,
     surface: &str,
@@ -158,39 +183,98 @@ fn shipped_prompts_have_parseable_schemas_and_expressions() {
     );
 }
 
+/// The copy the CLI contract test composes must be the shipped corpus, not a
+/// subset of it: a relative `::file` span that silently lost its target would
+/// otherwise turn into a composition error the test reports as a product bug.
+#[test]
+fn copied_prompt_corpus_matches_the_shipped_tree() {
+    let workspace = common::TestWorkspace::named("prompt-corpus-copy");
+    let copied_root = workspace.path().join("prompts");
+    copy_shipped_prompts(&copied_root);
+
+    let source_root = repository_root().join("prompts");
+    let sources = shipped_prompt_paths();
+    let copied = markdown_files_under(&copied_root);
+
+    let source_layout: Vec<PathBuf> = sources
+        .iter()
+        .map(|path| path.strip_prefix(&source_root).unwrap().to_path_buf())
+        .collect();
+    let copied_layout: Vec<PathBuf> = copied
+        .iter()
+        .map(|path| path.strip_prefix(&copied_root).unwrap().to_path_buf())
+        .collect();
+    assert_eq!(
+        copied_layout, source_layout,
+        "the copied corpus must hold every shipped prompt at its shipped relative path"
+    );
+
+    for (source, target) in sources.iter().zip(copied.iter()) {
+        assert_eq!(
+            std::fs::read(source).unwrap(),
+            std::fs::read(target).unwrap(),
+            "{} was not copied byte-for-byte",
+            source.display()
+        );
+    }
+}
+
+fn markdown_files_under(root: &Path) -> Vec<PathBuf> {
+    let mut found = Vec::new();
+    let mut pending = vec![root.to_path_buf()];
+    while let Some(dir) = pending.pop() {
+        for entry in std::fs::read_dir(&dir).unwrap() {
+            let path = entry.unwrap().path();
+            if path.is_dir() {
+                pending.push(path);
+            } else if path.extension().is_some_and(|extension| extension == "md") {
+                found.push(path);
+            }
+        }
+    }
+    found.sort();
+    found
+}
+
 #[cfg(unix)]
 #[test]
 fn feature_review_cli_preserves_numeric_iteration_and_dependent_paths() {
     use std::fs;
 
-    use common::wrap::seed_minimal_config;
+    use common::CliProcessFixture;
     use common::write_executable;
 
-    let repo = repository_root();
-    let workspace = tempfile::tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    let feature_dir = workspace.path().join("features/example");
+    let fixture = CliProcessFixture::named("feature-review-contract");
+    // The shipped document composes from a copy of the corpus inside the
+    // fixture's own repository. Composed in place it would anchor repository
+    // discovery on the rusty-biscuit checkout and walk the whole workspace;
+    // the copy keeps the shipped bytes under test and moves only their
+    // location, so `::file ../_senior-reviewer.md` still resolves one level up.
+    fixture.initialize_repository();
+    let prompts = fixture.cwd().join("prompts");
+    copy_shipped_prompts(&prompts);
+    // The feature lives under the fixture HOME: `review:` is derived with
+    // `dirname(spec)`, whose projection ladder (repo root → base dir → `~/`)
+    // only yields a re-resolvable spelling for the `~/` arm here — the fixture
+    // repository holds the prompt corpus, not the feature, so neither the repo
+    // root nor the base dir contains the fixture's spec.
+    let feature_dir = fixture.home().join("features/example");
     let spec = feature_dir.join("spec.md");
     let review = feature_dir.join("review-3.md");
-    let captured_prompt = workspace.path().join("stdin.txt");
-    fs::create_dir_all(&bin_dir).unwrap();
+    let captured_prompt = fixture.cwd().join("stdin.txt");
     fs::create_dir_all(&feature_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    fixture.seed_user_config();
     fs::write(&spec, "---\nreview_iterations: '2'\n---\n# Example\n").unwrap();
     write_executable(
-        &bin_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         "#!/bin/sh\n/bin/cat > \"$CLAUDINE_STDIN_FILE\"\nprintf '%s\\n' '---' 'ready: true' '---' > \"$CLAUDINE_REVIEW_FILE\"\nexit 0\n",
     );
 
-    let prompt = repo.join("prompts/_reviews/feature-review.md");
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &bin_dir)
+    let prompt = prompts.join("_reviews/feature-review.md");
+    fixture
+        .command()
         .env("CLAUDINE_STDIN_FILE", &captured_prompt)
         .env("CLAUDINE_REVIEW_FILE", &review)
-        .current_dir(workspace.path())
         .arg("compose")
         .arg(&prompt)
         .arg(format!("spec={}", spec.display()))
@@ -210,6 +294,16 @@ fn feature_review_cli_preserves_numeric_iteration_and_dependent_paths() {
     assert!(
         composed.contains("review-2.md"),
         "the previous-review instructions must target iteration 2: {composed}"
+    );
+    let senior_reviewer = fs::read_to_string(prompts.join("_senior-reviewer.md")).unwrap();
+    let senior_reviewer_opening = senior_reviewer
+        .lines()
+        .next()
+        .expect("the shipped senior-reviewer prompt is not empty");
+    assert!(
+        composed.contains(senior_reviewer_opening),
+        "the relative `::file ../_senior-reviewer.md` span must resolve against the copied \
+         corpus: {composed}"
     );
     assert!(
         !composed.contains("decrement_file_index(review)"),

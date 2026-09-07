@@ -5,28 +5,18 @@
 
 use predicates::str::contains;
 use std::fs;
-use tempfile::tempdir;
 mod common;
-#[cfg(unix)]
-use common::wrap::*;
-use common::{augmented_path, strip_ansi, write_dry_run_provider_stub};
+use common::{CliProcessFixture, strip_ansi, write_dry_run_provider_stub};
 #[cfg(unix)]
 use common::write_executable;
 
 fn assert_retired_wrapper_flag(flag: &str, replacement: &str) {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(workspace.path().join(".claudine")).unwrap();
-    fs::write(workspace.path().join(".claudine/config.json"), "{}").unwrap();
-    write_dry_run_provider_stub(&path_dir, "claude");
+    let fixture = CliProcessFixture::named("wrap-retired-flag");
+    fixture.seed_user_config();
+    write_dry_run_provider_stub(fixture.bin_dir(), "claude");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .args(["claude", flag, "file.md"])
         .assert()
         .failure()
@@ -37,8 +27,9 @@ fn assert_retired_wrapper_flag(flag: &str, replacement: &str) {
 
 #[test]
 fn compose_requires_positional_arg() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let fixture = CliProcessFixture::named("compose-requires-positional");
+    let assert = fixture
+        .command()
         .args(["compose"])
         .assert()
         .code(2);
@@ -50,8 +41,9 @@ fn compose_requires_positional_arg() {
 
 #[test]
 fn compose_missing_file_with_setter_only() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let fixture = CliProcessFixture::named("compose-setter-only");
+    let assert = fixture
+        .command()
         .args(["compose", "key=val"])
         .assert()
         .code(1);
@@ -65,8 +57,9 @@ fn compose_missing_file_with_setter_only() {
 
 #[test]
 fn compose_empty_key_setter_errors() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let fixture = CliProcessFixture::named("compose-empty-key-setter");
+    let assert = fixture
+        .command()
         .args(["compose", "=foo"])
         .assert()
         .code(1);
@@ -80,15 +73,14 @@ fn compose_empty_key_setter_errors() {
 
 #[test]
 fn compose_multiple_file_candidates_errors() {
-    let workspace = tempdir().unwrap();
-    let a = workspace.path().join("a.md");
-    let b = workspace.path().join("b.md");
+    let fixture = CliProcessFixture::named("compose-multiple-candidates");
+    let a = fixture.cwd().join("a.md");
+    let b = fixture.cwd().join("b.md");
     fs::write(&a, "---\n---\nbody\n").unwrap();
     fs::write(&b, "---\n---\nbody\n").unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", a.to_str().unwrap(), b.to_str().unwrap()])
         .assert()
         .code(1);
@@ -102,8 +94,9 @@ fn compose_multiple_file_candidates_errors() {
 
 #[test]
 fn compose_rejects_nonexistent_file() {
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let fixture = CliProcessFixture::named("compose-nonexistent-file");
+    fixture
+        .command()
         .args(["compose", "/nonexistent/path/to/file.md"])
         .assert()
         .code(1);
@@ -111,12 +104,12 @@ fn compose_rejects_nonexistent_file() {
 
 #[test]
 fn compose_rejects_non_markdown_file() {
-    let workspace = tempdir().unwrap();
-    let txt_file = workspace.path().join("file.txt");
+    let fixture = CliProcessFixture::named("compose-non-markdown-file");
+    let txt_file = fixture.cwd().join("file.txt");
     fs::write(&txt_file, "hello").unwrap();
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    fixture
+        .command()
         .args(["compose", txt_file.to_str().unwrap()])
         .assert()
         .code(1);
@@ -125,20 +118,16 @@ fn compose_rejects_non_markdown_file() {
 #[cfg(unix)]
 #[test]
 fn compose_missing_explicit_system_prompt_fails_visibly() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let md_file = workspace.path().join("prompt.md");
-    let missing_prompt = workspace.path().join("missing-system-prompt.md");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-missing-system-prompt");
+    let md_file = fixture.cwd().join("prompt.md");
+    let missing_prompt = fixture.cwd().join("missing-system-prompt.md");
+    fixture.seed_user_config();
     fs::write(&md_file, "---\ntitle: test\n---\nHello compose\n").unwrap();
 
-    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("codex"), "#!/bin/sh\nexit 0\n");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .args([
             "compose",
             "--codex",
@@ -165,19 +154,17 @@ fn no_cross_provider_retry_after_launch() {
     // Verifies that after a provider is launched and fails, Claudine
     // does NOT automatically retry with another provider. The exit code
     // from the single provider invocation is returned directly.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let codex_marker = workspace.path().join("codex-launched");
-    let claude_marker = workspace.path().join("claude-launched");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-no-cross-provider-retry");
+    let codex_marker = fixture.cwd().join("codex-launched");
+    let claude_marker = fixture.cwd().join("claude-launched");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
 
     // Provider that exits with error code 42
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 : > "$CODEX_MARKER"
 exit 42
@@ -186,7 +173,7 @@ exit 42
 
     // Also install a "claude" that succeeds -- if retry happened, we'd see code 0
     write_executable(
-        &path_dir.join("claude"),
+        &fixture.bin_dir().join("claude"),
         r#"#!/bin/sh
 : > "$CLAUDE_MARKER"
 exit 0
@@ -194,12 +181,8 @@ exit 0
     );
 
     // Explicitly select codex. It exits 42. No fallback to claude.
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CODEX_MARKER", &codex_marker)
         .env("CLAUDE_MARKER", &claude_marker)
         .args(["compose", "--codex", md_file.to_str().unwrap()])
@@ -216,8 +199,9 @@ exit 0
 #[test]
 fn old_compose_inline_command_is_unknown() {
     // Verify that the old `compose-inline` command no longer exists
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let fixture = CliProcessFixture::named("compose-inline-retired-subcommand");
+    fixture
+        .command()
         .args(["compose-inline", "file.md"])
         .assert()
         .code(2); // clap returns 2 for unrecognized subcommands
@@ -250,24 +234,20 @@ fn retired_prompt_file_flag_rejected_in_wrapper() {
 #[cfg(unix)]
 #[test]
 fn compose_dry_run_body_only_on_stdout_metadata_on_stderr() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-dry-run-stream-discipline");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("doc.md");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(
         &md_file,
         "---\nname: disc-doc\ndescription: a discipline doc\nagent: goose\n---\nBODY_MARKER_QQQ\n",
     )
     .unwrap();
 
-    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let output = fixture
+        .command()
         .args(["compose", "--goose", "--dry-run", md_file.to_str().unwrap()])
         .output()
         .unwrap();
@@ -320,24 +300,20 @@ fn compose_dry_run_body_only_on_stdout_metadata_on_stderr() {
 #[test]
 fn compose_dry_run_quiet_and_silent_are_no_op() {
     for flag in ["--quiet", "--silent"] {
-        let workspace = tempdir().unwrap();
-        let path_dir = workspace.path().join("bin");
-        fs::create_dir_all(&path_dir).unwrap();
-        seed_minimal_config(workspace.path());
+        let fixture = CliProcessFixture::named("compose-dry-run-quiet-silent");
+        fixture.seed_user_config();
 
-        let md_file = workspace.path().join("doc.md");
+        let md_file = fixture.cwd().join("doc.md");
         fs::write(
             &md_file,
             "---\nname: qs-doc\nagent: goose\n---\nBODY_MARKER_QQQ\n",
         )
         .unwrap();
 
-        write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+        write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
 
-        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
-            .env("HOME", workspace.path())
-            .env("PATH", augmented_path(&path_dir))
+        let output = fixture
+            .command()
             .args([
                 "compose",
                 "--goose",
@@ -382,12 +358,10 @@ fn compose_dry_run_quiet_and_silent_are_no_op() {
 #[cfg(unix)]
 #[test]
 fn compose_initialize_when_evaluation_error_exits_non_zero() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-initialize-when-raise");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("prompt.md");
+    let md_file = fixture.cwd().join("prompt.md");
     fs::write(
         &md_file,
         "---\nname: late-bind\nagent: goose\ninitialize:\n  stack:\n    \
@@ -397,12 +371,10 @@ fn compose_initialize_when_evaluation_error_exits_non_zero() {
 
     // A stub provider must exist on PATH for preflight, but the initialize
     // raise halts the run before it is ever launched.
-    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let output = fixture
+        .command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .output()
         .unwrap();
@@ -442,12 +414,10 @@ fn compose_initialize_when_evaluation_error_exits_non_zero() {
 #[cfg(unix)]
 #[test]
 fn compose_initialize_error_with_failure_raise_surfaces_failure_evaluation_error() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-initialize-error-failure-raise");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("prompt.md");
+    let md_file = fixture.cwd().join("prompt.md");
     fs::write(
         &md_file,
         "---\nname: explicit-error\nagent: goose\ninitialize:\n  stack:\n    \
@@ -458,12 +428,10 @@ fn compose_initialize_error_with_failure_raise_surfaces_failure_evaluation_error
 
     // A stub provider must exist on PATH for preflight, but the initialize
     // error + failure raise halts the run before it is ever launched.
-    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let output = fixture
+        .command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .output()
         .unwrap();
@@ -509,12 +477,10 @@ fn compose_initialize_error_with_failure_raise_surfaces_failure_evaluation_error
 #[cfg(unix)]
 #[test]
 fn compose_success_when_evaluation_error_surfaces_before_finalize_marker() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-success-when-raise");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("prompt.md");
+    let md_file = fixture.cwd().join("prompt.md");
     // `success` first guard raises (undefined root under DM2 strict mode);
     // `finalize.stderr` emits a marker the catch event prints to stderr.
     fs::write(
@@ -527,14 +493,10 @@ fn compose_success_when_evaluation_error_surfaces_before_finalize_marker() {
 
     // The provider runs and exits 0, so the terminal `success` event fires and
     // its first `when:` guard raises.
-    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let output = fixture
+        .command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .output()
         .unwrap();
@@ -582,17 +544,13 @@ fn compose_success_when_evaluation_error_surfaces_before_finalize_marker() {
 #[cfg(unix)]
 #[test]
 fn compose_dry_run_missing_file_errors_to_stderr_with_clean_stdout() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-dry-run-missing-file");
+    fixture.seed_user_config();
 
-    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let output = fixture
+        .command()
         .args(["compose", "--goose", "--dry-run", "does-not-exist.md"])
         .output()
         .unwrap();

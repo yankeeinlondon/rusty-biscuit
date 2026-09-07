@@ -7,32 +7,26 @@
 
 use predicates::str::contains;
 use std::fs;
-use tempfile::tempdir;
 mod common;
-use common::wrap::*;
-use common::{write_executable};
+use common::{CliProcessFixture, write_executable};
 
 #[cfg(unix)]
 #[test]
 fn gemini_wrapper_applies_yolo_as_approval_mode() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    let args_path = workspace.path().join("args.txt");
+    let fixture = CliProcessFixture::named("provider-flags-gemini-yolo");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
 
     write_executable(
-        &path_dir.join("gemini"),
+        &fixture.bin_dir().join("gemini"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .args(["gemini", "--yolo", "--", "-p", "summarize"])
         .assert()
@@ -51,24 +45,20 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn goose_wrapper_yolo_sets_env_var() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    let env_path = workspace.path().join("env.txt");
+    let fixture = CliProcessFixture::named("provider-flags-goose-yolo");
+    fixture.seed_user_config();
+    let env_path = fixture.cwd().join("env.txt");
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 printf 'GOOSE_MODE=%s\n' "$GOOSE_MODE" > "$CLAUDINE_ENV_FILE"
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ENV_FILE", &env_path)
         .args(["goose", "--yolo", "summarize"])
         .assert()
@@ -81,24 +71,20 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn goose_wrapper_non_interactive_prepends_run() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    let args_path = workspace.path().join("args.txt");
+    let fixture = CliProcessFixture::named("provider-flags-goose-run");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .args(["goose", "summarize"])
         .assert()
@@ -124,12 +110,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn kimi_wrapper_non_interactive_appends_wire() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    let args_path = workspace.path().join("args.txt");
-    let stdin_path = workspace.path().join("stdin.txt");
+    let fixture = CliProcessFixture::named("provider-flags-kimi-wire");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
+    let stdin_path = fixture.cwd().join("stdin.txt");
 
     // Stub kimi: capture argv to one file and the first two stdin lines
     // (the JSON-RPC `initialize` and `prompt` requests) into a separate
@@ -138,7 +122,7 @@ fn kimi_wrapper_non_interactive_appends_wire() {
     // semantic parser advances past handshake, then emits a final
     // `prompt` response so claudine's wait loop can shut down cleanly.
     write_executable(
-        &path_dir.join("kimi"),
+        &fixture.bin_dir().join("kimi"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 : > "$CLAUDINE_STDIN_FILE"
@@ -153,10 +137,8 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .args(["kimi", "hi"])
@@ -200,22 +182,18 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn qwen_wrapper_rejects_direct_approval_mode_yolo() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("provider-flags-qwen-approval");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("qwen"),
+        &fixture.bin_dir().join("qwen"),
         r#"#!/bin/sh
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .args(["qwen", "--approval-mode", "yolo", "--", "-p", "hi"])
         .assert()
         .code(1)

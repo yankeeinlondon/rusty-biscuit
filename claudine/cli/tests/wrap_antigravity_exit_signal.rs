@@ -20,20 +20,15 @@
 //! test rather than to stream-side detection.
 
 use std::fs;
-use tempfile::tempdir;
 mod common;
 use common::wrap::*;
-use common::write_executable;
+use common::{CliProcessFixture, write_executable};
 
 #[cfg(unix)]
 #[test]
 fn antigravity_exit_auth_signal_survives_bounded_tail_into_summary_row() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
-    seed_minimal_config(&fake_home);
+    let fixture = CliProcessFixture::named("antigravity-exit-signal");
+    fixture.seed_user_config();
 
     // The fake `agy` writes 13 filler stdout lines followed by the auth error as
     // the FINAL stdout line — more than the bounded 10-line `stdout_tail_ring`.
@@ -49,7 +44,7 @@ fn antigravity_exit_auth_signal_survives_bounded_tail_into_summary_row() {
     // parse — it matches the RAW `stdout_tail` substring — so the auth line still
     // fires the `exit-auth_invalid-models-signin` record from `SignalSource::Exit`.
     write_executable(
-        &path_dir.join("agy"),
+        &fixture.bin_dir().join("agy"),
         r#"#!/bin/sh
 printf '%s\n' '{"status":"SUCCESS","conversation_id":"fake-antigravity-conv","response":"OK","num_turns":1}'
 i=1
@@ -63,15 +58,13 @@ exit 1
     );
 
     // Antigravity's child exits nonzero, so the wrapper propagates a failure.
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", &fake_home)
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .args(["antigravity", "list models"])
         .assert()
         .failure();
 
-    let log_path = today_log_path(&fake_home);
+    let log_path = today_log_path(fixture.home());
     let log_contents = fs::read_to_string(&log_path)
         .unwrap_or_else(|e| panic!("expected a JSONL log at {log_path:?}: {e}"));
 

@@ -7,9 +7,8 @@
 //! propagation and partial-metrics handling on fail-fast.
 
 use std::fs;
-use tempfile::tempdir;
 mod common;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
 // ---------------------------------------------------------------------------
 // Single aggregated report for a successful multi-step sequence
@@ -18,11 +17,9 @@ use common::{augmented_path, strip_ansi, write_executable};
 #[cfg(unix)]
 #[test]
 fn sequence_perf_renders_single_aggregated_report() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("sequence-perf-aggregated");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         r#"---
@@ -36,23 +33,15 @@ Step {{state}}
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 echo "Agent response"
 exit 0
 "#,
     );
 
-    // Run from the isolated workspace (as
-    // `sequence_perf_propagates_startup_timings` does): with the ambient
-    // monorepo as cwd, each step's repository discovery pays a full git
-    // worktree-metadata refresh that can exceed nextest's termination
-    // ceiling under full-suite contention.
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["sequence", "--goose", "--perf", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -133,12 +122,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn sequence_perf_with_fail_fast_still_renders_partial_report() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("sequence-perf-startup-timings");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         r#"---
@@ -154,7 +141,7 @@ Step {{state}}
 
     // Step 1 succeeds, step 2 fails, step 3 should not run.
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -169,12 +156,9 @@ exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .current_dir(workspace.path())
         .args([
             "sequence",
             "--goose",
@@ -208,11 +192,9 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn sequence_perf_propagates_startup_timings() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("sequence-perf-partial");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         r#"---
@@ -225,19 +207,15 @@ Step {{state}}
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 echo "Agent response"
 exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["sequence", "--goose", "--perf", md_file.to_str().unwrap()])
         .assert()
         .success();

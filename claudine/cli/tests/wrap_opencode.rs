@@ -8,23 +8,20 @@
 use predicates::str::contains;
 use std::fs;
 use std::path::Path;
-use tempfile::tempdir;
 mod common;
 use common::wrap::*;
-use common::{augmented_path, strip_ansi, write, write_executable};
+use common::{CliProcessFixture, strip_ansi, write, write_executable};
 
 #[cfg(unix)]
 #[test]
 fn opencode_non_interactive_requires_model_when_missing() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    let args_path = workspace.path().join("args.txt");
-    let env_path = workspace.path().join("env.txt");
+    let fixture = CliProcessFixture::named("opencode-requires-model");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
+    let env_path = fixture.cwd().join("env.txt");
 
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 printf 'MODEL=%s\n' "$MODEL" > "$CLAUDINE_ENV_FILE"
@@ -32,10 +29,8 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
         .args(["opencode", "summarize"])
@@ -57,18 +52,20 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn opencode_launches_child_from_repo_root() {
-    let workspace = tempdir().unwrap();
-    seed_minimal_config(workspace.path());
-    let Some((repo_root, launch_dir, bin_dir)) = create_claudine_monorepo(workspace.path()) else {
+    let fixture = CliProcessFixture::named("opencode-repo-root-launch");
+    fixture.seed_user_config();
+    let Some((repo_root, launch_dir, _repo_bin)) =
+        create_claudine_monorepo(fixture.workspace_path())
+    else {
         eprintln!("Skipping integration test: git init unavailable");
         return;
     };
-    let pwd_path = workspace.path().join("pwd.txt");
-    let env_path = workspace.path().join("env.txt");
-    let args_path = workspace.path().join("args.txt");
+    let pwd_path = fixture.cwd().join("pwd.txt");
+    let env_path = fixture.cwd().join("env.txt");
+    let args_path = fixture.cwd().join("args.txt");
 
     write_executable(
-        &bin_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 pwd > "$CLAUDINE_PWD_FILE"
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
@@ -80,12 +77,13 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&launch_dir)
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
+    // ambient-context escape: the subject is the launch context — claudine must
+    // re-anchor the child at the repo root of the monorepo this test built.
+    fixture
+        .command_builder()
+        .ambient_context(&launch_dir)
+        .build()
         .env("OPENCODE_MODEL", "test-model")
-        .env("PATH", &bin_dir)
         .env("CLAUDINE_PWD_FILE", &pwd_path)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
@@ -116,15 +114,13 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn opencode_non_interactive_model_precedence_uses_env_overrides() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    let args_path = workspace.path().join("args.txt");
-    let env_path = workspace.path().join("env.txt");
+    let fixture = CliProcessFixture::named("opencode-model-env-precedence");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
+    let env_path = fixture.cwd().join("env.txt");
 
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 printf 'MODEL=%s\n' "$MODEL" > "$CLAUDINE_ENV_FILE"
@@ -132,12 +128,8 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
         .env("OPENCODE_MODEL", "from-opencode")
@@ -156,15 +148,13 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn opencode_non_interactive_explicit_cli_model_sets_model_env() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    let args_path = workspace.path().join("args.txt");
-    let env_path = workspace.path().join("env.txt");
+    let fixture = CliProcessFixture::named("opencode-cli-model-env");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
+    let env_path = fixture.cwd().join("env.txt");
 
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 printf 'MODEL=%s\n' "$MODEL" > "$CLAUDINE_ENV_FILE"
@@ -172,10 +162,8 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
         .args(["opencode", "--model", "cli-selected", "summarize"])
@@ -191,13 +179,11 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn opencode_post_summary_messages_are_logged_after_summary_block() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("opencode-post-summary-order");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 exit 0
 "#,
@@ -206,10 +192,8 @@ exit 0
     // Interactive mode (-i) still warns that OpenCode doesn't support --yolo
     // in interactive sessions (refined copy). This keeps the deferred-warning
     // ordering test meaningful after non-interactive forwards the flag.
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
         .args(["opencode", "-i", "-y"])
         .assert()
@@ -246,29 +230,23 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_opencode_non_interactive_passes_prompt_as_positional_arg() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let args_path = workspace.path().join("args.txt");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-opencode-positional");
+    let args_path = fixture.cwd().join("args.txt");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\nHello OpenCode\n").unwrap();
 
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
@@ -302,20 +280,22 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_opencode_launches_child_from_repo_root() {
-    let workspace = tempdir().unwrap();
-    seed_minimal_config(workspace.path());
-    let Some((repo_root, launch_dir, bin_dir)) = create_claudine_monorepo(workspace.path()) else {
+    let fixture = CliProcessFixture::named("compose-opencode-repo-root");
+    fixture.seed_user_config();
+    let Some((repo_root, launch_dir, _repo_bin)) =
+        create_claudine_monorepo(fixture.workspace_path())
+    else {
         eprintln!("Skipping integration test: git init unavailable");
         return;
     };
-    let pwd_path = workspace.path().join("pwd.txt");
-    let env_path = workspace.path().join("env.txt");
-    let args_path = workspace.path().join("args.txt");
+    let pwd_path = fixture.cwd().join("pwd.txt");
+    let env_path = fixture.cwd().join("env.txt");
+    let args_path = fixture.cwd().join("args.txt");
     let md_file = repo_root.join("prompts/test.md");
     write(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
 
     write_executable(
-        &bin_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 pwd > "$CLAUDINE_PWD_FILE"
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
@@ -327,12 +307,13 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&launch_dir)
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
+    // ambient-context escape: the subject is the launch context — the child
+    // must start at the repo root of the monorepo this test built.
+    fixture
+        .command_builder()
+        .ambient_context(&launch_dir)
+        .build()
         .env("OPENCODE_MODEL", "test-model")
-        .env("PATH", &bin_dir)
         .env("CLAUDINE_PWD_FILE", &pwd_path)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
@@ -365,21 +346,23 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_opencode_launches_from_repo_root_for_package_prompt_refs() {
-    let workspace = tempdir().unwrap();
-    seed_minimal_config(workspace.path());
-    let Some((repo_root, _launch_dir, bin_dir)) = create_claudine_monorepo(workspace.path()) else {
+    let fixture = CliProcessFixture::named("compose-opencode-package-prompt");
+    fixture.seed_user_config();
+    let Some((repo_root, _launch_dir, _repo_bin)) =
+        create_claudine_monorepo(fixture.workspace_path())
+    else {
         eprintln!("Skipping integration test: git init unavailable");
         return;
     };
     let package_root = repo_root.join("claudine");
-    let pwd_path = workspace.path().join("pwd-package.txt");
-    let env_path = workspace.path().join("env-package.txt");
-    let args_path = workspace.path().join("args-package.txt");
+    let pwd_path = fixture.cwd().join("pwd-package.txt");
+    let env_path = fixture.cwd().join("env-package.txt");
+    let args_path = fixture.cwd().join("args-package.txt");
     let md_file = package_root.join("prompts/test.md");
     write(&md_file, "---\ntitle: test\n---\nHello OpenCode\n");
 
     write_executable(
-        &bin_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 pwd > "$CLAUDINE_PWD_FILE"
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
@@ -391,12 +374,14 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&package_root)
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
+    // ambient-context escape: the subject is the launch context — a
+    // package-scoped `@prompts/...` reference must still re-anchor at the repo
+    // root of the monorepo this test built.
+    fixture
+        .command_builder()
+        .ambient_context(&package_root)
+        .build()
         .env("OPENCODE_MODEL", "test-model")
-        .env("PATH", &bin_dir)
         .env("CLAUDINE_PWD_FILE", &pwd_path)
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
@@ -447,11 +432,7 @@ exit 0
 #[test]
 #[serial_test::serial]
 fn opencode_structured_e2e_stdout_and_section_spacing() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
+    let fixture = CliProcessFixture::named("opencode-structured-e2e");
 
     // Minimal OpenCode fake binary. Uses the simple parser-compatible
     // event shapes (matching the `step_start` / `text` / `tool_end` /
@@ -459,9 +440,9 @@ fn opencode_structured_e2e_stdout_and_section_spacing() {
     // than the full nested `.part` payload, which keeps the test
     // resilient to stream-protocol evolution while still exercising the
     // sink end-to-end.
-    let args_path = workspace.path().join("args.txt");
+    let args_path = fixture.cwd().join("args.txt");
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 printf '%s\n' '{"type":"step_start","sessionID":"ses_oc_e2e"}'
@@ -471,10 +452,8 @@ printf '%s\n' '{"type":"step_complete","usage":{"input_tokens":10,"output_tokens
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", &fake_home)
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_ARGS_FILE", &args_path)
         // NOTE: intentionally do NOT pass `--format json` here — claudine
@@ -582,18 +561,14 @@ fn read_summary_row(home: &Path) -> serde_json::Value {
 #[test]
 #[serial_test::serial]
 fn opencode_stderr_rate_limit_before_stdout_forces_early_termination() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
-    seed_minimal_config(&fake_home);
+    let fixture = CliProcessFixture::named("opencode-rate-limit-early-term");
+    fixture.seed_user_config();
 
     // The fake binary only writes the rate-limit ERROR to stderr, then
     // sleeps so the bridge has to abort it. If claudine fails to terminate
     // early, the assert_cmd timeout would trip and the test would fail.
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 printf '%s\n' 'ERROR 2026-04-15T19:26:02 +3054ms service=llm providerID=zai-coding-plan modelID=glm-5.1 error={"error":{"name":"AI_RetryError","reason":"maxRetriesExceeded","errors":[{"name":"AI_APICallError","statusCode":429,"responseBody":"{\"error\":{\"code\":\"1308\",\"message\":\"Usage limit reached. Your limit will reset at 2026-04-16 04:18:56\"}}"}]}}' >&2
 sleep 30
@@ -601,13 +576,15 @@ exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", &fake_home)
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
+        // No budget is under test here — the `sleep 30` stays, because the
+        // contract is that the bridge ends the run. These two knobs only size
+        // the abort path itself: the wrapper would otherwise wait up to one
+        // default 5s tick to act and up to a default 10s grace to escalate.
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "0.2s")
+        .env("CLAUDINE_KILL_GRACE", "0.5s")
         .timeout(std::time::Duration::from_secs(30))
         .args(["opencode", "describe the thing"])
         .assert()
@@ -622,7 +599,7 @@ exit 0
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let row = read_summary_row(&fake_home);
+    let row = read_summary_row(fixture.home());
     assert_eq!(row["extra"]["exit_code"], serde_json::json!(1));
     assert_eq!(
         row["error"].as_str().unwrap_or(""),
@@ -663,18 +640,14 @@ exit 0
 #[test]
 #[serial_test::serial]
 fn opencode_stderr_stream_error_cap_1_17_8_forces_early_termination() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
-    seed_minimal_config(&fake_home);
+    let fixture = CliProcessFixture::named("opencode-stream-error-cap");
+    fixture.seed_user_config();
 
     // Single-quote shell quoting preserves the inner double-quotes of the
     // captured 1.17.8 line verbatim. The fake writes only this cap line to
     // stderr, then sleeps so the bridge has to abort it.
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 printf '%s\n' 'timestamp=2026-06-22T04:07:15.161Z level=ERROR run=da37e0dd message="stream error" providerID=zai-coding-plan modelID=glm-5.2 session.id=ses_1127ec2fdffepaJc2kEnX093eo small=false agent=build mode=primary error.error="AI_APICallError: Usage limit reached for 5 hour. Your limit will reset at 2026-06-22 13:59:38"' >&2
 sleep 30
@@ -682,11 +655,13 @@ exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", &fake_home)
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
+        // Abort-path sizing only, exactly as in
+        // `opencode_stderr_rate_limit_before_stdout_forces_early_termination`.
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "0.2s")
+        .env("CLAUDINE_KILL_GRACE", "0.5s")
         .timeout(std::time::Duration::from_secs(30))
         .args(["opencode", "describe the thing"])
         .assert()
@@ -701,7 +676,7 @@ exit 0
         String::from_utf8_lossy(&output.stderr)
     );
 
-    let row = read_summary_row(&fake_home);
+    let row = read_summary_row(fixture.home());
     assert_eq!(row["extra"]["exit_code"], serde_json::json!(1));
     // `summary.error_kind = Some("usage_limit_reached")` (set by
     // `apply_early_termination_to_summary` for `EarlyTermination::RateLimit`)
@@ -734,15 +709,11 @@ exit 0
 #[test]
 #[serial_test::serial]
 fn opencode_stderr_malformed_asset_records_diagnostic_without_config_badge() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
-    seed_minimal_config(&fake_home);
+    let fixture = CliProcessFixture::named("opencode-malformed-asset");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 printf '%s\n' 'ERROR 2026-04-15T21:28:30 +315ms service=config command=/Users/ken/.config/opencode/commands/catalog.md err=ENOENT: no such file or directory, open '"'"'/Users/ken/.config/opencode/commands/catalog.md'"'"' failed to load command' >&2
 printf '%s\n' '{"type":"step_start","sessionID":"ses_cfg_ok"}'
@@ -752,16 +723,14 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", &fake_home)
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
         .args(["opencode", "just classify"])
         .assert()
         .success();
 
-    let row = read_summary_row(&fake_home);
+    let row = read_summary_row(fixture.home());
     let diagnostics = &row["extra"]["provider_summary"]["stderr_diagnostics"];
     assert_eq!(
         diagnostics["malformed_asset_events"],
@@ -795,18 +764,14 @@ exit 0
 #[test]
 #[serial_test::serial]
 fn opencode_stderr_mixed_shapes_only_consume_classified_lines() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
-    seed_minimal_config(&fake_home);
+    let fixture = CliProcessFixture::named("opencode-mixed-stderr-shapes");
+    fixture.seed_user_config();
 
     // `bare chatter line` should flow through as raw stderr because it
     // doesn't match the header regex and isn't an ANSI `Error:` block.
     // The ERROR/skill line is classified as MalformedAsset.
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 printf '%s\n' 'ERROR 2026-04-15T21:28:30 +0ms service=config skill=/tmp/s.md err=ENOENT failed to load skill' >&2
 printf '%s\n' 'bare chatter line from the provider' >&2
@@ -817,12 +782,8 @@ exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", &fake_home)
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
         .args(["opencode", "mixed run"])
         .assert()
@@ -841,7 +802,7 @@ exit 0
         "unclassified stderr must still passthrough to the operator; stderr={stderr}",
     );
 
-    let row = read_summary_row(&fake_home);
+    let row = read_summary_row(fixture.home());
     let diagnostics = &row["extra"]["provider_summary"]["stderr_diagnostics"];
     assert_eq!(
         diagnostics["malformed_asset_events"],
@@ -864,15 +825,11 @@ exit 0
 #[test]
 #[serial_test::serial]
 fn opencode_structured_summary_merges_stderr_diagnostics_and_badges() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
-    seed_minimal_config(&fake_home);
+    let fixture = CliProcessFixture::named("opencode-summary-merge");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 printf '%s\n' 'ERROR 2026-04-15T21:28:30 +0ms service=config command=/tmp/a.md err=ENOENT failed to load command' >&2
 printf '%s\n' 'ERROR 2026-04-15T21:28:30 +0ms service=config agent=/tmp/b.md err=ENOENT failed to load agent' >&2
@@ -883,16 +840,14 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", &fake_home)
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
         .args(["opencode", "merge probe"])
         .assert()
         .success();
 
-    let row = read_summary_row(&fake_home);
+    let row = read_summary_row(fixture.home());
     let diagnostics = &row["extra"]["provider_summary"]["stderr_diagnostics"];
     assert_eq!(
         diagnostics["malformed_asset_events"],
@@ -925,21 +880,17 @@ exit 0
 #[test]
 #[serial_test::serial]
 fn compose_opencode_serviceless_stderr_lines_are_consumed() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
-    seed_minimal_config(&fake_home);
+    let fixture = CliProcessFixture::named("compose-opencode-serviceless-stderr");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\nHello\n").unwrap();
 
     // Fake opencode emits the exact service-less lines observed in the
     // wild (spec.md:17-24) plus matching NDJSON stdout so the wrapper
     // completes normally.
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
@@ -960,12 +911,8 @@ exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", &fake_home)
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .assert()
@@ -980,7 +927,7 @@ exit 0
     );
 
     // Verify the JSONL summary contains the expected stderr diagnostics.
-    let row = read_summary_row(&fake_home);
+    let row = read_summary_row(fixture.home());
     let diagnostics = &row["extra"]["provider_summary"]["stderr_diagnostics"];
     assert_eq!(
         diagnostics["log_records_parsed"].as_u64().unwrap_or(0),
