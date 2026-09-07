@@ -373,6 +373,21 @@ fn emit_stream_summary_inner(
     } else {
         format_verbose_summary_details_prose(summary, details)
     };
+    // The full incomplete-sub-agent diagnostic. Unlike the concise lifecycle
+    // headline it is not budgeted, so it names every task; it is suppressed
+    // only by `Silent`, which suppresses all trailer output.
+    if verbosity != Verbosity::Silent && !summary.subagent_outcomes.is_empty() {
+        use biscuit_terminal::components::renderable::TerminalRenderable;
+
+        let term = crate::log::terminal();
+        let rendered = claudine::render::IncompleteSubagents::new(&summary.subagent_outcomes)
+            .render(&term);
+        if let Some(section_stream) = section_stream {
+            section_stream.emit_stderr(super::section::Section::TrailerMetadata, &rendered);
+        } else {
+            eprintln!("{rendered}");
+        }
+    }
     if primary_markup.is_some() || secondary_markup.is_some() {
         use super::section::Section;
         use biscuit_terminal::components::prose::Prose;

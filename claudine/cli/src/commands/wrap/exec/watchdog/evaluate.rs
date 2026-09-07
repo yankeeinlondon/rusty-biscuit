@@ -2,7 +2,7 @@
 //!
 //! [`evaluate_timeout_tick`] is the pure predicate the ticker thread calls each
 //! cadence: it applies the wall-clock (`timeout`) and stream-silence
-//! (`step_timeout`) rules, encodes the OpenCode grace windows, and produces a
+//! (`step_timeout`) rules, encodes the OpenCode per-step grace, and produces a
 //! [`WatchdogTickResult`] with a fully formatted breach message
 //! ([`super::breach`]) when a rule fires.
 
@@ -33,12 +33,13 @@ pub(crate) enum WatchdogTickResult {
 /// 1. **Wall-clock (`timeout`).** If `config.timeout` is set and
 ///    `now - started_at >= timeout`, fire `Timeout`.
 /// 2. **Stream-silence (`step_timeout`).** If `config.step_timeout` is set
-///    AND at least one activity event has been observed
-///    (`LiveMetrics.last_event_at.is_some()`) AND no tools or subagents
-///    are currently in flight AND
-///    `now - last_event_at >= step_timeout`, fire `StepTimeout` with
+///    AND no tools or subagents are currently in flight AND
+///    `now - silence_reference >= step_timeout`, fire `StepTimeout` with
 ///    `outstanding = watchdog_state.active_subagents(now)` for diagnostic
-///    enrichment.
+///    enrichment. The silence reference is
+///    [`LiveMetricsState::silence_reference`](claudine::stream::progress::LiveMetricsState::silence_reference):
+///    the newest of `started_at`, `last_event_at`, and `last_byte_at`. A
+///    child that spawns and then emits nothing is bounded from `started_at`.
 ///
 /// The wall-clock rule is evaluated first so a deadline that elapses on
 /// the same tick as a silence breach is reported as `timeout` rather than
@@ -75,13 +76,14 @@ pub(crate) fn evaluate_timeout_tick(
         }
     }
 
-    // Rule 2: stream silence. Requires that at least one activity signal
-    // has been observed past initial session start, matching the existing
-    // first-event grace semantics. Activity is the more recent of the
-    // structured-event clock (`last_event_at`) and the raw-byte clock
-    // (`last_byte_at`), so providers whose stream is sparse enough that
-    // structured events lag behind real progress (notably OpenCode) still
-    // refresh the silence reference whenever bytes flow.
+    // Rule 2: stream silence, measured from the single reference the
+    // library owns (`LiveMetricsState::silence_reference`): the newest of
+    // the child's spawn instant, the structured-event clock
+    // (`last_event_at`), and the raw-byte clock (`last_byte_at`). Spawn is
+    // the reference only until real output exists — that is what bounds a
+    // child that starts successfully and then goes silent forever — and
+    // the byte clock keeps providers whose structured events lag behind
+    // real progress (notably OpenCode) from being killed while producing.
     //
     // Stuck-aware evaluation: a tool or subagent is "stuck" when its
     // `last_progress_at` is older than the step_timeout budget. The rule
@@ -90,7 +92,8 @@ pub(crate) fn evaluate_timeout_tick(
     // work does not block termination indefinitely.
     if let Some(budget) = config.step_timeout {
         let (
-            last_activity_at,
+            silence_reference,
+            silence_origin,
             last_event_at,
             last_byte_at,
             stuck_tools,
@@ -115,7 +118,8 @@ pub(crate) fn evaluate_timeout_tick(
                 let step_in_flight = g.step_in_flight;
                 let subagent_done_count = g.subagent_done_count;
                 (
-                    g.last_activity_at(),
+                    g.silence_reference(started_at),
+                    g.silence_origin(),
                     g.last_event_at,
                     g.last_byte_at,
                     stuck_tools,
@@ -129,30 +133,26 @@ pub(crate) fn evaluate_timeout_tick(
             }
             Err(_) => return WatchdogTickResult::Ok,
         };
+        let silence = now.saturating_duration_since(silence_reference);
         // OpenCode-specific grace: this provider does not emit
         // `tool_start` or `task_started` events, so `in_flight` /
         // `in_flight_subagents` stay empty during legitimate work and
         // the stuck-aware suppression above has nothing to suppress
-        // against. Two distinct conditions suppress the silence rule:
+        // against. What survives is the mid-step window: `step_in_flight`
+        // is true (a step is open between `step_start` and the next
+        // `step_finish`) AND at least one of the structured-event clock or
+        // the raw-byte clock is still within the budget. Mid-step silence
+        // is expected while subagents work, but if BOTH clocks are stale
+        // beyond the budget the breach still fires — the per-step grace
+        // must not override the byte-heartbeat backstop, otherwise an
+        // OpenCode session that emits `step_start` and then dies silently
+        // (the `2026-05-10` ndjson hang) is suppressed forever.
         //
-        // 1. **Cold start** — `step_in_flight` is false AND
-        //    `provider_status` is None: no `step_start` and no
-        //    `step_finish` have been observed yet. Suppress
-        //    unconditionally so slow startup / slow first turns are not
-        //    misclassified as a hang.
-        // 2. **Mid-step with recent activity** — `step_in_flight` is
-        //    true (a step is open between `step_start` and the next
-        //    `step_finish`) AND at least one of the structured-event
-        //    clock or the raw-byte clock is still within the budget.
-        //    Mid-step silence is expected while subagents work, but if
-        //    BOTH clocks are stale beyond the budget the breach still
-        //    fires — the per-step grace must not override the
-        //    byte-heartbeat backstop, otherwise an OpenCode session
-        //    that emits `step_start` and then dies silently (the
-        //    `2026-05-10` ndjson hang) is suppressed forever.
-        //
-        // The wall-clock `timeout` rule above remains the unconditional
-        // backstop in both cases.
+        // Cold start (no `step_start` and no `step_finish` yet) has no arm
+        // of its own. It used to suppress unconditionally, which made a
+        // provider that never got past its own bootstrap unkillable unless
+        // the opt-in wall-clock `timeout` was set. It is now bounded by the
+        // shared silence budget below, like every other silent state.
         let both_clocks_stale = match (last_event_at, last_byte_at) {
             (Some(e), Some(b)) => {
                 now.saturating_duration_since(e) >= budget
@@ -160,10 +160,9 @@ pub(crate) fn evaluate_timeout_tick(
             }
             _ => false,
         };
-        let is_cold_start = !step_in_flight && !provider_status_seen;
         let mid_step_with_recent_activity = step_in_flight && !both_clocks_stale;
         if config.provider == Some(claudine::provider::Provider::OpenCode)
-            && (is_cold_start || mid_step_with_recent_activity)
+            && mid_step_with_recent_activity
         {
             return WatchdogTickResult::Ok;
         }
@@ -171,37 +170,36 @@ pub(crate) fn evaluate_timeout_tick(
         if any_active && !any_stuck {
             return WatchdogTickResult::Ok;
         }
-        if let Some(last) = last_activity_at {
-            let silence = now.saturating_duration_since(last);
-            if silence >= budget {
-                let (outstanding, recent_subagents) = match watchdog_state.lock() {
-                    Ok(g) => {
-                        let outstanding = g.outstanding_at_breach(now);
-                        let recent = g.recent_subagents.clone();
-                        (outstanding, recent)
-                    }
-                    Err(_) => (Vec::new(), std::collections::VecDeque::new()),
-                };
-                let is_opencode = config.provider == Some(claudine::provider::Provider::OpenCode);
-                fired.store(true, Ordering::SeqCst);
-                let message = format_step_timeout_breach_message(
-                    silence,
-                    &outstanding,
-                    &stuck_tools,
-                    &stuck_subagents,
-                    is_opencode.then_some(OpenCodeBreachContext {
-                        subagent_done_count,
-                        step_in_flight,
-                        recent_subagents,
-                        now,
-                    }),
-                );
-                return WatchdogTickResult::Breach(WatchdogTermination {
-                    reason: WatchdogTerminationReason::StepTimeout,
-                    message,
-                    stuck_subagents: outstanding,
-                });
-            }
+        if silence >= budget {
+            let (outstanding, recent_subagents) = match watchdog_state.lock() {
+                Ok(g) => {
+                    let outstanding = g.outstanding_at_breach(now);
+                    let recent = g.recent_subagents.clone();
+                    (outstanding, recent)
+                }
+                Err(_) => (Vec::new(), std::collections::VecDeque::new()),
+            };
+            let is_opencode = config.provider == Some(claudine::provider::Provider::OpenCode);
+            fired.store(true, Ordering::SeqCst);
+            let message = format_step_timeout_breach_message(
+                silence,
+                silence_origin,
+                &outstanding,
+                &stuck_tools,
+                &stuck_subagents,
+                is_opencode.then_some(OpenCodeBreachContext {
+                    subagent_done_count,
+                    step_in_flight,
+                    first_step_completed: provider_status_seen,
+                    recent_subagents,
+                    now,
+                }),
+            );
+            return WatchdogTickResult::Breach(WatchdogTermination {
+                reason: WatchdogTerminationReason::StepTimeout,
+                message,
+                stuck_subagents: outstanding,
+            });
         }
     }
 

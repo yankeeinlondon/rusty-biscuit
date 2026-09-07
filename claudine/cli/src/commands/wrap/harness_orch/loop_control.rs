@@ -2056,8 +2056,22 @@ fn classify_attempt_phase(
         // lets callers (e.g. `compose --loop`) inspect the terminal
         // attempt's iteration signals to build an honest
         // `LoopIterationFailed` cause.
+        //
+        // The one exception is a provider-semantic failure the provider itself
+        // exited 0 for: propagating its 0 would tell the shell caller the run
+        // succeeded, which is the same silent success the failure stack just
+        // fired to prevent. This arm is unreachable before the `is_error`
+        // classification landed — a `Completed` attempt at exit 0 used to
+        // classify as success — so no previously failing shape changes code.
+        let exit_code = if outcome.termination == claudine::harness::ProcessTermination::Completed
+            && outcome.exit_code == 0
+        {
+            1
+        } else {
+            outcome.exit_code
+        };
         return Ok(LoopStep::Return((
-            outcome.exit_code,
+            exit_code,
             harness_perf.take(),
             iteration_signals,
             None,
