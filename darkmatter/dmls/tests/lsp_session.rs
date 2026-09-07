@@ -3761,6 +3761,187 @@ fn strict_mode_diagnoses_absent_required_eager_but_never_absent_eager_only() {
     fixture.shutdown();
 }
 
+/// How many required properties a document declares must not change *whether*
+/// their absence is reported.
+///
+/// `jsonschema` 0.42 compiled no `required` validator at all when a `required`
+/// array held exactly two names and its parent object also carried
+/// `properties`, on the assumption that the `properties` compiler would emit a
+/// fused properties-plus-required validator — which it only did below an
+/// internal 15-property threshold. Every Darkmatter document is merged against
+/// a 16-property baseline, so every strict-mode document with exactly two
+/// required properties published a false-clean verdict while one, three, and
+/// four all diagnosed correctly. Upstream fixed the shape in 0.46.1; this
+/// workspace runs 0.55.
+///
+/// Each case is `(file stem, document, diagnosed property names, closing
+/// `---` line)`. A missing key has no value node, so the diagnostic ranges the
+/// frontmatter mapping: line 1 through the closing fence. That end line moves
+/// with each fixture, so pinning it per case is a real range assertion rather
+/// than a restatement of the document.
+#[allow(clippy::type_complexity)]
+const STRICT_REQUIRED_COUNT_CASES: &[(&str, &str, &[&str], u32)] = &[
+    (
+        "one",
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  alpha: string(required)\n",
+            "title: Hello\n",
+            "---\n",
+            "\n",
+            "body\n",
+        ),
+        &["alpha"],
+        4,
+    ),
+    // The regressing case: exactly two, required-only. Also the review's
+    // "two required-only properties" control.
+    (
+        "two",
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  alpha: string(required)\n",
+            "  bravo: string(required)\n",
+            "title: Hello\n",
+            "---\n",
+            "\n",
+            "body\n",
+        ),
+        &["alpha", "bravo"],
+        5,
+    ),
+    (
+        "three",
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  alpha: string(required)\n",
+            "  bravo: string(required)\n",
+            "  charlie: string(required)\n",
+            "title: Hello\n",
+            "---\n",
+            "\n",
+            "body\n",
+        ),
+        &["alpha", "bravo", "charlie"],
+        6,
+    ),
+    (
+        "four",
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  alpha: string(required)\n",
+            "  bravo: string(required)\n",
+            "  charlie: string(required)\n",
+            "  delta: string(required)\n",
+            "title: Hello\n",
+            "---\n",
+            "\n",
+            "body\n",
+        ),
+        &["alpha", "bravo", "charlie", "delta"],
+        7,
+    ),
+    // Two `required; eager`: presence is owned by `required`, so adding
+    // `eager` must neither add nor remove a diagnosis.
+    (
+        "two_required_eager",
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  alpha: string(required; eager)\n",
+            "  bravo: string(required; eager)\n",
+            "title: Hello\n",
+            "---\n",
+            "\n",
+            "body\n",
+        ),
+        &["alpha", "bravo"],
+        5,
+    ),
+    // One of the pair supplied: exactly the omitted one is diagnosed. Under
+    // the upstream defect this case was silent too.
+    (
+        "two_one_supplied",
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  alpha: string(required)\n",
+            "  bravo: string(required)\n",
+            "alpha: supplied\n",
+            "title: Hello\n",
+            "---\n",
+            "\n",
+            "body\n",
+        ),
+        &["bravo"],
+        6,
+    ),
+];
+
+#[test]
+fn strict_mode_reports_every_absent_required_property_at_any_required_count() {
+    let workspace = tempfile::tempdir().unwrap();
+    std::fs::write(workspace.path().join(".dmls.toml"), "[schema]\nstrict = true\n").unwrap();
+
+    let mut fixture = ClientFixture::start();
+    fixture.initialize(neovim_like_initialize_params(workspace.path()));
+
+    for (stem, document, expected, fence_line) in STRICT_REQUIRED_COUNT_CASES {
+        let path = workspace.path().join(format!("{stem}.md"));
+        std::fs::write(&path, document).unwrap();
+        let uri = url::Url::from_file_path(&path).unwrap();
+        open(&fixture, uri.as_str(), document);
+
+        let diagnostics = fixture.wait_for_diagnostics(uri.as_str());
+        let missing: Vec<&Value> = diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic["code"] == json!("dm.schema.missing_required"))
+            .collect();
+
+        assert_eq!(
+            missing.len(),
+            expected.len(),
+            "[{stem}] expected {} missing-required diagnostics: {diagnostics:#?}",
+            expected.len(),
+        );
+
+        // Matched by name rather than by position: publish order is not part
+        // of the contract, one diagnostic per omitted property is.
+        for property in *expected {
+            let named: Vec<&&Value> = missing
+                .iter()
+                .filter(|diagnostic| {
+                    diagnostic["message"]
+                        .as_str()
+                        .is_some_and(|message| message.contains(property))
+                })
+                .collect();
+            assert_eq!(
+                named.len(),
+                1,
+                "[{stem}] exactly one diagnostic must name `{property}`: {missing:#?}"
+            );
+            let diagnostic = named[0];
+            assert_eq!(diagnostic["severity"], json!(1), "[{stem}] {diagnostic:#?}");
+            assert_eq!(diagnostic["source"], json!("darkmatter.schema"));
+            assert_eq!(
+                diagnostic["range"],
+                json!({
+                    "start": { "line": 1, "character": 0 },
+                    "end": { "line": fence_line, "character": 0 }
+                }),
+                "[{stem}] {diagnostic:#?}"
+            );
+        }
+    }
+
+    fixture.shutdown();
+}
+
 /// `attempts` is eager-only and supplied with a non-numeric scalar; `spec` is
 /// eager-only and supplied with a mapping where a file reference belongs. Both
 /// must be diagnosed by the shared Darkmatter validator at the *value* range.

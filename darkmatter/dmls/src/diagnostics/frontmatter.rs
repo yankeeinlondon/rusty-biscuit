@@ -1150,6 +1150,40 @@ mod tests {
         });
     }
 
+    /// Anchoring resolves a property *name*, so a nested leaf that shares its
+    /// name with a valid top-level property is the case where an unqualified
+    /// name would squiggle correct authoring.
+    #[test]
+    fn nested_conversion_error_does_not_anchor_on_a_same_named_top_level_property() {
+        let text = concat!(
+            "---\n",
+            "$schema:\n",
+            "  prompt: string(required)\n",
+            "  meta:\n",
+            "    prompt: string(integer)\n",
+            "prompt: hello\n",
+            "---\n",
+            "\n",
+            "body\n",
+        );
+        diagnostics_for(text, |diagnostics| {
+            let diagnostic = diagnostics
+                .iter()
+                .find(|diagnostic| {
+                    code_of(diagnostic) == Some(code::SCHEMA_INVALID_TYPE_DEFINITION)
+                })
+                .expect("nested schema diagnostic");
+            assert_eq!(diagnostic.range.start.line, 4, "{diagnostics:#?}");
+            assert_eq!(diagnostic.range.end.line, 4, "{diagnostics:#?}");
+            assert!(
+                diagnostics
+                    .iter()
+                    .all(|other| other.range.start.line == 4 && other.range.end.line == 4),
+                "the valid top-level `prompt` must stay clean: {diagnostics:#?}"
+            );
+        });
+    }
+
     #[test]
     fn unknown_expression_root_is_informational_frontmatter_diagnostic() {
         let text = expression_doc("when: mystery");
