@@ -1,3 +1,7 @@
+## Upgrading Agent Skill Properties
+
+The process of "upgrading" an Agent Skill involves the following steps:
+
 
 
 In order for the _symbolic links_ (the preferred approach) to be valid across as many providers as possible, Claudine will first "upgrade" the agent skill by:

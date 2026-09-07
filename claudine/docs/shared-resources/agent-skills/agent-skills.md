@@ -30,15 +30,50 @@ The entry point to an Agent Skill is always a `SKILL.md` file that is placed in 
 
 ::file ./skills-properties-extended.md
 
-## Operationalizing Agent Skill Sharing
+## Agent Skill Synchronization
 
-In order to make sure all of a user's or a repo's Agent Skills are shared across all of the installed agentic CLI's you will call into the Claudine CLI:
+Claudine's ability to share Agent Skills across agentic platforms is done via a process we will refer to as _synchronization_. You kick off this process with:
 
 ::file ./cli-sync.md
 
+This process must ensure that all canonical Agent Skill definitions are identified and "upgraded" to be correct and portable. What this _means_ will be explored next.
+
+### Property Mutations
+
+The following Frontmatter properties for each canonical agent skill will be evaluated and updated where appropriate:
+
+- `name` - if missing or different from the skill directory it is in will result in the name being updated
+- `description` 
+    - if missing then the default behavior is to:
+        - report an error as part of CLI output (but continue onto next skill not "fail fast")
+        - remove any pre-existing symbolic links to this skill
+    - if the user included the `--fix` flag when requesting the synchronization we will instead use a agent to produce a "description" for us
+        - by default this will result in an interactive dialog asking which agent should be used but the caller may specify `--agent <agent>` to avoid the interactive dialog
+        - by default the agent's default model will be used but this can be specified with `--model <model>`
+
+        > Once an agent has been chosen -- interactively or with a CLI switch -- it will be used consistently throughout the run instead of re-asking each time a description if missing
+- `model`
+    - Claudine provides a set of [abstracted model names](claudine/docs/topics/abstracted-model-names.md) that can be used to characterize the kind of model you want to use. This preserves portability while allowing for these abstracted names to be replaced with a real model name at runtime.
+    - When the model property is set to a value we will keep it "as is" if it is one of these portable model names
+    - If the model is a valid model name but not abstract than we will convert it to an abstracted model name; this will be clearly communicated to the caller as part of the process
+    - If the model is an invalid model name then we will report the invalid model reference while removing any symbolic links which may already point to this canonical agent skill
+    - If the caller included `--fix` and the model is invalid then the invalid model reference will be removed entirely leaving `model` undefined
+- `when_to_use` 
+
+When the agent skills are _synchronized_ we must run through a process who's goal is to ensure that every skill is available to every agent, ensure the skills are valid, and optimize for portability where possible. The end result of this process is that every _canonical_ version of the skill is:
+
+1. Identify all canonical `SKILL.md` files in User and Repo (_when in a repo_) scope
+2. Identify which agentic providers are installed on the system
+3. Iterate over each canonical skill definition:
+    a. ensure that baseline/core properties are valid (`name`, `description`, `model`), and portable (`model`)
+    b. look at the extended properties and optimize portability and semantic value
+    c. update the canonical skill
+    d. create symbolic links for each _installed_ agentic provider on the host pointing to the canonical skill's `SKILL.md`
+
+This process is executed with one of the following commands:
 
 
-The output of this process is a set of _symbolic links_ which point to the canonical definition found in the file system. In order for the agent skill to be valid for all agentic CLI's, however, we may have to "upgrade" the canonical definition first to make it portable. This upgrade starts with the basics:
+The output of this process is a set of _symbolic links_ which point to the canonical definition found in the file system. In order for the agent skill to be both valid and portable for all agentic CLI's we will go through an "upgrade" process which:
 
 1. if the Agent skill doesn't define a `name` Frontmatter property then it will be added (this is 100% inferrable based on the directory structure)
 2. if the Agent skill doesn't define a `description` Frontmatter property then it is invalid across all agentic CLI's (as it's the description which is used LLM to determine whether this skill should be used)
