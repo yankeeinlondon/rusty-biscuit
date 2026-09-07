@@ -702,7 +702,11 @@ fn inline_launch_fails_naming_a_missing_eager_prompt() {
         panic!("expected MissingProperties naming prompt, got: {err:?}");
     };
     let names: Vec<&str> = missing.iter().map(|p| p.name.as_str()).collect();
-    assert_eq!(names, ["prompt"], "only the eager property is launch-required");
+    assert_eq!(
+        names,
+        ["prompt"],
+        "only the required eager property is launch-required"
+    );
 }
 
 #[test]
@@ -1322,6 +1326,36 @@ fn pre_validate_schema_reports_optional_eager_file_failures() {
         }
         other => panic!("expected SchemaValidation, got {other:?}"),
     }
+}
+
+#[test]
+fn inline_launch_allows_absent_eager_but_rejects_present_invalid_eager() {
+    let dir = TempDir::new().unwrap();
+    let absent = make_source(
+        &dir,
+        "---\n$schema:\n  label: 'string(eager)'\n---\nbody\n",
+    );
+    pre_validate_schema_for_mode(
+        &absent,
+        None,
+        None,
+        CompositionMode::InlineFrontmatterPrompt,
+    )
+    .expect("an eager-only property remains optional");
+
+    let invalid = make_source(
+        &dir,
+        "---\n$schema:\n  label: 'string(eager)'\nlabel: []\n---\nbody\n",
+    );
+    assert!(matches!(
+        pre_validate_schema_for_mode(
+            &invalid,
+            None,
+            None,
+            CompositionMode::InlineFrontmatterPrompt,
+        ),
+        Err(CompositionError::SchemaValidation { .. })
+    ));
 }
 
 #[test]

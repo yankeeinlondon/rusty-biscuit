@@ -25,7 +25,9 @@ use super::closure::{
     reconcile_inline_artifact_with_evidence,
 };
 use super::error::CompositionError;
-use super::schema::{SchemaStatusReport, status_report_for_instance};
+use super::schema::{
+    SchemaStatusReport, schema_error_to_composition_error, status_report_from_validation,
+};
 use super::types::{CompositionMode, InlineClosurePlan, LaunchSchema};
 
 /// What the completion verdict knows about the run's body.
@@ -119,9 +121,17 @@ impl CompletionVerdict {
         if self.problems.is_empty() {
             return None;
         }
+        let status = self.status.unwrap_or_else(|| SchemaStatusReport {
+            source_path: self.source_path.clone(),
+            required: Vec::new(),
+            optional: Vec::new(),
+            has_invalid_optional: false,
+            raw_json_schema: true,
+        });
         Some(CompositionError::CompletionSchemaFailed {
             source_path: self.source_path,
             problems: self.problems,
+            status,
         })
     }
 }
@@ -185,7 +195,7 @@ pub fn complete_active_document(
                 context.live_frontmatter,
                 BodyEvidence::NotApplicable,
                 context.active_path,
-            );
+            )?;
             Ok(CompletionOutcome {
                 verdict,
                 artifact: None,
@@ -208,7 +218,7 @@ pub fn complete_active_document(
                         context.live_frontmatter,
                         BodyEvidence::Rejected(reason),
                         context.active_path,
-                    ),
+                    )?,
                     artifact: None,
                 }),
                 InlineReconciliation::Written(artifact) => {
@@ -219,7 +229,7 @@ pub fn complete_active_document(
                         &instance,
                         BodyEvidence::Changed,
                         context.active_path,
-                    );
+                    )?;
                     Ok(CompletionOutcome {
                         verdict,
                         artifact: Some(artifact),
@@ -235,36 +245,50 @@ pub fn complete_active_document(
 /// Pure and passive: no composition, coercion, expression or shell execution,
 /// schema re-resolution, or filesystem work happens here. A document with no
 /// retained schema is satisfied as long as its body evidence is.
+///
+/// ## Errors
+///
+/// Returns a typed composition error if the retained phase schema can no
+/// longer be projected or compiled.
 pub fn evaluate_completion(
     schema: Option<&LaunchSchema>,
     instance: &serde_json::Value,
     body: BodyEvidence,
     source_path: &Path,
-) -> CompletionVerdict {
+) -> Result<CompletionVerdict, CompositionError> {
     let Some(effective) = schema.map(|launch| &launch.effective) else {
-        return CompletionVerdict {
+        return Ok(CompletionVerdict {
             source_path: source_path.to_path_buf(),
             body,
             problems: Vec::new(),
             status: None,
-        };
+        });
     };
 
-    let report = effective.validate_for_phase(instance, SchemaPhase::Completion);
-    let status = status_report_for_instance(
+    let report = effective
+        .validate_for_phase(instance, SchemaPhase::Completion)
+        .map_err(|error| {
+            schema_error_to_composition_error(
+                source_path,
+                error.to_string(),
+                Some(&error),
+            )
+        })?;
+    let status = status_report_from_validation(
         effective,
         Some(SchemaPhase::Completion),
         source_path,
         instance.as_object().cloned().unwrap_or_default(),
+        &report,
     );
     let problems = declaration_ordered_problems(&report.problems, status.as_ref());
 
-    CompletionVerdict {
+    Ok(CompletionVerdict {
         source_path: source_path.to_path_buf(),
         body,
         problems,
         status,
-    }
+    })
 }
 
 /// Layer the agent's on-disk delta and the closure's owned values over the

@@ -10,6 +10,7 @@ pub(super) struct CategorizedProblems {
 pub(super) fn categorize_problems(
     problems: &[ValidationProblem],
     effective: Option<&EffectiveSchema>,
+    phase: Option<SchemaPhase>,
 ) -> CategorizedProblems {
     let mut missing_required = Vec::new();
     let mut invalid_required = Vec::new();
@@ -47,11 +48,14 @@ pub(super) fn categorize_problems(
             }
             ValidationProblemKind::Type | ValidationProblemKind::Invalid => {
                 let top = top_level_pointer_segment(&problem.path);
-                let required = top
+                let hard_at_this_phase = top
                     .as_deref()
-                    .map(|name| is_required(shape, name))
+                    .map(|name| {
+                        is_required(shape, name)
+                            || (phase == Some(SchemaPhase::Launch) && is_eager(shape, name))
+                    })
                     .unwrap_or(true);
-                if required {
+                if hard_at_this_phase {
                     invalid_required.push(problem.clone());
                 } else {
                     invalid_optional.push(problem.clone());
@@ -80,7 +84,8 @@ pub(super) fn atom_for_property<'s>(shape: &'s SchemaShape, name: &str) -> Optio
 }
 
 /// Whether any arm of `name` carries `eager` (on the value or, for an array
-/// property, on the array itself). Eager properties are launch-required.
+/// property, on the array itself). A present eager value is validated at
+/// launch; `required` independently controls presence.
 pub(super) fn is_eager(shape: Option<&SchemaShape>, name: &str) -> bool {
     let Some(def) = shape.and_then(|shape| shape.properties.get(name)) else {
         return false;
@@ -277,32 +282,6 @@ pub(super) fn provided_partial_value(value: Option<&serde_json::Value>) -> Optio
             }),
         _ => None,
     }
-}
-
-pub(super) fn is_eager_file_problem(shape: Option<&SchemaShape>, problem: &ValidationProblem) -> bool {
-    if !matches!(problem.kind, ValidationProblemKind::Invalid | ValidationProblemKind::Type) {
-        return false;
-    }
-    let Some(name) = top_level_pointer_segment(&problem.path) else {
-        return false;
-    };
-    let Some(shape) = shape else {
-        return false;
-    };
-    let Some(def) = shape.properties.get(&name) else {
-        return false;
-    };
-    let atoms: Vec<&PropertyAtom> = match def {
-        PropertyDef::Single(atom) => vec![atom],
-        PropertyDef::Union(items) => items.iter().collect(),
-    };
-    atoms.iter().any(|atom| {
-        matches!(atom.ty, TypeExpr::Primitive(SimplifiedType::File))
-            && atom
-                .constraints
-                .iter()
-                .any(|constraint| matches!(constraint, Constraint::Eager))
-    })
 }
 
 /// Map a [`PropertyAtom`] to an [`InteractiveShape`] for CLI prompting.
@@ -589,12 +568,19 @@ pub fn build_schema_status_report_for_mode(
         }
     }
 
-    Ok(status_report_for_instance(
+    status_report_for_instance(
         &effective,
         phase,
         &source.resolved_path,
         fm_map,
-    ))
+    )
+    .map_err(|error| {
+        schema_error_to_composition_error(
+            &source.resolved_path,
+            error.to_string(),
+            Some(&error),
+        )
+    })
 }
 
 /// Build the per-property status of `instance` against an already-resolved
@@ -608,12 +594,30 @@ pub(in crate::composition) fn status_report_for_instance(
     phase: Option<SchemaPhase>,
     source_path: &std::path::Path,
     fm_map: serde_json::Map<String, serde_json::Value>,
-) -> Option<SchemaStatusReport> {
+) -> Result<Option<SchemaStatusReport>, SchemaError> {
     let instance = serde_json::Value::Object(fm_map.clone());
     let report = match phase {
-        Some(phase) => effective.validate_for_phase(&instance, phase),
+        Some(phase) => effective.validate_for_phase(&instance, phase)?,
         None => effective.validate(&instance),
     };
+    Ok(status_report_from_validation(
+        effective,
+        phase,
+        source_path,
+        fm_map,
+        &report,
+    ))
+}
+
+/// Build a status report from the validation pass that judged the same
+/// effective schema and instance.
+pub(in crate::composition) fn status_report_from_validation(
+    effective: &EffectiveSchema,
+    phase: Option<SchemaPhase>,
+    source_path: &std::path::Path,
+    fm_map: serde_json::Map<String, serde_json::Value>,
+    report: &ValidationReport,
+) -> Option<SchemaStatusReport> {
 
     // Walk problems and build a per-property index keyed by top-level
     // segment / property name.

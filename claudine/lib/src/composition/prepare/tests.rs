@@ -196,6 +196,39 @@ fn inline_composition_uses_effective_frontmatter() {
 }
 
 #[test]
+fn inline_composition_warns_but_preserves_retired_custom_guardrails() {
+    let dir = TempDir::new().unwrap();
+    let custom_path = dir.path().join(".claudine/inline-compose.md");
+    fs::create_dir_all(custom_path.parent().unwrap()).unwrap();
+    let custom = "> Do not edit the source file directly.\n> Return your answer.\n";
+    fs::write(&custom_path, custom).unwrap();
+    let source = make_source(
+        &dir,
+        &[("prompt", json!("Write the report"))],
+        "Old content",
+    );
+
+    let prepared = prepare_inline(
+        &source,
+        PrepareOptions {
+            source_repo_root: Some(dir.path().to_path_buf()),
+            ..PrepareOptions::default()
+        },
+    )
+    .expect("retired customization warns instead of blocking");
+
+    assert!(prepared.prompt.contains("Do not edit the source file directly"));
+    assert_eq!(fs::read_to_string(&custom_path).unwrap(), custom);
+    let warning = prepared
+        .warnings
+        .iter()
+        .find(|warning| warning.stage == "inline_guardrails")
+        .expect("migration warning");
+    assert!(warning.message.contains(".claudine/inline-compose.md"));
+    assert!(warning.message.contains("Migrate"));
+}
+
+#[test]
 fn inline_composition_missing_prompt() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("title", json!("Test"))], "Content");

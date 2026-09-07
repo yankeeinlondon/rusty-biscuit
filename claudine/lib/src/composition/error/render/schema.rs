@@ -104,29 +104,23 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
         }
         CompositionError::CompletionSchemaFailed {
             source_path,
-            problems,
+            status,
+            ..
         } => {
             let file_link = render_file_link(source_path);
-            let mut body = format!(
-                "{file_link} does not satisfy its `$schema` now that the run has completed."
-            );
-            if !problems.is_empty() {
-                body.push_str("\n\n<b>Problems:</b>");
-                for problem in problems {
-                    body.push_str(&format!(
-                        "\n- <cyan>`{}`</cyan> — {}",
-                        Prose::escape_text(&problem.property),
-                        Prose::escape_text(&problem.message)
-                    ));
-                }
-            }
+            let body = vec![
+                Prose::new(format!(
+                    "{file_link} does not satisfy its `$schema` now that the run has completed."
+                )),
+                crate::composition::schema::schema_status_report_prose(status),
+            ];
             StatusBlock::new(StatusState::Error)
                 .error_header(ErrorHeader::new("CompositionError", "completion schema"))
                 .body(body)
                 .hint(
                     "A property declared `required` must be present and valid when the run \
                      finishes. Either the producing actor did not set it, or the schema \
-                     declares an obligation nothing fulfils.",
+                     declares an obligation nothing fulfills.",
                 )
         }
         CompositionError::MissingProperties {

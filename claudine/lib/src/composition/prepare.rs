@@ -384,7 +384,7 @@ fn effective_source_repo_root(
 }
 
 use super::error::CompositionError;
-use super::guardrails::load_or_create_guardrails;
+use super::guardrails::{load_or_create_guardrails, retired_custom_guardrails_path};
 use super::lifecycle::{
     LIFECYCLE_EVENT_KEYS, parse_lifecycle_config, validate_no_err_in_no_error_events,
 };
@@ -692,10 +692,10 @@ pub fn prepare_inline(
         launch_schema.as_ref(),
         &effective_frontmatter,
     );
-    let guardrails = render_guardrails(
-        &load_or_create_guardrails(source_repo_root.as_deref()),
-        &source.resolved_path,
-    );
+    let guardrails_template = load_or_create_guardrails(source_repo_root.as_deref());
+    let retired_guardrails =
+        retired_custom_guardrails_path(source_repo_root.as_deref(), &guardrails_template);
+    let guardrails = render_guardrails(&guardrails_template, &source.resolved_path);
     let prompt = format!("{header}\n\n{body}\n\n{guardrails}");
 
     // Capture pre-execution hash for closure
@@ -703,6 +703,17 @@ pub fn prepare_inline(
         MdHashKind::Simple,
         &super::closure::inline_hash_options(),
     );
+
+    let mut warnings = report.warnings.clone();
+    if let Some(path) = retired_guardrails {
+        warnings.push(darkmatter::markdown::compose::ComposeWarning::new(
+            "inline_guardrails",
+            format!(
+                "{} still contains retired response-harvesting instructions. Migrate it to tell the agent to edit {{document_path}} directly; Claudine preserved the customization and continued this run.",
+                biscuit_file::to_portable_string(&path)
+            ),
+        ));
+    }
 
     Ok(PreparedComposition {
         mode: CompositionMode::InlineFrontmatterPrompt,
@@ -723,7 +734,7 @@ pub fn prepare_inline(
         deferred_lifecycle_keys: sorted_deferred_keys(&report),
         compose_perf: report.perf,
         dropped_optionals: Vec::new(),
-        warnings: report.warnings.clone(),
+        warnings,
         input_layers,
         compose_context: ctx,
         document_epoch: options.document_epoch,

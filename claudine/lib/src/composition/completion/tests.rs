@@ -65,6 +65,16 @@ fn property_state(verdict: &CompletionVerdict, name: &str) -> PropertyState {
         .state
 }
 
+fn evaluate_completion(
+    schema: Option<&LaunchSchema>,
+    instance: &serde_json::Value,
+    body: BodyEvidence,
+    source_path: &Path,
+) -> CompletionVerdict {
+    super::evaluate_completion(schema, instance, body, source_path)
+        .expect("phase schema builds")
+}
+
 // -- the pure evaluator -----------------------------------------------------
 
 #[test]

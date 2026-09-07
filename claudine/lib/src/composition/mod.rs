@@ -139,9 +139,10 @@ pub use resolve::{
 pub use schema::{
     InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
     SchemaStatusReport, build_schema_status_report, build_schema_status_report_for_mode,
-    drop_invalid_optionals, launch_phase_for_mode, pre_validate_schema,
-    pre_validate_schema_for_mode, prepare_direct_with_schema,
-    prepare_direct_with_schema_and_prompt, prepare_inline_with_schema,
+    description_suffix, drop_invalid_optionals, escape_schema_prose, launch_phase_for_mode,
+    pre_validate_schema, pre_validate_schema_for_mode, prepare_direct_with_schema,
+    prepare_direct_with_schema_and_prompt, prepare_inline_with_schema, render_optional_line,
+    render_required_line, schema_status_report_prose,
 };
 pub use select::{
     build_candidate_set, build_installed_snapshot, build_picker_plan, build_picker_plan_with_hints,

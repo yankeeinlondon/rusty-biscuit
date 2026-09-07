@@ -6,6 +6,8 @@
 //! summary rather than document content. Users can customize the guardrails by
 //! placing a `.claudine/inline-compose.md` file in the repository root; the
 //! text may reference the active document with [`DOCUMENT_PATH_PLACEHOLDER`].
+//! A customization that still carries the retired "do not edit" contract is
+//! preserved and used, but preparation emits a migration warning.
 
 use std::fs;
 use std::io;
@@ -97,6 +99,19 @@ const HISTORICAL_SHIPPED_GUARDRAILS: &[&str] = &[
 /// delivering it.
 pub fn load_or_create_guardrails(repo_root: Option<&Path>) -> String {
     load_or_create_guardrails_with(repo_root, crate::config::atomic::atomic_write)
+}
+
+/// Identify a customized guardrail file that still directs the agent to use
+/// the retired response-harvesting workflow.
+pub(super) fn retired_custom_guardrails_path(
+    repo_root: Option<&Path>,
+    template: &str,
+) -> Option<std::path::PathBuf> {
+    let root = repo_root?;
+    let normalized = template.to_ascii_lowercase();
+    (!template.contains(DOCUMENT_PATH_PLACEHOLDER)
+        && normalized.contains("do not edit the source file directly"))
+    .then(|| root.join(GUARDRAILS_RELATIVE_PATH))
 }
 
 fn load_or_create_guardrails_with<W>(repo_root: Option<&Path>, write: W) -> String
@@ -249,6 +264,19 @@ mod tests {
         let result = load_or_create_guardrails(Some(dir.path()));
         assert_eq!(result, customized);
         assert_eq!(fs::read_to_string(path).unwrap(), customized);
+        assert_eq!(
+            retired_custom_guardrails_path(Some(dir.path()), &result),
+            Some(dir.path().join(GUARDRAILS_RELATIVE_PATH))
+        );
+    }
+
+    #[test]
+    fn current_custom_guardrails_do_not_request_migration() {
+        let custom = "> Edit {document_path} and summarize the changes.\n";
+        assert_eq!(
+            retired_custom_guardrails_path(Some(Path::new("/repo")), custom),
+            None
+        );
     }
 
     #[test]

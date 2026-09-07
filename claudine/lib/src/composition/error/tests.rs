@@ -2324,6 +2324,13 @@ fn every_batch_3_variant_projects_a_catalog_shaped_detail() {
                 message: "required property is missing".to_string(),
                 kind: crate::composition::CompletionProblemKind::Missing,
             }],
+            status: crate::composition::SchemaStatusReport {
+                source_path: PathBuf::from("/repo/run.md"),
+                required: Vec::new(),
+                optional: Vec::new(),
+                has_invalid_optional: false,
+                raw_json_schema: true,
+            },
         },
         CompositionError::LifecycleShellResolution {
             source_path: PathBuf::from("run.md"),

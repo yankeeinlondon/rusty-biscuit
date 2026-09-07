@@ -49,9 +49,15 @@ use super::types::{CompositionMode, PreparedComposition, ResolvedCompositionSour
 use darkmatter::markdown::schemas::{SchemaPhase, ValidationReport};
 
 pub mod classify;
+mod status_render;
 pub mod translate;
 
 pub use classify::*;
+pub use status_render::{
+    description_suffix, escape_schema_prose, render_optional_line, render_required_line,
+    schema_status_report_prose,
+};
+pub(in crate::composition) use translate::schema_error_to_composition_error;
 use translate::*;
 
 /// Inputs controlling whether interactive collection of missing required
@@ -237,18 +243,27 @@ fn post_shell_validate(
         return Ok(prepared);
     }
 
-    let judge = |instance: &serde_json::Value| -> ValidationReport {
+    let judge = |instance: &serde_json::Value| -> Result<ValidationReport, CompositionError> {
         match phase {
-            Some(phase) => effective.validate_for_phase(instance, phase),
-            None => effective.validate(instance),
+            Some(phase) => effective.validate_for_phase(instance, phase).map_err(|error| {
+                schema_error_to_composition_error(
+                    &source.resolved_path,
+                    error.to_string(),
+                    Some(&error),
+                )
+            }),
+            None => Ok(effective.validate(instance)),
         }
     };
-    let finish = |mut prepared: PreparedComposition, dropped: Vec<DroppedOptional>| {
-        let report = status_report_for_instance(
+    let finish = |mut prepared: PreparedComposition,
+                  dropped: Vec<DroppedOptional>,
+                  validation: &ValidationReport| {
+        let report = status_report_from_validation(
             &effective,
             phase,
             &source.resolved_path,
             instance_map(&prepared.effective_frontmatter),
+            validation,
         );
         if let Some(launch) = prepared.launch_schema.as_mut() {
             launch.report = report;
@@ -257,12 +272,12 @@ fn post_shell_validate(
         prepared
     };
 
-    let report = judge(&prepared.effective_frontmatter);
+    let report = judge(&prepared.effective_frontmatter)?;
     if report.valid {
-        return Ok(finish(prepared, dropped));
+        return Ok(finish(prepared, dropped, &report));
     }
 
-    let mut categorized = categorize_problems(&report.problems, Some(&effective));
+    let mut categorized = categorize_problems(&report.problems, Some(&effective), phase);
     if phase.is_none() {
         // Direct compose judges the authored contract: a required property whose
         // own expression resolved to `null` is a gap the caller fills at launch
@@ -302,7 +317,7 @@ fn post_shell_validate(
         // surface a warning to the user.
         let map = match prepared.effective_frontmatter.as_object_mut() {
             Some(m) => m,
-            None => return Ok(finish(prepared, dropped)),
+            None => return Ok(finish(prepared, dropped, &report)),
         };
         for problem in &droppable {
             let Some(name) = top_level_pointer_segment(&problem.path) else {
@@ -326,9 +341,10 @@ fn post_shell_validate(
 
         // Re-validate after dropping invalid optionals. If a required
         // value is still missing or invalid, surface it.
-        let report2 = judge(&prepared.effective_frontmatter);
+        let report2 = judge(&prepared.effective_frontmatter)?;
         if !report2.valid {
-            let mut categorized2 = categorize_problems(&report2.problems, Some(&effective));
+            let mut categorized2 =
+                categorize_problems(&report2.problems, Some(&effective), phase);
             if phase.is_none() {
                 promote_null_required_to_missing(
                     &mut categorized2,
@@ -351,7 +367,7 @@ fn post_shell_validate(
             }
         }
 
-        return Ok(finish(prepared, dropped));
+        return Ok(finish(prepared, dropped, &report2));
     }
 
     if !categorized.missing_required.is_empty() {
@@ -497,11 +513,12 @@ pub fn pre_validate_schema(
 
 /// [`pre_validate_schema`] judged at the launch phase of `mode`.
 ///
-/// `inline-compose` validates at [`SchemaPhase::Launch`]: a missing `eager`
-/// property is reported (and collected) exactly as for direct compose, while a
-/// missing required-but-not-eager property is not — the agent supplies it and
-/// the completion verdict enforces it. Present values are type-checked in both
-/// modes. Direct compose keeps the unphased authoring verdict.
+/// `inline-compose` validates at [`SchemaPhase::Launch`]: a missing
+/// `required; eager` property is reported (and collected) exactly as for
+/// direct compose, while eager-only properties remain optional and a missing
+/// required-but-not-eager property is deferred to completion. Present eager
+/// values are type-checked at launch. Direct compose keeps the unphased
+/// authoring verdict.
 ///
 /// ## Errors
 ///
@@ -550,7 +567,13 @@ pub fn pre_validate_schema_for_mode(
     let mut instance = build_effective_instance(&source, set_overrides.as_ref());
     normalize_file_array_values(&mut instance, Some(&effective));
     let report = match phase {
-        Some(phase) => effective.validate_for_phase(&instance, phase),
+        Some(phase) => effective.validate_for_phase(&instance, phase).map_err(|error| {
+            schema_error_to_composition_error(
+                &source.resolved_path,
+                error.to_string(),
+                Some(&error),
+            )
+        })?,
         None => effective.validate(&instance),
     };
     if report.valid {
@@ -619,7 +642,7 @@ pub fn pre_validate_schema_for_mode(
         });
     }
 
-    let categorized = categorize_problems(&composition_independent, Some(&effective));
+    let categorized = categorize_problems(&composition_independent, Some(&effective), phase);
     if !categorized.invalid_required.is_empty() {
         // A provided `file(match)` partial that failed existence resolution is
         // surfaced as the typed `UnresolvedFileReference` so the CLI can offer
@@ -639,9 +662,8 @@ pub fn pre_validate_schema_for_mode(
         ));
     }
     if !categorized.invalid_optional.is_empty() {
-        // Eager-optional `file(match)` failures reach here too (they are kept,
-        // not dropped); offer the same interactive resolution for a provided
-        // partial before falling back to the generic schema error.
+        // Offer interactive resolution for a provided optional file partial
+        // before falling back to the generic schema error.
         if let Some(err) = classify_unresolved_file_reference(
             &source.resolved_path,
             &categorized.invalid_optional,
@@ -809,7 +831,7 @@ pub fn drop_invalid_optionals(
                 if is_required(shape, &name) {
                     continue;
                 }
-                if is_eager_file_problem(shape, problem) {
+                if is_eager(shape, &name) {
                     continue;
                 }
                 // Composition-tolerant: skip values that look templated,

@@ -629,6 +629,7 @@ impl Diagnostic for CompositionError {
             CompositionError::CompletionSchemaFailed {
                 source_path,
                 problems,
+                ..
             } => {
                 base["source_path"] = json!(biscuit_file::to_portable_string(source_path));
                 base["properties"] = json!(

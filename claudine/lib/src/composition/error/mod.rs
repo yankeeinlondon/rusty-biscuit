@@ -399,6 +399,9 @@ pub enum CompositionError {
         source_path: PathBuf,
         /// Per-property failures, in schema declaration order.
         problems: Vec<super::completion::CompletionProblem>,
+        /// Full per-property status rendered by the same component used before
+        /// launch.
+        status: super::schema::SchemaStatusReport,
     },
 
     /// Restoring the inline guard's captured baseline failed.
