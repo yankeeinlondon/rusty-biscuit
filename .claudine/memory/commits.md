@@ -179,6 +179,19 @@ belong here.
   authoritative — a sibling commit (e.g. `chore: refresh GitNexus index
   counts`) can land in between. If stdout was hidden, recover with
   `git reflog --grep '<subject-substring>' -1`.
+- "HEAD raced ahead" surfaces as: agent reports `git show --name-status HEAD`
+  and `git verify-commit HEAD` succeed, but the path list / signature belong
+  to the sibling commit that landed after its own. Always verify against the
+  hash captured in the `[branch abbrev] subject` banner, not against `HEAD`.
+
+## Content Patterns
+
+- A new docs subtree frequently lands with several 0-byte placeholder files
+  (e.g. `shared-resources/agent-definitions/agent.md`, `mcp/mcp-services.md`,
+  `prompts/prompts.md`, `agent-skills/upgrading-skill-props.md`) alongside
+  prose siblings. The placeholders are intentional scaffolding, not missing
+  content — commit them together with the prose; do not omit them as "empty
+  files" or split them into a follow-up.
 - Use `git show --pretty=format: --name-only <hash>` when diffing the committed
   path list against a pathspec file.
 - After all groups finish, reconcile `git status --short` against the
