@@ -256,6 +256,7 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
         tool_result_summary: ToolResultSummary::Show,
         info_event_suppression: &[],
         collapse_task_progress: false,
+        suppress_synthetic_tool_calls: false,
         suppress_subscription_rate_limit: false,
         silent_extension_kinds: &[],
         stdout_noise_prefixes: &[],
