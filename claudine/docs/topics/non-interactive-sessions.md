@@ -389,6 +389,16 @@ The harness wraps non-interactive prompts with timeout enforcement, shell-audit 
 
 The retired `pre_checks` / `post_checks` / `handle_*` / `handle` / `deviate` frontmatter keys now reject with a typed `RemovedValidationKey` diagnostic; see [Composition — Migrating from the Retired Harness DSL](composition.md#migrating-from-the-retired-harness-dsl).
 
+### Exit Code 0 Is Not Success
+
+A provider process exiting 0 is not sufficient proof that the run succeeded. [`StreamExecutionSummary`](../../lib/src/stream/summary.rs) carries the provider's native `exit_code` and a separate provider-semantic `is_error` verdict, and the harness classifies a `Completed` attempt as a failure when **either** the exit code is non-zero **or** `is_error` is set. Such an attempt routes through `FailureEvent::AgentFailure`: the `failure` lifecycle stack fires and the `success` stack does not. The contract is provider-agnostic — any parser that truthfully reports `is_error` now reaches failure handling, which can surface pre-existing failures that previously looked successful.
+
+The motivating shape is unresolved sub-agent work. Claude Code can force-stop its background tasks, report them with `status: "stopped"`, finish the parent turn, and exit 0. The stream layer therefore keeps an attempt-scoped ledger of every sub-agent task it observed ([`task_ledger.rs`](../../lib/src/stream/task_ledger.rs)), reconciled by the provider's own task ID: a later success for the **same** ID clears an earlier stop, but a different task carrying a similar name does not, because Claudine has no sound way to prove two prose labels describe the same unit of work. At session end a task is incomplete when it is stopped, when its raw status is outside the recognized vocabulary, or when it started and never produced a terminal observation.
+
+When any task is incomplete, finalization sets `is_error`, an operator-facing `error_message`, and `error_kind: "incomplete_subagents"` — the last only when the parser has not already recorded a more specific provider failure, since a rate limit is the more actionable headline. Finalization does **not** touch `exit_code` and does **not** change `ProcessTermination::Completed`, because Claudine did not kill the child; the record stays honest about what the provider actually did.
+
+`session_end.extra.subagent_outcomes` is the stable machine contract for this data. Each entry carries the provider task ID and name when known, the normalized outcome, and the provider's raw status string preserved verbatim. The list stays complete regardless of how many entries the rendered diagnostic displays, and it is omitted entirely on a clean run — summaries written before the field existed deserialize to an empty list.
+
 ### Timeout
 
 The harness supports two independent timeouts, both parsed from human-readable
@@ -397,10 +407,10 @@ strings (`30s`, `5m`, `2h`):
 | Property | Frontmatter | CLI flag | Semantics |
 |----------|-------------|----------|-----------|
 | Wall clock | `timeout` | `--timeout <DURATION>` | Deadline for total runtime like 30s, 5m, 2h. Enforced by the watchdog ticker. |
-| Step silence | `step_timeout` | `--step-timeout <DURATION>` | Deadline for silence between stream events. Resets on every `SemanticEvent`; fires when `last_event_at` is older than the budget. |
+| Step silence | `step_timeout` | `--step-timeout <DURATION>` | Deadline for stream silence, measured from the newest of child spawn, the last activity event, and the last non-whitespace byte — so a child that spawns and never speaks is bounded too. See [timeouts.md](timeouts.md#step_timeout-stream-silence). |
 
-At either deadline, Claudine sends SIGTERM to the child; after a 5-second
-grace period, SIGKILL. Both timeouts surface as the same timeout failure and
+At either deadline, Claudine sends SIGTERM to the child; after a 10-second
+grace period (`CLAUDINE_KILL_GRACE`), SIGKILL. Both timeouts surface as the same timeout failure and
 route to the `failure` lifecycle event, where a `Retry` or `Resume` action
 can recover either case.
 

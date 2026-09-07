@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-e0f59bf1a61e2da8
-last_updated: 2026-07-23
+hash: ef46db3751d8e999-d1545a2e73d666ce
+last_updated: 2026-09-07
 ---
 
 # OpenCode Event Sources
@@ -249,6 +249,19 @@ The byte heartbeat (`last_byte_at`) still fires at the stderr reader
 layer **before** the bridge runs, so even filtered (`service=bus`) lines
 keep the silence clock fresh as a backstop. A child that produces zero
 bytes on either channel still allows `step_timeout` to fire normally.
+
+Silence *before* the first record is bounded too. The rule measures from
+the newest of the child's spawn instant, `last_event_at`, and
+`last_byte_at`, so an OpenCode process that boots, hangs resolving its
+plugins, and never reaches `SessionCreated` is killed once that age
+crosses `step_timeout`. There is **no cold-start exception** — the only
+OpenCode-specific suppression left is the mid-step grace, which holds
+while a step is open (`step_start` through `step_finish`) **and** at
+least one activity clock is still inside the budget; when both clocks are
+stale for the full budget, the breach fires even mid-step. The breach
+diagnostic distinguishes a child that produced nothing since launch from
+one that produced activity and then stalled before OpenCode's first
+completed step, because those are different operator problems.
 
 ## End-of-run summary enrichment
 
