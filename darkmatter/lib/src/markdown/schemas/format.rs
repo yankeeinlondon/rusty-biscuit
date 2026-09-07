@@ -187,9 +187,9 @@ fn valid_iso8601_time(value: &str) -> bool {
 /// [`crate::markdown::schemas::validate`] tidy and lets tests register only
 /// the format without the keywords.
 ///
-/// jsonschema 0.42's `with_format` accepts `F: Fn(&str) -> bool +
-/// Send + Sync + 'static`, so the anchors are captured by move into the
-/// closure — no thread-local or process-global state is required.
+/// `jsonschema`'s `with_format` accepts `F: Fn(&str) -> bool + Send + Sync +
+/// 'static`, so the anchors are captured by move into the closure — no
+/// thread-local or process-global state is required.
 pub fn register_darkmatter_formats(
     options: ValidationOptions,
     base_dir: Option<PathBuf>,
@@ -433,7 +433,7 @@ pub fn url_scheme_keyword_factory<'a>(
     _parent: &'a Map<String, Value>,
     schema: &'a Value,
     _schema_path: Location,
-) -> Result<Box<dyn Keyword>, ValidationError<'a>> {
+) -> Result<Box<dyn for<'i> Keyword<'i>>, ValidationError<'a>> {
     let arr = schema.as_array().ok_or_else(|| {
         ValidationError::schema("x-darkmatter-url-scheme must be an array of strings")
     })?;
@@ -468,8 +468,8 @@ impl DarkmatterUrlSchemeKeyword {
     }
 }
 
-impl Keyword for DarkmatterUrlSchemeKeyword {
-    fn validate<'i>(&self, instance: &'i Value) -> Result<(), ValidationError<'i>> {
+impl<'i> Keyword<'i> for DarkmatterUrlSchemeKeyword {
+    fn validate(&self, instance: &'i Value) -> Result<(), ValidationError<'i>> {
         match instance {
             Value::String(s) if self.check(s) => Ok(()),
             Value::String(s) => Err(ValidationError::custom(format!(
@@ -480,7 +480,7 @@ impl Keyword for DarkmatterUrlSchemeKeyword {
         }
     }
 
-    fn is_valid(&self, instance: &Value) -> bool {
+    fn is_valid(&self, instance: &'i Value) -> bool {
         match instance {
             Value::String(s) => self.check(s),
             _ => true,
@@ -493,7 +493,7 @@ pub fn type_definition_keyword_factory<'a>(
     _parent: &'a Map<String, Value>,
     schema: &'a Value,
     _schema_path: Location,
-) -> Result<Box<dyn Keyword>, ValidationError<'a>> {
+) -> Result<Box<dyn for<'i> Keyword<'i>>, ValidationError<'a>> {
     require_enabled_semantic_keyword(schema, DARKMATTER_TYPE_DEFINITION_KEYWORD)?;
     Ok(Box::new(DarkmatterTypeDefinitionKeyword))
 }
@@ -503,7 +503,7 @@ pub fn schema_keyword_factory<'a>(
     _parent: &'a Map<String, Value>,
     schema: &'a Value,
     _schema_path: Location,
-) -> Result<Box<dyn Keyword>, ValidationError<'a>> {
+) -> Result<Box<dyn for<'i> Keyword<'i>>, ValidationError<'a>> {
     require_enabled_semantic_keyword(schema, DARKMATTER_SCHEMA_KEYWORD)?;
     Ok(Box::new(DarkmatterSchemaKeyword))
 }
@@ -535,24 +535,24 @@ fn parse_schema_instance(instance: &Value) -> Result<(), String> {
 
 struct DarkmatterTypeDefinitionKeyword;
 
-impl Keyword for DarkmatterTypeDefinitionKeyword {
-    fn validate<'i>(&self, instance: &'i Value) -> Result<(), ValidationError<'i>> {
+impl<'i> Keyword<'i> for DarkmatterTypeDefinitionKeyword {
+    fn validate(&self, instance: &'i Value) -> Result<(), ValidationError<'i>> {
         parse_type_definition_instance(instance).map_err(ValidationError::custom)
     }
 
-    fn is_valid(&self, instance: &Value) -> bool {
+    fn is_valid(&self, instance: &'i Value) -> bool {
         parse_type_definition_instance(instance).is_ok()
     }
 }
 
 struct DarkmatterSchemaKeyword;
 
-impl Keyword for DarkmatterSchemaKeyword {
-    fn validate<'i>(&self, instance: &'i Value) -> Result<(), ValidationError<'i>> {
+impl<'i> Keyword<'i> for DarkmatterSchemaKeyword {
+    fn validate(&self, instance: &'i Value) -> Result<(), ValidationError<'i>> {
         parse_schema_instance(instance).map_err(ValidationError::custom)
     }
 
-    fn is_valid(&self, instance: &Value) -> bool {
+    fn is_valid(&self, instance: &'i Value) -> bool {
         parse_schema_instance(instance).is_ok()
     }
 }
