@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-1cbd7531a841d1a2
+hash: ef46db3751d8e999-2c43816879a1b7f1
 last_updated: 2026-09-06
 ---
 # Claudine Composition
@@ -243,8 +243,9 @@ Steps:
 1. **Resolve** — resolve the file reference
 2. **Validate permissions** — confirm read + write access to the file
 3. **Launch validation** — schema pre-validation judged at
-   `SchemaPhase::Launch`: a missing `eager` property is collected or fails
-   exactly as for `compose`; a required-but-not-eager property may stay absent
+   `SchemaPhase::Launch`: a missing `required; eager` property is collected or
+   fails exactly as for `compose`; an eager-only property remains optional,
+   while a required-but-not-eager property may stay absent
    (the agent supplies it, the completion verdict enforces it) and renders as
    *deferred* in the launch report. A present value is always type-checked.
    The intrinsic `prompt` verdict comes **after** this step, so a `--set`,
@@ -256,7 +257,9 @@ Steps:
    at launch, required/optional at completion — when a `$schema` is declared),
    the composed prompt, and the guardrails from `.claudine/inline-compose.md`
    (a shipped default migrates to the current text; a customized file is kept
-   and may use `{document_path}`). The guardrails name the three
+   and may use `{document_path}`). A customization that still says not to edit
+   the source produces a warning naming the file and migration, but the run
+   continues and Claudine never overwrites it. The guardrails name the three
    closure-owned properties (`prompt`, `hash`, `last_updated`), the direct
    write-and-re-read duty, the schema type duty, and the two-to-three-paragraph
    summary contract.
