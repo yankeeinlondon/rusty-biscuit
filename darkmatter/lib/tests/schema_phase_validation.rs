@@ -339,6 +339,30 @@ fn eager_is_universal_in_catalog_and_round_trips() {
         .find(|descriptor| descriptor.keyword == "eager")
         .expect("eager descriptor");
     assert_eq!(eager.target_types, "all types");
+
+    // The catalog is the single wording authority for `md schema about`, DMLS
+    // completion detail, and both DMLS hover surfaces. Its prose must state the
+    // independent-axis contract, not the retired eager-implies-required rule.
+    assert!(
+        eager
+            .description
+            .contains("absence is allowed unless `required` is also declared"),
+        "eager must disclose that it does not control presence: {}",
+        eager.description
+    );
+    assert!(
+        !eager.description.contains("Requires the containing property"),
+        "eager must not claim it requires the containing property: {}",
+        eager.description
+    );
+    assert!(
+        eager
+            .json_schema_effect
+            .contains("does not add the property to the parent's `required` list"),
+        "eager's JSON Schema effect must disclaim the `required` list: {}",
+        eager.json_schema_effect
+    );
+
     for descriptor in schema_type_descriptors() {
         assert!(
             descriptor.accepted_constraints.contains("eager"),
@@ -380,6 +404,118 @@ fn passive_trigger_schemas_reject_eager_on_every_shape_and_placement() {
             matches!(error, SchemaError::TriggerForbiddenConstraint { ref property, ref constraint }
                 if property == "candidate" && constraint == "eager"),
             "{definition}: {error:?}",
+        );
+    }
+}
+
+/// Exact claims from the retired eager-implies-`required` model. Each string
+/// appeared verbatim in one of the swept documents before 2026-09-07, so the
+/// sweep below is a discriminator rather than a spelling check.
+const RETIRED_EAGER_CLAIMS: &[&str] = &[
+    "the property must be present at stabilized launch and completion",
+    "| `eager` | Required | Required |",
+    "exactly equivalent to `required; eager`",
+    "There is no way to say \"optional, but resolve and check it eagerly when supplied\"",
+    "while `file[](eager)` requires the array property at launch",
+    "An eager `null` fails at launch",
+    "Launch requires recursively declared `eager` properties",
+    "completion requires `required` or `eager`",
+    "`file[](eager)` owns property presence",
+    "Requires the containing property at stabilized launch",
+];
+
+/// Markdown wraps prose across lines, so a claim is matched on its
+/// whitespace-collapsed form rather than its authored line breaks.
+fn collapse_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Every explanatory surface that a reader or an agent may consult must state
+/// the same independent-axis contract as the descriptor catalog and the phase
+/// projection. The prose is checked against the retired claims *and* against
+/// the real validator, so neither a doc rewrite nor a runtime change can drift
+/// alone.
+#[test]
+fn public_docs_and_skill_describe_required_and_eager_as_independent_axes() {
+    let root = repo_root();
+    let surfaces = [
+        (
+            "darkmatter/docs/topics/schema-definition.md",
+            vec![
+                "`required` and `eager` are independent axes",
+                "| `required; eager` | Required, and the value is validated eagerly | Required |",
+                "| `eager` | Optional; a present value is validated eagerly | Optional; present values remain type-checked |",
+                "An eager-only `null` is therefore allowed at both phases",
+                "Neither placement makes the property required",
+            ],
+        ),
+        (
+            "darkmatter/docs/inline/schema-validation.md",
+            vec![
+                "| `eager` | valid when present; absence is allowed | valid when present; absence is allowed |",
+                "| `required; eager` | must be present and valid | must be present and valid |",
+                "An eager-only `null` is therefore allowed at both phases",
+            ],
+        ),
+        (
+            ".claude/skills/darkmatter/schema.md",
+            vec![
+                "`required` and `eager` are independent axes",
+                "| `eager` | absence allowed; a present value is validated eagerly | absence allowed; a present value is type-checked |",
+                "`eager` is universal timing metadata and never controls presence",
+            ],
+        ),
+    ];
+
+    for (relative, expected) in surfaces {
+        let path = root.join(relative);
+        let text = collapse_whitespace(
+            &fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("{} is unreadable: {error}", path.display())),
+        );
+        for retired in RETIRED_EAGER_CLAIMS {
+            assert!(
+                !text.contains(retired),
+                "{relative} still asserts the retired claim: {retired}",
+            );
+        }
+        for claim in expected {
+            assert!(text.contains(claim), "{relative} no longer states: {claim}");
+        }
+    }
+
+    // The descriptor catalog is the wording authority DMLS and `md schema
+    // about` read; the documents above must agree with it, not with each other.
+    let eager = schema_constraint_descriptors()
+        .iter()
+        .find(|descriptor| descriptor.keyword == "eager")
+        .expect("eager descriptor");
+    assert!(
+        eager
+            .description
+            .contains("absence is allowed unless `required` is also declared"),
+        "descriptor drifted from the documented contract: {}",
+        eager.description
+    );
+
+    // Re-derive the documented four-cell matrix from the real validator so the
+    // prose cannot outlive the projection it describes.
+    for (declaration, launch_absence_ok, completion_absence_ok) in [
+        ("string", true, true),
+        ("string(eager)", true, true),
+        ("string(required)", true, false),
+        ("string(required; eager)", false, false),
+    ] {
+        let schema = format!("  value: {declaration}\n");
+        assert_eq!(
+            phase_valid(&schema, json!({}), SchemaPhase::Launch),
+            launch_absence_ok,
+            "{declaration}: documented launch absence verdict",
+        );
+        assert_eq!(
+            phase_valid(&schema, json!({ "value": null }), SchemaPhase::Completion),
+            completion_absence_ok,
+            "{declaration}: documented completion absence verdict",
         );
     }
 }
