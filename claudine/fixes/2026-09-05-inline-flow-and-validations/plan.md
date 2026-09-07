@@ -546,9 +546,12 @@ must pass its own checkpoint before a dependent phase begins.
   execution, schema resolution, file access, or network access; retain the
   existing unphased `validate*` semantics unchanged.
 - [x] Accept `eager` as a universal SimplifiedSchema constraint and derive the
-  recursive phase projection from the resolved schema shape: launch requires
-  eager properties, completion requires required-or-eager properties, and
-  present values remain type-checked in both phases.
+  recursive phase projection from the resolved schema shape. `required` and
+  `eager` are **independent axes** (ruled 2026-09-07, superseding this plan's
+  original eager-implies-required wording): launch requires `required; eager`
+  properties, completion requires `required` properties, eager-only properties
+  stay optional at both seams, and present values remain type-checked in both
+  phases.
 - [x] Implement nested-property presence, union hoisting, `file(eager)[]`
   versus `file[](eager)` ownership, explicit-null-as-absence, and the existing
   eager-file existence semantics without encoding phase rules into authored or
@@ -892,7 +895,19 @@ fixture's `git`, `say`, and `just` doubles append to one file concurrently
 without locking. It passed 3/3 in isolation immediately afterwards; the fixture's
 append pattern, not the verdict, is the cause.
 
-#### Open finding — `eager` without `required` is no longer expressible as "optional"
+#### Resolved finding — `eager` without `required` is expressible as "optional"
+
+> **Ruling 2026-09-07.** Ken's call went to *revisit the `eager`-implies-
+> `required` ruling*. `required` and `eager` are now independent axes:
+> `required` owns presence, `eager` owns validation timing for a supplied
+> value, and `required; eager` combines them. `spec: file(eager; match(...))`
+> in `prompts/_implement/implement-plan.md` is therefore correct as authored
+> and stays. The Phase 6 record below is retained as the history that produced
+> the ruling; its "no longer a way to say optional" conclusion no longer holds.
+> Follow-up work lives in
+> `darkmatter/fixes/2026-09-07-required-vs-eager/`.
+
+##### Phase 6 record
 
 Running `just test-l2` surfaced this against a *shipped* artifact, not a test
 fixture. `prompts/_implement/implement-plan.md` declares
@@ -931,8 +946,10 @@ contract that changed.
   generated properties, interactive-denied launch, and all three OS path
   shapes.
 - [x] Reconcile `prompts/_implement/implement-plan.md` (and its drift-pinned
-  fixture copy) with the ratified `eager` semantics — see *Open finding:
-  optional eager files* below — then refresh the shipped-prompt hash pin.
+  fixture copy) with the ratified `eager` semantics — see *Resolved finding:
+  optional eager files* above — then refresh the shipped-prompt hash pin. The
+  2026-09-07 independent-axis ruling made the shipped declaration correct as
+  authored, so no prompt change was needed.
 - [x] Add passive shipped-artifact corpus coverage for SimplifiedSchema/trigger
   changes and an end-to-end normal invocation test using a real shipped schema,
   as required by the Darkmatter skill.
@@ -968,7 +985,7 @@ Every row was executed, not merely mapped. The Darkmatter/DMLS rows ran under
 
 | AC | Evidence |
 |---|---|
-| AC1 | `darkmatter::schema_phase_validation::{launch_requires_eager_and_completion_requires_required_or_eager, all_eager_scalar_representations_are_coerced_and_checked, nested_and_union_eager_presence_is_recursive_and_hoisted, eager_array_placement_owns_items_or_property, original_voip_schema_launches_with_outputs_absent_and_enforces_them_at_completion}`; `dmls::lsp_session::{eager_schema_fixture_is_clean_and_catalog_driven, original_voip_schema_definitions_are_clean}` |
+| AC1 | `darkmatter::schema_phase_validation::{eager_controls_validation_timing_and_required_controls_presence, all_eager_scalar_representations_are_coerced_and_checked, nested_and_union_eager_presence_is_recursive_and_hoisted, eager_array_placement_owns_items_or_property, original_voip_schema_launches_with_outputs_absent_and_enforces_them_at_completion}`; `dmls::lsp_session::{eager_schema_fixture_is_clean_and_catalog_driven, original_voip_schema_definitions_are_clean}` |
 | AC2 | `dmls::lsp_session::{schema_definition_errors_are_independent_and_property_ranged, referenced_schema_conversion_error_keeps_origin_and_reference_fallback}` |
 | AC3 | `claudine-cli::wrap_inline_compose::{inline_compose_without_an_eager_prompt_fails_before_launch_naming_it, inline_compose_uses_a_caller_supplied_prompt_without_persisting_it}`; `claudine::composition::prepare::tests` |
 | AC4 | `claudine::composition::completion::tests::{a_required_property_the_agent_never_set_fails_completion, a_value_of_the_wrong_type_fails_completion_with_the_type_message, an_explicit_null_is_absence_at_completion, a_nested_property_failure_names_its_full_path}`; `claudine-cli::inline_completion_lifecycle::{a_missing_completion_property_fails_the_run_and_keeps_the_written_artifact, a_wrong_typed_completion_property_reports_the_type_mismatch, a_satisfied_inline_run_exits_zero_and_keeps_the_summary_out_of_the_document}` |
@@ -1009,8 +1026,10 @@ written document before being narrowed to the value.
   `accepted_constraints` rows, and the DMLS completion item
   (`dmls::providers::dsl::tests::text_edit_item_carries_eager_edit_and_markdown_documentation`).
   `darkmatter/docs/topics/schema-definition.md` agrees, including the
-  launch/completion table and the explicit note that an optional-but-eager
-  property is not expressible. **Trap worth recording:** the *installed*
+  launch/completion table. (Its note that an optional-but-eager property is
+  not expressible was retired by the 2026-09-07 independent-axis ruling; both
+  the descriptor and the table now state that eager alone allows absence.)
+  **Trap worth recording:** the *installed*
   `~/.cargo/bin/md` (2026-09-05) still printed the old `eager | file | Require
   the referenced file to exist` row, which reads exactly like drift. Confirm
   descriptor output against a binary built from the worktree.
@@ -1139,7 +1158,9 @@ and each named test observed passing:
   `loop_cli`, `error_guards`) — **127 passed, 0 failed**. Covers AC3, AC5,
   AC8, AC9, AC9a, AC9b, AC17, AC18, and the end-to-end shipped-artifact route
   (`shipped_implement_plan_launches_without_a_sibling_spec`,
-  `shipped_prompts_never_declare_eager_without_required`).
+  `shipped_prompt_schemas_project_at_both_phases`). The eager-without-`required`
+  ban this row originally named was retired with the 2026-09-07
+  independent-axis ruling.
 
 #### Scope verification
 
