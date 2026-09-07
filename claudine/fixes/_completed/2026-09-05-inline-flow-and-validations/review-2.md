@@ -4,7 +4,10 @@ ready: false
 agent: opencode/zai-coding-plan/glm-5.3
 created: 2026-09-07T13:01:35-07:00
 spec: 2026-09-05-inline-flow-and-validations/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/default
+log: claudine/fixes/2026-09-05-inline-flow-and-validations/log.md
+next: 2026-09-05-inline-flow-and-validations/review-3.md
 description: A **fix** review of `2026-09-05-inline-flow-and-validations/spec.md`
 fix: 2026-09-05-inline-flow-and-validations/review-2.md
 previous: 2026-09-05-inline-flow-and-validations/review-1.md
