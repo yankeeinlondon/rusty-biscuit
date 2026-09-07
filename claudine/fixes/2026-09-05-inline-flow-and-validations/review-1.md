@@ -4,10 +4,11 @@ ready: false
 agent: claude/default
 created: 2026-09-06T15:39:36-07:00
 spec: 2026-09-05-inline-flow-and-validations/spec.md
-implemented: false
 description: A **fix** review of `2026-09-05-inline-flow-and-validations/spec.md`
 fix: 2026-09-05-inline-flow-and-validations/review-1.md
 previous: /
+next: 2026-09-05-inline-flow-and-validations/review-2.md
+implemented: true
 ---
 
 # Review 1: Inline Flow and Completion Validation
