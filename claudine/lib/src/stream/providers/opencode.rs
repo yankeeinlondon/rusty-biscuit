@@ -407,6 +407,10 @@ impl<S: SemanticEventSink> OpenCodeSemanticStreamParser<S> {
         }
 
         let mut call_extra = self.base_extra(raw_kind);
+        // OpenCode reports only completion-side tool events. Preserve the
+        // normalized pair for metrics and logs while allowing live output to
+        // hide this adapter-created request side.
+        call_extra.insert("synthetic_tool_call".into(), Value::Bool(true));
         if let Some(id) = &resolved.id {
             call_extra.insert("tool_id".into(), Value::from(id.as_str()));
         }

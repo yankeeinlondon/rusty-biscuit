@@ -290,12 +290,21 @@ fn opencode_tool_use_emits_paired_tool_call_and_result() {
         "completion-only tool_use must synthesize the paired semantic lifecycle"
     );
 
-    let SemanticEvent::ToolCall { name, id, input, .. } = &captured[0] else {
+    let SemanticEvent::ToolCall {
+        name,
+        id,
+        input,
+        extra,
+    } = &captured[0] else {
         panic!("expected ToolCall");
     };
     assert_eq!(name.as_deref(), Some("bash"));
     assert_eq!(id.as_deref(), Some("t1"));
     assert_eq!(input.as_ref(), Some(&json!({"command": "ls -la"})));
+    assert_eq!(
+        extra.get("synthetic_tool_call").and_then(Value::as_bool),
+        Some(true)
+    );
 
     let SemanticEvent::ToolResult { name, status, .. } = &captured[1] else {
         panic!("expected ToolResult");
