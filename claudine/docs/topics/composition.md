@@ -1,5 +1,5 @@
 ---
-hash: ef46db3751d8e999-4b7ab9892547cb77
+hash: ef46db3751d8e999-c44f94c5db13c41f
 last_updated: 2026-09-05
 ---
 # Claudine Composition
@@ -153,8 +153,9 @@ Steps:
 1. **Resolve** — resolve the file reference
 2. **Validate permissions** — confirm read + write access to the file
 3. **Launch validation** — schema pre-validation judged at `SchemaPhase::Launch`:
-   a missing `eager` property is collected or fails exactly as for `compose`;
-   a required-but-not-eager property may stay absent (the agent supplies it, the
+   a missing `required; eager` property is collected or fails exactly as for
+   `compose`; an eager-only property remains optional, while a
+   required-but-not-eager property may stay absent (the agent supplies it, the
    completion verdict enforces it) and renders as *deferred* in the launch
    report. A present value is always type-checked. The intrinsic `prompt`
    verdict comes **after** this step, so a `--set`, positional `prompt=…`, or
@@ -166,7 +167,9 @@ Steps:
    launch, required/optional at completion — when a `$schema` is declared), the
    composed prompt, and the guardrails from `.claudine/inline-compose.md` (a
    shipped default migrates to the current text; a customized file is kept and
-   may use `{document_path}`). The guardrails name the three closure-owned
+   may use `{document_path}`). A customization that still says not to edit the
+   source produces a warning naming the file and migration, but the run
+   continues and Claudine never overwrites it. The guardrails name the three closure-owned
    properties (`prompt`, `hash`, `last_updated`), the direct write-and-re-read
    duty, the schema type duty, and the two-to-three-paragraph summary contract.
 5. **Prepare** — retain the launch-resolved schema and launch report
@@ -676,19 +679,20 @@ For each property declared in `$schema`, claudine routes the validation outcome 
 The drop-and-retry for invalid optionals is automatic; users see the discarded value via the `dropping optional schema property with invalid value` log line.
 
 The `Missing` row above is the **launch** view, and it splits by mode and by
-constraint. `eager` means "present and valid before the provider starts";
-`required` means "present and valid by the time the composition completes".
+constraint. `eager` means "validate at launch when present"; `required` means
+"the value must be present by the time the composition completes".
 
 | Declaration | `compose` at launch | `inline-compose` at launch | Both at completion |
 |---|---|---|---|
-| `eager` (with or without `required`) | prompt when allowed, otherwise `MissingProperties` | prompt when allowed, otherwise `MissingProperties` | must be present and valid |
+| `eager`, not required | validate when present; absence continues | validate when present; absence continues | valid if present |
+| `required; eager` | prompt when allowed, otherwise `MissingProperties` | prompt when allowed, otherwise `MissingProperties` | must be present and valid |
 | `required`, not eager | judged after the document's own expression has run: prompt when allowed, otherwise `MissingProperties` | never prompted, never a launch error | must be present and valid |
 | `generated; required` | exempt from launch collection | exempt from launch collection | must be present and valid |
 | neither | continue | continue | valid if present |
 
-`eager` without `required` is accepted and means exactly `required; eager`.
-There is no way to declare "optional, but resolve it eagerly when supplied" —
-an optional input is a plain `file` / `string` / … .
+`eager` controls validation timing and `required` controls presence. Therefore
+`file(eager)` expresses an optional file that is resolved and validated at
+launch when supplied.
 
 Raw JSON Schema has no phase vocabulary: its `required` entries are enforced
 before either mode starts and are checked again at completion. Use

@@ -262,6 +262,9 @@ display_policy:
   info_event_suppression:
   - step_progress
   collapse_task_progress: false
+  # OpenCode emits tool_use only after completion. Its parser retains a
+  # normalized ToolCall/ToolResult pair, but live output shows the result once.
+  suppress_synthetic_tool_calls: true
   suppress_subscription_rate_limit: false
   silent_extension_kinds: []
   stdout_noise_prefixes: []

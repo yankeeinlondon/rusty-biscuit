@@ -329,6 +329,7 @@ display_policy:
   # matching tool call ("Reading <path>" → `→ Read(<path>)`); the sink
   # holds them one tick and collapses the pair to the canonical tool line.
   collapse_task_progress: true
+  suppress_synthetic_tool_calls: false
   # Suppress only the legacy generic `rate limit` Warning when session
   # metadata shows subscription auth. Explicit Claude metadata text must
   # still render because it can include cap-window timing.
