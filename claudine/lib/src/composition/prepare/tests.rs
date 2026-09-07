@@ -161,7 +161,7 @@ fn inline_composition_uses_effective_frontmatter() {
     assert!(
         prepared
             .prompt
-            .contains("Return the replacement Markdown body content only")
+            .contains("Return the replacement Markdown body content in your final response")
     );
 
     // Effective frontmatter should contain composed keys

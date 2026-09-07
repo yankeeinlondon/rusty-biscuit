@@ -1,0 +1,111 @@
+---
+total_phases: 4
+created: 2026-09-01
+phase: 4
+agent: codex/default
+yolo: true
+---
+
+# Execution Plan: Anchor Eager Caller File Parameters Before Frontmatter Evaluation
+
+Reference specification: [`spec.md`](spec.md)
+
+## Goal
+
+Make every compose surface consume one launch-resolved semantic value for an
+eager caller-supplied `file()` parameter before frontmatter expressions run,
+while preserving the existing native-versus-portable presentation split,
+document-owned eager normalization, and lazy-file anchoring rules.
+
+## Scope and dependency summary
+
+The implementation is centered in Darkmatter's compose pipeline and is then
+verified through Claudine's normal preparation and CLI path. GitNexus currently
+reports **HIGH** upstream risk for `run_with_registry` and
+`resolve_eager_caller_file_overrides`: 21–22 symbols are reachable across the
+Compose, Transclusion, and Context modules, including the shared compose
+process. Direct compose, inline compose, sequences, proxy targets, retries,
+resumes, and downstream Darkmatter callers all depend on this behavior.
+
+Phase 1 establishes the failure and safety baseline. Phase 2 creates the
+schema/projection primitives. Phase 3 integrates those primitives into the
+pipeline and closes Darkmatter coverage. Phase 4 adds Claudine regression
+coverage, documentation, and final repository gates.
+
+## Phase 1 — Baseline, blast radius, and failing regression
+
+**Outcome:** the current split-value defect is reproduced with deterministic
+fixtures, and the implementation starts from a reviewed, isolated baseline.
+
+- [x] Record `git status --short` and preserve all pre-existing worktree changes; keep this fix's diffs limited to the Darkmatter compose/schema/error surfaces, focused tests, Claudine regression/docs, and this plan.
+- [x] Re-run GitNexus upstream impact analysis before editing `run_compose_pipeline_internal`, `run_with_registry`, `resolve_eager_caller_file_overrides`, and `resolve_eager_caller_value`; record the known HIGH risk, review every depth-1 caller, warn before proceeding, and stop for direction if the result is CRITICAL or exposes an unexpected execution route.
+- [x] Add a Darkmatter regression fixture under the existing compose/schema test modules that mirrors the shipped `prompts/plan.md` shape: prompt beneath `prompts/`, eager caller `spec`, `x: "{{ spec }}"`, and `plan: "{{ dirname(spec) + '/plan.md' }}"` with `plan` declared as lazy `file()`.
+- [x] Exercise that fixture with a captured repository-root launch base and with a captured `claudine/` launch base using `spec=fixes/<case>/spec.md`; assert both runs identify the same specification, derive `claudine/fixes/<case>/plan.md`, and never produce `prompts/fixes/<case>/plan.md`.
+- [x] Assert the pre-fix failure specifically: the package-area case currently leaves the raw override visible to frontmatter expressions while body interpolation receives the resolved presentation value. Keep the assertion focused enough that it turns green only when projection moves before pass 1.
+- [x] Capture unchanged-control cases alongside the regression: ordinary strings, lazy caller `file`, absent optional values, document-authored eager files, and keys in `ComposeOptions::exclude_keys` must retain their current values and anchoring.
+- [x] **Validation checkpoint:** run the narrow new tests plus the existing eager-override tests in `darkmatter/lib/src/markdown/compose/schema_validation.rs`; confirm the package-area ordering assertion fails for the expected `prompts/fixes/...` retargeting while existing scalar, array, repository-boundary, and ambient-CWD cases remain green.
+
+## Phase 2 — Reusable schema assembly and caller projection artifact
+
+**Outcome:** Darkmatter can assemble the effective schema once, project eager
+caller inputs with typed failures, and detect unstable eager classification
+without performing validation early.
+
+- [x] Extract the effective-schema builder and trigger-registry discovery currently embedded in `schema_validation::run_with_registry` into a crate-private preparation seam that accepts the current `Markdown`, `ComposeOptions`, and reusable trigger-registry slot and returns the assembled `DarkmatterSchemas`/`EffectiveSchema` state needed by both projection and validation.
+- [x] Make the preparation seam preserve the current baseline-schema merge, document `$schema` handling, request-scoped `FileResolutionContext`, `file_ref_fallback_dir`, deferred-verdict behavior, and single trigger-discovery walk; do not add a second filesystem scan or recapture ambient CWD.
+- [x] Introduce a transient pipeline-owned caller projection artifact in `darkmatter/lib/src/markdown/compose/schema_validation.rs` containing native values, portable presentation values, and the stable eager/non-eager classification of each present top-level caller override; keep it crate-private and never serialize it into frontmatter.
+- [x] Refactor `resolve_eager_caller_file_overrides` and `resolve_eager_caller_value` to return `Result`-based projection data instead of discarding `FileReference` parse/resolve failures through `Option`; support top-level scalars, arrays, property unions, root unions, baseline plus document schemas, and applicable trigger schemas while ignoring lazy/string/document-owned/absent/DM1-excluded values.
+- [x] Resolve projected values through `biscuit_file::FileReference` and the already captured trusted caller base. Preserve the existing typed malformed/missing file-reference diagnostic and launch-base provenance without adding prompt-directory or ambient-CWD fallback.
+- [x] Add a crate-private pre-interpolation operation that builds the initial effective schema, computes the artifact, and installs only its native values into working frontmatter. Keep coercion, optional binding materialization, validation verdicts, and document-owned eager normalization in their existing validation stage.
+- [x] Add a typed phase-instability variant in Darkmatter's composition error surface that records the affected property and explains that caller eager-file typing must be stable before frontmatter interpolation; implement its `BlockError` rendering and add it to `markdown::errors::as_block_error` discovery so Claudine's effective-diagnostic selection sees the typed cause without string flattening.
+- [x] Compare the eager classification of every present caller override whenever the effective schema is reassembled. Fail closed on eager-to-non-eager or non-eager-to-eager drift; do not rerun interpolation or any read-side expression/warning work.
+- [x] **Parallelizable after the artifact shape is fixed:** add helper-level tests for scalar/array/union classification, baseline plus document schemas, DM1 exclusions, idempotent projection, native versus portable values, and typed malformed/missing failures.
+- [x] **Validation checkpoint:** run the targeted schema-validation, `MarkdownError` block-rendering, and diagnostic-discovery tests. Verify projection is side-effect free except for installing caller native values, trigger discovery occurs once, and classification drift reports the named property through a discoverable typed diagnostic.
+
+## Phase 3 — Compose pipeline integration and Darkmatter contract coverage
+
+**Outcome:** the projection artifact is created once before interpolation pass
+1, reused by both schema passes, and consumed once by effective-state
+presentation.
+
+- [x] In `Markdown::run_compose_pipeline_internal`, create and apply the caller projection immediately after `prepare_frontmatter_for_compose` installs caller overrides and before `frontmatter_interpolation::interpolate_frontmatter` pass 1 builds its dependency graph.
+- [x] Change `schema_validation::run_with_registry` to accept the prepared projection artifact and shared schema/registry state instead of clearing a standalone presentation map and independently resolving raw overrides; retain its current coercion, optional binding, validation filtering, verdict, and document-owned normalization responsibilities.
+- [x] Reuse the same artifact during post-shell schema revalidation, reassembling only the effective trigger match needed for the stability comparison. Check classification before any post-shell validation mutation, and ensure shell expansion/interpolation pass 2 cannot change the caller anchor, duplicate registry discovery, or reinterpret installed absolute values as document-authored.
+- [x] Pass the artifact's presentation map to `EffectiveStateBuilder::with_presentation_values` exactly once. Verify whole-value, inline, static member, and array-index body interpolation use portable values while frontmatter/path expressions retain native semantic values.
+- [x] Update behavior comments in `pipeline/mod.rs` and `schema_validation.rs`, plus Darkmatter's `docs/inline/fm-interpolation.md`, `docs/inline/schema-validation.md`, and the matching `darkmatter` skill references, to describe the eager-caller projection prelude while preserving the public interpolation → validation → shell → interpolation-pass-2 contract.
+- [x] Expand Darkmatter Level 1 coverage for identical root/package launch results, body/frontmatter semantic agreement, eager arrays and union arms, unchanged lazy and document-authored behavior, malformed/missing launch-anchored diagnostics, pass-2 reuse, and projection idempotence.
+- [x] Add trigger tests for both non-eager→eager and eager→non-eager changes affecting a present caller override; assert the typed failure occurs before any frontmatter shell command executes, using an execution sentinel, and assert no raw `{{ ... }}` whole-value expression leaks into output.
+- [x] Add platform-neutral assertions for `/`-normalized presentation and derived paths, plus `#[cfg(windows)]` coverage proving semantic frontmatter uses native absolute Windows paths. Keep macOS/Linux expectations identical and avoid platform-specific path literals outside gated assertions.
+- [x] **Parallelizable after pipeline wiring:** split the negative-semantics matrix, shell/trigger tests, and Windows-specific assertions across independent test cases while one owner updates the core pipeline to avoid merge conflicts.
+- [x] **Validation checkpoint:** from `darkmatter/`, run `just test` and `just lint`; all existing and new Level 1 tests must pass. Do not run Level 2/3 suites because the change does not involve terminal/browser rendering, focus, or input encoding.
+
+## Phase 4 — Claudine end-to-end proof, documentation, and final gates
+
+**Outcome:** Claudine's real planning workflow proves the shared fix from both
+launch directories, the contract is documented, and both package areas pass
+their required gates.
+
+- [x] Add a Claudine Level 1 CLI regression in the existing `claudine/cli/tests/compose_schema_cli.rs` surface that stages the actual `prompts/plan.md` schema/expression shape and a real specification beneath `claudine/fixes/<case>/spec.md`.
+- [x] Run the staged workflow through `claudine compose ... --dry-run` once from the repository root with `spec=claudine/fixes/<case>/spec.md` and once from `claudine/` with `spec=fixes/<case>/spec.md`; assert both complete outputs instruct saving to `claudine/fixes/<case>/plan.md`, not merely that `prompts/` is absent.
+- [x] Add or extend the focused Claudine effective-diagnostic test only if the Darkmatter error is wrapped at the CLI boundary; prove the drift error retains its typed identity, property name, diagnostic code, and actionable message through effective selection, without adding ad hoc ANSI output or a Claudine-side path resolver.
+- [x] Confirm direct compose, inline-compose preparation, sequence/task preparation, proxy-target preparation, retry, and resume continue to route through the corrected shared Darkmatter pipeline; add new route-specific tests only if an audited route bypasses that pipeline.
+- [x] **Parallelizable with Claudine tests:** update `claudine/docs/topics/composition.md` and `.claude/skills/claudine/composition.md` together to state that eager caller file parameters are launch-resolved before frontmatter expressions, native semantics and portable presentation remain distinct, and document-authored/lazy references remain source-relative; preserve intentional differences already present between the authoritative topic and skill mirror.
+- [x] Review every changed symbol's `///`, `//!`, and inline comments for behavioral drift; delete or update only comments made inaccurate by this fix, and leave unrelated cleanup out of scope.
+- [x] From `claudine/`, run `just test` and `just lint`; from `darkmatter/`, rerun `just test` and `just lint`. Confirm no Level 2 or Level 3 test is needed and no terminal/browser window is launched.
+- [x] Run the two manual `--dry-run` reproduction commands from the specification against the checkout and compare their full target-path lines; both must name the same plan beside the specification.
+- [x] Run GitNexus `detect_changes` with `scope: "compare"` and `base_ref: "main"`; review changed symbols and affected execution flows, and reconcile any scope outside Darkmatter composition/schema diagnostics plus Claudine tests/docs before handoff.
+- [x] Inspect the final diff and report the exact gates run, cross-platform coverage added, and any host-limited Windows checks. Do not run `cargo fmt` and do not commit unless separately requested.
+
+The historical reproduction's `2026-09-01-inline-compose-frontmatter` fixture
+has since moved beneath `fixes/_completed`. The corrected historical path and
+this fix's equivalent root/package-area commands both produce identical
+plan targets.
+
+## Completion criteria
+
+The work is complete when caller eager-file overrides are projected once from
+the captured launch context before frontmatter pass 1; all later stages reuse
+that artifact; unstable dynamic typing fails with a typed diagnostic before
+shell/provider execution; lazy and document-owned semantics remain unchanged;
+the root and package-area planning workflows derive the same target; and both
+Darkmatter and Claudine Level 1 and lint gates pass.

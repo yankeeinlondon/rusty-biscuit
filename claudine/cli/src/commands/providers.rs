@@ -366,25 +366,27 @@ fn mapping_rows(payload: &serde_json::Value) -> Result<Vec<MappingRow>> {
 /// Resolves the `claudine-gen` command (installed binary or the
 /// dev-checkout `cargo run` fallback).
 fn gen_command() -> Result<Command> {
-    match resolve_gen_binary() {
-        Some(binary) => Ok(Command::new(binary)),
+    let mut command = match resolve_gen_binary() {
+        Some(binary) => Command::new(binary),
         None => match repo_root_for_cargo_fallback() {
             Some(root) => {
                 let mut cargo = Command::new("cargo");
                 cargo
                     .args(["run", "-p", "claudine-gen", "--quiet", "--"])
                     .current_dir(root);
-                Ok(cargo)
+                cargo
             }
-            None => bail!(
+            None => return Err(color_eyre::eyre::eyre!(
                 "could not find the `claudine-gen` binary (looked next to this \
                  executable and on PATH) and no repo root is detectable for a \
                  `cargo run -p claudine-gen` fallback.\n\
                  Install it with `cargo install --path claudine/gen` or run from \
                  inside the rusty-biscuit repo."
-            ),
+            )),
         },
-    }
+    };
+    claudine::child_environment::contribute_child_environment(&mut command)?;
+    Ok(command)
 }
 
 /// Resolution order: sibling of the current executable, then `$PATH`.
@@ -407,7 +409,8 @@ fn resolve_gen_binary() -> Option<PathBuf> {
 /// `cargo run -p claudine-gen` fallback.
 fn repo_root_for_cargo_fallback() -> Option<PathBuf> {
     let cwd = std::env::current_dir().ok()?;
-    let root = biscuit_file::find_git_root(&cwd).ok().flatten()?;
+    let invocation = claudine::invocation_context::InvocationContext::capture_at(&cwd);
+    let root = invocation.launch_repository().repo_root()?.to_path_buf();
     root.join("Cargo.toml").is_file().then_some(root)
 }
 
@@ -453,6 +456,27 @@ fn run_describe(format: ProvidersFormat) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generator_command_carries_absolute_agent_cwd() {
+        let expected = claudine::child_environment::initialize_process_launch_directory(
+            claudine::child_environment::LaunchDirectoryMode::Ordinary,
+        )
+        .unwrap()
+        .to_path_buf();
+        let command = gen_command().unwrap();
+        let value = command
+            .get_envs()
+            .find(|(key, _)| {
+                key.to_string_lossy()
+                    .eq_ignore_ascii_case(claudine::child_environment::AGENT_CWD_ENV)
+            })
+            .and_then(|(_, value)| value)
+            .map(PathBuf::from)
+            .expect("generator command must carry AGENT_CWD");
+        assert_eq!(value, expected);
+        assert!(value.is_absolute());
+    }
 
     #[test]
     fn reports_custom_command_support() {

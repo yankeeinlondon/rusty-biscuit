@@ -55,6 +55,28 @@ pub(super) fn debug_assert_child_env(env: &HashMap<OsString, OsString>) {
         contains("HOME") || cfg!(windows) && contains("USERPROFILE"),
         "child env is missing HOME — env::build_child_env likely has a bug"
     );
+    debug_assert!(
+        contains(claudine::child_environment::AGENT_CWD_ENV),
+        "child env is missing AGENT_CWD — the shared child-environment contribution is absent"
+    );
+    let agent_cwd = env
+        .iter()
+        .find(|(key, _)| {
+            #[cfg(windows)]
+            {
+                key.to_string_lossy()
+                    .eq_ignore_ascii_case(claudine::child_environment::AGENT_CWD_ENV)
+            }
+            #[cfg(not(windows))]
+            {
+                key.as_os_str() == claudine::child_environment::AGENT_CWD_ENV
+            }
+        })
+        .map(|(_, value)| Path::new(value));
+    debug_assert!(
+        agent_cwd.is_some_and(Path::is_absolute),
+        "child env AGENT_CWD must be absolute"
+    );
 }
 
 /// Build the base child command shared by every spawn mode.
@@ -71,6 +93,8 @@ pub(super) fn base_command(
 ) -> Command {
     let mut command = Command::new(binary);
     command.args(args).env_clear().envs(env).current_dir(cwd);
+    claudine::child_environment::contribute_child_environment(&mut command)
+        .expect("process launch directory was initialized before provider command construction");
     command
 }
 

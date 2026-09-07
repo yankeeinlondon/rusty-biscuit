@@ -178,6 +178,9 @@ fn inject_subcommand_help_flag(cmd: &mut clap::Command) {
 }
 
 fn main() -> Result<()> {
+    if let Some(code) = run_audio_worker_if_requested()? {
+        std::process::exit(code);
+    }
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
@@ -192,11 +195,34 @@ fn main() -> Result<()> {
     }
 }
 
+fn run_audio_worker_if_requested() -> Result<Option<i32>> {
+    if let Some(code) = playa::detached::run_if_worker() {
+        return Ok(Some(code));
+    }
+
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    Ok(runtime.block_on(biscuit_speaks::run_if_worker()))
+}
+
 /// Try to render `report` as a darkmatter `BlockError` via the cause-chain
 /// walker. Falls back to the CLI's generic `log::error` formatting
 /// (preserving the styled `Error:` label) when no cause in the chain
 /// implements `BlockError`.
+///
+/// Process-level tests may set `CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT` to capture
+/// the same structured diagnostic selected for rendering. Capture failures are
+/// deliberately ignored so this test seam cannot replace the original error.
 fn render_top_level_error(report: &Report) {
+    if let Some(path) = std::env::var_os("CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT")
+        && let Some(snapshot) =
+            claudine::diagnostics::DiagnosticSnapshot::select(report.as_ref())
+        && let Ok(encoded) = serde_json::to_vec(&snapshot)
+    {
+        let _ = std::fs::write(path, encoded);
+    }
+
     // A lifecycle evaluation error already rendered its styled block to stderr
     // at its catch point (Decision #2), before any catch events fired. Suppress
     // the duplicate styled block here while still exiting non-zero.
@@ -269,6 +295,12 @@ async fn async_main(
     process_start: std::time::Instant,
 ) -> Result<()> {
     let mut cli = parse_cli_from(&argv);
+    let launch_mode = if matches!(cli.command, Some(Commands::Handle(_))) {
+        claudine::child_environment::LaunchDirectoryMode::ProviderHook
+    } else {
+        claudine::child_environment::LaunchDirectoryMode::Ordinary
+    };
+    claudine::child_environment::initialize_process_launch_directory(launch_mode)?;
     // Attach the partitioned agent tail to the composition command. The tail is
     // captured before clap and never reconstructed from clap matches or argv.
     inject_provider_tail(&mut cli, provider_tail);

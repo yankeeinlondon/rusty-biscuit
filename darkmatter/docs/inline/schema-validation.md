@@ -72,10 +72,31 @@ $schema: ./schemas/post.yaml
 
 The referenced file may be:
 
-- a YAML file whose root carries its own `$schema:` SimplifiedSchema property, or
+- a YAML file whose root uses one of the two SimplifiedSchema envelopes, or
 - a `.json` / `.yaml` file that is already a valid Draft 2020-12 JSON Schema.
 
-Darkmatter disambiguates by inspecting the file: a root `$schema` key whose value is a *mapping* means SimplifiedSchema; anything else (including a `$schema` string URI) is treated as raw JSON Schema. Remote (`http(s)://`) references are **not** supported — download the schema locally first.
+The SimplifiedSchema envelopes are either `$schema:` as the sole root key, or
+`kind: schema` together with a `types:` mapping:
+
+```yaml
+$schema:
+    title: string(required)
+```
+
+```yaml
+kind: schema
+types:
+    title: string(required)
+```
+
+Anything else is treated as raw JSON Schema, including a `$schema` string URI.
+A non-empty bare map whose string values all parse as SimplifiedSchema property
+definitions still remains raw JSON Schema and therefore constrains nothing. If
+its keys do not identify JSON Schema or a custom vocabulary, Darkmatter emits
+the `dm.schema.missing_simplified_envelope` warning without changing validity
+or exit status. Add either envelope above to make the file a SimplifiedSchema.
+Remote (`http(s)://`) references are **not** supported — download the schema
+locally first.
 
 ### 3. Root-level union
 
@@ -101,7 +122,7 @@ A few behaviours worth knowing:
 
 - `additionalProperties` is `true` — documents may carry extra tooling-specific frontmatter without tripping the schema.
 - Unrecognized constraints are a **hard error at compile time**, so typos surface immediately rather than being silently ignored.
-- `file` is **lazy by default**: a bare `file` value is only checked for syntactic validity (it must parse as a biscuit-file reference) and is never resolved against the filesystem. Add `eager` (`file(eager)`) to require the referenced file to exist. For document-backed validation, an implicit reference such as `spec.md` searches the containing repository before the prompt document's directory; an explicit `./spec.md` or `../spec.md` is source-relative only. The captured launch area is retained for diagnostics, not searched. Only legacy callers that configure no document anchor resolve from the ambient current working directory. `match(...)` shapes path *suggestions* only and never rejects a value.
+- `file` is **lazy by default**: it builds the reference's candidate plan and materializes the first absolute candidate without probing the filesystem. Add `eager` (`file(eager)`) to require an existing regular file and materialize the first matching candidate. For document-backed validation, an implicit reference such as `spec.md` checks the prompt document's directory before the repository root; an explicit `./spec.md` or `../spec.md` is source-relative only. Caller-supplied values use the captured launch context, while the captured launch area is retained only as diagnostics for document-authored values. `match(...)` shapes path *suggestions* only and never rejects a value.
 
 ## Baseline Schemas
 
@@ -172,15 +193,21 @@ Schema validation also runs as an **always-on stage inside the compose pipeline*
 
 ```
 Apply --set / --state overrides
-  └─ Frontmatter Interpolation     ({{ var }})
-      └─ Schema Validation          ◄── here (bind + coerce + validate)
-          └─ Frontmatter Shell Expansion ($(cmd))
-              └─ … rest of pipeline
+  └─ Materialize schema-selected caller files (captured per-property origin)
+      └─ Frontmatter Interpolation ({{ var }})
+          └─ Schema Validation      ◄── here (bind + coerce + validate)
+              └─ Frontmatter Shell Expansion ($(cmd))
+                  └─ … rest of pipeline
 ```
 
 This placement is deliberate:
 
-- It runs **after** `--set` / `--state` and interpolation, so a schema-required field can be satisfied by an override or a template. A document with `spec: ""` plus `--set spec=design.md` validates fine — validation sees the *effective* frontmatter.
+- Before interpolation, the narrow projection prelude materializes
+  caller-owned values selected as eager or non-recursive lazy files from each
+  property's captured origin. It does not bind, coerce, validate, or normalize
+  document-authored values. This gives frontmatter expressions one stable
+  semantic value from their first lookup.
+- Full validation runs **after** `--set` / `--state` and interpolation, so a schema-required field can be satisfied by an override or a template. A document with `spec: ""` plus `--set spec=design.md` validates fine — validation sees the *effective* frontmatter.
 - It runs **before** shell expansion, preserving fail-fast: an invalid schema aborts the run before any side-effecting `$(...)` command executes.
 
 By default, `md compose` validates documents with no `$schema` against the
@@ -275,20 +302,36 @@ Coercion also never *parses into* a constrained string type: a number landing in
 
 For root unions, Darkmatter coerces against each arm in order and commits the first arm that validates post-coercion.
 
-### Eager-`file` value normalization
+### Schema-selected `file` value materialization
 
-Coercion has a sibling write-back pass that fires only on the **eager** `file` type. When a property is declared `file(eager)` (the eager marker is the compiled-schema `format: darkmatter-file`) and its value validates, the stored value is **rewritten to its resolved, repo-relative path** — the same projection `relative(value)` / `dirname(value)` already produce. After the rewrite, the document state is uniformly resolved: `spec` and `dirname(spec)` agree by construction, so an author never needs to hand-prepend `{{ctx.area}}` to make a derived path match.
+File materialization is a sibling of coercion. It runs only when the effective
+schema selects a `file` or `file(eager)` arm; an ordinary string is never parsed
+or probed merely because it looks path-shaped. The stored effective value is an
+**absolute native path**, while Markdown presentation keeps a separate portable
+spelling. Expressions, comparisons, lifecycle state, proxy handoffs, retries,
+and sequence tasks therefore retain one stable filesystem identity.
 
-The rewrite runs at the same two surfaces as coercion (the explicit library API and the compose stage's write-back) and is **idempotent**: re-validating an already-rewritten value is a fixpoint, so compose → re-compose never drifts.
+The materialization pass is idempotent: re-validating an already-materialized
+absolute value is a fixpoint, so compose → re-compose never drifts.
 
 **Triggered on:**
 
-- a present, non-null string value under `file(eager)` / `format: darkmatter-file` — including top-level properties, inline-object sub-properties, array-of-`file(eager)` elements, and the committed arm of a root or property union.
+- a present, non-null string selected by `file` or `file(eager)`, including
+  top-level properties, inline-object sub-properties, arrays, and the committed
+  arm of a root or property union;
+- eager values probe the ordered plan and require the first existing regular
+  file; lazy values materialize the first lexically normalized candidate
+  without probing;
+- caller-originated values use the captured launch context, document defaults
+  use that document's source context, proxy overlays use the proxying source,
+  and sequence parameters use the sequence document.
 
 **Left verbatim (never rewritten):**
 
 - `string`-typed properties, even when their value looks path-shaped — `string` is the literal-text contract.
-- bare (lazy) `file` properties — `format: darkmatter-file-reference` is syntax-only and may legitimately name a file that does not exist yet (e.g. a `review_file` this run is about to produce).
+- document-owned bare (lazy) `file` properties — `format: darkmatter-file-reference` is syntax-only and may legitimately name a file that does not exist yet (e.g. a `review_file` this run is about to produce). Caller records selected by a lazy file arm are materialized in the pre-interpolation input prelude without adding an existence check.
+- recursive lazy `file` values — they fail with a typed binding error because a
+  recursive plan has no single path shape without I/O; use `file(eager)`;
 - a value that resolves to a remote URL — there is no local path to project.
 - an absent or `null` optional `file(eager)` property.
 - a value still holding a `$(...)` shell expression or unresolved `{{ ... }}` template — the post-shell re-validation handles it once it expands.
@@ -297,14 +340,19 @@ The rewrite runs at the same two surfaces as coercion (the explicit library API 
 
 Stored values use `/` path separators on every OS, so a committed eager-`file` reference is portable across macOS, Linux, and Windows.
 
-Caller-originated eager-file overrides are the exception to the document-authored
-rewrite. A `set` value resolves against the caller's captured launch-area context
-and remains an absolute, native path in effective frontmatter. Path functions,
-comparisons, lifecycle state, and other typed consumers therefore retain the
-caller-owned filesystem identity. When that value is interpolated into Markdown
-body text, Darkmatter uses a separate portable presentation value; direct
-variables and static member/index selections share this presentation behavior
-without changing effective frontmatter.
+Caller records are the exception to the document-authored rewrite. Each record
+retains its raw value and captured file-resolution origin. Before frontmatter
+interpolation pass 1, an exactly selected eager or non-recursive lazy file arm
+materializes the semantic identity from that origin. Eager local files must
+exist; lazy local files bind the first ordered candidate without probing,
+HTTP(S) values remain typed remote identities, and recursive lazy references
+fail because no single unprobed identity exists. Path functions, comparisons,
+lifecycle state, and frontmatter expressions consume the native semantic
+identity. Markdown body text uses a separate portable presentation value;
+direct variables and static member/index selections share this presentation
+behavior without changing effective frontmatter. The raw record remains
+unchanged so fresh preparation can apply another active document's schema
+without recapturing ambient state.
 
 ## Interaction With `--set` and `--state`
 
@@ -316,9 +364,9 @@ md compose doc.md --set '{spec: "design.md"}'
 
 - `--state` fills missing or null values before validation.
 - `--set` overrides values before validation.
-- An eager-file `--set` value keeps its resolved absolute native identity in
-  effective frontmatter while body interpolation renders its separate portable
-  presentation value.
+- A caller `--set` value selected as an eager or non-recursive lazy file keeps
+  its materialized native identity in effective frontmatter while body
+  interpolation renders its separate portable presentation value.
 
 So `spec: ""` + `--set spec=design.md` validates, while `spec: "design.md"` + `--set spec=""` fails. The same applies to transcluded children: a parent's `::file set=` overlay is applied before the child's schema stage, so the parent can satisfy a child's required property.
 

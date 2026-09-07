@@ -22,6 +22,7 @@ use super::{
     schema_validation, shell_expansion, transclusion,
 };
 use serde_json::{Map, Value};
+use std::path::Path;
 use tracing::{info, instrument, trace};
 
 impl Markdown {
@@ -33,6 +34,7 @@ impl Markdown {
         // to exactly the groups this document names, and stays untouched when
         // it names none or when the caller chose the context themselves.
         options.upgrade_ambient_context_for(self);
+        options.ensure_file_resolution_context();
 
         // Resolve persistent cache root if configured
         let persistent_root = options.cache_root.as_ref().map(|root| {
@@ -115,7 +117,7 @@ impl Markdown {
     #[instrument(skip_all, fields(source = ?options.source))]
     pub(crate) fn run_compose_pipeline_internal(
         &mut self,
-        options: ComposeOptions,
+        mut options: ComposeOptions,
         runtime: &mut shell_expansion::types::PipelineRuntime,
     ) -> MarkdownResult<ComposeReport> {
         let source_id = match &options.source {
@@ -147,6 +149,22 @@ impl Markdown {
                 &options,
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion),
             );
+
+            // Caller file parameters are invocation-owned semantic inputs.
+            // Project them from their captured origins before the
+            // first frontmatter dependency graph consumes their values. The
+            // same schema assembly and projection are retained for validation,
+            // post-shell trigger matching, and final body presentation.
+            let mut trigger_registry = None;
+            let prepared_schemas =
+                schema_validation::prepare_schemas(self, &options, &mut trigger_registry)?;
+            let caller_projection = schema_validation::prepare_caller_projection(
+                self,
+                &options,
+                &prepared_schemas,
+            )?;
+            caller_projection.install(self);
+            caller_projection.install_provenance(&mut options);
 
             let shell_expansion_enabled =
                 options.is_enabled(ComposeOperation::FrontmatterShellExpansion);
@@ -224,15 +242,20 @@ impl Markdown {
             // disk; the post-shell pass below reuses that registry instead of
             // re-walking it (F8). Matching is re-evaluated against the current
             // frontmatter in each pass regardless.
-            let mut trigger_registry = None;
-            let mut presentation_overrides = std::collections::HashMap::new();
             {
                 let sv_start = perf.is_enabled().then(std::time::Instant::now);
+                let schema_consumer = runtime
+                    .transclusion
+                    .root_path()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| schema_validation::source_path(self, &options));
                 schema_validation::run_with_registry(
                     self,
                     &options,
-                    &mut trigger_registry,
-                    &mut presentation_overrides,
+                    &prepared_schemas,
+                    &caller_projection,
+                    &schema_consumer,
+                    &mut report,
                 )?;
                 if let Some(start) = sv_start {
                     perf.record(perf::PerfMetricKind::SchemaValidation, start.elapsed());
@@ -309,15 +332,34 @@ impl Markdown {
                     }
                 }
 
-                // Trigger activation is a function of the current frontmatter
-                // snapshot. Re-assemble after shell expansion and interpolation
-                // pass 2 so concrete values can activate or deactivate payloads.
+                // Schema applicability is a function of the current
+                // frontmatter snapshot. Re-assemble after shell expansion and
+                // interpolation pass 2 so concrete values can select a
+                // different root-union arm as well as activate or deactivate
+                // trigger payloads. Trigger schemas retain their established
+                // full post-shell validation pass; otherwise this stage only
+                // checks caller-file classification, leaving final coercion and
+                // optional-value scrubbing with the downstream schema owner.
                 if options.trigger_schemas {
+                    let schema_consumer = runtime
+                        .transclusion
+                        .root_path()
+                        .map(Path::to_path_buf)
+                        .unwrap_or_else(|| schema_validation::source_path(self, &options));
                     schema_validation::run_with_registry(
                         self,
                         &options,
-                        &mut trigger_registry,
-                        &mut presentation_overrides,
+                        &prepared_schemas,
+                        &caller_projection,
+                        &schema_consumer,
+                        &mut report,
+                    )?;
+                } else {
+                    schema_validation::verify_projection_stability(
+                        self,
+                        &options,
+                        &prepared_schemas,
+                        &caller_projection,
                     )?;
                 }
             }
@@ -343,7 +385,7 @@ impl Markdown {
                 .with_context(options.context().clone())
                 .with_allow_ctx_override(options.allow_ctx_override)
                 .with_name_coercion_keys(options.name_coercion_keys.clone())
-                .with_presentation_values(presentation_overrides)
+                .with_presentation_values(caller_projection.presentation_values())
                 .build()?;
             if let Some(start) = esb_start {
                 perf.record(perf::PerfMetricKind::EffectiveStateBuild, start.elapsed());

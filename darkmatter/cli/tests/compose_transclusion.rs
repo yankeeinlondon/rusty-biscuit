@@ -3,6 +3,18 @@ mod common;
 use common::md_cmd;
 use predicates::prelude::*;
 
+fn initialize_repository(root: &std::path::Path) {
+    let git_dir = root.join(".git");
+    std::fs::create_dir_all(git_dir.join("objects")).unwrap();
+    std::fs::create_dir_all(git_dir.join("refs/heads")).unwrap();
+    std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+    std::fs::write(
+        git_dir.join("config"),
+        "[core]\nrepositoryformatversion = 0\nbare = false\n",
+    )
+    .unwrap();
+}
+
 #[test]
 fn test_compose_set_variables_available_during_validation() {
     // Regression test: --set variables must be available during reference
@@ -30,6 +42,33 @@ fn test_compose_set_variables_available_during_validation() {
         .assert()
         .success()
         .stdout(predicate::str::contains("Plan content here."));
+}
+
+#[test]
+fn compose_with_the_shipped_baseline_renders_ctx_cwd_from_the_launch_directory() {
+    let launch = tempfile::tempdir().unwrap();
+    let prompt = launch.path().join("cwd.md");
+    std::fs::write(&prompt, "Launch: {{ ctx.cwd }}\n").unwrap();
+
+    // ctx.cwd carries the child's `current_dir()` spelling: symlink-resolved
+    // on Unix (macOS /var/folders), exactly as-launched on Windows, where CI
+    // tempdirs use 8.3 short names that `canonicalize` would re-spell.
+    #[cfg(windows)]
+    let expected_launch = launch.path().to_path_buf();
+    #[cfg(not(windows))]
+    let expected_launch =
+        std::fs::canonicalize(launch.path()).expect("canonical launch directory");
+
+    md_cmd()
+        .current_dir(launch.path())
+        .arg("compose")
+        .arg(&prompt)
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(format!(
+            "Launch: {}",
+            biscuit_file::to_portable_string(&expected_launch)
+        )));
 }
 
 #[test]
@@ -64,7 +103,7 @@ fn test_compose_state_variables_available_during_validation() {
 fn test_compose_link_relative_same_repo() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("repo");
-    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    initialize_repository(&repo);
     let docs = repo.join("docs");
     let assets = repo.join("assets");
     std::fs::create_dir_all(&docs).unwrap();
@@ -110,7 +149,7 @@ fn test_compose_link_relative_same_repo() {
 fn test_compose_link_transcluded_child() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("repo");
-    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    initialize_repository(&repo);
 
     let docs = repo.join("docs");
     let components = repo.join("components");
@@ -217,7 +256,7 @@ fn test_compose_env_var_substitution_one_warning() {
 fn test_compose_html_spaced_attributes() {
     let dir = tempfile::tempdir().unwrap();
     let repo = dir.path().join("repo");
-    std::fs::create_dir_all(repo.join(".git")).unwrap();
+    initialize_repository(&repo);
 
     let page_file = repo.join("page.md");
     let other_file = repo.join("other.md");

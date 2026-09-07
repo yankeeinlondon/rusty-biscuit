@@ -7,6 +7,7 @@ mod docs;
 mod git;
 mod groups;
 mod host;
+mod invocation;
 mod languages;
 mod repo;
 mod snapshot;
@@ -30,6 +31,35 @@ pub(super) type CaptureResult = (
 pub use groups::{ContextGroup, ContextRequirements};
 pub use snapshot::ContextCaptureEvidence;
 pub(crate) use datetime::populate_datetime;
+
+fn capture_repository_scope_catalog(
+    base_dir: &Path,
+) -> Option<biscuit_file::RepositoryScopeCatalog> {
+    let capture = snapshot::ContextCapture::new(
+        base_dir,
+        &[ContextGroup::Repo],
+        Ok(base_dir.to_path_buf()),
+    );
+    let root = capture.repo_root.as_deref()?;
+    match capture.repo_info.as_ref() {
+        Some(repo) => super::repository_scope::repository_scope_catalog(repo, root).ok(),
+        None => biscuit_file::RepositoryScopeCatalog::new(
+            root,
+            Vec::new(),
+            Vec::new(),
+            biscuit_file::PackageAreaFallback::None,
+        )
+        .ok(),
+    }
+}
+
+pub fn capture_file_resolution_context(base_dir: &Path) -> biscuit_file::FileResolutionContext {
+    let mut context = biscuit_file::FileResolutionContext::new(base_dir);
+    if let Some(catalog) = capture_repository_scope_catalog(base_dir) {
+        context = context.with_repository_scope_catalog(catalog);
+    }
+    context
+}
 
 /// Capture all runtime context variables for the given base directory.
 pub(crate) fn capture_runtime_context(base_dir: &Path) -> CaptureResult {
@@ -58,9 +88,21 @@ fn capture_runtime_context_for_requirements(
     base_dir: &Path,
     requirements: &ContextRequirements,
 ) -> CaptureResult {
+    capture_runtime_context_for_requirements_with_cwd(
+        base_dir,
+        requirements,
+        Ok(base_dir.to_path_buf()),
+    )
+}
+
+fn capture_runtime_context_for_requirements_with_cwd(
+    base_dir: &Path,
+    requirements: &ContextRequirements,
+    invocation_cwd: std::io::Result<std::path::PathBuf>,
+) -> CaptureResult {
     let environment = std::env::vars().collect();
     let groups: Vec<_> = requirements.iter().collect();
-    let cap = snapshot::ContextCapture::new(base_dir, &groups);
+    let cap = snapshot::ContextCapture::new(base_dir, &groups, invocation_cwd);
     populate_capture(cap, requirements, environment)
 }
 
@@ -80,6 +122,10 @@ fn populate_capture(
     environment: HashMap<String, String>,
 ) -> CaptureResult {
     let mut values = Map::new();
+
+    if requirements.contains(ContextGroup::Invocation) {
+        invocation::populate_invocation(&cap, &mut values);
+    }
 
     if requirements.contains(ContextGroup::DateTime) {
         datetime::populate_datetime(&mut values);
@@ -141,5 +187,56 @@ mod tests {
         assert!(!values.contains_key("gpu"));
         assert!(diagnostics.is_empty());
         assert!(timings.is_empty());
+    }
+
+    #[test]
+    fn cwd_capture_is_absolute_portable_and_repository_independent() {
+        let outside = tempfile::tempdir().unwrap();
+        let requirements = ContextRequirements::from_groups([ContextGroup::Invocation]);
+        let (values, diagnostics, timings, _) = capture_runtime_context_for_requirements_with_cwd(
+            outside.path(),
+            &requirements,
+            Ok(outside.path().to_path_buf()),
+        );
+
+        let cwd = values.get("cwd").and_then(Value::as_str).expect("ctx.cwd");
+        assert_eq!(cwd, biscuit_file::to_portable_string(outside.path()));
+        assert!(Path::new(cwd).is_absolute());
+        assert!(!values.contains_key("repo_root"));
+        assert!(diagnostics.is_empty());
+        assert!(timings.is_empty());
+    }
+
+    #[test]
+    fn cwd_capture_failure_is_null_with_a_partial_diagnostic() {
+        let outside = tempfile::tempdir().unwrap();
+        let requirements = ContextRequirements::from_groups([ContextGroup::Invocation]);
+        let (values, diagnostics, timings, _) = capture_runtime_context_for_requirements_with_cwd(
+            outside.path(),
+            &requirements,
+            Err(std::io::Error::other("forced current directory failure")),
+        );
+
+        assert_eq!(values.get("cwd"), Some(&Value::Null));
+        assert!(diagnostics.iter().any(|diagnostic| matches!(
+            diagnostic,
+            ContextMergeDiagnostic::PartialRuntimeCapture { area: "invocation.cwd", detail }
+                if detail.contains("forced current directory failure")
+        )));
+        assert!(timings.is_empty());
+    }
+
+    #[test]
+    fn invocation_projection_has_no_ambient_cwd_read() {
+        for source in [
+            include_str!("invocation.rs"),
+            include_str!("groups.rs"),
+            include_str!("snapshot.rs"),
+        ] {
+            assert!(
+                !source.contains(concat!("current", "_dir(")),
+                "invocation capture must consume boundary evidence instead of rediscovering CWD",
+            );
+        }
     }
 }

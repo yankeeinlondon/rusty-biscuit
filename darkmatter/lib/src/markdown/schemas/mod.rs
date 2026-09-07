@@ -22,7 +22,7 @@
 //!   never a validation keyword.)
 //! - [`validate`] — `Validator` construction + LRU [`ValidatorCache`].
 //! - [`rewrite`] — eager-`file` value normalization: rewrites a present
-//!   `file(eager)`-typed value to its repo-relative resolved path after
+//!   `file(eager)`-typed value to its document-relative resolved path after
 //!   validation accepts it.
 //! - [`resolve`] — `$schema` resolution and baseline merge.
 //! - [`about`] — typed descriptor catalog that backs `md schema about`.
@@ -50,6 +50,7 @@
 //! [`SchemaError`]: crate::markdown::schemas::errors::SchemaError
 
 pub mod about;
+mod advisory;
 pub mod clean;
 pub mod coerce;
 pub mod completion;
@@ -66,7 +67,7 @@ pub mod triggers;
 pub mod validate;
 
 use std::{
-    collections::HashSet,
+    collections::{BTreeSet, HashSet},
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -84,6 +85,7 @@ pub use about::{
     schema_type_descriptors, validation_behavior_descriptors, match_safe_constraint_descriptors,
     trigger_grammar_descriptors,
 };
+pub use advisory::{SchemaAdvisory, SchemaAdvisoryKind};
 pub use clean::{
     CleanBaselineSchema, CleanSchemaConfig, CleanSchemaContext, SchemaCleanAnalysis,
     analyze_frontmatter, schema_result_set_identical,
@@ -256,6 +258,7 @@ struct BaselineSchema {
     /// refcount bump) instead of deep-cloning the whole baseline schema on the
     /// common baseline-only / baseline+document paths (F29).
     json_schema: Arc<Value>,
+    advisories: Vec<SchemaAdvisory>,
 }
 
 /// A resolved trigger payload layer, ready to merge into the effective schema.
@@ -267,6 +270,7 @@ struct TriggerLayer {
     json_schema: Value,
     /// Payload dependency edges (referenced files + imports + examples).
     dependencies: Vec<PathBuf>,
+    advisories: Vec<SchemaAdvisory>,
 }
 
 impl DarkmatterSchemas {
@@ -279,7 +283,7 @@ impl DarkmatterSchemas {
     ///
     /// Per D2 the launch area is **not** a resolution input for a
     /// document-authored `format: darkmatter-file` value: those resolve
-    /// repository-first then against the document directory, never the launch
+    /// document-first then against the repository root, never the launch
     /// area or the ambient CWD. This anchor is retained for structural parity
     /// with the validator-cache identity (it still participates in
     /// `ComposeOptions`/cache identity) but does not change the resolved path.
@@ -314,7 +318,7 @@ impl DarkmatterSchemas {
             message: "baseline could not be converted to JSON Schema".into(),
             source: Some(Box::new(err)),
         })?;
-        self.set_baseline_json(json)?;
+        self.set_baseline_json(json, Vec::new())?;
         Ok(self)
     }
 
@@ -340,7 +344,7 @@ impl DarkmatterSchemas {
                     source: Some(Box::new(other)),
                 },
             })?;
-        self.set_baseline_json(resolved.json_schema)?;
+        self.set_baseline_json(resolved.json_schema, resolved.advisories)?;
         Ok(self)
     }
 
@@ -351,7 +355,7 @@ impl DarkmatterSchemas {
     /// Returns [`SchemaError::Baseline`] when the value is not a simple
     /// object schema.
     pub fn with_baseline_json_schema(mut self, value: Value) -> Result<Self, SchemaError> {
-        self.set_baseline_json(value)?;
+        self.set_baseline_json(value, Vec::new())?;
         Ok(self)
     }
 
@@ -364,14 +368,22 @@ impl DarkmatterSchemas {
     pub fn with_darkmatter_baseline_json_schema(mut self) -> Result<Self, SchemaError> {
         let json_schema = Arc::clone(darkmatter_base_json_schema_arc());
         resolve::validate_baseline_schema(&json_schema)?;
-        self.baseline = Some(BaselineSchema { json_schema });
+        self.baseline = Some(BaselineSchema {
+            json_schema,
+            advisories: Vec::new(),
+        });
         Ok(self)
     }
 
-    fn set_baseline_json(&mut self, value: Value) -> Result<(), SchemaError> {
+    fn set_baseline_json(
+        &mut self,
+        value: Value,
+        advisories: Vec<SchemaAdvisory>,
+    ) -> Result<(), SchemaError> {
         resolve::validate_baseline_schema(&value)?;
         self.baseline = Some(BaselineSchema {
             json_schema: Arc::new(value),
+            advisories,
         });
         Ok(())
     }
@@ -561,6 +573,11 @@ impl DarkmatterSchemas {
             &merged_json,
         );
         let dependencies = build_dependencies(resolved.as_ref(), &trigger_layers);
+        let advisories = build_advisories(
+            self.baseline.as_ref(),
+            &trigger_layers,
+            resolved.as_ref(),
+        );
         Ok(Some(EffectiveSchema {
             simplified: resolved.and_then(|r| r.simplified),
             json_schema: merged_json,
@@ -571,6 +588,7 @@ impl DarkmatterSchemas {
             file_ref_fallback_dir: self.cache.file_ref_fallback_dir().map(Path::to_path_buf),
             file_resolution_context: self.file_resolution_context.clone(),
             dependencies,
+            advisories,
         }))
     }
 
@@ -613,20 +631,25 @@ impl DarkmatterSchemas {
             if !eval.matched {
                 continue;
             }
-            let (json_schema, dependencies) = if pre_resolved {
+            let (json_schema, dependencies, advisories) = if pre_resolved {
                 let payload = &registry.payloads[idx];
-                (payload.json_schema.clone(), payload.dependencies.clone())
+                (
+                    payload.json_schema.clone(),
+                    payload.dependencies.clone(),
+                    payload.advisories.clone(),
+                )
             } else {
                 let payload = triggers::assemble::resolve_trigger_payload(
                     eval.trigger,
                     &registry.roots,
                 )?;
-                (payload.json_schema, payload.dependencies)
+                (payload.json_schema, payload.dependencies, payload.advisories)
             };
             layers.push(TriggerLayer {
                 source: eval.trigger.source.clone(),
                 json_schema,
                 dependencies,
+                advisories,
             });
         }
         Ok(layers)
@@ -654,6 +677,7 @@ impl DarkmatterSchemas {
                 valid: true,
                 problems: Vec::new(),
                 pending: Vec::new(),
+                advisories: Vec::new(),
             }),
         }
     }
@@ -694,7 +718,7 @@ pub struct EffectiveSchema {
     /// `None` for ordinary schemas.
     arm_validators: Option<Vec<Arc<Validator>>>,
     /// Prompt document directory used to reproduce the validator's
-    /// repository-first, then source-relative candidate plan in diagnostics.
+    /// document-first, then repository-relative candidate plan in diagnostics.
     base_dir: Option<PathBuf>,
     /// Captured launch-area metadata retained for file-reference diagnostics.
     file_ref_fallback_dir: Option<PathBuf>,
@@ -712,6 +736,9 @@ pub struct EffectiveSchema {
     /// otherwise unchanged) must invalidate a cached [`EffectiveSchema`]. The DMLS
     /// overlay cache content-hashes each entry to honor this.
     dependencies: Vec<PathBuf>,
+    /// Non-fatal findings produced while resolving the effective schema's
+    /// referenced files, sorted and deduplicated by semantic kind and path.
+    advisories: Vec<SchemaAdvisory>,
 }
 
 impl EffectiveSchema {
@@ -727,12 +754,17 @@ impl EffectiveSchema {
         &self.dependencies
     }
 
+    /// Non-fatal findings discovered while resolving this effective schema.
+    pub fn advisories(&self) -> &[SchemaAdvisory] {
+        &self.advisories
+    }
+
     /// Validates a frontmatter JSON value against this schema. Equivalent to
     /// [`Self::validate_with_positions`] with an empty position map (problems
     /// will carry no line/column information).
     ///
     /// Read-only: the caller's `frontmatter` is never mutated. To rewrite
-    /// eager-`file` values to their resolved repo-relative paths, call
+    /// eager-`file` values to their resolved document-relative paths, call
     /// [`Self::normalize_frontmatter`] explicitly.
     pub fn validate(&self, frontmatter: &Value) -> ValidationReport {
         self.validate_with_positions(frontmatter, &PositionMap::new())
@@ -748,7 +780,7 @@ impl EffectiveSchema {
     /// [`coerce::coerce_frontmatter`]) on a working copy before validation, so
     /// the report reflects post-coercion validity. No input is mutated —
     /// eager-`file` values are left in their raw caller-supplied form. To
-    /// rewrite them to their resolved repo-relative paths, call
+    /// rewrite them to their resolved document-relative paths, call
     /// [`Self::normalize_frontmatter`] explicitly on an already-valid
     /// instance.
     pub fn validate_with_positions(
@@ -842,6 +874,7 @@ impl EffectiveSchema {
             valid: problems.is_empty(),
             problems,
             pending: Vec::new(),
+            advisories: self.advisories.clone(),
         }
     }
 
@@ -890,7 +923,7 @@ impl EffectiveSchema {
     }
 
     /// Normalizes eager-`file`-typed frontmatter values to their resolved
-    /// repo-relative paths.
+    /// document-relative paths.
     ///
     /// Walks the compiled schema for every present, non-null value under an
     /// eager `format: darkmatter-file` marker and rewrites it to the same
@@ -918,7 +951,7 @@ impl EffectiveSchema {
     /// ## Examples
     ///
     /// A raw caller-supplied reference under an eager `file(eager)` property is
-    /// rewritten to its repo-relative resolved path — the same projection
+    /// rewritten to its document-relative resolved path — the same projection
     /// `relative(value)` / `dirname(value)` already produce:
     ///
     /// ```no_run
@@ -939,8 +972,8 @@ impl EffectiveSchema {
     ///
     /// let input = serde_json::json!({ "spec": "./spec.md" });
     /// let outcome = effective.normalize_frontmatter(&input, &HashSet::new());
-    /// // Raw `./spec.md` -> repo-relative `area/spec.md`.
-    /// assert_eq!(outcome.value["spec"], serde_json::json!("area/spec.md"));
+    /// // Raw `./spec.md` -> document-relative `spec.md`.
+    /// assert_eq!(outcome.value["spec"], serde_json::json!("spec.md"));
     /// // The caller's input is never mutated.
     /// assert_eq!(input["spec"], serde_json::json!("./spec.md"));
     /// ```
@@ -992,6 +1025,8 @@ pub struct ValidationReport {
     /// [`EffectiveSchema::validate_with_options`], which mirrors the compose
     /// deferral rules without executing anything.
     pub pending: Vec<PendingValue>,
+    /// Non-fatal findings discovered while resolving the effective schema.
+    pub advisories: Vec<SchemaAdvisory>,
 }
 
 /// Coarse classification of a validation problem.
@@ -1059,6 +1094,18 @@ pub struct ValidationProblem {
     /// [`code`](Self::code) is [`ValidationProblemCode::InvalidFileReference`];
     /// [`message`](Self::message) still carries the same rendered text.
     pub file_reference: Option<FileReferenceDiagnostic>,
+    /// Caller-owned resolution context retained when projection, rather than
+    /// ordinary document validation, produced the file-reference failure.
+    pub caller_file: Option<CallerFileReferenceProvenance>,
+}
+
+/// Resolution evidence attached to a caller-owned file validation problem.
+#[derive(Debug, Clone)]
+pub struct CallerFileReferenceProvenance {
+    /// The immutable context captured where the caller authored the value.
+    pub origin: biscuit_file::FileResolutionContext,
+    /// The selected or first attempted candidate, when the reference parsed.
+    pub candidate: Option<biscuit_file::ResolutionCandidate>,
 }
 
 /// Fine-grained classification of a [`ValidationProblem`] (R-5 Priority 1).
@@ -1428,6 +1475,24 @@ fn build_dependencies(
     deps.sort();
     deps.dedup();
     deps
+}
+
+fn build_advisories(
+    baseline: Option<&BaselineSchema>,
+    trigger_layers: &[TriggerLayer],
+    resolved: Option<&resolve::ResolvedSchema>,
+) -> Vec<SchemaAdvisory> {
+    let mut advisories = BTreeSet::new();
+    if let Some(baseline) = baseline {
+        advisories.extend(baseline.advisories.iter().cloned());
+    }
+    for layer in trigger_layers {
+        advisories.extend(layer.advisories.iter().cloned());
+    }
+    if let Some(resolved) = resolved {
+        advisories.extend(resolved.advisories.iter().cloned());
+    }
+    advisories.into_iter().collect()
 }
 
 pub(crate) fn positions_for(source: &Markdown) -> PositionMap {
@@ -2051,12 +2116,12 @@ mod claudine_compat_tests {
     }
 
     /// `normalize_frontmatter` rewrites a present eager-`file` value to its
-    /// repo-relative resolved path, and the caller's input `Value` is left
+    /// document-relative resolved path, and the caller's input `Value` is left
     /// byte-identical (Decision #3: pure).
     #[test]
     fn normalize_frontmatter_rewrites_eager_file_and_leaves_input_untouched() {
         let repo = tempfile::tempdir().expect("tempdir");
-        // A `.git` marker makes the projection git-root-relative.
+        // The repository marker provides the secondary implicit candidate.
         std::fs::create_dir_all(repo.path().join(".git")).expect("git marker");
         std::fs::create_dir_all(repo.path().join("area")).expect("area dir");
         std::fs::write(repo.path().join("area/spec.md"), "# Spec\n").expect("write spec");
@@ -2071,7 +2136,7 @@ mod claudine_compat_tests {
         let pending = HashSet::new();
         let outcome = effective.normalize_frontmatter(&input, &pending);
         assert!(outcome.changed, "expected the eager-file value to be rewritten");
-        assert_eq!(outcome.value["spec"], serde_json::json!("area/spec.md"));
+        assert_eq!(outcome.value["spec"], serde_json::json!("spec.md"));
         // Decision #3: the caller's input is never mutated.
         assert_eq!(input, snapshot, "normalize_frontmatter must not mutate its input");
     }
@@ -2102,7 +2167,7 @@ mod claudine_compat_tests {
         // Pending key is left verbatim.
         assert_eq!(outcome.value["spec"], serde_json::json!("$(echo spec.md)"));
         // Concrete sibling is rewritten.
-        assert_eq!(outcome.value["design"], serde_json::json!("area/design.md"));
+        assert_eq!(outcome.value["design"], serde_json::json!("design.md"));
     }
 
     /// Decision #3 regression: `validate_with_positions` keeps the documented
@@ -2185,6 +2250,26 @@ mod claudine_compat_tests {
             md.frontmatter().as_map().get("spec"),
             Some(&serde_json::json!("./spec.md")),
             "DarkmatterSchemas::validate must not rewrite the stored eager-file value",
+        );
+    }
+
+    #[test]
+    fn darkmatter_schemas_validate_does_not_materialize_lazy_file_frontmatter() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let prompt_path = dir.path().join("prompt.md");
+        std::fs::write(
+            &prompt_path,
+            "---\n$schema:\n  spec: file\nspec: missing.md\n---\nbody\n",
+        )
+        .expect("write prompt");
+
+        let md = Markdown::try_from(prompt_path.as_path()).expect("read prompt");
+        let report = DarkmatterSchemas::new().validate(&md).expect("validate");
+        assert!(report.valid, "expected valid: {:?}", report.problems);
+        assert_eq!(
+            md.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("missing.md")),
+            "validation-only APIs must not materialize a lazy caller-style value",
         );
     }
 

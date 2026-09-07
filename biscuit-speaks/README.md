@@ -48,7 +48,9 @@ This library can use any of the following TTS providers found on the host (or wi
 
 <br/>
 
-🔺 - certain TTS providers only produce an _audio file_ and then rely on other software on the host to play the audio; we use the `Playa` library to detect and use the best headless audio player on the host.
+🔺 - certain providers produce an audio file. With the `playa` feature enabled,
+`biscuit-speaks` plays it through Playa's native-first pipeline with
+capability-ranked host-player fallback.
 
 ## Useful Defaults
 
@@ -115,9 +117,37 @@ Speak::new("Custom voice")
     .play()
     .await?;
 
-// Fire-and-forget (ignores errors)
+// Best-effort foreground convenience (ignores errors)
 biscuit_speaks::speak_when_able("Task complete!", &TtsConfig::default()).await;
+
+// Durable fire-and-forget playback; returns after ordered handoff
+let job_id = Speak::new("Task complete!").play_detached().await?;
 ```
+
+### Foreground reports and detached delivery
+
+`play_with_result` returns `SpeakResult`. File-producing providers populate its
+optional `playback: SpeakPlaybackReport` with a lossless, always-compiled
+projection of Playa's route, expected/elapsed duration, and completion verdict.
+Direct streaming providers (`say`, SAPI, and eSpeak) leave this field `None`
+because their duration cannot be verified.
+
+`play_detached` publishes speech to Playa's private per-user queue and returns
+after durable handoff. Cache hits publish a ready file job immediately. Cache
+misses for Kokoro, EchoGarden, gTTS, and ElevenLabs first reserve their global
+sequence, then a detached `so-you-say` helper synthesizes and atomically marks
+that same slot ready. This prevents a later sound from overtaking slow
+synthesis. The scheduler waits up to ten minutes; helper failure or timeout
+marks the slot failed and advances the queue. macOS `say`, Windows SAPI, and
+eSpeak publish direct command jobs with lossless arguments.
+
+Detached delivery preserves the foreground provider selection and failover
+order. Providers represented only by enum variants remain explicitly
+unsupported for detached work. Playback is globally serialized with Playa and
+Claudine audio, survives requester exit, and remains best-effort after handoff.
+Preparation records are private and may contain speech text; journal/status
+output redacts them. `PLAYA_DRY_RUN=1` bypasses synthesis, cache, spool, journal,
+and subprocess work.
 
 ## Deferred Providers
 
@@ -142,6 +172,7 @@ These providers are often found on hosts and may be added to this library in the
 | `ELEVEN_LABS_API_KEY` | ElevenLabs API key (alternative)    |
 | `TTS_PROVIDER`        | Override default provider selection |
 | `BISCUIT_SPEAKS_CACHE` | Path to the provider capability cache **file**, replacing `~/.biscuit-speaks-cache.json`. Its parent directory must already exist. |
+| `PLAYA_DRY_RUN` | `1`/`true` skips synthesis, playback, cache, and detached-spool side effects |
 
 ## API Overview
 

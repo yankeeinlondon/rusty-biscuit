@@ -578,11 +578,12 @@ pub fn query_voices_for_provider(provider: &str) -> Vec<(String, biscuit_speaks:
 }
 
 fn query_say_voices() -> Vec<String> {
-    let output = match std::process::Command::new("say")
-        .arg("-v")
-        .arg("?")
-        .output()
-    {
+    let mut command = std::process::Command::new("say");
+    command.arg("-v").arg("?");
+    if claudine::child_environment::contribute_child_environment(&mut command).is_err() {
+        return vec![];
+    }
+    let output = match command.output() {
         Ok(o) => o,
         Err(_) => return vec![],
     };
@@ -599,7 +600,12 @@ fn query_say_voices() -> Vec<String> {
 }
 
 fn query_espeak_voices(binary: &str) -> Vec<String> {
-    let output = match std::process::Command::new(binary).arg("--voices").output() {
+    let mut command = std::process::Command::new(binary);
+    command.arg("--voices");
+    if claudine::child_environment::contribute_child_environment(&mut command).is_err() {
+        return vec![];
+    }
+    let output = match command.output() {
         Ok(o) => o,
         Err(_) => return vec![],
     };

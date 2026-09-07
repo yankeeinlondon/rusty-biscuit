@@ -1,6 +1,6 @@
 //! `md hash` subcommand implementation.
 
-use crate::io::{load_markdown, resolve_file_path};
+use crate::io::{load_markdown, load_markdown_text};
 use biscuit_hash::xx_hash;
 use color_eyre::eyre::{Context, Result, eyre};
 use darkmatter::markdown::hash::{
@@ -43,16 +43,20 @@ pub fn run_hash(
         return run_hash_directory(path, &options, save, diff);
     }
 
+    if save {
+        let input_path = input
+            .ok_or_else(|| eyre!("--save requires an input file path (stdin is not supported)"))?;
+        let (resolved, source, md) = load_markdown_text(input_path)?;
+        let stored = parse_stored_hash(&md, &options)?;
+        return run_hash_save(&md, &source, &resolved, stored.as_ref(), &options);
+    }
+
     let md = load_markdown(input)?;
     let stored = parse_stored_hash(&md, &options)?;
 
     if diff {
         return run_hash_diff(&md, stored.as_ref(), &options);
     }
-    if save {
-        return run_hash_save(&md, input, stored.as_ref(), &options);
-    }
-
     // Bare mode: select the kind (forced, else stored, else simple) and print.
     let selected = select_kind(stored.map(|s| s.kind), options.forced_kind);
     let computed = md.compute_hash(selected, &options);
@@ -166,14 +170,11 @@ fn run_hash_diff(
 /// success, whether or not a write was needed.
 fn run_hash_save(
     md: &Markdown,
-    input: Option<&PathBuf>,
+    source: &str,
+    resolved: &std::path::Path,
     stored: Option<&StoredHash>,
     options: &MdHashOptions,
 ) -> Result<()> {
-    let input_path = input
-        .filter(|p| p.to_str() != Some("-"))
-        .ok_or_else(|| eyre!("--save requires an input file path (stdin is not supported)"))?;
-
     let decision = md.plan_hash_save(stored, options)?;
 
     // A first baseline has nothing to compare against, so it has no explanation.
@@ -186,9 +187,10 @@ fn run_hash_save(
 
     let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
-    if let Some(written) = md.apply_hash_save(&decision, options, &today) {
-        let resolved = resolve_file_path(input_path)?;
-        std::fs::write(&resolved, written)
+    if let Some(written) = darkmatter::markdown::hash::apply_hash_save_text(
+        source, &decision, options, &today,
+    )? {
+        std::fs::write(resolved, written)
             .wrap_err_with(|| format!("Failed to write hash to {:?}", resolved))?;
     }
 

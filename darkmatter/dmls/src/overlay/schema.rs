@@ -16,12 +16,11 @@ use std::sync::Arc;
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::ComposeSource;
-use darkmatter::markdown::compose::find_git_root_from;
 use darkmatter::markdown::schemas::resolve::{merge_baseline, resolve_schema};
 use darkmatter::markdown::schemas::{
     DarkmatterSchemas, EffectiveSchema, PatternKey, PropertyAtom, PropertyDef, SchemaArm,
-    SchemaError, SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind, SimplifiedSchema,
-    SimplifiedType, StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr,
+    SchemaAdvisory, SchemaError, SchemaShape, SchemaSourceMap, SchemaSourcePath, SchemaSpanKind,
+    SimplifiedSchema, SimplifiedType, StandaloneSchemaDocument, StandaloneSchemaEnvelope, TypeExpr,
     darkmatter_base_json_schema_ref, darkmatter_base_schema, triggers::TriggerRegistry,
 };
 use globset::{Glob, GlobSetBuilder};
@@ -843,6 +842,8 @@ fn atoms(definition: &PropertyDef) -> &[PropertyAtom] {
 pub struct SchemaBundle {
     /// The layered effective schema (base + extensions + document `$schema`).
     pub effective: EffectiveSchema,
+    /// Non-fatal findings discovered while resolving referenced schemas.
+    pub advisories: Vec<SchemaAdvisory>,
     /// The document's frontmatter as JSON, with the `$schema` control key
     /// stripped (it is not document data).
     pub frontmatter_json: Value,
@@ -909,6 +910,7 @@ pub fn assemble(
 
     match schemas.effective_for(&md)? {
         Some(effective) => Ok(Some(SchemaBundle {
+            advisories: effective.advisories().to_vec(),
             effective,
             frontmatter_json: frontmatter_json(&md),
             extension_shapes,
@@ -929,11 +931,7 @@ pub fn trigger_boundary(doc_path: &Path, workspace_roots: &[PathBuf]) -> Option<
         .iter()
         .filter(|root| doc_path.starts_with(root))
         .max_by_key(|root| root.components().count())?;
-    let start = doc_path.parent().unwrap_or(doc_path);
-    match find_git_root_from(start) {
-        Some(repo) if repo.starts_with(workspace) => Some(repo),
-        _ => Some(workspace.clone()),
-    }
+    Some(workspace.clone())
 }
 
 /// The Darkmatter base baseline with matching extension baselines merged over

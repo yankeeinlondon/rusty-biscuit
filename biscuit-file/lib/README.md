@@ -11,7 +11,7 @@ Core library for file format parsing, conversion, and detection as well as file 
 | `json5` | yes | JSON5 parsing and conversion via `json-five` |
 | `extract` | yes | PDF text extraction via `pdf-extract` |
 | `lopdf` | yes | PDF table-of-contents extraction via `lopdf` |
-| `file-reference` | yes | File reference parsing and resolution via `git2`, `cargo_metadata`, `walkdir` |
+| `file-reference` | yes | File reference parsing and resolution via `gix` and `walkdir` |
 | `pdfium` | no | High-fidelity PDF extraction via `pdfium-render` |
 | `schema` | no | JSON Schema validation for TOML/YAML |
 | `full` | no | All features enabled |
@@ -25,8 +25,9 @@ Parse compact file descriptors and resolve them lazily against runtime context (
 Supported reference types:
 
 - **Relative** (`./foo.md`) and **Absolute** (`/path/to/file`)
-- **Magic** (`@docs/spec.md`) -- searches repo root, HOME, and custom paths
-- **Package** (`!README.md`) -- resolves from package area in a Cargo workspace
+- **Magic** (`@docs/spec.md`) -- searches custom, package, repository, and HOME roots
+- **Repository root** (`&README.md`) -- resolves exactly from the repository root
+- **Repository scoped** (`^README.md`) -- searches package, package-area, then repository roots
 - **Vault** (`vault:notes/today.md`) -- searches Obsidian vault roots
 - **Recursive** (`%foo.md`) -- walks directories to find a matching filename
 - **Interpolation** (`{{DIR}}/foo.md`) -- expands environment variables at resolution time

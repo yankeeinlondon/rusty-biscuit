@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "job_id": "job-0000000000000042",
+  "sequence": 42,
+  "enqueued_at": "2026-09-03T12:00:00Z",
+  "finished_at": "2026-09-03T12:00:07Z",
+  "source_kind": "speech_file",
+  "transition": "completed",
+  "outcome": {
+    "kind": "playback",
+    "route": "native",
+    "expected_millis": 5970,
+    "elapsed_millis": 6330,
+    "verdict": "complete"
+  }
+}

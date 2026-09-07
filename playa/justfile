@@ -63,9 +63,11 @@ install *args="":
 sanity:
     @just _sanity_all "playa playa-cli"
 
-# Test both library and CLI.
+# Test both library and CLI. The lib enables `native-playback,async` so the
+# async playback pipeline tests compile; nothing else in this area enables
+# `async`.
 test *args="":
-    @just _test_all "playa playa-cli" {{args}}
+    @just _test_all "playa --features native-playback,async; playa-cli" {{args}}
 
 # not applicable: playa has no real-terminal (Level-2) tests
 test-l2:
@@ -81,7 +83,7 @@ test-browser:
 
 # Real-device/audio-output tests. Skip-clean without audio sink.
 test-real *args="":
-    @just _test_real playa {{args}}
+    @just _test_real playa --features native-playback {{args}}
     @just _test_real playa-cli {{args}}
 
 # Lint both the library and CLI
@@ -135,7 +137,7 @@ install-linux-native *args="":
     echo
     echo -e "{{ BOLD }}{{ YELLOW }}Installing {{ CLI_NAME }} with Linux native audio{{ RESET }}"
     echo
-    cargo install --path {{ CLI_PATH }} --features sfx-native-audio {{ args }} || ( playa effect error-2 2>/dev/null; exit 1 )
+    cargo install --locked --path {{ CLI_PATH }} --features sfx-native-audio {{ args }} || ( playa effect error-2 2>/dev/null; exit 1 )
     echo -e "{{ BOLD }}{{ BLUE }}{{ CLI_NAME }} installed{{ RESET }}"
     echo
     playa effect drop-4 2>/dev/null || true

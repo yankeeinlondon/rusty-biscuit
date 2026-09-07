@@ -36,7 +36,7 @@ pub(crate) enum DispatchConfig<'a> {
 }
 
 impl DispatchConfig<'_> {
-    fn execute_speak(
+    async fn execute_speak(
         self,
         message_template: &str,
         voice_override: Option<&str>,
@@ -50,7 +50,8 @@ impl DispatchConfig<'_> {
                 gender_override,
                 meta,
                 config,
-            ),
+            )
+            .await,
         }
     }
 }
@@ -184,7 +185,9 @@ pub(crate) async fn execute_actions(
                     command = tracing::field::Empty,
                 )
                 .entered();
-                config.execute_speak(message, voice.as_deref(), *gender, meta);
+                config
+                    .execute_speak(message, voice.as_deref(), *gender, meta)
+                    .await;
             }
             HookAction::Report { handler, when: _ } => {
                 let _action_span = info_span!(
@@ -433,18 +436,14 @@ fn execute_sound_effect(name: &str, volume: f32, speed: f32) {
         }
     };
 
-    tokio::task::spawn_blocking(move || {
-        let playback = match playa::Playa::from_bytes(effect.bytes().to_vec()) {
-            Ok(player) => player.volume(volume).speed(speed).play(),
-            Err(error) => {
-                warn!(%error, "Failed to construct sound effect player");
-                return;
+    match playa::Playa::from_bytes(effect.bytes().to_vec()) {
+        Ok(player) => {
+            if let Err(error) = player.volume(volume).speed(speed).play_detached() {
+                warn!(%error, "Sound effect handoff failed");
             }
-        };
-        if let Err(error) = playback {
-            warn!(%error, "Sound effect playback failed");
         }
-    });
+        Err(error) => warn!(%error, "Failed to construct sound effect player"),
+    }
 }
 
 #[cfg(test)]

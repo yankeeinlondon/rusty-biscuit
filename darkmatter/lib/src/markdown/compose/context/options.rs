@@ -16,6 +16,36 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 use url::Url;
 
+/// One immutable caller override paired with the context that authored it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CallerInputRecord {
+    raw: serde_json::Value,
+    origin: biscuit_file::FileResolutionContext,
+}
+
+impl CallerInputRecord {
+    /// Pair an unmodified caller value with its captured resolution context.
+    pub fn new(
+        raw: serde_json::Value,
+        origin: biscuit_file::FileResolutionContext,
+    ) -> Self {
+        Self { raw, origin }
+    }
+
+    /// The unmodified value supplied by the caller.
+    pub fn raw(&self) -> &serde_json::Value {
+        &self.raw
+    }
+
+    /// The immutable context in which the caller authored the value.
+    pub fn origin(&self) -> &biscuit_file::FileResolutionContext {
+        &self.origin
+    }
+}
+
+/// Immutable caller overrides keyed by the winning top-level property.
+pub type CallerInputRecords = std::collections::BTreeMap<String, CallerInputRecord>;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum SourceDerivation {
     #[default]
@@ -100,6 +130,13 @@ pub struct ComposeOptions {
     /// Unlike `external_state` which only fills missing/null keys,
     /// these values always win regardless of what the frontmatter says.
     pub(crate) set_overrides: Option<serde_json::Value>,
+
+    /// Raw caller overrides and their per-property authoring contexts.
+    pub(crate) caller_input_records: CallerInputRecords,
+
+    /// Schema-selected property/array occurrences mapped back to caller provenance.
+    pub(crate) caller_file_provenance:
+        std::collections::HashMap<String, super::super::expression::resolve_ctx::CallerFileProvenance>,
 
     // ── Transclusion ───────────────────────────────────────────────
     /// Maximum recursive transclusion depth before the pipeline
@@ -381,7 +418,7 @@ pub struct ComposeOptions {
     /// Per D2 the launch directory is a base for **top-level** references only;
     /// it is **not** a resolution fallback for references authored inside a
     /// nested document. Darkmatter's document-backed resolution is
-    /// repository-first then source-relative and never consults this directory,
+    /// document-first then repository-relative and never consults this directory,
     /// so it is retained solely as a diagnostic facet (the `fallback_dir` field
     /// of a file-reference diagnostic) and as an authored `ComposeOptions`
     /// identity input. It participates in neither the resolution candidate order
@@ -400,6 +437,7 @@ impl std::fmt::Debug for ComposeOptions {
             .field("source", &self.source)
             .field("external_state", &self.external_state)
             .field("set_overrides", &self.set_overrides)
+            .field("caller_input_records", &self.caller_input_records)
             .field("max_transclusion_depth", &self.max_transclusion_depth)
             .field("allow_remote_transclusion", &self.allow_remote_transclusion)
             .field("allow_local_markdown", &self.allow_local_markdown)
@@ -505,15 +543,29 @@ impl ComposeOptions {
         {
             return;
         }
-        let base_dir = match &self.source {
-            ComposeSource::File(path) => path
-                .parent()
-                .map(Path::to_path_buf)
-                .unwrap_or_else(|| PathBuf::from(".")),
-            _ => std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
-        };
+        let base_dir = self.context.anchor().to_path_buf();
         self.context = ComposeContext::capture_for_document(&base_dir, document);
         self.context_is_ambient_default = false;
+    }
+
+    /// Capture file-resolution evidence once for an ambient compatibility request.
+    pub(crate) fn ensure_file_resolution_context(&mut self) {
+        if self.file_resolution_context.is_some() {
+            return;
+        }
+        let ambient = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+        let base_dir = match &self.source {
+            ComposeSource::File(path) => {
+                let absolute = if path.is_absolute() {
+                    path.clone()
+                } else {
+                    ambient.join(path)
+                };
+                absolute.parent().map(Path::to_path_buf).unwrap_or(ambient)
+            }
+            _ => ambient,
+        };
+        self.file_resolution_context = Some(super::capture::capture_file_resolution_context(&base_dir));
     }
 
     /// Creates new compose options using a pre-captured context.
@@ -531,6 +583,8 @@ impl ComposeOptions {
             source: ComposeSource::Unknown,
             external_state: None,
             set_overrides: None,
+            caller_input_records: CallerInputRecords::new(),
+            caller_file_provenance: std::collections::HashMap::new(),
             max_transclusion_depth: 16,
             allow_remote_transclusion: false,
             allow_local_markdown: true,
@@ -647,6 +701,18 @@ impl ComposeOptions {
     pub fn with_set_overrides(mut self, overrides: serde_json::Value) -> Self {
         self.set_overrides = Some(overrides);
         self
+    }
+
+    /// Installs immutable raw caller values with their per-property origins.
+    #[must_use]
+    pub fn with_caller_input_records(mut self, records: CallerInputRecords) -> Self {
+        self.caller_input_records = records;
+        self
+    }
+
+    /// Immutable caller values retained independently from effective overrides.
+    pub fn caller_input_records(&self) -> &CallerInputRecords {
+        &self.caller_input_records
     }
 
     /// Sets the list spacing mode for the cleanup stage.
@@ -934,8 +1000,14 @@ impl ComposeOptions {
         self
     }
 
-    /// Supplies the immutable request snapshot used by every document-backed
-    /// file-reference surface in this compose run.
+    /// Supplies the immutable request snapshot used by every file-reference
+    /// surface in this compose run.
+    ///
+    /// Caller overrides without explicit [`CallerInputRecord`] provenance are
+    /// anchored at this context's request base. A separate
+    /// [`Self::with_file_ref_fallback_dir`] is retained for compatibility and
+    /// diagnostic metadata, but is not required for caller projection when
+    /// this context is present.
     #[must_use]
     pub fn with_file_resolution_context(
         mut self,
@@ -1020,15 +1092,7 @@ impl ComposeOptions {
                 ctx.package_area().map(Path::to_path_buf),
                 ctx.home_dir().map(Path::to_path_buf),
             ),
-            None => {
-                let repository_root =
-                    crate::markdown::compose::util::find_git_root_from(&base_dir);
-                let package_area = crate::markdown::compose::util::find_package_area_from(
-                    &base_dir,
-                    repository_root.as_deref(),
-                );
-                (repository_root, package_area, dirs::home_dir())
-            }
+            None => (None, None, dirs::home_dir()),
         };
         let mut context = super::super::expression::ResolutionContext::new(base_dir);
         context.repository_root = repository_root;
@@ -1039,6 +1103,7 @@ impl ComposeOptions {
         context.ctx_values = self.context_values_for_resolution();
         context.home_dir = home_dir;
         context.file_resolution_context = file_resolution_context;
+        context.caller_file_provenance = self.caller_file_provenance.clone();
         context
     }
 
@@ -1076,15 +1141,7 @@ impl ComposeOptions {
                 ctx.package_area().map(Path::to_path_buf),
                 ctx.home_dir().map(Path::to_path_buf),
             ),
-            None => {
-                let repository_root =
-                    crate::markdown::compose::util::find_git_root_from(&base_dir);
-                let package_area = crate::markdown::compose::util::find_package_area_from(
-                    &base_dir,
-                    repository_root.as_deref(),
-                );
-                (repository_root, package_area, dirs::home_dir())
-            }
+            None => (None, None, dirs::home_dir()),
         };
         let mut context = super::super::expression::ResolutionContext::new(base_dir);
         context.repository_root = repository_root;
@@ -1094,6 +1151,7 @@ impl ComposeOptions {
         context.ctx_values = self.context_values_for_resolution();
         context.home_dir = home_dir;
         context.file_resolution_context = file_resolution_context;
+        context.caller_file_provenance = self.caller_file_provenance.clone();
         context
     }
 
@@ -1115,6 +1173,7 @@ impl ComposeOptions {
             policy_root: self.shell_policy_root.clone(),
             working_directory: self.shell_working_directory.clone(),
             approval_handler: self.shell_approval_handler.clone(),
+            file_resolution_context: self.file_resolution_context.clone(),
             strip_ansi: self.shell_strip_ansi,
         }
     }
@@ -1881,6 +1940,8 @@ impl ComposeOptions {
             source,
             external_state,
             set_overrides,
+            caller_input_records,
+            caller_file_provenance,
             max_transclusion_depth,
             allow_remote_transclusion,
             allow_local_markdown,
@@ -1991,6 +2052,34 @@ impl ComposeOptions {
                 enc.str(&canonical_json_sorted(v));
             }
             None => enc.tag(0),
+        }
+        enc.field("caller_input_records");
+        enc.count(caller_input_records.len());
+        for (property, record) in caller_input_records {
+            enc.str(property);
+            enc.str(&canonical_json_sorted(record.raw()));
+            encode_file_resolution_context(&mut enc, &Some(record.origin().clone()));
+        }
+        enc.field("caller_file_provenance");
+        let mut projected: Vec<_> = caller_file_provenance.iter().collect();
+        projected.sort_by_key(|(occurrence, _)| *occurrence);
+        enc.count(projected.len());
+        for (occurrence, provenance) in projected {
+            enc.str(occurrence);
+            enc.str(&provenance.property);
+            enc.str(&provenance.reference);
+            encode_file_resolution_context(&mut enc, &Some(provenance.origin.clone()));
+            enc.path(&provenance.candidate);
+            enc.tag(match provenance.candidate_provenance {
+                biscuit_file::RootProvenance::Repository => 0,
+                biscuit_file::RootProvenance::Source => 1,
+                biscuit_file::RootProvenance::PackageRoot => 2,
+                biscuit_file::RootProvenance::PackageArea => 7,
+                biscuit_file::RootProvenance::Home => 3,
+                biscuit_file::RootProvenance::Magic => 4,
+                biscuit_file::RootProvenance::Vault => 5,
+                biscuit_file::RootProvenance::Absolute => 6,
+            });
         }
 
         enc.field("max_transclusion_depth");
@@ -2340,6 +2429,13 @@ impl ComposeOptions {
             }
             None => cenc.tag(0),
         }
+        cenc.field("caller_input_records");
+        cenc.count(caller_input_records.len());
+        for (property, record) in caller_input_records {
+            cenc.str(property);
+            cenc.str(&canonical_json_sorted(record.raw()));
+            encode_file_resolution_context(&mut cenc, &Some(record.origin().clone()));
+        }
         cenc.field("baseline_schema");
         match &baseline_canonical {
             Some(canonical) => {
@@ -2529,6 +2625,39 @@ mod tests {
              Construct with `new_with_context(ComposeContext::capture_for_document(..))` \
              when a document is in hand, or `ComposeContext::capture()` for a deliberate \
              full snapshot.",
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(darkmatter_file_cwd)]
+    fn ambient_context_upgrade_keeps_the_request_launch_anchor() {
+        struct RestoreCwd(PathBuf);
+        impl Drop for RestoreCwd {
+            fn drop(&mut self) {
+                let _ = std::env::set_current_dir(&self.0);
+            }
+        }
+
+        let original = std::env::current_dir().unwrap();
+        let _restore = RestoreCwd(original);
+        let launch = tempfile::tempdir().unwrap();
+        let target = tempfile::tempdir().unwrap();
+        std::env::set_current_dir(launch.path()).unwrap();
+        // The anchor is captured as `current_dir()` reports it (symlink-resolved
+        // on macOS, legacy short-name spelling on Windows) — not `canonicalize`,
+        // whose verbatim `\\?\` form never enters the context.
+        let expected = std::env::current_dir().unwrap();
+        let mut options = ComposeOptions::new();
+
+        std::env::set_current_dir(target.path()).unwrap();
+        options.source = ComposeSource::File(target.path().join("prompt.md"));
+        let document: crate::markdown::Markdown = "{{ ctx.cwd }}".into();
+        options.upgrade_ambient_context_for(&document);
+
+        assert_eq!(options.context.anchor(), expected);
+        assert_eq!(
+            options.context.get("cwd"),
+            Some(&serde_json::json!(biscuit_file::to_portable_string(&expected))),
         );
     }
 
@@ -2741,6 +2870,77 @@ mod tests {
                 ["echo", "ls", "cat"].iter().map(|s| s.to_string()).collect(),
             );
         assert_eq!(id(&a), id(&b));
+    }
+
+    #[test]
+    fn caller_input_origin_participates_in_graph_and_cache_identity() {
+        let records = |base: &str| {
+            [(
+                "spec".to_string(),
+                CallerInputRecord::new(
+                    serde_json::json!("fixes/case/spec.md"),
+                    biscuit_file::FileResolutionContext::from_snapshot(
+                        base,
+                        None,
+                        std::collections::HashMap::new(),
+                    ),
+                ),
+            )]
+            .into_iter()
+            .collect()
+        };
+        let a = fixed_opts().with_caller_input_records(records("/repo/one"));
+        let b = fixed_opts().with_caller_input_records(records("/repo/two"));
+        let cloned = a.clone();
+
+        assert_ne!(id(&a), id(&b));
+        assert_ne!(a.compose_cache_fingerprint(), b.compose_cache_fingerprint());
+        assert_eq!(id(&a), id(&cloned));
+        assert_eq!(
+            a.compose_cache_fingerprint(),
+            cloned.compose_cache_fingerprint()
+        );
+        assert_eq!(
+            a.caller_input_records()["spec"].raw(),
+            &serde_json::json!("fixes/case/spec.md")
+        );
+    }
+
+    #[test]
+    fn caller_file_occurrences_each_participate_in_request_identity() {
+        let origin = biscuit_file::FileResolutionContext::from_snapshot(
+            "/repo/launch",
+            Some("/repo".into()),
+            std::collections::HashMap::new(),
+        );
+        let candidate = std::path::PathBuf::from("/repo/launch/missing.md");
+        let provenance = |property: &str, reference: &str| {
+            crate::markdown::compose::expression::resolve_ctx::CallerFileProvenance {
+                property: property.to_string(),
+                reference: reference.to_string(),
+                origin: origin.clone(),
+                candidate: candidate.clone(),
+                candidate_provenance: biscuit_file::RootProvenance::Source,
+            }
+        };
+        let mut complete = fixed_opts();
+        complete.caller_file_provenance = [
+            ("/first".to_string(), provenance("first", "missing.md")),
+            ("/second".to_string(), provenance("second", "./missing.md")),
+        ]
+        .into_iter()
+        .collect();
+        let mut collapsed = complete.clone();
+        collapsed.caller_file_provenance.remove("/first");
+
+        assert_eq!(complete.caller_file_provenance.len(), 2);
+        assert_eq!(complete.caller_file_provenance["/first"].property, "first");
+        assert_eq!(complete.caller_file_provenance["/second"].property, "second");
+        assert_eq!(
+            complete.caller_file_provenance["/first"].candidate,
+            complete.caller_file_provenance["/second"].candidate
+        );
+        assert_ne!(id(&complete), id(&collapsed));
     }
 
     #[test]

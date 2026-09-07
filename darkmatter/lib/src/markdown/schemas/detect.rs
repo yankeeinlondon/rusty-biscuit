@@ -123,10 +123,9 @@ pub fn detect_from_document_with_context(
 /// Detection is an authoring heuristic, so invalid references and probe errors
 /// classify as strings rather than becoming schema-detection failures. The
 /// legacy entry points capture their CWD/environment inputs once here, then use
-/// the same repository-first detailed resolver as explicit callers.
+/// the same document-first detailed resolver as explicit callers.
 fn compatibility_detection_context(md: &Markdown) -> FileResolutionContext {
     let base_dir = base_dir_for(md);
-    let repository_root = crate::markdown::compose::find_git_root_from(&base_dir);
     crate::markdown::compose::document_resolution_context(
         &base_dir,
         match md.source() {
@@ -134,7 +133,6 @@ fn compatibility_detection_context(md: &Markdown) -> FileResolutionContext {
             _ => None,
         },
         &[],
-        repository_root.as_deref(),
         None,
     )
 }
@@ -701,7 +699,7 @@ mod tests {
     }
 
     #[test]
-    fn explicit_context_detection_uses_repository_first_candidates() {
+    fn explicit_context_detection_uses_document_first_candidates() {
         let repo = tempfile::TempDir::new().unwrap();
         let docs = repo.path().join("docs");
         std::fs::create_dir_all(&docs).unwrap();

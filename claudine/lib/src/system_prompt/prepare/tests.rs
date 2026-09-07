@@ -173,7 +173,7 @@ fn relocated_primary_and_appendix_share_launch_context_but_keep_source_files() {
         "marker: primary\n",
         "spec: spec.md\n",
         "---\n",
-        "PRIMARY-SOURCE-BODY AREA={{ ctx.area }} REPO={{ ctx.repo_root }} ",
+        "PRIMARY-SOURCE-BODY AREA={{ ctx.area }} CWD={{ ctx.cwd }} REPO={{ ctx.repo_root }} ",
         "FILE={{ file_exists(spec) }}\n",
     );
     let appendix_raw = concat!(
@@ -182,7 +182,7 @@ fn relocated_primary_and_appendix_share_launch_context_but_keep_source_files() {
         "marker: appendix\n",
         "spec: spec.md\n",
         "---\n",
-        "APPENDIX-SOURCE-BODY AREA={{ ctx.area }} REPO={{ ctx.repo_root }} ",
+        "APPENDIX-SOURCE-BODY AREA={{ ctx.area }} CWD={{ ctx.cwd }} REPO={{ ctx.repo_root }} ",
         "FILE={{ file_exists(spec) }}\n",
     );
     std::fs::write(&primary_path, primary_raw).unwrap();
@@ -234,10 +234,18 @@ fn relocated_primary_and_appendix_share_launch_context_but_keep_source_files() {
     let launch_repo_text = biscuit_file::to_portable_string(&launch_repo);
 
     assert!(primary.composed_markdown.contains("PRIMARY-SOURCE-BODY AREA=alpha"));
+    assert!(primary.composed_markdown.contains(&format!(
+        "CWD={}",
+        biscuit_file::to_portable_string(&launch_dir)
+    )));
     assert!(primary.composed_markdown.contains(launch_repo_text.as_str()));
     assert!(primary.composed_markdown.contains("FILE=true"));
     assert!(!primary.composed_markdown.contains("LAUNCH-FRAGMENT"));
     assert!(appendix.composed_markdown.contains("APPENDIX-SOURCE-BODY AREA=alpha"));
+    assert!(appendix.composed_markdown.contains(&format!(
+        "CWD={}",
+        biscuit_file::to_portable_string(&launch_dir)
+    )));
     assert!(appendix.composed_markdown.contains(launch_repo_text.as_str()));
     assert!(appendix.composed_markdown.contains("FILE=true"));
     assert!(!appendix.composed_markdown.contains("LAUNCH-FRAGMENT"));

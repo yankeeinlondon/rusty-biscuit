@@ -384,6 +384,12 @@ pub async fn execute_approved_command(
     if let Some(dir) = working_dir {
         cmd.current_dir(dir);
     }
+    crate::child_environment::contribute_child_environment(&mut cmd).map_err(|error| {
+        HarnessError::ShellCommandExecutionFailed {
+            detail: format!("failed to prepare '{}': {error}", command.executable),
+            source: ShellExecCause::Spawn(std::io::Error::other(error)),
+        }
+    })?;
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
 
@@ -616,6 +622,44 @@ mod tests {
         assert!(result.is_ok());
         let (exit_code, _, _) = result.unwrap();
         assert_ne!(exit_code, 0);
+    }
+
+    #[tokio::test]
+    async fn approved_command_observes_agent_cwd() {
+        let expected = crate::child_environment::initialize_process_launch_directory(
+            crate::child_environment::LaunchDirectoryMode::Ordinary,
+        )
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+        let cmd = agent_cwd_command();
+        let (exit_code, stdout, _) = execute_approved_command(
+            &cmd,
+            None,
+            std::time::Duration::from_secs(5),
+        )
+        .await
+        .unwrap();
+        assert_eq!(exit_code, 0);
+        assert_eq!(stdout.trim(), expected);
+    }
+
+    #[cfg(windows)]
+    fn agent_cwd_command() -> ApprovedRuntimeCommand {
+        ApprovedRuntimeCommand {
+            raw: "echo %AGENT_CWD%".to_string(),
+            executable: "cmd.exe".to_string(),
+            args: vec!["/D".to_string(), "/C".to_string(), "echo %AGENT_CWD%".to_string()],
+        }
+    }
+
+    #[cfg(not(windows))]
+    fn agent_cwd_command() -> ApprovedRuntimeCommand {
+        ApprovedRuntimeCommand {
+            raw: "printf %s \"$AGENT_CWD\"".to_string(),
+            executable: "sh".to_string(),
+            args: vec!["-c".to_string(), "printf %s \"$AGENT_CWD\"".to_string()],
+        }
     }
 
     #[test]

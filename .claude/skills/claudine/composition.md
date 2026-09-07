@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-39b4d8e587eee969
-last_updated: 2026-08-26
+hash: ef46db3751d8e999-0d2a042a864ff681
+last_updated: 2026-09-05
 ---
 # Claudine Composition
 
@@ -78,6 +78,12 @@ absence and typed discovery failure are retained rather than retried through a
 different projection. Retry, resume, and JIT boundaries still reread document
 content; only immutable launch and repository evidence is reused.
 
+Project retained `RepoInfo` into file-reference scopes only through
+Darkmatter's public `repository_scope_catalog` adapter. Pass the already
+observed repository root using the lexical spelling compatible with the
+reference base; do not copy Sniff's absolute package paths or rebuild topology
+inside Claudine.
+
 Before composing, Claudine scans the authored frontmatter and body with
 Darkmatter's `ContextRequirements`, asks the invocation owner only for the
 required runtime groups, and supplies the resulting evidence to
@@ -100,7 +106,10 @@ that authored the task, not the document the step composes and runs.
 `set_frontmatter` and other file-touching effects in that stack therefore
 target files next to the task's origin document, including when an
 externalized `task:`/`group:` file lives in a different repository from the
-step's `prompt:` document.
+step's `prompt:` document. Prompt-task `params` retain that same authoring
+origin when the target schema selects a file value; immutable CLI caller
+records remain a separate, higher-precedence layer with the invocation's
+launch origin.
 
 ### Positional Arguments
 
@@ -165,12 +174,12 @@ The generated bash/zsh/fish scripts shell out to `claudine __complete` on
 every `<TAB>`. The supplement engine applies these rules in order:
 
 - **Candidates are markdown files only** (`*.md`). Directories,
-  non-markdown files, `./`/`../` traversal tokens, `!` package sigils,
+  non-markdown files, `./`/`../` traversal tokens,
   `vault:`, `/abs`, `%`, and `{{…}}` prefixes all return zero candidates.
-- **Two supported entry forms**: `@`-prefixed magic paths (enumerated
-  against repo root + user home) and implicit-relative paths like
-  `prompts/…` (enumerated against the repo root only).
-- **Typed-length scope**: 0–2 "meaningful characters" (leading `@` and
+- **Four supported entry forms**: `@`-prefixed magic paths, `&` repository-root
+  paths, `^` repository-scoped paths, and implicit-relative paths like
+  `prompts/…`. Each enumerates the same ordered roots its execution form uses.
+- **Typed-length scope**: 0–2 "meaningful characters" (a leading `@`, `&`, or `^` and
   segments before a `/` don't count) use the curated scope only —
   `prompts/` and `sequences/` under `<repo>/`, `<package-root>/`,
   `<package-area-root>/`, `~/`, and `~/.claudine/`. 3+ characters extend
@@ -205,7 +214,7 @@ claudine compose --codex @commit.md
 
 Steps:
 
-1. **Resolve** — resolve the file reference using `biscuit-file::FileReference`. A bare **implicit** path (`foo.md`, `dir/foo.md`) resolves repository-root first, then the source document's directory; an **explicit** `./`/`../` path resolves from the source directory only; `@` is a magic-root search, `!` a monorepo-package path, `~/` the user's home, `vault:` a configured vault, `%` a recursive modifier, and absolute paths resolve to themselves
+1. **Resolve** — resolve the file reference using `biscuit-file::FileReference`. A bare **implicit** path (`foo.md`, `dir/foo.md`) resolves from the source document's directory first, then the repository root; an **explicit** `./`/`../` path resolves from the source directory only; `@` is a magic-root search, `&` pins to the repository root, `^` searches package root then package-area root then repository root, `~/` is the user's home, `vault:` a configured vault, `%` a recursive modifier, and absolute paths resolve to themselves
 2. **Compose** — run the Markdown through Darkmatter's compose pipeline (transclusion, interpolation, shell commands, conditionals)
 3. **Prepare** — extract the effective (composed) frontmatter; this is the single source of truth for all downstream decisions
 4. **Select provider** — choose which agentic CLI to use (see Provider Selection below)
@@ -234,13 +243,13 @@ Steps:
 6. **Execute** — run the provider session
 7. **Closure** — Claudine rewrites the file:
    - The replacement body is the agent's **final response only** — the output text emitted after the agent's last tool call. Interstitial narration between tool calls (e.g. "Let me read the docs…") is dropped, so process commentary never leaks into the artifact. Providers that recover their final message post-hoc (e.g. Codex's `--output-last-message`) supply that message directly.
-   - The provider returns replacement body content only (no frontmatter)
-   - Original frontmatter properties are preserved byte-for-byte
-   - If the provider modified an existing frontmatter property, Claudine reverts it to the original value and emits a warning
-   - If the provider added a new frontmatter property, Claudine merges it into the document (inserted before `last_updated`)
+   - When the prompt asks for frontmatter properties, the provider returns them in a leading YAML frontmatter block (`---` fenced) at the top of its response. The guardrails teach this channel; no declaration in the document is required, and the prompt author is responsible for checking that requested properties arrived.
+   - Every returned property is merged: new keys are inserted in response order immediately before `last_updated`, and existing keys are replaced in place as whole YAML nodes on later runs. Each insertion and update is reported. The only exceptions are the closure-owned keys: a returned `prompt` is ignored with a warning because it is immutable, and returned `hash` and `last_updated` are ignored silently because the closure stamps them.
+   - A delimited metadata attempt with malformed YAML, duplicate keys, a non-mapping root, or no replacement body fails without modifying the source.
+   - Authored frontmatter bytes remain authoritative. If the source changes while the provider runs, Claudine completes the run, restores the pre-run frontmatter snapshot byte-for-byte, and reports each added, removed, or value-changed property without attributing a writer. Structurally invalid frontmatter gets a generic restoration warning because property-level comparison is impossible. Value-preserving reformatting remains silent. Mid-run body drift is compared independently, then replaced and reported.
    - `last_updated` is set to today's date (local time, `YYYY-MM-DD`)
-    - The file is written atomically
-    - A cleanup pass normalizes the body markdown without touching frontmatter
+   - The file is written atomically
+   - A cleanup pass normalizes the body markdown without touching authored frontmatter
 
 ### `hash` property (auto-stamped)
 
@@ -253,6 +262,9 @@ that persists the body.
 - **Kind is forced to `Simple`** — even if the document previously held a valid
   `structured` or `detailed` hash, the next `inline-compose` run normalizes it
   to the `Simple` shorthand.
+- **Textual write-back** — the managed hash and `last_updated` nodes are edited
+  in the reconstructed source text. Unmanaged authored frontmatter and the
+  replacement body are not reserialized through a YAML emitter.
 - **Self-reference stability** — `hash` and `last_updated` are excluded from the
   frontmatter segment when the hash is computed, so re-running `inline-compose`
   on an already-stamped, otherwise-unchanged document does not perturb the
@@ -264,7 +276,7 @@ that persists the body.
 
 This behavior is implemented by [`apply_inline_closure`] in the closure module,
 using `inline_hash_options`, `parse_inline_stored_hash`, `plan_hash_save`, and
-`apply_hash_save`.
+`apply_hash_save_text`.
 
 [`apply_inline_closure`]: ../../lib/src/composition/closure.rs
 
@@ -524,7 +536,41 @@ Any composition error (schema validation failure, missing file, denied shell com
 
 ## Schema Validation
 
-Composition documents can declare a `$schema` in their frontmatter to constrain the property values that drive the prompt. Schema processing is anchored on Darkmatter's `SimplifiedSchema` and runs as a stage inside the existing `Resolve → Pre-Flight → Prepare → Select → Launch → Closure` pipeline — between override application and shell expansion. The wrapper layer translates Darkmatter's structural failures into typed claudine errors so users see actionable reports instead of a generic compose failure.
+Composition documents can declare a `$schema` in their frontmatter to constrain the property values that drive the prompt. Schema processing is anchored on Darkmatter's `SimplifiedSchema` and runs as a stage inside the existing `Resolve → Pre-Flight → Prepare → Select → Launch → Closure` pipeline — between override application and shell expansion. The wrapper layer translates Darkmatter's structural failures into typed Claudine errors so users see actionable reports instead of a generic compose failure.
+
+### Caller File Provenance and Materialization
+
+Each explicit caller setter (`key=value` or `--set`) retains an immutable,
+per-property record containing the raw value and the file-resolution context
+captured at launch. Canonical preparation keeps that record separate from the
+effective frontmatter map. Document frontmatter, schema defaults, `proxy.with`,
+runtime mutation, and sequence/task-authored values retain their own ownership
+and are not relabeled as caller input.
+
+Before frontmatter interpolation pass 1, Darkmatter applies the active
+document's effective schema to each caller record. Exactly one applicable file
+arm must be selected; ambiguous or unmatched unions remain the responsibility
+of normal schema validation. A selected local `file(eager)` value resolves from
+the caller origin and must identify an existing file. A selected non-recursive
+lazy `file` value binds to the first ordered, lexically normalized candidate
+from that same origin without checking whether it exists. Lazy HTTP(S)
+references remain remote identities and are never sent through a local
+candidate plan or filesystem probe. Recursive lazy references have no single
+unprobed identity and fail with guidance to declare `file(eager)`.
+
+The raw caller value remains unchanged for identity and fresh preparation. The
+materialized semantic value is the native absolute path or typed remote
+identity consumed by frontmatter expressions, path functions, validation, and
+lifecycle state. Markdown body interpolation uses a separate portable
+presentation value, so Windows can render `/` separators without changing the
+native identity. Absent and explicit-null properties, ordinary strings, and
+document-owned file references are not caller-materialized.
+
+Proxy, retry, resume, inline-compose, and sequence/task entry preserve the same
+raw value and per-property origin. Fresh reads rematerialize them against the
+new active schema; a reused loop plan keeps its installed semantic identity.
+Neither route recaptures process CWD, and a proxy target cannot re-anchor a
+caller-owned value merely because it declares a different file mode.
 
 ## Lifecycle Integration
 
@@ -564,7 +610,7 @@ A frontmatter `loop:` block turns the prompt into a repeating run. The first ite
 
 ### Authoring
 
-`$schema` accepts the same forms Darkmatter accepts: inline `SimplifiedSchema` mappings, references to external YAML/JSON schema files (resolved through the shared `FileReference` contract — a bare implicit reference is repository-root first, then the prompt document's parent directory; an explicit `./`/`../` reference is the document's parent only), and root-level unions. Raw JSON Schema also validates, but it does not expose typed property metadata, so it does not feed the interactive prompts or shell completion described below.
+`$schema` accepts the same forms Darkmatter accepts: inline `SimplifiedSchema` mappings, references to external YAML/JSON schema files (resolved through the shared `FileReference` contract — a bare implicit reference uses the prompt document's parent directory first, then the repository root; an explicit `./`/`../` reference uses the document's parent only), and root-level unions. Raw JSON Schema also validates, but it does not expose typed property metadata, so it does not feed the interactive prompts or shell completion described below.
 
 ```yaml
 $schema:
@@ -681,6 +727,8 @@ The composition completion engine consults `$schema` when the cursor sits on a s
 Plain `ctx.*` in a composed document describes the caller's **launch context** — the directory Claudine was invoked from and the repository/package-area facts projected from it — never the prompt document's storage location and never the mutable process CWD (which the wrapper deliberately moves to the repo root).
 
 - **One owner.** The launch anchor and the launch repository/topology/environment/host evidence are paired as a single operation on `InvocationContext` (`capture_launch_context` for a fresh document epoch, `extend_launch_context` for a same-epoch reread). A caller cannot combine a launch directory with prompt-derived evidence, so moving a prompt, task, group, overlay, or system-prompt file cannot change launch-facing `ctx.*` values (`ctx.area`, `ctx.repo_root`, `ctx.current_packages`, …). A source stored in another repository never substitutes that repository for the launch repository.
+- **`ctx.cwd` is invocation state.** Darkmatter exposes the absolute, portable launch directory through its no-I/O `Invocation` context group. Supplied invocation evidence never rediscovers the process CWD; ambient compatibility capture reports `null` with a partial-capture diagnostic if its one boundary read fails.
+- **Caller file parameters retain their authoring anchor.** Darkmatter materializes only overrides whose selected effective schema arm is `file` or `file(eager)`. Lazy local values retain the first unprobed candidate, eager values select the first existing file, recursive lazy values are rejected, and remote lazy values remain URLs. The raw override stays in the input layer while effective frontmatter and expressions receive the anchored absolute value, so later document handoffs cannot reinterpret the caller's relative text.
 - **One snapshot per document epoch.** Direct, inline, loop, proxy-target, retry, and resume entry each prepare one target-adjusted early-binding snapshot after provider/model resolution and reuse that exact snapshot through shell preflight, body and effective-frontmatter composition, schema evaluation, loop conditions, and every lifecycle event. The post-`initialize` stabilized reread stays inside its epoch: newly demanded context groups are extended from retained launch evidence, and the anchor, environment capture, and applied target overrides never change. Proxying to another document, and retry/resume re-entry, start a new epoch (at most one new snapshot each).
 - **Reuse is observable and attributable.** Every canonical preparation carries a Claudine-local document-epoch token whose recorder owns that epoch's launch construction, same-epoch extensions, ambient fallbacks, and populated-context observations under the stable consumer names `preflight`, `body`, `effective-frontmatter`, `loop-condition`, and `lifecycle`. The recorder is separate from Darkmatter's `ComposeContext`; overlapping parallel sequence workers therefore cannot contribute to one another's exact maps. Performance reports project both invocation totals and each sorted epoch map. Canonical preparation records a fallback on the owning epoch if its prepared context is absent, so dropping the snapshot cannot pass a zero-fallback assertion invisibly.
 - **Target identity is layered, not captured.** `ctx.agent`, `ctx.model`, `env.AGENT`, and `env.MODEL` reflect the resolved target's environment overrides applied on top of the launch snapshot, preserving target-identity precedence on every route.

@@ -12,9 +12,12 @@ pub(crate) mod format;
 pub mod merge;
 pub(crate) mod options;
 pub(crate) mod report;
+mod repository_scope;
 pub(crate) mod runtime;
 
 pub use catalog::{context_variable_descriptors, ContextValueType, ContextVariableDescriptor};
 pub use capture::{ContextCaptureEvidence, ContextGroup, ContextRequirements};
+pub use capture::capture_file_resolution_context;
 pub use diagnostics::ContextMergeDiagnostic;
 pub use merge::merge_ctx;
+pub use repository_scope::repository_scope_catalog;

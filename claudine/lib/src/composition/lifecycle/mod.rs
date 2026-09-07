@@ -45,9 +45,7 @@ mod parse;
 mod validate;
 
 use action_shape::*;
-pub use audio::*;
-#[cfg(test)]
-use audio::run_blocking_with_timeout;
+pub(crate) use audio::*;
 pub use parse::{
     parse_lifecycle_config, parse_single_action, parse_task_action_stack,
     scan_removed_validation_keys,
@@ -439,11 +437,11 @@ impl LifecycleEmitter for DefaultLifecycleEmitter {
     }
 
     fn emit_speech(&self, text: &str, tts_config: TtsConfig) {
-        say_blocking(text, tts_config);
+        enqueue_speech(text, tts_config);
     }
 
     fn emit_effect(&self, name: &str) {
-        play_effect_blocking(name);
+        enqueue_effect(name);
     }
 
     fn emit_notification(&self, title: &str) {
@@ -832,9 +830,9 @@ impl<'a> LifecycleRunGuard<'a> {
     /// Emit a single lifecycle signal through the injected emitter.
     ///
     /// Short-circuits on `crate::interrupt::interrupted()` so a Ctrl+C
-    /// during execution skips all blocking post-execute side effects
-    /// (messenger sends, desktop notifications, TTS playback, sound
-    /// effects). The cheap stderr line still emits so the user sees the
+    /// during execution skips all post-execute side effects (messenger sends,
+    /// desktop notifications, and durable audio publication). The cheap stderr
+    /// line still emits so the user sees the
     /// terminal status before the process exits.
     fn emit_signal(&self, signal: LifecycleSignal) {
         let Some(notification) = self.config.get(signal) else {

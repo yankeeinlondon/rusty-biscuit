@@ -10,7 +10,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use claudine_gen::{GenError, Provenance, generate_for_area};
-use darkmatter::markdown::compose::find_git_root_from;
 
 /// Research topics the registry consumes (fixture copy set).
 const TOPICS: &[&str] = &[
@@ -135,7 +134,9 @@ fn skip_research_roster_entry_is_rejected_loudly() {
 fn pipeline_generates_from_all_declared_sources() {
     let fixture = Fixture::new();
     assert!(
-        find_git_root_from(&fixture.area()).is_none(),
+        sniff::filesystem::git::GitRepo::discover(&fixture.area())
+            .unwrap()
+            .is_none(),
         "the no-repository fixture exercises the discovery-compatible fallback"
     );
     let generation = fixture.generate().unwrap();

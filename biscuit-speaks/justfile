@@ -55,9 +55,8 @@ build *args="":
 # playback path and its 23 tests (357 of 380) are cfg'd out of a default-feature
 # run. Its two in-repo consumers — biscuit-speaks-cli (the shipped `so-you-say`
 # binary) and claudine — both enable it, so the default set is a configuration
-# nobody ships. The feature costs no audio device: playa's own `default = []`,
-# and biscuit-speaks asks only for `playa/async`, so no rodio/CoreAudio/ALSA
-# backend is compiled in.
+# nobody ships. The feature costs no audio device at test time, but it compiles
+# Playa's native-first rodio/CoreAudio/WASAPI/ALSA backend for shipped speech.
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
@@ -81,7 +80,7 @@ test-browser:
 
 # Real-resource TTS provider tests. Skip-clean when provider credentials absent.
 test-real *args="":
-    @just _test_real biscuit-speaks {{args}}
+    @just _test_real biscuit-speaks --features playa {{args}}
     @just _test_real biscuit-speaks-cli {{args}}
 
 # Lint both the library and CLI

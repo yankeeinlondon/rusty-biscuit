@@ -367,7 +367,9 @@ Composition commands resolve session interactivity from (highest to lowest prece
 Opt-in flag (composition commands and the provider wrappers) that prints a **reconciling performance tree** to **stderr** after the run. The `Performance` headline is true wall-clock and equals the sum of its top-level `Structural` buckets (`pre-dispatch`, `prep phase`, `environment setup`, `agent execution`) plus a synthetic `unattributed` remainder — the headline can never contradict the body. Nested `Breakdown` rows itemize cost (Darkmatter composition stages, agent sub-timings) without double-counting; a percent column shows each row's share of wall-clock, a single `▇ HOT` marker flags the dominant leaf (≥20% of wall-clock), and `×N` annotates stages that ran more than once. Dry runs render `agent execution` as an `—` leaf. The report is stderr-only (never pollutes piped stdout) and is emitted even under `--silent`/`--quiet`. `sequence` aggregates one report across all steps. See [Composition — Performance Reporting](composition.md#performance-reporting) for the full reference.
 
 **Positional Arguments:**
-- Exactly one file reference (supports `@` magic paths)
+- Exactly one file reference (supports implicit and explicit relative paths,
+  `@` magic paths, `&` repository-root paths, `^` package/area/repository
+  paths, home, vault, absolute, and remote forms)
 - Zero or more `key=value` setters (overrides frontmatter)
 
 **Common Flags:**

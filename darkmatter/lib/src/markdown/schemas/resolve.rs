@@ -28,15 +28,13 @@ use std::{
 };
 
 use biscuit_file::{FileReference, FileReferenceKind, FileResolutionContext};
-use crate::markdown::compose::{
-    document_resolution_context, find_git_root_from, package_area_for_reference,
-};
+use crate::markdown::compose::document_resolution_context;
 use indexmap::IndexMap;
 use serde_json::{Map, Value};
 use serde_yaml_ng::Value as YamlValue;
 
 use super::{
-    SchemaArm, SchemaOrigin, SchemaOriginKind, SchemaShape, SimplifiedSchema,
+    SchemaAdvisory, SchemaArm, SchemaOrigin, SchemaOriginKind, SchemaShape, SimplifiedSchema,
     errors::SchemaError,
     simplified::{
         SchemaDeclaration, parse_standalone_schema_document, parse_yaml_schema, to_json_schema,
@@ -80,6 +78,10 @@ pub struct ResolvedSchema {
     /// `$schema` mappings. These are dependency edges: a change to the schema
     /// file's own content must invalidate a cached effective schema.
     pub referenced_files: Vec<PathBuf>,
+
+    /// Non-fatal findings discovered while resolving referenced schema files,
+    /// sorted and deduplicated by semantic kind and canonical path.
+    pub advisories: Vec<SchemaAdvisory>,
 }
 
 /// Resolves a frontmatter `$schema` value into a JSON Schema.
@@ -187,6 +189,7 @@ fn resolve_yaml_schema_with_roots_in_context(
                 imports,
                 examples,
                 referenced_files: Vec::new(),
+                advisories: Vec::new(),
             })
         }
         YamlValue::Sequence(items) => {
@@ -218,6 +221,7 @@ fn resolve_root_union(
     let mut imports: BTreeSet<PathBuf> = BTreeSet::new();
     let mut examples: BTreeSet<PathBuf> = BTreeSet::new();
     let mut referenced_files: BTreeSet<PathBuf> = BTreeSet::new();
+    let mut advisories: BTreeSet<SchemaAdvisory> = BTreeSet::new();
     for item in items {
         match item {
             YamlValue::Mapping(_) => {
@@ -260,6 +264,7 @@ fn resolve_root_union(
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
                 referenced_files.extend(resolved.referenced_files.iter().cloned());
+                advisories.extend(resolved.advisories.iter().cloned());
                 // If this arm itself came from a SimplifiedSchema file, preserve
                 // it in the simplified projection only when it is a single
                 // shape (root unions of unions are not modelled in v1).
@@ -297,6 +302,7 @@ fn resolve_root_union(
         imports: imports.into_iter().collect(),
         examples: examples.into_iter().collect(),
         referenced_files: referenced_files.into_iter().collect(),
+        advisories: advisories.into_iter().collect(),
     })
 }
 
@@ -489,7 +495,7 @@ fn resolve_reference_in_context(
 
     // `$schema` references resolve through the shared document-backed context:
     // explicit `./`/`../` from the document directory only, implicit path
-    // references repository-root first then the document directory — the same
+    // references from the document directory first, then the repository root — the same
     // order the `file`-typed value references use. No ambient CWD is read.
     let path = resolve_file_reference_in_context(&file_ref, base_dir, request_context)
         .map_err(|source| SchemaError::Unresolved {
@@ -546,19 +552,9 @@ fn resolve_file_reference_in_context(
 ) -> Result<Option<PathBuf>, biscuit_file::FileReferenceError> {
     match request_context {
         Some(snapshot) => file_ref.resolve_in_context(&snapshot.for_base(base_dir)),
-        None => {
-            let repo_root = find_git_root_from(base_dir);
-            let package_area =
-                package_area_for_reference(file_ref, base_dir, repo_root.as_deref());
-            let context = document_resolution_context(
-                base_dir,
-                None,
-                &[],
-                repo_root.as_deref(),
-                package_area.as_deref(),
-            );
-            file_ref.resolve_in_context(&context)
-        }
+        None => file_ref.resolve_in_context(&document_resolution_context(
+            base_dir, None, &[], None,
+        )),
     }
 }
 
@@ -611,9 +607,16 @@ fn parse_yaml_referenced_file(
         };
     }
 
-    // Treat the file's contents as a raw JSON Schema serialised in YAML.
-    let json: Value =
+    // Treat the file's contents as a raw JSON Schema serialized in YAML.
+    let yaml: YamlValue =
         serde_yaml_ng::from_str(text).map_err(|_| SchemaError::AmbiguousReferenced {
+            path: path.to_path_buf(),
+        })?;
+    let advisories = missing_simplified_envelope_advisory(&yaml, path)
+        .into_iter()
+        .collect();
+    let json: Value =
+        serde_json::to_value(yaml).map_err(|_| SchemaError::AmbiguousReferenced {
             path: path.to_path_buf(),
         })?;
     if !json.is_object() {
@@ -628,7 +631,102 @@ fn parse_yaml_referenced_file(
         imports: Vec::new(),
         examples: Vec::new(),
         referenced_files: Vec::new(),
+        advisories,
     })
+}
+
+/// Returns whether `key` belongs to a Draft 2020-12 vocabulary understood by
+/// JSON Schema implementations.
+fn is_draft_2020_12_keyword(key: &str) -> bool {
+    matches!(
+        key,
+        // Core vocabulary.
+        "$schema"
+            | "$id"
+            | "$vocabulary"
+            | "$anchor"
+            | "$dynamicAnchor"
+            | "$dynamicRef"
+            | "$ref"
+            | "$defs"
+            | "$comment"
+            // Applicator vocabulary.
+            | "prefixItems"
+            | "items"
+            | "contains"
+            | "additionalProperties"
+            | "properties"
+            | "patternProperties"
+            | "dependentSchemas"
+            | "propertyNames"
+            | "if"
+            | "then"
+            | "else"
+            | "allOf"
+            | "anyOf"
+            | "oneOf"
+            | "not"
+            // Validation vocabulary.
+            | "type"
+            | "const"
+            | "enum"
+            | "multipleOf"
+            | "maximum"
+            | "exclusiveMaximum"
+            | "minimum"
+            | "exclusiveMinimum"
+            | "maxLength"
+            | "minLength"
+            | "pattern"
+            | "maxItems"
+            | "minItems"
+            | "uniqueItems"
+            | "maxContains"
+            | "minContains"
+            | "maxProperties"
+            | "minProperties"
+            | "required"
+            | "dependentRequired"
+            // Metadata, format, content, and unevaluated vocabularies.
+            | "title"
+            | "description"
+            | "default"
+            | "deprecated"
+            | "readOnly"
+            | "writeOnly"
+            | "examples"
+            | "format"
+            | "contentEncoding"
+            | "contentMediaType"
+            | "contentSchema"
+            | "unevaluatedItems"
+            | "unevaluatedProperties"
+    )
+}
+
+/// Classifies only the narrow shape that would otherwise silently act as an
+/// unconstrained raw JSON Schema. The supplied YAML value is already in
+/// memory; this performs no resolution or other I/O.
+fn missing_simplified_envelope_advisory(
+    root: &YamlValue,
+    path: &Path,
+) -> Option<SchemaAdvisory> {
+    let map = root.as_mapping()?;
+    if map.is_empty() {
+        return None;
+    }
+    for (key, value) in map {
+        let key = key.as_str()?;
+        if !value.is_string()
+            || key.starts_with('$')
+            || key.starts_with("x-")
+            || is_draft_2020_12_keyword(key)
+        {
+            return None;
+        }
+    }
+    parse_yaml_schema(root).ok()?;
+    Some(SchemaAdvisory::missing_simplified_envelope(path))
 }
 
 fn resolve_standalone_schema(
@@ -659,6 +757,7 @@ fn resolve_standalone_schema(
                 imports,
                 examples,
                 referenced_files: Vec::new(),
+                advisories: Vec::new(),
             })
         }
         SimplifiedSchema::Union(arms) => {
@@ -688,6 +787,7 @@ fn resolve_standalone_root_union(
     let mut imports = BTreeSet::new();
     let mut examples = BTreeSet::new();
     let mut referenced_files = BTreeSet::new();
+    let mut advisories = BTreeSet::new();
 
     for arm in arms {
         match arm {
@@ -726,6 +826,7 @@ fn resolve_standalone_root_union(
                 imports.extend(resolved.imports.iter().cloned());
                 examples.extend(resolved.examples.iter().cloned());
                 referenced_files.extend(resolved.referenced_files.iter().cloned());
+                advisories.extend(resolved.advisories.iter().cloned());
                 if let Some(SimplifiedSchema::Single(shape)) = resolved.simplified {
                     simplified_arms.push(SchemaArm::Inline(shape));
                 } else {
@@ -749,6 +850,7 @@ fn resolve_standalone_root_union(
         imports: imports.into_iter().collect(),
         examples: examples.into_iter().collect(),
         referenced_files: referenced_files.into_iter().collect(),
+        advisories: advisories.into_iter().collect(),
     })
 }
 
@@ -769,6 +871,7 @@ fn parse_raw_json_schema(path: &Path, bytes: &[u8]) -> Result<ResolvedSchema, Sc
         imports: Vec::new(),
         examples: Vec::new(),
         referenced_files: Vec::new(),
+        advisories: Vec::new(),
     })
 }
 
@@ -1856,6 +1959,7 @@ pub fn shape_to_schema(shape: &SchemaShape) -> Result<Value, SchemaError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::markdown::schemas::SchemaAdvisoryKind;
     use serde_json::json;
 
     fn yaml_value(input: &str) -> YamlValue {
@@ -1983,6 +2087,115 @@ mod tests {
         let v = yaml_value("./no-schema.yaml");
         let resolved = resolve_yaml_schema(&v, dir.path()).unwrap();
         assert!(resolved.simplified.is_none());
+    }
+
+    #[test]
+    fn bare_simplified_map_remains_raw_json_schema_and_reports_advisory() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_schema_file(
+            dir.path(),
+            "schema.yaml",
+            "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
+        );
+        let resolved = resolve_yaml_schema(&yaml_value("./schema.yaml"), dir.path()).unwrap();
+
+        assert!(resolved.simplified.is_none());
+        assert_eq!(resolved.json_schema["source_marker"], "string(required)");
+        assert_eq!(resolved.json_schema["spec"], "file(eager; required)");
+        let validator = jsonschema::validator_for(&resolved.json_schema).unwrap();
+        assert!(validator.is_valid(&json!({ "anything": true })));
+        assert_eq!(resolved.advisories.len(), 1);
+        let advisory = &resolved.advisories[0];
+        assert_eq!(
+            advisory.kind(),
+            SchemaAdvisoryKind::MissingSimplifiedEnvelope
+        );
+        assert_eq!(advisory.source(), "darkmatter.schema");
+        assert_eq!(advisory.code(), "dm.schema.missing_simplified_envelope");
+        assert_eq!(advisory.path(), path);
+        let message = advisory.message();
+        assert!(message.contains(&path.display().to_string()));
+        assert!(message.contains("`$schema:`"));
+        assert!(message.contains("`kind: schema` + `types:`"));
+    }
+
+    #[test]
+    fn bare_map_advisory_excludes_json_schema_envelopes_and_invalid_maps() {
+        let cases = [
+            (
+                "object-properties.yaml",
+                "type: object\nproperties:\n  name:\n    type: string\n",
+            ),
+            ("format.yaml", "format: string\n"),
+            ("title.yaml", "title: string(required)\n"),
+            ("comment.yaml", "$comment: string\n"),
+            ("custom-dollar.yaml", "$custom: string\n"),
+            ("custom-extension.yaml", "x-custom: string\n"),
+            ("pure.yaml", "$schema:\n  name: string(required)\n"),
+            (
+                "kinded.yaml",
+                "kind: schema\ntypes:\n  name: string(required)\n",
+            ),
+            ("mixed.yaml", "name: string(required)\ncount: 1\n"),
+            ("invalid.yaml", "name: definitely-not-a-type\n"),
+        ];
+
+        let dir = tempfile::tempdir().unwrap();
+        for (name, body) in cases {
+            write_schema_file(dir.path(), name, body);
+            let resolved =
+                resolve_yaml_schema(&yaml_value(&format!("./{name}")), dir.path()).unwrap();
+            assert!(
+                resolved.advisories.is_empty(),
+                "unexpected advisory for {name}"
+            );
+        }
+
+        write_schema_file(
+            dir.path(),
+            "target.yaml",
+            "$schema:\n  name: string(required)\n",
+        );
+        write_schema_file(dir.path(), "scalar.yaml", "$schema: ./target.yaml\n");
+        let resolved =
+            resolve_yaml_schema(&yaml_value("./scalar.yaml"), dir.path()).unwrap();
+        assert!(resolved.advisories.is_empty());
+    }
+
+    #[test]
+    fn root_union_sorts_and_deduplicates_schema_advisories() {
+        let dir = tempfile::tempdir().unwrap();
+        let z_path = write_schema_file(dir.path(), "z.yaml", "zeta: string(required)\n");
+        let a_path = write_schema_file(dir.path(), "a.yaml", "alpha: number(default(1))\n");
+        let resolved = resolve_yaml_schema(
+            &yaml_value("- ./z.yaml\n- ./a.yaml\n- ./z.yaml\n"),
+            dir.path(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            resolved
+                .advisories
+                .iter()
+                .map(SchemaAdvisory::path)
+                .collect::<Vec<_>>(),
+            vec![a_path.clone(), z_path.clone()]
+        );
+
+        write_schema_file(
+            dir.path(),
+            "root.yaml",
+            "$schema:\n  - ./z.yaml\n  - ./a.yaml\n  - ./z.yaml\n",
+        );
+        let nested = resolve_yaml_schema(&yaml_value("./root.yaml"), dir.path()).unwrap();
+        assert_eq!(
+            nested
+                .advisories
+                .iter()
+                .map(SchemaAdvisory::path)
+                .collect::<Vec<_>>(),
+            vec![a_path, z_path]
+        );
     }
 
     #[test]
@@ -2789,7 +3002,7 @@ mod bare_name_phase3 {
     fn bare_name_rejects_special_and_recursive_classes() {
         for raw in [
             "@schema.yaml",
-            "!schema.yaml",
+            "^schema.yaml",
             "%schema.yaml",
             "vault:schema.yaml",
             "vault::schema.yaml",
@@ -2799,6 +3012,10 @@ mod bare_name_phase3 {
             let file_ref = FileReference::new(raw).unwrap();
             assert!(!is_bare_name(&file_ref), "{raw} must not be a bare name");
         }
+        assert!(matches!(
+            FileReference::new("!schema.yaml"),
+            Err(biscuit_file::FileReferenceError::InvalidSyntax(_))
+        ));
     }
 
     #[test]
@@ -2948,7 +3165,7 @@ mod bare_name_phase3 {
 
     #[test]
     fn bare_name_pins_to_schema_root_not_repository_root() {
-        // The precedence flip made implicit resolution repository-first. A
+        // The precedence flip made implicit resolution document-first. A
         // schema-root probe must stay pinned to its root: with a collision
         // between the repository root and a nearer configured schema root, the
         // schema root wins (feature review-1 Finding 4). An unpinned

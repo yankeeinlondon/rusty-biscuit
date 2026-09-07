@@ -26,6 +26,10 @@ fn child_env_invariant_accepts_windows_key_spelling() {
             OsString::from("UserProfile"),
             OsString::from(r"C:\Users\test"),
         ),
+        (
+            OsString::from(claudine::child_environment::AGENT_CWD_ENV),
+            OsString::from(r"C:\workspace"),
+        ),
     ]);
 
     super::setup::debug_assert_child_env(&env);
@@ -52,6 +56,8 @@ fn minimal_env() -> HashMap<OsString, OsString> {
     if let Some(system_root) = std::env::var_os("SYSTEMROOT") {
         env.insert(OsString::from("SYSTEMROOT"), system_root);
     }
+    claudine::child_environment::contribute_child_environment(&mut env)
+        .expect("test child environment must receive the process launch directory");
     env
 }
 

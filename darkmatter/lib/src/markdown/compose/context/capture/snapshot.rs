@@ -52,6 +52,7 @@ struct RepositoryEvidence {
 #[derive(Debug, Clone)]
 pub struct ContextCaptureEvidence {
     environment: HashMap<String, String>,
+    invocation_cwd: EvidenceSlot<Option<PathBuf>>,
     git: EvidenceSlot<Option<GitInfo>>,
     repository: EvidenceSlot<RepositoryEvidence>,
     file_changes: EvidenceSlot<Vec<FileChange>>,
@@ -68,6 +69,7 @@ impl ContextCaptureEvidence {
     pub fn new(environment: HashMap<String, String>) -> Self {
         Self {
             environment,
+            invocation_cwd: EvidenceSlot::Missing,
             git: EvidenceSlot::Missing,
             repository: EvidenceSlot::Missing,
             file_changes: EvidenceSlot::Missing,
@@ -78,6 +80,12 @@ impl ContextCaptureEvidence {
             hardware: EvidenceSlot::Missing,
             gpus: EvidenceSlot::Missing,
         }
+    }
+
+    /// Supplies the invocation's immutable absolute launch directory.
+    pub fn with_invocation_cwd(mut self, cwd: Option<PathBuf>) -> Self {
+        self.invocation_cwd = EvidenceSlot::Supplied(cwd);
+        self
     }
 
     /// Supplies Git identity/status evidence or an observed non-repository.
@@ -186,6 +194,7 @@ impl ContextCaptureEvidence {
 /// Uses `GitRepo` for atomic queries instead of the monolithic `detect_git`,
 /// so only the fields actually needed are computed.
 pub(super) struct ContextCapture {
+    pub(super) invocation_cwd: Option<PathBuf>,
     /// Directory the capture was built for (the compose working directory).
     pub(super) base_dir: PathBuf,
     /// Repository root path (cheap: from `GitRepo::discover`).
@@ -219,9 +228,35 @@ impl ContextCapture {
     /// Uses `GitRepo` for atomic queries. Git identity and file changes share
     /// the one non-Sync handle; independent topology and host probes run in
     /// parallel via `std::thread::scope`.
-    pub(super) fn new(base_dir: &Path, groups: &[ContextGroup]) -> Self {
+    pub(super) fn new(
+        base_dir: &Path,
+        groups: &[ContextGroup],
+        invocation_cwd: std::io::Result<PathBuf>,
+    ) -> Self {
         let mut diagnostics = Vec::new();
         let mut timings = Vec::new();
+
+        let invocation_cwd = if groups.contains(&ContextGroup::Invocation) {
+            match invocation_cwd {
+                Ok(path) if path.is_absolute() => Some(path),
+                Ok(path) => {
+                    diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
+                        area: "invocation.cwd",
+                        detail: format!("captured launch directory is not absolute: {}", path.display()),
+                    });
+                    None
+                }
+                Err(error) => {
+                    diagnostics.push(ContextMergeDiagnostic::PartialRuntimeCapture {
+                        area: "invocation.cwd",
+                        detail: error.to_string(),
+                    });
+                    None
+                }
+            }
+        } else {
+            None
+        };
 
         let need_git_group = groups.contains(&ContextGroup::Git);
         let need_repo = groups.iter().any(|g| {
@@ -239,6 +274,7 @@ impl ContextCapture {
         let need_os = groups.contains(&ContextGroup::Os);
         let need_hw = groups.contains(&ContextGroup::Hardware);
         let need_gpu = groups.contains(&ContextGroup::Gpu);
+        let need_languages = groups.contains(&ContextGroup::Languages);
 
         // ── Git discovery (near-instant — just finds .git) ───────────
         let t = Instant::now();
@@ -324,7 +360,7 @@ impl ContextCapture {
         }
 
         // ── All remaining probes run in parallel ─────────────────────
-        let (repo_info, docs, os_info, hardware_info, gpu_names) = std::thread::scope(|s| {
+        let (repo_info, docs, os_info, hardware_info, gpu_names, languages) = std::thread::scope(|s| {
                 let repo_handle = if need_repo {
                     let rr = &repo_root;
                     Some(s.spawn(move || {
@@ -382,6 +418,21 @@ impl ContextCapture {
                     None
                 };
 
+                // Repository structure is detected structure-only, which never
+                // enriches per-package languages, so the language group needs
+                // its own inventory walk of the checkout.
+                let languages_handle = if need_languages {
+                    let rr = &repo_root;
+                    Some(s.spawn(move || {
+                        let t = Instant::now();
+                        let result = rr
+                            .as_ref()
+                            .and_then(|root| sniff::filesystem::detect_languages(root).ok());
+                        (result, t.elapsed())
+                    }))
+                } else {
+                    None
+                };
                 // Collect repo first — docs depends on it
                 let (repo_info, repo_elapsed) = repo_handle
                     .map(|h| h.join().unwrap_or((None, Duration::ZERO)))
@@ -441,8 +492,13 @@ impl ContextCapture {
                     timings.push(("gpu".into(), elapsed));
                     names
                 });
+                let languages = languages_handle.and_then(|h| {
+                    let (result, elapsed) = h.join().unwrap_or((None, Duration::ZERO));
+                    timings.push(("languages".into(), elapsed));
+                    result
+                });
 
-                (repo_info, docs, os_info, hardware_info, gpu_names)
+                (repo_info, docs, os_info, hardware_info, gpu_names, languages)
             });
 
         let os_info = match os_info {
@@ -480,6 +536,7 @@ impl ContextCapture {
         }).flatten();
 
         Self {
+            invocation_cwd,
             base_dir: base_dir.to_path_buf(),
             repo_root,
             repo_name,
@@ -488,7 +545,7 @@ impl ContextCapture {
             git_worktree,
             merge_conflicts,
             repo_info,
-            languages: None,
+            languages,
             docs,
             best_skill,
             os_info,
@@ -530,6 +587,10 @@ impl ContextCapture {
                     | ContextGroup::Documents
             )
         });
+        require(
+            groups.contains(&ContextGroup::Invocation) && evidence.invocation_cwd.is_missing(),
+            "invocation.cwd",
+        );
         require(
             groups.contains(&ContextGroup::Git) && evidence.git.is_missing(),
             "git",
@@ -591,6 +652,21 @@ impl ContextCapture {
         );
 
         let git_info = evidence.git.as_ref().and_then(Option::as_ref);
+        let invocation_cwd = evidence
+            .invocation_cwd
+            .as_ref()
+            .and_then(Option::as_ref)
+            .filter(|path| path.is_absolute())
+            .cloned();
+        require(
+            groups.contains(&ContextGroup::Invocation)
+                && evidence
+                    .invocation_cwd
+                    .as_ref()
+                    .and_then(Option::as_ref)
+                    .is_some_and(|path| !path.is_absolute()),
+            "invocation.cwd",
+        );
         let repository = evidence.repository.as_ref();
         let repo_info = repository.and_then(|repository| repository.info.clone());
         let repo_root = repository.and_then(|repository| repository.root.clone());
@@ -629,6 +705,7 @@ impl ContextCapture {
         });
 
         Self {
+            invocation_cwd,
             base_dir: base_dir.to_path_buf(),
             repo_root,
             repo_name: git_info.and_then(|info| info.repo.clone()),
@@ -713,6 +790,7 @@ impl ContextCapture {
     /// Minimal capture with a fixed repo root and the supplied repo info.
     pub(super) fn for_test_base(repo_root: PathBuf, repo_info: Option<RepoInfo>) -> Self {
         Self {
+            invocation_cwd: None,
             base_dir: repo_root.clone(),
             repo_root: Some(repo_root),
             repo_name: None,
@@ -799,7 +877,11 @@ mod tests {
         let outside = tempfile::tempdir().expect("temporary non-repository directory");
         GIT_DISCOVERY_COUNT.store(0, Ordering::Relaxed);
 
-        let capture = ContextCapture::new(outside.path(), &[ContextGroup::Git]);
+        let capture = ContextCapture::new(
+            outside.path(),
+            &[ContextGroup::Git],
+            Ok(outside.path().to_path_buf()),
+        );
 
         assert_eq!(GIT_DISCOVERY_COUNT.load(Ordering::Relaxed), 1);
         assert_eq!(capture.git_branch, None);
@@ -813,7 +895,11 @@ mod tests {
         let outside = tempfile::tempdir().expect("temporary non-repository directory");
         GIT_DISCOVERY_COUNT.store(0, Ordering::Relaxed);
 
-        let _capture = ContextCapture::new(outside.path(), &[ContextGroup::FileChanges]);
+        let _capture = ContextCapture::new(
+            outside.path(),
+            &[ContextGroup::FileChanges],
+            Ok(outside.path().to_path_buf()),
+        );
 
         assert_eq!(GIT_DISCOVERY_COUNT.load(Ordering::Relaxed), 1);
     }

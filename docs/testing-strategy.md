@@ -246,11 +246,14 @@ for the same reason.
 
 ### Toolchain
 
-`rust-toolchain.toml` pins the exact version (`channel = "1.97.1"`,
+`rust-toolchain.toml` pins an exact version (with
 `components = ["clippy", "rustfmt"]`), not a floating `stable`, so local and CI
-builds are provably identical and rustfmt/clippy stay stable. Required CI honors
-this file — each toolchain step is `rustup show` (which materializes the pinned
-toolchain); there are no `dtolnay/rust-toolchain@stable` overrides. The scheduled
+builds are provably identical and rustfmt/clippy stay stable. It is the only
+place the version is written: `just toolchain` shows the pin next to the current
+latest stable, and `just toolchain-upgrade [version]` rewrites that line and
+installs the toolchain. Required CI honors the file — each toolchain step is
+`rustup show` (which materializes the pinned toolchain); there are no
+`dtolnay/rust-toolchain@stable` overrides. The scheduled
 (and manual) `.github/workflows/rust-latest-stable.yml` advisory workflow tests
 the latest stable toolchain (`RUSTUP_TOOLCHAIN=stable`) and runs
 `cargo fmt --check`. It is **non-required** — advisory only.

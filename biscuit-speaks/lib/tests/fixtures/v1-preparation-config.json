@@ -1,0 +1,9 @@
+{
+  "requested_voice": "af_heart",
+  "requested_model": "kokoro-v1.0",
+  "gender": "female",
+  "language": { "custom": "en-US" },
+  "volume": { "explicit": 0.42 },
+  "speed": { "explicit": 1.15 },
+  "failover_strategy": { "specific_provider": { "host": "kokoro_tts" } }
+}

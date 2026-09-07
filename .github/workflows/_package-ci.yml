@@ -71,7 +71,7 @@ on:
         type: string
         default: '[]'
       runner-tools:
-        description: "JSON array from the closed runner-tool vocabulary: ai-provider-stubs, darkmatter-md-fixture, messenger-desktop-stubs, node-22, pnpm-10, l2-parallel-self-spawn, neovim."
+        description: "JSON array from the closed runner-tool vocabulary: ai-provider-stubs, darkmatter-md-fixture, messenger-desktop-stubs, node-22, pnpm-10, l2-parallel-self-spawn, neovim, zed-extension."
         type: string
         default: '[]'
       companion-suites:
@@ -448,6 +448,44 @@ jobs:
       # clippy + rustfmt come from rust-toolchain.toml (the single authority).
       - name: Set up the pinned Rust toolchain
         run: rustup show
+      - name: Read the pinned Zed extension packager record
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'zed-extension') }}
+        id: zed-extension-pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          config=.github/ci/zed-extension.json
+          test "$(jq -r '.schema_version' "$config")" = 1
+          for field in zed_commit linux_x86_64_url linux_x86_64_sha256; do
+            value="$(jq -er ".${field} | select(type == \"string\" and length > 0)" "$config")"
+            printf '%s=%s\n' "$field" "$value" >>"$GITHUB_OUTPUT"
+          done
+      - name: Cache the pinned Zed extension packager
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'zed-extension') }}
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/zed-extension/${{ steps.zed-extension-pin.outputs.zed_commit }}/zed-extension
+          key: zed-extension-${{ steps.zed-extension-pin.outputs.zed_commit }}-${{ steps.zed-extension-pin.outputs.linux_x86_64_sha256 }}
+      - name: Provision the Zed extension verification toolchain
+        if: ${{ contains(fromJSON(inputs.runner-tools), 'zed-extension') }}
+        shell: bash
+        env:
+          ZED_EXTENSION_SHA: ${{ steps.zed-extension-pin.outputs.zed_commit }}
+          ZED_EXTENSION_URL: ${{ steps.zed-extension-pin.outputs.linux_x86_64_url }}
+          ZED_EXTENSION_SHA256: ${{ steps.zed-extension-pin.outputs.linux_x86_64_sha256 }}
+        run: |
+          set -euo pipefail
+          rustup target add wasm32-wasip2
+          tool_dir="$RUNNER_TOOL_CACHE/zed-extension/$ZED_EXTENSION_SHA"
+          tool="$tool_dir/zed-extension"
+          mkdir -p "$tool_dir"
+          if [ ! -f "$tool" ]; then
+            curl --fail --location --retry 3 --output "$tool" "$ZED_EXTENSION_URL"
+          fi
+          printf '%s  %s\n' "$ZED_EXTENSION_SHA256" "$tool" | sha256sum --check --strict
+          chmod +x "$tool"
+          "$tool" --help >/dev/null
+          echo "$tool_dir" >>"$GITHUB_PATH"
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
@@ -475,6 +513,10 @@ jobs:
       - name: Lint
         id: clippy
         run: just _lint "${{ inputs.package }}"
+      - name: Verify the Zed extension package
+        if: ${{ !cancelled() && contains(fromJSON(inputs.runner-tools), 'zed-extension') }}
+        shell: bash
+        run: cd darkmatter && just zed-verify
       - name: Companion suite homelab-frontend lint
         id: companion
         if: ${{ !cancelled() && contains(fromJSON(inputs.companion-suites), 'homelab-frontend') && contains(fromJSON(inputs.node-environments), 'ubuntu-latest') }}

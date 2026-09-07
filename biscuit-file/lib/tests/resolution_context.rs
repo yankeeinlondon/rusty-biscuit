@@ -4,8 +4,7 @@
 //! These exercise the explicit, caller-owned resolution context introduced by
 //! the file-resolution work: a caller-suppliable repository root (no `sniff`
 //! dependency, no live git needed), home-pinned `~` resolution, and lexical
-//! containment validation. Phase 4 flipped the *precedence* to repository-root
-//! first, then base, so these assert that order plus the new context plumbing.
+//! containment validation and base-first implicit precedence.
 
 use std::fs;
 
@@ -13,7 +12,7 @@ use biscuit_file::{FileReference, FileReferenceError, FileResolutionContext, Pat
 use tempfile::TempDir;
 
 #[test]
-fn implicit_is_repository_first_with_caller_supplied_repo_root() {
+fn implicit_is_base_first_with_caller_supplied_repo_root() {
     // Collision: same filename at both the base dir and the supplied repo root.
     let repo = TempDir::new().unwrap();
     let base = repo.path().join("pkg");
@@ -31,8 +30,8 @@ fn implicit_is_repository_first_with_caller_supplied_repo_root() {
 
     assert_eq!(
         resolved.as_deref(),
-        Some(repo.path().join("notes.md").as_path()),
-        "Phase 4 resolves implicit repository-first even with a supplied repo root",
+        Some(base.join("notes.md").as_path()),
+        "implicit resolution stays base-first with a supplied repository root",
     );
 }
 
@@ -321,7 +320,6 @@ fn derived_source_preserves_request_snapshot_after_ambient_mutation() {
         ("~/home.md", home.join("home.md")),
         ("@magic.md", magic.join("magic.md")),
         ("vault:vault.md", vault.join("vault.md")),
-        ("!package.md", package.join("package.md")),
         ("{{SNAPSHOT_ROOT}}/captured.md", repo.path().join("captured.md")),
     ]
     .map(|(raw, expected)| {

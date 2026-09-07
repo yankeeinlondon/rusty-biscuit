@@ -65,8 +65,9 @@ fn one_launch_observation_projects_every_existing_context() {
 
     assert_eq!(file_resolution.base_dir(), fixture.path());
     // `LaunchContext` canonicalizes every path it projects so search-dir
-    // dedup compares one form; the authored roots below are unaffected.
-    let canonical_fixture = fixture.path().canonicalize().unwrap();
+    // dedup compares one form — in the legacy (dunce-simplified) spelling,
+    // never verbatim; the authored roots below are unaffected.
+    let canonical_fixture = biscuit_file::canonicalize_simplified(fixture.path()).unwrap();
     assert_eq!(launch.repo_root.as_deref(), Some(canonical_fixture.as_path()));
     assert_eq!(workspace.repo_root.as_deref(), Some(fixture.path()));
     assert_eq!(environment.git.as_ref().map(|git| git.repo_root.as_path()), Some(fixture.path()));
@@ -134,10 +135,102 @@ fn launch_and_same_repository_source_share_one_topology_probe() {
     assert_eq!(source_context.repository_root(), Some(fixture.path()));
     let expected_area = fixture.path().join("area");
     assert_eq!(source_context.package_area_root(), Some(expected_area.as_path()));
+    let expected_package = fixture.path().join("area/pkg");
+    assert_eq!(source_context.package_root(), Some(expected_package.as_path()));
+    assert_eq!(
+        source_context.file_resolution_context().package_area(),
+        Some(expected_area.as_path())
+    );
+    assert_eq!(
+        source_context.file_resolution_context().package_root(),
+        Some(expected_package.as_path())
+    );
     let work = invocation.work_snapshot();
     assert_eq!(work.git_root_discoveries, 1);
     assert_eq!(work.topology_probes, 1);
     assert!(work.topology_reuses >= 1);
+}
+
+#[test]
+#[serial_test::serial(cwd)]
+fn standalone_darkmatter_and_claudine_file_plans_have_scope_parity() {
+    let fixture = TempDir::new().unwrap();
+    init_repo(fixture.path());
+    write_workspace(fixture.path());
+    let package = fixture.path().join("area/pkg");
+    let source = package.join("prompt.md");
+    fs::write(&source, "prompt").unwrap();
+    let original_cwd = std::env::current_dir().unwrap();
+    std::env::set_current_dir(&package).unwrap();
+
+    let standalone = darkmatter::markdown::compose::capture_file_resolution_context(&package);
+    let invocation = InvocationContext::capture_at(&package);
+    let claudine = invocation.launch_file_resolution_context();
+
+    let paths = |reference: &str, context: &FileResolutionContext| {
+        biscuit_file::FileReference::new(reference)
+            .unwrap()
+            .candidate_plan(context)
+            .unwrap()
+            .into_iter()
+            .map(|candidate| (candidate.path().to_path_buf(), candidate.provenance()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(paths("^shared.md", &standalone), paths("^shared.md", claudine));
+    assert_eq!(paths("shared.md", &standalone), paths("shared.md", claudine));
+
+    let standalone_intrinsic = paths("@shared.md", &standalone);
+    let claudine_plan = paths("@shared.md", claudine);
+    let claudine_intrinsic = claudine_plan
+        .iter()
+        .filter(|(_, provenance)| *provenance != biscuit_file::RootProvenance::Magic)
+        .cloned()
+        .collect::<Vec<_>>();
+    assert_eq!(standalone_intrinsic, claudine_intrinsic);
+    assert!(
+        claudine_plan.iter().any(|(path, provenance)| {
+            *provenance == biscuit_file::RootProvenance::Magic
+                && path == &package.join("prompts/shared.md")
+        }),
+        "Claudine conventions must be prepended independently from intrinsic parity"
+    );
+
+    std::env::set_current_dir(original_cwd).unwrap();
+}
+
+#[test]
+fn nested_sources_rebuild_their_own_prompt_convention_roots() {
+    let fixture = TempDir::new().unwrap();
+    init_repo(fixture.path());
+    fs::create_dir_all(fixture.path().join("alpha/lib")).unwrap();
+    fs::create_dir_all(fixture.path().join("beta/lib")).unwrap();
+    fs::write(
+        fixture.path().join("Cargo.toml"),
+        "[workspace]\nmembers = [\"alpha/lib\", \"beta/lib\"]\nresolver = \"2\"\n",
+    )
+    .unwrap();
+    for (name, area) in [("alpha", "alpha"), ("beta", "beta")] {
+        fs::write(
+            fixture.path().join(format!("{area}/lib/Cargo.toml")),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\nedition = \"2024\"\n"),
+        )
+        .unwrap();
+    }
+    let alpha = fixture.path().join("alpha/lib/alpha.md");
+    let beta = fixture.path().join("beta/lib/beta.md");
+    fs::write(&alpha, "alpha").unwrap();
+    fs::write(&beta, "beta").unwrap();
+    let invocation = InvocationContext::capture_at(fixture.path().join("alpha/lib").as_path());
+
+    let alpha_context = invocation.derive_source(&alpha).unwrap();
+    let beta_context = invocation.derive_source(&beta).unwrap();
+    let alpha_roots = alpha_context.file_resolution_context().prepended_magic_paths();
+    let beta_roots = beta_context.file_resolution_context().prepended_magic_paths();
+
+    assert!(alpha_roots.contains(&fixture.path().join("alpha/lib/prompts")));
+    assert!(!alpha_roots.contains(&fixture.path().join("beta/lib/prompts")));
+    assert!(beta_roots.contains(&fixture.path().join("beta/lib/prompts")));
+    assert!(!beta_roots.contains(&fixture.path().join("alpha/lib/prompts")));
 }
 
 #[test]

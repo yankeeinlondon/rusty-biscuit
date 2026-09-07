@@ -595,6 +595,52 @@ fn shared_cache_across_distinct_options_prevents_reprompt() {
 }
 
 #[test]
+fn caller_file_origins_do_not_partition_the_exact_command_approval_cache() {
+    use darkmatter::markdown::compose::{CallerInputRecord, CallerInputRecords};
+
+    let md: Markdown = "# Test\n::shell curl https://example.com\n".into();
+    let records = |base: &std::path::Path| -> CallerInputRecords {
+        [(
+            "spec".to_string(),
+            CallerInputRecord::new(
+                serde_json::json!("cases/spec.md"),
+                biscuit_file::FileResolutionContext::new(base),
+            ),
+        )]
+        .into_iter()
+        .collect()
+    };
+    let first_origin = tempfile::TempDir::new().unwrap();
+    let second_origin = tempfile::TempDir::new().unwrap();
+    let policy = tempfile::TempDir::new().unwrap();
+    let handler = Arc::new(MockApprovalHandler::new(ShellApprovalDecision::AllowOnce));
+    let shared_cache = Arc::new(Mutex::new(std::collections::HashMap::new()));
+    let approval_options = shared_cache_options(
+        &policy,
+        handler.clone(),
+        Arc::clone(&shared_cache),
+    );
+
+    for origin in [first_origin.path(), second_origin.path()] {
+        let compose_options = ComposeOptions::new().with_caller_input_records(records(origin));
+        resolve_shell_approvals(
+            Some(&md),
+            Some(&compose_options),
+            &approval_options,
+            None,
+            None,
+        )
+        .unwrap();
+    }
+
+    assert_eq!(
+        handler.calls(),
+        1,
+        "equal command bytes must reuse approval even when caller file origins differ",
+    );
+}
+
+#[test]
 fn approval_request_carries_real_source_provenance() {
     use darkmatter::markdown::compose::ComposeSource;
 
@@ -783,13 +829,13 @@ fn lifecycle_shell_read_side_reuses_all_request_resolution_inputs() {
         "env_ref": env_ref,
         "home_ref": "~/home.flag",
         "magic_ref": "@magic.flag",
-        "package_ref": "!package.flag",
+        "package_ref": "^package.flag",
     });
     let fm_with_event = serde_json::json!({
         "env_ref": env_ref,
         "home_ref": "~/home.flag",
         "magic_ref": "@magic.flag",
-        "package_ref": "!package.flag",
+        "package_ref": "^package.flag",
         "start": {
             "stack": [{"action": {"shell": concat!(
                 "echo {{ file_exists(env_ref) }} ",

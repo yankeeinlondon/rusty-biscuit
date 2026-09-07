@@ -9,7 +9,7 @@ use biscuit_terminal::terminal::Terminal;
 use color_eyre::eyre::Result;
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::schemas::{
-    DarkmatterSchemas, SchemaError, ValidationProblem, ValidationProblemKind,
+    DarkmatterSchemas, SchemaAdvisory, SchemaError, ValidationProblem, ValidationProblemKind,
 };
 use std::path::{Path, PathBuf};
 
@@ -22,6 +22,7 @@ enum FileOutcome {
     Validated {
         report_valid: bool,
         problems: Vec<ValidationProblem>,
+        advisories: Vec<SchemaAdvisory>,
         schema_label: Option<String>,
         no_schema: bool,
     },
@@ -129,7 +130,10 @@ fn validate_one(
     assignments: &[Assignment],
     no_trigger_schemas: bool,
 ) -> FileOutcome {
-    let discovery_path = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
+    // Legacy-spelling canonicalization: a verbatim `\\?\` result would gain a
+    // path segment the gix-derived boundary lacks, disabling trigger discovery.
+    let discovery_path =
+        biscuit_file::canonicalize_simplified(file).unwrap_or_else(|_| file.to_path_buf());
     let mut md = match Markdown::try_from(discovery_path.as_path()) {
         Ok(md) => md,
         Err(err) => return FileOutcome::ParseError(err.to_string()),
@@ -137,8 +141,11 @@ fn validate_one(
 
     let api = if no_trigger_schemas {
         api.clone()
-    } else if let Some(boundary) =
-        darkmatter::markdown::compose::find_git_root_from(&discovery_path)
+    } else if let Some(boundary) = darkmatter::markdown::compose::capture_file_resolution_context(
+        discovery_path.parent().unwrap_or(&discovery_path),
+    )
+    .repository_root()
+    .map(Path::to_path_buf)
     {
         match api
             .clone()
@@ -178,6 +185,7 @@ fn validate_one(
         Ok(report) => FileOutcome::Validated {
             report_valid: report.valid,
             problems: report.problems,
+            advisories: report.advisories,
             schema_label,
             no_schema,
         },
@@ -229,6 +237,7 @@ fn emit_pretty(file: &Path, outcome: &FileOutcome, quiet: bool, terminal: &Termi
     match outcome {
         FileOutcome::Validated {
             report_valid: true,
+            advisories,
             no_schema,
             ..
         } => {
@@ -243,10 +252,14 @@ fn emit_pretty(file: &Path, outcome: &FileOutcome, quiet: bool, terminal: &Termi
             let line =
                 format!("- <green>✔</green> _<dim>the document</dim>_ {link} _<dim>{tail}</dim>_");
             println!("{}", Prose::new(line).render(terminal));
+            for advisory in advisories {
+                emit_advisory_bullet(advisory, terminal);
+            }
         }
         FileOutcome::Validated {
             report_valid: false,
             problems,
+            advisories,
             ..
         } => {
             let header = format!(
@@ -255,6 +268,9 @@ fn emit_pretty(file: &Path, outcome: &FileOutcome, quiet: bool, terminal: &Termi
             println!("{}", Prose::new(header).render(terminal));
             for problem in problems {
                 emit_problem_bullet(problem, terminal);
+            }
+            for advisory in advisories {
+                emit_advisory_bullet(advisory, terminal);
             }
         }
         FileOutcome::ParseError(message) => {
@@ -274,6 +290,16 @@ fn emit_pretty(file: &Path, outcome: &FileOutcome, quiet: bool, terminal: &Termi
             println!("{}", block.render(terminal));
         }
     }
+}
+
+fn emit_advisory_bullet(advisory: &SchemaAdvisory, terminal: &Terminal) {
+    let bullet = format!(
+        "    - <yellow>warning</yellow> <dim>[{}/{}]</dim> {}",
+        advisory.source(),
+        advisory.code(),
+        escape_prose(&advisory.message()),
+    );
+    println!("{}", Prose::new(bullet).render(terminal));
 }
 
 /// Renders one `ValidationProblem` as an indented Prose list item, with the
@@ -360,6 +386,7 @@ fn emit_json(file: &Path, outcome: &FileOutcome) {
         FileOutcome::Validated {
             report_valid,
             problems,
+            advisories,
             schema_label,
             ..
         } => {
@@ -378,12 +405,30 @@ fn emit_json(file: &Path, outcome: &FileOutcome) {
                     })
                 })
                 .collect();
-            json!({
+            let warnings_json: Vec<serde_json::Value> = advisories
+                .iter()
+                .map(|advisory| {
+                    json!({
+                        "source": advisory.source(),
+                        "code": advisory.code(),
+                        "path": advisory.path(),
+                        "message": advisory.message(),
+                    })
+                })
+                .collect();
+            let mut value = json!({
                 "file": file_str,
                 "valid": report_valid,
                 "schema": schema_label,
                 "problems": problems_json,
-            })
+            });
+            if !warnings_json.is_empty() {
+                value
+                    .as_object_mut()
+                    .expect("validated outcome is a JSON object")
+                    .insert("warnings".to_string(), warnings_json.into());
+            }
+            value
         }
         FileOutcome::ParseError(message) => json!({
             "file": file_str,

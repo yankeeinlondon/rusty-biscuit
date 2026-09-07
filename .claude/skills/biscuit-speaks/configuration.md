@@ -204,6 +204,19 @@ Speak::new("Custom").with_speed(SpeedLevel::Explicit(1.5)).play().await?;
 
 ## Environment Variable Configuration
 
+### Detached delivery
+
+`Speak::play_detached` uses the same provider selection and failover
+configuration as foreground `play`. It publishes all speech into Playa's
+per-user ordered queue. File-provider cache misses reserve their position
+before an internal helper begins synthesis; the helper must publish ready or
+failed within ten minutes. Direct command providers publish immediately.
+
+Detached implementations exist for Kokoro, EchoGarden, gTTS, ElevenLabs,
+macOS `say`, Windows SAPI, and eSpeak. Selecting a deferred enum-only provider
+returns `TtsError::DetachedUnsupported`. No blocking foreground fallback is
+attempted, because that could duplicate or reorder a reserved job.
+
 ### Provider Selection Override
 
 ```bash

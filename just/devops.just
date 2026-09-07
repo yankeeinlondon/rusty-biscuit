@@ -45,7 +45,7 @@ _install path pkg_name binary="" *args="":
     fi
 
     echo
-    cargo install --path {{ path }} {{ args }} || ( just _play error-2 && just _speak "Problems encountered when trying to install {{ pkg_name }}" && exit 1 )
+    cargo install --locked --path {{ path }} {{ args }} || ( just _play error-2 && just _speak "Problems encountered when trying to install {{ pkg_name }}" && exit 1 )
     echo
     if [[ -z "{{ binary }}" ]]; then
         echo -e "✅ {{ bold }}{{ green }}{{ pkg_name }} installed!{{ reset }}"

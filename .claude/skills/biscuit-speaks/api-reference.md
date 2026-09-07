@@ -312,7 +312,7 @@ pub trait TtsVoiceInventory: Send + Sync {
 ## Convenience Functions
 
 ```rust
-/// Simple fire-and-forget TTS.
+/// Foreground TTS.
 pub async fn speak(text: &str, config: &TtsConfig) -> Result<(), TtsError>;
 
 /// TTS returning metadata.
@@ -324,6 +324,12 @@ pub async fn speak_with_result(
 /// Error-ignored TTS (logs errors but doesn't return them).
 pub async fn speak_when_able(text: &str, config: &TtsConfig);
 ```
+
+For durable fire-and-forget delivery, use
+`Speak::new(text).with_config(config).play_detached().await`. It returns a
+detached job ID after a ready job is published or an ordered cache-miss slot is
+reserved. `SpeakResult::playback` contains `Some(SpeakPlaybackReport)` for
+file-producing providers and `None` for unverified direct streaming speech.
 
 ---
 
@@ -368,6 +374,9 @@ pub enum TtsError {
 
     #[error("Playback failed for {player}: {stderr}")]
     PlaybackFailed { player: String, stderr: String },
+
+    #[error("Detached playback is unsupported for {provider}: {reason}")]
+    DetachedUnsupported { provider: String, reason: String },
 
     #[error("Voice selection failed: {message}")]
     VoiceSelectionFailed { message: String },

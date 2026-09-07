@@ -36,12 +36,47 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy, rustfmt
+          targets: wasm32-wasip2
       - name: Install just
         uses: extractions/setup-just@v2
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
       - name: Report the toolchain under test
         run: rustc -vV
+      - name: Read the pinned Zed extension packager record
+        id: zed-extension-pin
+        shell: bash
+        run: |
+          set -euo pipefail
+          config=.github/ci/zed-extension.json
+          test "$(jq -r '.schema_version' "$config")" = 1
+          for field in zed_commit linux_x86_64_url linux_x86_64_sha256; do
+            value="$(jq -er ".${field} | select(type == \"string\" and length > 0)" "$config")"
+            printf '%s=%s\n' "$field" "$value" >>"$GITHUB_OUTPUT"
+          done
+      - name: Cache the pinned Zed extension packager
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.tool_cache }}/zed-extension/${{ steps.zed-extension-pin.outputs.zed_commit }}/zed-extension
+          key: zed-extension-${{ steps.zed-extension-pin.outputs.zed_commit }}-${{ steps.zed-extension-pin.outputs.linux_x86_64_sha256 }}
+      - name: Provision the pinned Zed extension packager
+        shell: bash
+        env:
+          ZED_EXTENSION_SHA: ${{ steps.zed-extension-pin.outputs.zed_commit }}
+          ZED_EXTENSION_URL: ${{ steps.zed-extension-pin.outputs.linux_x86_64_url }}
+          ZED_EXTENSION_SHA256: ${{ steps.zed-extension-pin.outputs.linux_x86_64_sha256 }}
+        run: |
+          set -euo pipefail
+          tool_dir="$RUNNER_TOOL_CACHE/zed-extension/$ZED_EXTENSION_SHA"
+          tool="$tool_dir/zed-extension"
+          mkdir -p "$tool_dir"
+          if [ ! -f "$tool" ]; then
+            curl --fail --location --retry 3 --output "$tool" "$ZED_EXTENSION_URL"
+          fi
+          printf '%s  %s\n' "$ZED_EXTENSION_SHA256" "$tool" | sha256sum --check --strict
+          chmod +x "$tool"
+          "$tool" --help >/dev/null
+          echo "$tool_dir" >>"$GITHUB_PATH"
       # Read-only formatting check — never write-mode. This surfaces rustfmt
       # drift between the pin and latest stable before a bump is attempted.
       - name: Read-only formatting check
@@ -52,4 +87,4 @@ jobs:
       - name: Advisory gates (biscuit-hash)
         run: cd biscuit-hash && just build && just test && just lint
       - name: Advisory gates (darkmatter)
-        run: cd darkmatter && just build && just lint
+        run: cd darkmatter && just build && just lint && just zed-verify

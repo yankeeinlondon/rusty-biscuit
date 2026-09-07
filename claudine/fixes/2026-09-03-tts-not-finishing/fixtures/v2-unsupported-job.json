@@ -1,0 +1,9 @@
+{
+  "schema_version": 2,
+  "job_id": "job-unsupported-version",
+  "sequence": 43,
+  "enqueued_at": "2026-09-03T12:01:00Z",
+  "enqueuer": { "unix_bytes": [47, 117, 115, 114, 47, 98, 105, 110, 47, 112, 108, 97, 121, 97] },
+  "capability_version": 2,
+  "payload": { "state": "ready", "kind": "future_payload" }
+}

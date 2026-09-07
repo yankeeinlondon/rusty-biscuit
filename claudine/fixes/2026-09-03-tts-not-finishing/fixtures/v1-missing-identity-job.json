@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "job_id": "job-0000000000000044",
+  "sequence": 44,
+  "enqueued_at": "2026-09-03T12:02:00Z",
+  "enqueuer": { "unix_bytes": [47, 117, 115, 114, 47, 98, 105, 110, 47, 99, 108, 97, 117, 100, 105, 110, 101] },
+  "capability_version": 1,
+  "payload": {
+    "state": "ready",
+    "kind": "play_file",
+    "path": { "unix_bytes": [47, 112, 114, 105, 118, 97, 116, 101, 47, 115, 112, 101, 101, 99, 104, 46, 119, 97, 118] },
+    "delete_after": true,
+    "playback": { "routing": "automatic", "speed": 1.0, "volume": 1.0 }
+  }
+}

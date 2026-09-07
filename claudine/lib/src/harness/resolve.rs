@@ -8,9 +8,10 @@
 //! repository-root join rather than a magic search.
 //!
 //! It is now a thin adapter over [`FileReference`] and the shared
-//! [`FileResolutionContext`]: implicit references are repository-first then
-//! source-relative (D4), `@` is a magic-root search (G2), `~` is home-pinned,
-//! explicit `./`/`../` stay pinned to the source directory, and resolution
+//! [`FileResolutionContext`]: implicit references are source-relative then
+//! repository-relative, `@` is a magic-root search, `&` pins to the repository
+//! root, `^` searches package, package-area, then repository roots, `~` is
+//! home-pinned, explicit `./`/`../` stay pinned to the source directory, and resolution
 //! probes the filesystem so only an existing regular file is a match.
 
 use std::path::{Path, PathBuf};
@@ -25,10 +26,10 @@ pub struct HarnessResolutionContext<'a> {
     /// Absolute path to the source document authoring the reference.
     pub source_path: &'a Path,
     /// Repository (worktree) root, when known. Supplied by the caller (already
-    /// discovered via `sniff`); implicit references anchor on it first.
+    /// discovered via `sniff`); implicit references use it after the source.
     pub repo_root: Option<&'a Path>,
-    /// Package-area root captured for this request. Package (`!`) references
-    /// use this anchor before the repository fallback.
+    /// Package-area root captured for this request. Repository-scoped (`^`)
+    /// references use this anchor before the repository fallback.
     pub package_area: Option<&'a Path>,
 }
 
@@ -37,10 +38,11 @@ pub struct HarnessResolutionContext<'a> {
 ///
 /// ## Resolution rules (all handled by [`FileReference`])
 ///
-/// - **implicit** (`foo.md`, `sub/foo.md`) — repository root first, then the
-///   source document's directory.
+/// - **implicit** (`foo.md`, `sub/foo.md`) — source directory first, then the
+///   repository root.
 /// - **explicit** (`./foo.md`, `../foo.md`) — pinned to the source directory.
-/// - **`@foo`** — magic-root search (repository root, configured roots, home).
+/// - **`@foo`** — registered prepend roots, then intrinsic package,
+///   package-area, repository, and home roots, then registered append roots.
 /// - **`~`**, **`~/foo`** — the user's home directory (`~user` unsupported).
 /// - **absolute** — the path itself.
 ///
@@ -75,7 +77,7 @@ pub fn resolve_harness_path(
     let resolution_ctx = build_resolution_context(trimmed, ctx)?;
 
     let detailed = file_ref.resolve_detailed(&resolution_ctx);
-    // The first candidate is the repository-first primary; surface it in the
+    // Surface the first ordered candidate in the
     // "does not exist" message so a miss names a concrete path.
     let primary = detailed
         .candidates()
@@ -160,10 +162,9 @@ pub fn resolve_harness_path_in_context(
 
 /// Build the explicit resolution context for a document-backed reference.
 ///
-/// `base_dir` is the source document's directory. The caller-supplied
-/// repository root anchors implicit references first, but only when it lexically
-/// contains that directory — otherwise the shared containment check would reject
-/// it, so resolution falls back to source-relative candidates.
+/// `base_dir` is the source document's directory. A caller-supplied repository
+/// root is retained only when it lexically contains that directory; implicit
+/// references still probe the source directory before that repository scope.
 fn build_resolution_context(
     trimmed: &str,
     ctx: &HarnessResolutionContext<'_>,

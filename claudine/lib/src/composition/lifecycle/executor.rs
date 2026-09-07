@@ -275,6 +275,12 @@ pub struct SystemShellRunner;
 impl ShellRunner for SystemShellRunner {
     fn run(&self, command: &str) -> Result<i32, ShellRunError> {
         let mut cmd = system_shell_command(command);
+        crate::child_environment::contribute_child_environment(&mut cmd).map_err(|error| {
+            ShellRunError::Spawn {
+                command: command.to_string(),
+                source: std::io::Error::other(error),
+            }
+        })?;
         let status = cmd.status().map_err(|source| ShellRunError::Spawn {
             command: command.to_string(),
             source,
@@ -741,7 +747,7 @@ impl StackExecutionContext<'_> {
 
     /// Build resolution state for expressions authored by `source_path`.
     ///
-    /// Implicit references resolve repository-first, then source-relative. The
+    /// Implicit references resolve source-relative, then against the repository. The
     /// launch-area `ctx_base_dir` is retained as `file_ref_fallback_dir`
     /// diagnostic metadata; it is not a third resolution candidate. Top-level
     /// CLI references are resolved from launch context before this executor is

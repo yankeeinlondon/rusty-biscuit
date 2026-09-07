@@ -99,7 +99,8 @@ A separate cache at `~/.biscuit-speaks-cache.json` stores discovered TTS provide
 
 `BISCUIT_SPEAKS_CACHE` names the cache file directly and takes priority over the home-directory default; an empty value is treated as unset. Its parent directory must already exist.
 
-Because environment is inherited by child processes, setting it also confines a re-spawned `so-you-say` -- which is how `--background --refresh-cache`, whose rewrite happens in a detached grandchild, is kept out of the caller's real cache during tests.
+Because environment is inherited by child processes, setting it also confines
+the detached preparation helper used by `--background` cache misses.
 
 `cache_file_path()` reads the variable; `resolve_cache_path()` applies the precedence rule and is what the tests exercise, so the rule can be asserted without mutating process-global environment state.
 
@@ -134,10 +135,18 @@ This is the only cache the CLI interacts with directly. The audio file cache is 
 
 ## Playback Flow
 
-After caching, the audio file is played through `playback.rs` which bridges to the playa library:
+After caching, the audio file is played through `playback.rs`, which bridges to
+Playa's native-first builder pipeline:
 
 1. Provider returns `(PathBuf, cache_hit)` from `generate_to_cache()`
 2. `play_audio_file()` converts biscuit-speaks types to playa types via `playa_bridge.rs`
-3. `playa::playa_explicit_with_options_async()` handles actual audio playback
+3. `Playa::play_async_with_report()` performs playback and returns route/timing evidence
 
 The playa bridge maps volume (`VolumeLevel` to `f32`) and speed (`SpeedLevel` to `f32`) for providers where playa controls playback speed. For providers that bake speed into audio, the speed option still passes through but the audio already contains the adjusted tempo.
+
+For detached cache misses, the requested sequence is reserved before synthesis.
+A private helper creates or reuses the cache file, atomically publishes the
+ready job into the same slot, or records failure. The preparation deadline is
+ten minutes; later audio cannot overtake the reserved sequence while it is
+pending. Preparation records may contain speech text and are never projected
+into Playa's journal or `playa spool` output.

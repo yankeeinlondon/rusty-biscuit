@@ -5,6 +5,9 @@ pub enum FileReferenceError {
     #[error("file reference syntax is invalid: {0}")]
     InvalidSyntax(String),
 
+    #[error("unsupported file reference scheme `{scheme}` in `{reference}`")]
+    UnsupportedScheme { scheme: String, reference: String },
+
     #[error("environment variable `{name}` is not set")]
     MissingEnvironmentVariable { name: String },
 
@@ -17,9 +20,6 @@ pub enum FileReferenceError {
     #[error("git repository is bare and has no working directory")]
     BareRepository,
 
-    #[error("could not inspect Cargo workspace state: {0}")]
-    Workspace(#[source] Box<cargo_metadata::Error>),
-
     #[error("vault reference used without any configured vault roots")]
     VaultNotConfigured,
 
@@ -30,9 +30,22 @@ pub enum FileReferenceError {
     MissingHomeContext,
 
     #[error(
-        "package reference used but no package area or repository root is available in the resolution context"
+        "`{sigil}` repository reference requires a repository containing reference CWD `{reference_cwd}`"
     )]
-    MissingPackageContext,
+    OutsideRepository {
+        sigil: char,
+        reference_cwd: PathBuf,
+    },
+
+    #[error(
+        "`{sigil}` reference `{reference}` escapes repository root `{repository_root}` through candidate `{escaped_candidate}`"
+    )]
+    RepositoryEscape {
+        sigil: char,
+        reference: String,
+        repository_root: PathBuf,
+        escaped_candidate: PathBuf,
+    },
 
     #[error(
         "repository root `{repository_root}` does not contain the resolution source `{source_path}`"

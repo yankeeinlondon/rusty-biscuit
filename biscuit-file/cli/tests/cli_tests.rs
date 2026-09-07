@@ -512,14 +512,13 @@ fn reference_add_vault_searches_vault() {
 
 #[test]
 fn reference_implicit_relative_bare_filename() {
-    // Bare filename (no `./` prefix) is ImplicitRelative. Phase 4 resolves it
-    // repository-root first: `Cargo.toml` exists both in the CLI crate and at
-    // the workspace root, so the workspace-root copy wins over the source-local
-    // one, end-to-end through the binary.
+    // Bare filename (no `./` prefix) is ImplicitRelative. `Cargo.toml` exists
+    // both in the CLI crate and at the workspace root, so the CLI-local copy
+    // wins end-to-end through the binary.
     let resolved = stdout_line(&["reference", "Cargo.toml"]);
     assert!(
-        !resolved.ends_with("biscuit-file/cli/Cargo.toml"),
-        "the workspace-root copy should win, got {resolved:?}"
+        resolved.ends_with("biscuit-file/cli/Cargo.toml"),
+        "the CLI-local copy should win, got {resolved:?}"
     );
     assert!(
         resolved.ends_with("/Cargo.toml"),
@@ -553,6 +552,17 @@ fn reference_invalid_syntax_exits_2() {
         .assert()
         .code(2)
         .stderr(predicate::str::contains("invalid variable name"));
+}
+
+#[test]
+fn reference_removed_package_sigil_exits_2_with_migration_help() {
+    bf().arg("reference")
+        .arg("!lib/src/lib.rs")
+        .assert()
+        .code(2)
+        .stderr(predicate::str::contains("removed"))
+        .stderr(predicate::str::contains("`!`"))
+        .stderr(predicate::str::contains("`^`"));
 }
 
 // ── Unknown file type ───────────────────────────────────────────────

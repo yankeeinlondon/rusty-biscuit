@@ -185,6 +185,8 @@ pub(crate) struct ResolvedPayload {
     /// Dependency edges: the payload file + its imports + its examples
     /// (sorted, deduplicated).
     pub dependencies: Vec<PathBuf>,
+    /// Non-fatal findings produced while resolving payload references.
+    pub advisories: Vec<super::super::SchemaAdvisory>,
 }
 
 /// Resolves a trigger's `$schema` payload, enforcing the merge-compatibility
@@ -240,6 +242,7 @@ pub(crate) fn resolve_trigger_payload(
     Ok(ResolvedPayload {
         json_schema: resolved.json_schema,
         dependencies: deps,
+        advisories: resolved.advisories,
     })
 }
 

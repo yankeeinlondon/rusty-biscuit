@@ -901,11 +901,9 @@ fn level2_proxy_routes_share_identity_across_routes_in_tmux() {
 
 /// The composition source document itself cannot be found.
 ///
-/// This route's contract is genuinely terminal-dependent, which is why it earns
-/// an L2 case rather than a headless one: piped, the lookup reports that
-/// autocomplete is *unavailable*; on a real TTY autocomplete runs, finds
-/// nothing, and reports **that** instead. Both are typed blocks, but only a real
-/// pane exercises the second path at all.
+/// An explicit path is never reinterpreted as an autocomplete query, even on a
+/// real TTY. This case verifies that the typed resolution evidence survives the
+/// terminal rendering path.
 #[test]
 #[serial(level2_terminal)]
 fn level2_composition_source_lookup_renders_status_block_in_tmux() {
@@ -929,12 +927,25 @@ fn level2_composition_source_lookup_renders_status_block_in_tmux() {
         capture.frame.plain
     );
     capture.assert_contains(
-        "No files matched",
-        "the block must state that the autocomplete query found nothing",
+        "CompositionError: Unresolvable file reference",
+        "the block must identify the typed resolution failure",
     );
     capture.assert_contains(
         "no-such-document.md",
         "the block must name the document that could not be found",
+    );
+    capture.assert_contains(
+        "Tried:",
+        "the block must preserve the attempted-candidate evidence",
+    );
+    capture.assert_contains(
+        "absolute:",
+        "the block must identify the absolute candidate strategy",
+    );
+    assert!(
+        !capture.frame.plain.contains("No files matched"),
+        "an explicit path must not be reinterpreted as autocomplete.\nplain:\n{}",
+        capture.frame.plain
     );
     assert_eq!(
         capture.exit_code, 1,

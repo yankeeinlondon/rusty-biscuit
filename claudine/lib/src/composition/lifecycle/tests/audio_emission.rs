@@ -2,49 +2,23 @@
 
 use super::*;
 
-/// A blocking lifecycle side effect that wedges (never returns) must not
-/// be able to freeze the composition thread: `run_blocking_with_timeout`
-/// has to return after roughly its budget, not after the work finishes.
-/// This is the core of fix #1 — a hung TTS / sound provider between loop
-/// iterations used to lock the run with no way for Ctrl+C to break in.
-#[test]
-fn run_blocking_with_timeout_returns_when_work_hangs() {
-    use std::time::{Duration, Instant};
+use fs4::fs_std::FileExt as _;
 
-    let start = Instant::now();
-    run_blocking_with_timeout("test-hang", Duration::from_millis(100), || {
-        // Simulate a wedged audio device / network voice.
-        std::thread::sleep(Duration::from_secs(30));
-    });
-    let elapsed = start.elapsed();
-
-    assert!(
-        elapsed < Duration::from_secs(5),
-        "must abandon the wedged side effect near the 100ms budget, \
-         not wait out the 30s sleep; took {elapsed:?}"
-    );
-}
-
-/// The happy path must still run the work to completion and return its
-/// result — bounding the wait must not turn into fire-and-forget for work
-/// that finishes within budget.
-#[test]
-fn run_blocking_with_timeout_runs_work_to_completion_within_budget() {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::time::Duration;
-
-    let done = Arc::new(AtomicBool::new(false));
-    let done_clone = Arc::clone(&done);
-    run_blocking_with_timeout("test-quick", Duration::from_secs(5), move || {
-        std::thread::sleep(Duration::from_millis(20));
-        done_clone.store(true, Ordering::SeqCst);
-    });
-
-    assert!(
-        done.load(Ordering::SeqCst),
-        "work that finishes within budget must complete before the call returns"
-    );
+/// Place an empty executable named `<name>` in `<temp>/bin` so a `PATH` lookup
+/// finds it on every OS. The eSpeak readiness these tests exercise is a
+/// presence check, and neither test lets playback reach the program, so the
+/// file is never run.
+fn install_fixture_program(temp: &Path, name: &str) -> std::path::PathBuf {
+    let bin = temp.join("bin");
+    std::fs::create_dir(&bin).unwrap();
+    let program = bin.join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+    std::fs::write(&program, b"").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+    bin
 }
 
 #[test]
@@ -103,6 +77,164 @@ fn audio_order_no_audio() {
     };
     let phases = audio_phases(&n);
     assert!(phases.is_empty());
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn default_emitter_publishes_audio_in_phase_order_without_waiting_for_playback() {
+    use std::fs::{self, OpenOptions};
+    use std::time::{Duration, Instant};
+
+    let temp = tempfile::tempdir().unwrap();
+    let spool = temp.path().join("spool");
+    let bin = install_fixture_program(temp.path(), "espeak");
+
+    let path = std::env::join_paths(
+        std::iter::once(bin.clone()).chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )),
+    )
+    .unwrap();
+    let _path = test_toolkit::EnvGuard::set_safe("PATH", path);
+    let _spool = test_toolkit::EnvGuard::set_safe("PLAYA_SPOOL_DIR", &spool);
+    let _dry_run = test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN");
+    assert_eq!(biscuit_speaks::run_if_worker().await, None);
+
+    fs::create_dir(&spool).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        fs::set_permissions(&spool, fs::Permissions::from_mode(0o700)).unwrap();
+    }
+    let worker = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(spool.join("worker.lock"))
+        .unwrap();
+    worker.lock_exclusive().unwrap();
+
+    let settings = GlobalSettings {
+        tts: Some(TtsSettings {
+            provider: Some("espeak".to_string()),
+            voice: None,
+            rate: None,
+        }),
+        ..GlobalSettings::default()
+    };
+    let messaging = RuntimeMessagingSettings::default();
+    let term = Terminal::default();
+    let ctx = LifecycleRuntimeContext {
+        settings: &settings,
+        messaging: &messaging,
+        term: &term,
+        source_path: Path::new("/tmp/test.md"),
+        repo_root: None,
+        launch_area: None,
+        context: None,
+    };
+    let emitter = DefaultLifecycleEmitter;
+    let start = Instant::now();
+
+    for frontmatter in [
+        json!({"start": {"say": "Phase 1 of the plan in the claudine package area, was implemented successfully", "effect": "doorbell-2"}}),
+        json!({"start": {"say_first": "Phase 1 of the plan in the claudine package area, was implemented successfully", "effect": "doorbell-2"}}),
+    ] {
+        let config = parse_lifecycle_config(&frontmatter, dummy_path()).unwrap();
+        let mut guard = LifecycleRunGuard::new(&config, &ctx, &emitter);
+        guard.emit_start_once();
+        guard.defuse();
+    }
+
+    assert!(
+        start.elapsed() < Duration::from_secs(4),
+        "lifecycle emission must return after durable publication"
+    );
+    let snapshot = playa::detached::snapshot().unwrap();
+    assert_eq!(
+        snapshot
+            .pending
+            .iter()
+            .map(|job| job.source_kind)
+            .collect::<Vec<_>>(),
+        vec![
+            playa::detached::JournalSourceKind::File,
+            playa::detached::JournalSourceKind::Command,
+            playa::detached::JournalSourceKind::Command,
+            playa::detached::JournalSourceKind::File,
+        ]
+    );
+    assert_eq!(
+        snapshot
+            .pending
+            .iter()
+            .map(|job| job.sequence)
+            .collect::<Vec<_>>(),
+        vec![1, 2, 3, 4]
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+#[tracing_test::traced_test]
+async fn default_emitter_warns_once_when_effect_handoff_fails() {
+    let temp = tempfile::tempdir().unwrap();
+    let not_a_directory = temp.path().join("not-a-directory");
+    std::fs::write(&not_a_directory, b"file").unwrap();
+    let _spool = test_toolkit::EnvGuard::set_safe("PLAYA_SPOOL_DIR", &not_a_directory);
+    let _dry_run = test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN");
+    assert_eq!(biscuit_speaks::run_if_worker().await, None);
+
+    DefaultLifecycleEmitter.emit_effect("doorbell-2");
+
+    logs_assert(|logs| {
+        let warnings = logs
+            .iter()
+            .filter(|line| line.contains("Lifecycle sound effect handoff failed"))
+            .count();
+        assert_eq!(warnings, 1, "expected one handoff warning, got: {logs:?}");
+        Ok(())
+    });
+}
+
+#[tokio::test]
+#[serial_test::serial]
+#[tracing_test::traced_test]
+async fn default_emitter_warns_once_when_speech_handoff_fails() {
+    use std::fs;
+
+    let temp = tempfile::tempdir().unwrap();
+    let bin = install_fixture_program(temp.path(), "espeak");
+    let path = std::env::join_paths(
+        std::iter::once(bin).chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )),
+    )
+    .unwrap();
+    let not_a_directory = temp.path().join("not-a-directory");
+    fs::write(&not_a_directory, b"file").unwrap();
+    let _path = test_toolkit::EnvGuard::set_safe("PATH", path);
+    let _spool = test_toolkit::EnvGuard::set_safe("PLAYA_SPOOL_DIR", &not_a_directory);
+    let _dry_run = test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN");
+    assert_eq!(biscuit_speaks::run_if_worker().await, None);
+
+    let config = TtsConfig::new().with_failover(TtsFailoverStrategy::SpecificProvider(
+        biscuit_speaks::TtsProvider::Host(biscuit_speaks::HostTtsProvider::ESpeak),
+    ));
+    DefaultLifecycleEmitter.emit_speech(
+        "Phase 1 of the plan in the claudine package area, was implemented successfully",
+        config,
+    );
+
+    logs_assert(|logs| {
+        let warnings = logs
+            .iter()
+            .filter(|line| line.contains("Lifecycle TTS handoff failed"))
+            .count();
+        assert_eq!(warnings, 1, "expected one handoff warning, got: {logs:?}");
+        Ok(())
+    });
 }
 
 #[test]

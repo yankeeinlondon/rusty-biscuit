@@ -1,13 +1,20 @@
 use super::*;
+use std::collections::HashMap;
 use std::error::Error as _;
 use std::fs;
 use std::io::{self, ErrorKind};
 use std::path::PathBuf;
+use biscuit_terminal::errors::BlockError;
+use biscuit_terminal::prelude::TerminalRenderable;
+use biscuit_terminal::terminal::Terminal;
+use crate::diagnostics::Diagnostic;
 use tempfile::TempDir;
 
 #[test]
 fn prompt_magic_roots_are_closest_first() {
-    // Discrete package before package area before repo before HOME.
+    // Only Claudine conventions are registered. The package, area,
+    // repository, and home roots are supplied by biscuit-file's intrinsic
+    // `@` chain and must not be duplicated here.
     let area = Path::new("/repo/claudine");
     let package = Path::new("/repo/claudine/lib");
     let repo = Path::new("/repo");
@@ -16,9 +23,7 @@ fn prompt_magic_roots_are_closest_first() {
     assert_eq!(
         got,
         vec![
-            PathBuf::from("/repo/claudine/lib"),
             PathBuf::from("/repo/claudine/lib/prompts"),
-            PathBuf::from("/repo/claudine"),
             PathBuf::from("/repo/claudine/prompts"),
             PathBuf::from("/repo/prompts"),
             PathBuf::from("/repo/.claudine/prompts"),
@@ -55,6 +60,90 @@ fn prompt_magic_roots_skip_absent_anchors() {
         ],
     );
     assert!(prompt_magic_roots(None, None, None, None).is_empty());
+}
+
+#[test]
+fn prompt_magic_candidates_interleave_conventions_and_intrinsic_scopes_once() {
+    // Roots must be host-absolute for the scope catalog; none need to exist.
+    let fixture = TempDir::new().unwrap();
+    let repo = fixture.path().join("repo");
+    let area = repo.join("claudine");
+    let package = area.join("lib");
+    let home = fixture.path().join("home");
+    let catalog = biscuit_file::RepositoryScopeCatalog::new(
+        repo.clone(),
+        vec![area.to_path_buf()],
+        vec![package.to_path_buf()],
+        biscuit_file::PackageAreaFallback::FirstComponent,
+    )
+    .unwrap();
+    let mut context = FileResolutionContext::from_snapshot(
+        package.join("src"),
+        Some(home.to_path_buf()),
+        HashMap::new(),
+    )
+    .with_repository_scope_catalog(catalog);
+    for root in prompt_magic_roots(Some(&repo), Some(&area), Some(&package), Some(&home)) {
+        context = context.add_magic_path(root, PathPosition::Start);
+    }
+
+    let candidates = FileReference::new("@shared.md")
+        .unwrap()
+        .candidate_plan(&context)
+        .unwrap()
+        .iter()
+        .map(|candidate| candidate.path().to_path_buf())
+        .collect::<Vec<_>>();
+
+    assert_eq!(candidates[0], package.join("prompts/shared.md"));
+    assert_eq!(candidates[1], area.join("prompts/shared.md"));
+    let package_intrinsic = package.join("shared.md");
+    let area_intrinsic = area.join("shared.md");
+    let repo_intrinsic = repo.join("shared.md");
+    let home_intrinsic = home.join("shared.md");
+    for intrinsic in [
+        package_intrinsic,
+        area_intrinsic,
+        repo_intrinsic,
+        home_intrinsic,
+    ] {
+        assert_eq!(
+            candidates.iter().filter(|candidate| **candidate == intrinsic).count(),
+            1,
+            "intrinsic root must occur exactly once: {intrinsic:?}"
+        );
+    }
+}
+
+#[test]
+fn skill_reference_prefers_repository_then_falls_back_to_home() {
+    let fixture = TempDir::new().unwrap();
+    let repo = fixture.path().join("repo");
+    let home = fixture.path().join("home");
+    let repo_skill = repo.join(".claude/skills/name/SKILL.md");
+    let home_skill = home.join(".claude/skills/name/SKILL.md");
+    fs::create_dir_all(repo_skill.parent().unwrap()).unwrap();
+    fs::create_dir_all(home_skill.parent().unwrap()).unwrap();
+    fs::write(&repo_skill, "repo skill").unwrap();
+    fs::write(&home_skill, "home skill").unwrap();
+    let catalog = biscuit_file::RepositoryScopeCatalog::new(
+        &repo,
+        Vec::new(),
+        Vec::new(),
+        biscuit_file::PackageAreaFallback::None,
+    )
+    .unwrap();
+    let context = FileResolutionContext::from_snapshot(
+        &repo,
+        Some(home.clone()),
+        HashMap::new(),
+    )
+    .with_repository_scope_catalog(catalog);
+    let reference = FileReference::new("@.claude/skills/name/SKILL.md").unwrap();
+
+    assert_eq!(reference.resolve_in_context(&context).unwrap(), Some(repo_skill.clone()));
+    fs::remove_file(repo_skill).unwrap();
+    assert_eq!(reference.resolve_in_context(&context).unwrap(), Some(home_skill));
 }
 
 #[test]
@@ -132,7 +221,96 @@ fn resolve_rejects_non_markdown() {
 #[test]
 fn resolve_missing_file() {
     let err = resolve_composition_source("/nonexistent/path/test.md").unwrap_err();
-    assert!(matches!(err, CompositionError::FileNotFound(_)));
+    assert!(matches!(
+        err,
+        CompositionError::FileReferenceNoMatch { .. }
+    ));
+}
+
+#[test]
+fn detailed_no_match_preserves_probe_order_and_diagnostic_shape() {
+    let repo = TempDir::new().unwrap();
+    let launch = repo.path().join("launch");
+    fs::create_dir_all(&launch).unwrap();
+    let context = FileResolutionContext::new(&launch).with_repository_root(repo.path());
+
+    let err = resolve_composition_source_in_context("missing.md", &context).unwrap_err();
+    let (reference, resolution, suggestions) = err.file_reference_no_match().unwrap();
+    assert_eq!(reference, "missing.md");
+    assert_eq!(resolution.reference(), "missing.md");
+    assert_eq!(resolution.base_dir(), launch);
+    assert_eq!(resolution.repository_root(), Some(repo.path()));
+    assert!(suggestions.is_empty());
+
+    let detail = err.detail();
+    assert_eq!(detail["reference"], serde_json::json!("missing.md"));
+    assert_eq!(detail["kind"], serde_json::json!("implicit_relative"));
+    assert_eq!(detail["effective_kind"], serde_json::json!("implicit_relative"));
+    assert_eq!(
+        detail["base_dir"],
+        serde_json::json!(biscuit_file::to_portable_string(&launch))
+    );
+    assert_eq!(
+        detail["repository_root"],
+        serde_json::json!(biscuit_file::to_portable_string(repo.path()))
+    );
+    assert_eq!(detail["failure"], serde_json::json!("no_match"));
+    assert_eq!(detail["suggestions"], serde_json::json!([]));
+    assert_eq!(detail["fallback_dir"], serde_json::Value::Null);
+    assert_eq!(detail["source_path"], serde_json::Value::Null);
+    assert_eq!(detail["property"], serde_json::Value::Null);
+    assert_eq!(detail["event"], serde_json::Value::Null);
+
+    let candidates = detail["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 2);
+    assert_eq!(candidates[0]["provenance"], serde_json::json!("source"));
+    assert_eq!(candidates[1]["provenance"], serde_json::json!("repository"));
+    assert_eq!(candidates[0]["disposition"], serde_json::json!("missing"));
+    assert_eq!(candidates[1]["disposition"], serde_json::json!("missing"));
+}
+
+#[test]
+fn detailed_no_match_rendering_matches_suggestion_order_and_uses_portable_paths() {
+    let repo = TempDir::new().unwrap();
+    let launch = repo.path().join("windows\\style");
+    fs::create_dir_all(&launch).unwrap();
+    let context = FileResolutionContext::new(&launch).with_repository_root(repo.path());
+    let err = resolve_composition_source_in_context("./missing.md", &context)
+        .unwrap_err()
+        .with_file_reference_suggestions(vec![
+            "zeta\\missing.md".to_string(),
+            "alpha/missing.md".to_string(),
+        ]);
+
+    let detail = err.detail();
+    assert_eq!(
+        detail["suggestions"],
+        serde_json::json!(["zeta/missing.md", "alpha/missing.md"])
+    );
+
+    let term = Terminal::default();
+    let rendered = err.status_block(&term).render(&term);
+    assert!(rendered.contains("launch directory"), "{rendered}");
+    assert!(!rendered.contains('\\'), "{rendered}");
+    let first = rendered.find("zeta/missing.md").unwrap();
+    let second = rendered.find("alpha/missing.md").unwrap();
+    assert!(first < second, "{rendered}");
+}
+
+#[test]
+fn detailed_resolution_preserves_non_no_match_typed_errors() {
+    let context = FileResolutionContext::new("/tmp");
+    let err = resolve_composition_source_in_context("https://example.com/prompt.md", &context)
+        .unwrap_err();
+    match err {
+        CompositionError::InvalidReference { source, .. } => {
+            assert!(matches!(
+                source,
+                biscuit_file::FileReferenceError::RemoteNotLocal(_)
+            ));
+        }
+        other => panic!("expected typed InvalidReference, got: {other:?}"),
+    }
 }
 
 #[test]
@@ -175,7 +353,11 @@ fn resolve_four_dash_fence_maps_to_frontmatter_parse() {
         "must not fall back to MarkdownLoad: {err:?}"
     );
     assert!(
-        !matches!(err, CompositionError::FileNotFound(_)),
+        !matches!(
+            err,
+            CompositionError::FileNotFound(_)
+                | CompositionError::FileReferenceNoMatch { .. }
+        ),
         "must not report file not found: {err:?}"
     );
     let msg = err.to_string();

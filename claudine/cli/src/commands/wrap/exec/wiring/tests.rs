@@ -769,6 +769,8 @@ exec sleep 30
         OsString::from("HOME"),
         workspace.path().as_os_str().to_os_string(),
     );
+    claudine::child_environment::contribute_child_environment(&mut env)
+        .expect("test child environment must receive the process launch directory");
 
     let mut spawned = false;
     let result = run_kimi_wire_session(
@@ -870,6 +872,8 @@ exec sleep 30
         OsString::from("HOME"),
         workspace.path().as_os_str().to_os_string(),
     );
+    claudine::child_environment::contribute_child_environment(&mut env)
+        .expect("test child environment must receive the process launch directory");
 
     let started = std::time::Instant::now();
     let mut spawned = false;

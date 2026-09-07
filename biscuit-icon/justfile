@@ -96,7 +96,7 @@ install *args="":
     # Inlined (rather than delegating to `_install`) because that helper
     # treats the third positional as `binary` and would steal `--features`.
     @echo -e "Installing \033[33m\033[1mBiscuit Icon\033[0m"
-    @cargo install --path ./cli --features image {{ args }} || (just _play error-2 && just _speak "Problems encountered when trying to install Biscuit Icon" && exit 1)
+    @cargo install --locked --path ./cli --features image {{ args }} || (just _play error-2 && just _speak "Problems encountered when trying to install Biscuit Icon" && exit 1)
     @echo -e "✅ \033[1m\033[32mBiscuit Icon installed!\033[0m"
     @just _play drop-4 || exit 0
 

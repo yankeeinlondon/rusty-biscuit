@@ -168,6 +168,207 @@ fn inline_compose_preserves_frontmatter() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn inline_compose_harvests_and_refreshes_response_frontmatter() {
+    let fixture = CliProcessFixture::named("inline-compose-refresh-frontmatter");
+    fixture.seed_user_config();
+
+    let md_file = fixture.cwd().join("ap.md");
+    let prompt_bytes = concat!(
+        "prompt: |-\n",
+        "    Inventory the wireless access points.  \n",
+        "\n",
+        "    Preserve literal \\\"quoted\\\" identifiers.\n",
+    );
+    let original = format!(
+        concat!(
+            "---\n",
+            "{}",
+            "last_updated: '2026-01-01'\n",
+            "---\n",
+            "Original inventory.\n",
+        ),
+        prompt_bytes
+    );
+    fs::write(&md_file, &original).unwrap();
+
+    let run_count = fixture.cwd().join("run-count");
+    let captured_args = fixture.cwd().join("captured-args");
+    write_executable(
+        &fixture.bin_dir().join("goose"),
+        r#"#!/bin/sh
+printf '%s\n' "$@" > "$CLAUDINE_CAPTURED_ARGS"
+if [ -f "$CLAUDINE_RUN_COUNT" ]; then
+  printf '%s\n' '---' 'access_points:' '  - Office-v2' '  - Studio-v2' 'generated_by: obedient-stub-v2' '---' 'Refreshed access-point inventory.'
+else
+  : > "$CLAUDINE_RUN_COUNT"
+  printf '%s\n' '---' 'access_points:' '  - Office-v1' '  - Studio-v1' 'generated_by: obedient-stub-v1' '---' 'Initial access-point inventory.'
+fi
+exit 0
+"#,
+    );
+
+    let run = || {
+        fixture
+            .command()
+            .env("CLAUDINE_RUN_COUNT", &run_count)
+            .env("CLAUDINE_CAPTURED_ARGS", &captured_args)
+            .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
+            .assert()
+            .success()
+    };
+
+    let first = run();
+    let first_stderr = strip_ansi(&String::from_utf8_lossy(&first.get_output().stderr));
+    assert!(first_stderr.contains("Inserted frontmatter property \"access_points\""));
+    assert!(first_stderr.contains("Inserted frontmatter property \"generated_by\""));
+    let first_content = fs::read_to_string(&md_file).unwrap();
+    assert!(first_content.contains(prompt_bytes));
+    assert!(first_content.contains("Office-v1"));
+    assert!(first_content.contains("generated_by: obedient-stub-v1"));
+
+    let delivered_prompt = fs::read_to_string(&captured_args).unwrap();
+    assert!(delivered_prompt.contains("If the prompt asks you to add or update frontmatter properties"));
+
+    let second = run();
+    let second_stderr = strip_ansi(&String::from_utf8_lossy(&second.get_output().stderr));
+    assert!(second_stderr.contains("Updated frontmatter property \"access_points\""));
+    assert!(second_stderr.contains("Updated frontmatter property \"generated_by\""));
+    let final_content = fs::read_to_string(&md_file).unwrap();
+    assert!(final_content.contains(prompt_bytes));
+    assert!(final_content.contains("Office-v2"));
+    assert!(final_content.contains("Studio-v2"));
+    assert!(final_content.contains("generated_by: obedient-stub-v2"));
+    assert!(!final_content.contains("Office-v1"));
+    assert!(!final_content.contains("obedient-stub-v1"));
+    assert_eq!(final_content.matches("access_points:").count(), 1);
+    assert_eq!(final_content.matches("generated_by:").count(), 1);
+    assert!(final_content.contains("Refreshed access-point inventory."));
+
+    let today = Local::now().format("%Y-%m-%d").to_string();
+    assert!(final_content.contains(&format!("last_updated: '{today}'")));
+    let markdown: darkmatter::markdown::Markdown = final_content.into();
+    let options = claudine::composition::closure::inline_hash_options();
+    let stored = darkmatter::markdown::hash::StoredHash::parse(
+        markdown.frontmatter().as_map().get("hash").unwrap(),
+        "hash",
+    )
+    .unwrap();
+    assert_eq!(stored.kind, darkmatter::markdown::hash::MdHashKind::Simple);
+    let comparison = markdown.compare_hash(&stored, &options).unwrap();
+    assert!(!comparison.frontmatter_changed && !comparison.body_changed);
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_reports_property_and_unclassified_frontmatter_drift() {
+    for (current, expected_notice) in [
+        (
+            "---\nprompt: Generate content\nadded: value\n---\nOriginal body\n",
+            "Frontmatter property \"added\" changed on disk during the run — restored the authored value",
+        ),
+        (
+            "---\nprompt: [\n---\nOriginal body\n",
+            "could not be compared property by property — restored the authored frontmatter",
+        ),
+    ] {
+        let fixture = CliProcessFixture::named("inline-compose-frontmatter-drift");
+        fixture.seed_user_config();
+
+        let md_file = fixture.cwd().join("doc.md");
+        fs::write(
+            &md_file,
+            "---\nprompt: Generate content\n---\nOriginal body\n",
+        )
+        .unwrap();
+        write_executable(
+            &fixture.bin_dir().join("goose"),
+            r#"#!/bin/sh
+printf '%s' "$CLAUDINE_DRIFT_CONTENT" > "$CLAUDINE_DRIFT_TARGET"
+printf 'Replacement body\n'
+exit 0
+"#,
+        );
+
+        let assert = fixture
+            .command()
+            .env("CLAUDINE_DRIFT_CONTENT", current)
+            .env("CLAUDINE_DRIFT_TARGET", &md_file)
+            .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
+            .assert()
+            .success();
+
+        let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+        let normalized_stderr = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(
+            normalized_stderr.contains(expected_notice),
+            "expected drift notice {expected_notice:?}; stderr was:\n{stderr}"
+        );
+        assert!(
+            !stderr.contains("The document body changed on disk during the run"),
+            "frontmatter-only drift must not produce a body notice; stderr was:\n{stderr}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn inline_compose_reports_canonical_value_and_body_drift() {
+    let fixture = CliProcessFixture::named("inline-compose-value-body-drift");
+    fixture.seed_user_config();
+
+    let md_file = fixture.cwd().join("doc.md");
+    let original = concat!(
+        "---\n",
+        "prompt: |-\n",
+        "  First\n",
+        "  Second\n",
+        "title: Mine\n",
+        "---\n",
+        "Original body\n",
+    );
+    fs::write(&md_file, original).unwrap();
+    write_executable(
+        &fixture.bin_dir().join("goose"),
+        r#"#!/bin/sh
+printf '%s' "$CLAUDINE_DRIFT_CONTENT" > "$CLAUDINE_DRIFT_TARGET"
+printf 'Replacement body\n'
+exit 0
+"#,
+    );
+
+    let drifted = concat!(
+        "---\n",
+        "prompt: \"First\\nSecond\"\n",
+        "title: Theirs\n",
+        "---\n",
+        "Changed body\n",
+    );
+    let assert = fixture
+        .command()
+        .env("CLAUDINE_DRIFT_CONTENT", drifted)
+        .env("CLAUDINE_DRIFT_TARGET", &md_file)
+        .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    let normalized_stderr = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(normalized_stderr.contains(
+        "Frontmatter property \"title\" changed on disk during the run — restored the authored value"
+    ));
+    assert!(normalized_stderr.contains(
+        "The document body changed on disk during the run — applied the captured replacement body"
+    ));
+    assert!(!normalized_stderr.contains("agent changed"));
+
+    let written = fs::read_to_string(md_file).unwrap();
+    assert!(written.contains("prompt: |-\n  First\n  Second\n"));
+    assert!(written.contains("title: Mine\n"));
+    assert!(written.ends_with("---\nReplacement body\n"));
+}
+
 /// Phase 4 dry-run: `inline-compose --dry-run` runs the full composition
 /// pipeline up to (but not including) provider launch, leaves the source
 /// file byte-identical (no write-back, `last_updated` untouched), and prints

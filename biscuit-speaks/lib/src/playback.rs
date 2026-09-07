@@ -5,7 +5,7 @@
 //!
 //! ## Features
 //!
-//! - Multi-provider audio playback with automatic player selection
+//! - Native-first audio playback with automatic host-player fallback
 //! - Volume and speed control where the player supports it
 //! - Support for WAV, MP3, Ogg, and PCM formats
 //!
@@ -42,9 +42,8 @@ use crate::types::AudioFormat;
 
 /// Play audio bytes using playa with config-based volume and speed.
 ///
-/// This function uses playa's multi-provider audio playback system which
-/// automatically selects the best available player and supports volume
-/// and speed control where the underlying player allows.
+/// This function uses playa's native-first builder and falls back to the best
+/// compatible host player when native playback is unavailable.
 ///
 /// ## Arguments
 ///
@@ -91,16 +90,34 @@ pub async fn play_audio_bytes(
         "Playing audio bytes via playa"
     );
 
-    playa::playa_explicit_with_options_async(playa_format, audio_data, options)
+    playa::Playa::from_data(audio_data, playa_format)
+        .with_options(options)
+        .play_async()
         .await
+        .map_err(TtsError::from)
+}
+
+/// Play audio bytes and retain Playa's route and completion report.
+#[cfg(feature = "playa")]
+pub async fn play_audio_bytes_with_report(
+    data: &[u8],
+    format: AudioFormat,
+    config: &crate::types::TtsConfig,
+) -> Result<crate::types::SpeakPlaybackReport, TtsError> {
+    use crate::playa_bridge::{to_playa_audio_data, to_playa_format, to_playa_options};
+
+    playa::Playa::from_data(to_playa_audio_data(data.to_vec()), to_playa_format(format))
+        .with_options(to_playa_options(config.volume, config.speed))
+        .play_async_with_report()
+        .await
+        .map(crate::types::SpeakPlaybackReport::from)
         .map_err(TtsError::from)
 }
 
 /// Play an audio file using playa with config-based volume and speed.
 ///
-/// This function uses playa's multi-provider audio playback system which
-/// automatically selects the best available player and supports volume
-/// and speed control where the underlying player allows.
+/// This function uses playa's native-first builder and falls back to the best
+/// compatible host player when native playback is unavailable.
 ///
 /// ## Arguments
 ///
@@ -145,9 +162,31 @@ pub async fn play_audio_file(
         "Playing audio file via playa"
     );
 
-    playa::playa_explicit_with_options_async(playa_format, audio_data, options)
+    playa::Playa::from_data(audio_data, playa_format)
+        .with_options(options)
+        .play_async()
         .await
         .map_err(TtsError::from)
+}
+
+/// Play an audio file and retain Playa's route and completion report.
+#[cfg(feature = "playa")]
+pub async fn play_audio_file_with_report(
+    path: &std::path::Path,
+    format: AudioFormat,
+    config: &crate::types::TtsConfig,
+) -> Result<crate::types::SpeakPlaybackReport, TtsError> {
+    use crate::playa_bridge::{to_playa_format, to_playa_options};
+
+    playa::Playa::from_data(
+        playa::AudioData::FilePath(path.to_path_buf()),
+        to_playa_format(format),
+    )
+    .with_options(to_playa_options(config.volume, config.speed))
+    .play_async_with_report()
+    .await
+    .map(crate::types::SpeakPlaybackReport::from)
+    .map_err(TtsError::from)
 }
 
 // ============================================================================

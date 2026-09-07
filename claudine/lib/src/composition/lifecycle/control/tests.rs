@@ -335,12 +335,12 @@ fn resolve_proxy_target_missing_file_errors() {
     );
 }
 
-/// D4: a bare implicit proxy target is repository-first. With the same basename
+/// Finalized-reference D3 supersedes ctx-launch-anchor review-3 Finding 4:
+/// a bare document-authored proxy target is source-first. With the same basename
 /// present at both the repository root and the authoring document's directory,
-/// the proxy resolves to the repository-root copy — the exact behavior the
-/// private harness grammar could never reach (`./foo` and `foo` were identical).
+/// the proxy resolves to the authoring document's copy.
 #[test]
-fn resolve_proxy_target_prefers_repository_root_for_implicit() {
+fn resolve_proxy_target_prefers_source_directory_for_implicit() {
     let repo = tempfile::tempdir().unwrap();
     let source = repo.path().join("prompts/run.md");
     std::fs::create_dir_all(source.parent().unwrap()).unwrap();
@@ -352,13 +352,13 @@ fn resolve_proxy_target_prefers_repository_root_for_implicit() {
 
     let resolved = resolve_proxy_target("plan.md", &source, Some(repo.path())).unwrap();
     assert_eq!(
-        resolved, repo_copy,
-        "implicit proxy target must resolve repository-first (D4)"
+        resolved, source_copy,
+        "implicit proxy target must resolve from the source directory first"
     );
 }
 
 #[test]
-fn resolve_proxy_target_package_reference_prefers_authoring_package_area() {
+fn resolve_proxy_target_repository_scoped_reference_prefers_package_area() {
     let repo = tempfile::tempdir().unwrap();
     let root = dunce::canonicalize(repo.path()).unwrap();
     std::fs::create_dir_all(root.join(".git")).unwrap();
@@ -384,7 +384,7 @@ fn resolve_proxy_target_package_reference_prefers_authoring_package_area() {
     std::fs::write(&package_target, "package").unwrap();
 
     assert_eq!(
-        resolve_proxy_target("!shared.md", &source, Some(&root)).unwrap(),
+        resolve_proxy_target("^shared.md", &source, Some(&root)).unwrap(),
         package_target,
     );
 }

@@ -867,7 +867,7 @@ iteration: \"{{ file_exists('design.md') ? 2 : 1 }}\"\n\
     #[test]
     fn preflight_resolves_launch_relative_derived_required_file() {
         let launch_dir = TempDir::new().unwrap();
-        std::fs::write(launch_dir.path().join(".git"), "gitdir: /tmp/fake\n").unwrap();
+        gix::init(launch_dir.path()).unwrap();
         let prompt_dir = launch_dir.path().join("prompts");
         std::fs::create_dir_all(&prompt_dir).unwrap();
         let review_dir = launch_dir.path().join("reviews/2026-06-30-replace-expression");

@@ -99,6 +99,22 @@ pub(super) fn translate_schema_failure(
         ));
     }
 
+    // Caller-file projection failures already carry the immutable authoring
+    // context and candidate evidence that the machine diagnostic needs. Keep
+    // the typed Darkmatter problem intact instead of reducing it to pointer
+    // strings in `SchemaValidation`.
+    if problems.iter().any(|problem| problem.caller_file.is_some()) {
+        return Err(CompositionError::ComposeFailed(
+            MarkdownError::SchemaValidationFailed {
+                path: source.resolved_path.clone(),
+                problems,
+                summary,
+                description: None,
+                source: None,
+            },
+        ));
+    }
+
     let effective = load_effective_schema(source, options.file_ref_fallback_dir.as_deref())?;
     let categorized = categorize_problems(&problems, effective.as_ref());
 

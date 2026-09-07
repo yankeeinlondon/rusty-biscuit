@@ -186,6 +186,22 @@ speak --slow "Take your time"
 
 ### Metadata and Debugging
 
+#### `--background`
+
+Durably hand speech to Playa's private per-user queue and return immediately.
+Cache hits publish ready audio; cache misses reserve their sequence before a
+detached preparation helper synthesizes. Jobs remain globally ordered with
+other Playa, biscuit-speaks, and Claudine audio and survive requester exit.
+
+Preparation failure or the ten-minute deadline marks the job failed and allows
+the queue to continue. `PLAYA_DRY_RUN=1` returns successfully without touching
+the capability cache, audio cache, spool, journal, or subprocesses.
+
+```bash
+so-you-say --background "Build complete"
+playa spool
+```
+
 #### `--meta`
 
 Display metadata about the voice and provider used after speaking.

@@ -8,8 +8,8 @@
 //! level (`composition::sequence::tests`); this binary proves the shipped
 //! artifact and the normal invocation path agree with it.
 //!
-//! Not duplicated here: `@` magic and `!` package references have a repo-aware
-//! home in `sequence_magic_reference.rs`; typed rejections live in
+//! Not duplicated here: `@` magic and `&`/`^` repository references have a
+//! repo-aware home in `sequence_magic_reference.rs`; typed rejections live in
 //! `sequence_errors_cli.rs`.
 
 use std::fs;

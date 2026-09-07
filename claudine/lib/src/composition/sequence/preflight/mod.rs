@@ -1137,8 +1137,12 @@ fn render_scalar(value: &Value) -> String {
 
 /// Canonicalize when the filesystem allows it, so two spellings of one file
 /// compare equal in the ancestry stack and the collision map.
+///
+/// Legacy-spelling canonicalization is load-bearing: `source_path` later
+/// re-enters reference resolution, and the grammar rejects a verbatim
+/// `\\?\` spelling as a device-prefix path.
 fn canonical(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 #[cfg(test)]

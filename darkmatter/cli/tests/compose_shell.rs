@@ -40,13 +40,11 @@ fn test_compose_with_blacklisted_command_fails() {
 #[test]
 fn test_compose_stdin_unapproved_command_fails_with_guidance() {
     let temp_dir = tempfile::TempDir::new().unwrap();
-    #[cfg(not(windows))]
+    // Policy paths anchor on the launch context (repository root, then home,
+    // then the compose base dir) on every platform; with HOME pointed at the
+    // tempdir and no enclosing repository, the guidance names the tempdir —
+    // Windows included, now that the fallback no longer consults USERPROFILE.
     let whitelist_path = temp_dir.path().join(".darkmatter-shell-whitelist");
-    #[cfg(windows)]
-    let whitelist_path = std::path::PathBuf::from(
-        std::env::var_os("USERPROFILE").expect("Windows user profile is available"),
-    )
-    .join(".darkmatter-shell-whitelist");
 
     md_cmd()
         .current_dir(temp_dir.path())

@@ -166,10 +166,12 @@ file reference.
 sequence: <file-ref> [-> <offset.path>] [::<operator>(<args>)]
 ```
 
-- `<file-ref>` keeps its full powers — relative paths, `@` magic, `!` package,
-  `~`, `vault:`, and `{{ }}` interpolation. Interpolation resolves **before**
+- `<file-ref>` keeps its full powers — relative paths, `@` magic, `&`
+  repository-root, `^` repository-scoped, `~`, `vault:`, and `{{ }}`
+  interpolation. Interpolation resolves **before**
   the suffix is parsed, and resolution is relative to the **authoring
-  document's** directory, never the process CWD.
+  document's** context: implicit paths check its directory before the repository
+  root, while explicit `./`/`../` paths stay pinned to its directory.
 - `->` is a dot-notation **offset** into the document. YAML/JSON/JSON5 only; a
   typed error on JSONL/NDJSON, whose root is always the list.
 - `::` is an **operator** on the resolved list. Exactly one per reference.

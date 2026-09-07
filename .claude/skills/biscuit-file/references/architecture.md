@@ -26,7 +26,7 @@ Default features: `toml`, `yaml`, `json5`, `extract`, `lopdf`, `file-reference`
 | `extract` | `pdf-extract` | PDF text extraction |
 | `lopdf` | `lopdf` | PDF TOC extraction |
 | `pdfium` | `pdfium-render` | High-fidelity PDF extraction |
-| `file-reference` | `git2`, `cargo_metadata`, `walkdir` | File reference parsing and resolution |
+| `file-reference` | `gix`, `walkdir`, `dirs`, `url` | File reference parsing and resolution |
 | `schema` | `jsonschema` | JSON Schema validation (not yet implemented) |
 | `full` | all above | All features enabled |
 

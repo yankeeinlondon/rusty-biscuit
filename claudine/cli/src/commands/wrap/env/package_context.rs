@@ -267,6 +267,8 @@ pub(crate) fn package_candidates_for_area(package_area: &str, packages: &[Packag
     candidates
 }
 
+/// Legacy-spelling canonicalization — a verbatim `\\?\` result would leak
+/// into env values and downstream reference resolution, which rejects it.
 pub(crate) fn canonical_or_self(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    biscuit_file::canonicalize_simplified(path).unwrap_or_else(|_| path.to_path_buf())
 }

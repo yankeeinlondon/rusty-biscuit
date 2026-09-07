@@ -2,6 +2,20 @@
 
 ## Basic Text-to-Speech
 
+### Ordered background speech
+
+```bash
+so-you-say --background "First message"
+so-you-say --background "Second message"
+playa spool
+```
+
+Both invocations return after durable handoff. The private Playa scheduler
+plays them in publication order without overlap, even after either requesting
+shell exits. A cache miss reserves its position before synthesis, so a later
+cache hit cannot overtake it. Delivery is best-effort and at-most-once after
+playback starts.
+
 ### Simple Usage
 
 ```bash

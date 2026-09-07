@@ -65,15 +65,15 @@ fn project_in_context(
 ) -> Projection {
     let repository_root = match request_context {
         Some(context) => context.repository_root().map(Path::to_path_buf),
-        None => crate::markdown::compose::find_git_root_from(base_dir),
+        None => None,
     };
     if let Some(repo) = repository_root
-        && let Ok(stripped) = abs.strip_prefix(&repo)
+        && let Some(stripped) = strip_prefix_any_spelling(abs, &repo)
     {
-        return Projection::Bare(stripped.to_path_buf());
+        return Projection::Bare(stripped);
     }
-    if let Ok(stripped) = abs.strip_prefix(base_dir) {
-        return Projection::Bare(stripped.to_path_buf());
+    if let Some(stripped) = strip_prefix_any_spelling(abs, base_dir) {
+        return Projection::Bare(stripped);
     }
     let home_dir = match request_context {
         Some(context) => context.home_dir().map(Path::to_path_buf),
@@ -85,6 +85,28 @@ fn project_in_context(
         return Projection::HomeRelative(stripped.to_path_buf());
     }
     Projection::Bare(abs.to_path_buf())
+}
+
+/// `strip_prefix` across the two spellings a root can legitimately carry.
+///
+/// The request repository root keeps the launch directory's spelling while a
+/// probed candidate may come back canonical (macOS `/var` vs `/private/var`,
+/// Windows verbatim prefixes). Both spellings name the same directory, so a
+/// literal miss retries against the canonical form of each side before giving
+/// up; a path that does not exist simply keeps its literal spelling.
+fn strip_prefix_any_spelling(abs: &Path, root: &Path) -> Option<PathBuf> {
+    if let Ok(stripped) = abs.strip_prefix(root) {
+        return Some(stripped.to_path_buf());
+    }
+    let canonical_root = std::fs::canonicalize(root).ok()?;
+    if let Ok(stripped) = abs.strip_prefix(&canonical_root) {
+        return Some(stripped.to_path_buf());
+    }
+    let canonical_abs = std::fs::canonicalize(abs).ok()?;
+    canonical_abs
+        .strip_prefix(&canonical_root)
+        .ok()
+        .map(Path::to_path_buf)
 }
 
 /// The native-text rendering of [`project_in_context`].

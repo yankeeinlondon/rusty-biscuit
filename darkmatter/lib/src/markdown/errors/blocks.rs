@@ -248,6 +248,22 @@ pub(crate) fn transform_block(message: &str) -> StatusBlock {
         .hint("Review the transform pipeline inputs and any configured rules.")
 }
 
+/// Build the block for unstable caller file typing.
+pub(crate) fn caller_file_classification_changed_block(property: &str) -> StatusBlock {
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new(
+            "MarkdownError",
+            "caller file parameter typing changed",
+        ))
+        .body(format!(
+            "The caller-supplied <inverse>{}</inverse> property changed file modes after frontmatter expressions had begun.",
+            Prose::escape_text(property)
+        ))
+        .hint(
+            "Make this property's eager `file(eager)` declaration unconditional in the baseline or document schema, or remove the frontmatter dependency on it.",
+        )
+}
+
 /// Build the [`StatusBlock`] for [`MarkdownError::Interpolation`].
 ///
 /// The headline and hint are derived from the typed `cause` (never the mechanism
@@ -480,6 +496,24 @@ pub(crate) fn malformed_disclosure_block(reason: &str, range: &std::ops::Range<u
         .hint("Disclosure blocks need `::disclosure`, `::details`, and `::end-disclosure`; the summary must contain only phrasing content.")
 }
 
+/// Build the [`StatusBlock`] for [`MarkdownError::ParameterBinding`].
+pub(crate) fn parameter_binding_block(
+    property: &str,
+    provided: &str,
+    reason: &str,
+) -> StatusBlock {
+    let body = format!(
+        "<dim>Property:</dim> <inverse>{}</inverse>\n<dim>Value:</dim> {}\n{}",
+        Prose::escape_text(property),
+        Prose::escape_text(provided),
+        Prose::escape_text(reason),
+    );
+    StatusBlock::new(StatusState::Error)
+        .error_header(ErrorHeader::new("MarkdownError", "parameter binding failed"))
+        .body(body)
+        .hint("Use `file(eager)` when the reference needs filesystem search or recursive matching.")
+}
+
 /// Build the [`StatusBlock`] for [`MarkdownError::SchemaValidationFailed`].
 ///
 /// When `problems` is empty the failure represents a schema *preparation*
@@ -641,6 +675,7 @@ mod tests {
             base_dir: dir.path().to_path_buf(),
             fallback_dir: None,
             source: None,
+            caller: None,
         });
         let out = render_block(&interpolation_block(
             Some("result"),
@@ -668,6 +703,7 @@ mod tests {
             base_dir: PathBuf::from("/repo"),
             fallback_dir: None,
             source: None,
+            caller: None,
         });
         let source = SourceRef::Effective {
             rendered: "frontmatter('missing.md')".to_string(),
@@ -710,6 +746,7 @@ mod tests {
             base_dir: PathBuf::from("/repo"),
             fallback_dir: None,
             source: None,
+            caller: None,
         });
         let block = interpolation_block(
             Some("iteration"),
@@ -1015,6 +1052,7 @@ mod tests {
             schema_path: None,
             offending_property: None,
             file_reference: None,
+            caller_file: None,
         }
     }
 

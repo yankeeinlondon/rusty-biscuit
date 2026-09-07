@@ -85,7 +85,7 @@ fn lifecycle_file_functions_reuse_all_request_resolution_inputs() {
         "file_exists('{{CLAUDINE_SNAPSHOT_ROOT}}/env.flag')",
         "file_exists('~/home.flag')",
         "file_exists('@magic.flag')",
-        "file_exists('!package.flag')",
+        "file_exists('^package.flag')",
     ] {
         let parsed = darkmatter::markdown::compose::expression::parse(expression).unwrap();
         assert_eq!(context.eval_expr(&parsed, &fm).unwrap(), Value::Bool(true));
@@ -272,8 +272,8 @@ fn lifecycle_reuses_prepared_snapshot_for_prompt_outside_launch_area() {
 /// Layout: `spec.md` lives under `base_dir` (the prompt's parent); a same-named
 /// file under the launch area is NOT a resolution candidate — the launch-area
 /// fallback is diagnostic-only for in-document references (D2). Pre-flip this
-/// test asserted the launch area drove resolution; repository-first replaced
-/// that with document-dir anchoring.
+/// test asserted the launch area drove resolution; document-dir anchoring
+/// replaced that behavior.
 #[serial_test::serial]
 #[test]
 fn file_exists_resolves_against_base_dir_after_chdir() {
@@ -419,7 +419,7 @@ fn prepare_time_and_event_time_agree_on_file_reference() {
 
 /// `frontmatter(spec, review_iterations)` resolves against `base_dir` (the
 /// document directory) — the mechanism behind `iteration` derivation in prompts
-/// like `review-feature.md`. Under repository-first resolution the spec is read
+/// like `review-feature.md`. Under source-first resolution the spec is read
 /// from the document's own directory, not the launch-area fallback.
 #[serial_test::serial]
 #[test]

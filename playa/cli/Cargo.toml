@@ -19,6 +19,7 @@ sfx-native = ["playa/sfx-native"]
 sfx-native-audio = ["sfx-native", "playa/sfx-native-audio"]
 
 [dependencies]
+biscuit-file = { path = "../../biscuit-file/lib", default-features = false, features = ["file-reference"] }
 biscuit-terminal = { path = "../../biscuit-terminal/lib" }
 clap = { version = "4.5.53", features = ["derive", "wrap_help"] }
 clap_complete = { version = "4.5", features = ["unstable-dynamic"] }
@@ -28,6 +29,12 @@ darkmatter = { path = "../../darkmatter/lib" }
 sniff = { path = "../../sniff/lib" }
 strum = { version = "0.28", features = ["derive"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros"], optional = true }
+
+[dev-dependencies]
+biscuit-test-harness = { path = "../../biscuit-test-harness" }
+fs4 = "0.13"
+serde_json = "1.0"
+serial_test = "3.2"
 
 # Opt-out of benchmarking: thin CLI wrapper around the playa library.
 [package.metadata.benchmarks]

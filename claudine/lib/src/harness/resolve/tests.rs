@@ -113,11 +113,12 @@ fn dot_slash_is_source_relative() {
     assert_eq!(result, local);
 }
 
-/// A bare implicit reference is repository-first: with the same basename
+/// Finalized-reference D3 supersedes ctx-launch-anchor review-3 Finding 4:
+/// a bare document-authored reference is source-first. With the same basename
 /// present at both the repository root and the source directory, the
-/// repository root wins (D4).
+/// source directory wins.
 #[test]
-fn implicit_reference_prefers_repository_root() {
+fn implicit_reference_prefers_source_directory() {
     let repo = tempfile::tempdir().unwrap();
     let source = repo.path().join("prompts/run.md");
     std::fs::create_dir_all(source.parent().unwrap()).unwrap();
@@ -134,8 +135,8 @@ fn implicit_reference_prefers_repository_root() {
     };
     let result = resolve_harness_path("shared.md", &ctx).unwrap();
     assert_eq!(
-        result, repo_copy,
-        "implicit reference must resolve repository-first"
+        result, source_copy,
+        "implicit reference must resolve from the source directory first"
     );
 }
 
@@ -158,7 +159,7 @@ fn implicit_reference_without_repo_root_is_source_relative() {
 }
 
 #[test]
-fn package_reference_prefers_captured_package_area_over_repository_root() {
+fn repository_scoped_reference_prefers_captured_package_area() {
     let repo = tempfile::tempdir().unwrap();
     let package_area = repo.path().join("claudine");
     let source = package_area.join("prompts/run.md");
@@ -175,7 +176,7 @@ fn package_reference_prefers_captured_package_area_over_repository_root() {
     };
 
     assert_eq!(
-        resolve_harness_path("!shared.md", &ctx).unwrap(),
+        resolve_harness_path("^shared.md", &ctx).unwrap(),
         package_target,
     );
 }
@@ -203,7 +204,7 @@ fn empty_reference_is_rejected() {
 /// D8: an implicit no-match retains the whole ordered candidate plan. The
 /// bare reference misses at both anchors, so the typed diagnostic projects
 /// `kind`, `repository_root`, and the two probed candidates in
-/// repository-then-source order — not just the winner the convenience
+/// source-then-repository order — not just the winner the convenience
 /// projection would keep.
 #[test]
 fn implicit_no_match_projects_ordered_candidate_detail() {
@@ -249,20 +250,20 @@ fn implicit_no_match_projects_ordered_candidate_detail() {
         .expect("candidates must be an array");
     assert_eq!(candidates.len(), 2, "both anchors were probed: {detail}");
 
-    let repo_candidate = repo.path().join("absent.md");
-    assert_eq!(
-        candidates[0]["path"],
-        serde_json::json!(biscuit_file::to_portable_string(&repo_candidate))
-    );
-    assert_eq!(candidates[0]["provenance"], serde_json::json!("repository"));
-    assert_eq!(candidates[0]["disposition"], serde_json::json!("missing"));
-
     let source_candidate = repo.path().join("prompts/absent.md");
     assert_eq!(
-        candidates[1]["path"],
+        candidates[0]["path"],
         serde_json::json!(biscuit_file::to_portable_string(&source_candidate))
     );
-    assert_eq!(candidates[1]["provenance"], serde_json::json!("source"));
+    assert_eq!(candidates[0]["provenance"], serde_json::json!("source"));
+    assert_eq!(candidates[0]["disposition"], serde_json::json!("missing"));
+
+    let repo_candidate = repo.path().join("absent.md");
+    assert_eq!(
+        candidates[1]["path"],
+        serde_json::json!(biscuit_file::to_portable_string(&repo_candidate))
+    );
+    assert_eq!(candidates[1]["provenance"], serde_json::json!("repository"));
     assert_eq!(candidates[1]["disposition"], serde_json::json!("missing"));
 }
 
@@ -278,8 +279,9 @@ fn io_failure_projects_full_ordered_candidate_detail() {
     std::fs::create_dir_all(source.parent().unwrap()).unwrap();
     std::fs::write(&source, "x").unwrap();
 
-    // The repository candidate is absent. The source candidate descends
-    // through a regular file, producing ENOTDIR rather than NotFound.
+    // The first, source-relative candidate descends through a regular file,
+    // producing ENOTDIR rather than NotFound. Resolution stops at that I/O
+    // failure without probing the repository fallback.
     std::fs::write(repo.path().join("prompts/blocker"), "x").unwrap();
 
     let ctx = HarnessResolutionContext {
@@ -314,27 +316,19 @@ fn io_failure_projects_full_ordered_candidate_detail() {
     let candidates = detail["candidates"]
         .as_array()
         .expect("candidates must be an array");
-    assert_eq!(candidates.len(), 2, "both probes must survive: {detail}");
-
-    let repository_candidate = repo.path().join("blocker/target.md");
-    assert_eq!(
-        candidates[0]["path"],
-        serde_json::json!(repository_candidate.to_string_lossy())
-    );
-    assert_eq!(candidates[0]["provenance"], serde_json::json!("repository"));
-    assert_eq!(candidates[0]["disposition"], serde_json::json!("missing"));
+    assert_eq!(candidates.len(), 1, "the terminal I/O probe must survive: {detail}");
 
     let source_candidate = repo.path().join("prompts/blocker/target.md");
     assert_eq!(
-        candidates[1]["path"],
+        candidates[0]["path"],
         serde_json::json!(source_candidate.to_string_lossy())
     );
-    assert_eq!(candidates[1]["provenance"], serde_json::json!("source"));
-    assert_eq!(candidates[1]["disposition"], serde_json::json!("io"));
+    assert_eq!(candidates[0]["provenance"], serde_json::json!("source"));
+    assert_eq!(candidates[0]["disposition"], serde_json::json!("io"));
 }
 
 /// The retained plan is also reachable as typed candidates for the renderer,
-/// in the same repository-then-source order.
+/// in the same source-then-repository order.
 #[test]
 fn implicit_no_match_exposes_typed_candidates_for_rendering() {
     use biscuit_file::RootProvenance;
@@ -355,9 +349,12 @@ fn implicit_no_match_exposes_typed_candidates_for_rendering() {
     assert_eq!(candidates.len(), 2);
     assert_eq!(
         candidates[0].candidate().provenance(),
+        RootProvenance::Source
+    );
+    assert_eq!(
+        candidates[1].candidate().provenance(),
         RootProvenance::Repository
     );
-    assert_eq!(candidates[1].candidate().provenance(), RootProvenance::Source);
 }
 
 /// A failure drawn before resolution carries no plan: `resolution` stays

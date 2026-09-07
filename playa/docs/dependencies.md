@@ -50,4 +50,16 @@ requesting a native backend would be unconditional.
 
 See `playa/lib/Cargo.toml` and `playa/cli/Cargo.toml` for the authoritative crate
 list and the feature gating (`sfx-native-audio` for OS-native SFX routing on every
-platform; `audio-ducking-{linux,macos,windows}` still split per OS).
+platform; `audio-ducking-{linux,macos,windows}` still split per OS). Runtime audio
+metadata probing uses the same bounded Symphonia header inspection as the build
+script, and playback reports use Serde because the detached worker journal
+persists them. The private detached spool uses `fs4` for cross-process queue and
+worker locks, `sniff` for the stable OS-user identity, and `biscuit-hash` for
+that identity's path-safe fingerprint and content-addressed audio cache keys.
+`chrono` timestamps preparation deadlines and journal events, while the
+target-specific `windows-sys` dependency provides atomic replacement of
+published records on Windows.
+The CLI uses `biscuit-file`'s `FileReference` resolver at its authored-path
+boundary and its portable-path renderer for redacted spool status. `tracing-test`
+and `serial_test` are test-only dependencies for warning-count and isolated
+environment tests.

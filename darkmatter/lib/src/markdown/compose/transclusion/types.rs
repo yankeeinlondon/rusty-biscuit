@@ -3,7 +3,7 @@
 use crate::markdown::compose::ComposeSource;
 use biscuit_terminal::errors::SourceContext;
 use std::ops::Range;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 /// Source info derived from a compose source.
@@ -269,6 +269,11 @@ impl TransclusionRuntime {
     /// Current recursion depth.
     pub fn depth(&self) -> usize {
         self.stack.len()
+    }
+
+    /// Path of the root document for the current recursive compose run.
+    pub(crate) fn root_path(&self) -> Option<&Path> {
+        self.stack.first().map(|node| node.path.as_path())
     }
 
     /// Creates a child runtime with the same ancestry stack.

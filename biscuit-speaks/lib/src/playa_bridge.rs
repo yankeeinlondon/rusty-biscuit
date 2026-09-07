@@ -67,6 +67,49 @@ pub(crate) fn to_playa_options(volume: VolumeLevel, speed: SpeedLevel) -> playa:
         .with_speed(speed.value())
 }
 
+pub(crate) fn to_detached_playback(config: &crate::types::TtsConfig) -> playa::detached::DetachedPlayback {
+    playa::detached::DetachedPlayback {
+        options: to_playa_options(config.volume, config.speed),
+        routing: playa::detached::PlaybackRouting::Auto,
+        ducking: None,
+    }
+}
+
+pub(crate) fn file_job(
+    path: std::path::PathBuf,
+    config: &crate::types::TtsConfig,
+) -> playa::detached::SpoolJob {
+    playa::detached::SpoolJob::PlayFile {
+        path: playa::detached::OsValue::from(path.into_os_string()),
+        playback: to_detached_playback(config),
+        delete_after: false,
+    }
+}
+
+pub(crate) fn command_job(
+    program: impl AsRef<std::ffi::OsStr>,
+    args: impl IntoIterator<Item = std::ffi::OsString>,
+) -> Result<playa::detached::SpoolJob, crate::TtsError> {
+    let requested = program.as_ref();
+    let program = if std::path::Path::new(requested).is_absolute() {
+        std::path::PathBuf::from(requested)
+    } else {
+        sniff::programs::find_program_with_source(requested)
+            .map(|(path, _)| path)
+            .ok_or_else(|| crate::TtsError::ProviderFailed {
+                provider: "detached".to_string(),
+                message: format!("executable was not discovered: {}", requested.to_string_lossy()),
+            })?
+    };
+    Ok(playa::detached::SpoolJob::Command {
+        program: playa::detached::OsValue::from(program.into_os_string()),
+        args: args
+            .into_iter()
+            .map(playa::detached::OsValue::from)
+            .collect(),
+    })
+}
+
 /// Wrap audio bytes in an `Arc` for use with playa's `AudioData::Bytes`.
 ///
 /// Playa expects bytes wrapped in `Arc<Vec<u8>>` for efficient sharing

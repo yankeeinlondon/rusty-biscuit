@@ -1,5 +1,3 @@
-use std::collections::hash_map::DefaultHasher;
-use std::hash::Hasher;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -13,7 +11,8 @@ use crate::detection::{
     detect_audio_format_from_bytes, detect_audio_format_from_path, detect_audio_format_from_url,
 };
 use crate::error::PlaybackError;
-use crate::player::{AudioPlayer, PLAYER_LOOKUP, match_available_players};
+use crate::player::{AudioPlayer, PLAYER_LOOKUP};
+use crate::report::{PlaybackReport, PlaybackRoute, ProbedAudioMetadata};
 use crate::types::{AudioFormat, PlaybackOptions};
 
 /// Detect the format and play audio with the best available player.
@@ -24,12 +23,12 @@ pub async fn playa(audio: AudioData) -> Result<(), PlaybackError> {
         AudioData::Bytes(bytes) => detect_audio_format_from_bytes(bytes)?,
     };
 
-    playa_explicit(format, audio)
+    crate::Playa::from_data(audio, format).play()
 }
 
 /// Play audio using an explicitly provided audio format.
 pub fn playa_explicit(format: AudioFormat, audio: AudioData) -> Result<(), PlaybackError> {
-    playa_explicit_with_options(format, audio, PlaybackOptions::default())
+    crate::Playa::from_data(audio, format).play()
 }
 
 /// Play audio using an explicitly provided audio format with options.
@@ -38,8 +37,28 @@ pub fn playa_explicit_with_options(
     audio: AudioData,
     options: PlaybackOptions,
 ) -> Result<(), PlaybackError> {
-    let player = select_player(format, &audio, &options)?;
-    playa_with_player_and_options(player, audio, options)
+    crate::Playa::from_data(audio, format)
+        .with_options(options)
+        .play()
+}
+
+/// Play explicitly classified audio and return its completion report.
+pub fn playa_explicit_with_report(
+    format: AudioFormat,
+    audio: AudioData,
+) -> Result<PlaybackReport, PlaybackError> {
+    crate::Playa::from_data(audio, format).play_with_report()
+}
+
+/// Play explicitly classified audio with options and return its report.
+pub fn playa_explicit_with_options_and_report(
+    format: AudioFormat,
+    audio: AudioData,
+    options: PlaybackOptions,
+) -> Result<PlaybackReport, PlaybackError> {
+    crate::Playa::from_data(audio, format)
+        .with_options(options)
+        .play_with_report()
 }
 
 /// Play audio using a specific player.
@@ -53,6 +72,34 @@ pub fn playa_with_player_and_options(
     audio: AudioData,
     options: PlaybackOptions,
 ) -> Result<(), PlaybackError> {
+    playa_with_player_and_options_with_report(player, audio, options).map(|_| ())
+}
+
+/// Play audio through a specific host player and report observed completion.
+pub fn playa_with_player_with_report(
+    player: AudioPlayer,
+    audio: AudioData,
+) -> Result<PlaybackReport, PlaybackError> {
+    playa_with_player_and_options_with_report(player, audio, PlaybackOptions::default())
+}
+
+/// Play audio through a specific host player with options and report completion.
+pub fn playa_with_player_and_options_with_report(
+    player: AudioPlayer,
+    audio: AudioData,
+    options: PlaybackOptions,
+) -> Result<PlaybackReport, PlaybackError> {
+    let probed = crate::probe_audio_metadata(&audio);
+    playa_with_player_and_options_report_inner(player, audio, options, probed)
+        .map(PlaybackReport::warn_if_truncated)
+}
+
+pub(crate) fn playa_with_player_and_options_report_inner(
+    player: AudioPlayer,
+    audio: AudioData,
+    options: PlaybackOptions,
+    probed: Option<ProbedAudioMetadata>,
+) -> Result<PlaybackReport, PlaybackError> {
     let metadata = PLAYER_LOOKUP
         .get(&player)
         .ok_or(PlaybackError::MissingPlayerMetadata { player })?;
@@ -65,12 +112,13 @@ pub fn playa_with_player_and_options(
     }
 
     let source = resolve_source(&audio, options.speed)?;
-    let mut command = build_player_command(player, metadata, &source, &options)?;
+    let mut command = build_player_command(player, metadata, &source, &options, probed)?;
     command
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
+    let started = Instant::now();
     let mut child = command
         .spawn()
         .map_err(|source| PlaybackError::Spawn { player, source })?;
@@ -88,7 +136,12 @@ pub fn playa_with_player_and_options(
                         exit_code: status.code(),
                     });
                 }
-                return Ok(());
+                return Ok(PlaybackReport::completed(
+                    PlaybackRoute::Host(player),
+                    probed,
+                    started.elapsed(),
+                    effective_speed(player, &options),
+                ));
             }
             Ok(None) => {
                 if Instant::now() >= deadline {
@@ -126,7 +179,7 @@ pub async fn playa_async(audio: AudioData) -> Result<(), PlaybackError> {
         AudioData::Bytes(bytes) => detect_audio_format_from_bytes(bytes)?,
     };
 
-    playa_explicit_async(format, audio).await
+    crate::Playa::from_data(audio, format).play_async().await
 }
 
 /// Play audio using an explicitly provided audio format (async).
@@ -137,7 +190,7 @@ pub async fn playa_explicit_async(
     format: AudioFormat,
     audio: AudioData,
 ) -> Result<(), PlaybackError> {
-    playa_explicit_with_options_async(format, audio, PlaybackOptions::default()).await
+    crate::Playa::from_data(audio, format).play_async().await
 }
 
 /// Play audio using an explicitly provided audio format with options (async).
@@ -149,8 +202,34 @@ pub async fn playa_explicit_with_options_async(
     audio: AudioData,
     options: PlaybackOptions,
 ) -> Result<(), PlaybackError> {
-    let player = select_player(format, &audio, &options)?;
-    playa_with_player_and_options_async(player, audio, options).await
+    crate::Playa::from_data(audio, format)
+        .with_options(options)
+        .play_async()
+        .await
+}
+
+/// Asynchronously play explicitly classified audio and return its report.
+#[cfg(feature = "async")]
+pub async fn playa_explicit_async_with_report(
+    format: AudioFormat,
+    audio: AudioData,
+) -> Result<PlaybackReport, PlaybackError> {
+    crate::Playa::from_data(audio, format)
+        .play_async_with_report()
+        .await
+}
+
+/// Asynchronously play classified audio with options and return its report.
+#[cfg(feature = "async")]
+pub async fn playa_explicit_with_options_async_and_report(
+    format: AudioFormat,
+    audio: AudioData,
+    options: PlaybackOptions,
+) -> Result<PlaybackReport, PlaybackError> {
+    crate::Playa::from_data(audio, format)
+        .with_options(options)
+        .play_async_with_report()
+        .await
 }
 
 /// Play audio using a specific player (async).
@@ -175,6 +254,40 @@ pub async fn playa_with_player_and_options_async(
     audio: AudioData,
     options: PlaybackOptions,
 ) -> Result<(), PlaybackError> {
+    playa_with_player_and_options_async_with_report(player, audio, options)
+        .await
+        .map(|_| ())
+}
+
+/// Asynchronously play audio through a specific host player and report completion.
+#[cfg(feature = "async")]
+pub async fn playa_with_player_async_with_report(
+    player: AudioPlayer,
+    audio: AudioData,
+) -> Result<PlaybackReport, PlaybackError> {
+    playa_with_player_and_options_async_with_report(player, audio, PlaybackOptions::default()).await
+}
+
+/// Asynchronously play audio through a specific host player with a report.
+#[cfg(feature = "async")]
+pub async fn playa_with_player_and_options_async_with_report(
+    player: AudioPlayer,
+    audio: AudioData,
+    options: PlaybackOptions,
+) -> Result<PlaybackReport, PlaybackError> {
+    let probed = crate::probe_audio_metadata(&audio);
+    playa_with_player_and_options_async_report_inner(player, audio, options, probed)
+        .await
+        .map(PlaybackReport::warn_if_truncated)
+}
+
+#[cfg(feature = "async")]
+pub(crate) async fn playa_with_player_and_options_async_report_inner(
+    player: AudioPlayer,
+    audio: AudioData,
+    options: PlaybackOptions,
+    probed: Option<ProbedAudioMetadata>,
+) -> Result<PlaybackReport, PlaybackError> {
     let metadata = PLAYER_LOOKUP
         .get(&player)
         .ok_or(PlaybackError::MissingPlayerMetadata { player })?;
@@ -187,7 +300,7 @@ pub async fn playa_with_player_and_options_async(
     }
 
     let source = resolve_source_async(&audio, options.speed).await?;
-    let (binary, args) = build_player_args(player, metadata, &source, &options)?;
+    let (binary, args) = build_player_args(player, metadata, &source, &options, probed)?;
 
     let mut command = tokio::process::Command::new(binary);
     command
@@ -196,6 +309,7 @@ pub async fn playa_with_player_and_options_async(
         .stdout(Stdio::null())
         .stderr(Stdio::null());
 
+    let started = Instant::now();
     let mut child = command
         .spawn()
         .map_err(|source| PlaybackError::Spawn { player, source })?;
@@ -209,7 +323,12 @@ pub async fn playa_with_player_and_options_async(
                     exit_code: status.code(),
                 });
             }
-            Ok(())
+            Ok(PlaybackReport::completed(
+                PlaybackRoute::Host(player),
+                probed,
+                started.elapsed(),
+                effective_speed(player, &options),
+            ))
         }
         Ok(Err(e)) => Err(PlaybackError::Spawn { player, source: e }),
         Err(_elapsed) => {
@@ -227,48 +346,12 @@ pub async fn playa_with_player_and_options_async(
     }
 }
 
-fn select_player(
-    format: AudioFormat,
-    audio: &AudioData,
-    options: &PlaybackOptions,
-) -> Result<AudioPlayer, PlaybackError> {
-    let players = match_available_players(format);
-    let selected = players.into_iter().find(|candidate| {
-        let Some(metadata) = PLAYER_LOOKUP.get(candidate) else {
-            return false;
-        };
-        // Filter by URL capability
-        if matches!(audio, AudioData::Url(_)) && !metadata.takes_stream_input {
-            return false;
-        }
-        // Filter by required capabilities
-        if options.requires_speed_control() && !metadata.supports_speed_control {
-            return false;
-        }
-        if options.requires_volume_control() && !metadata.supports_volume_control {
-            return false;
-        }
-        true
-    });
-
-    selected.ok_or_else(|| {
-        if options.requires_speed_control() || options.requires_volume_control() {
-            PlaybackError::NoPlayerWithCapabilities {
-                format,
-                needs_speed: options.requires_speed_control(),
-                needs_volume: options.requires_volume_control(),
-            }
-        } else {
-            PlaybackError::NoCompatiblePlayer { format }
-        }
-    })
-}
-
 fn build_player_command(
     player: AudioPlayer,
     metadata: &crate::player::Player,
     source: &ResolvedSource,
     options: &PlaybackOptions,
+    probed: Option<ProbedAudioMetadata>,
 ) -> Result<Command, PlaybackError> {
     let mut command = Command::new(metadata.binary_name());
 
@@ -279,6 +362,11 @@ fn build_player_command(
                 .arg("--no-video")
                 .arg("--no-terminal")
                 .arg("--really-quiet");
+            // Some CoreAudio devices end mpv mono playback early; a positive
+            // mono probe permits an upmix without downmixing surround.
+            if probed.is_some_and(|value| value.channels == 1) {
+                command.arg("--audio-channels=stereo");
+            }
             if let Some(vol) = options.volume {
                 command.arg(format!("--volume={}", (vol * 100.0) as i32));
             }
@@ -414,12 +502,12 @@ fn resolve_source(audio: &AudioData, speed: Option<f32>) -> Result<ResolvedSourc
 }
 
 fn temp_audio_hash(bytes: &[u8], speed: Option<f32>) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    hasher.write(bytes);
+    let mut identity = Vec::with_capacity(bytes.len() + std::mem::size_of::<f32>());
+    identity.extend_from_slice(bytes);
     if let Some(s) = speed {
-        hasher.write(&s.to_le_bytes());
+        identity.extend_from_slice(&s.to_le_bytes());
     }
-    hasher.finish()
+    biscuit_hash::xx_hash_bytes(&identity)
 }
 
 fn temp_audio_dir() -> PathBuf {
@@ -531,6 +619,13 @@ fn write_temp_audio(bytes: &[u8], speed: Option<f32>) -> Result<PathBuf, Playbac
     publish_temp_audio(&tmp_path, &path)
 }
 
+pub(crate) fn materialize_audio_bytes(
+    bytes: &[u8],
+    speed: Option<f32>,
+) -> Result<PathBuf, PlaybackError> {
+    write_temp_audio(bytes, speed)
+}
+
 /// Async counterpart of [`publish_temp_audio`] with identical race semantics.
 #[cfg(feature = "async")]
 async fn publish_temp_audio_async(tmp_path: &Path, path: &Path) -> Result<PathBuf, PlaybackError> {
@@ -607,6 +702,7 @@ fn build_player_args(
     metadata: &crate::player::Player,
     source: &ResolvedSource,
     options: &PlaybackOptions,
+    probed: Option<ProbedAudioMetadata>,
 ) -> Result<(&'static str, Vec<OsString>), PlaybackError> {
     let mut args: Vec<OsString> = Vec::new();
 
@@ -616,6 +712,11 @@ fn build_player_args(
             args.push("--no-video".into());
             args.push("--no-terminal".into());
             args.push("--really-quiet".into());
+            // Some CoreAudio devices end mpv mono playback early; require a
+            // positive mono probe so surround input remains intact.
+            if probed.is_some_and(|value| value.channels == 1) {
+                args.push("--audio-channels=stereo".into());
+            }
             if let Some(vol) = options.volume {
                 args.push(format!("--volume={}", (vol * 100.0) as i32).into());
             }
@@ -733,6 +834,16 @@ fn build_player_args(
     Ok((metadata.binary_name(), args))
 }
 
+fn effective_speed(player: AudioPlayer, options: &PlaybackOptions) -> f32 {
+    let requested = options.speed.unwrap_or(1.0);
+    match player {
+        AudioPlayer::FfPlay => requested.clamp(0.5, 2.0),
+        AudioPlayer::MacOsAfplay => requested.clamp(0.4, 3.0),
+        AudioPlayer::Mpv | AudioPlayer::Sox => requested,
+        _ => 1.0,
+    }
+}
+
 enum ResolvedSource {
     Path(PathBuf),
     Url(String),
@@ -797,7 +908,7 @@ mod tests {
         let metadata = get_metadata(AudioPlayer::Mpv);
         let source = mock_source();
         let options = PlaybackOptions::default();
-        let command = build_player_command(AudioPlayer::Mpv, metadata, &source, &options).unwrap();
+        let command = build_player_command(AudioPlayer::Mpv, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("--no-video")));
@@ -806,11 +917,49 @@ mod tests {
     }
 
     #[test]
+    fn build_command_mpv_upmixes_only_probed_mono() {
+        let metadata = get_metadata(AudioPlayer::Mpv);
+        let source = mock_source();
+        let options = PlaybackOptions::default();
+        for (channels, should_upmix) in [(1, true), (2, false), (6, false)] {
+            let probed = Some(ProbedAudioMetadata {
+                duration: Duration::from_secs(1),
+                channels,
+            });
+            let command = build_player_command(
+                AudioPlayer::Mpv,
+                metadata,
+                &source,
+                &options,
+                probed,
+            )
+            .unwrap();
+            let args: Vec<_> = command.get_args().collect();
+            assert_eq!(
+                args.contains(&OsStr::new("--audio-channels=stereo")),
+                should_upmix,
+                "channel count {channels}"
+            );
+        }
+        let command = build_player_command(
+            AudioPlayer::Mpv,
+            metadata,
+            &source,
+            &options,
+            None,
+        )
+        .unwrap();
+        assert!(!command
+            .get_args()
+            .any(|arg| arg == OsStr::new("--audio-channels=stereo")));
+    }
+
+    #[test]
     fn build_command_mpv_with_volume_and_speed() {
         let metadata = get_metadata(AudioPlayer::Mpv);
         let source = mock_source();
         let options = PlaybackOptions::new().with_volume(0.5).with_speed(1.25);
-        let command = build_player_command(AudioPlayer::Mpv, metadata, &source, &options).unwrap();
+        let command = build_player_command(AudioPlayer::Mpv, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("--volume=50")));
@@ -823,7 +972,7 @@ mod tests {
         let source = mock_source();
         let options = PlaybackOptions::default();
         let command =
-            build_player_command(AudioPlayer::FfPlay, metadata, &source, &options).unwrap();
+            build_player_command(AudioPlayer::FfPlay, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("-nodisp")));
@@ -838,7 +987,7 @@ mod tests {
         let source = mock_source();
         let options = PlaybackOptions::new().with_volume(0.75).with_speed(1.5);
         let command =
-            build_player_command(AudioPlayer::FfPlay, metadata, &source, &options).unwrap();
+            build_player_command(AudioPlayer::FfPlay, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("-volume")));
@@ -852,7 +1001,7 @@ mod tests {
         let metadata = get_metadata(AudioPlayer::Sox);
         let source = mock_source();
         let options = PlaybackOptions::default();
-        let command = build_player_command(AudioPlayer::Sox, metadata, &source, &options).unwrap();
+        let command = build_player_command(AudioPlayer::Sox, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("-q")));
@@ -863,7 +1012,7 @@ mod tests {
         let metadata = get_metadata(AudioPlayer::Sox);
         let source = mock_source();
         let options = PlaybackOptions::new().with_volume(0.8).with_speed(1.2);
-        let command = build_player_command(AudioPlayer::Sox, metadata, &source, &options).unwrap();
+        let command = build_player_command(AudioPlayer::Sox, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("-v")));
@@ -883,7 +1032,7 @@ mod tests {
         let metadata = get_metadata(AudioPlayer::Vlc);
         let source = mock_source();
         let options = PlaybackOptions::default();
-        let command = build_player_command(AudioPlayer::Vlc, metadata, &source, &options).unwrap();
+        let command = build_player_command(AudioPlayer::Vlc, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("--quiet")));
@@ -895,7 +1044,7 @@ mod tests {
         let metadata = get_metadata(AudioPlayer::Vlc);
         let source = mock_source();
         let options = PlaybackOptions::new().with_volume(0.5);
-        let command = build_player_command(AudioPlayer::Vlc, metadata, &source, &options).unwrap();
+        let command = build_player_command(AudioPlayer::Vlc, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("--gain=1")));
@@ -907,7 +1056,7 @@ mod tests {
         let source = mock_source();
         let options = PlaybackOptions::default();
         let command =
-            build_player_command(AudioPlayer::MPlayer, metadata, &source, &options).unwrap();
+            build_player_command(AudioPlayer::MPlayer, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("-really-quiet")));
@@ -919,7 +1068,7 @@ mod tests {
         let source = mock_source();
         let options = PlaybackOptions::new().with_volume(0.8);
         let command =
-            build_player_command(AudioPlayer::MPlayer, metadata, &source, &options).unwrap();
+            build_player_command(AudioPlayer::MPlayer, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("-softvol")));
@@ -933,7 +1082,7 @@ mod tests {
         let source = mock_source();
         let options = PlaybackOptions::default();
         let command =
-            build_player_command(AudioPlayer::GstreamerGstPlay, metadata, &source, &options)
+            build_player_command(AudioPlayer::GstreamerGstPlay, metadata, &source, &options, None)
                 .unwrap();
 
         let args: Vec<_> = command.get_args().collect();
@@ -946,7 +1095,7 @@ mod tests {
         let source = mock_source();
         let options = PlaybackOptions::new().with_volume(0.5);
         let command =
-            build_player_command(AudioPlayer::GstreamerGstPlay, metadata, &source, &options)
+            build_player_command(AudioPlayer::GstreamerGstPlay, metadata, &source, &options, None)
                 .unwrap();
 
         let args: Vec<_> = command.get_args().collect();
@@ -959,7 +1108,7 @@ mod tests {
         let source = mock_source();
         let options = PlaybackOptions::default();
         let command =
-            build_player_command(AudioPlayer::PulseaudioPaplay, metadata, &source, &options)
+            build_player_command(AudioPlayer::PulseaudioPaplay, metadata, &source, &options, None)
                 .unwrap();
 
         let args: Vec<_> = command.get_args().collect();
@@ -973,7 +1122,7 @@ mod tests {
         let source = mock_source();
         let options = PlaybackOptions::new().with_volume(0.5);
         let command =
-            build_player_command(AudioPlayer::PulseaudioPaplay, metadata, &source, &options)
+            build_player_command(AudioPlayer::PulseaudioPaplay, metadata, &source, &options, None)
                 .unwrap();
 
         let args: Vec<_> = command.get_args().collect();
@@ -987,7 +1136,7 @@ mod tests {
         let source = mock_source();
         let options = PlaybackOptions::default();
         let command =
-            build_player_command(AudioPlayer::Pipewire, metadata, &source, &options).unwrap();
+            build_player_command(AudioPlayer::Pipewire, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         let expected = mock_source_path();
@@ -1000,7 +1149,7 @@ mod tests {
         let source = mock_source();
         let options = PlaybackOptions::new().with_volume(0.75);
         let command =
-            build_player_command(AudioPlayer::Pipewire, metadata, &source, &options).unwrap();
+            build_player_command(AudioPlayer::Pipewire, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("--volume=0.75")));
@@ -1012,7 +1161,7 @@ mod tests {
         let source = mock_source();
         let options = PlaybackOptions::default();
         let command =
-            build_player_command(AudioPlayer::Mpg123, metadata, &source, &options).unwrap();
+            build_player_command(AudioPlayer::Mpg123, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("-q")));
@@ -1024,7 +1173,7 @@ mod tests {
         let source = mock_source();
         let options = PlaybackOptions::default();
         let command =
-            build_player_command(AudioPlayer::Ogg123, metadata, &source, &options).unwrap();
+            build_player_command(AudioPlayer::Ogg123, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("-q")));
@@ -1036,7 +1185,7 @@ mod tests {
         let source = mock_source();
         let options = PlaybackOptions::default();
         let command =
-            build_player_command(AudioPlayer::AlsaAplay, metadata, &source, &options).unwrap();
+            build_player_command(AudioPlayer::AlsaAplay, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("-q")));
@@ -1048,7 +1197,7 @@ mod tests {
         let source = mock_source();
         let options = PlaybackOptions::default();
         let command =
-            build_player_command(AudioPlayer::MacOsAfplay, metadata, &source, &options).unwrap();
+            build_player_command(AudioPlayer::MacOsAfplay, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         let expected = mock_source_path();
@@ -1061,7 +1210,7 @@ mod tests {
         let source = mock_source();
         let options = PlaybackOptions::new().with_volume(0.5).with_speed(1.5);
         let command =
-            build_player_command(AudioPlayer::MacOsAfplay, metadata, &source, &options).unwrap();
+            build_player_command(AudioPlayer::MacOsAfplay, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("-v")));
@@ -1077,7 +1226,7 @@ mod tests {
         // Speed outside 0.4-3.0 range should be clamped
         let options = PlaybackOptions::new().with_speed(5.0);
         let command =
-            build_player_command(AudioPlayer::MacOsAfplay, metadata, &source, &options).unwrap();
+            build_player_command(AudioPlayer::MacOsAfplay, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         assert!(args.contains(&OsStr::new("-r")));
@@ -1090,7 +1239,7 @@ mod tests {
         let source = mock_source();
         let options = PlaybackOptions::default();
         let command =
-            build_player_command(AudioPlayer::PulseaudioPacat, metadata, &source, &options)
+            build_player_command(AudioPlayer::PulseaudioPacat, metadata, &source, &options, None)
                 .unwrap();
 
         // pacat takes file path directly, no special flags
@@ -1107,7 +1256,7 @@ mod tests {
         let metadata = get_metadata(AudioPlayer::Mpv);
         let source = ResolvedSource::Path(path.to_path_buf());
         let options = PlaybackOptions::default();
-        let command = build_player_command(AudioPlayer::Mpv, metadata, &source, &options).unwrap();
+        let command = build_player_command(AudioPlayer::Mpv, metadata, &source, &options, None).unwrap();
 
         let args: Vec<_> = command.get_args().collect();
         let matches = args.iter().filter(|a| **a == path.as_os_str()).count();
@@ -1154,6 +1303,22 @@ mod tests {
         let h1 = temp_audio_hash(bytes, Some(1.5));
         let h2 = temp_audio_hash(bytes, Some(1.5));
         assert_eq!(h1, h2, "same inputs should produce same hash");
+    }
+
+    #[test]
+    fn temp_audio_hash_uses_xxhash_without_changing_identity_inputs() {
+        let bytes = b"24 kHz mono Kokoro WAV";
+        let speed = 1.25_f32;
+        let mut identity = bytes.to_vec();
+        identity.extend_from_slice(&speed.to_le_bytes());
+        assert_eq!(
+            temp_audio_hash(bytes, Some(speed)),
+            biscuit_hash::xx_hash_bytes(&identity)
+        );
+        assert_eq!(
+            temp_audio_hash(bytes, None),
+            biscuit_hash::xx_hash_bytes(bytes)
+        );
     }
 
     #[test]
@@ -1239,7 +1404,7 @@ mod tests {
             let source = mock_source();
             let options = PlaybackOptions::default();
             let (binary, args) =
-                build_player_args(AudioPlayer::Mpv, metadata, &source, &options).unwrap();
+                build_player_args(AudioPlayer::Mpv, metadata, &source, &options, None).unwrap();
 
             assert_eq!(binary, "mpv");
             assert!(args.contains(&OsString::from("--no-video")));
@@ -1248,12 +1413,46 @@ mod tests {
         }
 
         #[test]
+        fn build_player_args_mpv_upmixes_only_probed_mono() {
+            let metadata = get_metadata(AudioPlayer::Mpv);
+            let source = mock_source();
+            let options = PlaybackOptions::default();
+            for (channels, should_upmix) in [(1, true), (2, false), (6, false)] {
+                let (_, args) = build_player_args(
+                    AudioPlayer::Mpv,
+                    metadata,
+                    &source,
+                    &options,
+                    Some(ProbedAudioMetadata {
+                        duration: Duration::from_secs(1),
+                        channels,
+                    }),
+                )
+                .unwrap();
+                assert_eq!(
+                    args.contains(&OsString::from("--audio-channels=stereo")),
+                    should_upmix,
+                    "channel count {channels}"
+                );
+            }
+        }
+
+        #[test]
+        fn effective_speed_uses_route_clamps() {
+            let fast = PlaybackOptions::new().with_speed(5.0);
+            assert_eq!(effective_speed(AudioPlayer::Mpv, &fast), 5.0);
+            assert_eq!(effective_speed(AudioPlayer::FfPlay, &fast), 2.0);
+            assert_eq!(effective_speed(AudioPlayer::MacOsAfplay, &fast), 3.0);
+            assert_eq!(effective_speed(AudioPlayer::Vlc, &fast), 1.0);
+        }
+
+        #[test]
         fn build_player_args_mpv_with_volume_and_speed() {
             let metadata = get_metadata(AudioPlayer::Mpv);
             let source = mock_source();
             let options = PlaybackOptions::new().with_volume(0.5).with_speed(1.25);
             let (binary, args) =
-                build_player_args(AudioPlayer::Mpv, metadata, &source, &options).unwrap();
+                build_player_args(AudioPlayer::Mpv, metadata, &source, &options, None).unwrap();
 
             assert_eq!(binary, "mpv");
             assert!(args.contains(&OsString::from("--volume=50")));
@@ -1266,7 +1465,7 @@ mod tests {
             let source = mock_source();
             let options = PlaybackOptions::new().with_volume(0.75).with_speed(1.5);
             let (binary, args) =
-                build_player_args(AudioPlayer::FfPlay, metadata, &source, &options).unwrap();
+                build_player_args(AudioPlayer::FfPlay, metadata, &source, &options, None).unwrap();
 
             assert_eq!(binary, "ffplay");
             assert!(args.contains(&OsString::from("-nodisp")));
@@ -1282,7 +1481,7 @@ mod tests {
             let source = mock_source();
             let options = PlaybackOptions::new().with_volume(0.8).with_speed(1.2);
             let (binary, args) =
-                build_player_args(AudioPlayer::Sox, metadata, &source, &options).unwrap();
+                build_player_args(AudioPlayer::Sox, metadata, &source, &options, None).unwrap();
 
             assert_eq!(binary, "play");
             assert!(args.contains(&OsString::from("-q")));

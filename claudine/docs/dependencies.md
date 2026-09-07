@@ -5,6 +5,18 @@
 - The `claudine` library uses `dunce` as a dev dependency so tests that need a
   canonical filesystem identity can remove safely reducible Windows verbatim
   prefixes without converting paths through display text.
+- The `claudine` library and `claudine-cli` use `fs4` as a dev dependency to
+  hold Playa's worker lock while device-free tests inspect durable queued audio.
+
+## Audio Handoff
+
+- Both Claudine crates enable Playa's `native-playback` feature. Linux CI
+  installs `libasound2-dev` for the resulting ALSA build; Windows uses WASAPI
+  and macOS uses CoreAudio without additional native packages.
+- Claudine does not reimplement Playa's spool dependencies. Production audio
+  handoff reaches `fs4`, `biscuit-hash`, and the private-path rules through the
+  Playa dependency; the local `fs4` declarations are test-only worker-lock
+  fixtures. `biscuit-speaks/playa` carries the same native feature edge for TTS.
 
 ## Executable Lookup
 
@@ -87,7 +99,8 @@ edges exist to serve.
   the generator's schema↔catalog enum-subset gate.
 - `claudine-gen` (`claudine/gen`) depends on `darkmatter` (frontmatter parsing
   plus SimplifiedSchema sidecar validation), `biscuit-file` (file-reference
-  resolution for empirical research fixtures), `serde`/`serde_json`/
+  resolution for empirical research fixtures), `sniff` (focused repository
+  observation at the generator command boundary), `serde`/`serde_json`/
   `serde_yaml_ng`, `clap`, `thiserror`, and `regex` (generate-time
   compilation check for `match_op: regex` signal-detection records) — and
   deliberately NOT on the `claudine` library or CLI (bootstrap rule: a broken

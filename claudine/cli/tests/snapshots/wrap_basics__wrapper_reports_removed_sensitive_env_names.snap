@@ -10,6 +10,7 @@ Environment Variables:
 • INTERNAL_TOKEN
 • OPENAI_API_KEY
 • AGENT=codex
+• AGENT_CWD=<workspace>/cwd
 • AGENT_PARAMS=["--include","OPENAI_API_KEY","--","--version"]
 • CLAUDINE_INTERACTIVE=1
 • CLAUDINE_PID=<redacted>

@@ -213,6 +213,186 @@ async fn execute_actions_message_action_with_canonical_config() {
     assert!(result.is_none());
 }
 
+#[cfg(unix)]
+#[tokio::test]
+#[serial_test::serial]
+async fn audio_actions_publish_in_order_and_return_before_worker_execution() {
+    use fs4::fs_std::FileExt as _;
+    use std::fs::{self, OpenOptions};
+    use std::os::unix::fs::PermissionsExt as _;
+    use std::time::{Duration, Instant};
+
+    let temp = tempfile::tempdir().unwrap();
+    let spool = temp.path().join("spool");
+    let bin = temp.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let espeak = bin.join("espeak");
+    fs::write(&espeak, "#!/bin/sh\n/bin/sleep 5\n").unwrap();
+    let mut permissions = fs::metadata(&espeak).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&espeak, permissions).unwrap();
+    let path = std::env::join_paths(
+        std::iter::once(bin.clone()).chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )),
+    )
+    .unwrap();
+    let _path = test_toolkit::EnvGuard::set_safe("PATH", path);
+    let _spool = test_toolkit::EnvGuard::set_safe("PLAYA_SPOOL_DIR", &spool);
+    let _dry_run = test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN");
+    assert_eq!(biscuit_speaks::run_if_worker().await, None);
+
+    fs::create_dir(&spool).unwrap();
+    fs::set_permissions(&spool, fs::Permissions::from_mode(0o700)).unwrap();
+    let worker = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(spool.join("worker.lock"))
+        .unwrap();
+    worker.lock_exclusive().unwrap();
+
+    let config = claudine_config_with_tts(TtsValue::Config(
+        crate::config::tts::TtsConfigSettings {
+            provider: "espeak".to_string(),
+            voice: None,
+            gender: crate::config::tts::Gender::Female,
+        },
+    ));
+    let actions = vec![
+        HookAction::Speak {
+            message: "Phase 1 of the plan in the claudine package area, was implemented successfully".to_string(),
+            voice: None,
+            gender: None,
+            when: None,
+        },
+        HookAction::SoundEffect {
+            effect: "doorbell-2".to_string(),
+            volume: 0.5,
+            speed: 1.25,
+            when: None,
+        },
+    ];
+    let start = Instant::now();
+    let result = execute_actions(
+        &actions,
+        None,
+        &meta(),
+        DispatchConfig::Canonical(&config),
+        &RuntimeMessagingSettings::default(),
+        false,
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert!(result.is_none());
+    assert!(
+        start.elapsed() < Duration::from_secs(4),
+        "dispatch must return after durable publication"
+    );
+    let snapshot = playa::detached::snapshot().unwrap();
+    assert_eq!(
+        snapshot
+            .pending
+            .iter()
+            .map(|job| (job.sequence, job.source_kind))
+            .collect::<Vec<_>>(),
+        vec![
+            (1, playa::detached::JournalSourceKind::Command),
+            (2, playa::detached::JournalSourceKind::File),
+        ]
+    );
+}
+
+#[tokio::test]
+#[serial_test::serial]
+#[tracing_test::traced_test]
+async fn sound_effect_action_warns_once_when_handoff_fails() {
+    let temp = tempfile::tempdir().unwrap();
+    let not_a_directory = temp.path().join("not-a-directory");
+    std::fs::write(&not_a_directory, b"file").unwrap();
+    let _spool = test_toolkit::EnvGuard::set_safe("PLAYA_SPOOL_DIR", &not_a_directory);
+    let _dry_run = test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN");
+    assert_eq!(biscuit_speaks::run_if_worker().await, None);
+
+    execute_sound_effect("doorbell-2", 1.0, 1.0);
+
+    logs_assert(|logs| {
+        let warnings = logs
+            .iter()
+            .filter(|line| line.contains("Sound effect handoff failed"))
+            .count();
+        assert_eq!(warnings, 1, "expected one handoff warning, got: {logs:?}");
+        Ok(())
+    });
+}
+
+#[cfg(unix)]
+#[tokio::test]
+#[serial_test::serial]
+#[tracing_test::traced_test]
+async fn speak_action_warns_once_when_handoff_fails() {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let temp = tempfile::tempdir().unwrap();
+    let bin = temp.path().join("bin");
+    fs::create_dir(&bin).unwrap();
+    let espeak = bin.join("espeak");
+    fs::write(&espeak, "#!/bin/sh\nexit 0\n").unwrap();
+    let mut permissions = fs::metadata(&espeak).unwrap().permissions();
+    permissions.set_mode(0o755);
+    fs::set_permissions(&espeak, permissions).unwrap();
+    let path = std::env::join_paths(
+        std::iter::once(bin).chain(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        )),
+    )
+    .unwrap();
+    let not_a_directory = temp.path().join("not-a-directory");
+    fs::write(&not_a_directory, b"file").unwrap();
+    let _path = test_toolkit::EnvGuard::set_safe("PATH", path);
+    let _spool = test_toolkit::EnvGuard::set_safe("PLAYA_SPOOL_DIR", &not_a_directory);
+    let _dry_run = test_toolkit::EnvGuard::remove_safe("PLAYA_DRY_RUN");
+    assert_eq!(biscuit_speaks::run_if_worker().await, None);
+
+    let config = claudine_config_with_tts(TtsValue::Config(
+        crate::config::tts::TtsConfigSettings {
+            provider: "espeak".to_string(),
+            voice: None,
+            gender: crate::config::tts::Gender::Female,
+        },
+    ));
+    let actions = vec![HookAction::Speak {
+        message: "Phase 1 of the plan in the claudine package area, was implemented successfully".to_string(),
+        voice: None,
+        gender: None,
+        when: None,
+    }];
+    execute_actions(
+        &actions,
+        None,
+        &meta(),
+        DispatchConfig::Canonical(&config),
+        &RuntimeMessagingSettings::default(),
+        false,
+        None,
+    )
+    .await
+    .unwrap();
+
+    logs_assert(|logs| {
+        let warnings = logs
+            .iter()
+            .filter(|line| line.contains("TTS handoff failed"))
+            .count();
+        assert_eq!(warnings, 1, "expected one handoff warning, got: {logs:?}");
+        Ok(())
+    });
+}
+
 #[tokio::test]
 async fn blocking_call_command_failure_fails_closed() {
     let config = claudine_config_with_tts(TtsValue::Boolean(false));

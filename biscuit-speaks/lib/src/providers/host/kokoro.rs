@@ -357,8 +357,12 @@ impl TtsExecutor for KokoroTtsProvider {
 
         // Play the audio file (requires playa feature)
         #[cfg(feature = "playa")]
-        crate::playback::play_audio_file(&audio_path, crate::types::AudioFormat::Wav, config)
-            .await?;
+        let playback = crate::playback::play_audio_file_with_report(
+            &audio_path,
+            crate::types::AudioFormat::Wav,
+            config,
+        )
+        .await?;
 
         #[cfg(not(feature = "playa"))]
         {
@@ -379,9 +383,33 @@ impl TtsExecutor for KokoroTtsProvider {
                 SpeakResult::new(TtsProvider::Host(HostTtsProvider::KokoroTts), voice)
                     .with_audio_file(audio_path)
                     .with_codec("wav")
-                    .with_cache_hit(cache_hit),
+                    .with_cache_hit(cache_hit)
+                    .with_playback(playback),
             )
         }
+    }
+
+    #[cfg(feature = "playa")]
+    async fn detached_job(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<playa::detached::SpoolJob, TtsError> {
+        let voice = Self::resolve_voice(config);
+        let (path, _) = self.generate_to_cache(text, voice).await?;
+        Ok(crate::playa_bridge::file_job(path, config))
+    }
+
+    #[cfg(feature = "playa")]
+    async fn cached_detached_job(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<Option<playa::detached::SpoolJob>, TtsError> {
+        let path = CacheKey::new("kokoro", Self::resolve_voice(config), text, "wav").cache_path();
+        Ok(path
+            .is_file()
+            .then(|| crate::playa_bridge::file_job(path, config)))
     }
 }
 

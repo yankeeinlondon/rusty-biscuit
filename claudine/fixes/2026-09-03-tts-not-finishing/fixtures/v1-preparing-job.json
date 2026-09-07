@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "job_id": "job-0000000000000041",
+  "sequence": 41,
+  "enqueued_at": "2026-09-03T11:50:00Z",
+  "enqueuer": { "windows_wide": [67, 58, 92, 116, 111, 111, 108, 115, 92, 99, 108, 97, 117, 100, 105, 110, 101, 46, 101, 120, 101] },
+  "enqueuer_fingerprint": 3138556841971103717,
+  "capability_version": 1,
+  "payload": {
+    "state": "preparing",
+    "preparation_version": 1,
+    "deadline": "2026-09-03T12:00:00Z",
+    "text": "Phase 1 of the plan in the claudine package area, was implemented successfully",
+    "tts_config": { "provider": "kokoro", "speed": 1.0 }
+  }
+}

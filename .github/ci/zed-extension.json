@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "zed_commit": "9ee3c503a4bbbc6b4a0f8a789acca4871d773223",
+  "linux_x86_64_url": "https://zed-extension-cli.nyc3.digitaloceanspaces.com/9ee3c503a4bbbc6b4a0f8a789acca4871d773223/x86_64-unknown-linux-gnu/zed-extension",
+  "linux_x86_64_sha256": "a6fca5ef11ff23f0ef8b03bd2453270591c9fc6c03700c3c92017e5082ada757"
+}

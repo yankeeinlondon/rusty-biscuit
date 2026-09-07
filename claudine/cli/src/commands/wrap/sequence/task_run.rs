@@ -396,10 +396,32 @@ impl PromptTaskRunner for WrapperPromptRunner<'_> {
             .invocation
             .derive_source(&source.resolved_path)
             .expect("resolved prompt document always has a parent directory");
-        let prompt_compose_context = self
+        let params_source_context = self
+            .run
+            .prep_context
+            .invocation
+            .derive_source(&request.params_origin_path)
+            .expect("a preflight task always has an authoring source");
+        let mut caller_input_records =
+            claudine::composition::CallerInputLayers::from_caller_overrides(
+                Some(Value::Object(request.params.clone())),
+                params_source_context.file_resolution_context().clone(),
+            )
+            .caller_input_records;
+        caller_input_records.extend(self.run.compose.caller_input_records.clone());
+        if let Some(runtime) = &request.runtime {
+            for key in runtime.snapshot().mutations.keys() {
+                caller_input_records.remove(key);
+            }
+        }
+        for key in claudine::composition::sequence::reserved::ROOT_OVERLAY_KEYS {
+            caller_input_records.remove(*key);
+        }
+        let mut prompt_compose_context = self
             .run
             .compose
             .for_referenced_document(request.inline_compose, &prompt_source_context);
+        prompt_compose_context.caller_input_records = &caller_input_records;
         let composed = super::jit::compose_step(
             &source,
             &prompt_compose_context,

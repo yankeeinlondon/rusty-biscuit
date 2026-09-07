@@ -148,6 +148,12 @@ pub(crate) fn run_composition_inner(
     let frontmatter_load_t = std::time::Instant::now();
     let invocation = InvocationContext::capture()?;
     let provisional_context = invocation.launch_file_resolution_context().clone();
+    let mut caller_input_records =
+        claudine::composition::CallerInputLayers::from_caller_overrides(
+            set_overrides.clone(),
+            provisional_context.clone(),
+        )
+        .caller_input_records;
     let source = resolve_composition_source(
         &file,
         kind,
@@ -212,8 +218,11 @@ pub(crate) fn run_composition_inner(
     // stabilized reread reaches the verdict instead. Interactive collection goes
     // with it — prompting the caller for a value the document is about to write
     // itself would be a question with a wrong answer.
-    let defer_verdict = defers_schema_verdict_to_initialize(&source);
-    let (source, set_overrides) = if defer_verdict {
+    // The pre-validator always runs because it owns interactive collection;
+    // with caller records present only its plain schema verdict is deferred to
+    // canonical preparation, which alone can carry their authoring context
+    // into a failure.
+    let (source, set_overrides) = if defers_schema_verdict_to_initialize(&source) {
         (source, set_overrides)
     } else {
         let interactive_opts = resolve_interactive_options(shared.silent);
@@ -224,9 +233,20 @@ pub(crate) fn run_composition_inner(
             interactive_opts,
             &term,
             launch_area_fallback.as_deref(),
+            !caller_input_records.is_empty(),
         )
         .map_err(|e| e.enrich_frontmatter(&source, stderr_is_tty))?;
         emit_dropped_optional_warnings(&pre.dropped_optionals);
+        // Interactive collection may have supplied a missing value or replaced
+        // a `file(match)` partial, and invalid optionals may have been dropped;
+        // the caller records must carry the same values, still anchored at
+        // the launch origin.
+        caller_input_records =
+            claudine::composition::CallerInputLayers::from_caller_overrides(
+                pre.set_overrides.clone(),
+                provisional_context.clone(),
+            )
+            .caller_input_records;
         (pre.source, pre.set_overrides)
     };
     // Includes any interactive collection wait when stdin is a TTY; in the
@@ -305,6 +325,7 @@ pub(crate) fn run_composition_inner(
             &mut inline_state,
             &system_prompt_args,
             set_overrides.clone(),
+            caller_input_records.clone(),
             &launch_area_fallback,
             &shared_approval_cache,
             &ledger,
@@ -401,6 +422,7 @@ pub(crate) fn prepare_and_run_active_document(
     inline_state: &mut Option<crate::commands::compose::InlinePromptState>,
     system_prompt_args: &SystemPromptArgs,
     set_overrides: Option<serde_json::Value>,
+    caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     launch_area_fallback: &Option<std::path::PathBuf>,
     shared_approval_cache: &SharedApprovalCache,
     ledger: &SharedRunLedger,
@@ -595,6 +617,7 @@ pub(crate) fn prepare_and_run_active_document(
         if let Some(ref overrides) = set_overrides {
             opts = opts.with_set_overrides(overrides.clone());
         }
+        opts = opts.with_caller_input_records(caller_input_records.clone());
         opts
     };
 
@@ -652,6 +675,7 @@ pub(crate) fn prepare_and_run_active_document(
         Arc::clone(ledger),
         system_prompt_args,
         set_overrides,
+        caller_input_records,
         kind,
         verbose,
         startup_timings,
@@ -688,9 +712,8 @@ fn validate_timeout_flags(shared: &SharedComposeArgs) -> Result<()> {
     Ok(())
 }
 
-/// Resolve the composition source, with inline-specific error reporting
-/// for reference-resolution failures and an ENTER-path autocomplete fallback
-/// when the file reference is not found.
+/// Resolve the composition source, with inline-specific error reporting and
+/// bare-name autocomplete recovery for a clean file-reference no-match.
 pub(crate) fn resolve_composition_source(
     file: &str,
     kind: CompositionKind,
@@ -701,27 +724,37 @@ pub(crate) fn resolve_composition_source(
         || std::env::var_os("FORCE_COLOR").is_some();
     match claudine::composition::resolve_composition_source_in_context(file, file_resolution_context) {
         Ok(source) => Ok(source),
-        Err(CompositionError::FileNotFound(_)) => {
-            let mode = match kind {
-                CompositionKind::Direct => crate::completion::scopes::ComposeMode::Compose,
-                CompositionKind::Inline => {
-                    crate::completion::scopes::ComposeMode::InlineCompose
+        Err(no_match @ CompositionError::FileReferenceNoMatch { .. }) => {
+            match crate::completion::operation_file::recover_operation_file(file, no_match) {
+                crate::completion::operation_file::OperationFileRecovery::AttemptAutocomplete => {
+                    let mode = match kind {
+                        CompositionKind::Direct => {
+                            crate::completion::scopes::ComposeMode::Compose
+                        }
+                        CompositionKind::Inline => {
+                            crate::completion::scopes::ComposeMode::InlineCompose
+                        }
+                    };
+                    let selected =
+                        crate::completion::operation_file::autocomplete_operation_file(file, mode)?;
+                    claudine::composition::resolve_composition_source_in_context(
+                        &selected,
+                        file_resolution_context,
+                    )
+                    .map_err(|e| {
+                        claudine::composition::enrich_composition_source_load_error_in_context(
+                            &selected,
+                            e,
+                            stderr_is_tty,
+                            file_resolution_context,
+                        )
+                        .into()
+                    })
                 }
-            };
-            let selected =
-                crate::completion::operation_file::autocomplete_operation_file(file, mode)?;
-            claudine::composition::resolve_composition_source_in_context(
-                &selected,
-                file_resolution_context,
-            ).map_err(|e| {
-                claudine::composition::enrich_composition_source_load_error_in_context(
-                    &selected,
-                    e,
-                    stderr_is_tty,
-                    file_resolution_context,
-                )
-                .into()
-            })
+                crate::completion::operation_file::OperationFileRecovery::ExplicitNoMatch(err) => {
+                    Err(err.into())
+                }
+            }
         }
         Err(e) => {
             let e = claudine::composition::enrich_composition_source_load_error_in_context(
@@ -1116,6 +1149,7 @@ fn execute_loop_or_single(
     handoff_ledger: SharedRunLedger,
     system_prompt_args: &SystemPromptArgs,
     set_overrides: Option<serde_json::Value>,
+    caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     kind: CompositionKind,
     verbose: u8,
     mut startup_timings: Option<crate::perf::StartupTimings>,
@@ -1161,6 +1195,7 @@ fn execute_loop_or_single(
         invocation_context: Some(prep_context.invocation.clone()),
         document_epoch: Some(document_epoch.clone()),
         set_overrides: set_overrides.clone(),
+        caller_input_records: caller_input_records.clone(),
         pre_approved_commands: Some(preflight.approved_commands.clone()),
         env_overrides: env_overrides.clone(),
         perf_enabled: shared.perf,
@@ -1265,6 +1300,7 @@ fn execute_loop_or_single(
                 invocation_context: Some(prep_context.invocation.clone()),
                 document_epoch: Some(document_epoch),
                 set_overrides,
+                caller_input_records,
                 pre_approved_commands: Some(preflight.approved_commands),
                 env_overrides: env_overrides.clone(),
                 perf_enabled: shared.perf,

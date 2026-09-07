@@ -15,7 +15,7 @@ use crate::events::EventMeta;
 /// 2. Config-level voice resolved through gendered voice pairs
 /// 3. Config-level single voice
 /// 4. Auto-detect (no explicit voice)
-pub(super) fn execute_speak_from_claudine(
+pub(super) async fn execute_speak_from_claudine(
     message_template: &str,
     voice_override: Option<&str>,
     gender_override: Option<Gender>,
@@ -33,15 +33,13 @@ pub(super) fn execute_speak_from_claudine(
 
     let tts = tts_config_from_claudine(config, voice_override, gender_override);
 
-    tokio::spawn(async move {
-        if let Err(error) = biscuit_speaks::Speak::new(text)
-            .with_config(tts)
-            .play()
-            .await
-        {
-            warn!(%error, "TTS playback failed");
-        }
-    });
+    if let Err(error) = biscuit_speaks::Speak::new(text)
+        .with_config(tts)
+        .play_detached()
+        .await
+    {
+        warn!(%error, "TTS handoff failed");
+    }
 }
 
 /// Build a [`TtsConfig`] from [`ClaudineConfig`] with optional per-action overrides.

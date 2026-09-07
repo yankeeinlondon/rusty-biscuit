@@ -137,6 +137,7 @@ pub fn audit_shell_commands(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::harness::shell::CachedApprovalDecision;
 
     #[test]
     fn empty_source_text_returns_empty_vec() {
@@ -168,8 +169,13 @@ mod tests {
     }
 
     fn permissive_options() -> ShellApprovalOptions {
-        // No policy root, no approval handler → commands on PATH are approved
-        ShellApprovalOptions::default()
+        let options = ShellApprovalOptions::default();
+        options
+            .approval_cache
+            .lock()
+            .unwrap()
+            .insert("echo hello".to_string(), CachedApprovalDecision::Allowed);
+        options
     }
 
     #[test]
@@ -177,7 +183,7 @@ mod tests {
         let cmd = make_audited_command(AuditedCommandSource::ComposeSourceLine { line: 1 });
         let report = audit_shell_commands(&[cmd], &permissive_options());
         assert_eq!(report.outcomes.len(), 1);
-        assert!(report.outcomes[0].passed);
+        assert!(report.outcomes[0].passed, "{}", report.outcomes[0].message);
         assert!(report.outcomes[0].message.contains("approved"));
         assert!(report.all_passed());
         assert!(report.failures().is_empty());

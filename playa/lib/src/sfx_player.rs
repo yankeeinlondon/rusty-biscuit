@@ -163,6 +163,7 @@ pub enum SfxPlaybackError {
 impl SfxPlaybackError {
     /// Whether callers should fall back to a host player instead of reporting
     /// the native failure directly.
+    #[allow(dead_code)]
     pub(crate) fn should_fallback_to_host(&self) -> bool {
         matches!(self, Self::Decode(_))
     }

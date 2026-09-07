@@ -15,6 +15,8 @@
 //! - Schema-aware shell completion lists required properties before
 //!   optional ones for `claudine compose <prompt> key=<TAB>`.
 //! - `enum` values complete from the schema member list.
+//! - Eager caller file setters anchor before frontmatter expressions from
+//!   both repository-root and package-area launch directories.
 
 #[cfg(unix)]
 use std::fs;
@@ -31,6 +33,81 @@ use common::{augmented_path, strip_ansi, write_executable};
 // ============================================================================
 // Non-interactive MissingProperties surface
 // ============================================================================
+
+#[cfg(unix)]
+#[test]
+fn compose_and_inline_bare_sidecar_advisory_render_once_and_silent_suppresses_it() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let sidecar = workspace.path().join("schema.yaml");
+    fs::write(
+        &sidecar,
+        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
+    )
+    .unwrap();
+    let md_file = workspace.path().join("plan.md");
+    fs::write(
+        &md_file,
+        "---\n$schema: ./schema.yaml\ntitle: Hello\n---\nPlan.\n",
+    )
+    .unwrap();
+    let inline_file = workspace.path().join("inline.md");
+    let inline_source =
+        "---\n$schema: ./schema.yaml\nprompt: Update the body.\n---\nOriginal body.\n";
+    fs::write(&inline_file, inline_source).unwrap();
+    write_executable(
+        &path_dir.join("goose"),
+        "#!/bin/sh\nprintf 'Updated body.\\n'\nexit 0\n",
+    );
+
+    let run = |subcommand: &str, file: &std::path::Path, silent: bool| {
+        let mut command = assert_cmd::Command::cargo_bin("claudine").unwrap();
+        command
+            .env("NO_COLOR", "1")
+            .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+            .env("HOME", workspace.path())
+            .env("PATH", augmented_path(&path_dir))
+            .current_dir(workspace.path())
+            .args([subcommand, "--goose"]);
+        if silent {
+            command.arg("--silent");
+        }
+        command.arg(file).assert().success().get_output().stderr.clone()
+    };
+
+    for (subcommand, file) in [("compose", &md_file), ("inline-compose", &inline_file)] {
+        if subcommand == "inline-compose" {
+            fs::write(file, inline_source).unwrap();
+        }
+        let stderr = strip_ansi(&String::from_utf8_lossy(&run(subcommand, file, false)));
+        assert_eq!(
+            stderr
+                .matches("looks like a SimplifiedSchema but has no envelope")
+                .count(),
+            1,
+            "the {subcommand} warning must render exactly once; stderr:\n{stderr}"
+        );
+        assert!(
+            stderr.contains(&sidecar.display().to_string()),
+            "{subcommand} stderr:\n{stderr}"
+        );
+
+        if subcommand == "inline-compose" {
+            assert!(
+                fs::read_to_string(file).unwrap().contains("Updated body."),
+                "inline-compose must still persist the provider result"
+            );
+            fs::write(file, inline_source).unwrap();
+        }
+        let silent_stderr =
+            strip_ansi(&String::from_utf8_lossy(&run(subcommand, file, true)));
+        assert!(
+            !silent_stderr.contains("looks like a SimplifiedSchema but has no envelope"),
+            "--silent must suppress the {subcommand} warning; stderr:\n{silent_stderr}"
+        );
+    }
+}
 
 #[cfg(unix)]
 #[test]
@@ -1077,6 +1154,57 @@ Implement {{plan}} from {{review}}.
         !count_path.exists(),
         "no provider session should have been launched on a missing eager input"
     );
+}
+
+#[test]
+fn compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area() {
+    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(std::path::Path::parent)
+        .expect("claudine CLI crate should live two levels below the repository root")
+        .to_path_buf();
+    let home = tempfile::tempdir().unwrap();
+
+    let area = root.join("claudine");
+    let runs = [
+        (
+            root.as_path(),
+            "prompts/plan.md",
+            "spec=claudine/cli/tests/fixtures/shipped_plan_route/spec.md",
+        ),
+        (
+            area.as_path(),
+            "../prompts/plan.md",
+            "spec=cli/tests/fixtures/shipped_plan_route/spec.md",
+        ),
+    ];
+
+    for (launch_dir, prompt_arg, setter) in runs {
+        let assert = assert_cmd::Command::cargo_bin("claudine")
+            .unwrap()
+            .env("NO_COLOR", "1")
+            .env("HOME", home.path())
+            .env("CLAUDE_CODE_EXIT", "0")
+            .current_dir(launch_dir)
+            .args(["compose", "--claude", "--dry-run", prompt_arg, setter])
+            .assert()
+            .success();
+        let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
+        assert!(
+            stdout.contains(
+                "Save the plan as \"claudine/cli/tests/fixtures/shipped_plan_route/plan.md\""
+            ),
+            "the complete target instruction must be launch-directory invariant; \
+             launch_dir={}\nstdout:\n{stdout}",
+            launch_dir.display()
+        );
+        assert!(
+            !stdout.contains("prompts/cli/tests/fixtures/shipped_plan_route/plan.md"),
+            "the plan expression must not retarget beneath the prompt directory; \
+             launch_dir={}\nstdout:\n{stdout}",
+            launch_dir.display()
+        );
+    }
 }
 
 // ============================================================================

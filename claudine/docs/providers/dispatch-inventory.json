@@ -18,10 +18,10 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 1471,
-    "provider_refs": 1578,
+    "sites": 1473,
+    "provider_refs": 1580,
     "by_form": {
-      "direct-ref": 1416,
+      "direct-ref": 1418,
       "eq-comparison": 21,
       "match-provider": 5,
       "matches-macro": 15,
@@ -30,7 +30,7 @@
     },
     "by_dispatch_class": {
       "conditional": 55,
-      "reference": 1416
+      "reference": 1418
     }
   },
   "sites": [
@@ -973,7 +973,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 454,
+      "line": 468,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -983,7 +983,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 477,
+      "line": 473,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -993,7 +993,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 482,
+      "line": 492,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1003,7 +1003,27 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 518,
+      "line": 515,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/env/tests.rs",
+      "line": 520,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "Claude"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/env/tests.rs",
+      "line": 556,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1013,7 +1033,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 523,
+      "line": 561,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1023,7 +1043,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 568,
+      "line": 606,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1033,7 +1053,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 584,
+      "line": 622,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1043,7 +1063,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 694,
+      "line": 732,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1053,7 +1073,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 700,
+      "line": 738,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1063,7 +1083,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 719,
+      "line": 757,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1073,7 +1093,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/env/tests.rs",
-      "line": 724,
+      "line": 762,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1273,7 +1293,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/exec/wiring/tests.rs",
-      "line": 846,
+      "line": 848,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1283,7 +1303,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/exec/wiring/tests.rs",
-      "line": 858,
+      "line": 860,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1930,7 +1950,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs",
-      "line": 106,
+      "line": 111,
       "form": "matches-macro",
       "dispatch_class": "conditional",
       "providers": [
@@ -1940,7 +1960,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs",
-      "line": 176,
+      "line": 186,
       "form": "matches-macro",
       "dispatch_class": "conditional",
       "providers": [
@@ -1950,7 +1970,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs",
-      "line": 278,
+      "line": 290,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1960,7 +1980,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs",
-      "line": 329,
+      "line": 341,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1970,7 +1990,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs",
-      "line": 374,
+      "line": 386,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1980,7 +2000,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs",
-      "line": 423,
+      "line": 435,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1990,7 +2010,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs",
-      "line": 461,
+      "line": 473,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -2000,7 +2020,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/harness_orch/loop_control/tests/retry_resume.rs",
-      "line": 506,
+      "line": 518,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -4166,7 +4186,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/sequence/mod.rs",
-      "line": 509,
+      "line": 512,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [

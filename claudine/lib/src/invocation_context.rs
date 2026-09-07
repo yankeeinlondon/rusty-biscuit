@@ -666,16 +666,13 @@ impl InvocationContext {
         );
 
         let launch_repository_root = launch_repository.repo_root();
-        let launch_repo_info = launch_repository.repo_info();
-        let (package_area_root, package_root) = package_roots(&cwd, launch_repo_info);
         let launch_file_resolution = build_file_resolution_context(
             &cwd,
             None,
             home_dir.clone(),
             environment.clone(),
             launch_repository_root,
-            package_area_root.as_deref(),
-            package_root.as_deref(),
+            launch_repository.repo_info(),
         );
 
         let mut cache = RepositoryCache::default();
@@ -793,16 +790,16 @@ impl InvocationContext {
         let repository_root = entry
             .repo_root()
             .map(|root| repo_root_in_base_spelling(&base_dir, root));
-        let (package_area_root, package_root) = package_roots(&base_dir, entry.repo_info());
         let file_resolution = build_file_resolution_context(
             &base_dir,
             Some(&source_path),
             self.inner.home_dir.clone(),
             self.inner.environment.clone(),
             repository_root.as_deref(),
-            package_area_root.as_deref(),
-            package_root.as_deref(),
+            entry.repo_info(),
         );
+        let package_area_root = file_resolution.package_area().map(Path::to_path_buf);
+        let package_root = file_resolution.package_root().map(Path::to_path_buf);
 
         Ok(SourceContext {
             source_path,
@@ -971,6 +968,9 @@ impl InvocationContext {
             // the cache answered.
             let mut captured = false;
             match group {
+                ContextGroup::Invocation => {
+                    evidence = evidence.with_invocation_cwd(Some(self.inner.launch_cwd.clone()));
+                }
                 ContextGroup::DateTime | ContextGroup::Agent => {}
                 ContextGroup::Git => {
                     if repository.failure().is_none() {
@@ -1390,6 +1390,7 @@ fn context_group_name(group: darkmatter::markdown::compose::ContextGroup) -> &'s
     use darkmatter::markdown::compose::ContextGroup;
 
     match group {
+        ContextGroup::Invocation => "invocation",
         ContextGroup::DateTime => "datetime",
         ContextGroup::Git => "git",
         ContextGroup::Repo => "repo",
@@ -1409,44 +1410,33 @@ fn build_file_resolution_context(
     home_dir: Option<PathBuf>,
     environment: HashMap<String, String>,
     repository_root: Option<&Path>,
-    package_area_root: Option<&Path>,
-    package_root: Option<&Path>,
+    repo_info: Option<&RepoInfo>,
 ) -> FileResolutionContext {
     let mut context = FileResolutionContext::from_snapshot(base_dir, home_dir, environment);
     if let Some(source_path) = source_path {
         context = context.with_source_path(source_path);
     }
-    if let Some(repository_root) = repository_root {
+    if let (Some(repository_root), Some(repo_info)) = (repository_root, repo_info) {
+        let catalog = darkmatter::markdown::compose::repository_scope_catalog(
+            repo_info,
+            repository_root,
+        )
+        .expect("retained repository topology must project to valid absolute scopes");
+        context = context.with_repository_scope_catalog(catalog);
+    } else if let Some(repository_root) = repository_root {
         context = context.with_repository_root(repository_root);
     }
-    if let Some(package_area_root) = package_area_root {
-        context = context.with_package_area(package_area_root);
-    }
+    let package_area_root = context.package_area().map(Path::to_path_buf);
+    let package_root = context.package_root().map(Path::to_path_buf);
     for root in prompt_magic_roots(
         repository_root,
-        package_area_root,
-        package_root,
+        package_area_root.as_deref(),
+        package_root.as_deref(),
         context.home_dir(),
     ) {
         context = context.add_magic_path(root, PathPosition::Start);
     }
     context
-}
-
-fn package_roots(base_dir: &Path, repo: Option<&RepoInfo>) -> (Option<PathBuf>, Option<PathBuf>) {
-    let package_area = repo.and_then(|repo| {
-        repo.package_area_label_for_dir(base_dir).map(|area| {
-            if area.as_ref() == "root" {
-                repo.root.clone()
-            } else {
-                repo.root.join(area.as_ref())
-            }
-        })
-    });
-    let package = repo
-        .and_then(|repo| repo.package_for_dir(base_dir))
-        .map(|package| package.path.clone());
-    (package_area, package)
 }
 
 /// Whether a `.git` boundary separates a directory from its enclosing root.

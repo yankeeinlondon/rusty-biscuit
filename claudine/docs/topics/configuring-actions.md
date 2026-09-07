@@ -41,7 +41,9 @@ Every action is a JSON object with a `"type"` discriminator. Claudine supports s
 
 ### `sound_effect`
 
-Play an embedded sound from the playa library. Fire-and-forget -- playback runs on a blocking thread and does not delay subsequent actions.
+Play an embedded sound from the Playa library. Claudine durably publishes the
+job to Playa's private per-user spool and returns without waiting for playback.
+The global scheduler serializes it with lifecycle, speech, and other Playa jobs.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
@@ -55,7 +57,15 @@ Play an embedded sound from the playa library. Fire-and-forget -- playback runs 
 
 ### `speak`
 
-Speak a message aloud using biscuit-speaks TTS. Fire-and-forget -- TTS is async and does not block the pipeline. Empty messages after template interpolation are silently skipped.
+Speak a message aloud using biscuit-speaks TTS. Claudine reserves or publishes
+an ordered detached job and returns without waiting for synthesis or playback.
+Cache misses keep their sequence while a private helper prepares them. Empty
+messages after template interpolation are silently skipped.
+
+Both audio actions are native-first where available and best-effort after
+durable handoff. A handoff failure logs one warning; Claudine does not attempt a
+blocking fallback or start a second scheduler. Playa's journal/status views
+redact private preparation text.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|

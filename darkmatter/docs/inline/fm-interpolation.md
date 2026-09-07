@@ -51,9 +51,17 @@ It runs:
 
 1. After external-state defaults are applied
 2. After `--set` overrides are applied
-3. Before the final `EffectiveState` is built
+3. After caller-owned values selected as eager or non-recursive lazy `file`
+   parameters are materialized from their captured per-property origins
+4. Before the final `EffectiveState` is built
 
 That ordering matters because frontmatter interpolation shapes the state that later stages consume.
+
+The caller-file step is a schema-aware input projection, not an early
+validation pass. It installs the native semantic identity before expressions
+build their dependency graph, so `dirname(spec)` and direct `spec` lookup
+observe the same file. Full binding, coercion, validation, and document-owned
+eager-file normalization still run after interpolation pass 1.
 
 ## Core Rule: Seed-Only Semantics
 
@@ -131,7 +139,7 @@ The [read-side functions](../topics/darkmatter-expressions.md#read-side-function
 `validate_schema`, `absolute`, `relative`) resolve in frontmatter interpolation
 just as they do in body interpolation — both passes carry a resolution context
 anchored on the source document's directory and its repository root (implicit
-paths resolve repository-root first, then the document directory). The motivating pattern relies on this:
+paths resolve from the document directory first, then the repository root). The motivating pattern relies on this:
 
 ```yaml
 possible_spec: "{{dir}}/spec.md"
@@ -224,6 +232,19 @@ Because frontmatter interpolation runs after frontmatter has been initialized, b
 
 - `--state` can fill missing or null frontmatter values before interpolation runs
 - `--set` can override frontmatter values before interpolation runs
+
+When a caller property carries an immutable raw value and file-resolution
+origin, Darkmatter applies the effective schema before interpolation pass 1.
+The exactly selected eager or non-recursive lazy `file` arm materializes a
+native semantic identity from that origin: eager requires an existing file,
+while lazy binds the first ordered candidate without probing it. Expressions
+and path functions consume that semantic value. Markdown body interpolation
+uses the corresponding portable presentation value (`/` separators), so
+presentation can differ on Windows without changing the file's identity. The
+raw value remains available for fresh preparation against another document's
+schema. Ordinary strings and document-authored file references are not
+caller-projected and retain their existing source-relative and
+repository-aware rules.
 
 That means patterns like this are supported:
 

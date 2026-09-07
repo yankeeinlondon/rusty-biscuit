@@ -59,6 +59,7 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
         }
         SchemaOutcome::Ready(Some(bundle)) => {
             if let Some(ast) = overlay.ast.as_deref() {
+                schema_advisory_diagnostics(ctx, ast, bundle, &mut out);
                 // One effective-schema validation drives both the generic schema
                 // problems and the expression pass, which reads it to decide
                 // whether a union as a whole rejects a malformed-expression value.
@@ -90,6 +91,27 @@ pub fn diagnostics(ctx: &DocumentContext) -> Vec<Diagnostic> {
     }
 
     out
+}
+
+fn schema_advisory_diagnostics(
+    ctx: &DocumentContext,
+    ast: &FrontmatterAst,
+    bundle: &SchemaBundle,
+    out: &mut Vec<Diagnostic>,
+) {
+    let range = ast
+        .schema_entry()
+        .and_then(|entry| ctx.source_map.byte_range_to_lsp(entry.value_span.clone()))
+        .unwrap_or_else(zero_range);
+    out.extend(bundle.advisories.iter().map(|advisory| {
+        diagnostic(
+            range,
+            DiagnosticSeverity::WARNING,
+            advisory.source(),
+            advisory.code(),
+            advisory.message(),
+        )
+    }));
 }
 
 /// Builds the file-level diagnostic for a failed trigger-registry scan.

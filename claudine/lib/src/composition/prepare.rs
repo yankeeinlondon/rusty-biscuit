@@ -71,6 +71,8 @@ pub struct PrepareOptions {
     pub document_epoch: Option<crate::invocation_context::DocumentEpoch>,
     /// Frontmatter `--set` overrides (JSON object).
     pub set_overrides: Option<serde_json::Value>,
+    /// Immutable raw caller overrides paired with their launch-time origins.
+    pub caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     /// Commands pre-approved during pre-flight shell discovery.
     pub pre_approved_commands: Option<std::collections::HashSet<String>>,
     /// Extra environment variables to inject into the composition context.
@@ -237,6 +239,7 @@ fn canonical_compose_options(
     compose_opts = compose_opts.with_set_overrides(
         super::runtime_state::with_initialized_outputs(options.set_overrides.clone()),
     );
+    compose_opts = compose_opts.with_caller_input_records(options.caller_input_records.clone());
     if !options.name_coercion_keys.is_empty() {
         compose_opts = compose_opts.with_name_coercion_keys(options.name_coercion_keys.clone());
     }

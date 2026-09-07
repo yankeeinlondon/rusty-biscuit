@@ -55,7 +55,7 @@ fn resolves_file_in_git_root_when_absent_from_cwd() {
 }
 
 #[test]
-fn prefers_git_root_over_cwd_on_name_collision() {
+fn prefers_cwd_over_git_root_on_name_collision() {
     let tmp = TempDir::new().unwrap();
     let repo_root = tmp.path();
     git_init(repo_root);
@@ -67,19 +67,15 @@ fn prefers_git_root_over_cwd_on_name_collision() {
     fs::write(subdir.join("notes.md"), b"subdir").unwrap();
 
     let subdir = canonical(&subdir);
-    let repo_root_canon = canonical(repo_root);
-
     let resolved = FileReference::new("notes.md")
         .unwrap()
         .resolve_from(&subdir)
         .unwrap();
 
-    // Phase 4 precedence flip: the repository-root candidate wins over the
-    // source-local one for implicit relative references.
     assert_eq!(
         resolved.as_deref(),
-        Some(repo_root_canon.join("notes.md").as_path()),
-        "git root should take priority over CWD for implicit relative refs"
+        Some(subdir.join("notes.md").as_path()),
+        "CWD should take priority over the git root for implicit relative refs"
     );
 }
 
@@ -391,7 +387,7 @@ mod partial_completion {
 
     #[test]
     #[serial]
-    fn magic_bare_sigil_includes_repo_and_home_roots() {
+    fn magic_partial_includes_repo_and_home_roots() {
         let tmp_repo = TempDir::new().unwrap();
         let repo_root = tmp_repo.path();
         git_init(repo_root);
@@ -401,13 +397,13 @@ mod partial_completion {
         let home_canon = canonical(tmp_home.path());
         let _home_guard = HomeGuard::set(&home_canon);
 
-        let completion = FileReference::complete_partial("@", &repo_root_canon)
+        let completion = FileReference::complete_partial("@p", &repo_root_canon)
             .unwrap()
             .expect("magic form is supported");
 
         assert_eq!(completion.entry_form(), CompletionEntryForm::Magic);
         assert_eq!(completion.rendered_prefix(), "@");
-        assert_eq!(completion.active_segment(), "");
+        assert_eq!(completion.active_segment(), "p");
         assert_eq!(
             completion.roots(),
             &[repo_root_canon.clone(), expected_home(&home_canon)],
@@ -482,7 +478,7 @@ mod partial_completion {
         let previous_home = env::var_os("HOME");
         unsafe { env::remove_var("HOME") };
 
-        let completion = FileReference::complete_partial("@", &repo_root_canon)
+        let completion = FileReference::complete_partial("@p", &repo_root_canon)
             .unwrap()
             .expect("magic form is supported");
         // Capture the provider's home under the same HOME-unset condition the
@@ -525,8 +521,8 @@ mod partial_completion {
         assert_eq!(completion.active_segment(), "ab");
         assert_eq!(
             completion.roots(),
-            &[repo_root_canon.join("prompts"), subdir.join("prompts")],
-            "git-root-relative root precedes CWD-relative root (Phase 4 flip)",
+            &[subdir.join("prompts"), repo_root_canon.join("prompts")],
+            "CWD-relative root precedes the git-root-relative fallback",
         );
     }
 
@@ -585,8 +581,12 @@ mod partial_completion {
         let tmp = TempDir::new().unwrap();
         let base = tmp.path();
 
+        assert!(matches!(
+            FileReference::complete_partial("!foo", base),
+            Err(biscuit_file::FileReferenceError::InvalidSyntax(_))
+        ));
+
         for token in &[
-            "!foo",
             "/abs/path",
             "./rel.md",
             "../rel.md",

@@ -29,6 +29,7 @@ CLI_NAME := PACKAGE + " CLI"
 LIBRARY := lowercase(PACKAGE)
 CLI := lowercase(PACKAGE) + "-cli"
 DMLS := "dmls"
+DMLS_ZED_CLI := "zed-dmls-cli"
 DMLS_NAME := PACKAGE + " Language Server"
 CLI_PATH := "./cli"
 DOCS := ""
@@ -54,12 +55,13 @@ build *args="":
     @just _build darkmatter "{{ LIB_NAME }}" {{ args }}
     @just _build darkmatter-cli "CLI_NAME" {{ args }}
     @just _build {{ DMLS }} "{{ DMLS_NAME }}" {{ args }}
+    @just _build {{ DMLS_ZED_CLI }} "DMLS Zed CLI" {{ args }}
 
 # --- Canonical lifecycle recipe set (testing-best-practices Phase 2) -------
 
 # Fast confidence subset (≤15s, lib + bin, !slow). Doctests live in `doctest`.
 sanity:
-    @just _sanity_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }}"
+    @just _sanity_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }} {{ DMLS_ZED_CLI }}"
 
 # Test both library and CLI. Level-1 only: the slow tiers (real-terminal,
 # headless-browser, real-resource) are excluded here and run via their own
@@ -73,9 +75,9 @@ test *args="":
     if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
         # Darkmatter's CI L1 contract retains the explicitly marked slow tests
         # and keeps per-package invocations for distinct JUnit reports.
-        BISCUIT_L1_INCLUDE_SLOW=1 just _test_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }}" {{ args }} || exit_code=$?
+        BISCUIT_L1_INCLUDE_SLOW=1 just _test_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }} {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
     else
-        just _test_local_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }}" {{ args }} || exit_code=$?
+        just _test_local_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }} {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
     fi
     if (( exit_code == 130 )); then
         exit 130
@@ -116,10 +118,24 @@ lint:
     @just _lint {{ LIBRARY }}
     @just _lint {{ CLI }}
     @just _lint {{ DMLS }}
+    @just _lint {{ DMLS_ZED_CLI }}
+    @just check-zed
 
-# installs the DMLS binary into binary path
+# Install the DMLS binary; when Zed is installed, also stage and register its dev extension
 install-dmls:
-    @cargo install --path ./dmls --force
+    #!/usr/bin/env bash
+    set -euo pipefail
+    cargo install --locked --path ./dmls --force
+    if ! cargo run --quiet -p {{ DMLS_ZED_CLI }} -- stage --if-zed-present; then
+        echo "warning: dmls was installed, but its Zed extension needs attention (see above)" >&2
+    fi
+    if ! cargo run --quiet -p {{ DMLS_ZED_CLI }} -- doctor --if-zed-present; then
+        echo "warning: dmls was installed, but the Zed integration is unhealthy; run 'just zed-doctor'" >&2
+    fi
+
+# Diagnose the installed DMLS binary and Zed dev-extension registration.
+zed-doctor *args="":
+    @cargo run --quiet -p {{ DMLS_ZED_CLI }} -- doctor {{ args }}
 
 # Package the DMLS VSCode extension and (re)install it into VSCode.
 #
@@ -256,34 +272,89 @@ install *args="":
     @echo
     @echo -e "{{ BOLD }}{{ YELLOW }}Installing {{ CLI_NAME }}{{ RESET }}"
     @echo
-    @cargo install --path {{ CLI_PATH }} {{ args }} || ( playa effect error-2 2>/dev/null && exit 1 )
+    @cargo install --locked --path {{ CLI_PATH }} {{ args }} || ( playa effect error-2 2>/dev/null && exit 1 )
     @echo -e "{{ BOLD }}{{ BLUE }}{{ CLI_NAME }} installed{{ RESET }}"
     @just _play drop4
 
 # Validate the source code without doing a full build
 check:
-    @cargo check -p {{ LIBRARY }} -p {{ CLI }} -p {{ DMLS }}
+    @cargo check -p {{ LIBRARY }} -p {{ CLI }} -p {{ DMLS }} -p {{ DMLS_ZED_CLI }}
     @just check-zed
 
 # Check the Zed WASM extension (zed-dmls) compiles against its wasm target.
 #
 # The extension is workspace-excluded (it targets wasm32 and carries its own
-# empty `[workspace]`), so it is checked standalone. `wasm32-wasip1` is the
-# target Zed compiles extensions for. Skips cleanly when the target is not
-# installed so the check never fails merely because the host lacks it; install
-# it with `rustup target add wasm32-wasip1` to make the compile mandatory.
+# empty `[workspace]`), so it is checked standalone. Verification never mutates
+# the caller's Rust toolchain: provision the target explicitly before running.
 check-zed:
     #!/usr/bin/env bash
     set -euo pipefail
-    target="wasm32-wasip1"
+    target="wasm32-wasip2"
     if ! rustup target list --installed 2>/dev/null | grep -qx "$target"; then
-        echo -e "{{ YELLOW }}skip{{ RESET }} check-zed: rust target {{ BOLD }}$target{{ RESET }} is not installed"
-        echo -e "{{ DIM }}- install it with: rustup target add $target{{ RESET }}"
-        exit 0
+        echo -e "{{ RED }}error{{ RESET }} check-zed: rust target {{ BOLD }}$target{{ RESET }} is not installed" >&2
+        echo "Install it with: rustup target add $target" >&2
+        exit 1
     fi
     echo -e "Checking the {{ BOLD }}Zed WASM extension{{ RESET }} (zed-dmls) against $target"
-    cargo check --manifest-path ./dmls/zed-dmls/Cargo.toml --target "$target"
+    cargo check --locked --manifest-path ./dmls/zed-dmls/Cargo.toml --target "$target"
     echo -e "✅ {{ GREEN }}zed-dmls compiles for $target{{ RESET }}"
+
+# Package the Zed extension with an already-provisioned official packager.
+zed-package output_dir="./dmls/zed-dmls/dist" scratch_dir="./dmls/zed-dmls/target/packager-scratch":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if ! command -v zed-extension >/dev/null 2>&1; then
+        echo "error: zed-extension is required; CI provisions the pinned binary from .github/ci/zed-extension.json" >&2
+        exit 1
+    fi
+    mkdir -p "{{ output_dir }}" "{{ scratch_dir }}"
+    zed-extension \
+        --source-dir ./dmls/zed-dmls \
+        --output-dir "{{ output_dir }}" \
+        --scratch-dir "{{ scratch_dir }}"
+
+# Compile, package, and validate Zed's emitted manifest and WASM archive.
+zed-verify:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    just check-zed
+    verify_root="$(mktemp -d "${TMPDIR:-/tmp}/dmls-zed-verify.XXXXXX")"
+    cleanup() {
+        case "$verify_root" in
+            */dmls-zed-verify.*) rm -rf -- "$verify_root" ;;
+            *) echo "refusing to remove unexpected verification path: $verify_root" >&2 ;;
+        esac
+    }
+    trap cleanup EXIT HUP INT TERM
+    output_dir="$verify_root/output"
+    scratch_dir="$verify_root/scratch"
+    just zed-package "$output_dir" "$scratch_dir"
+
+    manifest="$output_dir/manifest.json"
+    archive="$output_dir/archive.tar.gz"
+    test -f "$manifest" || { echo "error: zed-extension did not emit manifest.json" >&2; exit 1; }
+    test -f "$archive" || { echo "error: zed-extension did not emit archive.tar.gz" >&2; exit 1; }
+    jq -e '.name == "DMLS" and (.provides | index("language-servers") != null)' "$manifest" >/dev/null || {
+        echo "error: packaged manifest does not describe the DMLS language-server extension" >&2
+        exit 1
+    }
+    tar -tzf "$archive" >"$verify_root/archive-entries.txt"
+    archive_manifest="$(awk '$0 == "extension.toml" || $0 == "./extension.toml" { print; exit }' "$verify_root/archive-entries.txt")"
+    test -n "$archive_manifest" || { echo "error: packaged archive lacks extension.toml" >&2; exit 1; }
+    tar -xOzf "$archive" "$archive_manifest" >"$verify_root/extension.toml"
+    grep -Eq '^id[[:space:]]*=[[:space:]]*"dmls"[[:space:]]*$' "$verify_root/extension.toml" || {
+        echo "error: packaged extension id is not dmls" >&2
+        exit 1
+    }
+    grep -Eq '^languages[[:space:]]*=[[:space:]]*\[[[:space:]]*"Markdown"[[:space:]]*\][[:space:]]*$' "$verify_root/extension.toml" || {
+        echo "error: packaged extension does not declare Markdown" >&2
+        exit 1
+    }
+    awk '{ sub(/^\.\//, ""); if ($0 == "extension.wasm") found = 1 } END { exit !found }' "$verify_root/archive-entries.txt" || {
+        echo "error: packaged archive lacks extension.wasm" >&2
+        exit 1
+    }
+    echo -e "✅ {{ GREEN }}zed-dmls package contains a valid manifest and extension.wasm{{ RESET }}"
 
 # Distribution matrix (the Zed extension downloads assets by these names):
 #   macOS (universal) : dmls-<version>-macos-universal.tar.gz  (lipo aarch64+x86_64)

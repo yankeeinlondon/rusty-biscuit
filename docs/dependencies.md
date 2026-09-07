@@ -2,6 +2,20 @@
 
 ## Recent Dependency Notes
 
+- `playa/lib` uses `fs4` for its private cross-process spool locks,
+  `biscuit-hash` for stable user/cache fingerprints, `chrono` for protocol
+  deadlines, and `windows-sys` for atomic replacement on Windows. `playa-cli`
+  uses the `biscuit-file` file-reference and portable-path authorities at the
+  CLI boundary; the library remains independent of CLI path syntax.
+- `biscuit-speaks/lib`'s optional `playa` feature enables
+  `playa/native-playback`; Linux CI therefore provisions `libasound2-dev`
+  alongside `espeak-ng`. It uses `biscuit-hash` xxHash for content-addressed
+  TTS audio cache names and `fs4` for detached-helper/test coordination. See
+  [`biscuit-speaks/docs/dependencies.md`](./biscuit-speaks/docs/dependencies.md).
+- Both Claudine crates explicitly enable `playa/native-playback`; their Linux
+  native policy includes `libasound2-dev`. Their direct `biscuit-file` and
+  `biscuit-hash` edges remain composition/MCP/session authorities rather than
+  substitutes for Playa's spool path and fingerprint authorities.
 - `unchained-ai/lib` aliases `xpty` as `portable-pty` so the existing
   cross-platform PTY API remains stable while Windows ConPTY sessions avoid
   cursor inheritance, whose open-time handshake cannot be answered through
@@ -80,6 +94,11 @@
   `biscuit-file` (`file-reference` feature, default features off), and
   `biscuit-hash` (xxHash content-hash identity for graph invalidation). See
   [`darkmatter/docs/dependencies.md`](./darkmatter/docs/dependencies.md).
+- `darkmatter/dmls/zed-dmls-cli` (`zed-dmls-cli`) stages the Zed extension in
+  a stable per-user data directory and diagnoses the native binary, dev
+  registration, manifest, and bounded Zed log tail. It uses `sniff` for one
+  request-scoped host/executable observation, `dirs` for platform data roots,
+  and `biscuit-terminal` for `TerminalRenderable` output.
 
 ## Structure
 
@@ -93,7 +112,7 @@ This is a Rust workspace with the following modules:
 - `biscuit-hash/cli/Cargo.toml` - Hashing CLI (`bh`)
 - `biscuit-icon/lib/Cargo.toml` - Curated offline domain icons + on-demand Iconify lookup (renderable, biscuit-terminal, rusqlite bundled, reqwest, strum)
 - `biscuit-icon/cli/Cargo.toml` - Icon CLI (`icon`) (clap, clap_complete unstable-dynamic, color-eyre)
-- `biscuit-speaks/lib/Cargo.toml` - Cross-platform TTS library
+- `biscuit-speaks/lib/Cargo.toml` - Cross-platform TTS library (native-first Playa feature, xxHash audio cache, detached preparation)
 - `biscuit-terminal/lib/Cargo.toml` - Terminal detection, image rendering, diagrams
 - `biscuit-terminal/cli/Cargo.toml` - Terminal inspector CLI (`bt`)
 - `claudine/lib/Cargo.toml` - Universal hook/event handler for agentic CLIs
@@ -102,12 +121,13 @@ This is a Rust workspace with the following modules:
 - `darkmatter/lib/Cargo.toml` - Markdown parsing, rendering, syntax highlighting
 - `darkmatter/cli/Cargo.toml` - Markdown renderer CLI (`md`)
 - `darkmatter/dmls/Cargo.toml` - Darkmatter Language Server (`dmls`) (lsp-server, lsp-types, line-index, rlsp-yaml-parser, ignore, globset, unicode-normalization, biscuit-hash)
+- `darkmatter/dmls/zed-dmls-cli/Cargo.toml` - Stable Zed extension staging and diagnostics (`zed-dmls`) (sniff, dirs, biscuit-terminal, clap, toml)
 - `homelab/lib/Cargo.toml` - Homelab device control library
 - `homelab/cli/Cargo.toml` - Homelab CLI (`homey`)
 - `model-citizen/lib/Cargo.toml` - Local LLM model management library
 - `model-citizen/cli/Cargo.toml` - Model management CLI (`model`)
 - `unchained-ai/model_id/Cargo.toml` - Proc-macro for model ID derivation
-- `playa/lib/Cargo.toml` - Audio playback with host player detection
+- `playa/lib/Cargo.toml` - Native-first audio playback, host-player fallback, metadata probing, and completion reports
 - `playa/cli/Cargo.toml` - Audio player CLI (`playa`)
 - `queue/lib/Cargo.toml` - TUI command scheduler library
 - `queue/cli/Cargo.toml` - TUI command scheduler CLI (`queue`)
@@ -239,6 +259,12 @@ This is a Rust workspace with the following modules:
 
     _Tags: workspace, cli, lsp, markdown_
 
+- [zed-dmls-cli](./darkmatter/dmls/zed-dmls-cli) _v0.1.0_
+
+    _Stable staging and diagnostics for the DMLS Zed extension._
+
+    _Tags: workspace, cli, lsp, zed_
+
 - [homelab](./homelab) _v0.1.0_
 
     _Homelab device control library for AV receivers and smart home devices._
@@ -271,7 +297,7 @@ This is a Rust workspace with the following modules:
 
 - [playa](./playa) _v0.1.0_
 
-    _Audio playback via host CLI players with format detection and 53 embedded sound effects._
+    _Native-first audio playback with host CLI fallback, format and metadata detection, completion reports, and embedded sound effects._
 
     _Tags: workspace, library, audio, playback_
 

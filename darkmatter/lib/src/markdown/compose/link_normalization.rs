@@ -372,17 +372,21 @@ pub fn normalize_links(
         _ => None,
     };
 
-    let base_dir = base_file
-        .as_ref()
-        .and_then(|p| p.parent().map(|p| p.to_path_buf()));
     let base_file = base_file.as_deref().map(comparison_key);
-    let git_root = match options.file_resolution_context.as_ref() {
+    let captured_context = match (&options.file_resolution_context, &source) {
+        (None, ComposeSource::File(path)) => path
+            .parent()
+            .map(crate::markdown::compose::capture_file_resolution_context),
+        _ => None,
+    };
+    let request_context = options.file_resolution_context.as_ref().or(captured_context.as_ref());
+    let git_root = match request_context {
         Some(context) => context.repository_root().map(Path::to_path_buf),
-        None => base_dir.as_ref().and_then(|d| super::find_git_root_from(d)),
+        None => None,
     }
     .map(|r| std::fs::canonicalize(&r).unwrap_or(r))
     .map(|r| comparison_key(&r));
-    let home = match options.file_resolution_context.as_ref() {
+    let home = match request_context {
         Some(context) => context.home_dir().map(Path::to_path_buf),
         None => dirs::home_dir(),
     }
@@ -571,6 +575,19 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
+    fn options_with_repo(source: &Path) -> ComposeOptions {
+        let repo = source
+            .ancestors()
+            .find(|path| path.join(".git").exists())
+            .expect("test repository root");
+        let base = source.parent().expect("source parent");
+        let context = biscuit_file::FileResolutionContext::new(base)
+            .with_repository_root(repo);
+        ComposeOptions::new()
+            .with_source_file(source)
+            .with_file_resolution_context(context)
+    }
+
     #[test]
     fn test_normalize_links_same_repo() {
         let dir = tempdir().unwrap();
@@ -588,7 +605,7 @@ mod tests {
         let abs_path = std::fs::canonicalize(&target_file).unwrap();
         let content = format!("![img]({})\n", biscuit_file::to_portable_string(&abs_path));
         let mut md = Markdown::new(&content);
-        let options = ComposeOptions::new().with_source_file(&source_file);
+        let options = options_with_repo(&source_file);
         let mut report = ComposeReport::new();
         normalize_links(&mut md, &options, &mut report).unwrap();
         assert!(
@@ -719,7 +736,7 @@ mod tests {
             biscuit_file::to_portable_string(&abs_script)
         );
         let mut md = Markdown::new(&content);
-        let options = ComposeOptions::new().with_source_file(&source_file);
+        let options = options_with_repo(&source_file);
         let mut report = ComposeReport::new();
 
         normalize_links(&mut md, &options, &mut report).unwrap();
@@ -772,7 +789,7 @@ mod tests {
             biscuit_file::to_portable_string(&abs_sibling)
         );
         let mut md = Markdown::new(&content);
-        let options = ComposeOptions::new().with_source_file(&source_file);
+        let options = options_with_repo(&source_file);
         let mut report = ComposeReport::new();
 
         normalize_links(&mut md, &options, &mut report).unwrap();
@@ -856,7 +873,7 @@ mod tests {
         );
 
         let mut md = Markdown::new(&content);
-        let options = ComposeOptions::new().with_source_file(&source_file);
+        let options = options_with_repo(&source_file);
         let mut report = ComposeReport::new();
 
         normalize_links(&mut md, &options, &mut report).unwrap();
@@ -912,7 +929,7 @@ mod tests {
             biscuit_file::to_portable_string(&abs_css)
         );
         let mut md = Markdown::new(&content);
-        let options = ComposeOptions::new().with_source_file(&source_file);
+        let options = options_with_repo(&source_file);
         let mut report = ComposeReport::new();
 
         normalize_links(&mut md, &options, &mut report).unwrap();
@@ -1208,7 +1225,7 @@ mod tests {
             );
 
             let content = format!("<img src=\"{destination}\">\n");
-            let options = ComposeOptions::new().with_source_file(&source_file);
+            let options = options_with_repo(&source_file);
             assert_anchor_preserves_and_warns(&content, &options, label);
         }
     }
@@ -1236,7 +1253,7 @@ mod tests {
 
         let content = format!("<img src=\"{destination}\">\n");
         let mut md = Markdown::new(&content);
-        let options = ComposeOptions::new().with_source_file(&source_file);
+        let options = options_with_repo(&source_file);
         let mut report = ComposeReport::new();
 
         normalize_links(&mut md, &options, &mut report).unwrap();

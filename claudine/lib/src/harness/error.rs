@@ -60,8 +60,10 @@ impl PathResolutionFailure {
 /// root, and each attempted candidate's provenance and probe disposition.
 #[derive(Debug, Clone)]
 pub struct ResolutionDetail {
+    reference: String,
     kind: FileReferenceKind,
     effective_kind: FileReferenceKind,
+    base_dir: PathBuf,
     repository_root: Option<PathBuf>,
     candidates: Vec<ProbedCandidate>,
 }
@@ -70,16 +72,47 @@ impl ResolutionDetail {
     /// Project the retained detail out of a shared [`DetailedResolution`].
     pub fn from_detailed(detailed: &DetailedResolution) -> Self {
         Self {
+            reference: detailed.raw().to_string(),
             kind: detailed.class().kind,
             effective_kind: detailed.effective_kind(),
+            base_dir: detailed.base_dir().to_path_buf(),
             repository_root: detailed.repository_root().map(Path::to_path_buf),
             candidates: detailed.candidates().to_vec(),
         }
     }
 
+    /// The reference exactly as authored.
+    pub fn reference(&self) -> &str {
+        &self.reference
+    }
+
+    /// The captured directory against which source-relative candidates resolve.
+    pub fn base_dir(&self) -> &Path {
+        &self.base_dir
+    }
+
+    /// The repository root used by repository-relative candidates, when known.
+    pub fn repository_root(&self) -> Option<&Path> {
+        self.repository_root.as_deref()
+    }
+
     /// The ordered candidates the resolver attempted, each with its disposition.
     pub fn candidates(&self) -> &[ProbedCandidate] {
         &self.candidates
+    }
+
+    /// Populate the resolver-owned fields in the shared file-reference payload.
+    pub(crate) fn apply_to_diagnostic(&self, detail: &mut Value) {
+        detail["reference"] = json!(self.reference);
+        detail["kind"] = json!(file_reference_kind_slug(self.kind));
+        detail["effective_kind"] = json!(file_reference_kind_slug(self.effective_kind));
+        detail["base_dir"] = json!(biscuit_file::to_portable_string(&self.base_dir));
+        detail["repository_root"] = json!(
+            self.repository_root
+                .as_ref()
+                .map(|path| biscuit_file::to_portable_string(path))
+        );
+        detail["candidates"] = resolution_candidates_detail(&self.candidates);
     }
 }
 
@@ -261,7 +294,7 @@ impl HarnessError {
     /// The ordered candidate plan a resolution failure attempted, when one was
     /// retained. Empty for every other arm and for a failure drawn before a
     /// filesystem probe. The renderer enumerates it as the report's "Tried:"
-    /// list so a miss shows repository-then-source order, not just its winner.
+    /// list so a miss shows source-then-repository order, not just its winner.
     pub fn resolution_candidates(&self) -> &[ProbedCandidate] {
         match self {
             HarnessError::PathResolutionFailed {
@@ -350,10 +383,10 @@ impl Diagnostic for HarnessError {
             HarnessError::RepoRootRequired { path } => json!({ "path": path }),
             // Seeded from the catalog so every declared key is present.
             // `reference`, `source_path`, and the typed `failure` are always
-            // known; `kind`, `repository_root`, and the ordered `candidates`
-            // are populated from the shared resolver's retained plan when a
-            // probe ran, and stay `null` when the failure was drawn before
-            // resolution (spec §D8). `failure` is the typed
+            // known; `kind`, `effective_kind`, `base_dir`, `repository_root`,
+            // and the ordered `candidates` are populated from the shared
+            // resolver's retained plan when a probe ran, and stay `null` when
+            // the failure was drawn before resolution (spec §D8). `failure` is the typed
             // `PathResolutionFailure`, never back-derived from `kind`.
             HarnessError::PathResolutionFailed {
                 raw,
@@ -368,16 +401,7 @@ impl Diagnostic for HarnessError {
                 base["source_path"] =
                     json!(source_path.as_deref().map(biscuit_file::to_portable_string));
                 if let Some(detail) = resolution {
-                    base["kind"] = json!(file_reference_kind_slug(detail.kind));
-                    base["effective_kind"] =
-                        json!(file_reference_kind_slug(detail.effective_kind));
-                    base["repository_root"] = json!(
-                        detail
-                            .repository_root
-                            .as_ref()
-                            .map(|path| biscuit_file::to_portable_string(path))
-                    );
-                    base["candidates"] = resolution_candidates_detail(&detail.candidates);
+                    detail.apply_to_diagnostic(&mut base);
                 }
                 base
             }
@@ -397,16 +421,7 @@ impl Diagnostic for HarnessError {
                 base["source_path"] =
                     json!(source_path.as_deref().map(biscuit_file::to_portable_string));
                 if let Some(detail) = resolution {
-                    base["kind"] = json!(file_reference_kind_slug(detail.kind));
-                    base["effective_kind"] =
-                        json!(file_reference_kind_slug(detail.effective_kind));
-                    base["repository_root"] = json!(
-                        detail
-                            .repository_root
-                            .as_ref()
-                            .map(|path| biscuit_file::to_portable_string(path))
-                    );
-                    base["candidates"] = resolution_candidates_detail(&detail.candidates);
+                    detail.apply_to_diagnostic(&mut base);
                 }
                 base
             }
@@ -423,17 +438,19 @@ impl Diagnostic for HarnessError {
 fn file_reference_failure_slug(error: &FileReferenceError) -> &'static str {
     use FileReferenceError as E;
     match error {
-        E::InvalidSyntax(_) | E::UnsupportedUserHome(_) => "invalid_syntax",
+        E::InvalidSyntax(_) | E::UnsupportedScheme { .. } | E::UnsupportedUserHome(_) => {
+            "invalid_syntax"
+        }
         E::MissingEnvironmentVariable { .. }
         | E::MissingHomeContext
-        | E::MissingPackageContext
         | E::VaultNotConfigured
+        | E::OutsideRepository { .. }
         | E::RepositoryRootNotContainingSource { .. }
         | E::BareRepository => "missing_context",
         E::RemoteNotLocal(_) => "unsupported_remote",
         E::CurrentDirectory(_)
         | E::Git(_)
-        | E::Workspace(_)
+        | E::RepositoryEscape { .. }
         | E::RelativePath { .. }
         | E::Io { .. } => "permission_io",
         E::InvalidUrl(_) => "invalid_syntax",
@@ -449,7 +466,8 @@ fn file_reference_kind_slug(kind: FileReferenceKind) -> &'static str {
         K::ImplicitRelative => "implicit_relative",
         K::Absolute => "absolute",
         K::Magic => "magic",
-        K::Package => "package",
+        K::RepositoryRoot => "repository_root",
+        K::RepositoryScoped => "repository_scoped",
         K::Home => "home",
         K::Vault => "vault",
         K::Url => "url",
@@ -463,7 +481,8 @@ fn root_provenance_slug(provenance: RootProvenance) -> &'static str {
     match provenance {
         P::Repository => "repository",
         P::Source => "source",
-        P::Package => "package",
+        P::PackageRoot => "package_root",
+        P::PackageArea => "package_area",
         P::Home => "home",
         P::Magic => "magic",
         P::Vault => "vault",
@@ -486,7 +505,7 @@ fn probe_disposition_slug(disposition: ProbeDisposition) -> &'static str {
 
 /// Project the ordered probe record into the `candidates` detail array: one
 /// object per attempt carrying its path, root provenance, and probe
-/// disposition, in first-seen (repository-then-source) order.
+/// disposition, in first-seen resolution order.
 fn resolution_candidates_detail(candidates: &[ProbedCandidate]) -> Value {
     Value::Array(
         candidates

@@ -7,7 +7,7 @@ use tempfile::tempdir;
 fn test_end_to_end_link_interpolation() {
     let dir = tempdir().unwrap();
     let repo = dir.path().join("repo");
-    fs::create_dir_all(repo.join(".git")).unwrap();
+    gix::init(&repo).unwrap();
 
     let root_dir = repo.join("docs");
     let child_dir = repo.join("components");

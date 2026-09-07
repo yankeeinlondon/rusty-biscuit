@@ -92,7 +92,12 @@ pub(super) async fn execute_bash(command: &str, params: &str, meta: &EventMeta) 
     let action = async {
         match &validated {
             bash_executor::ValidatedCommand::Direct(executable) => {
-                Command::new(executable).args(&param_args).output().await
+                let mut command = Command::new(executable);
+                command.args(&param_args);
+                if let Err(error) = crate::child_environment::contribute_child_environment(&mut command) {
+                    return Err(std::io::Error::other(error));
+                }
+                command.output().await
             }
             bash_executor::ValidatedCommand::Interpreted {
                 interpreter,
@@ -103,6 +108,9 @@ pub(super) async fn execute_bash(command: &str, params: &str, meta: &EventMeta) 
                 cmd.args(interpreter_args);
                 cmd.arg(script);
                 cmd.args(&param_args);
+                if let Err(error) = crate::child_environment::contribute_child_environment(&mut cmd) {
+                    return Err(std::io::Error::other(error));
+                }
                 cmd.output().await
             }
         }
@@ -172,6 +180,8 @@ pub(super) async fn run_command_blocking(
     if let Some(args) = args {
         cmd.args(args);
     }
+    crate::child_environment::contribute_child_environment(&mut cmd)
+        .map_err(std::io::Error::other)?;
 
     let output = cmd.output().await?;
     Ok(super::CommandOutput {
@@ -222,6 +232,32 @@ mod tests {
             shell_words::split(raw).unwrap()
         };
         assert!(args.is_empty());
+    }
+
+    #[tokio::test]
+    async fn blocking_command_child_observes_agent_cwd() {
+        let expected = crate::child_environment::initialize_process_launch_directory(
+            crate::child_environment::LaunchDirectoryMode::Ordinary,
+        )
+        .unwrap()
+        .to_string_lossy()
+        .into_owned();
+        #[cfg(windows)]
+        let output = run_command_blocking(
+            "cmd.exe",
+            Some(&["/D".to_string(), "/C".to_string(), "echo %AGENT_CWD%".to_string()]),
+        )
+        .await
+        .unwrap();
+        #[cfg(not(windows))]
+        let output = run_command_blocking(
+            "sh",
+            Some(&["-c".to_string(), "printf %s \"$AGENT_CWD\"".to_string()]),
+        )
+        .await
+        .unwrap();
+        assert_eq!(output.status.code(), Some(0));
+        assert_eq!(output.stdout.trim(), expected);
     }
 
     // =========================================================================

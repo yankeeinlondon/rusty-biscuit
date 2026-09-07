@@ -101,7 +101,7 @@ fn inline_compose_uses_source_doc_repository_not_launch_cwd() {
     let source = source_root.join("prompts/inline.md");
     write(
         &source,
-        "---\nprompt: |\n  ::file snippet.md\n---\nOriginal body.\n",
+        "---\nprompt: |\n  CWD={{ ctx.cwd }}\n  ::file snippet.md\n---\nOriginal body.\n",
     );
 
     let path_dir = workspace.path().join("bin");
@@ -130,5 +130,14 @@ fn inline_compose_uses_source_doc_repository_not_launch_cwd() {
     assert!(
         !stdout.contains("LAUNCH_REPOSITORY_INLINE_MARKER"),
         "launch repository must not leak into inline prompt transclusion; stdout:\n{stdout}"
+    );
+    assert!(
+        stdout.contains(&format!(
+            "CWD={}",
+            biscuit_file::to_portable_string(
+                &launch_root.canonicalize().expect("canonical launch directory")
+            )
+        )),
+        "inline composition must project the immutable launch directory; stdout:\n{stdout}"
     );
 }

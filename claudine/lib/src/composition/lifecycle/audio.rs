@@ -159,159 +159,44 @@ pub(crate) fn tts_config_from_settings(tts: Option<&TtsSettings>) -> TtsConfig {
     config
 }
 
-/// Maximum wall-clock time a single lifecycle TTS playback may block the
-/// composition thread before it is abandoned.
-///
-/// A wedged TTS provider (a stalled network voice, a contended audio device,
-/// a hung `say` subprocess) must never freeze a compose run — the danger is
-/// acute *between* loop iterations, where no child wait loop is installed and
-/// the Ctrl+C interrupt flag cannot reach a synchronous call. Generous enough
-/// for a long sentence, short enough that a hang can't wedge the run.
-const TTS_PLAYBACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
-
-/// Maximum wall-clock time a single lifecycle sound effect may block.
-const EFFECT_PLAYBACK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
-
-/// Run a blocking side effect on a detached worker thread, bounding how long
-/// the caller waits for it.
-///
-/// Returns once the work finishes or `timeout` elapses, whichever comes first.
-/// On timeout the worker is detached (it may keep running harmlessly in the
-/// background) and a warning is logged. This is the lifecycle analogue of the
-/// wrapper's `join_with_timeout`: the only safe way to bound an arbitrary
-/// blocking call (subprocess wait, audio device, network voice) from outside
-/// is to stop waiting on it.
-pub(super) fn run_blocking_with_timeout<F>(label: &'static str, timeout: std::time::Duration, work: F)
-where
-    F: FnOnce() + Send + 'static,
-{
-    let (tx, rx) = std::sync::mpsc::channel::<()>();
-    std::thread::spawn(move || {
-        work();
-        // A closed receiver (timed-out caller already moved on) is expected;
-        // the send is best-effort.
-        let _ = tx.send(());
-    });
-    match rx.recv_timeout(timeout) {
-        Ok(()) => {}
-        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-            warn!(
-                label,
-                ?timeout,
-                "lifecycle side effect exceeded its time budget; detaching and continuing"
-            );
-        }
-        // The worker dropped its sender without signaling (e.g. it panicked).
-        // There is nothing left to wait for, and no timeout was breached.
-        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {}
-    }
-}
-
-/// Play a sound effect synchronously (blocking), bounded by
-/// [`EFFECT_PLAYBACK_TIMEOUT`].
-pub(super) fn play_effect_blocking(name: &str) {
-    let name = name.to_string();
-    run_blocking_with_timeout("effect", EFFECT_PLAYBACK_TIMEOUT, move || {
-        let Some(effect) = playa::SoundEffect::from_name(&name) else {
-            warn!(%name, "Unknown sound effect in lifecycle notification");
-            return;
-        };
-        match playa::Playa::from_bytes(effect.bytes().to_vec()) {
-            Ok(player) => {
-                if let Err(e) = player.play() {
-                    warn!(%e, "Lifecycle sound effect playback failed");
-                }
-            }
-            Err(e) => warn!(%e, "Failed to construct sound effect player"),
-        }
-    });
-}
-
-/// Speak text using the Tokio runtime, bounded by [`TTS_PLAYBACK_TIMEOUT`].
-///
-/// The playback runs on a detached worker thread that drives the async
-/// `play()` future via the current runtime's `Handle` (cloned in before the
-/// thread is spawned, since `Handle::block_on` works from any thread). This
-/// both bounds the wait and avoids `block_in_place`, which would panic off a
-/// runtime worker thread.
-pub(super) fn say_blocking(text: &str, config: TtsConfig) {
-    let Ok(handle) = tokio::runtime::Handle::try_current() else {
-        warn!("No Tokio runtime available for lifecycle TTS");
-        return;
-    };
+pub(super) fn enqueue_speech(text: &str, config: TtsConfig) {
     let text = text.to_string();
-    run_blocking_with_timeout("tts", TTS_PLAYBACK_TIMEOUT, move || {
-        handle.block_on(async move {
-            if let Err(e) = biscuit_speaks::Speak::new(text)
-                .with_config(config)
-                .play()
-                .await
-            {
-                warn!(%e, "Lifecycle TTS playback failed");
-            }
-        });
+    let handle = tokio::runtime::Handle::try_current().ok();
+    let result = std::thread::scope(|scope| {
+        scope
+            .spawn(move || {
+                let speech = biscuit_speaks::Speak::new(text).with_config(config);
+                if let Some(handle) = handle {
+                    handle.block_on(speech.play_detached())
+                } else {
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .map_err(biscuit_speaks::TtsError::from)?;
+                    runtime.block_on(speech.play_detached())
+                }
+            })
+            .join()
     });
+    match result {
+        Ok(Ok(_)) => {}
+        Ok(Err(error)) => warn!(%error, "Lifecycle TTS handoff failed"),
+        Err(_) => warn!("Lifecycle TTS handoff panicked"),
+    }
 }
 
-/// Emit a lifecycle signal with deterministic audio ordering.
-///
-/// Dispatches non-audio targets (stderr, message) immediately, then
-/// plays audio phases in order. All errors are logged as warnings and
-/// never propagated.
-///
-/// Prefer [`LifecycleRunGuard`] for new code — it uses this same
-/// emission logic but adds mechanical state-transition enforcement.
-#[deprecated(
-    since = "0.1.0",
-    note = "use LifecycleRunGuard instead, which enforces state transitions and emits signals via the LifecycleEmitter trait"
-)]
-pub fn emit_lifecycle_signal(
-    config: &LifecycleConfig,
-    signal: LifecycleSignal,
-    ctx: &LifecycleRuntimeContext<'_>,
-) {
-    let Some(notification) = config.get(signal) else {
+pub(super) fn enqueue_effect(name: &str) {
+    let Some(effect) = playa::SoundEffect::from_name(name) else {
+        warn!(%name, "Unknown sound effect in lifecycle notification");
         return;
     };
-
-    // --- Non-audio fan-out (immediate) ---
-
-    // stderr — plain prose, no status glyph (see DefaultLifecycleEmitter::emit_stderr)
-    if let Some(stderr_text) = &notification.stderr {
-        let rendered = Prose::new(stderr_text).render(ctx.term);
-        eprintln!("{rendered}");
-    }
-
-    // message
-    if let Some(message_text) = &notification.message {
-        crate::messaging::execute_resolved_message(
-            message_text,
-            None,
-            Some(ctx.source_path),
-            ctx.repo_root,
-            ctx.messaging,
-        );
-    }
-    // notify
-    if let Some(notify_title) = &notification.notify {
-        crate::messaging::execute_notification(notify_title, None);
-    }
-
-    // --- Audio phases (sequential, blocking, lazy TTS config) ---
-
-    let phases = audio_phases(notification);
-    let mut tts_config: Option<TtsConfig> = None;
-
-    for phase in phases {
-        match phase {
-            AudioPhase::Speak(text) => {
-                let config = tts_config
-                    .get_or_insert_with(|| tts_config_from_settings(ctx.settings.tts.as_ref()))
-                    .clone();
-                say_blocking(&text, config);
+    match playa::Playa::from_bytes(effect.bytes().to_vec()) {
+        Ok(player) => {
+            if let Err(error) = player.play_detached() {
+                warn!(%error, "Lifecycle sound effect handoff failed");
             }
-            AudioPhase::Effect(name) => play_effect_blocking(&name),
         }
+        Err(error) => warn!(%error, "Failed to construct lifecycle sound effect"),
     }
 }
 

@@ -351,6 +351,18 @@ pub(crate) fn build_child_env_with_launch(
         "PWD",
         launch_ctx.child_cwd.display().to_string(),
     );
+    claudine::child_environment::contribute_child_environment(&mut env)?;
+    let agent_cwd = env
+        .get(std::ffi::OsStr::new(
+            claudine::child_environment::AGENT_CWD_ENV,
+        ))
+        .expect("shared child-environment contribution must set AGENT_CWD")
+        .to_string_lossy()
+        .into_owned();
+    added.insert(
+        claudine::child_environment::AGENT_CWD_ENV.to_string(),
+        agent_cwd,
+    );
 
     let perf_substages = build_env_perf_substages(sanitize_elapsed, shadow_breakdown);
 

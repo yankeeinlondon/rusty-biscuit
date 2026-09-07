@@ -336,7 +336,7 @@ fn test_root_union_with_literal_discriminant() {
 /// Writes a repo-shaped fixture: `.git` marker, a `schemas/` trigger root,
 /// and a document; returns (dir, doc_path).
 fn trigger_fixture(dir: &TempDir, trigger: &str, payload: &str, doc: &str) -> std::path::PathBuf {
-    fs::create_dir_all(dir.path().join(".git")).unwrap();
+    gix::init(dir.path()).unwrap();
     fs::create_dir_all(dir.path().join("schemas")).unwrap();
     fs::write(dir.path().join("schemas").join("release.yaml"), trigger).unwrap();
     fs::write(dir.path().join("schemas").join("payload.yaml"), payload).unwrap();

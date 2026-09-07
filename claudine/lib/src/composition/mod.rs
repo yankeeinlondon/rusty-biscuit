@@ -66,7 +66,7 @@ pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
 pub use lifecycle::{
     DefaultLifecycleEmitter, LIFECYCLE_EVENT_KEYS, LifecycleConfig, LifecycleEmitter,
     LifecycleNotification, LifecycleRunGuard, LifecycleRuntimeContext, LifecycleRuntimeState,
-    LifecycleSignal, emit_lifecycle_signal, parse_lifecycle_config,
+    LifecycleSignal, parse_lifecycle_config,
 };
 pub use lifecycle_actions::{
     CommunicationAction, CommunicationChannel, ExpressionFunctionAction, LifecycleAction,

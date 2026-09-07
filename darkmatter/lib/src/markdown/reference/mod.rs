@@ -42,17 +42,11 @@ fn options_with_reference_resolution_context(
     let Some(base_dir) = source_path.parent() else {
         return options.clone();
     };
-    let repository_root = crate::markdown::compose::find_git_root_from(base_dir);
-    let package_area = crate::markdown::compose::find_package_area_from(
-        base_dir,
-        repository_root.as_deref(),
-    );
     let context = crate::markdown::compose::document_resolution_context(
         base_dir,
         Some(source_path),
         &options.magic_paths,
-        repository_root.as_deref(),
-        package_area.as_deref(),
+        None,
     );
     options.clone().with_file_resolution_context(context)
 }
@@ -78,20 +72,12 @@ fn resolve_transclusion_target(
                 snapshot.for_trusted_external_source(source_path)
             }
         },
-        None => {
-            let repository_root = crate::markdown::compose::find_git_root_from(base_dir);
-            let package_area = crate::markdown::compose::find_package_area_from(
-                base_dir,
-                repository_root.as_deref(),
-            );
-            crate::markdown::compose::document_resolution_context(
-                base_dir,
-                Some(source_path),
-                &options.magic_paths,
-                repository_root.as_deref(),
-                package_area.as_deref(),
-            )
-        }
+        None => crate::markdown::compose::document_resolution_context(
+            base_dir,
+            Some(source_path),
+            &options.magic_paths,
+            None,
+        ),
     };
     let reference = biscuit_file::FileReference::new(raw_target)?;
     Ok(reference.resolve_detailed(&context).into_convenience()?)

@@ -29,7 +29,33 @@ Playa is no longer just a host-player wrapper.
 - Host fallback: delegate to ranked installed players when native playback is unavailable, unsupported, timed out, or forced off
 - Escape hatch: `--force-host` or `.force_host()` skips the native path
 
-Native audio uses bounded device-open deadlines. If a native device-open operation times out, Playa trips a process-local circuit breaker and future native playback attempts fall back directly to host playback for the rest of the process.
+Native audio uses bounded device-open deadlines. The retry boundary is audio submission: any native failure before audio reaches the device (unsupported format, decode error, stream or device-open failure or timeout, tripped breaker) falls back to a host player in the same call, while a stall after audio was submitted is a fatal `AudioSubsystem` error rather than a replay. A device-open timeout or stall trips a process-local circuit breaker, so later native attempts skip the device and go straight to host playback for the rest of the process. Detached delegates are fresh processes; a delegate that observes the breaker tripped records a `native-disabled` memo in the spool root, and delegates that find a memo younger than 10 minutes force host routing so each job does not pay the device-open timeout again.
+
+The library keeps `native-playback` opt-in; the Playa CLI and speech-producing
+consumers enable it explicitly. All automatic builder/free-function entry points
+then use this pipeline. APIs that explicitly name an `AudioPlayer` remain
+host-only.
+
+`play_with_report` and `play_async_with_report` return the selected route,
+expected and elapsed duration, and `Complete`, `Truncated`, or `Unverified`.
+Truncation is diagnostic and does not replay. mpv receives
+`--audio-channels=stereo` only for positively probed mono input; unknown,
+stereo, and multichannel sources keep their original layout.
+
+## Detached playback
+
+`Playa::play_detached`, `playa --background`, and effect background playback
+publish to one private per-user spool. Publication returns after an existing or
+new scheduler owns the job. The scheduler preserves global sequence without
+overlap, survives requester exit, and delegates each job to the absolute
+executable that enqueued it so options and compile-time capabilities are not
+lost. Delivery is best-effort and at-most-once after playback starts.
+
+The queue rejects linked/reparse-point records and enforces private ownership
+and `0700` permissions on Unix. Windows paths use lossless wide-string encoding;
+Unix paths preserve raw bytes. `playa spool` displays only redacted state and
+journal outcomes; private speech text never appears there. `PLAYA_DRY_RUN=1`
+short-circuits before source, cache, spool, journal, or subprocess side effects.
 
 ## Player Selection
 
@@ -69,6 +95,7 @@ playa players                       # Show host player table
 playa output-channels               # Show native output devices (with `sfx-native`)
 playa --channel "<device>" tone.wav # Route to a specific output device
 playa duck-info                     # Audio ducking backend info
+playa spool                         # Redacted detached queue/journal status
 playa --no-duck audio.wav           # Disable ducking
 playa --force-host audio.wav        # Skip native playback
 ```

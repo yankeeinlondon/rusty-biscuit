@@ -5,6 +5,14 @@ use super::*;
 // ============================================
 
 mod schema_validation_integration {
+    /// The native spelling of a fixture path: `Path::join("a/b")` keeps the
+    /// authored separator on Windows, while materialized values are normalized.
+    fn native(path: &std::path::Path) -> String {
+        std::path::PathBuf::from_iter(path.components())
+            .to_string_lossy()
+            .into_owned()
+    }
+
     use super::*;
 
     #[test]
@@ -546,5 +554,1948 @@ mod schema_validation_integration {
             "run 2 must NOT reuse run 1's entry — options_hash still includes \
              file_ref_fallback_dir. got {stats2:?}",
         );
+    }
+
+    fn compose_from_launch(
+        prompt: &std::path::Path,
+        repository: &std::path::Path,
+        launch_dir: &std::path::Path,
+        overrides: serde_json::Value,
+        exclude_keys: impl IntoIterator<Item = &'static str>,
+    ) -> Markdown {
+        let context = biscuit_file::FileResolutionContext::new(launch_dir)
+            .with_repository_root(repository)
+            .with_source_path(prompt);
+        let options = ComposeOptions::new()
+            .with_source_file(prompt)
+            .with_file_resolution_context(context)
+            .with_file_ref_fallback_dir(launch_dir)
+            .with_set_overrides(overrides)
+            .with_exclude_keys(exclude_keys)
+            .only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::Interpolation,
+            ]);
+        Markdown::try_from(prompt)
+            .unwrap()
+            .compose_with(options)
+            .unwrap()
+            .0
+    }
+
+    #[test]
+    fn eager_caller_file_projection_is_identical_from_root_and_package_launches() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let prompt = repo.path().join("prompts/plan.md");
+        let package = repo.path().join("claudine");
+        let case_dir = package.join("fixes/file-param-anchoring");
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&case_dir).unwrap();
+        let spec = case_dir.join("spec.md");
+        std::fs::write(&spec, "# Specification\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n\
+             $schema:\n\
+             \x20 spec: file(eager; required)\n\
+             \x20 x: string(required)\n\
+             \x20 plan: file\n\
+             spec: authored.md\n\
+             x: \"{{ spec }}\"\n\
+             plan: \"{{ dirname(spec) + '/plan.md' }}\"\n\
+             ---\n\
+             SPEC={{ spec }}\n\
+             PLAN={{ plan }}\n",
+        )
+        .unwrap();
+
+        let launches = [
+            (repo.path(), "claudine/fixes/file-param-anchoring/spec.md"),
+            (&package, "fixes/file-param-anchoring/spec.md"),
+        ];
+        for (launch, authored) in launches {
+            let composed = compose_from_launch(
+                &prompt,
+                repo.path(),
+                launch,
+                serde_json::json!({ "spec": authored }),
+                [],
+            );
+            let frontmatter = composed.frontmatter().as_map();
+            let native_spec = native(&spec);
+            assert_eq!(frontmatter.get("spec"), Some(&serde_json::json!(native_spec)));
+            assert_eq!(frontmatter.get("x"), frontmatter.get("spec"));
+            assert_eq!(
+                frontmatter.get("plan"),
+                Some(&serde_json::json!(
+                    "claudine/fixes/file-param-anchoring/plan.md"
+                )),
+            );
+            assert!(
+                composed.content().contains(&format!(
+                    "SPEC={}",
+                    biscuit_file::to_portable_string(&spec)
+                )),
+                "direct body interpolation should use the portable eager-file presentation: {}",
+                composed.content(),
+            );
+            assert!(
+                composed
+                    .content()
+                    .contains("PLAN=claudine/fixes/file-param-anchoring/plan.md"),
+                "derived plan should remain beside the specification: {}",
+                composed.content(),
+            );
+            assert!(
+                !composed
+                    .content()
+                    .contains("prompts/fixes/file-param-anchoring/plan.md"),
+                "the launch-relative input must not be retargeted under the prompt directory",
+            );
+        }
+    }
+
+    #[test]
+    fn post_shell_pass_reuses_projection_and_discovers_triggers_once() {
+        use crate::markdown::compose::ShellExpansionError;
+        use crate::markdown::compose::shell_expansion::{
+            ShellApprovalDecision, ShellApprovalHandler, ShellApprovalRequest,
+        };
+        use std::sync::atomic::Ordering;
+
+        struct AllowShell;
+
+        impl ShellApprovalHandler for AllowShell {
+            fn approve(
+                &self,
+                _request: ShellApprovalRequest,
+            ) -> Result<ShellApprovalDecision, ShellExpansionError> {
+                Ok(ShellApprovalDecision::AllowOnce)
+            }
+        }
+
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        std::fs::create_dir_all(repo.path().join("schemas")).unwrap();
+        let launch = repo.path().join("claudine");
+        let prompt = repo.path().join("prompts/post-shell.md");
+        let spec = launch.join("fixes/stable/spec.md");
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(&spec, "# Specification\n").unwrap();
+        std::fs::write(
+            repo.path().join("schemas/stable.trigger.yaml"),
+            "kind: trigger-schema\nmatch:\n  gate: literal(stable; required)\n$schema: payload.yaml\n",
+        )
+        .unwrap();
+        std::fs::write(
+            repo.path().join("schemas/payload.yaml"),
+            "$schema:\n  trigger_marker: string\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n\
+             $schema:\n\
+             \x20 spec: file(eager; required)\n\
+             \x20 plan: file\n\
+             spec: authored.md\n\
+             gate: \"$(echo stable)\"\n\
+             suffix: \"{{ gate }}\"\n\
+             plan: \"{{ dirname(spec) + '/' + suffix + '.md' }}\"\n\
+             ---\n\
+             SPEC={{ spec }}\n\
+             PLAN={{ plan }}\n",
+        )
+        .unwrap();
+        let context = biscuit_file::FileResolutionContext::new(&launch)
+            .with_repository_root(repo.path())
+            .with_source_path(&prompt);
+        crate::markdown::compose::schema_validation::TRIGGER_DISCOVERY_COUNT
+            .store(0, Ordering::Relaxed);
+
+        let composed = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(
+                ComposeOptions::new()
+                    .with_source_file(&prompt)
+                    .with_file_resolution_context(context)
+                    .with_set_overrides(serde_json::json!({
+                        "spec": "fixes/stable/spec.md"
+                    }))
+                    .with_trigger_schemas(true)
+                    .with_shell_approval_handler(std::sync::Arc::new(AllowShell))
+                    .only(&[
+                        ComposeOperation::FrontmatterInterpolation,
+                        ComposeOperation::FrontmatterShellExpansion,
+                        ComposeOperation::Interpolation,
+                    ]),
+            )
+            .expect("post-shell validation should retain the caller projection")
+            .0;
+
+        assert_eq!(
+            crate::markdown::compose::schema_validation::TRIGGER_DISCOVERY_COUNT
+                .load(Ordering::Relaxed),
+            1,
+            "the pre-shell and post-shell schema passes must share one discovery walk",
+        );
+        assert_eq!(
+            composed.frontmatter().as_map()["spec"],
+            serde_json::json!(native(&spec)),
+        );
+        assert_eq!(
+            composed.frontmatter().as_map()["plan"],
+            serde_json::json!("claudine/fixes/stable/stable.md"),
+        );
+        assert!(composed.content().contains(&format!(
+            "SPEC={}",
+            biscuit_file::to_portable_string(&spec)
+        )));
+        assert!(
+            composed
+                .content()
+                .contains("PLAN=claudine/fixes/stable/stable.md")
+        );
+    }
+
+    #[test]
+    fn caller_projection_installation_is_idempotent() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("launch");
+        let prompt = repo.path().join("prompts/idempotent.md");
+        let spec = launch.join("spec.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(&spec, "# Specification\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n$schema:\n  spec: file(eager; required)\nspec: authored.md\n---\n{{ spec }}\n",
+        )
+        .unwrap();
+        let context = biscuit_file::FileResolutionContext::new(&launch)
+            .with_repository_root(repo.path())
+            .with_source_path(&prompt);
+        let options = ComposeOptions::new()
+            .with_source_file(&prompt)
+            .with_file_resolution_context(context)
+            .with_set_overrides(serde_json::json!({ "spec": "spec.md" }));
+        let mut markdown = Markdown::try_from(prompt.as_path()).unwrap();
+        markdown
+            .frontmatter_mut()
+            .as_map_mut()
+            .insert("spec".into(), serde_json::json!("spec.md"));
+        let mut registry = None;
+        let prepared = crate::markdown::compose::schema_validation::prepare_schemas(
+            &markdown,
+            &options,
+            &mut registry,
+        )
+        .unwrap();
+        let projection = crate::markdown::compose::schema_validation::prepare_caller_projection(
+            &markdown,
+            &options,
+            &prepared,
+        )
+        .unwrap();
+
+        projection.install(&mut markdown);
+        let once = markdown.frontmatter().as_map().clone();
+        projection.install(&mut markdown);
+        assert_eq!(markdown.frontmatter().as_map(), &once);
+        assert_eq!(
+            markdown.frontmatter().as_map()["spec"],
+            serde_json::json!(native(&spec)),
+        );
+    }
+
+    #[test]
+    fn baseline_file_projection_layers_with_document_schema_and_skips_absent_optional() {
+        use crate::markdown::schemas::{
+            Constraint, PropertyAtom, PropertyDef, SchemaShape, SimplifiedSchema,
+            SimplifiedType, TypeExpr,
+        };
+        use indexmap::IndexMap;
+
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("claudine");
+        let prompt = repo.path().join("prompts/layered.md");
+        let spec = launch.join("fixes/layered/spec.md");
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(&spec, "# Specification\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n\
+             $schema:\n\
+             \x20 plan: file\n\
+             \x20 optional_input: file(eager)\n\
+             plan: \"{{ dirname(spec) + '/plan.md' }}\"\n\
+             ---\n\
+             SPEC={{ spec }}\n\
+             PLAN={{ plan }}\n",
+        )
+        .unwrap();
+        let mut properties = IndexMap::new();
+        properties.insert(
+            "spec".into(),
+            PropertyDef::Single(PropertyAtom {
+                ty: TypeExpr::Primitive(SimplifiedType::File),
+                is_array: false,
+                constraints: vec![Constraint::Eager, Constraint::Required],
+                array_constraints: vec![],
+                description: None,
+            }),
+        );
+        let baseline = SimplifiedSchema::Single(SchemaShape {
+            properties,
+            ..Default::default()
+        });
+        let context = biscuit_file::FileResolutionContext::new(&launch)
+            .with_repository_root(repo.path())
+            .with_source_path(&prompt);
+
+        let composed = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(
+                ComposeOptions::new()
+                    .with_source_file(&prompt)
+                    .with_file_resolution_context(context)
+                    .with_baseline_schema(baseline)
+                    .with_set_overrides(serde_json::json!({
+                        "spec": "fixes/layered/spec.md"
+                    }))
+                    .only(&[
+                        ComposeOperation::FrontmatterInterpolation,
+                        ComposeOperation::Interpolation,
+                    ]),
+            )
+            .expect("baseline and document schemas should form one effective projection")
+            .0;
+
+        assert_eq!(
+            composed.frontmatter().as_map()["spec"],
+            serde_json::json!(native(&spec)),
+        );
+        assert_eq!(
+            composed.frontmatter().as_map()["plan"],
+            serde_json::json!("claudine/fixes/layered/plan.md"),
+        );
+        assert_eq!(
+            composed.frontmatter().as_map()["optional_input"],
+            serde_json::Value::Null,
+            "an absent optional caller property must not be projected",
+        );
+    }
+
+    #[test]
+    fn file_resolution_context_alone_anchors_raw_caller_overrides() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let package = repo.path().join("claudine");
+        let prompt = repo.path().join("prompts/plan.md");
+        let spec = package.join("fixes/context-only/spec.md");
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        std::fs::write(&spec, "# Specification\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n\
+             $schema:\n  spec: file(eager; required)\n  plan: file\n\
+             spec: authored.md\n\
+             plan: \"{{ dirname(spec) + '/plan.md' }}\"\n\
+             ---\n\
+             SPEC={{ spec }}\n\
+             PLAN={{ plan }}\n",
+        )
+        .unwrap();
+        let context = biscuit_file::FileResolutionContext::new(&package)
+            .with_repository_root(repo.path())
+            .with_source_path(&prompt);
+
+        let composed = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(
+                ComposeOptions::new()
+                    .with_source_file(&prompt)
+                    .with_file_resolution_context(context)
+                    .with_set_overrides(serde_json::json!({
+                        "spec": "fixes/context-only/spec.md"
+                    }))
+                    .only(&[
+                        ComposeOperation::FrontmatterInterpolation,
+                        ComposeOperation::Interpolation,
+                    ]),
+            )
+            .expect("the request context should be sufficient caller provenance")
+            .0;
+
+        assert_eq!(
+            composed.frontmatter().as_map()["spec"],
+            serde_json::json!(native(&spec)),
+        );
+        assert_eq!(
+            composed.frontmatter().as_map()["plan"],
+            serde_json::json!("claudine/fixes/context-only/plan.md"),
+        );
+        assert!(
+            composed
+                .content()
+                .contains("PLAN=claudine/fixes/context-only/plan.md")
+        );
+    }
+
+    #[test]
+    fn lazy_target_reuses_the_callers_file_origin_after_an_eager_router() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let package = repo.path().join("claudine");
+        let case_dir = package.join("fixes/proxy-provenance");
+        let router = repo.path().join("prompts/implement.md");
+        let target = repo.path().join("prompts/_implement/implement-suggestions.md");
+        std::fs::create_dir_all(&case_dir).unwrap();
+        std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+        let spec = case_dir.join("spec.md");
+        std::fs::write(&spec, "---\nreview_iterations: 2\n---\nSpecification\n").unwrap();
+        std::fs::write(
+            &router,
+            "---\n$schema:\n  spec: file(eager; required)\nspec: authored.md\nimplemented: \"{{ frontmatter(spec, 'review_iterations') }}\"\n---\n{{ spec }}\n",
+        )
+        .unwrap();
+        std::fs::write(
+            &target,
+            "---\n$schema:\n  spec: file(required)\n  iteration: number(required)\nspec: authored.md\niteration: \"{{ frontmatter(spec, 'review_iterations') }}\"\n---\n{{ spec }}\n",
+        )
+        .unwrap();
+
+        let raw = "fixes/proxy-provenance/spec.md";
+        let origin = biscuit_file::FileResolutionContext::new(&package)
+            .with_repository_root(repo.path());
+        let records: CallerInputRecords = [(
+            "spec".to_string(),
+            CallerInputRecord::new(serde_json::json!(raw), origin.clone()),
+        )]
+        .into_iter()
+        .collect();
+        let compose = |prompt: &std::path::Path| {
+            Markdown::try_from(prompt)
+                .unwrap()
+                .compose_with(
+                    ComposeOptions::new()
+                        .with_source_file(prompt)
+                        .with_file_resolution_context(origin.for_source(prompt))
+                        .with_set_overrides(serde_json::json!({ "spec": raw }))
+                        .with_caller_input_records(records.clone())
+                        .only(&[
+                            ComposeOperation::FrontmatterInterpolation,
+                            ComposeOperation::Interpolation,
+                        ]),
+                )
+                .unwrap()
+                .0
+        };
+
+        let routed = compose(&router);
+        assert_eq!(routed.frontmatter().as_map()["implemented"], serde_json::json!(2));
+        let prepared_target = compose(&target);
+        assert_eq!(prepared_target.frontmatter().as_map()["iteration"], serde_json::json!(2));
+        assert_eq!(
+            prepared_target.frontmatter().as_map()["spec"],
+            serde_json::json!(native(&spec)),
+        );
+    }
+
+    #[test]
+    fn lazy_caller_file_uses_authoritative_candidate_order_for_every_local_reference_kind() {
+        use biscuit_file::{CandidatePlanOrder, PathPosition, RootProvenance};
+
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let source = repo.path().join("area");
+        let package = repo.path().join("package");
+        let magic = repo.path().join("magic");
+        let home = repo.path().join("home");
+        let appended_magic = repo.path().join("appended-magic");
+        let prompt = repo.path().join("prompts/candidate-order.md");
+        for root in [
+            repo.path(),
+            source.as_path(),
+            package.as_path(),
+            magic.as_path(),
+            home.as_path(),
+            appended_magic.as_path(),
+        ] {
+            std::fs::create_dir_all(root.join("collision")).unwrap();
+            std::fs::write(root.join("collision/spec.md"), root.to_string_lossy().as_bytes())
+                .unwrap();
+        }
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n$schema:\n  spec: file(required)\nspec: authored.md\n---\n{{ spec }}\n",
+        )
+        .unwrap();
+
+        let origin = biscuit_file::FileResolutionContext::new(&source)
+            .with_repository_root(repo.path())
+            .with_package_area(&package)
+            .with_home_dir(&home)
+            .add_magic_path(&magic, PathPosition::Start)
+            .add_magic_path(&appended_magic, PathPosition::End);
+        let cases = [
+            (
+                "collision/spec.md",
+                vec![RootProvenance::Source, RootProvenance::Repository],
+            ),
+            (
+                "@collision/spec.md",
+                vec![
+                    RootProvenance::Magic,
+                    RootProvenance::PackageArea,
+                    RootProvenance::Repository,
+                    RootProvenance::Home,
+                    RootProvenance::Magic,
+                ],
+            ),
+            ("./collision/spec.md", vec![RootProvenance::Source]),
+        ];
+
+        for (raw, expected_provenance) in cases {
+            let reference = biscuit_file::FileReference::new(raw).unwrap();
+            let plan = reference
+                .candidate_plan_with_order(&origin, CandidatePlanOrder::AuthoringBaseFirst)
+                .unwrap();
+            assert_eq!(
+                plan.iter()
+                    .map(biscuit_file::ResolutionCandidate::provenance)
+                    .collect::<Vec<_>>(),
+                expected_provenance,
+                "fixture must exercise the authoritative plan for `{raw}`",
+            );
+            let expected = plan.first().unwrap().path();
+            assert!(
+                expected.exists(),
+                "the first candidate for `{raw}` must participate in the collision",
+            );
+
+            let records = [(
+                "spec".to_string(),
+                CallerInputRecord::new(serde_json::json!(raw), origin.clone()),
+            )]
+            .into_iter()
+            .collect();
+            let composed = Markdown::try_from(prompt.as_path())
+                .unwrap()
+                .compose_with(
+                    ComposeOptions::new()
+                        .with_source_file(&prompt)
+                        .with_set_overrides(serde_json::json!({ "spec": raw }))
+                        .with_caller_input_records(records)
+                        .only(&[
+                            ComposeOperation::FrontmatterInterpolation,
+                            ComposeOperation::Interpolation,
+                        ]),
+                )
+                .unwrap()
+                .0;
+
+            assert_eq!(
+                composed.frontmatter().as_map()["spec"],
+                serde_json::json!(native(expected)),
+                "lazy projection must consume the first candidate for `{raw}`",
+            );
+            assert_eq!(
+                composed.content().trim(),
+                biscuit_file::to_portable_string(expected),
+                "presentation must preserve the selected identity for `{raw}`",
+            );
+        }
+    }
+
+    #[test]
+    fn caller_file_projection_does_not_guess_ambiguous_or_zero_match_unions() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("area");
+        let prompt = repo.path().join("prompts/union.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(launch.join("spec.md"), "# Specification\n").unwrap();
+        let origin = biscuit_file::FileResolutionContext::new(&launch)
+            .with_repository_root(repo.path());
+
+        std::fs::write(
+            &prompt,
+            "---\n$schema:\n  spec:\n    - string(required)\n    - file(required)\nspec: authored.md\n---\n{{ spec }}\n",
+        )
+        .unwrap();
+        let ambiguous_records = [(
+            "spec".to_string(),
+            CallerInputRecord::new(serde_json::json!("spec.md"), origin.clone()),
+        )]
+        .into_iter()
+        .collect();
+        let ambiguous = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(
+                ComposeOptions::new()
+                    .with_source_file(&prompt)
+                    .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
+                    .with_caller_input_records(ambiguous_records)
+                    .only(&[ComposeOperation::Interpolation]),
+            )
+            .unwrap()
+            .0;
+        assert_eq!(
+            ambiguous.frontmatter().as_map()["spec"],
+            serde_json::json!("spec.md")
+        );
+
+        std::fs::write(
+            &prompt,
+            "---\n$schema:\n  spec:\n    - number(required)\n    - file(required)\nspec: authored.md\n---\nBody\n",
+        )
+        .unwrap();
+        let zero_records = [(
+            "spec".to_string(),
+            CallerInputRecord::new(serde_json::json!({ "unexpected": true }), origin),
+        )]
+        .into_iter()
+        .collect();
+        let error = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(
+                ComposeOptions::new()
+                    .with_source_file(&prompt)
+                    .with_set_overrides(
+                        serde_json::json!({ "spec": { "unexpected": true } }),
+                    )
+                    .with_caller_input_records(zero_records)
+                    .only(&[ComposeOperation::Interpolation]),
+            )
+            .expect_err("normal schema validation owns a zero-match union");
+        assert!(matches!(error, MarkdownError::SchemaValidationFailed { .. }));
+    }
+
+    #[test]
+    fn eager_file_and_plain_string_property_union_uses_only_one_applicable_arm() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("area");
+        let prompt = repo.path().join("prompts/property-union.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(launch.join("existing.md"), "# Existing\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n$schema:\n  spec:\n    - file(eager; required)\n    - string(required)\nspec: authored.md\n---\n{{ spec }}\n",
+        )
+        .unwrap();
+
+        for raw in ["plain-label", "existing.md"] {
+            let composed = compose_from_launch(
+                &prompt,
+                repo.path(),
+                &launch,
+                serde_json::json!({ "spec": raw }),
+                [],
+            );
+            assert_eq!(
+                composed.frontmatter().as_map()["spec"],
+                serde_json::json!(raw),
+                "the projection must not guess an eager arm for `{raw}`",
+            );
+            assert_eq!(composed.content().trim(), raw);
+        }
+    }
+
+    #[test]
+    fn discriminated_root_union_selects_one_file_schema_path() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("area");
+        let prompt = repo.path().join("prompts/root-union.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        let spec = launch.join("spec.md");
+        std::fs::write(&spec, "# Specification\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n\
+             $schema:\n\
+             \x20 - kind: literal(alpha; required)\n\
+             \x20   spec: file(required)\n\
+             \x20 - kind: literal(beta; required)\n\
+             \x20   spec: file(required)\n\
+             kind: alpha\n\
+             spec: authored.md\n\
+             ---\n\
+             {{ spec }}\n",
+        )
+        .unwrap();
+
+        let composed = compose_from_launch(
+            &prompt,
+            repo.path(),
+            &launch,
+            serde_json::json!({ "spec": "spec.md" }),
+            [],
+        );
+
+        assert_eq!(
+            composed.frontmatter().as_map()["spec"],
+            serde_json::json!(native(&spec)),
+        );
+        assert_eq!(
+            composed.content().trim(),
+            biscuit_file::to_portable_string(&spec),
+        );
+    }
+
+    #[test]
+    fn root_union_uses_document_origin_for_an_eager_file_sibling() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("launch");
+        let prompt = repo.path().join("prompts/root-union.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        let spec = launch.join("spec.md");
+        std::fs::write(&spec, "# Specification\n").unwrap();
+        std::fs::write(prompt.parent().unwrap().join("document.md"), "# Document\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n\
+             $schema:\n\
+             \x20 - kind: literal(alpha; required)\n\
+             \x20   spec: file(required)\n\
+             \x20   document: file(eager; required)\n\
+             \x20 - kind: literal(beta; required)\n\
+             \x20   spec: string(required)\n\
+             \x20   document: file(eager; required)\n\
+             kind: alpha\n\
+             spec: authored.md\n\
+             document: document.md\n\
+             ---\n\
+             {{ spec }}\n",
+        )
+        .unwrap();
+        let origin = biscuit_file::FileResolutionContext::new(&launch)
+            .with_repository_root(repo.path());
+        let records = [(
+            "spec".to_string(),
+            CallerInputRecord::new(serde_json::json!("spec.md"), origin.clone()),
+        )]
+        .into_iter()
+        .collect();
+
+        let composed = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(
+                ComposeOptions::new()
+                    .with_source_file(&prompt)
+                    .with_file_resolution_context(origin.for_source(&prompt))
+                    .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
+                    .with_caller_input_records(records)
+                    .only(&[
+                        ComposeOperation::FrontmatterInterpolation,
+                        ComposeOperation::Interpolation,
+                    ]),
+            )
+            .unwrap()
+            .0;
+
+        assert_eq!(
+            composed.frontmatter().as_map()["spec"],
+            serde_json::json!(native(&spec)),
+        );
+        assert_eq!(
+            composed.content().trim(),
+            biscuit_file::to_portable_string(&spec),
+        );
+    }
+
+    #[test]
+    fn root_union_materializes_each_caller_file_from_its_own_origin() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let first_origin_dir = repo.path().join("first-origin");
+        let second_origin_dir = repo.path().join("second-origin");
+        let prompt = repo.path().join("prompts/root-union.md");
+        std::fs::create_dir_all(&first_origin_dir).unwrap();
+        std::fs::create_dir_all(&second_origin_dir).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        let first = first_origin_dir.join("first.md");
+        let second = second_origin_dir.join("second.md");
+        std::fs::write(&first, "# First\n").unwrap();
+        std::fs::write(&second, "# Second\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n\
+             $schema:\n\
+             \x20 - kind: literal(alpha; required)\n\
+             \x20   first: file(eager; required)\n\
+             \x20   second: file(eager; required)\n\
+             \x20 - kind: literal(beta; required)\n\
+             \x20   first: string(required)\n\
+             \x20   second: string(required)\n\
+             kind: alpha\n\
+             first: authored-first.md\n\
+             second: authored-second.md\n\
+             ---\n\
+             {{ first }}\n\
+             {{ second }}\n",
+        )
+        .unwrap();
+        let document_context = biscuit_file::FileResolutionContext::new(prompt.parent().unwrap())
+            .with_repository_root(repo.path())
+            .with_source_path(&prompt);
+        let records = [
+            (
+                "first".to_string(),
+                CallerInputRecord::new(
+                    serde_json::json!("first.md"),
+                    biscuit_file::FileResolutionContext::new(&first_origin_dir)
+                        .with_repository_root(repo.path()),
+                ),
+            ),
+            (
+                "second".to_string(),
+                CallerInputRecord::new(
+                    serde_json::json!("second.md"),
+                    biscuit_file::FileResolutionContext::new(&second_origin_dir)
+                        .with_repository_root(repo.path()),
+                ),
+            ),
+        ]
+        .into_iter()
+        .collect();
+
+        let composed = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(
+                ComposeOptions::new()
+                    .with_source_file(&prompt)
+                    .with_file_resolution_context(document_context)
+                    .with_set_overrides(serde_json::json!({
+                        "first": "first.md",
+                        "second": "second.md",
+                    }))
+                    .with_caller_input_records(records)
+                    .only(&[
+                        ComposeOperation::FrontmatterInterpolation,
+                        ComposeOperation::Interpolation,
+                    ]),
+            )
+            .unwrap()
+            .0;
+
+        assert_eq!(
+            composed.frontmatter().as_map()["first"],
+            serde_json::json!(native(&first)),
+        );
+        assert_eq!(
+            composed.frontmatter().as_map()["second"],
+            serde_json::json!(native(&second)),
+        );
+    }
+
+    #[test]
+    fn discriminated_root_union_distinguishes_file_and_non_file_arms() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("area");
+        std::fs::create_dir_all(&launch).unwrap();
+        let spec = launch.join("spec.md");
+        std::fs::write(&spec, "# Specification\n").unwrap();
+
+        for (kind, expected) in [
+            ("file", native(&spec)),
+            ("text", "spec.md".to_string()),
+        ] {
+            let prompt = repo.path().join(format!("prompts/root-{kind}.md"));
+            std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+            std::fs::write(
+                &prompt,
+                format!(
+                    "---\n\
+                     $schema:\n\
+                     \x20 - kind: literal(file; required)\n\
+                     \x20   spec: file(required)\n\
+                     \x20 - kind: literal(text; required)\n\
+                     \x20   spec: string(required)\n\
+                     kind: {kind}\n\
+                     spec: authored.md\n\
+                     ---\n\
+                     {{{{ spec }}}}\n"
+                ),
+            )
+            .unwrap();
+
+            let composed = compose_from_launch(
+                &prompt,
+                repo.path(),
+                &launch,
+                serde_json::json!({ "spec": "spec.md" }),
+                [],
+            );
+            assert_eq!(
+                composed.frontmatter().as_map()["spec"],
+                serde_json::json!(expected),
+                "root arm `{kind}` selected the wrong property schema",
+            );
+        }
+    }
+
+    #[test]
+    fn discriminated_root_union_active_plain_string_arm_ignores_eager_sibling() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("area");
+        let prompt = repo.path().join("prompts/root-plain.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(launch.join("spec.md"), "# Specification\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n\
+             $schema:\n\
+             \x20 - kind: literal(file; required)\n\
+             \x20   spec: file(eager; required)\n\
+             \x20 - kind: literal(text; required)\n\
+             \x20   spec: string(required)\n\
+             kind: text\n\
+             spec: authored.md\n\
+             ---\n\
+             {{ spec }}\n",
+        )
+        .unwrap();
+
+        let composed = compose_from_launch(
+            &prompt,
+            repo.path(),
+            &launch,
+            serde_json::json!({ "spec": "spec.md" }),
+            [],
+        );
+        assert_eq!(
+            composed.frontmatter().as_map()["spec"],
+            serde_json::json!("spec.md"),
+        );
+        assert_eq!(composed.content().trim(), "spec.md");
+    }
+
+    #[test]
+    fn root_union_discriminant_drift_after_interpolation_fails_closed() {
+        for (final_kind, eager_first) in [("text", true), ("file", false)] {
+            let repo = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+            let launch = repo.path().join("area");
+            let prompt = repo.path().join("prompts/root-interpolation-drift.md");
+            std::fs::create_dir_all(&launch).unwrap();
+            std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+            std::fs::write(launch.join("spec.md"), "# Specification\n").unwrap();
+            let (template_schema, final_schema) = if eager_first {
+                ("file(eager; required)", "string(required)")
+            } else {
+                ("string(required)", "file(eager; required)")
+            };
+            std::fs::write(
+                &prompt,
+                format!(
+                    "---\n\
+                     $schema:\n\
+                     \x20 - kind: string(pattern(^[{{][{{]); required)\n\
+                     \x20   spec: {template_schema}\n\
+                     \x20 - kind: literal({final_kind}; required)\n\
+                     \x20   spec: {final_schema}\n\
+                     selected: {final_kind}\n\
+                     kind: \"{{{{ selected }}}}\"\n\
+                     spec: authored.md\n\
+                     ---\n\
+                     Body\n"
+                ),
+            )
+            .unwrap();
+
+            let context = biscuit_file::FileResolutionContext::new(&launch)
+                .with_repository_root(repo.path())
+                .with_source_path(&prompt);
+            let error = Markdown::try_from(prompt.as_path())
+                .unwrap()
+                .compose_with(
+                    ComposeOptions::new()
+                        .with_source_file(&prompt)
+                        .with_file_resolution_context(context)
+                        .with_file_ref_fallback_dir(&launch)
+                        .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
+                        .only(&[
+                            ComposeOperation::FrontmatterInterpolation,
+                            ComposeOperation::Interpolation,
+                        ]),
+                )
+                .expect_err("a changed root-union file mode must fail closed");
+            assert!(
+                matches!(
+                    error,
+                    MarkdownError::CallerFileClassificationChanged { ref property }
+                        if property == "spec"
+                ),
+                "unexpected error for final `{final_kind}`: {error:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn root_union_discriminant_drift_after_shell_expansion_fails_closed() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("area");
+        let prompt = repo.path().join("prompts/root-shell-drift.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(launch.join("spec.md"), "# Specification\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n\
+             $schema:\n\
+             \x20 - kind: string(pattern('^[$][(]'); required)\n\
+             \x20   spec: file(eager; required)\n\
+             \x20 - kind: literal(text; required)\n\
+             \x20   spec: string(required)\n\
+             kind: \"$(echo text)\"\n\
+             spec: authored.md\n\
+             ---\n\
+             Body\n",
+        )
+        .unwrap();
+        let context = biscuit_file::FileResolutionContext::new(&launch)
+            .with_repository_root(repo.path())
+            .with_source_path(&prompt);
+        let error = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(
+                ComposeOptions::new()
+                    .with_source_file(&prompt)
+                    .with_file_resolution_context(context)
+                    .with_file_ref_fallback_dir(&launch)
+                    .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
+                    .with_pre_approved_commands(["echo text".to_string()].into_iter().collect())
+                    .only(&[
+                        ComposeOperation::FrontmatterInterpolation,
+                        ComposeOperation::FrontmatterShellExpansion,
+                        ComposeOperation::Interpolation,
+                    ]),
+            )
+            .expect_err("post-shell root-union file-mode drift must fail closed");
+        assert!(
+            matches!(
+                error,
+                MarkdownError::CallerFileClassificationChanged { ref property }
+                    if property == "spec"
+            ),
+            "unexpected post-shell error: {error:?}",
+        );
+    }
+
+    #[test]
+    fn ambiguous_root_union_does_not_guess_a_file_arm() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("area");
+        let prompt = repo.path().join("prompts/root-ambiguous.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(launch.join("spec.md"), "# Specification\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n\
+             $schema:\n\
+             \x20 - kind: literal(shared; required)\n\
+             \x20   spec: file(required)\n\
+             \x20 - kind: literal(shared; required)\n\
+             \x20   spec: file(required)\n\
+             kind: shared\n\
+             spec: authored.md\n\
+             ---\n\
+             {{ spec }}\n",
+        )
+        .unwrap();
+
+        let composed = compose_from_launch(
+            &prompt,
+            repo.path(),
+            &launch,
+            serde_json::json!({ "spec": "spec.md" }),
+            [],
+        );
+        assert_eq!(
+            composed.frontmatter().as_map()["spec"],
+            serde_json::json!("spec.md"),
+        );
+        assert_eq!(composed.content().trim(), "spec.md");
+    }
+
+    #[test]
+    fn zero_match_root_union_leaves_the_verdict_to_schema_validation() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("area");
+        let prompt = repo.path().join("prompts/root-zero.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(launch.join("spec.md"), "# Specification\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n\
+             $schema:\n\
+             \x20 - kind: literal(alpha; required)\n\
+             \x20   spec: file(required)\n\
+             \x20 - kind: literal(beta; required)\n\
+             \x20   spec: file(required)\n\
+             kind: neither\n\
+             spec: authored.md\n\
+             ---\n\
+             Body\n",
+        )
+        .unwrap();
+
+        let context = biscuit_file::FileResolutionContext::new(&launch)
+            .with_repository_root(repo.path())
+            .with_source_path(&prompt);
+        let error = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(
+                ComposeOptions::new()
+                    .with_source_file(&prompt)
+                    .with_file_resolution_context(context)
+                    .with_file_ref_fallback_dir(&launch)
+                    .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
+                    .only(&[
+                        ComposeOperation::FrontmatterInterpolation,
+                        ComposeOperation::Interpolation,
+                    ]),
+            )
+            .expect_err("normal validation must reject a zero-match root union");
+        assert!(matches!(error, MarkdownError::SchemaValidationFailed { .. }));
+    }
+
+    #[test]
+    fn recursive_lazy_caller_file_requires_eager_binding() {
+        use crate::markdown::schemas::FileReferenceDiagnostic;
+
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("area");
+        let prompt = repo.path().join("prompts/recursive.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n$schema:\n  spec: file(required)\nspec: authored.md\n---\n{{ spec }}\n",
+        )
+        .unwrap();
+        let origin = biscuit_file::FileResolutionContext::new(&launch)
+            .with_repository_root(repo.path());
+        let records = [(
+            "spec".to_string(),
+            CallerInputRecord::new(serde_json::json!("%spec.md"), origin),
+        )]
+        .into_iter()
+        .collect();
+
+        let error = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(
+                ComposeOptions::new()
+                    .with_source_file(&prompt)
+                    .with_set_overrides(serde_json::json!({ "spec": "%spec.md" }))
+                    .with_caller_input_records(records)
+                    .only(&[
+                        ComposeOperation::FrontmatterInterpolation,
+                        ComposeOperation::Interpolation,
+                    ]),
+            )
+            .expect_err("a recursive lazy caller file has no single identity");
+        let MarkdownError::SchemaValidationFailed { problems, .. } = error else {
+            panic!("expected typed schema failure, got {error:?}");
+        };
+        assert_eq!(problems.len(), 1);
+        assert!(problems[0].message.contains("file(eager)"));
+        assert!(matches!(
+            problems[0].file_reference,
+            Some(FileReferenceDiagnostic::ResolutionFailed { ref raw }) if raw == "%spec.md"
+        ));
+    }
+
+    #[test]
+    fn lazy_remote_caller_file_preserves_remote_identity_without_local_resolution() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("area");
+        let prompt = repo.path().join("prompts/remote.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n$schema:\n  spec: file(required)\nspec: authored.md\nselected: \"{{ spec }}\"\n---\n{{ spec }}\n",
+        )
+        .unwrap();
+        let raw = "https://example.com/spec.md?revision=2";
+        let origin = biscuit_file::FileResolutionContext::new(&launch)
+            .with_repository_root(repo.path());
+        let records = [(
+            "spec".to_string(),
+            CallerInputRecord::new(serde_json::json!(raw), origin),
+        )]
+        .into_iter()
+        .collect();
+
+        let composed = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(
+                ComposeOptions::new()
+                    .with_source_file(&prompt)
+                    .with_set_overrides(serde_json::json!({ "spec": raw }))
+                    .with_caller_input_records(records)
+                    .only(&[
+                        ComposeOperation::FrontmatterInterpolation,
+                        ComposeOperation::Interpolation,
+                    ]),
+            )
+            .unwrap()
+            .0;
+        assert_eq!(composed.frontmatter().as_map()["spec"], serde_json::json!(raw));
+        assert_eq!(
+            composed.frontmatter().as_map()["selected"],
+            serde_json::json!(raw)
+        );
+        assert!(composed.content().contains(raw));
+    }
+
+    #[test]
+    fn null_caller_files_and_non_caller_strings_are_not_materialized() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("area");
+        let prompt = repo.path().join("prompts/controls.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n$schema:\n  spec: file\n  label: string(required)\nspec: authored.md\nlabel: document-owned\n---\n{{ label }}\n",
+        )
+        .unwrap();
+        let origin = biscuit_file::FileResolutionContext::new(&launch)
+            .with_repository_root(repo.path());
+        let records = [(
+            "spec".to_string(),
+            CallerInputRecord::new(serde_json::Value::Null, origin),
+        )]
+        .into_iter()
+        .collect();
+
+        let composed = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(
+                ComposeOptions::new()
+                    .with_source_file(&prompt)
+                    .with_set_overrides(serde_json::json!({ "spec": null }))
+                    .with_caller_input_records(records)
+                    .only(&[
+                        ComposeOperation::FrontmatterInterpolation,
+                        ComposeOperation::Interpolation,
+                    ]),
+            )
+            .unwrap()
+            .0;
+        assert_eq!(
+            composed.frontmatter().as_map()["spec"],
+            serde_json::Value::Null
+        );
+        assert_eq!(
+            composed.frontmatter().as_map()["label"],
+            serde_json::json!("document-owned")
+        );
+        assert_eq!(composed.content(), "document-owned");
+    }
+
+    #[test]
+    fn absent_caller_property_does_not_materialize_a_schema_file_default() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("area");
+        let prompt = repo.path().join("prompts/default.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n$schema:\n  spec: \"file(default('./defaults/spec.md'))\"\n  caller_label: string(required)\n---\nBody.\n",
+        )
+        .unwrap();
+        let origin = biscuit_file::FileResolutionContext::new(&launch)
+            .with_repository_root(repo.path());
+        let records = [(
+            "caller_label".to_string(),
+            CallerInputRecord::new(serde_json::json!("present"), origin),
+        )]
+        .into_iter()
+        .collect();
+
+        let composed = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(
+                ComposeOptions::new()
+                    .with_source_file(&prompt)
+                    .with_set_overrides(serde_json::json!({ "caller_label": "present" }))
+                    .with_caller_input_records(records)
+                    .only(&[
+                        ComposeOperation::FrontmatterInterpolation,
+                        ComposeOperation::Interpolation,
+                    ]),
+            )
+            .unwrap()
+            .0;
+
+        assert!(
+            !composed.frontmatter().as_map().contains_key("spec"),
+            "an absent caller property must not turn a document-owned schema default into an effective caller value",
+        );
+        assert_eq!(
+            composed.frontmatter().as_map()["$schema"]["spec"],
+            serde_json::json!("file(default('./defaults/spec.md'))"),
+            "the schema retains ownership of its unchanged default declaration",
+        );
+    }
+
+    #[test]
+    #[serial_test::serial(caller_file_process_cwd)]
+    fn caller_file_materialization_ignores_a_post_capture_process_cwd_change() {
+        struct RestoreCwd(std::path::PathBuf);
+        impl Drop for RestoreCwd {
+            fn drop(&mut self) {
+                let _ = std::env::set_current_dir(&self.0);
+            }
+        }
+
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("area");
+        let unrelated = repo.path().join("unrelated");
+        let prompt = repo.path().join("prompts/cwd.md");
+        let spec = launch.join("cases/spec.md");
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&unrelated).unwrap();
+        std::fs::write(&spec, "---\nmarker: captured\n---\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n$schema:\n  spec: file(required)\nmarker: \"{{ frontmatter(spec, 'marker') }}\"\n---\n{{ marker }}\n",
+        )
+        .unwrap();
+        let origin = biscuit_file::FileResolutionContext::new(&launch)
+            .with_repository_root(repo.path());
+        let records = [(
+            "spec".to_string(),
+            CallerInputRecord::new(serde_json::json!("cases/spec.md"), origin),
+        )]
+        .into_iter()
+        .collect();
+        let options = ComposeOptions::new()
+            .with_source_file(&prompt)
+            .with_set_overrides(serde_json::json!({ "spec": "cases/spec.md" }))
+            .with_caller_input_records(records)
+            .only(&[
+                ComposeOperation::FrontmatterInterpolation,
+                ComposeOperation::Interpolation,
+            ]);
+        let prior = std::env::current_dir().unwrap();
+        let _restore = RestoreCwd(prior);
+        std::env::set_current_dir(&unrelated).unwrap();
+
+        let composed = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(options)
+            .unwrap()
+            .0;
+        assert_eq!(composed.frontmatter().as_map()["marker"], serde_json::json!("captured"));
+        assert_eq!(
+            composed.frontmatter().as_map()["spec"],
+            serde_json::json!(native(&spec)),
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_caller_file_native_and_presentation_values_share_one_identity() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("area");
+        let prompt = repo.path().join("prompts/windows.md");
+        let spec = launch.join("cases/spec.md");
+        std::fs::create_dir_all(spec.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(&spec, "# Windows identity\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n$schema:\n  spec: file(required)\n---\n{{ spec }}\n",
+        )
+        .unwrap();
+        let origin = biscuit_file::FileResolutionContext::new(&launch)
+            .with_repository_root(repo.path());
+        let records = [(
+            "spec".to_string(),
+            CallerInputRecord::new(serde_json::json!("cases/spec.md"), origin),
+        )]
+        .into_iter()
+        .collect();
+        let composed = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(
+                ComposeOptions::new()
+                    .with_source_file(&prompt)
+                    .with_set_overrides(serde_json::json!({ "spec": "cases/spec.md" }))
+                    .with_caller_input_records(records)
+                    .only(&[
+                        ComposeOperation::FrontmatterInterpolation,
+                        ComposeOperation::Interpolation,
+                    ]),
+            )
+            .unwrap()
+            .0;
+        let native = composed.frontmatter().as_map()["spec"].as_str().unwrap();
+        let presentation = composed.content().trim();
+
+        assert_eq!(std::path::PathBuf::from(native), spec);
+        assert_eq!(presentation, biscuit_file::to_portable_string(&spec));
+        assert!(native.contains('\\'));
+        assert!(presentation.contains('/'));
+    }
+
+    #[test]
+    fn eager_array_and_property_union_project_before_frontmatter_expressions() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let package = repo.path().join("claudine");
+        let prompt = repo.path().join("prompts/array-union.md");
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&package).unwrap();
+        let first = package.join("first.md");
+        let union = package.join("union.md");
+        std::fs::write(&first, "# First\n").unwrap();
+        std::fs::write(&union, "# Union\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n\
+             $schema:\n\
+             \x20 specs: file(eager)[]\n\
+             \x20 selected: string(required)\n\
+             \x20 union_spec:\n\
+             \x20   - file(eager; required)\n\
+             \x20   - number\n\
+             \x20 union_selected: string(required)\n\
+             specs: []\n\
+             selected: \"{{ specs[0] }}\"\n\
+             union_spec: authored.md\n\
+             union_selected: \"{{ union_spec }}\"\n\
+             ---\n\
+             DIRECT={{ specs[0] }}\n\
+             UNION={{ union_spec }}\n",
+        )
+        .unwrap();
+
+        let composed = compose_from_launch(
+            &prompt,
+            repo.path(),
+            &package,
+            serde_json::json!({
+                "specs": ["first.md"],
+                "union_spec": "union.md",
+            }),
+            [],
+        );
+        let frontmatter = composed.frontmatter().as_map();
+        let native_first = native(&first);
+        let native_union = native(&union);
+        assert_eq!(frontmatter.get("specs"), Some(&serde_json::json!([native_first])));
+        assert_eq!(frontmatter.get("selected"), frontmatter["specs"].get(0));
+        assert_eq!(
+            frontmatter.get("union_spec"),
+            Some(&serde_json::json!(native_union)),
+        );
+        assert_eq!(frontmatter.get("union_selected"), frontmatter.get("union_spec"));
+        assert!(composed.content().contains(&format!(
+            "DIRECT={}",
+            biscuit_file::to_portable_string(&first)
+        )));
+        assert!(composed.content().contains(&format!(
+            "UNION={}",
+            biscuit_file::to_portable_string(&union)
+        )));
+
+        #[cfg(windows)]
+        {
+            assert!(frontmatter["selected"].as_str().unwrap().contains('\\'));
+            assert!(!biscuit_file::to_portable_string(&first).contains('\\'));
+        }
+    }
+
+    #[test]
+    fn non_eager_and_excluded_caller_values_are_not_projected() {
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let package = repo.path().join("claudine");
+        std::fs::create_dir_all(&package).unwrap();
+
+        for (name, declaration, excluded) in [
+            ("ordinary", "string(required)", false),
+            ("excluded", "file(eager; required)", true),
+        ] {
+            let prompt = repo.path().join(format!("prompts/{name}.md"));
+            std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+            std::fs::write(
+                &prompt,
+                format!(
+                    "---\n$schema:\n  spec: '{declaration}'\nspec: authored.md\n---\nSPEC={{{{ spec }}}}\n"
+                ),
+            )
+            .unwrap();
+            let composed = compose_from_launch(
+                &prompt,
+                repo.path(),
+                &package,
+                serde_json::json!({ "spec": "missing.md" }),
+                excluded.then_some("spec"),
+            );
+            assert_eq!(
+                composed.frontmatter().as_map().get("spec"),
+                Some(&serde_json::json!("missing.md")),
+                "{name} caller value should retain its authored spelling",
+            );
+            assert!(
+                composed.content().contains("SPEC=missing.md"),
+                "{name} caller value should stay unprojected in body output",
+            );
+        }
+
+        let prompt = repo.path().join("prompts/document-owned.md");
+        let authored = prompt.parent().unwrap().join("authored.md");
+        std::fs::write(&authored, "# Authored\n").unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n$schema:\n  spec: 'file(eager; required)'\nspec: ./authored.md\n---\nSPEC={{ spec }}\n",
+        )
+        .unwrap();
+        let context = biscuit_file::FileResolutionContext::new(repo.path())
+            .with_repository_root(repo.path())
+            .for_source(&prompt);
+        let composed = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(
+                ComposeOptions::new()
+                    .with_source_file(&prompt)
+                    .with_file_resolution_context(context)
+                    .only(&[
+                        ComposeOperation::FrontmatterInterpolation,
+                        ComposeOperation::Interpolation,
+                    ]),
+            )
+            .unwrap()
+            .0;
+        assert_eq!(
+            composed.frontmatter().as_map().get("spec"),
+            Some(&serde_json::json!("prompts/authored.md")),
+            "document-owned eager files keep the existing repository-relative normalization",
+        );
+    }
+
+    #[test]
+    fn eager_caller_file_classification_drift_fails_before_shell_expansion() {
+        for (case, match_type) in [
+            ("non-eager-to-eager", "boolean(required)"),
+            ("eager-to-non-eager", "string(required)"),
+        ] {
+            let repo = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+            std::fs::create_dir_all(repo.path().join("schemas")).unwrap();
+            let package = repo.path().join("claudine");
+            std::fs::create_dir_all(&package).unwrap();
+            std::fs::write(package.join("spec.md"), "# Specification\n").unwrap();
+            std::fs::write(
+                repo.path().join("schemas/eager-file.yaml"),
+                format!(
+                    "kind: trigger-schema\nmatch:\n  gate: {match_type}\n$schema: payload.yaml\n"
+                ),
+            )
+            .unwrap();
+            std::fs::write(
+                repo.path().join("schemas/payload.yaml"),
+                "$schema:\n  spec: file(eager; required)\n",
+            )
+            .unwrap();
+            let prompt = repo.path().join("prompts/drift.md");
+            std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+            std::fs::write(
+                &prompt,
+                "---\nenabled: true\ngate: \"{{ enabled }}\"\nspec: authored.md\nsentinel: \"$(darkmatter_test_should_not_execute)\"\n---\n{{ spec }}\n",
+            )
+            .unwrap();
+            let context = biscuit_file::FileResolutionContext::new(&package)
+                .with_repository_root(repo.path())
+                .with_source_path(&prompt);
+            let err = Markdown::try_from(prompt.as_path())
+                .unwrap()
+                .compose_with(
+                    ComposeOptions::new()
+                        .with_source_file(&prompt)
+                        .with_file_resolution_context(context)
+                        .with_file_ref_fallback_dir(&package)
+                        .with_set_overrides(serde_json::json!({ "spec": "spec.md" }))
+                        .with_trigger_schemas(true)
+                        .only(&[
+                            ComposeOperation::FrontmatterInterpolation,
+                            ComposeOperation::FrontmatterShellExpansion,
+                            ComposeOperation::Interpolation,
+                        ]),
+                )
+                .expect_err("phase-unstable caller file typing must fail closed");
+            assert!(
+                matches!(
+                    err,
+                    MarkdownError::CallerFileClassificationChanged { ref property }
+                        if property == "spec"
+                ),
+                "{case} should report the typed spec classification error, got {err:?}",
+            );
+        }
+    }
+
+    #[test]
+    fn eager_caller_file_failures_retain_typed_reference_diagnostics() {
+        use crate::markdown::schemas::FileReferenceDiagnostic;
+
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let package = repo.path().join("claudine");
+        let prompt = repo.path().join("prompts/failure.md");
+        std::fs::create_dir_all(&package).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n$schema:\n  spec: file(eager; required)\nspec: authored.md\n---\n{{ spec }}\n",
+        )
+        .unwrap();
+
+        for (raw, expected_kind) in [("@//rooted", "syntax"), ("missing.md", "no-match")] {
+            let context = biscuit_file::FileResolutionContext::new(&package)
+                .with_repository_root(repo.path())
+                .with_source_path(&prompt);
+            let err = Markdown::try_from(prompt.as_path())
+                .unwrap()
+                .compose_with(
+                    ComposeOptions::new()
+                        .with_source_file(&prompt)
+                        .with_file_resolution_context(context)
+                        .with_file_ref_fallback_dir(&package)
+                        .with_set_overrides(serde_json::json!({ "spec": raw }))
+                        .only(&[
+                            ComposeOperation::FrontmatterInterpolation,
+                            ComposeOperation::Interpolation,
+                        ]),
+                )
+                .expect_err("invalid eager caller input must fail before interpolation");
+            let MarkdownError::SchemaValidationFailed { problems, .. } = err else {
+                panic!("expected typed schema failure for {raw}, got {err:?}");
+            };
+            assert_eq!(problems.len(), 1, "{raw} should produce one focused problem");
+            assert_eq!(problems[0].path, "/spec");
+            assert!(
+                matches!(
+                    (&problems[0].file_reference, expected_kind),
+                    (Some(FileReferenceDiagnostic::InvalidSyntax { .. }), "syntax")
+                        | (Some(FileReferenceDiagnostic::NoMatch { .. }), "no-match")
+                ),
+                "{raw} should retain its {expected_kind} diagnostic: {:?}",
+                problems[0],
+            );
+        }
+    }
+
+    #[test]
+    fn lazy_caller_read_failure_retains_raw_origin_and_selected_candidate() {
+        use crate::markdown::compose::expression::ExpressionError;
+
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("claudine");
+        let prompt = repo.path().join("prompts/target.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::write(
+            &prompt,
+            "---\n$schema:\n  spec: file(required)\nvalue: \"{{ frontmatter(spec, 'value') }}\"\n---\nBody\n",
+        )
+        .unwrap();
+        let raw = "fixes/missing/spec.md";
+        let origin = biscuit_file::FileResolutionContext::new(&launch)
+            .with_repository_root(repo.path());
+        let records = [(
+            "spec".to_string(),
+            CallerInputRecord::new(serde_json::json!(raw), origin.clone()),
+        )]
+        .into_iter()
+        .collect();
+
+        let error = Markdown::try_from(prompt.as_path())
+            .unwrap()
+            .compose_with(
+                ComposeOptions::new()
+                    .with_source_file(&prompt)
+                    .with_set_overrides(serde_json::json!({ "spec": raw }))
+                    .with_caller_input_records(records)
+                    .only(&[
+                        ComposeOperation::FrontmatterInterpolation,
+                        ComposeOperation::Interpolation,
+                    ]),
+            )
+            .expect_err("the later frontmatter read must report the missing lazy candidate");
+        let MarkdownError::Interpolation { cause, .. } = error else {
+            panic!("expected interpolation failure, got {error:?}");
+        };
+        let ExpressionError::FileReference(diagnostic) = cause.as_ref() else {
+            panic!("expected typed file-reference cause, got {cause:?}");
+        };
+        let caller = diagnostic
+            .caller
+            .as_ref()
+            .expect("schema-projected lazy value must retain caller evidence");
+        let expected = launch.join(raw);
+        assert_eq!(diagnostic.reference, raw);
+        assert_eq!(diagnostic.base_dir, launch);
+        assert_eq!(caller.property, "spec");
+        assert_eq!(caller.origin.base_dir(), origin.base_dir());
+        assert_eq!(caller.candidate, expected);
+        assert_eq!(
+            caller.candidate_provenance,
+            biscuit_file::RootProvenance::Source
+        );
+    }
+
+    #[test]
+    fn equal_lazy_candidates_retain_the_selected_property_occurrence() {
+        use crate::markdown::compose::expression::{ExpressionError, FileReferenceDiagnostic};
+
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let prompt = repo.path().join("prompts/target.md");
+        let launch = repo.path().join("launch");
+        let first_source = launch.join("caller-first.md");
+        let second_source = launch.join("caller-second.md");
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        std::fs::create_dir_all(&launch).unwrap();
+        let first_raw = "missing.md";
+        let second_raw = "./missing.md";
+        let first_origin =
+            biscuit_file::FileResolutionContext::new(&launch).with_source_path(&first_source);
+        let second_origin =
+            biscuit_file::FileResolutionContext::new(&launch).with_source_path(&second_source);
+        let records = [
+            (
+                "first".to_string(),
+                CallerInputRecord::new(serde_json::json!(first_raw), first_origin.clone()),
+            ),
+            (
+                "second".to_string(),
+                CallerInputRecord::new(serde_json::json!(second_raw), second_origin.clone()),
+            ),
+        ]
+        .into_iter()
+        .collect::<CallerInputRecords>();
+
+        let failure_for = |property: &str| -> FileReferenceDiagnostic {
+            std::fs::write(
+                &prompt,
+                format!(
+                    "---\n$schema:\n  first: file(required)\n  second: file(required)\nvalue: \"{{{{ frontmatter({property}, 'value') }}}}\"\n---\nBody\n"
+                ),
+            )
+            .unwrap();
+            let error = Markdown::try_from(prompt.as_path())
+                .unwrap()
+                .compose_with(
+                    ComposeOptions::new()
+                        .with_source_file(&prompt)
+                        .with_set_overrides(serde_json::json!({
+                            "first": first_raw,
+                            "second": second_raw,
+                        }))
+                        .with_caller_input_records(records.clone())
+                        .only(&[
+                            ComposeOperation::FrontmatterInterpolation,
+                            ComposeOperation::Interpolation,
+                        ]),
+                )
+                .expect_err("the selected lazy caller file must be missing");
+            let MarkdownError::Interpolation { cause, .. } = error else {
+                panic!("expected interpolation failure, got {error:?}");
+            };
+            let ExpressionError::FileReference(diagnostic) = cause.as_ref() else {
+                panic!("expected typed file-reference cause, got {cause:?}");
+            };
+            diagnostic.clone()
+        };
+
+        let first = failure_for("first");
+        let second = failure_for("second");
+        let first_caller = first.caller.as_ref().unwrap();
+        let second_caller = second.caller.as_ref().unwrap();
+        assert_eq!(first.reference, first_raw);
+        assert_eq!(first_caller.property, "first");
+        assert_eq!(first.base_dir, launch);
+        assert_eq!(first_caller.origin.source_path(), Some(first_source.as_path()));
+        assert_eq!(first_caller.candidate, launch.join(first_raw));
+        assert_eq!(second.reference, second_raw);
+        assert_eq!(second_caller.property, "second");
+        assert_eq!(second.base_dir, launch);
+        assert_eq!(second_caller.origin.source_path(), Some(second_source.as_path()));
+        assert_eq!(second_caller.candidate, launch.join("missing.md"));
+        assert_eq!(first_caller.candidate, second_caller.candidate);
+    }
+
+    #[test]
+    fn duplicate_lazy_array_identities_retain_each_raw_occurrence() {
+        use crate::markdown::compose::expression::{ExpressionError, FileReferenceDiagnostic};
+
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("launch");
+        let prompt = repo.path().join("prompts/target.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        let raw = serde_json::json!(["missing.md", "./missing.md"]);
+        let origin = biscuit_file::FileResolutionContext::new(&launch);
+        let records = [(
+            "files".to_string(),
+            CallerInputRecord::new(raw.clone(), origin.clone()),
+        )]
+        .into_iter()
+        .collect::<CallerInputRecords>();
+
+        let failure_for = |index: usize| -> FileReferenceDiagnostic {
+            std::fs::write(
+                &prompt,
+                format!(
+                    "---\n$schema:\n  files: file(required)[]\nvalue: \"{{{{ frontmatter(files[{index}], 'value') }}}}\"\n---\nBody\n"
+                ),
+            )
+            .unwrap();
+            let error = Markdown::try_from(prompt.as_path())
+                .unwrap()
+                .compose_with(
+                    ComposeOptions::new()
+                        .with_source_file(&prompt)
+                        .with_set_overrides(serde_json::json!({ "files": raw }))
+                        .with_caller_input_records(records.clone())
+                        .only(&[
+                            ComposeOperation::FrontmatterInterpolation,
+                            ComposeOperation::Interpolation,
+                        ]),
+                )
+                .expect_err("the selected lazy caller array item must be missing");
+            let MarkdownError::Interpolation { cause, .. } = error else {
+                panic!("expected interpolation failure, got {error:?}");
+            };
+            let ExpressionError::FileReference(diagnostic) = cause.as_ref() else {
+                panic!("expected typed file-reference cause, got {cause:?}");
+            };
+            diagnostic.clone()
+        };
+
+        let first = failure_for(0);
+        let second = failure_for(1);
+        assert_eq!(first.reference, "missing.md");
+        assert_eq!(second.reference, "./missing.md");
+        assert_eq!(first.base_dir, launch);
+        assert_eq!(second.base_dir, launch);
+        assert_eq!(first.caller.as_ref().unwrap().property, "files");
+        assert_eq!(second.caller.as_ref().unwrap().property, "files");
+        assert_eq!(first.caller.as_ref().unwrap().origin.base_dir(), launch);
+        assert_eq!(second.caller.as_ref().unwrap().origin.base_dir(), launch);
+        assert_eq!(first.caller.as_ref().unwrap().candidate, launch.join("missing.md"));
+        assert_eq!(first.caller.as_ref().unwrap().candidate, second.caller.as_ref().unwrap().candidate);
+    }
+
+    #[test]
+    fn dynamic_lazy_array_index_retains_the_selected_raw_occurrence() {
+        use crate::markdown::compose::expression::{ExpressionError, FileReferenceDiagnostic};
+
+        let repo = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+        let launch = repo.path().join("launch");
+        let prompt = repo.path().join("prompts/target.md");
+        let source = launch.join("caller.md");
+        std::fs::create_dir_all(&launch).unwrap();
+        std::fs::create_dir_all(prompt.parent().unwrap()).unwrap();
+        let raw = serde_json::json!(["missing.md", "./missing.md"]);
+        let origin = biscuit_file::FileResolutionContext::new(&launch)
+            .with_repository_root(repo.path())
+            .with_source_path(&source);
+        let records = [(
+            "files".to_string(),
+            CallerInputRecord::new(raw.clone(), origin.clone()),
+        )]
+        .into_iter()
+        .collect::<CallerInputRecords>();
+
+        let failure_for = |index: usize| -> FileReferenceDiagnostic {
+            std::fs::write(
+                &prompt,
+                format!(
+                    "---\n$schema:\n  files: file(required)[]\nindex: {index}\nvalue: \"{{{{ frontmatter(files[index], 'value') }}}}\"\n---\nBody\n"
+                ),
+            )
+            .unwrap();
+            let error = Markdown::try_from(prompt.as_path())
+                .unwrap()
+                .compose_with(
+                    ComposeOptions::new()
+                        .with_source_file(&prompt)
+                        .with_set_overrides(serde_json::json!({ "files": raw }))
+                        .with_caller_input_records(records.clone())
+                        .only(&[
+                            ComposeOperation::FrontmatterInterpolation,
+                            ComposeOperation::Interpolation,
+                        ]),
+                )
+                .expect_err("the dynamically selected caller array item must be missing");
+            let MarkdownError::Interpolation { cause, .. } = error else {
+                panic!("expected interpolation failure, got {error:?}");
+            };
+            let ExpressionError::FileReference(diagnostic) = cause.as_ref() else {
+                panic!("expected typed file-reference cause, got {cause:?}");
+            };
+            diagnostic.clone()
+        };
+
+        let first = failure_for(0);
+        let second = failure_for(1);
+        for (diagnostic, expected_raw) in [(&first, "missing.md"), (&second, "./missing.md")] {
+            let caller = diagnostic.caller.as_ref().unwrap();
+            assert_eq!(diagnostic.reference, expected_raw);
+            assert_eq!(diagnostic.base_dir, launch);
+            assert_eq!(caller.property, "files");
+            assert_eq!(caller.origin.base_dir(), origin.base_dir());
+            assert_eq!(caller.origin.repository_root(), origin.repository_root());
+            assert_eq!(caller.origin.source_path(), Some(source.as_path()));
+            assert_eq!(caller.candidate, launch.join("missing.md"));
+            assert_eq!(
+                caller.candidate_provenance,
+                biscuit_file::RootProvenance::Source
+            );
+        }
+        assert_eq!(first.caller.as_ref().unwrap().candidate, second.caller.as_ref().unwrap().candidate);
     }
 }

@@ -215,7 +215,7 @@ mod tests {
             "file_exists('{{CLAUDINE_SEQUENCE_ROOT}}/env.flag')",
             "file_exists('~/home.flag')",
             "file_exists('@magic.flag')",
-            "file_exists('!package.flag')",
+            "file_exists('^package.flag')",
         ] {
             assert_eq!(evaluate_whole(expression, &lookup).unwrap(), Value::Bool(true));
         }

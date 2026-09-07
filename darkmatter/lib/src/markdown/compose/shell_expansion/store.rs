@@ -4,7 +4,6 @@ use super::types::{
     ShellExpansionError, ShellExpansionOptions, ShellPolicyPaths, ShellRuleEntry, ShellRuleSet,
 };
 use crate::markdown::compose::ComposeSource;
-use crate::markdown::compose::find_git_root_from;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
@@ -57,11 +56,17 @@ pub fn resolve_policy_paths(
             }
         };
 
-        // Try to find git repo root by walking up
-        find_git_root_from(&base_dir).unwrap_or_else(|| {
-            // Fall back to HOME if no git repo
-            dirs::home_dir().unwrap_or(base_dir)
-        })
+        shell_opts
+            .file_resolution_context
+            .as_ref()
+            .and_then(|context| context.repository_root().map(Path::to_path_buf))
+            .or_else(|| {
+                shell_opts
+                    .file_resolution_context
+                    .as_ref()
+                    .and_then(|context| context.home_dir().map(Path::to_path_buf))
+            })
+            .unwrap_or(base_dir)
     };
 
     let whitelist = policy_dir.join(".darkmatter-shell-whitelist");
@@ -253,6 +258,7 @@ fn append_rule(path: &Path, rule_type: &str, value: &str) -> Result<(), ShellExp
 
 #[cfg(test)]
 mod tests {
+    use crate::markdown::compose::find_git_root_from;
     use super::*;
     use tempfile::TempDir;
 

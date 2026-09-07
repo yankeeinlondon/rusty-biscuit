@@ -318,6 +318,8 @@ impl TaskShellRunner for SystemTaskShell {
         live: Option<&Arc<TaskLiveOutput>>,
     ) -> Result<ShellCommandOutput, TaskShellError> {
         let mut builder = system_shell_command(command);
+        crate::child_environment::contribute_child_environment(&mut builder)
+            .map_err(|error| TaskShellError::Io(std::io::Error::other(error)))?;
         builder
             .stdout(Stdio::piped())
             // Piped only when there is somewhere attributed to put it. With no

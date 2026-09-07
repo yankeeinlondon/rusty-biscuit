@@ -763,7 +763,12 @@ impl TtsExecutor for ElevenLabsProvider {
 
         // Play the audio file (requires playa feature)
         #[cfg(feature = "playa")]
-        crate::playback::play_audio_file(&audio_path, AudioFormat::Mp3, config).await?;
+        let playback = crate::playback::play_audio_file_with_report(
+            &audio_path,
+            AudioFormat::Mp3,
+            config,
+        )
+        .await?;
 
         #[cfg(not(feature = "playa"))]
         {
@@ -812,8 +817,47 @@ impl TtsExecutor for ElevenLabsProvider {
             )
             .with_audio_file(audio_path)
             .with_codec("mp3")
-            .with_cache_hit(cache_hit))
+            .with_cache_hit(cache_hit)
+            .with_playback(playback))
         }
+    }
+
+    #[cfg(feature = "playa")]
+    async fn detached_job(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<playa::detached::SpoolJob, TtsError> {
+        let voice_id = self.resolve_voice_id(config).await?;
+        let model_id = config
+            .requested_model
+            .clone()
+            .unwrap_or_else(|| self.default_model_id.clone());
+        let (path, _) = self
+            .generate_to_cache(text, &voice_id, &model_id, config.speed)
+            .await?;
+        Ok(crate::playa_bridge::file_job(path, config))
+    }
+
+    #[cfg(feature = "playa")]
+    async fn cached_detached_job(
+        &self,
+        text: &str,
+        config: &TtsConfig,
+    ) -> Result<Option<playa::detached::SpoolJob>, TtsError> {
+        let Some(voice_id) = config.requested_voice.as_deref() else {
+            return Ok(None);
+        };
+        let model_id = config.requested_model.as_deref().unwrap_or(&self.default_model_id);
+        let combined_id = format!("{voice_id}-{model_id}");
+        let mut key = CacheKey::new("elevenlabs", combined_id, text, "mp3");
+        if config.speed != SpeedLevel::Normal {
+            key = key.with_speed(config.speed.value());
+        }
+        let path = key.cache_path();
+        Ok(path
+            .is_file()
+            .then(|| crate::playa_bridge::file_job(path, config)))
     }
 }
 

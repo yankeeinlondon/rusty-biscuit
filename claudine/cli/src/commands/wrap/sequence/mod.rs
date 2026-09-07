@@ -56,7 +56,9 @@ pub(super) fn run_was_interrupted(exit_code: i32, interrupted: &AtomicBool) -> b
 /// is byte-identical to what execution runs. Referenced prompt documents
 /// contribute their template `::shell` directives through the same pass, which
 /// is what makes "no approval prompts once the sequence starts" honest for work
-/// several hops from the sequence document.
+/// several hops from the sequence document. Schema verdicts are deferred during
+/// this discovery-only compose because prompt-task `params` bind just in time;
+/// the task's canonical prepare validates the resulting effective values.
 #[allow(clippy::too_many_arguments)]
 fn approve_preflight_graph(
     graph: &composition::PreflightGraph,
@@ -100,6 +102,7 @@ fn approve_preflight_graph(
         let mut opts = darkmatter::markdown::compose::ComposeOptions::new_with_context(context)
             .with_source_file(path)
             .with_file_resolution_context(source_context.file_resolution_context().clone())
+            .with_deferred_schema_verdict(true)
             // Defer the lifecycle subtree exactly as the per-step template
             // preflight does: this pass exists to discover `::shell`
             // directives, and resolving a deferred `success:`/`failure:` read
@@ -125,6 +128,7 @@ pub(crate) fn execute_sequence(
     plan: SequencePlan,
     shared: &SharedComposeArgs,
     user_set_overrides: Option<serde_json::Value>,
+    caller_input_records: darkmatter::markdown::compose::CallerInputRecords,
     execution_options: SequenceExecutionOptions,
     verbose: u8,
     perf_enabled: bool,
@@ -553,6 +557,7 @@ pub(crate) fn execute_sequence(
         approval_cache: Arc::clone(&shared_approval_cache),
         inline_mode,
         file_resolution_context: &file_resolution_context,
+        caller_input_records: &caller_input_records,
         invocation: &prep_context.invocation,
     };
 

@@ -186,6 +186,160 @@ fn test_frontmatter_interpolation_report_merge() {
     assert_eq!(r1.frontmatter_interpolations_applied, 8);
 }
 
+#[test]
+fn compose_report_merge_keeps_duplicate_non_schema_warnings() {
+    let warning = ComposeWarning::new("interpolation", "same ordinary warning");
+    let mut root = ComposeReport::new();
+    root.add_warning(warning.clone());
+    let mut child = ComposeReport::new();
+    child.add_warning(warning);
+
+    root.merge(child);
+
+    assert_eq!(root.warnings.len(), 2);
+}
+
+#[test]
+fn bare_sidecar_composes_with_one_typed_warning_in_one_validation_pass() {
+    let dir = tempfile::tempdir().unwrap();
+    let schema_path = dir.path().join("schema.yaml");
+    std::fs::write(
+        &schema_path,
+        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
+    )
+    .unwrap();
+    let document_path = dir.path().join("prompt.md");
+    std::fs::write(
+        &document_path,
+        "---\n$schema: ./schema.yaml\ntitle: unchanged\n---\nBody unchanged.\n",
+    )
+    .unwrap();
+    let md = Markdown::try_from(document_path.as_path()).unwrap();
+
+    let (composed, report) = md
+        .compose_with(ComposeOptions::new().with_source_file(&document_path))
+        .unwrap();
+
+    assert_eq!(composed.content(), "Body unchanged.\n");
+    assert_eq!(report.warnings.len(), 1, "got: {:?}", report.warnings);
+    assert_eq!(
+        report.warnings[0].code.as_deref(),
+        Some("dm.schema.missing_simplified_envelope")
+    );
+}
+
+#[test]
+fn bare_sidecar_composes_unchanged_with_one_typed_warning_across_two_passes() {
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+    let schema_path = repo.path().join("schema.yaml");
+    std::fs::write(
+        &schema_path,
+        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
+    )
+    .unwrap();
+    let document_path = repo.path().join("prompt.md");
+    std::fs::write(
+        &document_path,
+        "---\n$schema: ./schema.yaml\ntitle: unchanged\n---\nBody unchanged.\n",
+    )
+    .unwrap();
+    let md = Markdown::try_from(document_path.as_path()).unwrap();
+
+    let (composed, report) = md
+        .compose_with(
+            ComposeOptions::new()
+                .with_source_file(&document_path)
+                .with_trigger_schemas(true),
+        )
+        .unwrap();
+
+    assert_eq!(composed.content(), "Body unchanged.\n");
+    assert_eq!(composed.frontmatter().as_map().get("title"), Some(&serde_json::json!("unchanged")));
+    assert_eq!(report.warnings.len(), 1, "got: {:?}", report.warnings);
+    let warning = &report.warnings[0];
+    assert_eq!(warning.stage, "schema_validation");
+    assert_eq!(warning.source.as_deref(), Some("darkmatter.schema"));
+    assert_eq!(warning.code.as_deref(), Some("dm.schema.missing_simplified_envelope"));
+    assert_eq!(warning.path.as_deref(), Some(schema_path.canonicalize().unwrap().as_path()));
+    assert_eq!(warning.consumer.as_deref(), Some(document_path.as_path()));
+}
+
+#[test]
+fn schema_advisory_is_not_duplicated_when_transclusion_reports_merge() {
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+    let schema_path = repo.path().join("schema.yaml");
+    std::fs::write(
+        &schema_path,
+        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
+    )
+    .unwrap();
+    let child_path = repo.path().join("child.md");
+    std::fs::write(
+        &child_path,
+        "---\n$schema: ./schema.yaml\n---\nChild body.\n",
+    )
+    .unwrap();
+    let root_path = repo.path().join("root.md");
+    std::fs::write(
+        &root_path,
+        "---\n$schema: ./schema.yaml\n---\n::file ./child.md\n",
+    )
+    .unwrap();
+    let md = Markdown::try_from(root_path.as_path()).unwrap();
+
+    let (composed, report) = md
+        .compose_with(ComposeOptions::new().with_source_file(&root_path))
+        .unwrap();
+
+    assert_eq!(composed.content(), "Child body.\n");
+    let warnings: Vec<_> = report
+        .warnings
+        .iter()
+        .filter(|warning| {
+            warning.code.as_deref() == Some("dm.schema.missing_simplified_envelope")
+        })
+        .collect();
+    assert_eq!(warnings.len(), 1, "got: {:?}", report.warnings);
+    assert_eq!(warnings[0].path.as_deref(), Some(schema_path.canonicalize().unwrap().as_path()));
+    assert_eq!(warnings[0].consumer.as_deref(), Some(root_path.as_path()));
+}
+
+#[test]
+fn transcluded_schema_advisory_uses_root_document_as_consumer() {
+    let repo = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(repo.path().join(".git")).unwrap();
+    let schema_path = repo.path().join("schema.yaml");
+    std::fs::write(
+        &schema_path,
+        "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
+    )
+    .unwrap();
+    let child_path = repo.path().join("child.md");
+    std::fs::write(
+        &child_path,
+        "---\n$schema: ./schema.yaml\n---\nChild body.\n",
+    )
+    .unwrap();
+    let root_path = repo.path().join("root.md");
+    std::fs::write(&root_path, "::file ./child.md\n").unwrap();
+    let md = Markdown::try_from(root_path.as_path()).unwrap();
+
+    let (_, report) = md
+        .compose_with(ComposeOptions::new().with_source_file(&root_path))
+        .unwrap();
+
+    let warning = report
+        .warnings
+        .iter()
+        .find(|warning| {
+            warning.code.as_deref() == Some("dm.schema.missing_simplified_envelope")
+        })
+        .expect("schema advisory warning");
+    assert_eq!(warning.consumer.as_deref(), Some(root_path.as_path()));
+}
+
 // ── DM1: exclude-keys integration tests ───────────────────────────
 
 #[test]
@@ -906,4 +1060,3 @@ fn name_coercion_inline_frontmatter_value_coerces() {
         "inline frontmatter value must coerce to the name"
     );
 }
-

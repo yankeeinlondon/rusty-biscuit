@@ -118,6 +118,35 @@ pub trait TtsExecutor: Send + Sync {
         text: &str,
         config: &TtsConfig,
     ) -> impl std::future::Future<Output = Result<SpeakResult, TtsError>> + Send;
+
+    /// Build a durable playback operation for this provider.
+    ///
+    /// File-producing implementations may synthesize into their shared cache;
+    /// callers that require immediate return run this method in the detached
+    /// preparation helper after reserving the ordered spool slot.
+    #[cfg(feature = "playa")]
+    fn detached_job(
+        &self,
+        _text: &str,
+        _config: &TtsConfig,
+    ) -> impl std::future::Future<Output = Result<playa::detached::SpoolJob, TtsError>> + Send {
+        async {
+            Err(TtsError::DetachedUnsupported {
+                provider: self.info().to_string(),
+            })
+        }
+    }
+
+    /// Return a ready detached job only when synthesis output is already cached.
+    #[cfg(feature = "playa")]
+    fn cached_detached_job(
+        &self,
+        _text: &str,
+        _config: &TtsConfig,
+    ) -> impl std::future::Future<Output = Result<Option<playa::detached::SpoolJob>, TtsError>> + Send
+    {
+        async { Ok(None) }
+    }
 }
 
 /// Trait for TTS providers that support voice enumeration.

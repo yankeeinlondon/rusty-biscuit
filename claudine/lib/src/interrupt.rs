@@ -1,8 +1,8 @@
 //! Process-scoped user-interrupt flag shared across the lib + CLI.
 //!
 //! The CLI's SIGINT guard sets this flag on the first Ctrl+C so the rest
-//! of the lib (especially blocking lifecycle side effects like messenger
-//! sends, TTS playback, and sound effects) can short-circuit instead of
+//! of the lib (especially lifecycle side effects like messenger sends and
+//! durable audio publication) can short-circuit instead of
 //! running for several more seconds before the next ^C is checked.
 
 use std::sync::atomic::{AtomicBool, Ordering};

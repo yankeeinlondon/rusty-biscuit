@@ -227,28 +227,22 @@ impl ScopeContext {
 /// completion does not rediscover or reclassify them while walking candidates.
 pub(crate) fn file_resolution_context(ctx: &ScopeContext) -> FileResolutionContext {
     let repository_root = effective_repo_root(ctx);
-    let package_area = ctx.repo_info.as_ref().and_then(|repo| {
-        repo.package_area_label_for_dir(&ctx.cwd)
-            .map(|area| repo.root.join(area.as_ref()))
-    });
-    let package = ctx
-        .repo_info
-        .as_ref()
-        .and_then(|repo| repo.package_for_dir(&ctx.cwd))
-        .map(|package| package.path.clone());
 
     let mut resolution = FileResolutionContext::new(ctx.cwd.clone());
-    if let Some(root) = repository_root {
+    if let (Some(root), Some(repo)) = (repository_root, ctx.repo_info.as_ref()) {
+        let catalog = darkmatter::markdown::compose::repository_scope_catalog(repo, root)
+            .expect("observed repository topology must project to valid absolute scopes");
+        resolution = resolution.with_repository_scope_catalog(catalog);
+    } else if let Some(root) = repository_root {
         resolution = resolution.with_repository_root(root);
-    }
-    if let Some(area) = package_area.as_ref() {
-        resolution = resolution.with_package_area(area);
     }
     if let Some(home) = ctx.home.as_ref() {
         resolution = resolution.with_home_dir(home);
     } else {
         resolution = resolution.without_home_dir();
     }
+    let package_area = resolution.package_area().map(Path::to_path_buf);
+    let package = resolution.package_root().map(Path::to_path_buf);
     for root in claudine::composition::prompt_magic_roots(
         repository_root,
         package_area.as_deref(),

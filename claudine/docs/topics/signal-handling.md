@@ -121,8 +121,8 @@ pub(crate) fn user_interrupt_observed() -> bool {
 The library mirror lives in
 [`claudine/lib/src/interrupt.rs`](../../lib/src/interrupt.rs) and exposes
 `mark_interrupted()`, `interrupted()`, and `clear_for_tests()`. It exists
-because the lib must be able to consult the flag from blocking lifecycle
-code (messenger sends, TTS playback) without taking a CLI dependency. The
+because the lib must be able to consult the flag from potentially blocking
+lifecycle code, such as messenger sends, without taking a CLI dependency. The
 CLI-side setter writes both halves atomically; the lib-side flag is
 read-only from the rest of the lib.
 
@@ -162,19 +162,12 @@ subprocess wait, large sniff scan, TTS subprocess), guard it with
 `crate::interrupt::interrupted()` (lib) or
 `crate::output::user_interrupt_observed()` (CLI).
 
-Two backstops cover the case where such a call is *already in flight* when
-Ctrl+C lands (the flag check has already passed, so the flag cannot break
-in):
+Lifecycle audio no longer leaves playback in flight in the Claudine process.
+`say`, `say_first`, and `effect` durably reserve/publish to Playa's detached
+per-user scheduler and return. The interrupt check therefore prevents new
+handoffs after Ctrl+C; it does not cancel audio already owned by the scheduler.
 
-1. **Bounded blocking lifecycle side effects.** The genuinely blocking
-   lifecycle emitters — TTS (`say` / `say_first`) and sound `effect` — run
-   on a detached worker thread bounded by `run_blocking_with_timeout`
-   ([`lib/src/composition/lifecycle/mod.rs`](../../lib/src/composition/lifecycle/mod.rs):
-   `TTS_PLAYBACK_TIMEOUT` = 30 s, `EFFECT_PLAYBACK_TIMEOUT` = 15 s). A wedged
-   audio device or network voice can no longer freeze a run between phases;
-   the wait is abandoned and a warning logged. (`message` and `notify` are
-   already fire-and-forget `tokio::spawn`s and never block the caller.)
-2. **Second-press force-exit** (above) — the universal escape hatch when a
+The remaining universal backstop is **second-press force-exit** (above), used when a
    blocking call outside any wait loop ignores the flag entirely.
 
 ### Lifecycle short-circuit details
@@ -520,7 +513,7 @@ pattern the user-interrupt guard uses.
 | `USER_INTERRUPTED` flag (CLI) | [`cli/src/output/mod.rs`](../../cli/src/output/mod.rs) |
 | `wait_loop_active` flag + `WaitLoopActiveGuard` | [`cli/src/output/mod.rs`](../../cli/src/output/mod.rs) |
 | Second-press force-exit (`_exit(130)`) | [`cli/src/commands/compose/interrupt.rs`](../../cli/src/commands/compose/interrupt.rs) |
-| Bounded lifecycle side effects (`run_blocking_with_timeout`) | [`lib/src/composition/lifecycle/mod.rs`](../../lib/src/composition/lifecycle/mod.rs) |
+| Detached lifecycle audio handoff | [`lib/src/composition/lifecycle/audio.rs`](../../lib/src/composition/lifecycle/audio.rs) |
 | Lib-side mirror flag | [`lib/src/interrupt.rs`](../../lib/src/interrupt.rs) |
 | `install_user_interrupt_guard` + `UserInterruptGuard` | [`cli/src/commands/compose/interrupt.rs`](../../cli/src/commands/compose/interrupt.rs) |
 | `USER_INTERRUPT_EXIT_CODE` constant | [`cli/src/commands/compose/interrupt.rs`](../../cli/src/commands/compose/interrupt.rs) |

@@ -37,6 +37,27 @@ pub enum DetectionError {
 /// Errors returned by playback helpers.
 #[derive(Debug, Error)]
 pub enum PlaybackError {
+    /// The host executable did not register Playa's detached worker entry seam.
+    #[error("the host executable did not install the detached Playa worker seam")]
+    NoDetachedWorker,
+    /// A detached spool record failed validation or used an incompatible protocol.
+    #[error("detached playback protocol error: {detail}")]
+    DetachedProtocol {
+        /// Validation or compatibility failure detail.
+        detail: String,
+    },
+    /// A detached worker could not be launched.
+    #[error("failed to launch detached playback worker: {source}")]
+    DetachedWorkerSpawn {
+        /// The process-launch failure.
+        source: std::io::Error,
+    },
+    /// Playback speed must be finite and greater than zero.
+    #[error("invalid playback speed {speed}; expected a finite value greater than zero")]
+    InvalidPlaybackSpeed {
+        /// Rejected speed multiplier.
+        speed: f32,
+    },
     /// Detection failed while preparing audio for playback.
     #[error("audio detection failed: {0}")]
     Detection(#[from] DetectionError),

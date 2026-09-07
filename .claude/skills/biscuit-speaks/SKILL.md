@@ -10,6 +10,8 @@ description: Cross-platform text-to-speech library with multi-provider support a
 - OS-aware default provider stacks
 - Voice capability caching
 - Audio file caching (content-addressed via xxHash)
+- Native-first Playa playback for file-producing providers when `playa` is enabled
+- Durable, globally serialized detached speech via `Speak::play_detached`
 - Builder pattern APIs for ergonomic configuration
 
 ## Quick Start
@@ -43,7 +45,8 @@ println!("Used: {} via {:?}", result.voice.name, result.provider);
 | `Voice` | Voice metadata (name, gender, quality, languages, identifier) |
 | `TtsProvider` | Enum: `Host(HostTtsProvider)` or `Cloud(CloudTtsProvider)` |
 | `TtsFailoverStrategy` | `FirstAvailable`, `PreferHost`, `PreferCloud`, `SpecificProvider(TtsProvider)` |
-| `SpeakResult` | Metadata returned after speaking (provider, voice, model, cache_hit) |
+| `SpeakResult` | Metadata returned after speaking, including optional `SpeakPlaybackReport` |
+| `SpeakPlaybackReport` | Always-compiled route, duration, and completion projection for file playback |
 
 ## Traits
 
@@ -94,6 +97,28 @@ OS-specific default stacks (highest quality first):
 - Content-addressed using xxHash
 - Cache key: provider + voice_id + text + format + speed (conditional)
 - Atomic writes to prevent corruption
+
+## Playback and detached preparation
+
+The `playa` feature also enables `playa/native-playback`. File-producing
+providers (Kokoro, EchoGarden, gTTS, ElevenLabs) use the native route first and
+fall back to ranked host players. Their `play_with_result` response includes a
+`SpeakPlaybackReport`; direct streaming providers (`say`, SAPI, eSpeak) leave
+the field absent because their completion duration is unverified.
+
+`Speak::play_detached` returns after publishing a ready job or reserving an
+ordered preparation slot in Playa's private per-user spool. Cache misses are
+synthesized by an internal `so-you-say` helper and atomically transition the
+same slot to ready or failed. The ten-minute preparation deadline prevents one
+stuck synthesis from blocking the queue forever, while reservation prevents
+later audio from overtaking it. Playback is serialized across all participating
+processes and survives requester exit. Delivery is best-effort after handoff.
+
+Detached support is concrete for Kokoro, EchoGarden, gTTS, ElevenLabs, macOS
+`say`, Windows SAPI, and eSpeak. Deferred enum-only providers return
+`TtsError::DetachedUnsupported`. Preparation records may contain speech text;
+status and journal projections redact it. `PLAYA_DRY_RUN=1` creates no cache,
+spool, journal, or subprocess side effects.
 
 ## Detailed Documentation
 

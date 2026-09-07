@@ -46,6 +46,7 @@ ITALIC := '\033[3m'
 RESET := '\033[0m'
 RED := '\033[31m'
 GREEN := '\033[32m'
+YELLOW := '\033[33m'
 # Single kache version authority, shared with GitHub Actions via
 # `.github/kache-version` (D2). Both sides read the same file, so they cannot
 # drift to different versions.
@@ -127,6 +128,14 @@ changed-areas:
 pre-push *areas="claudine darkmatter":
     @just _orchestrate lint {{ areas }}
     @just test {{ areas }}
+
+# run one package's L1 suite on the standing build-host clones (real Linux +
+# native Windows) against the LOCAL tree — no commit or push needed. The
+# expected pre-push step for changes touching path semantics, process
+# spawning, or terminal behavior, which macOS L1 cannot exercise.
+# Usage: just cross-check <package> [--host linux|windows|all] [nextest args]
+cross-check *args:
+    @./scripts/cross-check.sh {{ args }}
 
 # run Level 1 tests for the .githooks/pre-push shell hook itself
 test-pre-push-hook:
@@ -258,6 +267,65 @@ release-update:
 # install release-plz CLI locally
 install-release-plz:
     @cargo install release-plz --locked
+
+# --- Rust toolchain pin --------------------------------------------------------
+# `rust-toolchain.toml` is the only place the toolchain version lives. rustup
+# honors it for every local cargo invocation, CI's toolchain step is `rustup
+# show` against the same file, and the cross-check build hosts check the repo
+# out, so advancing that one line moves everything.
+
+# Show the pinned Rust toolchain next to the current latest stable
+toolchain:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    pinned="$(just _toolchain-pinned)"
+    latest="$(just _toolchain-latest-stable)"
+    echo -e "pinned:        {{ BOLD }}${pinned}{{ RESET }}  (rust-toolchain.toml)"
+    echo -e "latest stable: {{ BOLD }}${latest}{{ RESET }}"
+    if [[ "$pinned" == "$latest" ]]; then
+        echo -e "{{ GREEN }}the pin is at the latest stable{{ RESET }}"
+    else
+        echo -e "{{ YELLOW }}a newer stable exists{{ RESET }}; advance the pin with {{ BOLD }}just toolchain-upgrade{{ RESET }}"
+    fi
+
+# Advance the pin to the latest stable (or the given version) and install it
+toolchain-upgrade version="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    current="$(just _toolchain-pinned)"
+    target="{{ version }}"
+    if [[ -z "$target" ]]; then
+        target="$(just _toolchain-latest-stable)"
+    fi
+    if [[ ! "$target" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo -e "{{ RED }}error{{ RESET }}: the pin must be an exact version such as 1.98.1, not '${target}'" >&2
+        exit 2
+    fi
+    if [[ "$target" == "$current" ]]; then
+        echo -e "rust-toolchain.toml already pins {{ BOLD }}${current}{{ RESET }}"
+        exit 0
+    fi
+    python3 - "$target" <<'PY'
+    import re, sys
+    path = "rust-toolchain.toml"
+    text = open(path).read()
+    updated, count = re.subn(r'^channel = "[^"]+"$', f'channel = "{sys.argv[1]}"', text, flags=re.M)
+    assert count == 1, "expected exactly one channel line"
+    open(path, "w").write(updated)
+    PY
+    echo -e "pinned {{ BOLD }}${current}{{ RESET }} → {{ BOLD }}${target}{{ RESET }} in rust-toolchain.toml"
+    echo "installing it with its components..."
+    rustup toolchain install >/dev/null
+    rustc --version
+    echo
+    echo -e "next: {{ BOLD }}just ci-local --lint-only --all{{ RESET }} surfaces new clippy lints or rustfmt drift before you commit the pin."
+
+_toolchain-pinned:
+    @sed -n 's/^channel = "\(.*\)"$/\1/p' rust-toolchain.toml
+
+# The stable channel manifest is the same source rustup resolves `stable` from.
+_toolchain-latest-stable:
+    @curl -fsSL https://static.rust-lang.org/dist/channel-rust-stable.toml | awk '/^\[pkg.rust\]$/ { block = 1; next } block && !found && /^version = / { match($0, /[0-9]+\.[0-9]+\.[0-9]+/); print substr($0, RSTART, RLENGTH); found = 1 }'
 
 # run the latest debug build of the `sniff` CLI
 sniff *args="":
@@ -974,10 +1042,11 @@ _ensure-cargo-sweep:
     fi
 
 # prune Cargo target/ dirs, which cargo never garbage-collects. Passes:
-# uninstalled toolchains, untouched >14d, then a 120GB default backstop cap per
-# root, then out-of-tree target dirs under ~/.cache left behind by --target-dir
-# builds (docs/kache-strategy.md). Constrained Windows hosts use the native 80GB
-# policy below. Roots default to this repo; override with paths.
+# uninstalled toolchains, untouched >14d, then a 120GB cap only when the target
+# filesystem has less than 100 GiB free, then out-of-tree target dirs under
+# ~/.cache left behind by --target-dir builds (docs/kache-strategy.md).
+# Constrained Windows hosts use the native 80GB policy below. Roots default to
+# this repo; override with paths.
 sweep *args="": _ensure-cargo-sweep
     @scripts/sweep.sh {{ args }}
 

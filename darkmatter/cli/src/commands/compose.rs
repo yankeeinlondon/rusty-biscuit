@@ -190,6 +190,34 @@ pub fn run_compose(
     // cwd/env/attached streams within one process still detect afresh.
     let term_cell: std::cell::OnceCell<Terminal> = std::cell::OnceCell::new();
 
+    let launch_dir = std::env::current_dir().wrap_err("Failed to capture launch directory")?;
+    let launch_repository = sniff::filesystem::git::GitRepo::discover(&launch_dir)
+        .ok()
+        .flatten()
+        .map(|repo| repo.repo_root().to_path_buf());
+    let launch_repo_structure = launch_repository
+        .as_deref()
+        .and_then(|root| sniff::filesystem::repo::detect_repo_structure(root).ok().flatten());
+    let launch_package_area = launch_repo_structure.as_ref().and_then(|repo| {
+        repo.package_area_label_for_dir(&launch_dir).map(|area| {
+            if area.as_ref() == "root" {
+                repo.root.clone()
+            } else {
+                repo.root.join(area.as_ref())
+            }
+        })
+    });
+    let mut launch_file_resolution_context =
+        biscuit_file::FileResolutionContext::new(launch_dir.clone());
+    if let Some(repository_root) = launch_repository {
+        launch_file_resolution_context =
+            launch_file_resolution_context.with_repository_root(repository_root);
+    }
+    if let Some(package_area) = launch_package_area {
+        launch_file_resolution_context =
+            launch_file_resolution_context.with_package_area(package_area);
+    }
+
     // Resolve the input path once through FileReference (handles @-prefixed paths)
     // and reuse for both loading and source_file/policy_root.
     let resolve_start = perf.then(Instant::now);
@@ -210,14 +238,65 @@ pub fn run_compose(
         load_markdown(None)?
     };
     let load_input_dur = load_start.map(|s| s.elapsed()).unwrap_or_default();
+    let file_resolution_context = resolved_input.as_ref().map_or_else(
+        || launch_file_resolution_context.clone(),
+        |resolved| {
+            let document_context = launch_file_resolution_context.for_source(resolved);
+            if document_context.validate().is_ok() {
+                document_context
+            } else {
+                let source_repository = resolved.parent().and_then(|source_dir| {
+                    sniff::filesystem::git::GitRepo::discover(source_dir)
+                        .ok()
+                        .flatten()
+                        .map(|repo| repo.repo_root().to_path_buf())
+                        .or_else(|| {
+                            darkmatter::markdown::compose::find_git_root_from(source_dir)
+                        })
+                });
+                let source_repo_structure = source_repository.as_deref().and_then(|root| {
+                    sniff::filesystem::repo::detect_repo_structure(root)
+                        .ok()
+                        .flatten()
+                });
+                let source_package_area = source_repo_structure.as_ref().and_then(|repo| {
+                    resolved.parent().and_then(|source_dir| {
+                        repo.package_area_label_for_dir(source_dir).map(|area| {
+                            if area.as_ref() == "root" {
+                                repo.root.clone()
+                            } else {
+                                repo.root.join(area.as_ref())
+                            }
+                        })
+                    })
+                });
+                let mut external_context = biscuit_file::FileResolutionContext::from_snapshot(
+                    resolved
+                        .parent()
+                        .map(std::path::Path::to_path_buf)
+                        .unwrap_or_else(|| launch_dir.clone()),
+                    launch_file_resolution_context
+                        .home_dir()
+                        .map(std::path::Path::to_path_buf),
+                    launch_file_resolution_context.env().clone(),
+                );
+                if let Some(repository_root) = source_repository {
+                    external_context = external_context.with_repository_root(repository_root);
+                }
+                if let Some(package_area) = source_package_area {
+                    external_context = external_context.with_package_area(package_area);
+                }
+                external_context.for_trusted_external_source(resolved)
+            }
+        },
+    );
 
     // Demand-driven context capture: scan document (body + frontmatter values)
     // for ctx.* references and only capture the groups actually needed.
     // Shared between validation and compose.
     let ctx_start = perf.then(Instant::now);
     let shared_context = {
-        let base_dir = std::env::current_dir().unwrap_or_default();
-        darkmatter::markdown::compose::ComposeContext::capture_for_document(&base_dir, &md)
+        darkmatter::markdown::compose::ComposeContext::capture_for_document(&launch_dir, &md)
     };
     let capture_context_dur = ctx_start.map(|s| s.elapsed()).unwrap_or_default();
     // Keep a cheap Arc clone for perf report context timings
@@ -267,7 +346,10 @@ pub fn run_compose(
     }
 
     if !override_map.is_empty() {
-        options = options.with_set_overrides(serde_json::Value::Object(override_map));
+        options = options
+            .with_file_resolution_context(file_resolution_context)
+            .with_file_ref_fallback_dir(&launch_dir)
+            .with_set_overrides(serde_json::Value::Object(override_map));
     }
 
     // ── Reference validation ───────────────────────────────────────────

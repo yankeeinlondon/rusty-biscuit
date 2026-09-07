@@ -23,8 +23,9 @@ use crate::completion::scopes::ComposeMode;
 pub(super) fn gather_magic(
     mode: ComposeMode,
     completion: &PartialCompletion,
+    active_override: Option<&str>,
 ) -> Vec<Candidate> {
-    let active = completion.active_segment();
+    let active = active_override.unwrap_or_else(|| completion.active_segment());
     let partial_len = PartialLen::classify(active.chars().count());
 
     let mut out: Vec<Candidate> = Vec::new();

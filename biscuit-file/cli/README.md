@@ -141,7 +141,8 @@ The `reference` subcommand (alias `ref`) resolves file reference strings to file
 
 ```sh
 bf reference @docs/spec.md           # magic: searches repo root, then HOME
-bf reference !README.md              # package: resolves from Cargo workspace area
+bf reference &README.md              # repository root only
+bf reference ^README.md              # repository scopes, most specific first
 bf reference %foo.md                 # recursive: walks directories for a match
 bf ref ./Cargo.toml                  # alias for 'reference'
 ```

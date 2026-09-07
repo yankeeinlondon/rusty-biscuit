@@ -167,7 +167,7 @@ impl Audio {
         Ok(())
     }
 
-    fn new(data: AudioData, format: AudioFormat) -> Self {
+    pub(crate) fn new(data: AudioData, format: AudioFormat) -> Self {
         Self {
             data,
             format,

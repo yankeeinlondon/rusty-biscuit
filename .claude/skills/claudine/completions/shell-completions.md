@@ -138,7 +138,7 @@ pipeline, parameterised by a `ComposeMode`. Mode determines:
   set.
 
 All three also share the partial-length progression, fuzzy matching
-rules, magic-path resolution, `.gitignore` semantics, and the
+rules, file-reference resolution, `.gitignore` semantics, and the
 `MAX_CANDIDATES = 500` budget.
 
 ### Scopes
@@ -161,8 +161,9 @@ Default iteration order (`ScopeSet::iter_scopes`):
 5. **User Claudine scope** — `~/.claudine/prompts/`.
 6. **Extras** — mode-specific (see below).
 
-Magic-path roots come from Claudine's shared `prompt_magic_roots` builder and
-are expanded by `FileReference::complete_partial_in_context`:
+Magic convention roots come from Claudine's shared `prompt_magic_roots` builder
+and are expanded by `FileReference::complete_partial_in_context`. Because
+Claudine registers them as prepends, the complete effective `@` order is:
 
 1. **Discrete package** — `<pkg>/`, then `<pkg>/prompts/`.
 2. **Package area** — `<repo>/<area>/`, then `<repo>/<area>/prompts/`.
@@ -170,6 +171,7 @@ are expanded by `FileReference::complete_partial_in_context`:
 4. **Repo Claudine scope** — `<repo>/.claudine/prompts/`.
 5. **Repo document scopes** — `docs/`, then the agent-skill peers.
 6. **User Claudine scope** — `~/.claudine/prompts/`.
+7. **Intrinsic roots** — discrete package, package area, repository, then home.
 
 Runtime composition registers this identical ordered list. The package and
 area bare roots keep path-shaped values such as `@prompts/plan.md` resolvable;
@@ -275,8 +277,8 @@ Directory drilling is a Word-mode (non-`@`) behavior — type a bare path like
 
 #### Magic-path priority
 
-Magic resolution uses the shared package → package-area → repository → user
-order documented under [Scopes](#scopes).
+Magic resolution uses the full convention-prepend → package → package-area →
+repository → home order documented under [Scopes](#scopes).
 
 The user-global scope is **last**. The basename dedup keeps the closest
 occurrence, so a repo-local `plan.md` owns the `@plan.md` candidate's rank
@@ -289,6 +291,14 @@ launch by registering these same directories as magic search roots,
 closest-first; `biscuit_file::FileReference` returns the first existing
 candidate, so the nearest prompt wins. This mirrors the completion scope
 set, so anything the engine offers under `@` is resolvable at launch.
+
+### Repository `&` and `^` resolution
+
+Repository-root partials (`&...`) enumerate exactly the repository root.
+Repository-scoped partials (`^...`) enumerate the current package root, then
+the package-area root, then the repository root. Both preserve their sigil in
+the emitted value and apply the same repository-containment rules as execution.
+Unlike `@`, neither form consults convention roots or the user's home directory.
 
 ### Committed directory
 
@@ -608,27 +618,38 @@ own completion alive in those edge cases.
 
 ## ENTER-path autocomplete
 
-When a composition command runs interactively and a required file value
-is missing, Claudine can prompt for it at runtime instead of failing.
-This applies to two surfaces:
+Runtime operation-file recovery distinguishes three outcomes for
+`claudine compose <file>`, `claudine inline-compose <file>`, and
+`claudine sequence <file>`:
 
-1. **The composition positional argument** — `claudine compose <file>`,
-   `claudine inline-compose <file>`, and `claudine sequence <file>`.
-   When the positional file is omitted or does not resolve, Claudine
-   offers every markdown candidate in scope.
-2. **Missing `$schema` properties** — when a frontmatter schema declares
-   a property typed `file` or `file[]`, the value can be supplied
-   interactively at runtime.
+1. **Omitted positional** — argument parsing rejects the command before
+   operation-file recovery runs.
+2. **Unresolved bare discovery name** — a single-component implicit name
+   such as `access` or `access.md` is eligible for the interactive picker.
+3. **Unresolved explicit reference** — a typed path or reference such as
+   `./docs/access.md`, `~/access.md`, or `@access.md` reports the existing
+   `composition.invalid_file_reference` typed no-match diagnostic without
+   opening a picker. Repository-local basename suggestions, when present,
+   are advisory and do not select or retry another file. Their repository walk
+   examines at most 20,000 entries: unreadable entries and other per-entry
+   errors consume that budget but are skipped, so later matches and matches
+   already found within the bound remain available. An unusable repository root
+   still produces no suggestions.
 
-The prompt is gated by the same rules as the missing-property prompt:
+Interactive file collection also applies to **missing `$schema`
+properties**: when a frontmatter schema declares
+a property typed `file` or `file[]`, the value can be supplied
+interactively at runtime.
+
+Both the bare-name picker and missing-property prompt use the same gates:
 stdin and stderr must be TTYs, `--silent` must be off, and
 `prompt_for_missing` must be true in config. If any gate is closed,
 Claudine prints the non-interactive remediation block instead.
 
 ### Type-driven chooser
 
-- A property typed `file` (or the single positional argument) uses a
-  single-select `ChooseOne` chooser.
+- A property typed `file` (or an eligible bare operation-file name) uses
+  a single-select `ChooseOne` chooser.
 - A property typed `file[]` uses a multi-select `ChooseMany` chooser:
   press `Space` to toggle items, then `Enter` to submit the set.
 
