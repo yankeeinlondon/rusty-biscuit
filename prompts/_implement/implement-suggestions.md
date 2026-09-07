@@ -28,8 +28,8 @@ initialize:
 start:
     message: "🏃 starting implementation #{{ file_index(review) }} of `{{ parent_dir(review) }}` review suggestions (_using_ {{ctx.agent}}/{{ctx.model}} _in_ {{ctx.area}})"
 success:
-    message: "✅  implemented suggestions from review **#{{ file_index(review) }}** of `{{ parent_dir(review) }}` in **{{ctx.area}}** package area"
-    say: "the review suggestions for {{ title_case(without_date(parent_dir(review))) }} in {{ctx.area}} completed successfully"
+    message: "✅  implemented review findings from review **#{{ file_index(review) }}** of `{{ parent_dir(review) }}` (area: **{{ctx.area}}**, wt: **{{ ctx.worktree }}**)"
+    say: "the review findings in {{ without_date(parent_dir(review)) }} were implemented successfully"
     effect: bong
 failure:
     message: "❌ implementation of the review #{{iteration}} suggestions from **{{ parent_dir(review) }}** failed to complete ({{err.msg}})!"
