@@ -58,7 +58,9 @@ The following Frontmatter properties for each canonical agent skill will be eval
     - If the model is a valid model name but not abstract than we will convert it to an abstracted model name; this will be clearly communicated to the caller as part of the process
     - If the model is an invalid model name then we will report the invalid model reference while removing any symbolic links which may already point to this canonical agent skill
     - If the caller included `--fix` and the model is invalid then the invalid model reference will be removed entirely leaving `model` undefined
-- `when_to_use` 
+
+All other Frontmatter properties that might exist on an agent skill definition 
+
 
 When the agent skills are _synchronized_ we must run through a process who's goal is to ensure that every skill is available to every agent, ensure the skills are valid, and optimize for portability where possible. The end result of this process is that every _canonical_ version of the skill is:
 
