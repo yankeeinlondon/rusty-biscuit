@@ -558,6 +558,11 @@ printf '%s\n' '{{"type":"result","subtype":"success","stop_reason":"end_turn","n
     // Narration is never reported as the run's outcome. Publishing the summary
     // itself into run output is the lifecycle-routing step (plan Phase 6).
     let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    let stdout = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stdout));
+    assert!(
+        stdout.contains("I researched the handsets and wrote the document."),
+        "the final response must be published as the run summary; stdout was:\n{stdout}"
+    );
     assert!(
         !stderr.contains("Let me read the research documents first."),
         "narration must not be reported as the summary; stderr was:\n{stderr}"

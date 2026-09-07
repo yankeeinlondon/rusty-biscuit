@@ -912,6 +912,13 @@ mod corpus {
                         message: "required property is missing".to_string(),
                         kind: claudine::composition::CompletionProblemKind::Missing,
                     }],
+                    status: claudine::composition::SchemaStatusReport {
+                        source_path: PathBuf::from("run.md"),
+                        required: Vec::new(),
+                        optional: Vec::new(),
+                        has_invalid_optional: false,
+                        raw_json_schema: true,
+                    },
                 }),
             ),
             (

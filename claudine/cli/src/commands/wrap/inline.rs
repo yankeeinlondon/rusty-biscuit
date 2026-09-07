@@ -1,3 +1,4 @@
+use biscuit_terminal::prelude::{Prose, TerminalRenderable};
 use biscuit_terminal::terminal::Terminal;
 use claudine::provider::Provider;
 use color_eyre::eyre::Result;
@@ -75,23 +76,23 @@ pub(crate) fn report_inline_agent_status(
         if final_response.trim().is_empty() {
             log::message(&crate::output::fm_check_fail(
                 &format!(
-                    "<b>User interrupted the agent with CTRL+C; the body of \
-                     <blue-500>{display_path}</blue-500> is empty so it appears no work was accomplished.</b>"
+                    "<b>User interrupted the agent with CTRL+C; Claudine restored \
+                     <blue-500>{display_path}</blue-500> to its pre-run state.</b>"
                 ),
                 term,
             ));
         } else {
             log::message(&crate::output::fm_check_fail(
                 &format!(
-                    "<b>User interrupted the agent with CTRL+C; the body of \
-                     <blue-500>{display_path}</blue-500> has been at least partially filled:</b>"
+                    "<b>User interrupted the agent with CTRL+C; Claudine restored \
+                     <blue-500>{display_path}</blue-500> to its pre-run state.</b>"
                 ),
                 term,
             ));
-            eprintln!();
-            for line in final_response.lines() {
-                eprintln!("  {line}");
-            }
+            log::message(
+                &Prose::new(format!("<b>Agent summary:</b>\n\n{final_response}"))
+                    .render(term),
+            );
         }
     }
 }

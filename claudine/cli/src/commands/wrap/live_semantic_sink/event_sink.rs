@@ -46,8 +46,8 @@ impl SemanticEventSink for LiveSemanticSink {
         //    final-response accumulator. The accumulator captures only the
         //    output text emitted after the last tool activity: either half of
         //    the semantic tool lifecycle resets it, and `OutputText` appends
-        //    to it. `inline-compose` writes this final turn — never the full
-        //    accumulated narration — into the body.
+        //    to it. For inline composition this is only the agent summary;
+        //    the agent edits the active document independently.
         match &event {
             SemanticEvent::ToolCall { name, .. } => {
                 if let Ok(mut details) = self.summary_details.lock() {
