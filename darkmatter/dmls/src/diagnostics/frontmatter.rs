@@ -163,8 +163,15 @@ fn schema_prepare_diagnostic_with_origin(
             let span = referenced_origin
                 .is_none()
                 .then(|| {
-                    ast.and_then(|ast| ast.entry_by_key_path(&["$schema", property]))
-                        .map(|entry| entry.value_span.clone())
+                    ast.and_then(|ast| {
+                        ast.entry_by_key_path(&["$schema", property])
+                            .or_else(|| {
+                                let mut path = vec!["$schema"];
+                                path.extend(property.split('.'));
+                                ast.entry_by_key_path(&path)
+                            })
+                    })
+                    .map(|entry| entry.value_span.clone())
                 })
                 .flatten()
                 .or_else(|| fallback_span.clone());
@@ -1125,6 +1132,21 @@ mod tests {
                 range.start.character > quote_pos.character,
                 "range must start past the opening quote"
             );
+        });
+    }
+
+    #[test]
+    fn nested_schema_conversion_error_points_to_the_nested_value() {
+        let text = "---\n$schema:\n  meta:\n    prompt: string(integer)\n---\n\nbody\n";
+        diagnostics_for(text, |diagnostics| {
+            let diagnostic = diagnostics
+                .iter()
+                .find(|diagnostic| {
+                    code_of(diagnostic) == Some(code::SCHEMA_INVALID_TYPE_DEFINITION)
+                })
+                .expect("nested schema diagnostic");
+            assert_eq!(diagnostic.range.start.line, 3, "{diagnostics:#?}");
+            assert_eq!(diagnostic.range.end.line, 3, "{diagnostics:#?}");
         });
     }
 

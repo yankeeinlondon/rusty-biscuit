@@ -502,7 +502,12 @@ fn object_body_from_shape(
     let mut required = Vec::new();
     let mut errors = Vec::new();
     for (prop_name, def) in &shape.properties {
-        match property_def_to_schema(prop_name, def) {
+        let qualified_name = if context == "<root>" {
+            prop_name.clone()
+        } else {
+            format!("{context}.{prop_name}")
+        };
+        match property_def_to_schema(&qualified_name, def) {
             Ok((prop_schema, is_required)) => {
                 if is_required {
                     required.push(Value::String(prop_name.clone()));

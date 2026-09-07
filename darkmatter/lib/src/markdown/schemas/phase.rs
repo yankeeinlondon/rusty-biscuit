@@ -123,8 +123,8 @@ fn project_atom(atom: &mut PropertyAtom, phase: SchemaPhase, property_eager: boo
         .retain(|constraint| !matches!(constraint, Constraint::Required | Constraint::Generated));
 
     let phase_required = match phase {
-        SchemaPhase::Launch => property_eager,
-        SchemaPhase::Completion => property_eager || authored_required,
+        SchemaPhase::Launch => property_eager && authored_required,
+        SchemaPhase::Completion => authored_required,
     };
     if phase_required {
         if atom.is_array {

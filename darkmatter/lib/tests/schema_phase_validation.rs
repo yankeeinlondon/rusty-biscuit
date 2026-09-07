@@ -18,15 +18,19 @@ fn effective(schema: &str) -> darkmatter::markdown::schemas::EffectiveSchema {
 }
 
 fn phase_valid(schema: &str, instance: Value, phase: SchemaPhase) -> bool {
-    effective(schema).validate_for_phase(&instance, phase).valid
+    effective(schema)
+        .validate_for_phase(&instance, phase)
+        .expect("phase schema builds")
+        .valid
 }
 
 #[test]
-fn launch_requires_eager_and_completion_requires_required_or_eager() {
+fn eager_controls_validation_timing_and_required_controls_presence() {
     let schema = "  input: string(eager)\n  output: string(required)\n  optional: number\n";
 
-    assert!(!phase_valid(schema, json!({}), SchemaPhase::Launch));
+    assert!(phase_valid(schema, json!({}), SchemaPhase::Launch));
     assert!(phase_valid(schema, json!({ "input": "ready" }), SchemaPhase::Launch));
+    assert!(!phase_valid(schema, json!({ "input": [] }), SchemaPhase::Launch));
     assert!(!phase_valid(
         schema,
         json!({ "input": "ready" }),
@@ -34,18 +38,21 @@ fn launch_requires_eager_and_completion_requires_required_or_eager() {
     ));
     assert!(phase_valid(
         schema,
-        json!({ "input": "ready", "output": "done" }),
+        json!({ "output": "done" }),
         SchemaPhase::Completion,
     ));
 
-    for null_value in [json!({ "input": null }), json!({ "output": null })] {
-        let phase = if null_value.get("input").is_some() {
-            SchemaPhase::Launch
-        } else {
-            SchemaPhase::Completion
-        };
-        assert!(!phase_valid(schema, null_value, phase));
-    }
+    assert!(phase_valid(schema, json!({ "input": null }), SchemaPhase::Launch));
+    assert!(!phase_valid(
+        schema,
+        json!({ "output": null }),
+        SchemaPhase::Completion,
+    ));
+    assert!(!phase_valid(
+        "  input: string(required; eager)\n",
+        json!({}),
+        SchemaPhase::Launch,
+    ));
 }
 
 #[test]
@@ -77,7 +84,7 @@ fn completion_observes_types_without_coercing_the_final_instance() {
     let report = schema.validate_for_phase(
         &json!({ "researched_by": 42 }),
         SchemaPhase::Completion,
-    );
+    ).expect("phase schema builds");
     assert!(!report.valid);
     assert!(report.problems.iter().any(|problem| {
         problem.instance_path.segments() == ["researched_by"]
@@ -128,8 +135,13 @@ fn all_eager_scalar_representations_are_coerced_and_checked() {
 #[test]
 fn nested_and_union_eager_presence_is_recursive_and_hoisted() {
     let nested = "  job: \"{ source: string(eager), result: number(required) }(eager)\"\n";
-    assert!(!phase_valid(nested, json!({}), SchemaPhase::Launch));
-    assert!(!phase_valid(nested, json!({ "job": {} }), SchemaPhase::Launch));
+    assert!(phase_valid(nested, json!({}), SchemaPhase::Launch));
+    assert!(phase_valid(nested, json!({ "job": {} }), SchemaPhase::Launch));
+    assert!(!phase_valid(
+        nested,
+        json!({ "job": { "source": [] } }),
+        SchemaPhase::Launch,
+    ));
     assert!(phase_valid(
         nested,
         json!({ "job": { "source": "input" } }),
@@ -142,7 +154,7 @@ fn nested_and_union_eager_presence_is_recursive_and_hoisted() {
     ));
 
     let union = "  value:\n    - string\n    - number(eager)\n";
-    assert!(!phase_valid(union, json!({}), SchemaPhase::Launch));
+    assert!(phase_valid(union, json!({}), SchemaPhase::Launch));
     assert!(phase_valid(union, json!({ "value": "quoted" }), SchemaPhase::Launch));
     assert!(phase_valid(union, json!({ "value": 3 }), SchemaPhase::Launch));
 }
@@ -154,9 +166,44 @@ fn eager_array_placement_owns_items_or_property() {
     assert!(phase_valid(item_eager, json!({ "inputs": null }), SchemaPhase::Launch));
 
     let property_eager = "  inputs: file[](eager)\n";
-    assert!(!phase_valid(property_eager, json!({}), SchemaPhase::Launch));
-    assert!(!phase_valid(property_eager, json!({ "inputs": null }), SchemaPhase::Launch));
+    assert!(phase_valid(property_eager, json!({}), SchemaPhase::Launch));
+    assert!(phase_valid(property_eager, json!({ "inputs": null }), SchemaPhase::Launch));
     assert!(phase_valid(property_eager, json!({ "inputs": [] }), SchemaPhase::Launch));
+}
+
+#[test]
+fn array_level_required_owns_presence_independently_of_array_level_eager() {
+    // Presence lives in the postfix `[](...)` list for an array property, so
+    // phase projection must read `required` from the array constraints rather
+    // than only from the item constraints.
+    let property_required = "  inputs: file[](required)\n";
+    assert!(phase_valid(property_required, json!({}), SchemaPhase::Launch));
+    assert!(!phase_valid(property_required, json!({}), SchemaPhase::Completion));
+    assert!(!phase_valid(property_required, json!({ "inputs": null }), SchemaPhase::Completion));
+    assert!(phase_valid(property_required, json!({ "inputs": [] }), SchemaPhase::Completion));
+
+    let property_required_eager = "  inputs: file[](required; eager)\n";
+    assert!(!phase_valid(property_required_eager, json!({}), SchemaPhase::Launch));
+    assert!(!phase_valid(property_required_eager, json!({}), SchemaPhase::Completion));
+    assert!(phase_valid(property_required_eager, json!({ "inputs": [] }), SchemaPhase::Launch));
+
+    // Either placement of `required` governs property presence, so a reader
+    // that inspects only one constraint list is wrong for one of these forms.
+    let item_required = "  inputs: file(required)[]\n";
+    assert!(!phase_valid(item_required, json!({}), SchemaPhase::Completion));
+}
+
+#[test]
+fn required_eager_is_mandatory_at_both_phases_including_explicit_null() {
+    // The fourth cell of the semantic matrix, asserted end to end rather than
+    // only at launch-absence: presence *and* validity at both seams.
+    let schema = "  plan: string(required; eager)\n";
+    for phase in [SchemaPhase::Launch, SchemaPhase::Completion] {
+        assert!(!phase_valid(schema, json!({}), phase), "{phase:?}: absence");
+        assert!(!phase_valid(schema, json!({ "plan": null }), phase), "{phase:?}: null");
+        assert!(!phase_valid(schema, json!({ "plan": [] }), phase), "{phase:?}: wrong type");
+        assert!(phase_valid(schema, json!({ "plan": "ready" }), phase), "{phase:?}: supplied");
+    }
 }
 
 #[test]
@@ -165,7 +212,10 @@ fn phase_validation_is_passive_while_unphased_eager_file_semantics_remain() {
     let instance = json!({ "source": "definitely-missing-phase-validation-file.md" });
     assert!(!schema.validate(&instance).valid, "ordinary eager validation probes existence");
     assert!(
-        schema.validate_for_phase(&instance, SchemaPhase::Launch).valid,
+        schema
+            .validate_for_phase(&instance, SchemaPhase::Launch)
+            .expect("phase schema builds")
+            .valid,
         "phase validation must not resolve or read the file",
     );
 }
@@ -174,8 +224,13 @@ fn phase_validation_is_passive_while_unphased_eager_file_semantics_remain() {
 fn generated_required_keeps_authoring_compatibility_but_fails_completion() {
     let schema = effective("  artifact: string(generated; required)\n");
     assert!(schema.validate(&json!({})).valid);
-    assert!(schema.validate_for_phase(&json!({}), SchemaPhase::Launch).valid);
-    let completion = schema.validate_for_phase(&json!({}), SchemaPhase::Completion);
+    assert!(schema
+        .validate_for_phase(&json!({}), SchemaPhase::Launch)
+        .expect("phase schema builds")
+        .valid);
+    let completion = schema
+        .validate_for_phase(&json!({}), SchemaPhase::Completion)
+        .expect("phase schema builds");
     assert!(!completion.valid);
     assert!(completion.problems.iter().any(|problem| {
         problem.property.as_deref() == Some("artifact")
@@ -199,7 +254,10 @@ fn raw_json_schema_keeps_required_at_launch() {
         .expect("schema resolves")
         .expect("effective schema");
     assert!(schema.simplified.is_none());
-    assert!(!schema.validate_for_phase(&json!({}), SchemaPhase::Launch).valid);
+    assert!(!schema
+        .validate_for_phase(&json!({}), SchemaPhase::Launch)
+        .expect("phase schema builds")
+        .valid);
 }
 
 #[test]
@@ -220,7 +278,9 @@ fn phase_projection_preserves_merged_baseline_properties() {
         .expect("effective schema")
         .expect("schema present");
 
-    let launch = schema.validate_for_phase(&json!({}), SchemaPhase::Launch);
+    let launch = schema
+        .validate_for_phase(&json!({}), SchemaPhase::Launch)
+        .expect("phase schema builds");
     assert!(!launch.valid, "baseline required remains a launch gate");
     assert!(launch.problems.iter().any(|problem| {
         problem.property.as_deref() == Some("baseline")
@@ -254,6 +314,22 @@ fn independent_conversion_failures_are_aggregated_by_property() {
         })
         .collect::<Vec<_>>();
     assert_eq!(properties, ["first", "second"]);
+}
+
+#[test]
+fn nested_conversion_failure_uses_a_dotted_property_path() {
+    use darkmatter::markdown::schemas::{SchemaError, parse_yaml_schema, to_json_schema};
+
+    let yaml = serde_yaml_ng::from_str::<serde_yaml_ng::Value>(
+        "meta:\n  prompt: string(integer)\n",
+    )
+    .expect("schema YAML");
+    let schema = parse_yaml_schema(&yaml).expect("schema grammar");
+    let error = to_json_schema(&schema).expect_err("nested conversion error");
+    let SchemaError::Convert { property, .. } = error else {
+        panic!("expected one conversion error, got {error:?}");
+    };
+    assert_eq!(property, "meta.prompt");
 }
 
 #[test]
@@ -433,6 +509,7 @@ fn real_shipped_inline_schema_uses_normal_resolution_and_phase_path() {
     let missing = |instance: &Value, phase| -> Vec<String> {
         let mut names: Vec<String> = schema
             .validate_for_phase(instance, phase)
+            .expect("phase schema builds")
             .problems
             .iter()
             .filter_map(|problem| problem.property.clone())
@@ -457,6 +534,12 @@ fn real_shipped_inline_schema_uses_normal_resolution_and_phase_path() {
         "total_phases": 3,
         "spec": Value::Null,
     });
-    assert!(schema.validate_for_phase(&satisfied, SchemaPhase::Launch).valid);
-    assert!(schema.validate_for_phase(&satisfied, SchemaPhase::Completion).valid);
+    assert!(schema
+        .validate_for_phase(&satisfied, SchemaPhase::Launch)
+        .expect("phase schema builds")
+        .valid);
+    assert!(schema
+        .validate_for_phase(&satisfied, SchemaPhase::Completion)
+        .expect("phase schema builds")
+        .valid);
 }

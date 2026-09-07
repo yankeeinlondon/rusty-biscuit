@@ -135,13 +135,14 @@ judges the result — needs two different answers at two different moments, so
 ```rust
 use darkmatter::markdown::schemas::SchemaPhase;
 
-let launch = effective.validate_for_phase(&frontmatter, SchemaPhase::Launch);
-let done   = effective.validate_for_phase(&frontmatter, SchemaPhase::Completion);
+let launch = effective.validate_for_phase(&frontmatter, SchemaPhase::Launch)?;
+let done   = effective.validate_for_phase(&frontmatter, SchemaPhase::Completion)?;
 ```
 
 | Constraint | `Launch` | `Completion` |
 |------------|----------|--------------|
-| `eager` | must be present and valid | must be present and valid |
+| `eager` | valid when present; absence is allowed | valid when present; absence is allowed |
+| `required; eager` | must be present and valid | must be present and valid |
 | `required` | may be absent; a present value is still type-checked | must be present and valid |
 | `generated; required` | may be absent while the host can still supply it | must be present and valid |
 | none | may be absent; a present value is still type-checked | may be absent; a present value is still type-checked |
@@ -156,9 +157,11 @@ let done   = effective.validate_for_phase(&frontmatter, SchemaPhase::Completion)
   execution, no schema resolution, and no filesystem access. The eager-`file`
   existence probe belongs to ordinary schema preparation, not to phase
   validation.
-- Presence is projected recursively from the resolved SimplifiedSchema. Array
-  placement decides ownership: `file(eager)[]` constrains each present item,
-  while `file[](eager)` makes the array property itself launch-required.
+- Phase constraints are projected recursively from the resolved
+  SimplifiedSchema. Array placement decides ownership: `file(eager)[]`
+  constrains each present item, while `file[](eager)` validates the array
+  property at launch when present. `required` independently controls whether
+  the property must exist.
 - Raw JSON Schema has no phase vocabulary and keeps its authored `required`
   behavior at both phases. Trigger match conditions reject `eager` outright,
   because matching is passive and has no launch.

@@ -701,11 +701,11 @@ impl DarkmatterSchemas {
         let frontmatter_value = frontmatter_as_json(source);
         let positions = positions_for(source);
         match self.effective_for(source)? {
-            Some(effective) => Ok(effective.validate_for_phase_with_positions(
+            Some(effective) => effective.validate_for_phase_with_positions(
                 &frontmatter_value,
                 &positions,
                 phase,
-            )),
+            ),
             None => Ok(ValidationReport {
                 valid: true,
                 problems: Vec::new(),
@@ -828,14 +828,20 @@ impl EffectiveSchema {
     /// Validates a working frontmatter instance at a runtime schema phase.
     ///
     /// SimplifiedSchema phase rules are projected from the already-resolved
-    /// schema: launch requires `eager`, while completion requires `required`
-    /// or `eager`. Raw JSON Schema retains its authored behavior in both
-    /// phases. The caller's instance and the effective schema are not mutated.
+    /// schema: `eager` controls when a present value is validated, while
+    /// `required` controls whether it must be present. Raw JSON Schema retains
+    /// its authored behavior in both phases. The caller's instance and the
+    /// effective schema are not mutated.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`SchemaError`] when the phase projection cannot be converted,
+    /// merged, or compiled into a validator.
     pub fn validate_for_phase(
         &self,
         frontmatter: &Value,
         phase: SchemaPhase,
-    ) -> ValidationReport {
+    ) -> Result<ValidationReport, SchemaError> {
         self.validate_for_phase_with_positions(frontmatter, &PositionMap::new(), phase)
     }
 
@@ -845,28 +851,24 @@ impl EffectiveSchema {
         frontmatter: &Value,
         positions: &PositionMap,
         phase: SchemaPhase,
-    ) -> ValidationReport {
+    ) -> Result<ValidationReport, SchemaError> {
         let (projected, mut json_schema) = match &self.simplified {
             Some(simplified) => {
                 let projected = phase::project(simplified, phase);
-                let projected_document = simplified::to_json_schema(&projected)
-                    .expect("a resolved effective SimplifiedSchema must remain convertible after phase projection");
-                let json_schema = phase::merge_with_effective(&self.json_schema, projected_document)
-                    .expect("phase projection must preserve merge-compatible effective schema layers");
+                let projected_document = simplified::to_json_schema(&projected)?;
+                let json_schema =
+                    phase::merge_with_effective(&self.json_schema, projected_document)?;
                 (Some(projected), json_schema)
             }
             None => (None, self.json_schema.as_ref().clone()),
         };
         phase::make_passive(&mut json_schema);
-        let validator = Arc::new(
-            validate::build_validator_in_context(
-                &json_schema,
-                self.base_dir.as_deref(),
-                self.file_ref_fallback_dir.as_deref(),
-                self.file_resolution_context.as_ref(),
-            )
-            .expect("phase projection must build whenever the effective validator built"),
-        );
+        let validator = Arc::new(validate::build_validator_in_context(
+            &json_schema,
+            self.base_dir.as_deref(),
+            self.file_ref_fallback_dir.as_deref(),
+            self.file_resolution_context.as_ref(),
+        )?);
         let arm_validators = json_schema
             .get("anyOf")
             .and_then(Value::as_array)
@@ -881,10 +883,10 @@ impl EffectiveSchema {
                             self.file_resolution_context.as_ref(),
                         )
                         .map(Arc::new)
-                        .expect("projected union arm must build")
                     })
-                    .collect()
-            });
+                    .collect::<Result<Vec<_>, SchemaError>>()
+            })
+            .transpose()?;
         let projected = Self {
             simplified: projected,
             json_schema: Arc::new(json_schema),
@@ -897,12 +899,12 @@ impl EffectiveSchema {
             dependencies: self.dependencies.clone(),
             advisories: self.advisories.clone(),
         };
-        match phase {
+        Ok(match phase {
             SchemaPhase::Launch => projected.validate_with_positions(frontmatter, positions),
             SchemaPhase::Completion => {
                 projected.validate_raw_with_positions(frontmatter, positions)
             }
-        }
+        })
     }
 
     /// Validates a frontmatter JSON value against this schema **without any
