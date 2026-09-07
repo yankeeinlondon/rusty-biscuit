@@ -313,9 +313,18 @@ is read by the target-launch overlay tests as a real overlay, and
 which claudine's own test graph never builds.
 
 Claudine's runtime phase verdicts are unchanged — `inline_launch_allows_absent_eager_but_rejects_present_invalid_eager`,
-`inline_launch_succeeds_with_required_non_eager_properties_absent`,
-`eager_without_required_is_still_required_at_completion`, and
+`inline_launch_succeeds_with_required_non_eager_properties_absent`, and
 `status_report_for_inline_mode_defers_required_non_eager_gaps` all pass.
+
+Claudine's generated inline prompt table was *not* unchanged. Review 2 found
+that it still labelled an eager-only property `required` in its "At completion"
+column, pinned by `eager_without_required_is_still_required_at_completion`.
+`def_is_required_at_completion` now treats only `required` as a completion
+presence rule, and the regression is inverted as
+`eager_without_required_is_optional_at_completion`, joined by the matrix and
+array-placement control `only_required_marks_a_property_required_at_completion`
+and the normal-preparation-path assertion
+`inline_prompt_table_marks_only_required_properties_required_at_completion`.
 
 #### Non-vacuity controls
 
