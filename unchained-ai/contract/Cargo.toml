@@ -25,7 +25,7 @@ tokio = { version = "1", features = ["rt", "macros"] }
 
 # Structured-output schema + payload values, and adapter-owned JSON Schema validation
 serde_json = "1.0"
-jsonschema = { version = "0.42", default-features = false }
+jsonschema = { version = "0.55", default-features = false }
 
 # Adapter-internal error type, mapped to InferenceError at the trait boundary
 thiserror = "2.0"

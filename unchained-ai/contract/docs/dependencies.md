@@ -38,7 +38,7 @@ re-export provider-native types through the contract surface.
   implementation and the execution surface's tests. Already an
   `unchained-ai` dependency.
 - `serde_json` — schema and structured-payload `Value`s.
-- `jsonschema` (`0.42`, `default-features = false`) — adapter-owned JSON Schema
+- `jsonschema` (`0.55`, `default-features = false`) — adapter-owned JSON Schema
   (Draft 2020-12) validation. The contract crate deliberately bundles no schema
   engine, so validation lives here. Pinned to the workspace-wide `0.42` used by
   `darkmatter` and `schematic-gen`.
