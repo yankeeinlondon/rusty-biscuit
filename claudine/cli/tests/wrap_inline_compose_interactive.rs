@@ -7,19 +7,15 @@
 
 use predicates::str::contains;
 use std::fs;
-use tempfile::tempdir;
 mod common;
-use common::wrap::*;
-use common::{write_executable};
+use common::{CliProcessFixture, write_executable};
 
 #[cfg(unix)]
 #[test]
 fn inline_compose_interactive_is_capability_gated() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("inline-compose-interactive-gated");
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(
         &md_file,
         "---\nprompt: Generate content\n---\nOriginal body\n",
@@ -27,15 +23,14 @@ fn inline_compose_interactive_is_capability_gated() {
     .unwrap();
 
     write_executable(
-        &path_dir.join("gemini"),
+        &fixture.bin_dir().join("gemini"),
         r#"#!/bin/sh
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .args([
             "inline-compose",
             "--interactive",
@@ -52,12 +47,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn inline_compose_interactive_codex_uses_captured_last_message() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("inline-compose-interactive-codex");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(
         &md_file,
         "---\nprompt: Generate content\n---\nOriginal body\n",
@@ -65,7 +58,7 @@ fn inline_compose_interactive_codex_uses_captured_last_message() {
     .unwrap();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 while [ "$#" -gt 0 ]; do
   if [ "$1" = "--output-last-message" ]; then
@@ -79,12 +72,8 @@ exit 1
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .args([
             "inline-compose",
             "--interactive",

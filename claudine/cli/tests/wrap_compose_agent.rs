@@ -7,10 +7,8 @@
 
 use predicates::str::contains;
 use std::fs;
-use tempfile::tempdir;
 mod common;
-use common::wrap::*;
-use common::{strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
 #[cfg(unix)]
 #[test]
@@ -19,21 +17,15 @@ fn repo_scoped_config_favorite_selects_provider() {
     // Verifies that a repo-level .claudine/config.json with a linking
     // preference is consulted during composition selection so the
     // favorite provider wins over interactive selection.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let args_file = workspace.path().join("goose-args.txt");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-repo-favorite");
+    let args_file = fixture.cwd().join("goose-args.txt");
+    fixture.seed_user_config();
 
     // Initialize a git repo so repo root detection works
-    std::process::Command::new("git")
-        .args(["init"])
-        .current_dir(workspace.path())
-        .output()
-        .unwrap();
+    fixture.initialize_repository();
 
     // Create repo-local config with goose as the preferred agent
-    let config_dir = workspace.path().join(".claudine");
+    let config_dir = fixture.cwd().join(".claudine");
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(
         config_dir.join("config.json"),
@@ -41,31 +33,28 @@ fn repo_scoped_config_favorite_selects_provider() {
     )
     .unwrap();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
 
     // Install both providers — without the config favorite, multiple
     // installed providers would require interactive selection.
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 exit 0
 "#,
     );
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 exit 99
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("PATH", &path_dir)
-        .env("HOME", workspace.path())
+    let assert = fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_file)
-        .current_dir(workspace.path())
         .args(["compose", md_file.to_str().unwrap()])
         .assert()
         .code(1);
@@ -86,28 +75,22 @@ fn agent_hint_resolved_early_in_non_tty() {
     // Verifies that an `agent` hint is resolved during preparation
     // (not at launch), so prefix matches like "c" resolve to the
     // first match (Claude) instead of being treated as ambiguous.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-agent-hint-prefix");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: test\nagent: c\n---\nPrompt\n").unwrap();
 
     // Install both claude and codex; "c" resolves to Claude (first prefix match)
-    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
-    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 99\n");
+    write_executable(&fixture.bin_dir().join("claude"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("codex"), "#!/bin/sh\nexit 99\n");
 
     // Write empty stdin via a file to prevent TTY detection
-    let stdin_file = workspace.path().join("empty-stdin.txt");
+    let stdin_file = fixture.cwd().join("empty-stdin.txt");
     fs::write(&stdin_file, "").unwrap();
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
-        .current_dir(workspace.path())
+    fixture
+        .command()
         .pipe_stdin(&stdin_file)
         .unwrap()
         .args(["compose", md_file.to_str().unwrap()])
@@ -122,27 +105,23 @@ fn unknown_agent_hint_is_non_fatal_and_aborts_in_non_tty() {
     // In non-TTY mode the invalid hint is discarded and the run aborts
     // because no provider can be resolved, mirroring the no-agent
     // non-TTY behavior until the Phase 3 live-path messaging lands.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-unknown-agent-hint");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(
         &md_file,
         "---\ntitle: test\nagent: unknown-provider\n---\nPrompt\n",
     )
     .unwrap();
 
-    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("claude"), "#!/bin/sh\nexit 0\n");
 
-    let stdin_file = workspace.path().join("empty-stdin.txt");
+    let stdin_file = fixture.cwd().join("empty-stdin.txt");
     fs::write(&stdin_file, "").unwrap();
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .pipe_stdin(&stdin_file)
         .unwrap()
         .args(["compose", md_file.to_str().unwrap()])
@@ -158,26 +137,25 @@ fn unknown_agent_hint_is_non_fatal_and_aborts_in_non_tty() {
 #[cfg(unix)]
 #[test]
 fn compose_dry_run_list_one_installed_renders_auto_select_header() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-dry-run-list-one");
+    fixture.seed_user_config();
 
     // Suggest two agents; install only `claude` so the list resolves to a
     // single installed provider (ListOneInstalled).
-    let md_file = workspace.path().join("doc.md");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(
         &md_file,
         "---\nname: one-installed\nagent: [claude, gemini]\n---\nBODY\n",
     )
     .unwrap();
-    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("claude"), "#!/bin/sh\nexit 0\n");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        // Restrict PATH to the fake bin so only `claude` is "installed".
-        .env("PATH", &path_dir)
+    // fake-only PATH: the assertion is that `gemini` was *not* found, so the
+    // fixture bin must be the only place a provider can come from.
+    let output = fixture
+        .command_builder()
+        .fake_only_path()
+        .build()
         .args(["compose", "--dry-run", md_file.to_str().unwrap()])
         .output()
         .unwrap();
@@ -208,19 +186,15 @@ fn compose_dry_run_list_one_installed_renders_auto_select_header() {
 #[cfg(unix)]
 #[test]
 fn compose_dry_run_single_entry_invalid_list_is_zero_installed() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-dry-run-invalid-list");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("doc.md");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(&md_file, "---\nname: zero\nagent: [not-real]\n---\nBODY\n").unwrap();
-    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let output = fixture
+        .command()
         .args(["compose", "--dry-run", md_file.to_str().unwrap()])
         .output()
         .unwrap();
@@ -253,23 +227,19 @@ fn compose_dry_run_single_entry_invalid_list_is_zero_installed() {
 #[cfg(unix)]
 #[test]
 fn compose_silent_does_not_suppress_agent_resolution_report() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-silent-agent-report");
+    fixture.seed_user_config();
 
     // No agent hint, no explicit provider → live no-TTY abort.
-    let md_file = workspace.path().join("doc.md");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(&md_file, "---\ntitle: t\n---\nPrompt body\n").unwrap();
-    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let stdin_file = workspace.path().join("empty-stdin.txt");
+    let stdin_file = fixture.cwd().join("empty-stdin.txt");
     fs::write(&stdin_file, "").unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .pipe_stdin(&stdin_file)
         .unwrap()
         .args(["compose", "--silent", md_file.to_str().unwrap()])
@@ -295,18 +265,16 @@ fn compose_silent_does_not_suppress_agent_resolution_report() {
 
 #[cfg(unix)]
 fn assert_direct_wrap_dry_run_delivers_prompt(provider_slug: &str) {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("direct-wrap-dry-run");
+    fixture.seed_user_config();
 
-    // An empty PATH proves dry-run neither resolves nor spawns the provider.
-
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
+    // fake-only PATH over an empty fixture bin: the proof is that dry-run
+    // neither resolves nor spawns the provider, so nothing may be findable.
+    let output = fixture
+        .command_builder()
+        .fake_only_path()
+        .build()
         .env("OPENCODE_MODEL", "test-model")
-        .env("PATH", &path_dir)
         .args([provider_slug, "--dry-run", "hello"])
         .output()
         .unwrap();

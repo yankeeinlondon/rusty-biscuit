@@ -3,14 +3,13 @@ use std::fs::{self, OpenOptions};
 use fs4::fs_std::FileExt as _;
 
 mod common;
-use common::{TestWorkspace, write};
+use common::{CliProcessFixture, write};
 
 #[test]
 fn handle_human_in_the_loop_leaves_durable_doorbell_job_after_exit() {
-    let workspace = TestWorkspace::named("claudine-handle-detached-audio");
-    let home = workspace.path().join("home");
-    let spool = workspace.path().join("spool");
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("claudine-handle-detached-audio");
+    let home = fixture.home();
+    let spool = fixture.workspace_path().join("spool");
     fs::create_dir(&spool).unwrap();
     #[cfg(unix)]
     {
@@ -50,16 +49,9 @@ fn handle_human_in_the_loop_leaves_durable_doorbell_job_after_exit() {
         "session_id": "detached-doorbell"
     })
     .to_string();
-    let output = assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
-        .current_dir(workspace.path())
-        .env("HOME", &home)
-        .env("USERPROFILE", &home)
-        .env("APPDATA", &home)
-        .env("LOCALAPPDATA", &home)
+    let output = fixture
+        .command()
         .env("PLAYA_SPOOL_DIR", &spool)
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("NO_COLOR", "1")
         .env_remove("PLAYA_DRY_RUN")
         .args(["handle", "human_in_the_loop", "--provider", "claude"])
         .write_stdin(payload)

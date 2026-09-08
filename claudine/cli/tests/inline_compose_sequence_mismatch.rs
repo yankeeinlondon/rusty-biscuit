@@ -14,11 +14,10 @@
 //! `claudine/lib/src/composition/error.rs`.
 
 use std::fs;
-use tempfile::tempdir;
 mod common;
-use common::strip_ansi;
+use common::{CliProcessFixture, strip_ansi};
 #[cfg(unix)]
-use common::{augmented_path, write_executable};
+use common::write_executable;
 
 /// The unique marker the mismatch diagnostic always emits, regardless of TTY
 /// state. Negative-path tests assert its **absence** to prove the document
@@ -39,9 +38,12 @@ fn normalize_ws(input: &str) -> String {
 /// Run `claudine inline-compose <doc>` (no provider, piped stderr) and return
 /// the **raw** stderr bytes plus whether the process failed. Piped stderr is
 /// never a TTY, so this always exercises the non-TTY (YAML-withheld) branch.
-fn run_inline_compose_raw(md_file: &std::path::Path) -> (Vec<u8>, bool) {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+fn run_inline_compose_raw(
+    fixture: &CliProcessFixture,
+    md_file: &std::path::Path,
+) -> (Vec<u8>, bool) {
+    let assert = fixture
+        .command()
         .args(["inline-compose", md_file.to_str().unwrap()])
         .assert();
     let output = assert.get_output();
@@ -51,8 +53,8 @@ fn run_inline_compose_raw(md_file: &std::path::Path) -> (Vec<u8>, bool) {
 
 /// Run `claudine inline-compose <doc>` and return the whitespace-normalized
 /// stderr plus whether the process failed.
-fn run_inline_compose(md_file: &std::path::Path) -> (String, bool) {
-    let (raw, failed) = run_inline_compose_raw(md_file);
+fn run_inline_compose(fixture: &CliProcessFixture, md_file: &std::path::Path) -> (String, bool) {
+    let (raw, failed) = run_inline_compose_raw(fixture, md_file);
     (normalize_ws(&String::from_utf8_lossy(&raw)), failed)
 }
 
@@ -80,15 +82,15 @@ fn assert_is_mismatch_diagnostic(plain: &str) {
 #[test]
 fn rejects_string_prompt_with_nonempty_list_sequence() {
     // Criterion 1: valid string prompt + nonempty list sequence.
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("doc.md");
+    let fixture = CliProcessFixture::named("inline-compose-mismatch");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(
         &md_file,
         "---\nprompt: Do something\nsequence:\n  - name: Hello\n---\nbody\n",
     )
     .unwrap();
 
-    let (plain, failed) = run_inline_compose(&md_file);
+    let (plain, failed) = run_inline_compose(&fixture, &md_file);
     assert!(failed, "mismatch must exit nonzero; stderr:\n{plain}");
     assert_is_mismatch_diagnostic(&plain);
 }
@@ -96,15 +98,15 @@ fn rejects_string_prompt_with_nonempty_list_sequence() {
 #[test]
 fn rejects_empty_list_sequence() {
     // Criterion 2: `sequence: []` is non-null.
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("doc.md");
+    let fixture = CliProcessFixture::named("inline-compose-mismatch");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(
         &md_file,
         "---\nprompt: Do something\nsequence: []\n---\nbody\n",
     )
     .unwrap();
 
-    let (plain, failed) = run_inline_compose(&md_file);
+    let (plain, failed) = run_inline_compose(&fixture, &md_file);
     assert!(failed, "mismatch must exit nonzero; stderr:\n{plain}");
     assert_is_mismatch_diagnostic(&plain);
 }
@@ -112,15 +114,15 @@ fn rejects_empty_list_sequence() {
 #[test]
 fn rejects_scalar_sequence() {
     // Criterion 3: prompt + scalar (wrong-type, non-null) sequence.
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("doc.md");
+    let fixture = CliProcessFixture::named("inline-compose-mismatch");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(
         &md_file,
         "---\nprompt: Do something\nsequence: nope\n---\nbody\n",
     )
     .unwrap();
 
-    let (plain, failed) = run_inline_compose(&md_file);
+    let (plain, failed) = run_inline_compose(&fixture, &md_file);
     assert!(failed, "mismatch must exit nonzero; stderr:\n{plain}");
     assert_is_mismatch_diagnostic(&plain);
 }
@@ -128,15 +130,15 @@ fn rejects_scalar_sequence() {
 #[test]
 fn rejects_mapping_sequence() {
     // Criterion 3: prompt + mapping (wrong-type, non-null) sequence.
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("doc.md");
+    let fixture = CliProcessFixture::named("inline-compose-mismatch");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(
         &md_file,
         "---\nprompt: Do something\nsequence:\n  key: value\n---\nbody\n",
     )
     .unwrap();
 
-    let (plain, failed) = run_inline_compose(&md_file);
+    let (plain, failed) = run_inline_compose(&fixture, &md_file);
     assert!(failed, "mismatch must exit nonzero; stderr:\n{plain}");
     assert_is_mismatch_diagnostic(&plain);
 }
@@ -153,11 +155,11 @@ fn rejects_mapping_sequence() {
 /// mismatch diagnostic (criterion 7). `frontmatter` is the YAML body between
 /// the `---` delimiters.
 fn assert_prompt_variant_rejected(frontmatter: &str) {
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("doc.md");
+    let fixture = CliProcessFixture::named("inline-compose-mismatch-prompt-variant");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(&md_file, format!("---\n{frontmatter}\n---\nbody\n")).unwrap();
 
-    let (plain, failed) = run_inline_compose(&md_file);
+    let (plain, failed) = run_inline_compose(&fixture, &md_file);
     assert!(failed, "mismatch must exit nonzero; stderr:\n{plain}");
     assert_is_mismatch_diagnostic(&plain);
 }
@@ -192,15 +194,15 @@ fn non_tty_withholds_yaml_but_keeps_guidance() {
     // `sections` guidance and omits the authored YAML block entirely (the
     // frontmatter excerpt is TTY-gated). The unique frontmatter token must not
     // leak.
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("doc.md");
+    let fixture = CliProcessFixture::named("inline-compose-mismatch");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(
         &md_file,
         "---\n# secret-frontmatter-token\nprompt: Do something\nsequence: []\n---\nbody\n",
     )
     .unwrap();
 
-    let (raw, failed) = run_inline_compose_raw(&md_file);
+    let (raw, failed) = run_inline_compose_raw(&fixture, &md_file);
     assert!(failed, "mismatch must exit nonzero");
 
     // Criterion 16: redirected (non-TTY) output must contain no terminal
@@ -232,15 +234,15 @@ fn non_tty_withholds_yaml_but_keeps_guidance() {
 fn sequence_without_prompt_yields_missing_prompt_not_mismatch() {
     // Criterion 6: non-null sequence + no prompt → existing missing-prompt
     // behavior, NOT the mismatch.
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("doc.md");
+    let fixture = CliProcessFixture::named("inline-compose-mismatch");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(
         &md_file,
         "---\nsequence:\n  - name: Hello\n---\nbody\n",
     )
     .unwrap();
 
-    let (plain, failed) = run_inline_compose(&md_file);
+    let (plain, failed) = run_inline_compose(&fixture, &md_file);
     assert!(failed, "missing prompt must exit nonzero; stderr:\n{plain}");
     assert!(
         !plain.contains(MISMATCH_MARKER),
@@ -256,15 +258,15 @@ fn sequence_without_prompt_yields_missing_prompt_not_mismatch() {
 fn null_prompt_with_sequence_yields_existing_prompt_error_not_mismatch() {
     // Criterion 8: `prompt: null` + non-null sequence → existing null-prompt
     // behavior, NOT the mismatch.
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("doc.md");
+    let fixture = CliProcessFixture::named("inline-compose-mismatch");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(
         &md_file,
         "---\nprompt: null\nsequence:\n  - name: Hello\n---\nbody\n",
     )
     .unwrap();
 
-    let (plain, failed) = run_inline_compose(&md_file);
+    let (plain, failed) = run_inline_compose(&fixture, &md_file);
     assert!(failed, "null prompt must exit nonzero; stderr:\n{plain}");
     assert!(
         !plain.contains(MISMATCH_MARKER),
@@ -280,8 +282,8 @@ fn null_prompt_with_sequence_yields_existing_prompt_error_not_mismatch() {
 fn malformed_frontmatter_keeps_parse_precedence_not_mismatch() {
     // Criterion 9: a document whose frontmatter cannot parse must surface the
     // frontmatter-parse diagnostic; the mismatch check never runs.
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("doc.md");
+    let fixture = CliProcessFixture::named("inline-compose-mismatch");
+    let md_file = fixture.cwd().join("doc.md");
     // `prompt: [unclosed` is an unterminated YAML flow sequence.
     fs::write(
         &md_file,
@@ -289,7 +291,7 @@ fn malformed_frontmatter_keeps_parse_precedence_not_mismatch() {
     )
     .unwrap();
 
-    let (plain, failed) = run_inline_compose(&md_file);
+    let (plain, failed) = run_inline_compose(&fixture, &md_file);
     assert!(
         failed,
         "malformed frontmatter must exit nonzero; stderr:\n{plain}"
@@ -326,23 +328,19 @@ fn write_goose_stub(bin_dir: &std::path::Path) {
 fn prompt_with_null_sequence_proceeds_to_ordinary_behavior() {
     // Criterion 4: `prompt` + `sequence: null` is not a mismatch — it proceeds
     // to ordinary inline-compose behavior and runs the provider.
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    write_goose_stub(&bin_dir);
+    let fixture = CliProcessFixture::named("inline-compose-mismatch-provider");
+    fixture.seed_user_config();
+    write_goose_stub(fixture.bin_dir());
 
-    let md_file = workspace.path().join("doc.md");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(
         &md_file,
         "---\nprompt: Do something\nsequence: null\n---\nbody\n",
     )
     .unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&bin_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -358,19 +356,15 @@ fn prompt_with_null_sequence_proceeds_to_ordinary_behavior() {
 #[test]
 fn prompt_without_sequence_retains_inline_behavior() {
     // Criterion 5: `prompt` + no sequence key → ordinary inline-compose.
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    write_goose_stub(&bin_dir);
+    let fixture = CliProcessFixture::named("inline-compose-mismatch-provider");
+    fixture.seed_user_config();
+    write_goose_stub(fixture.bin_dir());
 
-    let md_file = workspace.path().join("doc.md");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(&md_file, "---\nprompt: Do something\n---\nbody\n").unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&bin_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -390,16 +384,16 @@ fn prompt_without_sequence_retains_inline_behavior() {
 fn override_cannot_suppress_authored_mismatch() {
     // Criterion 10: detection reads authored frontmatter only — a `--set`
     // override that nulls `sequence` must NOT suppress the mismatch.
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("doc.md");
+    let fixture = CliProcessFixture::named("inline-compose-mismatch");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(
         &md_file,
         "---\nprompt: Do something\nsequence: []\n---\nbody\n",
     )
     .unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let assert = fixture
+        .command()
         .args([
             "inline-compose",
             "--set",
@@ -418,19 +412,15 @@ fn override_cannot_suppress_authored_mismatch() {
 fn override_cannot_create_mismatch() {
     // Criterion 10: a `--set` override that adds `sequence` to a prompt-only
     // document must NOT create a mismatch — the run proceeds normally.
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    write_goose_stub(&bin_dir);
+    let fixture = CliProcessFixture::named("inline-compose-mismatch-provider");
+    fixture.seed_user_config();
+    write_goose_stub(fixture.bin_dir());
 
-    let md_file = workspace.path().join("doc.md");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(&md_file, "---\nprompt: Do something\n---\nbody\n").unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&bin_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args([
             "inline-compose",
             "--goose",
@@ -457,16 +447,15 @@ fn override_cannot_create_mismatch() {
 fn rejection_has_no_side_effects() {
     // Criterion 15: the rejection precedes every side-effect surface. No shell
     // directive runs, no provider launches, and the source file is unchanged.
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
+    let fixture = CliProcessFixture::named("inline-compose-mismatch-side-effects");
+    fixture.seed_user_config();
 
-    let shell_sentinel = workspace.path().join("shell-ran.flag");
-    let provider_sentinel = workspace.path().join("provider-ran.flag");
+    let shell_sentinel = fixture.cwd().join("shell-ran.flag");
+    let provider_sentinel = fixture.cwd().join("provider-ran.flag");
 
     // Provider stub records any launch so we can prove it was never invoked.
     write_executable(
-        &bin_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho launched > {marker}\necho body\nexit 0\n",
             marker = provider_sentinel.display()
@@ -475,18 +464,15 @@ fn rejection_has_no_side_effects() {
 
     // Mismatch doc whose body also embeds a shell directive that would touch a
     // sentinel if composition (which never runs) reached it.
-    let md_file = workspace.path().join("doc.md");
+    let md_file = fixture.cwd().join("doc.md");
     let original = format!(
         "---\nprompt: Do something\nsequence: []\n---\n::shell touch {sentinel}\n",
         sentinel = shell_sentinel.display()
     );
     fs::write(&md_file, &original).unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&bin_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();

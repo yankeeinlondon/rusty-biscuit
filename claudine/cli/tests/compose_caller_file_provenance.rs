@@ -85,9 +85,9 @@ fn run_compose(
     document: &std::path::Path,
     setters: &[&str],
 ) -> String {
-    let mut command = fixture.command();
+    // Escape: caller-relative references must resolve from this fixture directory.
+    let mut command = fixture.command_builder().ambient_context(cwd).build();
     command
-        .current_dir(cwd)
         .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
         .args(["compose", "--goose", document.to_str().unwrap()]);
     command.args(setters);
@@ -104,9 +104,9 @@ fn run_compose_failure(
     let snapshot = fixture
         .cwd()
         .join(format!("diagnostic-{}.json", document.file_stem().unwrap().to_string_lossy()));
-    let mut command = fixture.command();
+    // Escape: caller-relative references must resolve from this fixture directory.
+    let mut command = fixture.command_builder().ambient_context(cwd).build();
     command
-        .current_dir(cwd)
         .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
         .env("CLAUDINE_TEST_DIAGNOSTIC_SNAPSHOT", &snapshot)
         .args(["compose", "--goose", document.to_str().unwrap()]);
@@ -425,7 +425,6 @@ fn a_proxied_resume_rematerializes_from_the_original_caller_record() {
 
     let assertion = fixture
         .command()
-        .current_dir(fixture.cwd())
         .args([
             "compose",
             "--claude",
@@ -507,9 +506,11 @@ fn a_sequence_prompt_task_proxy_reads_the_invocation_wide_caller_file() {
         "---\n$schema:\n  spec: 'file(required)'\nmarker: \"{{ frontmatter(spec, 'marker') }}\"\nstart:\n  stack:\n    - action: {append_line: ['events.log', 'sequence={{ marker }}']}\n---\nTARGET={{ marker }}\n",
     );
 
+    // Escape: exercise invocation from the fixture's package directory.
     let assertion = fixture
-        .command()
-        .current_dir(&package)
+        .command_builder()
+        .ambient_context(&package)
+        .build()
         .args([
             "sequence",
             "--goose",
@@ -553,9 +554,11 @@ fn sequence_task_params_and_cli_file_inputs_keep_distinct_authoring_origins() {
         "---\n$schema:\n  caller_spec: 'file(required)'\n  task_spec: 'file(required)'\ncaller_marker: \"{{ frontmatter(caller_spec, 'marker') }}\"\ntask_marker: \"{{ frontmatter(task_spec, 'marker') }}\"\nstart:\n  stack:\n    - action: {append_line: ['events.log', 'mixed={{ caller_marker }}:{{ task_marker }}']}\n---\nMIXED.\n",
     );
 
+    // Escape: exercise invocation from the fixture's package directory.
     let assertion = fixture
-        .command()
-        .current_dir(&package)
+        .command_builder()
+        .ambient_context(&package)
+        .build()
         .args([
             "sequence",
             "--goose",
@@ -600,7 +603,6 @@ fn a_sequence_cli_setter_shadows_the_same_named_task_file_param() {
 
     let assertion = fixture
         .command()
-        .current_dir(fixture.cwd())
         .args([
             "sequence",
             "--goose",
@@ -649,7 +651,6 @@ fn a_sequence_runtime_mutation_shadows_the_same_named_task_file_param() {
 
     let assertion = fixture
         .command()
-        .current_dir(fixture.cwd())
         .args(["sequence", "--goose", sequence.to_str().unwrap()])
         .assert()
         .success();
@@ -688,7 +689,6 @@ fn a_sequence_reserved_overlay_shadows_a_same_named_caller_file_input() {
 
     let assertion = fixture
         .command()
-        .current_dir(fixture.cwd())
         .args([
             "sequence",
             "--goose",
@@ -729,7 +729,6 @@ fn inline_compose_proxy_uses_the_caller_origin_and_closes_over_the_target() {
 
     let assertion = fixture
         .command()
-        .current_dir(fixture.cwd())
         .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
         .args([
             "inline-compose",

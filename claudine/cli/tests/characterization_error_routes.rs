@@ -42,7 +42,7 @@
 use std::path::{Path, PathBuf};
 
 mod common;
-use common::{TestWorkspace, augmented_path, strip_ansi, write, write_executable};
+use common::{CliProcessFixture, strip_ansi, write, write_executable};
 
 // --- Provider shims -------------------------------------------------------
 
@@ -113,15 +113,14 @@ impl RouteOutcome {
 
 /// Run `claudine compose --claude <doc>` in an isolated workspace.
 fn run_route(doc_body: &str, provider_exit: i32, extra_args: &[&str]) -> RouteOutcome {
-    let workspace = TestWorkspace::named("claudine-characterization");
-    let root = workspace.path();
-    let bin_dir = root.join("bin");
+    let fixture = CliProcessFixture::named("claudine-characterization");
+    fixture.seed_user_config();
     write_executable(
-        &bin_dir.join(shim_name("claude")),
+        &fixture.bin_dir().join(shim_name("claude")),
         &provider_shim(provider_exit),
     );
 
-    let doc = root.join("route.md");
+    let doc = fixture.cwd().join("route.md");
     write(&doc, doc_body);
 
     let mut args: Vec<&str> = vec!["compose", "--claude"];
@@ -129,16 +128,14 @@ fn run_route(doc_body: &str, provider_exit: i32, extra_args: &[&str]) -> RouteOu
     let doc_arg = doc.to_str().unwrap().to_string();
     args.push(&doc_arg);
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("PATH", augmented_path(&bin_dir))
-        .current_dir(root)
+    let output = fixture
+        .command()
         .args(&args)
         .output()
         .expect("spawn claudine");
 
     let stderr_plain = strip_ansi(&String::from_utf8_lossy(&output.stderr));
-    let events = read_events(root);
+    let events = read_events(fixture.workspace_path());
 
     RouteOutcome {
         exit_code: output.status.code(),
@@ -149,10 +146,9 @@ fn run_route(doc_body: &str, provider_exit: i32, extra_args: &[&str]) -> RouteOu
 
 /// Read the ordered lifecycle markers.
 ///
-/// Searches the workspace rather than assuming a fixed location: the wrapper
-/// may switch CWD to a discovered repo root, which moves where a relative
-/// `append_line` target lands. Searching keeps the baseline stable on hosts
-/// whose temp dir has a `.git` ancestor.
+/// Searches the workspace rather than assuming a fixed location: a relative
+/// `append_line` target lands wherever the run's mutation root resolves to,
+/// which is not necessarily the launch directory.
 fn read_events(root: &Path) -> Vec<String> {
     let Some(path) = find_events_log(root) else {
         return Vec::new();

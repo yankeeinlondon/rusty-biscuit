@@ -8,10 +8,8 @@ use std::fs;
 use std::path::Path;
 #[cfg(windows)]
 use std::process::Command;
-use tempfile::tempdir;
 mod common;
-use common::augmented_path;
-use common::wrap::seed_minimal_config;
+use common::CliProcessFixture;
 
 /// Write a fake `goose` provider that prints a fixed, deterministic replacement
 /// body and exits 0, discoverable on `PATH` on every platform.
@@ -59,30 +57,20 @@ fn write_goose_provider(bin_dir: &Path) {
 
 #[test]
 fn inline_compose_writes_hash_that_passes_md_diff() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("inline-compose-hash");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(
         &md_file,
         "---\nprompt: Generate the body\nlast_updated: 2026-01-01\n---\nOriginal body\n",
     )
     .unwrap();
 
-    write_goose_provider(&path_dir);
+    write_goose_provider(fixture.bin_dir());
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        // `dirs::home_dir()` reads `HOME` on Unix and `USERPROFILE` on Windows;
-        // set both so the wrapper's config home resolves to the temp workspace
-        // on every platform.
-        .env("HOME", workspace.path())
-        .env("USERPROFILE", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();

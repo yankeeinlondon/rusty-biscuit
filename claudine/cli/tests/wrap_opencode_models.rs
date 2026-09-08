@@ -7,10 +7,8 @@
 
 use std::fs;
 use std::path::Path;
-use tempfile::tempdir;
 mod common;
-use common::wrap::*;
-use common::{augmented_path, write_executable};
+use common::{CliProcessFixture, write_executable};
 
 /// A fake `opencode` binary that exits 1 when called with `models`.
 /// Placed on PATH to prove that `--claude` / `--codex` compose paths do
@@ -31,21 +29,17 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_claude_dry_run_does_not_call_opencode_models() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-claude-no-opencode-models");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("fast.md");
+    let md_file = fixture.cwd().join("fast.md");
     fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
 
-    write_failing_opencode_models(&path_dir);
-    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+    write_failing_opencode_models(fixture.bin_dir());
+    write_executable(&fixture.bin_dir().join("claude"), "#!/bin/sh\nexit 0\n");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .args([
             "compose",
             "--claude",
@@ -59,25 +53,21 @@ fn compose_claude_dry_run_does_not_call_opencode_models() {
 #[cfg(unix)]
 #[test]
 fn inline_compose_claude_dry_run_does_not_call_opencode_models() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("inline-compose-claude-no-opencode-models");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("fast.md");
+    let md_file = fixture.cwd().join("fast.md");
     fs::write(
         &md_file,
         "---\ntitle: test\nprompt: rewrite\n---\nPrompt body\n",
     )
     .unwrap();
 
-    write_failing_opencode_models(&path_dir);
-    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+    write_failing_opencode_models(fixture.bin_dir());
+    write_executable(&fixture.bin_dir().join("claude"), "#!/bin/sh\nexit 0\n");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .args([
             "inline-compose",
             "--claude",
@@ -91,21 +81,17 @@ fn inline_compose_claude_dry_run_does_not_call_opencode_models() {
 #[cfg(unix)]
 #[test]
 fn compose_codex_dry_run_does_not_call_opencode_models() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-codex-no-opencode-models");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("fast.md");
+    let md_file = fixture.cwd().join("fast.md");
     fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
 
-    write_failing_opencode_models(&path_dir);
-    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+    write_failing_opencode_models(fixture.bin_dir());
+    write_executable(&fixture.bin_dir().join("codex"), "#!/bin/sh\nexit 0\n");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .args(["compose", "--codex", "--dry-run", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -114,25 +100,21 @@ fn compose_codex_dry_run_does_not_call_opencode_models() {
 #[cfg(unix)]
 #[test]
 fn inline_compose_codex_dry_run_does_not_call_opencode_models() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("inline-compose-codex-no-opencode-models");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("fast.md");
+    let md_file = fixture.cwd().join("fast.md");
     fs::write(
         &md_file,
         "---\ntitle: test\nprompt: rewrite\n---\nPrompt body\n",
     )
     .unwrap();
 
-    write_failing_opencode_models(&path_dir);
-    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+    write_failing_opencode_models(fixture.bin_dir());
+    write_executable(&fixture.bin_dir().join("codex"), "#!/bin/sh\nexit 0\n");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .args([
             "inline-compose",
             "--codex",
@@ -146,25 +128,19 @@ fn inline_compose_codex_dry_run_does_not_call_opencode_models() {
 #[cfg(unix)]
 #[test]
 fn compose_opencode_dry_run_calls_opencode_models_and_fails_with_test_double() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-opencode-calls-models");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("fast.md");
+    let md_file = fixture.cwd().join("fast.md");
     fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
 
-    write_failing_opencode_models(&path_dir);
+    write_failing_opencode_models(fixture.bin_dir());
 
     // When --opencode is selected, model validation *should* call `opencode
     // models`, so the failing test double causes a failure (or the catalog
     // refresh is skipped because the model comes from an env var).
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
         .args([
             "compose",
@@ -182,24 +158,20 @@ fn compose_opencode_dry_run_calls_opencode_models_and_fails_with_test_double() {
 #[cfg(unix)]
 #[test]
 fn sequence_opencode_dry_run_with_env_model_skips_opencode_models_call() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("sequence-opencode-env-model");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\nsequence:\n  - step_one\nmodel: frontmatter-model\n---\ncomposed body text\n",
     )
     .unwrap();
 
-    write_failing_opencode_models(&path_dir);
+    write_failing_opencode_models(fixture.bin_dir());
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("OPENCODE_MODEL", "env-model")
         .args([
             "sequence",
@@ -217,25 +189,21 @@ fn sequence_opencode_dry_run_with_env_model_skips_opencode_models_call() {
 #[cfg(unix)]
 #[test]
 fn sequence_claude_dry_run_does_not_call_opencode_models() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("sequence-claude-no-opencode-models");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\nsequence:\n  - step_one\n---\ncomposed body text\n",
     )
     .unwrap();
 
-    write_failing_opencode_models(&path_dir);
-    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+    write_failing_opencode_models(fixture.bin_dir());
+    write_executable(&fixture.bin_dir().join("claude"), "#!/bin/sh\nexit 0\n");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .args([
             "sequence",
             "--claude",

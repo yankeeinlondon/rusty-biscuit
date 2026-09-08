@@ -6,7 +6,6 @@
 //! `common::wrap`.
 
 use std::fs;
-use tempfile::tempdir;
 mod common;
 use common::wrap::*;
 use common::{CliProcessFixture, strip_ansi, write_executable};
@@ -14,36 +13,30 @@ use common::{CliProcessFixture, strip_ansi, write_executable};
 #[cfg(unix)]
 #[test]
 fn explicit_provider_flag_bypasses_chooser() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let args_path = workspace.path().join("args.txt");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-explicit-provider");
+    let args_path = fixture.cwd().join("args.txt");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\nPrompt body\n").unwrap();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 exit 0
 "#,
     );
     write_executable(
-        &path_dir.join("claude"),
+        &fixture.bin_dir().join("claude"),
         r#"#!/bin/sh
 exit 99
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_path)
-        .current_dir(workspace.path())
         .args([
             "compose",
             "--codex",
@@ -65,28 +58,22 @@ exit 99
 #[cfg(unix)]
 #[test]
 fn compose_uses_wrapper_grade_execution() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-wrapper-grade");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\nHello compose\n").unwrap();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 printf 'AGENT=%s\n' "$AGENT" >&2
 exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -105,34 +92,28 @@ fn compose_resolves_env_agent_in_body_template() {
     // Regression: `{{env.AGENT}}` in a compose body must resolve to the
     // chosen provider's slug, since AGENT is now set in the parent
     // process env *before* templates render.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-env-agent-body");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(
         &md_file,
         "---\ntitle: agent env test\n---\nrunning on {{env.AGENT}}\n",
     )
     .unwrap();
 
-    let stdin_path = workspace.path().join("stdin.txt");
+    let stdin_path = fixture.cwd().join("stdin.txt");
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 /bin/cat > "$CLAUDINE_STDIN_FILE"
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
-        .current_dir(workspace.path())
         .args(["compose", "--codex", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -153,18 +134,15 @@ fn wrapper_resolves_env_agent_in_system_prompt() {
     // non-interactive system-prompt delivery writes the composed prompt
     // to a temp file passed via --append-system-prompt-file, which the
     // shim can capture verbatim.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-env-agent-system-prompt");
+    fixture.seed_user_config();
 
-    let system_prompt = workspace.path().join("system-prompt.md");
-    fs::write(&system_prompt, "you are running on {{env.AGENT}}\n").unwrap();
+    fixture.write_root_system_prompt("you are running on {{env.AGENT}}\n");
 
-    let captured_prompt = workspace.path().join("captured_prompt.txt");
-    let captured_args = workspace.path().join("captured_args.txt");
+    let captured_prompt = fixture.cwd().join("captured_prompt.txt");
+    let captured_args = fixture.cwd().join("captured_args.txt");
     write_executable(
-        &path_dir.join("claude"),
+        &fixture.bin_dir().join("claude"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_CAPTURED_ARGS"
 : > "$CLAUDINE_CAPTURED_PROMPT"
@@ -185,13 +163,10 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_CAPTURED_PROMPT", &captured_prompt)
         .env("CLAUDINE_CAPTURED_ARGS", &captured_args)
-        .current_dir(workspace.path())
         .args(["claude", "--", "ping"])
         .assert()
         .success();
@@ -209,7 +184,7 @@ exit 0
 #[test]
 fn compose_preflight_error_includes_source_provenance() {
     let fixture = CliProcessFixture::named("compose-preflight-provenance");
-    seed_minimal_config(fixture.home());
+    fixture.seed_user_config();
 
     // Markdown with a ::shell directive that is NOT whitelisted.
     let md_file = fixture.cwd().join("template.md");
@@ -256,30 +231,24 @@ fn compose_preflight_error_includes_source_provenance() {
 #[cfg(unix)]
 #[test]
 fn compose_interactive_claude_seeds_prompt_as_positional_arg() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let args_path = workspace.path().join("args.txt");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-interactive-claude");
+    let args_path = fixture.cwd().join("args.txt");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\n- Hello Claude\n").unwrap();
 
     write_executable(
-        &path_dir.join("claude"),
+        &fixture.bin_dir().join("claude"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_path)
-        .current_dir(workspace.path())
         .args([
             "compose",
             "--interactive",
@@ -308,28 +277,23 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_interactive_kimi_seeds_prompt_with_prompt_flag() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let args_path = workspace.path().join("args.txt");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("compose-interactive-kimi");
+    let args_path = fixture.cwd().join("args.txt");
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\nHello Kimi\n").unwrap();
 
     write_executable(
-        &path_dir.join("kimi"),
+        &fixture.bin_dir().join("kimi"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_path)
-        .current_dir(workspace.path())
         .args([
             "compose",
             "--interactive",
@@ -352,16 +316,13 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_supports_mcp_runtime_and_tag_cleanup() {
-    let workspace = tempdir().unwrap();
-    let home = workspace.path().join("home");
-    let path_dir = workspace.path().join("bin");
-    let stdin_path = workspace.path().join("stdin.txt");
-    let env_path = workspace.path().join("env.txt");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("compose-mcp-runtime");
+    let home = fixture.home().to_path_buf();
+    let stdin_path = fixture.cwd().join("stdin.txt");
+    let env_path = fixture.cwd().join("env.txt");
     fs::create_dir_all(home.join(".codex")).unwrap();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(
         &md_file,
         "---\ntitle: test\n---\nUse #calendar for this task\n",
@@ -373,7 +334,7 @@ fn compose_supports_mcp_runtime_and_tag_cleanup() {
     seed_empty_provider_state(&home);
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 /bin/cat > "$CLAUDINE_STDIN_FILE"
 {
@@ -383,14 +344,10 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
-        .current_dir(workspace.path())
         .args(["compose", "--codex", "--mcp", md_file.to_str().unwrap()])
         .assert()
         .success();
