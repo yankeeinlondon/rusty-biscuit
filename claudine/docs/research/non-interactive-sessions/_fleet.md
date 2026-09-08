@@ -59,17 +59,23 @@ CI, wrapper execution, or API-style use where the provider should not require a 
 mid-run. Providers use different names for this mode: print mode, headless mode, exec,
 run, batch, wire mode, app-server mode, or SDK mode.
 
-Most agentic CLIs provide multiple output formats for non-interactive sessions. Your
-first task is to enumerate the output formats provided by **{{state.name}}** and decide
-which one Claudine should prefer.
+Most agentic CLIs provide multiple execution and control interfaces for non-interactive
+sessions. Your first task is to enumerate every interface provided by
+**{{state.name}}**: one-shot commands, retained subprocess protocols, local or network
+servers, SDKs, attach/resume surfaces, and each interface's output or event streams.
+Then decide which usable RPC or equivalent control interface Claudine should prefer.
+When recommending a simpler alternative, require source or observed evidence for the
+specific launch profile and feature set, enumerate the lost capabilities, and explain
+why those losses are acceptable for that use case.
 
 The most valuable format is usually structured data that can be parsed while the agent is
 still running. Choose the best format for Claudine and explain why it is the best choice.
 Do not stop at "it is structured." Consider:
 
-- **API style:** many providers expose both a request/reply style interaction and a
-  streaming response. The streaming response is almost always more valuable because
-  Claudine can show progress, classify failures, and react before the process exits.
+- **API style:** request/reply control and streaming events are sometimes parts of the
+  same interface. Do not frame RPC and streaming as mutually exclusive. Prefer the
+  interface that provides the strongest usable combined execution, observation, cancellation,
+  and lifecycle contract, and explain when a simpler alternative is a justified fallback.
 - **Multiple streams:** some providers expose more than one useful stream, such as a
   response stream plus a log, telemetry, hook, or server-event stream. When that exists,
   explain whether Claudine should parse the response stream, the secondary stream, or
@@ -84,6 +90,11 @@ Do not stop at "it is structured." Consider:
   format. Then look for other surfaces that influence output: environment variables,
   user config files, repo config files, managed/system config, command aliases, profiles,
   debug/verbose flags, or logging settings.
+- **Preserved behavior:** do not recommend disabling extensions, skills, prompt
+  templates, context files, MCP, or other enabled features merely to simplify parsing.
+  If a feature creates a control obligation, document the obligation and reason about
+  policy or a capability-reduced fallback. Keep approval/trust bypass flags as a separate
+  security-policy decision.
 
 When researching configuration, always consider the common **user** and **repo** scopes
 that often combine to create the effective configuration. Be clear about which scope
