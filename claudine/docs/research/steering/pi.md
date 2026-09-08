@@ -1,6 +1,6 @@
 ---
 $schema: ./_schema.yaml
-schema_revision: 2
+schema_revision: 3
 provider: pi
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -121,6 +121,55 @@ changes:
   - "Corrected stale claim: v0.84.4 AgentSession emits agent_settled and RPC forwards it; agent_end is lower-level."
 requires_claudine_update: true
 reason: "Safe support needs a new retained-RPC launch profile, guarded registration, resource preservation, native OS and disposable verification; current Claudine JSON sessions and ordinary Pi sessions are not steerable."
+discovery_gaps: []
+interface_inventory:
+- disposition: included
+  evidence_ids:
+  - local-pi
+  - official-home
+  - wrapper
+  id: profile-ordinary-cli
+  profile_ids:
+  - ordinary-cli
+  reason: Ordinary Pi TUI or print/JSON invocation without a retained peer endpoint.
+- disposition: included
+  evidence_ids:
+  - official-rpc
+  - source-rpc
+  id: profile-retained-rpc
+  profile_ids:
+  - retained-rpc
+  reason: Pi child deliberately launched in RPC mode with controller-owned stdin/stdout.
+- disposition: unknown
+  evidence_ids:
+  - official-rpc
+  - source-rpc
+  id: coverage-review-retained-rpc
+  profile_ids:
+  - retained-rpc
+  reason: The existing profile does not cover other client launch modes. This migration does not establish that these combinations are impossible. Review interface ownership, lifetime, and discovery before expanding coverage; do not infer exclusion from current wrapper behavior.
+receipt_observations:
+- evidence_ids:
+  - official-rpc
+  - source-rpc
+  - source-session
+  mechanism_id: rpc-steer
+  signal: '{"id":"id","type":"response","command":"steer","success":true|false} Initial receipt only; later processing and settlement have separate signals.'
+  timing: early
+- evidence_ids:
+  - official-rpc
+  - source-rpc
+  - source-settled
+  mechanism_id: rpc-idle-prompt
+  signal: success after acceptance, queueing, or extension handling Initial receipt only; later processing and settlement have separate signals.
+  timing: early
+- evidence_ids:
+  - official-rpc
+  - source-rpc
+  mechanism_id: rpc-abort-submit
+  signal: Cancellation and replacement have separate outcomes. abort success after idle; separate prompt preflight response Abort acknowledgment proves idle, not replacement acceptance.
+  timing: multi_phase
+
 ---
 
 # Steering Research: Pi
@@ -184,3 +233,12 @@ Revision 2 adds stable profiles, full Cartesian cases, receipts, access, compati
 - [v0.84.4 RPC source](https://github.com/earendil-works/pi/blob/b79e4cc834970cca69daebffab7df1da7d1e52c4/packages/coding-agent/src/modes/rpc/rpc-mode.ts)
 - [v0.84.4 AgentSession](https://github.com/earendil-works/pi/blob/b79e4cc834970cca69daebffab7df1da7d1e52c4/packages/coding-agent/src/core/agent-session.ts)
 - [v0.84.4 agent loop](https://github.com/earendil-works/pi/blob/b79e4cc834970cca69daebffab7df1da7d1e52c4/packages/agent/src/agent-loop.ts)
+
+
+## Revision 3 Contract Backfill
+
+Receipt timing, interface inventory, and case-specific discovery gaps were added
+from the existing evidence on 2026-09-08. No new provider observation or live test
+was performed. Unexamined profile combinations remain unknown, not unsupported.
+The original fleet model/effort provenance above describes the research run;
+this deterministic contract migration is a separate coordinator edit.

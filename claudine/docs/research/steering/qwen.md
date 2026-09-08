@@ -1,6 +1,6 @@
 ---
 "$schema": "./_schema.yaml"
-schema_revision: 2
+schema_revision: 3
 provider: qwen
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -219,6 +219,55 @@ changes:
   - Initial Qwen Code steering report using schema revision 2.
 requires_claudine_update: true
 reason: A future managed qwen serve profile could provide discoverable FIFO follow-up and idle-turn delivery, while ordinary sessions remain unknown and all activation is blocked by empty verification.
+discovery_gaps: []
+interface_inventory:
+- disposition: included
+  evidence_ids:
+  - official-overview
+  - local-help
+  - wrapper-source
+  id: profile-ordinary-cli
+  profile_ids:
+  - ordinary-cli
+  reason: Ordinary Qwen interactive TUI or one-shot prompt launch without a peer-control server.
+- disposition: included
+  evidence_ids:
+  - official-serve
+  - source-sdk-0198
+  - local-help
+  id: profile-managed-http-daemon
+  profile_ids:
+  - managed-http-daemon
+  reason: Future Claudine-managed qwen serve process with registered HTTP endpoint, client identity, session IDs, and SSE subscriptions.
+- disposition: unknown
+  evidence_ids:
+  - official-serve
+  - source-sdk-0198
+  - local-help
+  id: coverage-review-managed-http-daemon
+  profile_ids:
+  - managed-http-daemon
+  reason: The existing profile does not cover other client launch modes, other launch origins. This migration does not establish that these combinations are impossible. Review interface ownership, lifetime, and discovery before expanding coverage; do not infer exclusion from current wrapper behavior.
+receipt_observations:
+- evidence_ids:
+  - official-serve
+  - source-sdk-0198
+  mechanism_id: daemon-follow-up
+  signal: JSON HTTP envelope plus SSE envelopes {id,v,type,data,originatorClientId?}. Initial receipt only; later processing and settlement have separate signals.
+  timing: early
+- evidence_ids:
+  - official-serve
+  - source-sdk-0198
+  mechanism_id: daemon-idle-prompt
+  signal: JSON and SSE envelopes. Initial receipt only; later processing and settlement have separate signals.
+  timing: early
+- evidence_ids:
+  - official-serve
+  - source-sdk-0198
+  mechanism_id: daemon-cancel-then-prompt
+  signal: Cancellation and replacement have separate outcomes. HTTP status plus SSE envelopes. Cancel and replacement are non-atomic; a 204 does not prove tool termination or replacement admission.
+  timing: multi_phase
+
 ---
 
 # Qwen Code steering research
@@ -284,3 +333,12 @@ The principal blockers are empty live verification, no safe retry/idempotency co
 ## Changelog
 
 - 2026-09-08: Created the Qwen Code schema-revision-2 steering report from official documentation, v0.19.8 source distribution, and passive macOS inspection.
+
+
+## Revision 3 Contract Backfill
+
+Receipt timing, interface inventory, and case-specific discovery gaps were added
+from the existing evidence on 2026-09-08. No new provider observation or live test
+was performed. Unexamined profile combinations remain unknown, not unsupported.
+The original fleet model/effort provenance above describes the research run;
+this deterministic contract migration is a separate coordinator edit.

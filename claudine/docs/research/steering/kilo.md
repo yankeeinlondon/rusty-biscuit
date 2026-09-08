@@ -1,6 +1,6 @@
 ---
 "$schema": "./_schema.yaml"
-schema_revision: 2
+schema_revision: 3
 provider: kilo
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -1307,6 +1307,57 @@ reason: Kilo 7.3.45 has a promising documented/source-derived HTTP prompt queue 
   Claudine needs a managed launch profile, strict read-only compatibility checks,
   receipts/event correlation, and mandatory disposable tests before activation; automatic
   warnings must never use interruption.
+discovery_gaps: []
+interface_inventory:
+- disposition: included
+  evidence_ids:
+  - official-runtime
+  - official-cli
+  - local-cli-7-3-45
+  - claudine-wrapper
+  id: profile-ordinary-cli
+  profile_ids:
+  - ordinary-cli
+  reason: Ordinary Kilo TUI or one-shot run, whose runtime may opportunistically attach to a daemon or use a private embedded/worker fallback but exposes no stable registered endpoint contract to an independent sender.
+- disposition: included
+  evidence_ids:
+  - official-runtime
+  - official-testing
+  - source-http-7-3-45
+  - source-queue-7-3-45
+  id: profile-managed-http-server
+  profile_ids:
+  - managed-http-server
+  reason: Future Claudine-managed, authenticated `kilo serve` process with endpoint, directory context, and provider session IDs retained in Claudine registration.
+- disposition: unknown
+  evidence_ids:
+  - official-runtime
+  - official-testing
+  - source-http-7-3-45
+  - source-queue-7-3-45
+  id: coverage-review-managed-http-server
+  profile_ids:
+  - managed-http-server
+  reason: The existing profile does not cover other client launch modes, other launch origins. This migration does not establish that these combinations are impossible. Review interface ownership, lifetime, and discovery before expanding coverage; do not infer exclusion from current wrapper behavior.
+receipt_observations:
+- evidence_ids:
+  - source-http-7-3-45
+  - official-testing
+  mechanism_id: http-prompt-async-active
+  signal: No response body; later SSE events/history are separate and uncorrelated with the initial receipt. Initial receipt only; later processing and settlement have separate signals.
+  timing: early
+- evidence_ids:
+  - source-http-7-3-45
+  - official-testing
+  mechanism_id: http-prompt-async-idle
+  signal: No response body. Initial receipt only; later processing and settlement have separate signals.
+  timing: early
+- evidence_ids:
+  - source-http-7-3-45
+  mechanism_id: http-abort-then-prompt
+  signal: Cancellation and replacement have separate outcomes. Two uncorrelated responses plus later SSE/history. The Boolean applies only to the abort call. It says nothing about subsequent prompt acceptance or delivery; the two phases can fail independently.
+  timing: multi_phase
+
 ---
 # Kilo Code steering research
 
@@ -1379,3 +1430,12 @@ The blockers are the empty live-test gate, ordinary-session attribution, uncorre
 ## Changelog
 
 - 2026-09-08: Created the revision-2 Kilo report, separating ordinary launches from the managed HTTP profile and pinning 7.3.45 source findings.
+
+
+## Revision 3 Contract Backfill
+
+Receipt timing, interface inventory, and case-specific discovery gaps were added
+from the existing evidence on 2026-09-08. No new provider observation or live test
+was performed. Unexamined profile combinations remain unknown, not unsupported.
+The original fleet model/effort provenance above describes the research run;
+this deterministic contract migration is a separate coordinator edit.

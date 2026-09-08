@@ -1,6 +1,6 @@
 ---
 "$schema": "./_schema.yaml"
-schema_revision: 2
+schema_revision: 3
 provider: codex
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -1463,6 +1463,52 @@ receipt_guarantees:
   - official-app-server
   limitations: Initial interrupt acknowledgment proves only cancellation request acceptance;
     replacement delivery can fail separately.
+discovery_gaps: []
+interface_inventory:
+- disposition: included
+  evidence_ids:
+  - official-cli
+  - local-help-0-153-4
+  - wrapper-inspection
+  id: profile-ordinary-cli
+  profile_ids:
+  - ordinary-cli
+  reason: Ordinary Codex TUI or one-shot exec/resume launch without a deliberately exposed peer-control endpoint.
+- disposition: included
+  evidence_ids:
+  - official-app-server
+  - local-help-0-153-4
+  id: profile-managed-app-server
+  profile_ids:
+  - managed-app-server
+  reason: Future Claudine-managed client, including non-interactive execution, backed by a deliberately retained and registered Codex app-server.
+- disposition: unknown
+  evidence_ids:
+  - official-app-server
+  - local-help-0-153-4
+  id: coverage-review-managed-app-server
+  profile_ids:
+  - managed-app-server
+  reason: The existing profile does not cover other launch origins. This migration does not establish that these combinations are impossible. Review interface ownership, lifetime, and discovery before expanding coverage; do not infer exclusion from current wrapper behavior.
+receipt_observations:
+- evidence_ids:
+  - official-app-server
+  - local-schema-0-153-4
+  mechanism_id: app-server-steer
+  signal: Success identifies the same turn; userMessage items can echo clientUserMessageId. Later item and turn notifications establish processing/completion. Protocol errors reject invalid, stale, idle, or ineligible targets. Initial receipt only; later processing and settlement have separate signals.
+  timing: early
+- evidence_ids:
+  - official-app-server
+  - local-schema-0-153-4
+  mechanism_id: app-server-turn-start
+  signal: Initial turn response followed by turn/started, item lifecycle notifications, and turn/completed. Initial receipt only; later processing and settlement have separate signals.
+  timing: early
+- evidence_ids:
+  - official-app-server
+  mechanism_id: app-server-interrupt-then-start
+  signal: Cancellation and replacement have separate outcomes. Interrupt returns {}; later turn/completed with interrupted status proves termination. Replacement has its own turn response and lifecycle. Initial interrupt acknowledgment proves only cancellation request acceptance; replacement delivery can fail separately.
+  timing: multi_phase
+
 ---
 # Steering Research: Codex CLI
 
@@ -1644,3 +1690,12 @@ does not require a human client.
 - [Codex CLI documentation](https://developers.openai.com/codex/cli)
 - [Codex 0.153.4 app-server protocol in the official repository](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/app-server/README.md)
 - [Official openai/codex repository](https://github.com/openai/codex)
+
+
+## Revision 3 Contract Backfill
+
+Receipt timing, interface inventory, and case-specific discovery gaps were added
+from the existing evidence on 2026-09-08. No new provider observation or live test
+was performed. Unexamined profile combinations remain unknown, not unsupported.
+The original fleet model/effort provenance above describes the research run;
+this deterministic contract migration is a separate coordinator edit.

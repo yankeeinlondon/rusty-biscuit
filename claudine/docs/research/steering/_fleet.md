@@ -19,7 +19,9 @@ success:
         - action:
               - action: shell
                 command: "md schema validate '{{file}}' --no-trigger-schemas"
-              - stderr: "Steering research schema check completed for **{{state.name}}**; evidence and coverage review remain required."
+              - action: shell
+                command: "claudine providers steering check '{{state.slug}}'"
+              - stderr: "Steering schema and relationship checks completed for **{{state.name}}**; source review and live activation gates remain separate."
 failure:
     warn: "Steering research failed for **{{state.name}}**: {{err.message}}"
 ---
@@ -29,9 +31,9 @@ You are the assigned provider researcher, already running inside the fleet.
 Perform the research yourself. Do not launch another agent, `claudine sequence`,
 or another research coordinator to carry out this assignment.
 
-Fleet research prompt using steering schema revision 2. The Claude Code,
-OpenCode, Codex, and Pi passive pilots informed this contract. Refresh those
-reports into revision 2, then use the same contract for the remaining roster.
+Fleet research prompt using steering schema revision 3. The four pilots and
+completed ten-provider fleet informed this contract. On refresh, retain useful
+evidence and investigate specific gaps rather than repeating completed work.
 Use the Claudine skill. Research the CLI identified by roster slug
 `{{state.slug}}`, binary `{{state.binary}}`, and official site `{{state.site}}`.
 Write only `{{file}}` and any explicitly assigned sanitized evidence fixtures.
@@ -122,7 +124,7 @@ notices. None of these claims is established merely by appearing in this prompt.
 ## Metadata Contract
 
 Read `./_schema.yaml` and include `$schema: ./_schema.yaml` in the report.
-Use `schema_revision: 2`, the roster slug in `provider`, today's date
+Use `schema_revision: 3`, the roster slug in `provider`, today's date
 (`{{ctx.today}}`) in `last_updated`, and preserve `created` on refresh.
 Record the actual research agent, model, and low effort, with provenance in the
 body. Preserve useful prior findings on refresh, reverify claims, and describe
@@ -149,6 +151,14 @@ Separate ordinary one-shot lifetime from a retained process where capability
 differs, and distinguish active-turn steering from starting an idle turn in
 mechanism records, not only prose. Delivery states must not include permission
 holds that occur after delivery when the agent attempts a tool.
+
+Populate `interface_inventory` before selecting launch profiles. Each considered
+interface records included, excluded, or unknown disposition with evidence and a
+reason. Included entries reference profiles; every profile must be represented.
+Explain omitted modes/origins/OS values explicitly; unexamined combinations remain
+unknown. A complete Cartesian product of selected profiles does not establish
+that all useful interfaces were considered. Compare delivery behavior and feature
+preservation, not simply whether a protocol is called RPC or ACP.
 
 `support` describes researched provider capability, not implemented Claudine
 support. Use:
@@ -192,6 +202,18 @@ persistence, delivery scheduling, and confirmed conversation delivery
 independent; use `unknown` rather than deriving one from another. List later
 provider signals without upgrading the initial receipt. Record its correlation.
 
+Populate one `receipt_observations` record per mechanism. `early` means a separate
+admission response is available without waiting for turn completion; `terminal`
+means the first established successful response arrives after execution;
+`multi_phase` means cancellation and replacement have independent receipts;
+`none` requires evidence that no acknowledgment exists; otherwise use `unknown`.
+Name the exact confirming signal and attach evidence. Receipt guarantees refer
+to that signal, not to a successful transport write. For multi-phase operations,
+state which phase the guarantee describes; cancellation acknowledgment never
+proves replacement admission. `not_persisted` requires evidence of volatile-only
+storage, not merely missing evidence of durability. A terminal response cannot
+justify returning an accepted result immediately after submission.
+
 Mechanism records identify interface maturity, initialization, exact request
 and response framing, operation intent, destination, authentication, and target
 preconditions. Distinguish exact-active-turn steering, idle-turn start,
@@ -206,6 +228,21 @@ response with unknown idempotency is never safe to retry. For interruption,
 list ordered phases and the partial outcome when interruption succeeds but
 submission fails, including queue retention or clearing.
 
+Assess automatic rescue separately from manual messaging. Interruption and
+next-turn-only delivery cannot rescue an endlessly running current turn.
+Tool-boundary delivery may help repeated tool rounds but cannot help generation
+or a tool that never reaches that boundary. Derive these restrictions from
+operation intent, conversation effect, and delivery boundary; do not introduce
+an independent support boolean or infer useful timing from request acceptance.
+Unknown delivery boundaries remain unknown even when acceptance is confirmed.
+
+For input processed by extensions, skills, or templates, distinguish receipt,
+input handling, model scheduling, and model-visible delivery. Require versioned
+evidence for both lifecycle event definitions and forwarding through the chosen
+interface before treating an event as full settlement. Reference the execution
+topic for its interface selection and unattended request contract; do not assume
+that low-level turn completion includes queued work or extension settlement.
+
 ## Required Prose
 
 Write an overview followed by sections for session discovery, non-interrupting
@@ -217,7 +254,10 @@ help a token-generation loop that never reaches another tool call.
 
 ## Completion and Review Gates
 
-Run `md schema validate '{{file}}' --no-trigger-schemas`. Check the 24 unique
+Run `md schema validate '{{file}}' --no-trigger-schemas` and
+`claudine providers steering check '{{state.slug}}'` using a build that includes
+the steering validator. A missing command is a failed gate, not permission to
+skip it. Check the 24 unique
 baseline combinations and each profile's declared Cartesian product × both
 states; unique IDs; valid profile/evidence/discovery/mechanism references;
 case-matching OS/origin/profile discovery records; and
@@ -225,6 +265,14 @@ mechanism/profile-matching compatibility records. Every supported
 case must have concrete evidence, an identified delivery mechanism, and explicit
 discovery coverage or a documented discovery gap. The generator must distinguish
 delivery capability from whether Claudine can actually find the session.
+
+Every supported case without discovery must have a matching `discovery_gaps`
+record keyed by profile, OS, origin, launch mode, and session state, with a concrete
+next check. An unrelated document-level gap does not satisfy this requirement.
+Check state/operation consistency: an idle-start operation cannot be the only
+mechanism offered for a working case, and an interrupt-only mechanism cannot
+establish non-interrupting support. Require one receipt observation per mechanism
+and valid, evidenced interface-inventory references.
 
 Treat these relational and evidence checks as a separate review gate: the sidecar
 validates shape, not truth or references. Do not report a schema pass as a complete

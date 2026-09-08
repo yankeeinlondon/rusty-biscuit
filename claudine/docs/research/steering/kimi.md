@@ -1,6 +1,6 @@
 ---
 $schema: ./_schema.yaml
-schema_revision: 2
+schema_revision: 3
 provider: kimi
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -309,6 +309,83 @@ changes:
   - "Recorded source-derived web prompt queue/steer and ACP interrupt-then-submit candidates; left verification empty."
 requires_claudine_update: true
 reason: "A future managed `kimi web` profile is the preferred candidate because it exposes exact session/prompt IDs and non-interrupting steer; ACP is a retained-stdio fallback for idle prompts and explicitly approved interruption. Ordinary sessions remain undiscoverable for safe delivery. Adapters, registration, compatibility guards, and mandatory live tests do not yet exist."
+discovery_gaps: []
+interface_inventory:
+- disposition: included
+  evidence_ids:
+  - E_HELP
+  - E_SESSIONS
+  - E_CLI_SOURCE
+  id: profile-ordinary_cli
+  profile_ids:
+  - ordinary_cli
+  reason: 'Ordinary shell TUI or one-shot `kimi --prompt`; no documented peer-control endpoint. Lifetime varies by launch mode: the TUI can remain open, while a prompt invocation exits.'
+- disposition: included
+  evidence_ids:
+  - E_WEB_DOC
+  - E_WEB_PROMPTS
+  - E_WEB_REGISTRY
+  - E_WEB_AUTH
+  - E_CORE_STEER
+  id: profile-web_server
+  profile_ids:
+  - web_server
+  reason: Long-lived `kimi web` REST/WebSocket server with session registry and prompt queue/steer API.
+- disposition: unknown
+  evidence_ids:
+  - E_WEB_DOC
+  - E_WEB_PROMPTS
+  - E_WEB_REGISTRY
+  - E_WEB_AUTH
+  - E_CORE_STEER
+  id: coverage-review-web_server
+  profile_ids:
+  - web_server
+  reason: The existing profile does not cover other client launch modes. This migration does not establish that these combinations are impossible. Review interface ownership, lifetime, and discovery before expanding coverage; do not infer exclusion from current wrapper behavior.
+- disposition: included
+  evidence_ids:
+  - E_ACP_DOC
+  - E_ACP_SERVER
+  - E_ACP_SESSION
+  id: profile-acp_server
+  profile_ids:
+  - acp_server
+  reason: Long-lived `kimi acp` multi-session JSON-RPC server over retained stdin/stdout.
+- disposition: unknown
+  evidence_ids:
+  - E_ACP_DOC
+  - E_ACP_SERVER
+  - E_ACP_SESSION
+  id: coverage-review-acp_server
+  profile_ids:
+  - acp_server
+  reason: The existing profile does not cover other client launch modes. This migration does not establish that these combinations are impossible. Review interface ownership, lifetime, and discovery before expanding coverage; do not infer exclusion from current wrapper behavior.
+receipt_observations:
+- evidence_ids:
+  - E_WEB_PROMPTS
+  - E_WEB_EVENTS
+  mechanism_id: web_steer
+  signal: UTF-8 JSON plus optional authenticated WebSocket events. Initial receipt only; later processing and settlement have separate signals.
+  timing: early
+- evidence_ids:
+  - E_WEB_PROMPTS
+  - E_WEB_EVENTS
+  mechanism_id: web_submit
+  signal: UTF-8 JSON plus WebSocket lifecycle events. Initial receipt only; later processing and settlement have separate signals.
+  timing: early
+- evidence_ids:
+  - E_ACP_SERVER
+  - E_ACP_SESSION
+  mechanism_id: acp_cancel_submit
+  signal: Cancellation and replacement have separate outcomes. ACP JSON-RPC responses and notifications. Cancellation can succeed silently and replacement submission can then fail; no initial cancellation acknowledgment exists.
+  timing: multi_phase
+- evidence_ids:
+  - E_ACP_DOC
+  - E_ACP_SESSION
+  mechanism_id: acp_prompt
+  signal: Successful session/prompt PromptResponse after the turn; no separate early acceptance response is established.
+  timing: terminal
+
 ---
 
 # Kimi Code CLI steering research
@@ -468,3 +545,12 @@ unacknowledged cancellation, and missing native Linux/Windows verification.
 
 - 2026-09-08: Initial revision-2 report; separated ordinary, web, and ACP
   profiles and recorded passive candidates without activating them.
+
+
+## Revision 3 Contract Backfill
+
+Receipt timing, interface inventory, and case-specific discovery gaps were added
+from the existing evidence on 2026-09-08. No new provider observation or live test
+was performed. Unexamined profile combinations remain unknown, not unsupported.
+The original fleet model/effort provenance above describes the research run;
+this deterministic contract migration is a separate coordinator edit.

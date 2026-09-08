@@ -1,6 +1,6 @@
 ---
 $schema: ./_schema.yaml
-schema_revision: 2
+schema_revision: 3
 provider: claude
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -794,6 +794,70 @@ changes:
   - Split ordinary interactive, ordinary one-shot non-interactive, and retained non-interactive launch profiles; split active-turn steering from idle-turn start mechanisms.
 requires_claudine_update: true
 reason: "Claudine needs registry parsing, identity/liveness checks, policy-aware acknowledgments, OS-specific adapters, compatibility gates, and mandatory disposable verification. Native Windows direct delivery additionally lacks a supported token source."
+discovery_gaps: []
+interface_inventory:
+- disposition: included
+  evidence_ids:
+  - official-cross-session
+  - official-cli
+  - local-help-2-1-263
+  id: profile-ordinary-interactive
+  profile_ids:
+  - ordinary-interactive
+  reason: Ordinary interactive Claude Code session using the provider-managed same-machine peer inbox.
+- disposition: included
+  evidence_ids:
+  - official-cross-session
+  - official-cli
+  - local-help-2-1-263
+  id: profile-ordinary-one-shot
+  profile_ids:
+  - ordinary-one-shot
+  reason: Ordinary one-shot non-interactive Claude Code process. It is active only while running and cannot be an idle active session after exit.
+- disposition: included
+  evidence_ids:
+  - official-cross-session
+  - official-cli
+  - local-help-2-1-263
+  id: profile-retained-noninteractive
+  profile_ids:
+  - retained-noninteractive
+  reason: Deliberately retained long-running non-interactive Claude Code process with a provider-managed peer inbox.
+- disposition: unknown
+  evidence_ids:
+  - official-cross-session
+  - official-cli
+  - local-help-2-1-263
+  id: coverage-review-retained-noninteractive
+  profile_ids:
+  - retained-noninteractive
+  reason: The existing profile does not cover other client launch modes. This migration does not establish that these combinations are impossible. Review interface ownership, lifetime, and discovery before expanding coverage; do not infer exclusion from current wrapper behavior.
+receipt_observations:
+- evidence_ids:
+  - official-cross-session
+  - local-binary-2-1-263
+  mechanism_id: peer-unix-active
+  signal: No independently established initial acknowledgment timing. A successful socket write or initial raw response must not be treated as acceptance, persistence, scheduling, or delivery until a disposable test establishes the exact frame and correlation behavior.
+  timing: unknown
+- evidence_ids:
+  - official-cross-session
+  - local-binary-2-1-263
+  mechanism_id: peer-unix-idle
+  signal: No independently established initial acknowledgment timing. A successful socket write or initial raw response must not be treated as acceptance, persistence, scheduling, or delivery until a disposable test establishes the exact frame and correlation behavior.
+  timing: unknown
+- evidence_ids:
+  - official-cross-session
+  - local-binary-2-1-263
+  mechanism_id: peer-windows-pipe-active
+  signal: No independently established initial acknowledgment timing. No supported independent source for the target token and no live pipe exchange were established.
+  timing: unknown
+- evidence_ids:
+  - official-cross-session
+  - local-binary-2-1-263
+  mechanism_id: peer-windows-pipe-idle
+  signal: No independently established initial acknowledgment timing. No supported independent source for the target token and no live pipe exchange were established.
+  timing: unknown
+
 ---
 
 # Claude Code steering research
@@ -817,3 +881,12 @@ source-derived and is marked undocumented with unknown maturity. Windows also
 lacks a supported source for the target session token. Every candidate remains
 unavailable for activation because this passive run has no disposable delivery
 verification.
+
+
+## Revision 3 Contract Backfill
+
+Receipt timing, interface inventory, and case-specific discovery gaps were added
+from the existing evidence on 2026-09-08. No new provider observation or live test
+was performed. Unexamined profile combinations remain unknown, not unsupported.
+The original fleet model/effort provenance above describes the research run;
+this deterministic contract migration is a separate coordinator edit.

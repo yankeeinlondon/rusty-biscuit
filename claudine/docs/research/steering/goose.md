@@ -1,6 +1,6 @@
 ---
 $schema: ./_schema.yaml
-schema_revision: 2
+schema_revision: 3
 provider: goose
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -266,6 +266,59 @@ changes:
   - "Separated ordinary CLI coverage from the managed authenticated ACP server profile and left retained stdio as a separately identified future profile gap."
 requires_claudine_update: true
 reason: "A future adapter should manage authenticated `goose serve`, preserve the user's normal Goose config/resources, register endpoint/session/run identity, implement guarded steer and idle prompt, and enforce exact-version plus disposable-test gates. Current Claudine only launches ordinary one-shot `goose run`."
+discovery_gaps: []
+interface_inventory:
+- disposition: included
+  evidence_ids:
+  - official-cli
+  - source-cli
+  - local-host
+  - claudine-wrapper
+  id: profile-ordinary-cli
+  profile_ids:
+  - ordinary-cli
+  reason: Ordinary `goose session` or `goose run`; neither exposes a peer control endpoint.
+- disposition: included
+  evidence_ids:
+  - official-acp
+  - source-cli
+  - source-steer
+  - source-sessions
+  - source-auth
+  id: profile-managed-acp-server
+  profile_ids:
+  - managed-acp-server
+  reason: A deliberately retained `goose serve` process exposing authenticated ACP over HTTP/WebSocket; this is a separate future managed profile, not an attachment to an ordinary CLI.
+- disposition: unknown
+  evidence_ids:
+  - official-acp
+  - source-cli
+  - source-steer
+  - source-sessions
+  - source-auth
+  id: coverage-review-managed-acp-server
+  profile_ids:
+  - managed-acp-server
+  reason: The existing profile does not cover other client launch modes. This migration does not establish that these combinations are impossible. Review interface ownership, lifetime, and discovery before expanding coverage; do not infer exclusion from current wrapper behavior.
+receipt_observations:
+- evidence_ids:
+  - source-steer
+  - source-steer-test
+  mechanism_id: acp-steer
+  signal: '{"jsonrpc":"2.0","id":"request-id","result":{"runId":"run_...","messageId":"steer_..."}} Initial receipt only; later processing and settlement have separate signals.'
+  timing: early
+- evidence_ids:
+  - source-prompt
+  mechanism_id: acp-idle-prompt
+  signal: Successful session/prompt PromptResponse after the turn; no separate early acceptance response is established.
+  timing: terminal
+- evidence_ids:
+  - source-cancel
+  - source-prompt
+  mechanism_id: acp-cancel-submit
+  signal: Cancellation and replacement have separate outcomes. old PromptResponse stopReason=cancelled; independent replacement PromptResponse The cancel notification has no response; submission is a separate operation and may fail after cancellation.
+  timing: multi_phase
+
 ---
 
 # Goose steering research
@@ -335,3 +388,12 @@ Primary sources are the official Goose documentation and the commit-pinned v1.49
 ## Changelog
 
 - 2026-09-08: Created schema-revision-2 Goose steering research, pinned claims to v1.49.0, identified guarded non-interrupting ACP steering, separated ordinary and managed-server coverage, and left live activation blocked.
+
+
+## Revision 3 Contract Backfill
+
+Receipt timing, interface inventory, and case-specific discovery gaps were added
+from the existing evidence on 2026-09-08. No new provider observation or live test
+was performed. Unexamined profile combinations remain unknown, not unsupported.
+The original fleet model/effort provenance above describes the research run;
+this deterministic contract migration is a separate coordinator edit.

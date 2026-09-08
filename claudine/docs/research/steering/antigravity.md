@@ -1,6 +1,6 @@
 ---
 "$schema": "./_schema.yaml"
-schema_revision: 2
+schema_revision: 3
 provider: antigravity
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -232,6 +232,43 @@ changes:
   - Added the 1.1.15 retained stream-json input profile while keeping ordinary-session steering and active-turn behavior unknown.
 requires_claudine_update: true
 reason: A future managed retained-stream launch could provide same-conversation idle turns, but the current wrapper is one-shot, ordinary sessions lack a verified peer endpoint, and all activation is blocked by empty verification and unresolved framing/receipt semantics.
+discovery_gaps: []
+interface_inventory:
+- disposition: included
+  evidence_ids:
+  - official-product
+  - local-cli-1127
+  - local-state
+  - prior-resume
+  - wrapper-source
+  id: profile-ordinary-cli
+  profile_ids:
+  - ordinary-cli
+  reason: Ordinary interactive TUI or one-shot print launch without a deliberately retained structured-input controller.
+- disposition: included
+  evidence_ids:
+  - local-changelog-1127
+  - local-binary-strings
+  id: profile-managed-stream-json
+  profile_ids:
+  - managed-stream-json
+  reason: Future Claudine-managed print process launched with retained NDJSON stdin and stream-json stdout, exclusively owned and registered by Claudine.
+- disposition: unknown
+  evidence_ids:
+  - local-changelog-1127
+  - local-binary-strings
+  id: coverage-review-managed-stream-json
+  profile_ids:
+  - managed-stream-json
+  reason: The existing profile does not cover other client launch modes, other launch origins. This migration does not establish that these combinations are impossible. Review interface ownership, lifetime, and discovery before expanding coverage; do not infer exclusion from current wrapper behavior.
+receipt_observations:
+- evidence_ids:
+  - local-changelog-1127
+  - local-binary-strings
+  mechanism_id: retained-ndjson-idle
+  signal: No independently established initial acknowledgment timing. Release notes establish multiple turns in one retained conversation, but not the meaning or timing of the first response to a line. A successful pipe write proves none of acceptance, persistence, scheduling, or conversation delivery.
+  timing: unknown
+
 ---
 
 # Antigravity CLI steering research
@@ -309,3 +346,12 @@ Primary public entry point: [Antigravity CLI product page](https://antigravity.g
 ## Changelog
 
 - 2026-09-08: Created the schema-revision-2 report, refreshed prior 1.1.0 findings against 1.1.27, and separated ordinary launches from the managed retained stream-json candidate.
+
+
+## Revision 3 Contract Backfill
+
+Receipt timing, interface inventory, and case-specific discovery gaps were added
+from the existing evidence on 2026-09-08. No new provider observation or live test
+was performed. Unexamined profile combinations remain unknown, not unsupported.
+The original fleet model/effort provenance above describes the research run;
+this deterministic contract migration is a separate coordinator edit.

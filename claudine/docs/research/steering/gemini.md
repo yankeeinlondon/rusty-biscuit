@@ -1,6 +1,6 @@
 ---
 "$schema": "./_schema.yaml"
-schema_revision: 2
+schema_revision: 3
 provider: gemini
 created: 2026-09-08
 last_updated: 2026-09-08
@@ -269,6 +269,49 @@ changes:
   - Initial steering revision-2 report for Gemini CLI.
 requires_claudine_update: true
 reason: A future managed ACP launch/registry/adapter could support idle prompts and consented interrupt-then-submit, but ordinary sessions remain undiscoverable for exact live-conversation delivery and all activation is blocked by empty verification.
+discovery_gaps: []
+interface_inventory:
+- disposition: included
+  evidence_ids:
+  - official-cli
+  - official-sessions
+  - local-help
+  - wrapper-source
+  id: profile-ordinary-cli
+  profile_ids:
+  - ordinary-cli
+  reason: Ordinary Gemini interactive TUI or one-shot headless launch, with no deliberately retained peer-control protocol.
+- disposition: included
+  evidence_ids:
+  - official-acp
+  - source-acp-051
+  - local-help
+  id: profile-managed-acp
+  profile_ids:
+  - managed-acp
+  reason: Future Claudine-managed Gemini process launched explicitly in ACP mode and retained as a private JSON-RPC stdio child.
+- disposition: unknown
+  evidence_ids:
+  - official-acp
+  - source-acp-051
+  - local-help
+  id: coverage-review-managed-acp
+  profile_ids:
+  - managed-acp
+  reason: The existing profile does not cover other client launch modes, other launch origins. This migration does not establish that these combinations are impossible. Review interface ownership, lifetime, and discovery before expanding coverage; do not infer exclusion from current wrapper behavior.
+receipt_observations:
+- evidence_ids:
+  - official-acp
+  - source-acp-051
+  mechanism_id: acp-idle-prompt
+  signal: Successful session/prompt PromptResponse after the turn; no separate early acceptance response is established.
+  timing: terminal
+- evidence_ids:
+  - source-acp-051
+  mechanism_id: acp-cancel-then-prompt
+  signal: Cancellation and replacement have separate outcomes. Old PromptResponse cancelled, then replacement session/update stream and PromptResponse. Cancel has no acknowledgment response. Claudine must observe the old prompt's cancelled result before submitting; even then submission can fail, and no sender message ID makes ambiguous retries unsafe.
+  timing: multi_phase
+
 ---
 
 # Gemini CLI steering research
@@ -334,3 +377,12 @@ Primary sources are Gemini CLI's official [ACP mode documentation](https://gemin
 ## Changelog
 
 - 2026-09-08: Created the revision-2 Gemini steering report from official documentation, release source, and passive local inspection.
+
+
+## Revision 3 Contract Backfill
+
+Receipt timing, interface inventory, and case-specific discovery gaps were added
+from the existing evidence on 2026-09-08. No new provider observation or live test
+was performed. Unexamined profile combinations remain unknown, not unsupported.
+The original fleet model/effort provenance above describes the research run;
+this deterministic contract migration is a separate coordinator edit.

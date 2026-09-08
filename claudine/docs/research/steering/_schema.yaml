@@ -1,7 +1,10 @@
-# Revision 2 research contract. Shape validation is only the first gate;
+# Revision 3 research contract. Shape validation is only the first gate;
 # _fleet.md defines relational, coverage, and evidence review.
 $schema:
-    schema_revision: literal(2; required)
+    schema_revision: literal(3; required)
+    receipt_observations: "{ mechanism_id: string(required), timing: enum(early,terminal,multi_phase,none,unknown; required), signal: string(required), evidence_ids: string[](required) }[](required)"
+    interface_inventory: "{ id: string(required), profile_ids: string[](required), disposition: enum(included,excluded,unknown; required), reason: string(required), evidence_ids: string[](required) }[](required)"
+    discovery_gaps: "{ profile_id: string(required), os: enum(macos,linux,windows; required), origin: enum(native,claudine; required), launch_mode: enum(interactive,non_interactive; required), session_state: enum(working,idle; required), detail: string(required), next_check: string(required) }[](required)"
     provider: string(required)
     created: date(required)
     last_updated: date(required)

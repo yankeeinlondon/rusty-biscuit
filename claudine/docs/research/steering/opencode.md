@@ -1,6 +1,6 @@
 ---
 "$schema": "./_schema.yaml"
-schema_revision: 2
+schema_revision: 3
 provider: opencode
 created: '2026-09-08'
 last_updated: '2026-09-08'
@@ -71,7 +71,7 @@ access_findings:
   os: linux
   status: setup_required
   prerequisite: Deliberately expose and retain the authenticated endpoint, workspace
-    routing, and native provider session identity before launch; interruption requires explicit interactive approval.
+    routing, and native provider session identity before launch.
   applies_to_existing_sessions: 'no'
   evidence_ids: *1
 - mechanism_id: http-prompt-sync-active
@@ -79,7 +79,7 @@ access_findings:
   os: linux
   status: setup_required
   prerequisite: Deliberately expose and retain the authenticated endpoint, workspace
-    routing, and native provider session identity before launch; interruption requires explicit interactive approval.
+    routing, and native provider session identity before launch.
   applies_to_existing_sessions: 'no'
   evidence_ids: *2
 - mechanism_id: http-prompt-async-idle
@@ -87,7 +87,7 @@ access_findings:
   os: linux
   status: setup_required
   prerequisite: Deliberately expose and retain the authenticated endpoint, workspace
-    routing, and native provider session identity before launch; interruption requires explicit interactive approval.
+    routing, and native provider session identity before launch.
   applies_to_existing_sessions: 'no'
   evidence_ids: *3
 - mechanism_id: http-prompt-sync-idle
@@ -95,7 +95,7 @@ access_findings:
   os: linux
   status: setup_required
   prerequisite: Deliberately expose and retain the authenticated endpoint, workspace
-    routing, and native provider session identity before launch; interruption requires explicit interactive approval.
+    routing, and native provider session identity before launch.
   applies_to_existing_sessions: 'no'
   evidence_ids: *4
 - mechanism_id: http-abort-then-prompt
@@ -2550,13 +2550,12 @@ receipt_guarantees:
   - message read/list
   - session status
   - SSE message/session events
-  - streamed assistant response for synchronous route
+  - HTTP 204 admission response
   correlation: message_id
   evidence_ids: *1
-  limitations: A successful synchronous HTTP response confirms request acceptance,
-    but it can arrive only after waiting on prior work. A timeout or disconnect
-    before that response is ambiguous and must not be retried; acceptance does not
-    independently prove durable persistence, scheduling, or conversation delivery.
+  limitations: HTTP 204 confirms asynchronous request admission only; it does not
+    prove durable persistence, scheduling, or conversation delivery. A timeout or
+    disconnect before that response is ambiguous and must not be retried.
 - mechanism_id: http-prompt-sync-active
   request_acceptance: confirmed
   persistence: unknown
@@ -2581,7 +2580,7 @@ receipt_guarantees:
   - message read/list
   - session status
   - SSE message/session events
-  - streamed assistant response for synchronous route
+  - HTTP 204 admission response
   correlation: message_id
   evidence_ids: *3
   limitations: The initial acknowledgment does not independently prove durable persistence,
@@ -2616,6 +2615,98 @@ receipt_guarantees:
   evidence_ids: *5
   limitations: Initial abort acknowledgment proves neither completed cancellation
     nor replacement acceptance/delivery.
+discovery_gaps: []
+interface_inventory:
+- disposition: included
+  evidence_ids:
+  - official-cli
+  - source-launch-1-18-29
+  - local-help-1-18-29
+  id: profile-ordinary-tui
+  profile_ids:
+  - ordinary-tui
+  reason: Ordinary interactive OpenCode TUI using its internal worker transport and no deliberately exposed HTTP endpoint.
+- disposition: included
+  evidence_ids:
+  - official-cli
+  - source-launch-1-18-29
+  - local-help-1-18-29
+  id: profile-ordinary-run
+  profile_ids:
+  - ordinary-run
+  reason: Ordinary one-shot opencode run with its in-process random-port server and no retained external endpoint.
+- disposition: included
+  evidence_ids:
+  - official-server
+  - official-cli
+  - source-launch-1-18-29
+  id: profile-exposed-tui-http
+  profile_ids:
+  - exposed-tui-http
+  reason: Interactive TUI deliberately launched with a known HTTP hostname/port and optional Basic authentication.
+- disposition: unknown
+  evidence_ids:
+  - official-server
+  - official-cli
+  - source-launch-1-18-29
+  id: coverage-review-exposed-tui-http
+  profile_ids:
+  - exposed-tui-http
+  reason: The existing profile does not cover other client launch modes. This migration does not establish that these combinations are impossible. Review interface ownership, lifetime, and discovery before expanding coverage; do not infer exclusion from current wrapper behavior.
+- disposition: included
+  evidence_ids:
+  - official-server
+  - official-cli
+  - local-help-1-18-29
+  id: profile-retained-server-run-attach
+  profile_ids:
+  - retained-server-run-attach
+  reason: Long-lived headless OpenCode server with a non-interactive run client attached by URL.
+- disposition: unknown
+  evidence_ids:
+  - official-server
+  - official-cli
+  - local-help-1-18-29
+  id: coverage-review-retained-server-run-attach
+  profile_ids:
+  - retained-server-run-attach
+  reason: The existing profile does not cover other client launch modes. This migration does not establish that these combinations are impossible. Review interface ownership, lifetime, and discovery before expanding coverage; do not infer exclusion from current wrapper behavior.
+receipt_observations:
+- evidence_ids:
+  - official-server
+  - source-api-1-18-29
+  - source-runner-1-18-29
+  mechanism_id: http-prompt-async-active
+  signal: 204 contains no delivery object. Correlate the chosen messageID through message reads and SSE when available. Initial receipt only; later processing and settlement have separate signals.
+  timing: early
+- evidence_ids:
+  - official-server
+  - source-api-1-18-29
+  - source-runner-1-18-29
+  mechanism_id: http-prompt-sync-active
+  signal: Successful synchronous prompt response can wait on execution or prior work; no separate early acceptance response is established.
+  timing: terminal
+- evidence_ids:
+  - official-server
+  - source-api-1-18-29
+  - source-runner-1-18-29
+  mechanism_id: http-prompt-async-idle
+  signal: 204 acknowledges request handling only, not completed conversation delivery. Initial receipt only; later processing and settlement have separate signals.
+  timing: early
+- evidence_ids:
+  - official-server
+  - source-api-1-18-29
+  mechanism_id: http-prompt-sync-idle
+  signal: Successful synchronous prompt response can wait on execution or prior work; no separate early acceptance response is established.
+  timing: terminal
+- evidence_ids:
+  - official-server
+  - source-api-1-18-29
+  - source-runner-1-18-29
+  mechanism_id: http-abort-then-prompt
+  signal: Cancellation and replacement have separate outcomes. Boolean abort result plus later prompt acknowledgment/result and SSE/status observations. Initial abort acknowledgment proves neither completed cancellation nor replacement acceptance/delivery.
+  timing: multi_phase
+
 ---
 # Steering Research: OpenCode CLI
 
@@ -2761,3 +2852,12 @@ records the corresponding blockers and next checks.
 
 - 2026-09-08: Refreshed revision 1 into schema revision 2; separated ordinary and HTTP-exposed launch profiles, expanded protocol/receipt metadata, and completed relational coverage.
 - 2026-09-08: Preserved the initial passive findings for OpenCode 1.18.29; no live delivery evidence was added.
+
+
+## Revision 3 Contract Backfill
+
+Receipt timing, interface inventory, and case-specific discovery gaps were added
+from the existing evidence on 2026-09-08. No new provider observation or live test
+was performed. Unexamined profile combinations remain unknown, not unsupported.
+The original fleet model/effort provenance above describes the research run;
+this deterministic contract migration is a separate coordinator edit.
