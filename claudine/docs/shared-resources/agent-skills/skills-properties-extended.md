@@ -13,7 +13,7 @@ Beyond the basic properties that you see frequently in Agent Skill definitions y
 
 ### Additional Skill Properties
 
-We do research on every supported CLI agent and you'll find the detailed results on their support for Agent Skills in @claudine/docs/research/skills (one file per agent) but here are some properties you may have run into in the past to help you understand what's out there in the wild:
+We do research on every supported CLI agent and you'll find the detailed results on their support for Agent Skills in @claudine/docs/research/skills (_one file per agent_) but here are some properties you may have run into in the past to help you understand what's out there in the wild:
 
 - `when_to_use` is supported in Claude (maybe others) but has a huge amount of sematic overlap with the `description`. Claudine will not make any changes to this property but you might want to move some of the text in `when_to_use` into `description` so that all agents are better able to distinguish when it's best to use this skill
 - `effort` is also defined in Claude as a way to override the default thinking level, not many others include it but can't be harmed by it's inclusion. As an instruction it's a bit odd anyway as it seems like you'd want a thinking level assigned to an overall prompt but not a skill.
