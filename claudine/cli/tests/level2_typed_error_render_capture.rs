@@ -1179,14 +1179,11 @@ fn run_inline_in_pane(
 
     harness.send_text(b"clear\n").expect("clear pane");
     let _ = biscuit_test_harness::wait_for_prompt(harness);
-    harness
-        .send_text(format!("cd {}\n", staged.workspace.path().display()).as_bytes())
-        .expect("cd into workspace");
-    let _ = biscuit_test_harness::wait_for_prompt(harness);
 
     let command = format!(
-        "{claudine} inline-compose --claude --no-interactive {}; echo {EXIT_MARKER}$?",
-        staged.doc.display()
+        "{} inline-compose --claude --no-interactive {}; echo {EXIT_MARKER}$?",
+        common::sh_quote(&claudine),
+        common::sh_quote(&document)
     );
     let mut env = vec![
         ("HOME", home.as_str()),
@@ -1198,8 +1195,19 @@ fn run_inline_in_pane(
     if let Some(replacement) = replacement {
         env.push(("CLAUDINE_AGENT_DOCUMENT", replacement));
     }
+    // Multiline YAML and the host PATH must not pass through the interactive
+    // line editor or the terminal's bounded canonical input buffer.
+    let script = staged.workspace.path().join("run-inline.sh");
+    let mut source = format!("cd {} || exit 1\n", common::sh_quote(&home));
+    for (key, value) in env {
+        source.push_str(&format!("export {key}={}\n", common::sh_quote(value)));
+    }
+    source.push_str(&command);
+    std::fs::write(&script, source).expect("stage inline invocation");
     harness
-        .send_command_with_env(&command, &env)
+        .send_text(
+            format!("/bin/sh {}\n", common::sh_quote(&script.to_string_lossy())).as_bytes(),
+        )
         .expect("send inline composition");
     let capture = wait_for_exit_marker(harness, Duration::from_secs(30));
     let _ = biscuit_test_harness::wait_for_prompt(harness);

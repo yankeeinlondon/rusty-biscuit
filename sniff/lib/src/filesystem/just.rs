@@ -558,59 +558,53 @@ set shell := [\"bash\"]\n\nFOO := \"bar\"\n\nbuild:\n    echo $FOO\n";
 
     #[test]
     fn detect_justfiles_finds_repo_files() {
-        // Run from this repo's root
-        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let result = detect_justfiles(&base, &[]).unwrap();
-        // Should find at least the root justfile plus some package area justfiles
-        assert!(
-            result.len() > 1,
-            "Expected multiple justfiles, found {}",
-            result.len()
-        );
-        // All should have at least one recipe
-        for jf in &result {
-            assert!(
-                !jf.recipes.is_empty(),
-                "Justfile {} has no recipes",
-                jf.relative
-            );
-        }
+        let repo = justfile_repository();
+        let result = detect_justfiles(&repo.path().join("sniff/src"), &[]).unwrap();
+        let mut paths: Vec<_> = result
+            .iter()
+            .map(|jf| PathBuf::from(&jf.relative))
+            .collect();
+        paths.sort();
+        let mut expected = vec![
+            PathBuf::from("justfile"),
+            PathBuf::from("seedling/justfile"),
+            PathBuf::from("sniff/justfile"),
+        ];
+        expected.sort();
+        assert_eq!(paths, expected);
+        let empty = result
+            .iter()
+            .find(|jf| jf.path.ends_with("seedling/justfile"))
+            .unwrap();
+        assert!(empty.recipes.is_empty());
+        assert!(!empty.has_default);
+        let root = result
+            .iter()
+            .find(|jf| jf.relative == "justfile")
+            .unwrap();
+        assert_eq!(root.recipes.len(), 1);
+        assert_eq!(root.recipes[0].name, "build");
+        assert_eq!(root.recipes[0].body.trim(), "echo build");
     }
 
     #[test]
     fn detect_justfiles_with_filter() {
-        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let result = detect_justfiles(&base, &["sniff".to_string()]).unwrap();
-        assert!(
-            !result.is_empty(),
-            "Should find at least one justfile matching 'sniff'"
-        );
-        for jf in &result {
-            assert!(
-                jf.relative.to_lowercase().contains("sniff")
-                    || jf
-                        .path
-                        .display()
-                        .to_string()
-                        .to_lowercase()
-                        .contains("sniff"),
-                "Justfile {} should match filter 'sniff'",
-                jf.relative
-            );
-        }
+        let repo = justfile_repository();
+        let result = detect_justfiles(repo.path(), &["SNIFF".to_string()]).unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(Path::new(&result[0].relative), Path::new("sniff/justfile"));
     }
 
     #[test]
     fn detect_justfiles_tracks_has_default() {
-        let base = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let result = detect_justfiles(&base, &[]).unwrap();
-        // At least some justfiles should have a default recipe
-        let any_has_default = result.iter().any(|jf| jf.has_default);
-        assert!(
-            any_has_default,
-            "Expected at least one justfile with a default recipe"
-        );
-        // The default recipe should NOT appear in the recipes list
+        let repo = justfile_repository();
+        let result = detect_justfiles(repo.path(), &[]).unwrap();
+        let default_only = result
+            .iter()
+            .find(|jf| jf.path.ends_with("sniff/justfile"))
+            .unwrap();
+        assert!(default_only.has_default);
+        assert!(default_only.recipes.is_empty());
         for jf in &result {
             assert!(
                 !jf.recipes.iter().any(|r| r.name == "default"),
@@ -618,5 +612,24 @@ set shell := [\"bash\"]\n\nFOO := \"bar\"\n\nbuild:\n    echo $FOO\n";
                 jf.relative
             );
         }
+    }
+
+    fn justfile_repository() -> tempfile::TempDir {
+        let repo = tempfile::Builder::new()
+            .prefix("justfile-repo-")
+            .tempdir()
+            .unwrap();
+        git2::Repository::init(repo.path()).unwrap();
+        std::fs::create_dir_all(repo.path().join("sniff/src")).unwrap();
+        std::fs::create_dir(repo.path().join("seedling")).unwrap();
+        std::fs::write(repo.path().join("justfile"), "build:\n    echo build\n").unwrap();
+        std::fs::write(
+            repo.path().join("sniff/justfile"),
+            "default:\n    echo default\n",
+        )
+        .unwrap();
+        // Empty package placeholders are valid discovery results.
+        std::fs::write(repo.path().join("seedling/justfile"), "").unwrap();
+        repo
     }
 }
