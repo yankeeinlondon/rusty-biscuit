@@ -776,7 +776,7 @@ fn retired_packages_reach_verdict_through_package_evidence() {
             missing.push(format!("ci-verdict still depends on {retired_job}"));
         }
     }
-    if !verdict.contains("uses: actions/download-artifact@v4")
+    if !verdict.contains("uses: actions/download-artifact@")
         || !verdict.contains("ci-rollup rollup")
         || !verdict.contains("ci-rollup verdict")
     {
@@ -1577,6 +1577,49 @@ fn ci_verdict_is_the_single_required_check() {
         !ci.contains("baseline-failures.txt"),
         "the retired display-name baseline must have no consumers"
     );
+}
+
+#[test]
+fn post_merge_reuse_preserves_the_verdict_and_normal_ci_fallback() {
+    let validation = job_block("ci.yml", "  validation:");
+    assert!(
+        validation.contains("reuse_validation.py check")
+            && validation.contains("steps.reuse.outcome == 'success'")
+            && validation.contains("continue-on-error: true")
+            && validation.contains("actions: read")
+            && validation.contains("pull-requests: read"),
+        "reuse must verify GitHub evidence and discard outputs from failed lookups"
+    );
+    let scope = job_block("ci.yml", "  scope:");
+    assert!(
+        scope.contains("needs: validation")
+            && scope.contains("!cancelled() && needs.validation.outputs.reuse != 'true'")
+            && scope.contains("reuse_validation.py record")
+            && scope.contains("name: ${{ steps.receipt.outputs.receipt }}")
+            && scope.contains("if: github.event_name == 'pull_request'"),
+        "scope must run on lookup failure and publish receipts for PR validation"
+    );
+    let verdict = job_block("ci.yml", "  ci-verdict:");
+    assert!(
+        verdict.contains("      - validation\n")
+            && verdict.contains("if: always()")
+            && verdict.contains("needs.validation.result == 'success'")
+            && verdict.contains("actions/runs/$VALIDATED_RUN"),
+        "the existing required verdict must link reused evidence on main"
+    );
+    let steps = verdict.split_once("    steps:\n").unwrap().1;
+    for step in steps.split("      - ").skip(2) {
+        assert!(
+            step.contains("needs.validation.outputs.reuse != 'true'"),
+            "normal verdict steps must not build Rust or judge an empty grid on reuse: {step}"
+        );
+    }
+    for job in ["  preflight:", "  ci-tooling:"] {
+        assert!(
+            job_block("ci.yml", job).contains("python3 scripts/ci/test_reuse_validation.py"),
+            "the reuse decision tests must run in {job}"
+        );
+    }
 }
 
 #[test]
