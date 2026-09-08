@@ -145,6 +145,11 @@ The `claudine` binary provides interactive setup, hook inspection, event handlin
 
 **Context command:** `claudine context` renders from Darkmatter's public typed descriptor catalogs, not from parsed Markdown. The default report shows every context variable grouped by category with `Property` (`ctx.NAME`), `Type`, and `Description` columns. `--values` replaces `Description` with live captured values (nulls shown, not dropped). `--expressions` shows the expression-language overview — precedence, truthiness, unary/comparison/arithmetic operators, variable access, parse modes, null propagation, and the complete function catalog grouped by category — with an `Example` column where layout permits. `--side-effects` shows the capability catalog with `Capability`, `Description`, `Safety`, and `Example` columns; the `Example` column is hidden below 70 characters to preserve the minimum-supported-width floor. It is documentation-only and does not invoke, probe, or check availability of any capability. All reports share a 140ch-inclusive width contract, inverse-styled inline code, and `UnorderedList` bullet formatting. Every report table fills to the right margin (`configure_shared_table` sets `width: 100%` via the shared `Table`'s `Width::Fixed(Length::Percent(100))`; the last column absorbs the slack) so tables with and without wrapped cells share one right edge — and the `Example` column carries a per-table `min_width` floor so a long `Description` cannot starve it.
 
+For composed prompts, `ctx.repo` must resolve without requesting `ctx.branch`
+or `ctx.worktree`. `InvocationContext::project_evidence` supplies cached Git
+identity and repository topology to every repository-dependent context group.
+An empty `ctx.area` at the repository root is expected.
+
 **Wrapper & composition subsystems** — each row is a pointer; depth lives in the linked doc:
 
 | Subsystem | In one line | Reference |

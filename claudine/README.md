@@ -95,6 +95,10 @@ The immediate benefits of wrapped execution are:
 
 Claudine's composition features let you use Markdown as a dynamic template for agentic CLI sessions, leveraging [Darkmatter](../darkmatter/README.md)'s composition pipeline (transclusion, interpolation, conditionals, shell commands).
 
+Prompt context uses the launch repository even for prompts stored elsewhere:
+`ctx.repo` provides its name independently of Git-variable references, while
+`ctx.area` is empty at the repository root. See [context variables](docs/topics/context/context-variables.md).
+
 Three canonical commands:
 
 - **`claudine compose <file-ref> [key=value ...]`** — compose a Markdown file and send it as a prompt (no file mutation)
