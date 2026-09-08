@@ -46,10 +46,12 @@
 //!
 //! A `macro_rules!` defined in a scanned file is expanded at the syntax level:
 //! each transcriber is rewritten with placeholders for its metavariables, one
-//! copy per repetition, and `$crate` as `crate`, then censused under the name
-//! `macro!` — or `macro!::fn` for a function the transcriber emits — in every
-//! module context in the scanned crate. This conservative superset includes
-//! every possible invocation scope, so invocation-site resolution cannot hide
+//! copy per repetition, and `$crate` as a definition-crate marker, then
+//! censused under the name `macro!` — or `macro!::fn` for a function the
+//! transcriber emits. A non-exported macro is checked in every module context
+//! in its scanned crate; an exported macro is checked in every module context
+//! across both guarded crates. This conservative superset includes every
+//! possible local invocation scope, so invocation-site resolution cannot hide
 //! a construction; an impossible context may instead produce a loud false
 //! positive. A transcriber that yields neither a block nor items fails the
 //! census outright. Invocation arguments are still read as expressions.
@@ -117,6 +119,7 @@ const HELPER_ROOTS: [&str; 2] = ["crate", "claudine"];
 const EXECUTION_METHODS: [&str; 4] = ["spawn", "status", "output", "exec"];
 
 const UNCONTROLLED: &str = "UNCONTROLLED";
+const MACRO_DEFINITION_CRATE: &str = "__macro_definition_crate";
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 struct SpawnSite {
@@ -368,6 +371,12 @@ impl Location {
 }
 
 type LocationKey = (Option<PathBuf>, Vec<String>);
+
+#[derive(Clone)]
+struct ExpansionContext<'a> {
+    resolver: &'a ModuleResolver,
+    location: Location,
+}
 
 /// One binding step on the resolution stack: where it was taken, the name
 /// being looked up, and the path being followed for it.
@@ -662,10 +671,25 @@ enum FunctionItem {
 struct NameScope<'a> {
     resolver: &'a ModuleResolver,
     location: Location,
+    macro_definition: Option<&'a ExpansionContext<'a>>,
     helper_scope: &'a BareHelperScope,
 }
 
 impl NameScope<'_> {
+    fn resolve(&self, segments: &[&str]) -> Option<Identity> {
+        if let [MACRO_DEFINITION_CRATE, rest @ ..] = segments {
+            let definition = self.macro_definition?;
+            let definition_path = std::iter::once("crate")
+                .chain(rest.iter().copied())
+                .collect::<Vec<_>>();
+            definition
+                .resolver
+                .resolve(&definition.location, &definition_path)
+        } else {
+            self.resolver.resolve(&self.location, segments)
+        }
+    }
+
     fn function_item(&self, path: &syn::Path) -> Option<FunctionItem> {
         if let Some(kind) = self.constructor_kind(path) {
             return Some(FunctionItem::Constructor(kind));
@@ -679,7 +703,7 @@ impl NameScope<'_> {
         let [type_path @ .., "new"] = segments.as_slice() else {
             return None;
         };
-        match self.resolver.resolve(&self.location, type_path)? {
+        match self.resolve(type_path)? {
             Identity::Command(kind) => Some(kind),
             _ => None,
         }
@@ -698,7 +722,7 @@ impl NameScope<'_> {
             _ => {}
         }
         matches!(
-            self.resolver.resolve(&self.location, &segments),
+            self.resolve(&segments),
             Some(Identity::Helper)
         )
     }
@@ -712,7 +736,7 @@ impl NameScope<'_> {
             return None;
         }
         let segments = path_segments(&path.path);
-        match self.resolver.resolve(&self.location, &as_strs(&segments))? {
+        match self.resolve(&as_strs(&segments))? {
             Identity::Command(kind) => Some(kind),
             _ => None,
         }
@@ -1344,8 +1368,14 @@ struct FileScanner<'a> {
     resolver: &'a ModuleResolver,
     /// The module being walked; inline `mod` items push onto it.
     location: Location,
-    /// Every module whose bindings a local macro expansion may inherit.
-    expansion_contexts: &'a [Location],
+    /// Modules in the definition crate whose bindings any local macro may
+    /// inherit.
+    local_expansion_contexts: &'a [ExpansionContext<'a>],
+    /// Modules in either guarded crate whose bindings an exported macro may
+    /// inherit.
+    exported_expansion_contexts: &'a [ExpansionContext<'a>],
+    /// The defining crate and module while scanning a macro transcriber.
+    macro_definition: Option<ExpansionContext<'a>>,
     /// `macro!::` while walking a macro's expanded transcriber, so a function
     /// it emits is reported under the macro that emits it.
     function_prefix: String,
@@ -1360,6 +1390,7 @@ impl FileScanner<'_> {
         let scope = NameScope {
             resolver: self.resolver,
             location: self.location.clone(),
+            macro_definition: self.macro_definition.as_ref(),
             helper_scope: &helper_scope,
         };
         for command in FunctionAnalyzer::analyze(&scope, signature, block) {
@@ -1382,9 +1413,9 @@ impl FileScanner<'_> {
     }
 
     /// Censuses every transcriber of a `macro_rules!` definition against every
-    /// module context in the crate. Literal identifiers use invocation-site
-    /// bindings, while rewriting `$crate` preserves definition-crate lookup.
-    fn scan_macro_rules(&mut self, name: &str, definition: &syn::Macro) {
+    /// module context where it can be invoked. Exported macros include both
+    /// guarded crates; `$crate` continues to use the definition context.
+    fn scan_macro_rules(&mut self, name: &str, definition: &syn::Macro, exported: bool) {
         let path = self.path;
         let unanalyzable = move |what: &str| -> ! {
             panic!(
@@ -1395,6 +1426,11 @@ impl FileScanner<'_> {
             unanalyzable("does not split into `(matcher) => {transcriber}` rules")
         };
         let prefix = format!("{}{name}!::", self.function_prefix);
+        let contexts = if exported {
+            self.exported_expansion_contexts.to_vec()
+        } else {
+            self.local_expansion_contexts.to_vec()
+        };
         for transcriber in transcribers {
             let body = rewrite_transcriber(transcriber);
             let braced = TokenStream::from(TokenTree::Group(Group::new(Delimiter::Brace, body.clone())));
@@ -1404,9 +1440,14 @@ impl FileScanner<'_> {
                 .then(|| syn::parse2::<syn::File>(body))
                 .transpose()
                 .unwrap_or_else(|_| unanalyzable("expands to neither a block nor items"));
-            let definition_location = self.location.clone();
-            for context in self.expansion_contexts {
-                self.location = context.clone();
+            let definition = ExpansionContext {
+                resolver: self.resolver,
+                location: self.location.clone(),
+            };
+            for context in &contexts {
+                self.resolver = context.resolver;
+                self.location = context.location.clone();
+                self.macro_definition = Some(definition.clone());
                 if let Some(block) = &block {
                     self.scan_function(format!("{name}!"), None, block);
                     let outer = std::mem::replace(&mut self.function_prefix, prefix.clone());
@@ -1418,7 +1459,9 @@ impl FileScanner<'_> {
                     self.function_prefix = outer;
                 }
             }
-            self.location = definition_location;
+            self.resolver = definition.resolver;
+            self.location = definition.location;
+            self.macro_definition = None;
         }
     }
 }
@@ -1447,7 +1490,7 @@ fn macro_rules_transcribers(tokens: TokenStream) -> Option<Vec<TokenStream>> {
 }
 
 /// A transcriber as analyzable Rust: `$name` becomes the placeholder
-/// `__meta_name`, `$crate` becomes `crate`, and a repetition
+/// `__meta_name`, `$crate` becomes a definition-context marker, and a repetition
 /// `$( ... ) sep? op` is emitted once without its separator and operator.
 /// Spans are kept, so a record inside the expansion carries the definition's
 /// own line.
@@ -1459,7 +1502,7 @@ fn rewrite_transcriber(tokens: TokenStream) -> TokenStream {
             TokenTree::Punct(dollar) if dollar.as_char() == '$' => match tokens.peek() {
                 Some(TokenTree::Ident(name)) => {
                     let placeholder = if name == "crate" {
-                        Ident::new("crate", name.span())
+                        Ident::new(MACRO_DEFINITION_CRATE, name.span())
                     } else {
                         Ident::new(&format!("__meta_{name}"), name.span())
                     };
@@ -1499,7 +1542,8 @@ impl<'ast> Visit<'ast> for FileScanner<'_> {
         if let Some(name) = &item.ident
             && item.mac.path.is_ident("macro_rules")
         {
-            self.scan_macro_rules(&name.to_string(), &item.mac);
+            let exported = item.attrs.iter().any(|attr| attr.path().is_ident("macro_export"));
+            self.scan_macro_rules(&name.to_string(), &item.mac, exported);
         }
         visit::visit_item_macro(self, item);
     }
@@ -1631,8 +1675,15 @@ fn scan_source(path: &str, source: &str) -> Vec<SpawnSite> {
     let file = parse_source(path, source);
     let resolver = ModuleResolver::new(None);
     let location = resolver.location_of(None, &file);
-    let contexts = location.module_contexts();
-    scan_parsed(path, &file, &resolver, location, &contexts)
+    let contexts = location
+        .module_contexts()
+        .into_iter()
+        .map(|location| ExpansionContext {
+            resolver: &resolver,
+            location,
+        })
+        .collect::<Vec<_>>();
+    scan_parsed(path, &file, &resolver, location, &contexts, &contexts)
 }
 
 /// Scan one source with the bindings its imports reach through the crate.
@@ -1644,8 +1695,12 @@ fn scan_crate_file(
 ) -> Vec<SpawnSite> {
     let file = parse_source(display_path, source);
     let location = resolver.location_of(Some(file_path), &file);
-    let contexts = location.module_contexts();
-    scan_parsed(display_path, &file, resolver, location, &contexts)
+    let contexts = location
+        .module_contexts()
+        .into_iter()
+        .map(|location| ExpansionContext { resolver, location })
+        .collect::<Vec<_>>();
+    scan_parsed(display_path, &file, resolver, location, &contexts, &contexts)
 }
 
 fn scan_crate_file_with_contexts(
@@ -1653,11 +1708,19 @@ fn scan_crate_file_with_contexts(
     file_path: &Path,
     source: &str,
     resolver: &ModuleResolver,
-    expansion_contexts: &[Location],
+    local_expansion_contexts: &[ExpansionContext<'_>],
+    exported_expansion_contexts: &[ExpansionContext<'_>],
 ) -> Vec<SpawnSite> {
     let file = parse_source(display_path, source);
     let location = resolver.location_of(Some(file_path), &file);
-    scan_parsed(display_path, &file, resolver, location, expansion_contexts)
+    scan_parsed(
+        display_path,
+        &file,
+        resolver,
+        location,
+        local_expansion_contexts,
+        exported_expansion_contexts,
+    )
 }
 
 fn parse_source(path: &str, source: &str) -> syn::File {
@@ -1669,13 +1732,16 @@ fn scan_parsed(
     file: &syn::File,
     resolver: &ModuleResolver,
     location: Location,
-    expansion_contexts: &[Location],
+    local_expansion_contexts: &[ExpansionContext<'_>],
+    exported_expansion_contexts: &[ExpansionContext<'_>],
 ) -> Vec<SpawnSite> {
     let mut scanner = FileScanner {
         path,
         resolver,
         location,
-        expansion_contexts,
+        local_expansion_contexts,
+        exported_expansion_contexts,
+        macro_definition: None,
         function_prefix: String::new(),
         sites: Vec::new(),
     };
@@ -1717,28 +1783,66 @@ fn collect_rs_files(directory: &Path, files: &mut Vec<PathBuf>) {
 }
 
 fn generate_inventory() -> Inventory {
+    struct ScannedCrate {
+        resolver: ModuleResolver,
+        files: Vec<PathBuf>,
+        contexts: Vec<Location>,
+    }
+
     let root = workspace_root();
     let mut sites = Vec::new();
-    for relative_root in SCANNED_ROOTS {
+    let mut crates = SCANNED_ROOTS.map(|relative_root| {
         let src_root = root.join(relative_root);
-        let resolver = ModuleResolver::new(Some(src_root.clone()));
         let files = production_files(&src_root);
-        let mut contexts = Vec::new();
-        for file in &files {
+        ScannedCrate {
+            resolver: ModuleResolver::new(Some(src_root.clone())),
+            files,
+            contexts: Vec::new(),
+        }
+    });
+    for scanned_crate in &mut crates {
+        for file in &scanned_crate.files {
             let source = fs::read_to_string(file).unwrap();
             let parsed = parse_source(&file.display().to_string(), &source);
-            contexts.extend(resolver.location_of(Some(file), &parsed).module_contexts());
+            scanned_crate
+                .contexts
+                .extend(scanned_crate.resolver.location_of(Some(file), &parsed).module_contexts());
         }
-        for file in files {
+    }
+    let exported_contexts = crates
+        .iter()
+        .flat_map(|scanned_crate| {
+            scanned_crate
+                .contexts
+                .iter()
+                .cloned()
+                .map(|location| ExpansionContext {
+                    resolver: &scanned_crate.resolver,
+                    location,
+                })
+        })
+        .collect::<Vec<_>>();
+    for scanned_crate in &crates {
+        let local_contexts = scanned_crate
+            .contexts
+            .iter()
+            .cloned()
+            .map(|location| ExpansionContext {
+                resolver: &scanned_crate.resolver,
+                location,
+            })
+            .collect::<Vec<_>>();
+        for file in &scanned_crate.files {
             let relative = file.strip_prefix(root.join("claudine")).unwrap();
             let relative = relative.to_string_lossy().replace('\\', "/");
-            let source = fs::read_to_string(&file).unwrap();
+            let source = fs::read_to_string(file).unwrap();
             sites.extend(scan_crate_file_with_contexts(
                 &relative,
-                &file,
+                file,
                 &source,
-                &resolver,
-                &contexts,
+                &scanned_crate.resolver,
+                &local_contexts,
+                &exported_contexts,
             ));
         }
     }
@@ -2944,6 +3048,121 @@ fn main() {
     let sites = scan_source("fixture.rs", source);
     assert_eq!(tally(&sites, "launch!"), (0, 1));
     assert_eq!(sites.len(), 1);
+}
+
+/// An exported transcriber can inherit an ordinary item name from a module in
+/// the other guarded crate. Keeping the definition and invocation resolvers
+/// separate is what makes that cross-crate expansion visible.
+#[test]
+fn an_exported_macro_rules_transcriber_uses_a_cross_crate_invocation_scope() {
+    let definition_source = r#"
+#[macro_export]
+macro_rules! launch {
+    () => { Command::new("true").status().unwrap() };
+}
+"#;
+    let invocation_source = r#"
+use std::process::Command;
+
+fn run() {
+    dependency::launch!();
+}
+"#;
+    let definition = parse_source("definition/src/lib.rs", definition_source);
+    let invocation = parse_source("invocation/src/main.rs", invocation_source);
+    let definition_resolver = ModuleResolver::new(None);
+    let invocation_resolver = ModuleResolver::new(None);
+    let definition_location = definition_resolver.location_of(None, &definition);
+    let invocation_location = invocation_resolver.location_of(None, &invocation);
+    let definition_contexts = definition_location
+        .module_contexts()
+        .into_iter()
+        .map(|location| ExpansionContext {
+            resolver: &definition_resolver,
+            location,
+        })
+        .collect::<Vec<_>>();
+
+    let before = scan_parsed(
+        "definition/src/lib.rs",
+        &definition,
+        &definition_resolver,
+        definition_location.clone(),
+        &definition_contexts,
+        &definition_contexts,
+    );
+    assert_eq!(tally(&before, "launch!"), (0, 0));
+
+    let mut all_contexts = definition_contexts.clone();
+    all_contexts.extend(
+        invocation_location
+            .module_contexts()
+            .into_iter()
+            .map(|location| ExpansionContext {
+                resolver: &invocation_resolver,
+                location,
+            }),
+    );
+    let after = scan_parsed(
+        "definition/src/lib.rs",
+        &definition,
+        &definition_resolver,
+        definition_location,
+        &definition_contexts,
+        &all_contexts,
+    );
+    assert_eq!(tally(&after, "launch!"), (0, 1));
+    assert_eq!(after.len(), 1);
+}
+
+#[test]
+fn an_exported_macro_rules_transcriber_keeps_dollar_crate_in_the_definition_crate() {
+    let definition_source = r#"
+pub use std::process::Command as DefinitionCommand;
+
+#[macro_export]
+macro_rules! launch {
+    () => { $crate::DefinitionCommand::new("true").status().unwrap() };
+}
+"#;
+    let invocation_source = r#"
+type DefinitionCommand = String;
+"#;
+    let definition = parse_source("definition/src/lib.rs", definition_source);
+    let invocation = parse_source("invocation/src/main.rs", invocation_source);
+    let definition_resolver = ModuleResolver::new(None);
+    let invocation_resolver = ModuleResolver::new(None);
+    let definition_location = definition_resolver.location_of(None, &definition);
+    let invocation_location = invocation_resolver.location_of(None, &invocation);
+    let definition_contexts = definition_location
+        .module_contexts()
+        .into_iter()
+        .map(|location| ExpansionContext {
+            resolver: &definition_resolver,
+            location,
+        })
+        .collect::<Vec<_>>();
+    let mut all_contexts = definition_contexts.clone();
+    all_contexts.extend(
+        invocation_location
+            .module_contexts()
+            .into_iter()
+            .map(|location| ExpansionContext {
+                resolver: &invocation_resolver,
+                location,
+            }),
+    );
+
+    let sites = scan_parsed(
+        "definition/src/lib.rs",
+        &definition,
+        &definition_resolver,
+        definition_location,
+        &definition_contexts,
+        &all_contexts,
+    );
+    assert_eq!(tally(&sites, "launch!"), (0, 2));
+    assert_eq!(sites.len(), 2);
 }
 
 /// Externally generated tokens are outside the source-authored census. Both a
