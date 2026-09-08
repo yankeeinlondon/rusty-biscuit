@@ -25,7 +25,9 @@ failure:
 ---
 # Steering Research: {{state.name}}
 
-Draft research prompt for review and a pilot before full-fleet execution.
+Fleet research prompt using steering schema revision 2. The Claude Code,
+OpenCode, Codex, and Pi passive pilots informed this contract. Refresh those
+reports into revision 2, then use the same contract for the remaining roster.
 Use the Claudine skill. Research the CLI identified by roster slug
 `{{state.slug}}`, binary `{{state.binary}}`, and official site `{{state.site}}`.
 Write only `{{file}}` and any explicitly assigned sanitized evidence fixtures.
@@ -34,15 +36,19 @@ Do not modify production code, this prompt, the schema, or another provider's re
 ## Execution Contract
 
 The research task must run with `gpt-5.6-sol` and low thinking. The sequence
-launcher must supply Codex's `-c model_reasoning_effort=low` option and verify
+launcher must explicitly forward `-- -m gpt-5.6-sol -c model_reasoning_effort=low`
+to Codex and verify
 the actual model and effort in execution metadata. A requested model string is
-not proof of the resolved model. Do not substitute another model silently.
+not proof of the resolved model. When the provider does not expose resolved
+execution metadata, say that model and effort provenance is launcher-supplied;
+do not fabricate independent verification. Do not substitute another model silently.
 
 This first pass is read-only investigation plus writing research artifacts.
 Do not message, interrupt, or alter any existing agent session. Do not launch
 live delivery experiments in this pass. Describe a disposable-session test when
 behavior cannot be established by documentation or passive inspection; mark the
 claim unverified. Do not focus terminal or browser windows or print credentials.
+Run non-interactively and do not request or wait for human approval.
 
 Use official documentation, versioned source, release notes, and passive local
 inspection. Use Sniff for host/process discovery; read its skill before doing so.
@@ -96,6 +102,13 @@ hooks, and extensions. Do not assume stdin remains writable or feeds the active
 turn. Document terminal-keystroke injection as a distinct approach if encountered;
 do not equate it with a stable messaging protocol.
 
+For a future Claudine-managed launch profile, prefer a verified provider prompt
+RPC where available. Define the verified fallback and its warning when RPC is
+unavailable. The profile must preserve enabled extensions, skills, prompt
+templates, context files, and explicit provider settings; transport selection
+must not silently disable them. Non-interactive operation cannot depend on a
+receiving human approving messages or provider UI requests.
+
 For Claude Code, independently investigate the user's report of PID-named JSON
 records in `~/.claude/sessions/`, `messagingSocketPath`, authenticated Unix sockets
 under `/tmp/cc-socks/` with sibling `.key` files, and next-tool-round delivery.
@@ -105,18 +118,33 @@ notices. None of these claims is established merely by appearing in this prompt.
 ## Metadata Contract
 
 Read `./_schema.yaml` and include `$schema: ./_schema.yaml` in the report.
-Use `schema_revision: 1`, the roster slug in `provider`, today's date
+Use `schema_revision: 2`, the roster slug in `provider`, today's date
 (`{{ctx.today}}`) in `last_updated`, and preserve `created` on refresh.
 Record the actual research agent, model, and low effort, with provenance in the
 body. Preserve useful prior findings on refresh, reverify claims, and describe
 changes. Do not treat the current date as evidence of a current provider version.
 
-Provide exactly 24 baseline cases: three OS values × two launch modes × two
-launch origins × working/idle states. An impossible combination (for example,
-a launch mode that cannot remain idle) needs an explicit reason, not omission.
-List special startup requirements in each applicable case. If multiple launch
-profiles differ, explain the alternatives and their mechanism mappings in prose;
-do not imply every session in that case meets those prerequisites.
+Define stable launch-profile IDs before writing cases. Each profile states its
+applicable OS values, launch modes, origins, endpoint scope, lifetime, startup
+requirements, and whether it preserves extensions, skills, prompt templates,
+and context. Mark ordinary provider launch coverage with `baseline: true`.
+Baseline profiles collectively provide exactly the 24 ordinary combinations:
+three OS values × two launch modes × two origins × working/idle.
+
+For every profile, provide exactly one case for every member of its declared
+applicable OS × launch-mode × origin product, for both working and idle states.
+An impossible combination needs an explicit case and reason. Do not merge
+ordinary, exposed-server, attached-client, retained-stdio, extension, or SDK
+profiles. Every case names one `profile_id`. Multiple baseline profiles must
+partition the 24 combinations without overlap.
+
+Evaluate managed control interfaces for non-interactive execution explicitly;
+an API used by an interactive client is not inherently interactive. Explain
+excluded modes/origins with provider evidence rather than today's wrapper limits.
+Separate ordinary one-shot lifetime from a retained process where capability
+differs, and distinguish active-turn steering from starting an idle turn in
+mechanism records, not only prose. Delivery states must not include permission
+holds that occur after delivery when the agent attempts a tool.
 
 `support` describes researched provider capability, not implemented Claudine
 support. Use:
@@ -141,7 +169,7 @@ origin, session state, outcome, sanitized fixture, assertions, and limitations.
 An empty list leaves activation blocked; it is valid research. Do not fabricate
 test records or use source inspection as a substitute for a live test.
 
-Populate `access_findings` for every mechanism/OS pair referenced by a case.
+Populate `access_findings` for every mechanism/profile/OS tuple referenced by a case.
 Distinguish an external sender being able to use a mechanism (`available`) from
 requiring deliberate setup (`setup_required`), lacking a necessary credential or
 interface (`blocked`), or unresolved evidence (`unknown`). These are researched
@@ -150,17 +178,29 @@ separate requirements. Explain whether prerequisites can help existing sessions.
 
 Populate `delivery_states` for each mechanism. Record the full known state
 vocabulary, including held-for-approval versus queued-for-delivery, and whether
-an external sender can observe and correlate those states. The mechanism's
-`acknowledgment` describes initial acceptance evidence; it does not replace this
-lifecycle record. Do not assume states visible to a provider's built-in agent
-tool are exposed to an independent client using the underlying protocol.
+an external sender can observe and correlate those states. Do not assume states
+visible to a provider's built-in agent tool are exposed to
+an independent client using the underlying protocol.
 
-Mechanism records must describe exact discovery/destination conventions,
-authentication without credentials, protocol framing, request/response examples,
-and failure behavior. Long exact explanations may live in the body, with a
-specific section reference in the corresponding metadata field. Do not encode
-runtime shell programs for a generator to execute. Unexpected protocol families
-use `other` and an explicit implementation gap rather than a misleading enum.
+Populate one `receipt_guarantees` record per mechanism with only what a
+successful initial acknowledgment proves. Keep request acceptance, message
+persistence, delivery scheduling, and confirmed conversation delivery
+independent; use `unknown` rather than deriving one from another. List later
+provider signals without upgrading the initial receipt. Record its correlation.
+
+Mechanism records identify interface maturity, initialization, exact request
+and response framing, operation intent, destination, authentication, and target
+preconditions. Distinguish exact-active-turn steering, idle-turn start,
+interrupt-then-submit, and follow-up queueing. Record provider target guards,
+including expected operation IDs, and stale/absent-guard behavior.
+
+Describe long-tool and complete-tool-batch behavior, queue ordering/drain and
+persistence, and whether text is literal or may invoke skills, templates,
+extension commands, or input transformations. Record sender message IDs,
+correlation, duplicate suppression, and conservative retry policy; an ambiguous
+response with unknown idempotency is never safe to retry. For interruption,
+list ordered phases and the partial outcome when interruption succeeds but
+submission fails, including queue retention or clearing.
 
 ## Required Prose
 
@@ -173,9 +213,11 @@ help a token-generation loop that never reaches another tool call.
 
 ## Completion and Review Gates
 
-Run `md schema validate '{{file}}' --no-trigger-schemas`. Check all 24 unique
-cases, unique record IDs, valid cross-record references, case-matching OS/origin
-discovery records, and mechanism-matching compatibility records. Every supported
+Run `md schema validate '{{file}}' --no-trigger-schemas`. Check the 24 unique
+baseline combinations and each profile's declared Cartesian product × both
+states; unique IDs; valid profile/evidence/discovery/mechanism references;
+case-matching OS/origin/profile discovery records; and
+mechanism/profile-matching compatibility records. Every supported
 case must have concrete evidence, an identified delivery mechanism, and explicit
 discovery coverage or a documented discovery gap. The generator must distinguish
 delivery capability from whether Claudine can actually find the session.
@@ -189,6 +231,6 @@ mandatory live-test activation gate. `disposable_test` evidence may be cited onl
 when a real test record exists and its conditions match the claim.
 
 Finish with the saved artifact path, validation result, and unresolved gaps.
-Do not run code tests or lints for this research-only task. The coordinator reviews
+Set `verification: []`; do not run live tests, code tests, or lints. The coordinator reviews
 the pilot before the full roster and permits at most two corrective research turns
 per provider; unresolved findings remain explicit after that budget.
