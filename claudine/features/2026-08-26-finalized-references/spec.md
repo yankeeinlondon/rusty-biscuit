@@ -4,7 +4,7 @@ created: 2026-08-27
 reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-08-27
-review_iterations: 7
+review_iterations: 8
 area: claudine
 packages:
     - biscuit-file
@@ -445,9 +445,17 @@ paths uses `ctx.*` interpolation or derives from a caller-passed parameter
    aliased, helper-returned, and inline `status`/`output` forms, and fail when a
    child can execute without the shared contribution helper. As in the model
    guard, `#[cfg(test)]` bodies and test-only source files are excluded; clap's
-   unrelated `Command` builder is not a process seam. Every recorded production
-   process seam must be governed — an allowlist may describe an indirect
-   governed path, but may not exempt a spawned child from `AGENT_CWD`.
+   unrelated `Command` builder is not a process seam. Here, “production
+   construction” means a construction authored in the two guarded source roots,
+   including one emitted by a `macro_rules!` transcriber authored there under
+   any possible invocation-module bindings. Tokens generated solely by a
+   declarative or procedural macro defined outside those roots are excluded:
+   stable Rust exposes no portable compiler-expanded source inventory, and the
+   external definition is not part of the guarded source. Executable expressions
+   authored as external-macro invocation arguments remain in scope. Every
+   recorded production process seam must be governed — an allowlist may describe
+   an indirect governed path, but may not exempt a spawned child from
+   `AGENT_CWD`.
 
 This extends the existing eager-`file` normalization so that derivation and
 proxy boundaries cannot strand a value without its anchor. The 2026-08-26
@@ -645,10 +653,14 @@ an explicit-relative spelling such as `./name:part`.
   non-absolute inherited values on `handle` cover the D8.7 fallback/error rule.
   The spawn-seam inventory guard fails on any production `Command` construction
   in `claudine` lib or CLI whose child can execute without the shared
-  environment helper. Scanner unit fixtures prove the guard is non-vacuous by
-  presenting each supported construction form with one governed and one
-  deliberately ungoverned seam; proving the guard never requires mutating
-  production source during a test.
+  environment helper, where production construction has D8.7's source-authored
+  boundary for externally generated macro tokens. Local `macro_rules!`
+  transcribers are checked against every scanned module's bindings, including a
+  fixture whose definition module lacks `Command` and whose invocation module
+  imports it. Scanner unit fixtures prove the guard is non-vacuous by presenting
+  each supported construction form with one governed and one deliberately
+  ungoverned seam; proving the guard never requires mutating production source
+  during a test.
 - **AC7 — magic conventions preserved.** The skill example
   (`@.claude/skills/.../SKILL.md`: repo first, home fallback) and Claudine's
   prompt-lookup conventions keep working through registered roots. Collision
