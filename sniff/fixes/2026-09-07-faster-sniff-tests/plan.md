@@ -149,6 +149,62 @@ them should stop and re-derive rather than proceed.
 
 ---
 
+## Execution and evidence policy (all phases)
+
+This policy governs every phase checkpoint below. A checkpoint records the
+proof required; it does not require repeating a command whose applicable
+result is already recorded. Implementation, PR review, and final performance
+verification are separate milestones.
+
+- During implementation, run focused tests for the changed binaries or library
+  modules through the canonical recipes. Run the combined area L1 suite and
+  lint after a coherent batch of changes, not after every file or subphase.
+  A shared fixture change requires its affected consumers to be covered.
+- Keep one validation ledger in `log.md`: command, selected packages/tests,
+  features, profile, platform, source state (including dirty changes), result,
+  build/setup time, runner elapsed, and artifact link. Reuse a result only
+  while its relevant sources, dependencies, fixtures, configuration, and
+  environment remain unchanged. A new failure or relevant change invalidates
+  the affected evidence, not every prior gate.
+- Document-only phases run the changed analysis tools and their relevant
+  tests, not Rust package suites or unrelated package gates. Reuse the existing
+  Claudine metrics, inventory, and attribution tools after checking their
+  contracts; add only missing area-specific behavior and regression coverage.
+  Do not build a second general-purpose parser or repeat unchanged mutation
+  demonstrations. Preserve malformed-input and completeness failures.
+  Start with `claudine/fixes/2026-09-07-faster-claudine-tests/`'s
+  `junit-metrics.ts`, `inventory-reconciler.ts`, and `attribution.ts` plus their
+  tests. Reference or adapt these locally without introducing a cross-package
+  framework or depending on another agent's concurrently changing files.
+- Capture each distinct recipe/CI feature selection once per relevant source
+  state and derive family membership from those captures. Keep every test in
+  the audit, but document common setup and proof once per enumerated family.
+  Reuse suite artifacts for attribution; run isolated experiments only to
+  answer a specific unresolved cost question.
+- Run L2/L3/browser/real tiers when their code, shared fixtures, dependencies,
+  or execution routes changed, and at final verification where required by
+  acceptance. Use canonical recipes, preserve focus, and keep unavailable
+  evidence pending. Diagnose an unrelated environment failure once and link
+  the reproduction; do not repeat the whole tier until the relevant code or
+  environment changes. New or unexplained failures still require diagnosis.
+- Preserve the baseline source state and build artifacts before editing. One
+  warm diagnostic run per required population is enough to begin attribution;
+  collect the five alternating baseline/candidate samples together in the
+  measurement phase. Keep separate build directories for the two states and
+  stable feature selections; do not clean caches or alternate rebuilds in a
+  single target directory. Avoid competing builds and measurements on the
+  same host; parallel work is useful only while it does not contend for those
+  resources or shared files.
+- Missing repeated CI samples or unavailable hosts do not block implementation
+  or opening a PR. Keep budgets pending until compatible CI baseline evidence
+  exists; ratify them before judging candidate performance. Preserve the
+  required final sample counts and platform coverage. Do not claim final
+  verification or archive the fix while required evidence remains pending.
+- Keep evidence in one place: `inventory.md` owns family dispositions and
+  budgets, `log.md` owns run records, and `results.md` links those records and
+  summarizes outcomes. Update phase checkboxes and a short status; do not
+  duplicate transcripts or requirement-to-test narratives across documents.
+
 ## Phase 1 — Baseline, metrics tooling, and the coordination window (RB5)
 
 Opens the attribution window. Everything downstream measures against this.
@@ -162,19 +218,19 @@ Opens the attribution window. Everything downstream measures against this.
       `test_detect_completes_in_reasonable_time` threads-required override,
       global slow-timeout/leak windows, plus any per-test overrides the
       census finds).
-- [ ] Build the metrics tool in this fix directory (fork the claudine
-      predecessor's `junit-metrics.ts` convention): reads nextest JUnit
-      artifacts and emits the baseline table with **build/setup, runner
-      elapsed, and summed test duration as three separate columns**. It must
-      reject malformed reports, missing expected artifacts or tests, duplicate
-      identities, invalid durations, and failed runs — a script that prints a
-      miss and exits 0 is not a gate.
-- [ ] Warm the revision's build artifacts, then collect **five alternating
-      warm local runs** (spec §5) of, at minimum: the full local L1 suite
-      (`just test` from `sniff/`), the `just sanity` cohort (its duration is
-      reported against the 15-second fast-confidence budget), and the CLI
-      integration cohort (`sniff-cli` package tests). Alternate rather than
-      batch so page-cache warming cannot masquerade as a trend.
+- [ ] Reuse the existing Claudine TypeScript metrics tool with Sniff-specific
+      inputs. Preserve separate build/setup, runner elapsed, and summed test
+      duration columns and rejection of malformed reports, missing artifacts
+      or tests, duplicate identities, invalid durations, and failed runs.
+      Run existing tool tests once; add focused regressions only for changed
+      behavior instead of rebuilding and re-proving the parser.
+- [ ] Preserve a reproducible baseline source state and its build directory.
+      Warm its test artifacts, then collect one diagnostic local L1 run
+      (`just test`) and one `just sanity` run with its 15-second budget.
+      Extract CLI and native-detector cohort data from these reports wherever
+      the required selection matches. Collect five alternating runs per
+      revision together in Phase 8; do not repeat a separate CLI suite when
+      its coverage and summed timings are already in the L1 report.
 - [ ] Capture per-test durations via nextest's JUnit output for the same runs
       and store everything under
       `sniff/fixes/2026-09-07-faster-sniff-tests/baseline/<run-id>/`.
@@ -191,17 +247,21 @@ Opens the attribution window. Everything downstream measures against this.
 - [ ] Run `just test-l2` from `sniff/` once and record the L2 pair's baseline
       (tmux backend) so Phase 7's sleep replacement has a before measurement.
 
-**Validation checkpoint 1** — five alternating warm runs exist per cohort with
-artifacts stored; the metrics tool reproduces the baseline table and fails on
-a deliberately malformed report (proved once, transcript recorded); the
-coordination note exists; `just sanity` baseline duration is recorded against
-the 15-second budget.
+**Validation checkpoint 1** — reproducible baseline source/build state and
+initial L1/sanity artifacts are stored; metrics validation passes (including
+malformed-input rejection, proved once); the coordination note exists and
+sanity duration is recorded. Full alternating measurement belongs to Phase 8.
+Reuse compatible CI baseline artifacts as available; missing CI inputs keep
+the affected budgets pending without blocking implementation.
 
 ---
 
 ## Phase 2 — Reconciled inventory (RB1, AC1) ‖ runs during Phase 1's window
 
-Document-only. No source file changes. Produces `inventory.md`.
+Use existing captures, reports, and validated tools. Run only changed
+analysis-tool checks; do not run Rust package gates for document-only work.
+
+Inventory and analysis only; no Rust application or test changes. Produces `inventory.md`.
 
 - [ ] Build the enumeration substrate: capture
       `cargo nextest list --message-format json` for both packages under
@@ -258,10 +318,10 @@ Document-only. No source file changes. Produces `inventory.md`.
       enabling `test-fixtures` for `sniff-cli` while local `test` leaves it
       off; the `SNIFF_INTERACTIVE_PTY=1` bespoke gate resolving to a route or
       an unreachable-with-reason row; `foo.rs` as a dead test binary.
-- [ ] Implement the completeness reconciler in this fix directory. It reads
-      the nextest listings plus the inventory's declared families and **fails**
-      on any identity assigned to zero or more than one row. Run it and paste
-      its output into `inventory.md`.
+- [ ] Reuse the existing completeness reconciler with Sniff's listings and
+      family declarations. Add only missing area-specific handling; preserve
+      failure on unassigned or multiply assigned identities. Link its output
+      from `inventory.md` and run focused regressions for any tool changes.
 - [ ] State the disposition of every row. No row may be dispositioned by
       timing threshold; no exclusions based on historical speed (AC1).
 
@@ -274,7 +334,12 @@ disposition; the override census and recipe findings are complete.
 
 ## Phase 3 — Attribution and ratified budgets (RB5 first half; resolves the spec's five draft decisions)
 
-Document-only. Depends on Phases 1 and 2.
+Attribute from stored suite reports first. Run only experiments that resolve
+a specific uncertainty. Missing CI budgets remain pending and must be ratified
+before candidate performance is judged; they do not block implementation.
+
+Analysis only. Uses Phase 1 local evidence and the Phase 2 inventory;
+CI-dependent budget conclusions may remain pending.
 
 - [ ] Attribute cost by family against the Phase 1 baseline, keeping build,
       elapsed, and summed-duration columns separate, and pairing each suspect
@@ -317,13 +382,16 @@ Document-only. Depends on Phases 1 and 2.
 backed by measurements or reconciler output; budgets live in `inventory.md`
 next to the baseline; the native-detector cohort is separately measured; the
 Windows concurrency question has evidence or an explicit no-change decision.
+Missing CI inputs leave budget ratification pending; link the missing evidence
+and continue implementation without inventing a target.
 
 ---
 
 ## Phase 4 — One fixture, one spawn: the CLI command builder and guard (RB2 infrastructure)
 
-First code phase. Requires checkpoint 1. Everything in Phases 5–7 that spawns
-the `sniff` binary depends on this, so it lands alone.
+First code phase. Requires the preserved baseline and initial local evidence
+from checkpoint 1. Phases 5–7 depend on the fixture contract and its focused
+verification; missing CI samples do not block this work.
 
 - [ ] Create `sniff/cli/tests/common/mod.rs` with a `SniffCliFixture`
       (naming to taste, modeled on claudine's `CliProcessFixture`): temp
@@ -379,11 +447,10 @@ the `sniff` binary depends on this, so it lands alone.
       and mark local Windows verification pending where the host cannot run
       it (spec AC).
 
-**Validation checkpoint 4** — `just test` and `just lint` green from `sniff/`;
-the drift test passes; the guard's census matches the Phase 1 spawn count
-(± sites the guard legitimately excludes); negative guard tests prove both
-the violation arm and the stale-entry arm; `git diff main --
-.config/nextest.toml` empty.
+**Validation checkpoint 4** — Focused builder, drift, guard, and
+affected-consumer tests pass; the census matches actual spawns and negative
+tests reject violations and stale entries. Run area L1/lint once for the
+fixture batch, with override evidence recorded.
 
 ---
 
@@ -454,11 +521,11 @@ allowlist entries, and the guard's stale-entry arm catches a mis-merge.
 - [ ] Re-run `just test` from `sniff/` with the probes exported and record
       that no deterministic test changed its result.
 
-**Validation checkpoint 5** — `just test`, `just lint`, `just doctest` green
-from `sniff/`; the guard census shows zero generic exemptions with every
-exclusion tier-named; contamination probes pass; test count reconciles
-(additions and removals reported separately, never netted); `just sanity`
-still green.
+**Validation checkpoint 5** — All migrated binaries and contamination probes
+pass; the guard reports zero generic exemptions and test additions/removals
+reconcile. Run one combined area L1/lint checkpoint after the migration
+batches. Reuse equivalent sanity coverage; run doctests only if relevant
+inputs changed.
 
 ---
 
@@ -509,11 +576,10 @@ CLI files, so **partially parallelizable with Phase 5** after Phase 4 lands
       remediation-in-scope; linked follow-ups get their owner documents
       updated instead.
 
-**Validation checkpoint 6** — `just test`, `just doctest` green from `sniff/`
-with `remote` coverage preserved (spec AC); every eliminated-work claim has a
-counter assertion behind it, not a timing note; collector-propagation
-verification recorded; test-population changes each carry a coverage mapping;
-`git diff main -- .config/nextest.toml` unchanged.
+**Validation checkpoint 6** — Changed library tests pass with remote coverage
+preserved, counter assertions and collector-propagation proof, and coverage
+mappings for population changes. Run affected doctests if needed; combine
+broad L1/lint validation with Phase 7. Record the override delta.
 
 ---
 
@@ -555,27 +621,37 @@ verification recorded; test-population changes each carry a coverage mapping;
       pane broker, no focus changes); verify the L2 pair still passes after
       the sleep replacement.
 
-**Validation checkpoint 7** — `just test` green from `sniff/`; `just test-l2`
-green; root `just test-leaks` reports no survivors attributable to sniff
-cohorts; no readiness sleep remains that is not itself a timeout contract
-with a justified floor; the serialization audit is written with per-use
-justifications.
+**Validation checkpoint 7** — Affected remote, process, and wait tests pass,
+with canonical L2 proof for the changed readiness waits. Root `just
+test-leaks` reports no survivors attributable to these cohorts; retained
+timing floors and serialization have reasons. Reuse the combined Phase 6/7
+L1/lint result.
 
 ---
 
 ## Phase 8 — Local candidate measurement (RB5, first evidence tranche)
 
-Requires Phases 5–7 complete and green.
+Requires Phases 5–7 implemented with applicable checks passing; diagnosed
+unrelated environment failures remain explicitly pending.
 
-- [ ] Warm the candidate revision's artifacts, then collect **five
-      alternating warm local runs** of every changed cohort and the full
-      local L1 suite, alternating baseline-revision and candidate-revision
-      runs on the same host with matching toolchain, features, profile,
-      concurrency, and fixture inputs. Record revision, dirty state,
-      platform, cache state, and the exact commands.
-- [ ] Re-run every changed timeout or concurrency case (the L2 pair, any
-      test whose wait was replaced) **ten times under representative suite
-      load**, not in isolation.
+- [ ] Warm the preserved baseline and candidate artifacts, then collect
+      **five alternating warm runs per revision** of each required full L1
+      population. Extract changed-cohort identities, counts, and summed test
+      durations from those same reports; do not also run every cohort in
+      isolation. A cohort's summed duration is not its isolated wall time.
+      Run a separate cohort experiment only when selection, resource needs,
+      or an explicit latency claim cannot be represented by the suite runs.
+      Record source state, toolchain, features, profile, platform, concurrency,
+      fixture inputs, cache state, and commands. Keep revision-specific build
+      directories warm and prevent concurrent edits or competing workloads
+      during measurement. Reuse earlier samples only if their provenance and
+      alternating sequence match this protocol.
+- [ ] Execute each **changed** timeout, readiness, or concurrency
+      contract ten times under representative suite load. Count compatible
+      candidate measurement runs toward those ten executions and run only the
+      remaining repetitions with a fixed representative load cohort. Record
+      the target set, spread, failures, and leak results. Do not repeat
+      unchanged tests separately merely because their file was migrated.
 - [ ] Measure any cold-build claim in an isolated build directory — never by
       clearing the developer's working cache.
 - [ ] Re-collect the work-counter readings paired in Phase 1 and show the
@@ -590,8 +666,9 @@ Requires Phases 5–7 complete and green.
 - [ ] Record local numbers as **attribution only**; they establish no CI
       target (spec §5).
 
-**Validation checkpoint 8** — five alternating runs exist per changed cohort
-on both revisions; ten reruns exist per changed wait/concurrency case; every
+**Validation checkpoint 8** — five alternating runs per revision cover the full L1
+population and changed cohorts through shared reports; ten executions cover
+each changed timing/concurrency contract; every
 eliminated-work claim has a counter or sentinel behind it; the sanity budget
 comparison is recorded; no comparison spans a landing of
 2026-07-22-inefficient-calling (re-baseline if it landed — see Phase 1's
@@ -603,14 +680,26 @@ protocol).
 
 Human-gated: push and read.
 
-- [ ] Run `just ci-local --lint-only` then `just ci-local` at the repo root
-      for the branch's affected scope before pushing (repo pre-push
-      discipline); record the selected scope and commands.
-- [ ] Push and collect **three consecutive green candidate CI runs for each
-      configured sniff package/environment leg** (the dependency-aware
-      workflow fans from `[package.metadata.ci.tests]`: lib `remote` L1; cli
-      L1 + L2/tmux). Record every intervening failed attempt and its cause —
-      selecting only successful attempts is disallowed.
+Preserve the declared Sniff routes: library `remote` L1 and CLI L1 plus
+L2/tmux. Record the actual selected environment legs.
+
+- [ ] Complete one consolidated validation of the affected scope before
+      push handoff. Inspect the actual recipe expansion: if `just ci-local`
+      already includes lint, run it once without a preceding
+      `just ci-local --lint-only`. Credit equivalent current-state checks in
+      the validation ledger only where the workflow supports that reuse;
+      otherwise run the required gate once. Record scope, features, and any
+      checks still missing. This step does not authorize a commit or push.
+- [ ] Open or hand off the PR once implementation and applicable local
+      checks are ready; do not wait for repeated performance CI samples.
+      Use the first candidate run on every configured package/environment leg
+      for cross-platform correctness review, then accumulate **three
+      consecutive green candidate runs per leg** for final performance
+      verification. Reuse qualifying normal CI runs; request extra runs only
+      for missing samples. Keep source state, workflow definition, runner
+      image, and features comparable, and record every intervening failure.
+      Baseline gaps and missing samples remain pending; PR readiness does not
+      imply merge readiness or completion of the performance criteria.
 - [ ] Treat the `windows-latest` leg as the compile authority for
       Windows-only test targets (spec AC; this area has no local mingw
       recipe) and record its results explicitly; native Windows and WSL are
@@ -629,7 +718,9 @@ Human-gated: push and read.
       `network`-selection reachability question Phase 2/3 answered). Record
       unavailable runtime evidence as pending, not passing.
 
-**Validation checkpoint 9** — three consecutive green runs exist per
+**Validation checkpoint 9 (final performance evidence; not PR opening)**
+
+three consecutive green runs exist per
 configured leg with failures disclosed; every budget is met or its miss is
 explained with cause; no override, retry, tier change, or disabled assertion
 was used to reach a number; `git diff main -- .config/nextest.toml` shows
@@ -655,7 +746,7 @@ removals/justifications only.
       `sniff/docs/`, `sniff/just.md` if recipes changed. Shared production
       changes require a separate scope and downstream impact review (spec AC;
       `CLAUDE.md` § Drift Maintenance governs).
-- [ ] Sweep the acceptance criteria explicitly, one subsection each:
+- [ ] Sweep the acceptance criteria using one compact status-and-evidence table:
   - [ ] **AC1** — every test/family has an evaluated purpose, disposition,
         and real execution route; no exclusions based on historical speed
         (reconciler output attached).
@@ -686,10 +777,26 @@ removals/justifications only.
         `just test-leaks` sweeps.
   - [ ] **AC9** — Sniff skill and area docs updated where contracts changed;
         shared production changes routed to a separate scope.
-- [ ] Final gate run from the `sniff/` package area: `just sanity`,
-      `just lint`, `just check`, `just doctest`, `just test`, `just test-l2`;
-      plus root `just test-leaks` and `just check-tier-coverage` if any tier
-      marker or recipe changed.
+- [ ] Reconcile the final gate ledger instead of restarting all gates.
+      Credit passing checks from implementation, measurement, and pre-push
+      validation when their relevant source state and environment are still
+      applicable. Run only missing or invalidated checks. If a full-suite
+      run already covers a package subset with the required features, do not
+      repeat that subset just to obtain a second green command. Record known
+      environment failures as pending with links; do not retry them without
+      a relevant change.
+- [ ] Prepare `results.md` and the acceptance review while CI runs. Record
+      each criterion as verified, pending, or an explicitly permitted
+      deferral, with an evidence link; keep the detailed record in its owning
+      document. Final closure still requires the specified measurement samples
+      and applicable acceptance evidence. Pending evidence does not prevent
+      PR review, but it does prevent claiming that verification is complete.
+- [ ] Required final coverage: area `just sanity` (including its measured
+      15-second budget), `just lint`, `just check`, `just doctest`, `just test`,
+      and applicable `just test-l2`; root `just test-leaks` and
+      `just check-tier-coverage` if tier markers or recipes changed. Preserve
+      `remote` and `test-fixtures` selections; credit an overlapping gate only
+      when its actual feature/target coverage matches.
 - [ ] Confirm `git diff main -- .config/nextest.toml` contains
       removals/justifications only, and that every surviving override's
       justification is written in the inventory.
@@ -714,9 +821,13 @@ that no comparison spans it.
 | Phase 6 ‖ Phase 7 | Different concerns (request bounding vs. effects/cleanup) and largely different files; serialize only where both touch one binary. |
 | Phase 6/7 ‖ Phase 5 (post-Phase-4) | Lib-side vs. CLI-side files; serialize only where a commit would mix scopes. |
 
-**Strictly serial**: Phase 1 → Phase 4 (no code lands before the baseline
-window closes); Phase 4 → Phase 5 (the builder must exist); Phases 5–7 →
+**Strictly serial**: Phase 1 → Phase 4 (preserve the baseline source state and initial
+local evidence before editing; CI sampling may continue); Phase 4 → Phase 5 (the builder must exist); Phases 5–7 →
 Phase 8 → Phase 9 → Phase 10 (evidence follows the change it measures).
+
+PR preparation and closure-document drafting may overlap CI sampling. The
+sequence below governs final performance verification and archive readiness,
+not permission to open a PR with pending evidence.
 
 ## Dependency order (summary)
 
