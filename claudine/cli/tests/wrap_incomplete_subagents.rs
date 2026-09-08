@@ -36,6 +36,7 @@ use std::time::Duration;
 mod common;
 use common::incomplete_subagents::{
     REPLAY_DOCUMENT, incident_stream, task_notification, task_started, write_replay_provider,
+    write_replay_provider_exiting, write_stalling_provider,
 };
 use common::wrap::today_log_path;
 use common::{CliProcessFixture, strip_ansi};
@@ -133,6 +134,13 @@ fn lifecycle_trace(fixture: &CliProcessFixture) -> Vec<String> {
         .filter(|line| !line.is_empty())
         .map(str::to_string)
         .collect()
+}
+
+/// Stderr collapsed to single-spaced text, so a sentence the renderer folded
+/// across rows can be matched whole. Sound only because the heading wraps on
+/// word boundaries, which the component's own unit tests establish.
+fn flatten(plain: &str) -> String {
+    plain.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 /// The `extra` object of the last synthesized `session_end` row.
@@ -350,4 +358,119 @@ fn display_truncation_never_reaches_the_machine_record() {
             long_task_name(index)
         );
     }
+}
+
+/// Review 3 finding 3. A task started before a `step_timeout` kill is still
+/// unfinished in the ledger, so the full diagnostic renders after the watchdog
+/// has already terminated the child. It must say so — the run timed out — and
+/// must not claim the provider "exited normally", which is what the synthetic
+/// row's `exit_reason: step_timeout` directly contradicts.
+///
+/// Budget: 2 s silence, 0.2 s watchdog tick, 0.5 s kill grace — the same
+/// sizing `wrap_watchdog_startup_stall.rs` documents. The outer `.timeout` is
+/// only a hang backstop.
+#[test]
+fn a_started_task_cut_off_by_a_step_timeout_is_reported_as_timed_out() {
+    let fixture = CliProcessFixture::named("timed-out-subagent");
+    fixture.seed_user_config();
+    let md_file = fixture.cwd().join("replay.md");
+    fs::write(&md_file, REPLAY_DOCUMENT).unwrap();
+    write_stalling_provider(
+        fixture.bin_dir(),
+        &[
+            r#"{"type":"system","subtype":"init","session_id":"incident","model":"claude-opus"}"#
+                .to_string(),
+            task_started("sa_1", "commit-alpha"),
+        ],
+    );
+
+    let assert = fixture
+        .command()
+        .env("CLAUDINE_STEP_TIMEOUT", "2s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "0.2s")
+        .env("CLAUDINE_KILL_GRACE", "0.5s")
+        .args(["compose", "--claude", md_file.to_str().unwrap()])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .failure();
+
+    let plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(
+        plain.contains("1 sub-agent task did not complete"),
+        "the unfinished task must still be enumerated after a timeout; got: {plain}"
+    );
+    assert!(
+        plain.contains("commit-alpha"),
+        "the diagnostic must name the task the timeout cut off; got: {plain}"
+    );
+    assert!(
+        flatten(&plain).contains("timed out and was terminated before this task finished"),
+        "the diagnostic must attribute the unfinished task to the timeout; got: {plain}"
+    );
+    assert!(
+        !plain.contains("exited normally"),
+        "a watchdog kill is not a normal exit; got: {plain}"
+    );
+
+    let extra = last_session_end_extra(&fixture);
+    assert_eq!(
+        extra["exit_reason"],
+        serde_json::json!("step_timeout"),
+        "the machine record must still carry the timeout; extra: {extra}"
+    );
+    let facts = extra["subagent_outcomes"]
+        .as_array()
+        .unwrap_or_else(|| panic!("extra.subagent_outcomes missing; extra: {extra}"));
+    assert_eq!(facts.len(), 1, "extra: {extra}");
+    assert_eq!(facts[0]["name"], serde_json::json!("commit-alpha"));
+}
+
+/// Review 3 finding 3, native half. The provider stops both tasks and then
+/// exits 2 on its own. The diagnostic must quote that code rather than claim a
+/// normal exit, and must not present the unfinished tasks as the reason the
+/// run failed — the provider already said so with its exit.
+#[test]
+fn a_nonzero_native_exit_with_stopped_tasks_quotes_the_exit_code() {
+    let fixture = CliProcessFixture::named("nonzero-exit-subagents");
+    fixture.seed_user_config();
+    let md_file = fixture.cwd().join("replay.md");
+    fs::write(&md_file, REPLAY_DOCUMENT).unwrap();
+    let ending = TaskEnding::BothStopped;
+    write_replay_provider_exiting(
+        fixture.bin_dir(),
+        &incident_stream(&ending.start_lines(), &ending.event_lines()),
+        2,
+    );
+
+    let assert = fixture
+        .command()
+        .args(["compose", "--claude", md_file.to_str().unwrap()])
+        .timeout(Duration::from_secs(60))
+        .assert()
+        .failure();
+
+    let plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(
+        plain.contains("2 sub-agent tasks did not complete"),
+        "both stopped tasks must still be enumerated; got: {plain}"
+    );
+    assert!(
+        flatten(&plain)
+            .contains("The provider exited with code 2, and these tasks also never finished."),
+        "the diagnostic must quote the native exit code; got: {plain}"
+    );
+    assert!(
+        !plain.contains("exited normally"),
+        "exit 2 is not a normal exit; got: {plain}"
+    );
+    for name in ["commit-alpha", "commit-beta"] {
+        assert!(plain.contains(name), "{name} missing from: {plain}");
+    }
+
+    let extra = last_session_end_extra(&fixture);
+    assert_eq!(
+        extra["exit_code"],
+        serde_json::json!(2),
+        "the native exit must be preserved; extra: {extra}"
+    );
 }

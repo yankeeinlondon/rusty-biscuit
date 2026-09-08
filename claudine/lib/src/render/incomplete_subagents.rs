@@ -4,6 +4,7 @@ use biscuit_terminal::components::renderable::TerminalRenderable;
 use biscuit_terminal::terminal::Terminal;
 use biscuit_terminal::utils::layout::{Layout, WordWrap};
 
+use crate::harness::ProcessTermination;
 use crate::stream::task_ledger::SubagentOutcome;
 
 /// The full operator diagnostic for a run whose sub-agent work never finished.
@@ -12,9 +13,16 @@ use crate::stream::task_ledger::SubagentOutcome;
 /// characters and may name only the first few tasks. This component is under
 /// no such budget: it enumerates **every** incomplete fact, so the terminal and
 /// the machine record agree on the count even when the headline does not.
+///
+/// The heading's second sentence states how the run ended around the
+/// unfinished work. Without [`Self::with_exit`] it stays termination-neutral:
+/// the task list survives a watchdog kill and a nonzero native exit, and only
+/// the caller knows which of those — or the exit-zero incident — it is
+/// rendering.
 #[derive(Debug, Default)]
 pub struct IncompleteSubagents {
     outcomes: Vec<SubagentOutcome>,
+    exit: Option<(ProcessTermination, i32)>,
     layout: Layout,
 }
 
@@ -22,7 +30,47 @@ impl IncompleteSubagents {
     pub fn new(outcomes: &[SubagentOutcome]) -> Self {
         Self {
             outcomes: outcomes.to_vec(),
+            exit: None,
             layout: Layout::default(),
+        }
+    }
+
+    /// Record how the provider process ended so the heading can say so.
+    ///
+    /// `exit_code` is the native code and is only quoted for a
+    /// [`ProcessTermination::Completed`] run; a wrapper-driven termination is
+    /// described by its reason instead, because the code it stamps is
+    /// synthetic.
+    pub fn with_exit(mut self, termination: ProcessTermination, exit_code: i32) -> Self {
+        self.exit = Some((termination, exit_code));
+        self
+    }
+
+    /// The sentence that follows the count, chosen by how the run ended.
+    fn verdict(&self, count: usize) -> String {
+        let these = if count == 1 { "this task" } else { "these tasks" };
+        match self.exit {
+            Some((ProcessTermination::Completed, 0)) => {
+                "The provider exited normally, so this run is a failure despite its exit code."
+                    .to_string()
+            }
+            Some((ProcessTermination::Completed, code)) => {
+                format!("The provider exited with code {code}, and {these} also never finished.")
+            }
+            Some((ProcessTermination::TimedOut, _)) => {
+                format!("This run timed out and was terminated before {these} finished.")
+            }
+            Some((ProcessTermination::Aborted, _)) => {
+                format!("This run was aborted before {these} finished.")
+            }
+            Some((ProcessTermination::Interrupted, _)) => {
+                format!("This run was interrupted before {these} finished.")
+            }
+            // A launch failure has no stream to leave tasks in; if one ever
+            // reaches here the neutral sentence is the only honest one.
+            Some((ProcessTermination::LaunchFailed, _)) | None => {
+                format!("This run ended with {these} still unfinished.")
+            }
         }
     }
 
@@ -45,8 +93,8 @@ impl TerminalRenderable for IncompleteSubagents {
         // *emulator* soft-wraps it mid-word. The list below already wraps on
         // word boundaries; the heading must read the same way.
         let heading = Prose::new(format!(
-            "<b>{count} sub-agent {noun} did not complete.</b> The provider \
-             exited normally, so this run is a failure despite its exit code."
+            "<b>{count} sub-agent {noun} did not complete.</b> {}",
+            self.verdict(count)
         ))
         .with_word_wrap(WordWrap::default())
         .render(term);
@@ -138,7 +186,9 @@ mod tests {
         const WIDTH: u32 = 70;
         let term = plain_term(WIDTH);
         let outcomes: Vec<_> = (0..7).map(|i| stopped(&format!("agent-{i}"))).collect();
-        let rendered = IncompleteSubagents::new(&outcomes).render(&term);
+        let rendered = IncompleteSubagents::new(&outcomes)
+            .with_exit(ProcessTermination::Completed, 0)
+            .render(&term);
 
         let heading_rows: Vec<&str> = rendered
             .lines()
@@ -188,5 +238,98 @@ mod tests {
         let rendered = IncompleteSubagents::new(&outcomes).render(&term);
         assert!(rendered.contains("unnamed task"), "{rendered}");
         assert!(rendered.contains("never finished"), "{rendered}");
+    }
+
+    /// The exit-zero incident sentence is the one the Level 2 capture pins.
+    #[test]
+    fn a_normal_exit_keeps_the_exit_zero_sentence() {
+        let term = plain_term(200);
+        let rendered = IncompleteSubagents::new(&[stopped("alpha"), stopped("beta")])
+            .with_exit(ProcessTermination::Completed, 0)
+            .render(&term);
+        assert!(
+            rendered.contains(
+                "The provider exited normally, so this run is a failure despite its exit code."
+            ),
+            "{rendered}"
+        );
+    }
+
+    /// Review 3 finding 3: without exit context the heading may not claim a
+    /// normal exit, a code, or a termination it cannot know about.
+    #[test]
+    fn the_default_verdict_is_termination_neutral() {
+        let term = plain_term(200);
+        let rendered = IncompleteSubagents::new(&[stopped("alpha"), stopped("beta")]).render(&term);
+        assert!(
+            rendered.contains("This run ended with these tasks still unfinished."),
+            "{rendered}"
+        );
+        for claim in ["exited normally", "exited with code", "timed out", "aborted", "interrupted"]
+        {
+            assert!(!rendered.contains(claim), "neutral wording may not say {claim:?}: {rendered}");
+        }
+    }
+
+    #[test]
+    fn a_nonzero_native_exit_quotes_its_code_without_blaming_the_tasks() {
+        let term = plain_term(200);
+        let rendered = IncompleteSubagents::new(&[stopped("alpha"), stopped("beta")])
+            .with_exit(ProcessTermination::Completed, 2)
+            .render(&term);
+        assert!(
+            rendered.contains("The provider exited with code 2, and these tasks also never finished."),
+            "{rendered}"
+        );
+        assert!(!rendered.contains("exited normally"), "{rendered}");
+        assert!(!rendered.contains("despite its exit code"), "{rendered}");
+    }
+
+    #[test]
+    fn a_wrapper_termination_names_its_reason_instead_of_an_exit() {
+        let term = plain_term(200);
+        let outcomes = [stopped("alpha"), stopped("beta")];
+        let cases = [
+            (
+                ProcessTermination::TimedOut,
+                "This run timed out and was terminated before these tasks finished.",
+            ),
+            (
+                ProcessTermination::Aborted,
+                "This run was aborted before these tasks finished.",
+            ),
+            (
+                ProcessTermination::Interrupted,
+                "This run was interrupted before these tasks finished.",
+            ),
+        ];
+        for (termination, expected) in cases {
+            // The synthetic exit code a kill stamps must never be quoted.
+            let rendered = IncompleteSubagents::new(&outcomes)
+                .with_exit(termination, 1)
+                .render(&term);
+            assert!(rendered.contains(expected), "{termination}: {rendered}");
+            assert!(!rendered.contains("exited normally"), "{termination}: {rendered}");
+            assert!(!rendered.contains("exited with code"), "{termination}: {rendered}");
+        }
+    }
+
+    #[test]
+    fn a_single_task_verdict_reads_as_singular() {
+        let term = plain_term(200);
+        let rendered = IncompleteSubagents::new(&[stopped("lonely")])
+            .with_exit(ProcessTermination::TimedOut, 1)
+            .render(&term);
+        assert!(rendered.contains("before this task finished"), "{rendered}");
+    }
+
+    #[test]
+    fn a_launch_failure_falls_back_to_the_neutral_verdict() {
+        let term = plain_term(200);
+        let rendered = IncompleteSubagents::new(&[stopped("alpha")])
+            .with_exit(ProcessTermination::LaunchFailed, 1)
+            .render(&term);
+        assert!(rendered.contains("This run ended with this task still unfinished."), "{rendered}");
+        assert!(!rendered.contains("exited"), "{rendered}");
     }
 }

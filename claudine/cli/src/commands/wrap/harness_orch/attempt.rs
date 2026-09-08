@@ -275,6 +275,7 @@ pub(crate) fn execute_harness_attempt(
 
         super::super::policy::emit_stream_summary(
             &summary,
+            termination,
             profile,
             env_context,
             stream_verbosity,

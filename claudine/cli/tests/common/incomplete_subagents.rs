@@ -64,13 +64,20 @@ pub fn incident_stream(start_lines: &[String], event_lines: &[String]) -> Vec<St
 /// The script drains stdin first so the wrapper's composed-prompt write cannot
 /// race the child's exit.
 pub fn write_replay_provider(bin_dir: &Path, events: &[String]) {
+    write_replay_provider_exiting(bin_dir, events, 0);
+}
+
+/// [`write_replay_provider`] with a chosen native exit code, for the case
+/// where the provider itself fails *and* leaves tasks unfinished.
+pub fn write_replay_provider_exiting(bin_dir: &Path, events: &[String], exit_code: i32) {
     #[cfg(unix)]
     {
         let body = events
             .iter()
             .map(|line| format!("printf '%s\\n' '{line}'\n"))
             .collect::<String>();
-        let script = format!("#!/bin/sh\ncat > /dev/null 2>/dev/null\n{body}exit 0\n");
+        let script =
+            format!("#!/bin/sh\ncat > /dev/null 2>/dev/null\n{body}exit {exit_code}\n");
         write_executable(&bin_dir.join("claude"), &script);
     }
     #[cfg(windows)]
@@ -79,7 +86,38 @@ pub fn write_replay_provider(bin_dir: &Path, events: &[String]) {
             .iter()
             .map(|line| format!("echo {line}\r\n"))
             .collect::<String>();
-        let script = format!("@echo off\r\n{body}exit /b 0\r\n");
+        let script = format!("@echo off\r\n{body}exit /b {exit_code}\r\n");
+        write(&bin_dir.join("claude.cmd"), &script);
+    }
+}
+
+/// Install a fake `claude` in `bin_dir` that emits `events` and then goes
+/// silent forever, so only a wrapper timeout can end the run.
+///
+/// Stdin is left alone: the wrapper's prompt write fits the pipe buffer, and
+/// draining it would just be another way of stalling. The sleep loop's
+/// coarsest granularity is Windows' `ping -n 2` (~1 s), which a 2 s silence
+/// budget clears with margin.
+pub fn write_stalling_provider(bin_dir: &Path, events: &[String]) {
+    #[cfg(unix)]
+    {
+        let body = events
+            .iter()
+            .map(|line| format!("printf '%s\\n' '{line}'\n"))
+            .collect::<String>();
+        let script = format!("#!/bin/sh\n{body}while :; do /bin/sleep 1; done\n");
+        write_executable(&bin_dir.join("claude"), &script);
+    }
+    #[cfg(windows)]
+    {
+        // `ping -n 2 127.0.0.1` is the console-safe ~1s sleep; `timeout /t`
+        // needs an interactive console handle and fails under a piped stdin.
+        let body = events
+            .iter()
+            .map(|line| format!("echo {line}\r\n"))
+            .collect::<String>();
+        let script =
+            format!("@echo off\r\n{body}:loop\r\nping -n 2 127.0.0.1 >nul\r\ngoto loop\r\n");
         write(&bin_dir.join("claude.cmd"), &script);
     }
 }
