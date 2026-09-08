@@ -31,6 +31,28 @@
 //! two fail closed in opposite directions: a constructor bound on either
 //! branch still constructs, a helper governs only if every branch bound it.
 //!
+//! A constructor that leaves a function as a *value* — an argument, a struct
+//! field, a tuple element, a return value, a closure's result — is a
+//! construction this function can no longer describe: the code that receives
+//! it decides which children it makes and when. It is recorded at the
+//! expression as `UNCONTROLLED`, the same verdict a command handed off unhelped
+//! gets, because no caller-side proof exists for it. The helper handed off the
+//! same way constructs nothing and needs no record. On the receiving side, a
+//! parameter whose type is a callable returning the command — `impl Fn(..) ->
+//! Command`, a `fn` pointer, `Box<dyn Fn..>`, `&dyn Fn..`, or a generic bound
+//! that way in the generics list or the `where` clause — constructs when it is
+//! called, exactly like a bound constructor. A `Command` received by value is
+//! the caller's hand-off obligation, not the callee's.
+//!
+//! A `macro_rules!` defined in a scanned file is expanded at the syntax level:
+//! each transcriber is rewritten with placeholders for its metavariables, one
+//! copy per repetition, and `$crate` as `crate`, then censused under the name
+//! `macro!` — or `macro!::fn` for a function the transcriber emits — against
+//! the module the macro is defined in. A transcriber that yields neither a
+//! block nor items fails the census outright, so a construction hidden in an
+//! unanalyzable shape can never pass silently. Invocation arguments are still
+//! read as expressions, so a constructor passed into any macro is a record.
+//!
 //! Glob chains through the crate are followed to any depth; the resolution
 //! stack, not a hop limit, is what terminates the real cycle in
 //! `cli/src/commands/wrap/exec/wiring/` (`mod.rs` re-exports `session::*`,
@@ -48,14 +70,13 @@
 //!
 //! - a closure or `async` body is analyzed from the state at its definition
 //!   site and its effects do not flow back to the enclosing path;
-//! - macro arguments are read as observations (`debug!`, `format!`), not as
-//!   hand-offs that could execute a child;
+//! - a macro defined outside the two scanned roots — `#[macro_export]` from
+//!   another workspace crate, or a third-party crate — is not expanded: its
+//!   transcriber lives in source this census never reads. Only its invocation
+//!   arguments are seen;
 //! - a local `struct` or `enum` that shadows a glob-inherited `Command` name
 //!   is still censused. That error is a loud false positive the inventory
-//!   check surfaces, never a silent pass, so it is not resolved;
-//! - a constructor or helper function item is followed only into a local
-//!   binding that the same function calls. One that leaves the function as a
-//!   value — passed as an argument, stored in a field — is not followed.
+//!   check surfaces, never a silent pass, so it is not resolved.
 //!
 //! Regenerate after an intentional spawn-seam change:
 //!
@@ -69,6 +90,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
+use proc_macro2::{Delimiter, Group, Ident, TokenStream, TokenTree};
 use serde::Serialize;
 use syn::spanned::Spanned;
 use syn::visit::{self, Visit};
@@ -672,6 +694,99 @@ impl NameScope<'_> {
             Some(Identity::Helper)
         )
     }
+
+    /// The command kind a type path names, through any alias.
+    fn command_type(&self, ty: &syn::Type) -> Option<CommandKind> {
+        let syn::Type::Path(path) = ty else {
+            return None;
+        };
+        if path.qself.is_some() {
+            return None;
+        }
+        let segments = path_segments(&path.path);
+        match self.resolver.resolve(&self.location, &as_strs(&segments))? {
+            Identity::Command(kind) => Some(kind),
+            _ => None,
+        }
+    }
+
+    /// The command kind a parameter of type `ty` constructs when called: a
+    /// callable — `impl Fn(..) -> T`, `fn(..) -> T`, `Box<dyn Fn..(..) -> T>`,
+    /// `&dyn Fn..(..) -> T`, or a generic parameter bound that way — whose
+    /// return type names the command.
+    fn constructor_parameter(&self, ty: &syn::Type, generics: &syn::Generics) -> Option<CommandKind> {
+        match ty {
+            syn::Type::Reference(reference) => self.constructor_parameter(&reference.elem, generics),
+            syn::Type::Paren(inner) => self.constructor_parameter(&inner.elem, generics),
+            syn::Type::BareFn(pointer) => self.callable_output(&pointer.output),
+            syn::Type::ImplTrait(bounds) => self.callable_bound(bounds.bounds.iter()),
+            syn::Type::TraitObject(bounds) => self.callable_bound(bounds.bounds.iter()),
+            syn::Type::Path(path) if path.qself.is_none() => {
+                if let Some(ident) = path.path.get_ident() {
+                    return self.callable_bound(generic_bounds(generics, ident));
+                }
+                let last = path.path.segments.last()?;
+                if last.ident != "Box" {
+                    return None;
+                }
+                let syn::PathArguments::AngleBracketed(arguments) = &last.arguments else {
+                    return None;
+                };
+                match arguments.args.first()? {
+                    syn::GenericArgument::Type(inner) => self.constructor_parameter(inner, generics),
+                    _ => None,
+                }
+            }
+            _ => None,
+        }
+    }
+
+    fn callable_bound<'b>(&self, bounds: impl Iterator<Item = &'b syn::TypeParamBound>) -> Option<CommandKind> {
+        bounds.filter_map(|bound| self.callable_trait(bound)).next()
+    }
+
+    fn callable_trait(&self, bound: &syn::TypeParamBound) -> Option<CommandKind> {
+        let syn::TypeParamBound::Trait(bound) = bound else {
+            return None;
+        };
+        let last = bound.path.segments.last()?;
+        if !matches!(last.ident.to_string().as_str(), "Fn" | "FnMut" | "FnOnce") {
+            return None;
+        }
+        let syn::PathArguments::Parenthesized(arguments) = &last.arguments else {
+            return None;
+        };
+        self.callable_output(&arguments.output)
+    }
+
+    fn callable_output(&self, output: &syn::ReturnType) -> Option<CommandKind> {
+        match output {
+            syn::ReturnType::Type(_, ty) => self.command_type(ty),
+            syn::ReturnType::Default => None,
+        }
+    }
+}
+
+/// Every bound written on generic parameter `name`, in the generics list and
+/// the `where` clause.
+fn generic_bounds<'g>(generics: &'g syn::Generics, name: &'g syn::Ident) -> impl Iterator<Item = &'g syn::TypeParamBound> {
+    let inline = generics
+        .type_params()
+        .filter(move |param| &param.ident == name)
+        .flat_map(|param| param.bounds.iter());
+    let predicates = generics
+        .where_clause
+        .iter()
+        .flat_map(|clause| clause.predicates.iter())
+        .filter_map(move |predicate| match predicate {
+            syn::WherePredicate::Type(bounded) => match &bounded.bounded_ty {
+                syn::Type::Path(path) if path.qself.is_none() && path.path.is_ident(name) => Some(&bounded.bounds),
+                _ => None,
+            },
+            _ => None,
+        })
+        .flat_map(|bounds| bounds.iter());
+    inline.chain(predicates)
 }
 
 /// Index into [`FunctionAnalyzer::commands`]; one per construction site.
@@ -786,12 +901,15 @@ struct FunctionAnalyzer<'a> {
 }
 
 impl<'a> FunctionAnalyzer<'a> {
-    fn analyze(scope: &'a NameScope<'a>, block: &syn::Block) -> Vec<CommandRecord> {
+    fn analyze(scope: &'a NameScope<'a>, signature: Option<&syn::Signature>, block: &syn::Block) -> Vec<CommandRecord> {
         let mut analyzer = Self {
             scope,
             commands: Vec::new(),
         };
         let mut state = FlowState::default();
+        if let Some(signature) = signature {
+            analyzer.seed_parameters(signature, &mut state);
+        }
         // A command in the body's tail position is this function's return
         // value: it leaves local control exactly like an argument hand-off.
         let returned = analyzer.block(block, &mut state);
@@ -823,18 +941,39 @@ impl<'a> FunctionAnalyzer<'a> {
         value
     }
 
+    /// A parameter typed as a callable returning the command is a constructor
+    /// this function was handed; calling it constructs.
+    fn seed_parameters(&self, signature: &syn::Signature, state: &mut FlowState) {
+        for input in &signature.inputs {
+            let syn::FnArg::Typed(typed) = input else {
+                continue;
+            };
+            let Some(name) = binding_name(&typed.pat) else {
+                continue;
+            };
+            if let Some(kind) = self.scope.constructor_parameter(&typed.ty, &signature.generics) {
+                state.constructors.insert(name, kind);
+            }
+        }
+    }
+
     fn local(&mut self, local: &syn::Local, state: &mut FlowState) {
+        let name = binding_name(&local.pat);
         let mut ids = BTreeSet::new();
         let mut item = None;
         if let Some(init) = &local.init {
-            ids = self.expr(&init.expr, state);
-            item = self.function_item_value(&init.expr, state);
+            // A function item bound to a plain name is followed as a binding;
+            // evaluated as an expression it would count as leaving the function.
+            item = name.as_ref().and_then(|_| self.function_item_value(&init.expr, state));
+            if item.is_none() {
+                ids = self.expr(&init.expr, state);
+            }
             if let Some((_, diverge)) = &init.diverge {
                 let mut unmatched = state.clone();
                 self.expr(diverge, &mut unmatched);
             }
         }
-        match binding_name(&local.pat) {
+        match name {
             Some(name) => state.bind(name, ids, item),
             // Destructured into something this analysis cannot follow.
             None => self.require_helped(&ids, state, Obligation::Escape),
@@ -843,11 +982,27 @@ impl<'a> FunctionAnalyzer<'a> {
 
     fn expr(&mut self, expr: &syn::Expr, state: &mut FlowState) -> BTreeSet<CommandId> {
         match expr {
-            syn::Expr::Path(path) => path
-                .path
-                .get_ident()
-                .and_then(|ident| state.bindings.get(&ident.to_string()).cloned())
-                .unwrap_or_default(),
+            syn::Expr::Path(path) => {
+                // Reached only when the path is a value, not a callee or a
+                // plain-name initializer: the constructor leaves this function
+                // and whatever it builds is out of reach.
+                if path.qself.is_none()
+                    && let Some(FunctionItem::Constructor(kind)) = self.function_item(&path.path, state)
+                {
+                    self.commands.push(CommandRecord {
+                        line: path.span().start().line,
+                        kind,
+                        helped: false,
+                        executed_unhelped: false,
+                        escaped_unhelped: true,
+                    });
+                    return BTreeSet::new();
+                }
+                path.path
+                    .get_ident()
+                    .and_then(|ident| state.bindings.get(&ident.to_string()).cloned())
+                    .unwrap_or_default()
+            }
             syn::Expr::Call(call) => self.call(call, state),
             syn::Expr::MethodCall(call) => self.method_call(call, state),
             // Forms that pass a command through unchanged.
@@ -898,11 +1053,20 @@ impl<'a> FunctionAnalyzer<'a> {
                 BTreeSet::new()
             }
             syn::Expr::Assign(assign) => {
-                let ids = self.expr(&assign.right, state);
-                let item = self.function_item_value(&assign.right, state);
                 match binding_name_of_expr(&assign.left) {
-                    Some(name) => state.bind(name, ids, item),
-                    None => self.require_helped(&ids, state, Obligation::Escape),
+                    Some(name) => {
+                        let item = self.function_item_value(&assign.right, state);
+                        let ids = if item.is_some() {
+                            BTreeSet::new()
+                        } else {
+                            self.expr(&assign.right, state)
+                        };
+                        state.bind(name, ids, item);
+                    }
+                    None => {
+                        let ids = self.expr(&assign.right, state);
+                        self.require_helped(&ids, state, Obligation::Escape);
+                    }
                 }
                 BTreeSet::new()
             }
@@ -918,7 +1082,7 @@ impl<'a> FunctionAnalyzer<'a> {
     }
 
     fn call(&mut self, call: &syn::ExprCall, state: &mut FlowState) -> BTreeSet<CommandId> {
-        if let syn::Expr::Path(function) = call.func.as_ref() {
+        if let syn::Expr::Path(function) = strip_groups(call.func.as_ref()) {
             match self.function_item(&function.path, state) {
                 Some(FunctionItem::Constructor(kind)) => {
                     for arg in &call.args {
@@ -1088,8 +1252,10 @@ impl<'a> FunctionAnalyzer<'a> {
         }
     }
 
-    /// Macro arguments are read as observations, not hand-offs: the macros in
-    /// this tree format, log, or assert on a command rather than execute one.
+    /// Invocation arguments are read as expressions: a command among them is
+    /// observed (`debug!`, `format!`), a constructor value among them is the
+    /// hand-off record it is anywhere else. What the macro's own body does is
+    /// censused at its definition, when that definition is in a scanned file.
     fn macro_tokens(&mut self, invocation: &syn::Macro, state: &mut FlowState) {
         use syn::parse::Parser;
         let parser = syn::punctuated::Punctuated::<syn::Expr, syn::Token![,]>::parse_terminated;
@@ -1171,18 +1337,22 @@ struct FileScanner<'a> {
     /// The module being walked; inline `mod` items push onto it.
     location: Location,
     helper_scope: &'a BareHelperScope,
+    /// `macro!::` while walking a macro's expanded transcriber, so a function
+    /// it emits is reported under the macro that emits it.
+    function_prefix: String,
     sites: Vec<SpawnSite>,
 }
 
 impl FileScanner<'_> {
-    fn scan_function(&mut self, name: String, block: &syn::Block) {
+    fn scan_function(&mut self, name: String, signature: Option<&syn::Signature>, block: &syn::Block) {
+        let name = format!("{}{name}", self.function_prefix);
         let indirect = indirect_governor(self.path, &name);
         let scope = NameScope {
             resolver: self.resolver,
             location: self.location.clone(),
             helper_scope: self.helper_scope,
         };
-        for command in FunctionAnalyzer::analyze(&scope, block) {
+        for command in FunctionAnalyzer::analyze(&scope, signature, block) {
             let proven = command.helped && !command.executed_unhelped && !command.escaped_unhelped;
             let governed_by = if proven {
                 HELPER.to_string()
@@ -1200,9 +1370,123 @@ impl FileScanner<'_> {
             });
         }
     }
+
+    /// Censuses every transcriber of a `macro_rules!` definition as if it were
+    /// written out where the macro is defined. Names resolve in the defining
+    /// module — textual scope — which is also where `$crate` lands.
+    fn scan_macro_rules(&mut self, name: &str, definition: &syn::Macro) {
+        let path = self.path;
+        let unanalyzable = move |what: &str| -> ! {
+            panic!(
+                "{path}: macro_rules! {name} {what}; its transcriber could not be analyzed and must be simplified or given a syntactically analyzable shape (a block, statements, or items)"
+            )
+        };
+        let Some(transcribers) = macro_rules_transcribers(definition.tokens.clone()) else {
+            unanalyzable("does not split into `(matcher) => {transcriber}` rules")
+        };
+        let prefix = format!("{}{name}!::", self.function_prefix);
+        for transcriber in transcribers {
+            let body = rewrite_transcriber(transcriber);
+            let braced = TokenStream::from(TokenTree::Group(Group::new(Delimiter::Brace, body.clone())));
+            if let Ok(block) = syn::parse2::<syn::Block>(braced) {
+                self.scan_function(format!("{name}!"), None, &block);
+                // Items the transcriber emits are censused under the macro's
+                // name by the same walk that reaches nested items in a body.
+                let outer = std::mem::replace(&mut self.function_prefix, prefix.clone());
+                visit::visit_block(self, &block);
+                self.function_prefix = outer;
+            } else if let Ok(file) = syn::parse2::<syn::File>(body) {
+                let outer = std::mem::replace(&mut self.function_prefix, prefix.clone());
+                self.visit_file(&file);
+                self.function_prefix = outer;
+            } else {
+                unanalyzable("expands to neither a block nor items");
+            }
+        }
+    }
+}
+
+/// The transcriber token streams of a `macro_rules!` body, one per rule.
+fn macro_rules_transcribers(tokens: TokenStream) -> Option<Vec<TokenStream>> {
+    let mut rules = Vec::new();
+    let mut tokens = tokens.into_iter().peekable();
+    while let Some(matcher) = tokens.next() {
+        let TokenTree::Group(_) = matcher else {
+            return None;
+        };
+        match (tokens.next(), tokens.next()) {
+            (Some(TokenTree::Punct(eq)), Some(TokenTree::Punct(gt))) if eq.as_char() == '=' && gt.as_char() == '>' => {}
+            _ => return None,
+        }
+        let Some(TokenTree::Group(transcriber)) = tokens.next() else {
+            return None;
+        };
+        rules.push(transcriber.stream());
+        if matches!(tokens.peek(), Some(TokenTree::Punct(semicolon)) if semicolon.as_char() == ';') {
+            tokens.next();
+        }
+    }
+    Some(rules)
+}
+
+/// A transcriber as analyzable Rust: `$name` becomes the placeholder
+/// `__meta_name`, `$crate` becomes `crate`, and a repetition
+/// `$( ... ) sep? op` is emitted once without its separator and operator.
+/// Spans are kept, so a record inside the expansion carries the definition's
+/// own line.
+fn rewrite_transcriber(tokens: TokenStream) -> TokenStream {
+    let mut rewritten = Vec::new();
+    let mut tokens = tokens.into_iter().peekable();
+    while let Some(token) = tokens.next() {
+        match token {
+            TokenTree::Punct(dollar) if dollar.as_char() == '$' => match tokens.peek() {
+                Some(TokenTree::Ident(name)) => {
+                    let placeholder = if name == "crate" {
+                        Ident::new("crate", name.span())
+                    } else {
+                        Ident::new(&format!("__meta_{name}"), name.span())
+                    };
+                    rewritten.push(TokenTree::Ident(placeholder));
+                    tokens.next();
+                }
+                Some(TokenTree::Group(repetition)) if repetition.delimiter() == Delimiter::Parenthesis => {
+                    rewritten.extend(rewrite_transcriber(repetition.stream()));
+                    tokens.next();
+                    match tokens.next() {
+                        Some(TokenTree::Punct(op)) if matches!(op.as_char(), '*' | '+' | '?') => {}
+                        // A separator precedes the operator.
+                        Some(_) => {
+                            tokens.next();
+                        }
+                        None => {}
+                    }
+                }
+                _ => rewritten.push(TokenTree::Punct(dollar)),
+            },
+            TokenTree::Group(group) => {
+                let mut inner = Group::new(group.delimiter(), rewrite_transcriber(group.stream()));
+                inner.set_span(group.span());
+                rewritten.push(TokenTree::Group(inner));
+            }
+            other => rewritten.push(other),
+        }
+    }
+    rewritten.into_iter().collect()
 }
 
 impl<'ast> Visit<'ast> for FileScanner<'_> {
+    fn visit_item_macro(&mut self, item: &'ast syn::ItemMacro) {
+        if cfg_test(&item.attrs) {
+            return;
+        }
+        if let Some(name) = &item.ident
+            && item.mac.path.is_ident("macro_rules")
+        {
+            self.scan_macro_rules(&name.to_string(), &item.mac);
+        }
+        visit::visit_item_macro(self, item);
+    }
+
     fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
         if cfg_test(&item.attrs) {
             return;
@@ -1219,7 +1503,7 @@ impl<'ast> Visit<'ast> for FileScanner<'_> {
         if cfg_test(&item.attrs) {
             return;
         }
-        self.scan_function(item.sig.ident.to_string(), &item.block);
+        self.scan_function(item.sig.ident.to_string(), Some(&item.sig), &item.block);
         // Recurse so a nested item is analyzed under its own name.
         visit::visit_item_fn(self, item);
     }
@@ -1228,7 +1512,7 @@ impl<'ast> Visit<'ast> for FileScanner<'_> {
         if cfg_test(&item.attrs) {
             return;
         }
-        self.scan_function(item.sig.ident.to_string(), &item.block);
+        self.scan_function(item.sig.ident.to_string(), Some(&item.sig), &item.block);
         visit::visit_impl_item_fn(self, item);
     }
 
@@ -1237,7 +1521,7 @@ impl<'ast> Visit<'ast> for FileScanner<'_> {
             return;
         }
         if let Some(default) = &item.default {
-            self.scan_function(item.sig.ident.to_string(), default);
+            self.scan_function(item.sig.ident.to_string(), Some(&item.sig), default);
         }
         visit::visit_trait_item_fn(self, item);
     }
@@ -1351,6 +1635,7 @@ fn scan_parsed(path: &str, file: &syn::File, resolver: &ModuleResolver, location
         resolver,
         location,
         helper_scope: &helper_scope,
+        function_prefix: String::new(),
         sites: Vec::new(),
     };
     scanner.visit_file(file);
@@ -2402,4 +2687,194 @@ fn ungoverned_deep() { Command::new("x").spawn(); }
     assert_eq!(tally(&sites, "governed_deep"), (1, 0));
     assert_eq!(tally(&sites, "ungoverned_deep"), (0, 1));
     assert_eq!(sites.len(), 2);
+}
+
+/// A constructor that leaves a function as a value is a construction the
+/// function can no longer describe, so it is `UNCONTROLLED` at the expression
+/// — as an argument (Review 6's `invoke(Command::new::<&'static str>)`
+/// included), a bound name passed on, an enum or struct payload, a tuple or
+/// array element, a return value, or a closure's result. A plain-name binding
+/// stays a binding, a parenthesized callee still calls, the helper and any
+/// unrelated function passed the same way contribute nothing, and a closure
+/// that constructs is censused on what it does with the command.
+#[test]
+fn a_constructor_leaving_the_function_fails_closed() {
+    let source = r#"
+use claudine::child_environment::contribute_child_environment;
+use std::process::Command;
+use tokio::process::Command as TokioCommand;
+
+fn invoke<F>(construct: F) where F: Fn(&'static str) -> Command { construct("true").status().unwrap(); }
+fn launch() { invoke(Command::new::<&'static str>); }
+fn handed_plain() { invoke(Command::new); }
+fn handed_qualified() { invoke(std::process::Command::new); }
+fn handed_bound() { let c = Command::new; invoke(c); }
+fn handed_in_option() { let _ = Some(Command::new); }
+fn handed_in_struct() { let _ = Factory { construct: Command::new }; }
+fn handed_in_tuple() { let _ = (Command::new, 1); }
+fn handed_in_array() { let _ = [Command::new]; }
+fn handed_to_method() { registry.register(Command::new); }
+fn returned_as_tail() -> fn(&str) -> Command { Command::new }
+fn returned_explicitly() -> fn(&str) -> Command { return Command::new; }
+fn returned_from_closure() { let _ = || Command::new; }
+fn handed_tokio() { invoke(TokioCommand::new); }
+fn handed_unrelated() { invoke(unrelated); }
+fn handed_clap() { invoke(clap::Command::new); }
+fn handed_helper() { apply(contribute_child_environment); }
+fn closure_constructs_unhelped() { invoke(|s| Command::new(s)); }
+fn closure_constructs_helped() { invoke(|s| { let mut c = Command::new(s); contribute_child_environment(&mut c); c }); }
+fn parenthesized_call() { (Command::new)("x").status(); }
+fn bound_stays_a_binding() { let construct = Command::new; let mut c = construct("x"); contribute_child_environment(&mut c); c.status(); }
+"#;
+    let sites = scan_source("fixture.rs", source);
+    assert_eq!(tally(&sites, "invoke"), (0, 1));
+    assert_eq!(tally(&sites, "launch"), (0, 1));
+    assert_eq!(tally(&sites, "handed_plain"), (0, 1));
+    assert_eq!(tally(&sites, "handed_qualified"), (0, 1));
+    assert_eq!(tally(&sites, "handed_bound"), (0, 1));
+    assert_eq!(tally(&sites, "handed_in_option"), (0, 1));
+    assert_eq!(tally(&sites, "handed_in_struct"), (0, 1));
+    assert_eq!(tally(&sites, "handed_in_tuple"), (0, 1));
+    assert_eq!(tally(&sites, "handed_in_array"), (0, 1));
+    assert_eq!(tally(&sites, "handed_to_method"), (0, 1));
+    assert_eq!(tally(&sites, "returned_as_tail"), (0, 1));
+    assert_eq!(tally(&sites, "returned_explicitly"), (0, 1));
+    assert_eq!(tally(&sites, "returned_from_closure"), (0, 1));
+    assert_eq!(tally(&sites, "handed_tokio"), (0, 1));
+    assert_eq!(tally(&sites, "handed_unrelated"), (0, 0));
+    assert_eq!(tally(&sites, "handed_clap"), (0, 0));
+    assert_eq!(tally(&sites, "handed_helper"), (0, 0));
+    assert_eq!(tally(&sites, "closure_constructs_unhelped"), (0, 1));
+    assert_eq!(tally(&sites, "closure_constructs_helped"), (1, 0));
+    assert_eq!(tally(&sites, "parenthesized_call"), (0, 1));
+    assert_eq!(tally(&sites, "bound_stays_a_binding"), (1, 0));
+    assert_eq!(
+        sites
+            .iter()
+            .filter(|site| site.function == "handed_tokio")
+            .map(|site| site.command_kind)
+            .collect::<Vec<_>>(),
+        vec!["tokio"]
+    );
+    assert_eq!(sites.len(), 18);
+}
+
+/// A parameter typed as a callable returning the command constructs when
+/// called, in every callable shape and through a `type` alias, a qualified
+/// path, or tokio's command; governance is then the ordinary obligation. A
+/// callable returning anything else, an unbounded generic, and a `Command`
+/// received by value contribute nothing — the last is the caller's hand-off.
+/// Passing such a parameter on is the hand-off record of the previous fixture.
+#[test]
+fn a_constructor_typed_parameter_constructs_when_called() {
+    let source = r#"
+use claudine::child_environment::contribute_child_environment;
+use std::process::Command;
+use tokio::process::Command as TokioCommand;
+type Cmd = Command;
+
+fn governed_impl_fn(construct: impl Fn(&str) -> Command) { let mut c = construct("x"); contribute_child_environment(&mut c); c.status(); }
+fn ungoverned_impl_fn(construct: impl Fn(&str) -> Command) { construct("x").status(); }
+fn governed_fn_pointer(construct: fn(&str) -> Command) { let mut c = construct("x"); contribute_child_environment(&mut c); c.spawn(); }
+fn ungoverned_fn_pointer(construct: fn(&str) -> Command) { construct("x").spawn(); }
+fn governed_boxed(construct: Box<dyn Fn(&str) -> Command>) { let mut c = construct("x"); contribute_child_environment(&mut c); c.output(); }
+fn ungoverned_boxed(mut construct: Box<dyn FnMut(&str) -> Command>) { construct("x").output(); }
+fn governed_dyn_ref(construct: &dyn Fn(&str) -> Command) { let mut c = construct("x"); contribute_child_environment(&mut c); c.status(); }
+fn ungoverned_dyn_ref(construct: &dyn Fn(&str) -> Command) { construct("x").status(); }
+fn governed_generic<F: Fn(&str) -> Command>(construct: F) { let mut c = construct("x"); contribute_child_environment(&mut c); c.status(); }
+fn ungoverned_generic<F: FnMut(&str) -> Command>(mut construct: F) { construct("x").status(); }
+fn governed_where<F>(construct: F) where F: Fn(&str) -> Command { let mut c = construct("x"); contribute_child_environment(&mut c); c.status(); }
+fn ungoverned_where<F>(construct: F) where F: FnOnce(&str) -> Command { construct("x").status(); }
+fn ungoverned_alias(construct: impl Fn(&str) -> Cmd) { construct("x").status(); }
+fn ungoverned_qualified(construct: impl Fn(&str) -> std::process::Command) { construct("x").status(); }
+fn ungoverned_tokio(construct: impl Fn(&str) -> TokioCommand) { construct("x").output(); }
+fn parameter_handed_on(construct: impl Fn(&str) -> Command) { other(construct); }
+fn clap_parameter(build: impl Fn(&str) -> clap::Command) { build("x"); }
+fn unrelated_parameter(make: impl Fn(&str) -> String) { make("x"); }
+fn unbounded_generic<F>(construct: F) { construct("x"); }
+fn command_by_value(mut c: Command) { c.status(); }
+"#;
+    let sites = scan_source("fixture.rs", source);
+    assert_eq!(tally(&sites, "governed_impl_fn"), (1, 0));
+    assert_eq!(tally(&sites, "ungoverned_impl_fn"), (0, 1));
+    assert_eq!(tally(&sites, "governed_fn_pointer"), (1, 0));
+    assert_eq!(tally(&sites, "ungoverned_fn_pointer"), (0, 1));
+    assert_eq!(tally(&sites, "governed_boxed"), (1, 0));
+    assert_eq!(tally(&sites, "ungoverned_boxed"), (0, 1));
+    assert_eq!(tally(&sites, "governed_dyn_ref"), (1, 0));
+    assert_eq!(tally(&sites, "ungoverned_dyn_ref"), (0, 1));
+    assert_eq!(tally(&sites, "governed_generic"), (1, 0));
+    assert_eq!(tally(&sites, "ungoverned_generic"), (0, 1));
+    assert_eq!(tally(&sites, "governed_where"), (1, 0));
+    assert_eq!(tally(&sites, "ungoverned_where"), (0, 1));
+    assert_eq!(tally(&sites, "ungoverned_alias"), (0, 1));
+    assert_eq!(tally(&sites, "ungoverned_qualified"), (0, 1));
+    assert_eq!(tally(&sites, "ungoverned_tokio"), (0, 1));
+    assert_eq!(tally(&sites, "parameter_handed_on"), (0, 1));
+    assert_eq!(tally(&sites, "clap_parameter"), (0, 0));
+    assert_eq!(tally(&sites, "unrelated_parameter"), (0, 0));
+    assert_eq!(tally(&sites, "unbounded_generic"), (0, 0));
+    assert_eq!(tally(&sites, "command_by_value"), (0, 0));
+    assert_eq!(
+        sites
+            .iter()
+            .filter(|site| site.function == "ungoverned_tokio")
+            .map(|site| site.command_kind)
+            .collect::<Vec<_>>(),
+        vec!["tokio"]
+    );
+    assert_eq!(sites.len(), 16);
+}
+
+/// A `macro_rules!` transcriber is censused where the macro is defined, under
+/// `macro!` — zero-argument, with metavariables, with a repetition, inside a
+/// function body — and a function the transcriber emits under `macro!::fn`.
+/// `$crate` reaches the helper's module; a `clap::Command` transcriber and a
+/// `#[cfg(test)]` definition contribute nothing.
+#[test]
+fn a_local_macro_rules_transcriber_is_censused() {
+    let source = r#"
+use claudine::child_environment::contribute_child_environment;
+use std::process::Command;
+
+macro_rules! ungoverned_zero_arg { () => { std::process::Command::new("true").status() }; }
+macro_rules! governed_zero_arg { () => {{ let mut c = Command::new("true"); contribute_child_environment(&mut c); c.status() }}; }
+macro_rules! ungoverned_metavariable { ($p:expr) => { Command::new($p).status() }; }
+macro_rules! governed_metavariable { ($p:expr) => {{ let mut c = Command::new($p); contribute_child_environment(&mut c); c.status() }}; }
+macro_rules! ungoverned_repetition {
+    ($($p:expr),* $(,)?) => {{ let mut c = Command::new("x"); c.args([$($p),*]); $( c.env("K", $p); )* c.status() }};
+}
+macro_rules! ungoverned_items { ($t:ident) => { impl $t { fn launch(&self) { Command::new("x").status(); } } }; }
+macro_rules! governed_by_crate_path { () => {{ let mut c = Command::new("x"); $crate::child_environment::contribute_child_environment(&mut c); c.spawn() }}; }
+macro_rules! clap_only { () => { clap::Command::new("x") }; }
+#[cfg(test)] macro_rules! test_only { () => { Command::new("x").status() }; }
+fn inside_a_function() { macro_rules! ungoverned_inner { () => { Command::new("x").output() }; } ungoverned_inner!(); }
+"#;
+    let sites = scan_source("fixture.rs", source);
+    assert_eq!(tally(&sites, "ungoverned_zero_arg!"), (0, 1));
+    assert_eq!(tally(&sites, "governed_zero_arg!"), (1, 0));
+    assert_eq!(tally(&sites, "ungoverned_metavariable!"), (0, 1));
+    assert_eq!(tally(&sites, "governed_metavariable!"), (1, 0));
+    assert_eq!(tally(&sites, "ungoverned_repetition!"), (0, 1));
+    assert_eq!(tally(&sites, "ungoverned_items!::launch"), (0, 1));
+    assert_eq!(tally(&sites, "governed_by_crate_path!"), (1, 0));
+    assert_eq!(tally(&sites, "clap_only!"), (0, 0));
+    assert_eq!(tally(&sites, "test_only!"), (0, 0));
+    assert_eq!(tally(&sites, "ungoverned_inner!"), (0, 1));
+    assert_eq!(tally(&sites, "inside_a_function"), (0, 0));
+    assert_eq!(sites.len(), 8);
+}
+
+/// A transcriber that is neither a block nor items cannot be censused, and a
+/// construction it might hide must not pass silently: the scan fails, naming
+/// the file and the macro.
+#[test]
+#[should_panic(expected = "fixture.rs: macro_rules! unanalyzable expands to neither a block nor items; its transcriber could not be analyzed")]
+fn an_unanalyzable_macro_transcriber_fails_the_census() {
+    let source = r#"
+use std::process::Command;
+
+macro_rules! unanalyzable { () => { fn }; }
+"#;
+    scan_source("fixture.rs", source);
 }
