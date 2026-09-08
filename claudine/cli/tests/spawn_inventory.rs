@@ -47,11 +47,12 @@
 //! A `macro_rules!` defined in a scanned file is expanded at the syntax level:
 //! each transcriber is rewritten with placeholders for its metavariables, one
 //! copy per repetition, and `$crate` as `crate`, then censused under the name
-//! `macro!` — or `macro!::fn` for a function the transcriber emits — against
-//! the module the macro is defined in. A transcriber that yields neither a
-//! block nor items fails the census outright, so a construction hidden in an
-//! unanalyzable shape can never pass silently. Invocation arguments are still
-//! read as expressions, so a constructor passed into any macro is a record.
+//! `macro!` — or `macro!::fn` for a function the transcriber emits — in every
+//! module context in the scanned crate. This conservative superset includes
+//! every possible invocation scope, so invocation-site resolution cannot hide
+//! a construction; an impossible context may instead produce a loud false
+//! positive. A transcriber that yields neither a block nor items fails the
+//! census outright. Invocation arguments are still read as expressions.
 //!
 //! Glob chains through the crate are followed to any depth; the resolution
 //! stack, not a hop limit, is what terminates the real cycle in
@@ -70,10 +71,9 @@
 //!
 //! - a closure or `async` body is analyzed from the state at its definition
 //!   site and its effects do not flow back to the enclosing path;
-//! - a macro defined outside the two scanned roots — `#[macro_export]` from
-//!   another workspace crate, or a third-party crate — is not expanded: its
-//!   transcriber lives in source this census never reads. Only its invocation
-//!   arguments are seen;
+//! - a macro defined outside the two scanned roots — declarative or procedural
+//!   — is not expanded because its generated tokens are not source-authored in
+//!   the guarded roots. Its invocation arguments are still seen;
 //! - a local `struct` or `enum` that shadows a glob-inherited `Command` name
 //!   is still censused. That error is a loud false positive the inventory
 //!   check surfaces, never a silent pass, so it is not resolved.
@@ -169,38 +169,18 @@ struct BareHelperScope {
 }
 
 impl BareHelperScope {
-    fn for_file(path: &str, file: &syn::File) -> Self {
-        let mut collector = LocalItemCollector::default();
-        collector.visit_file(file);
+    fn for_location(path: &str, location: &Location) -> Self {
+        let scope = location.scope().expect("a scanner location names a module scope");
+        let definition_file = location
+            .file
+            .as_deref()
+            .is_some_and(|file| file.ends_with(HELPER_DEFINITION_FILE));
         Self {
-            local_functions: collector.functions,
-            local_modules: collector.modules,
-            definition_site: path == HELPER_DEFINITION_FILE,
+            local_functions: scope.local_functions.clone(),
+            local_modules: scope.inline.keys().chain(&scope.declared).cloned().collect(),
+            definition_site: (definition_file || location.file.is_none() && path == HELPER_DEFINITION_FILE)
+                && location.inline_path.is_empty(),
         }
-    }
-}
-
-#[derive(Default)]
-struct LocalItemCollector {
-    functions: BTreeSet<String>,
-    modules: BTreeSet<String>,
-}
-
-impl<'ast> Visit<'ast> for LocalItemCollector {
-    fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
-        if cfg_test(&item.attrs) {
-            return;
-        }
-        self.modules.insert(item.ident.to_string());
-        visit::visit_item_mod(self, item);
-    }
-
-    fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
-        if cfg_test(&item.attrs) {
-            return;
-        }
-        self.functions.insert(item.sig.ident.to_string());
-        visit::visit_item_fn(self, item);
     }
 }
 
@@ -219,6 +199,8 @@ struct ModuleScope {
     inline: BTreeMap<String, ModuleScope>,
     /// `mod x;` declarations, whose bodies are files found on lookup.
     declared: BTreeSet<String>,
+    /// Free functions declared in this module, used for helper shadowing.
+    local_functions: BTreeSet<String>,
 }
 
 impl ModuleScope {
@@ -269,6 +251,14 @@ impl<'ast> Visit<'ast> for ScopeCollector {
         {
             self.current().type_aliases.push((item.ident.to_string(), path_segments(&target.path)));
         }
+    }
+
+    fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+        if cfg_test(&item.attrs) {
+            return;
+        }
+        self.current().local_functions.insert(item.sig.ident.to_string());
+        visit::visit_item_fn(self, item);
     }
 }
 
@@ -356,6 +346,24 @@ impl Location {
 
     fn key(&self) -> LocationKey {
         (self.file.clone(), self.inline_path.clone())
+    }
+
+    fn module_contexts(&self) -> Vec<Self> {
+        fn collect(location: &Location, contexts: &mut Vec<Location>) {
+            contexts.push(location.clone());
+            let children = location
+                .scope()
+                .into_iter()
+                .flat_map(|scope| scope.inline.keys().cloned())
+                .collect::<Vec<_>>();
+            for child in children {
+                collect(&location.child(&child), contexts);
+            }
+        }
+
+        let mut contexts = Vec::new();
+        collect(self, &mut contexts);
+        contexts
     }
 }
 
@@ -1336,7 +1344,8 @@ struct FileScanner<'a> {
     resolver: &'a ModuleResolver,
     /// The module being walked; inline `mod` items push onto it.
     location: Location,
-    helper_scope: &'a BareHelperScope,
+    /// Every module whose bindings a local macro expansion may inherit.
+    expansion_contexts: &'a [Location],
     /// `macro!::` while walking a macro's expanded transcriber, so a function
     /// it emits is reported under the macro that emits it.
     function_prefix: String,
@@ -1347,10 +1356,11 @@ impl FileScanner<'_> {
     fn scan_function(&mut self, name: String, signature: Option<&syn::Signature>, block: &syn::Block) {
         let name = format!("{}{name}", self.function_prefix);
         let indirect = indirect_governor(self.path, &name);
+        let helper_scope = BareHelperScope::for_location(self.path, &self.location);
         let scope = NameScope {
             resolver: self.resolver,
             location: self.location.clone(),
-            helper_scope: self.helper_scope,
+            helper_scope: &helper_scope,
         };
         for command in FunctionAnalyzer::analyze(&scope, signature, block) {
             let proven = command.helped && !command.executed_unhelped && !command.escaped_unhelped;
@@ -1371,9 +1381,9 @@ impl FileScanner<'_> {
         }
     }
 
-    /// Censuses every transcriber of a `macro_rules!` definition as if it were
-    /// written out where the macro is defined. Names resolve in the defining
-    /// module — textual scope — which is also where `$crate` lands.
+    /// Censuses every transcriber of a `macro_rules!` definition against every
+    /// module context in the crate. Literal identifiers use invocation-site
+    /// bindings, while rewriting `$crate` preserves definition-crate lookup.
     fn scan_macro_rules(&mut self, name: &str, definition: &syn::Macro) {
         let path = self.path;
         let unanalyzable = move |what: &str| -> ! {
@@ -1388,20 +1398,27 @@ impl FileScanner<'_> {
         for transcriber in transcribers {
             let body = rewrite_transcriber(transcriber);
             let braced = TokenStream::from(TokenTree::Group(Group::new(Delimiter::Brace, body.clone())));
-            if let Ok(block) = syn::parse2::<syn::Block>(braced) {
-                self.scan_function(format!("{name}!"), None, &block);
-                // Items the transcriber emits are censused under the macro's
-                // name by the same walk that reaches nested items in a body.
-                let outer = std::mem::replace(&mut self.function_prefix, prefix.clone());
-                visit::visit_block(self, &block);
-                self.function_prefix = outer;
-            } else if let Ok(file) = syn::parse2::<syn::File>(body) {
-                let outer = std::mem::replace(&mut self.function_prefix, prefix.clone());
-                self.visit_file(&file);
-                self.function_prefix = outer;
-            } else {
-                unanalyzable("expands to neither a block nor items");
+            let block = syn::parse2::<syn::Block>(braced).ok();
+            let file = block
+                .is_none()
+                .then(|| syn::parse2::<syn::File>(body))
+                .transpose()
+                .unwrap_or_else(|_| unanalyzable("expands to neither a block nor items"));
+            let definition_location = self.location.clone();
+            for context in self.expansion_contexts {
+                self.location = context.clone();
+                if let Some(block) = &block {
+                    self.scan_function(format!("{name}!"), None, block);
+                    let outer = std::mem::replace(&mut self.function_prefix, prefix.clone());
+                    visit::visit_block(self, block);
+                    self.function_prefix = outer;
+                } else if let Some(file) = &file {
+                    let outer = std::mem::replace(&mut self.function_prefix, prefix.clone());
+                    self.visit_file(file);
+                    self.function_prefix = outer;
+                }
             }
+            self.location = definition_location;
         }
     }
 }
@@ -1614,27 +1631,51 @@ fn scan_source(path: &str, source: &str) -> Vec<SpawnSite> {
     let file = parse_source(path, source);
     let resolver = ModuleResolver::new(None);
     let location = resolver.location_of(None, &file);
-    scan_parsed(path, &file, &resolver, location)
+    let contexts = location.module_contexts();
+    scan_parsed(path, &file, &resolver, location, &contexts)
 }
 
 /// Scan one source with the bindings its imports reach through the crate.
-fn scan_crate_file(display_path: &str, file_path: &Path, source: &str, resolver: &ModuleResolver) -> Vec<SpawnSite> {
+fn scan_crate_file(
+    display_path: &str,
+    file_path: &Path,
+    source: &str,
+    resolver: &ModuleResolver,
+) -> Vec<SpawnSite> {
     let file = parse_source(display_path, source);
     let location = resolver.location_of(Some(file_path), &file);
-    scan_parsed(display_path, &file, resolver, location)
+    let contexts = location.module_contexts();
+    scan_parsed(display_path, &file, resolver, location, &contexts)
+}
+
+fn scan_crate_file_with_contexts(
+    display_path: &str,
+    file_path: &Path,
+    source: &str,
+    resolver: &ModuleResolver,
+    expansion_contexts: &[Location],
+) -> Vec<SpawnSite> {
+    let file = parse_source(display_path, source);
+    let location = resolver.location_of(Some(file_path), &file);
+    scan_parsed(display_path, &file, resolver, location, expansion_contexts)
 }
 
 fn parse_source(path: &str, source: &str) -> syn::File {
     syn::parse_file(source).unwrap_or_else(|error| panic!("failed to parse {path}: {error}"))
 }
 
-fn scan_parsed(path: &str, file: &syn::File, resolver: &ModuleResolver, location: Location) -> Vec<SpawnSite> {
-    let helper_scope = BareHelperScope::for_file(path, file);
+fn scan_parsed(
+    path: &str,
+    file: &syn::File,
+    resolver: &ModuleResolver,
+    location: Location,
+    expansion_contexts: &[Location],
+) -> Vec<SpawnSite> {
     let mut scanner = FileScanner {
         path,
         resolver,
         location,
-        helper_scope: &helper_scope,
+        expansion_contexts,
         function_prefix: String::new(),
         sites: Vec::new(),
     };
@@ -1681,11 +1722,24 @@ fn generate_inventory() -> Inventory {
     for relative_root in SCANNED_ROOTS {
         let src_root = root.join(relative_root);
         let resolver = ModuleResolver::new(Some(src_root.clone()));
-        for file in production_files(&src_root) {
+        let files = production_files(&src_root);
+        let mut contexts = Vec::new();
+        for file in &files {
+            let source = fs::read_to_string(file).unwrap();
+            let parsed = parse_source(&file.display().to_string(), &source);
+            contexts.extend(resolver.location_of(Some(file), &parsed).module_contexts());
+        }
+        for file in files {
             let relative = file.strip_prefix(root.join("claudine")).unwrap();
             let relative = relative.to_string_lossy().replace('\\', "/");
             let source = fs::read_to_string(&file).unwrap();
-            sites.extend(scan_crate_file(&relative, &file, &source, &resolver));
+            sites.extend(scan_crate_file_with_contexts(
+                &relative,
+                &file,
+                &source,
+                &resolver,
+                &contexts,
+            ));
         }
     }
     sites.sort();
@@ -2863,6 +2917,59 @@ fn inside_a_function() { macro_rules! ungoverned_inner { () => { Command::new("x
     assert_eq!(tally(&sites, "ungoverned_inner!"), (0, 1));
     assert_eq!(tally(&sites, "inside_a_function"), (0, 0));
     assert_eq!(sites.len(), 8);
+}
+
+/// Literal names in a declarative macro use the invocation module's bindings.
+/// The scanner considers every module context, so the executable expansion is
+/// found even though the definition module does not import `Command`.
+#[test]
+fn a_local_macro_rules_transcriber_uses_invocation_scope() {
+    let source = r#"
+macro_rules! launch {
+    () => { Command::new("true").status().unwrap() };
+}
+
+mod call_site {
+    use std::process::Command;
+
+    pub fn run() {
+        launch!();
+    }
+}
+
+fn main() {
+    call_site::run();
+}
+"#;
+    let sites = scan_source("fixture.rs", source);
+    assert_eq!(tally(&sites, "launch!"), (0, 1));
+    assert_eq!(sites.len(), 1);
+}
+
+/// Externally generated tokens are outside the source-authored census. Both a
+/// declarative invocation and procedural attribute therefore contribute no
+/// site by themselves, while executable invocation arguments remain visible.
+#[test]
+fn external_macro_expansions_observe_the_source_inventory_boundary() {
+    let source = r#"
+use std::process::Command;
+
+#[external_macros::launch]
+fn procedural() {}
+
+fn declarative() {
+    external_macros::launch!();
+}
+
+fn executable_argument() {
+    external_macros::identity!(Command::new("true").status());
+}
+"#;
+    let sites = scan_source("fixture.rs", source);
+    assert_eq!(tally(&sites, "procedural"), (0, 0));
+    assert_eq!(tally(&sites, "declarative"), (0, 0));
+    assert_eq!(tally(&sites, "executable_argument"), (0, 1));
+    assert_eq!(sites.len(), 1);
 }
 
 /// A transcriber that is neither a block nor items cannot be censused, and a
