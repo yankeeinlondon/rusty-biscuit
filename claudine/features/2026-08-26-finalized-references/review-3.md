@@ -4,17 +4,20 @@ ready: false
 agent: codex/gpt-5.6-sol
 created: 2026-09-07T23:36:28-07:00
 spec: 2026-08-26-finalized-references/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/default
+log: claudine/features/2026-08-26-finalized-references/log.md
 description: A **feature** review of `2026-08-26-finalized-references/spec.md`
 feature: 2026-08-26-finalized-references/review-3.md
 previous: 2026-08-26-finalized-references/review-2.md
+next: 2026-08-26-finalized-references/review-4.md
 ---
 
 # Review 3: Finalized References
 
 ## Verdict
 
-The implementation is not ready for production. Review 2's documentation finding is fixed, and the spawn-inventory analysis now catches the specific receiver, ordering, branch, loop, closure, and glob-import counterexamples requested there. Two high-severity acceptance blockers remain: the inventory can still omit or incorrectly approve executable commands, and AC10's required final cross-platform matrix is neither satisfiable under the current CI policy nor green on the final tree.
+The implementation is not ready for production. Review 2's documentation finding is fixed, and the spawn-inventory analysis now catches the specific receiver, ordering, branch, loop, closure, and glob-import counterexamples requested there. Two high-severity acceptance blockers remain: the inventory can still omit or incorrectly approve executable commands, and AC10's required final cross-platform matrix is not yet green on the final tree, and the Windows/WSL Level 2 CI legs it depends on have not yet been provisioned.
 
 ## Findings
 
@@ -32,13 +35,15 @@ Required change: resolve actual constructor/helper identities rather than matchi
 
 Verification level: Level 1 is appropriate for this source-inventory invariant. The gap is semantic coverage and fail-open analysis, not test tier.
 
-### High — AC10 remains incomplete and conflicts with the repository's Level 2 platform policy
+### High — AC10 remains incomplete; the Windows/WSL Level 2 CI legs it requires are not yet provisioned
 
-AC10 requires `just test`, `just test-l2`, and `just lint` for biscuit-file, Darkmatter, and Claudine on macOS, native Linux, WSL, and native Windows. The implementation log now documents that Windows and WSL Level 2 jobs are absent by construction in `.github/workflows/_package-ci.yml`, where their absence is deliberately recorded as a policy gap. No implementation or authorized specification amendment reconciles that policy with AC10.
+AC10 requires `just test`, `just test-l2`, and `just lint` for biscuit-file, Darkmatter, and Claudine on macOS, native Linux, WSL, and native Windows. The implementation log now documents that Windows and WSL Level 2 jobs are absent by construction in `.github/workflows/_package-ci.yml`, where their absence is recorded as a policy gap in the rollup.
+
+Ruling (Ken, 2026-09-08): that policy gap was always intended to be temporary. It is a record of what CI could not yet host at the time, not an authorized exclusion, and it does not soften AC10. AC10 is a real, standing requirement: the full platform matrix, including Level 2 on native Windows and WSL, must be green before this feature is accepted. The implementation log's framing that "part of AC10 is unsatisfiable as written and needs a specification amendment" is therefore rejected; the gap is closed by provisioning the missing environments, not by amending the criterion.
 
 The available final-tree evidence is also not wholly green. The log records green macOS Level 1 and lint runs for all three areas and a green Darkmatter Level 2 run, but Claudine Level 2 still has a reproducible WezTerm failure caused by an interactive Atuin startup prompt. The prior CI run tested an older tree and had one Windows Level 1 and one macOS Level 2 failure; commit `ebc28e107` contains plausible targeted fixes, but no post-fix CI run verifies them. A host condition may explain a failure, but the acceptance criterion requires a passing gate or an authorized exclusion.
 
-Required change: amend AC10 to an achievable, explicit platform/backend matrix or provision the missing Windows/WSL Level 2 environments; then record a complete green run for the final tree. Resolve or formally exclude the macOS WezTerm host-startup failure and verify `ebc28e107` in CI.
+Required change: provision the missing Windows and WSL Level 2 CI environments so the rollup no longer records a policy gap for those cells, then record a complete green run for the final tree across all four platforms. Amending AC10 to a narrower matrix is not an available route. Resolve the macOS WezTerm host-startup failure (or harden the L2 harness against interactive shell-startup output) and verify `ebc28e107` in CI.
 
 Verification level: AC10 explicitly requires Level 1 and Level 2 evidence. Level 3 is not applicable because no requirement depends on OS keyboard or mouse encoding.
 
