@@ -141,7 +141,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
       - name: Install native prerequisites
         shell: bash
         env:
@@ -230,7 +230,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
       - name: Install native prerequisites
         shell: bash
         env:
@@ -433,7 +433,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
       - name: Install native prerequisites
         shell: bash
         env:
@@ -594,7 +594,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
       - name: Install native prerequisites
         shell: bash
         env:
@@ -768,7 +768,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
       - name: Install native prerequisites
         shell: bash
         env:
