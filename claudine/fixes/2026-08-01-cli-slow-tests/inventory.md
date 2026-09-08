@@ -189,6 +189,94 @@ original assertions. The unchanged false-block test still proves
 condition-blind static shell discovery and that preflight prevents provider
 launch.
 
+## 2026-09 follow-up
+
+The 2026-08-01 pass above fixed exactly the tests that had crossed five
+seconds. [spec.md](spec.md) records what happened next: under CI contention the
+threshold moved to their siblings in the same files. This section is the
+measurement record for the fix that replaced the per-test remedy with one
+hermetic builder, a spawn-site guard, and sub-second timeout floors.
+
+CI JUnit artifacts are the measurement of record. Everything below is computed
+from `junit-claudine-cli-L1-<environment>` by
+[junit-metrics.ts](junit-metrics.ts):
+
+```bash
+for env in ubuntu-latest macos-latest windows-latest wsl2-ubuntu; do
+  gh run download <run-id> -R yankeeinlondon/rusty-biscuit \
+    -n "junit-claudine-cli-L1-$env" -D "/tmp/junit-<run-id>/$env"
+done
+npx tsx claudine/fixes/2026-08-01-cli-slow-tests/junit-metrics.ts \
+  /tmp/junit-<run-id> --label "run <run-id>"
+```
+
+"Migrated tests" is every test in the 29 binaries named in Required behavior 2.
+"Non-timeout" excludes the nine timeout-shaped tests the script lists by name.
+
+### Baseline — run 33440897014 (`main`, 2026-08-31)
+
+| Environment | ≥ 5 s | ≥ 2 s (non-timeout) | Slowest non-timeout | 19 inventoried, serial | 10 other, serial |
+|---|---:|---:|---|---:|---:|
+| `ubuntu-latest` | 6 | 88 | 14.3 s (`agents_and_commands_route_to_empty_state_messages`) | 237.9 s (161 tests) | 158.7 s (92 tests) |
+| `macos-latest` | 3 | 84 | 9.6 s (`agents_and_commands_route_to_empty_state_messages`) | 178.2 s (161 tests) | 118.4 s (92 tests) |
+| `windows-latest` | 4 | 7 | 8.8 s (`characterize_all_failure_routes_exit_one_and_emit_once`) | 4.9 s (17 tests) | 63.5 s (60 tests) |
+| `wsl2-ubuntu` | 89 | 88 | 77.1 s (`agents_and_commands_route_to_empty_state_messages`) | 1207.3 s (161 tests) | 846.7 s (92 tests) |
+
+Only 17 of the 161 inventoried tests compile on `windows-latest`, which is why
+its serial sum is not comparable to the others'.
+
+### First three green runs after the change
+
+**Not yet collected.** The branch is complete and green locally but has not
+been pushed, so no post-change JUnit artifact exists. Fill the table by running
+the recipe above against each of the first three green runs, then walk the
+Outcome table in [spec.md](spec.md) and record every miss with its cause rather
+than adjusting the target.
+
+| Environment | ≥ 5 s | ≥ 2 s (non-timeout) | Slowest non-timeout | 19 inventoried, serial | 10 other, serial |
+|---|---:|---:|---|---:|---:|
+| `ubuntu-latest` | — | — | — | — | — |
+| `macos-latest` | — | — | — | — | — |
+| `windows-latest` | — | — | — | — | — |
+| `wsl2-ubuntu` | — | — | — | — | — |
+
+### Local attribution (never a target)
+
+The spec is explicit that local runs attribute cost and never prove a target.
+These are recorded because they are what the change can be held to today.
+
+One local `NEXTEST_PROFILE=ci` run on a 16-core Mac, same script, same
+definitions — read against the `macos-latest` baseline row, whose median test
+runs about 1.7× a local one:
+
+| Environment | ≥ 5 s | ≥ 2 s (non-timeout) | Slowest non-timeout | 19 inventoried, serial | 10 other, serial |
+|---|---:|---:|---|---:|---:|
+| local, macOS 16-core | 0 | 0 | 0.6 s (`inline_compose_perf_stdout_matches_non_perf`) | 28.5 s (162 tests) | 7.0 s (92 tests) |
+
+Every one of the nine timeout-shaped tests sat inside `budget + tick + 1 s` on
+that run: `watchdog_subagent_hang` 1.5 s, `watchdog_stream_idle` 1.3 s,
+`watchdog_wall_clock` 1.3 s, `post_fanout` 1.2 s, `compose_non_harness` 1.3 s,
+`inline_compose_non_harness` 1.3 s, `sequence_per_step_step_timeout_override`
+1.1 s, and both `opencode_stderr_*_forces_early_termination` at 0.3 s. The
+19-binary group carries 162 tests rather than 161 because this fix added a
+corpus test to `shipped_prompt_contract`.
+
+Per-process `--perf` attribution, the isolation proof the spec asks for:
+
+- A migrated dry run (`codex --dry-run -- --version` from the fixture) reports
+  **launch discovery at 245–247 µs** of a 5.7 ms total with `topology probes 0`,
+  and its dry-run report has no `System prompt:` section at all. Re-running it
+  against a checkout whose root `system-prompt.md` had been modified produced
+  identical output apart from the per-process `CLAUDINE_PID` and
+  `CLAUDINE_SESSION_ID`.
+- The same command from the monorepo checkout pays 260.9 ms total with a
+  230.5 ms prep phase and `topology probes 1`.
+- The shipped feature-review test, now composing a copy of the `prompts/`
+  corpus inside its fixture, runs 285–344 ms with an 80 ms prep phase; pointed
+  back at the monorepo prompt it takes 554 ms with a 340 ms prep phase whose
+  261 ms frontmatter load is flagged `▇ HOT`. Both compose byte-identical
+  output.
+
 ## Production concerns catalog
 
 These findings were not changed in this test-performance pass.

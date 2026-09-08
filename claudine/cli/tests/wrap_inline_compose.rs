@@ -6,18 +6,16 @@
 #[cfg(unix)]
 use chrono::Local;
 use std::fs;
-use tempfile::tempdir;
 mod common;
+use common::{CliProcessFixture, strip_ansi};
 #[cfg(unix)]
-use common::wrap::*;
-use common::strip_ansi;
-#[cfg(unix)]
-use common::{augmented_path, write_executable};
+use common::write_executable;
 
 #[test]
 fn inline_compose_requires_positional_arg() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let fixture = CliProcessFixture::named("inline-compose-requires-positional");
+    let assert = fixture
+        .command()
         .args(["inline-compose"])
         .assert()
         .code(2);
@@ -29,12 +27,12 @@ fn inline_compose_requires_positional_arg() {
 
 #[test]
 fn inline_compose_rejects_missing_prompt_property() {
-    let workspace = tempdir().unwrap();
-    let md_file = workspace.path().join("test.md");
+    let fixture = CliProcessFixture::named("inline-compose-missing-prompt");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: No prompt\n---\nBody\n").unwrap();
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    fixture
+        .command()
         .args(["inline-compose", md_file.to_str().unwrap()])
         .assert()
         .code(1);
@@ -47,30 +45,24 @@ fn inline_compose_resolves_env_agent_in_prompt_template() {
     // resolve to the chosen provider's slug after eager target resolution.
     // Uses Goose because its `-t <prompt>` argv delivery is easy to
     // capture, and its plain-stdout output works without structured streams.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("inline-compose-env-agent");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("inline.md");
+    let md_file = fixture.cwd().join("inline.md");
     fs::write(
         &md_file,
         "---\nprompt: 'pick: {{env.AGENT}}'\nagent: goose\n---\noriginal body\n",
     )
     .unwrap();
 
-    let captured_args = workspace.path().join("captured_args.txt");
+    let captured_args = fixture.cwd().join("captured_args.txt");
     common::InlineAgentStub::new(&md_file)
         .prelude("printf '%s\\n' \"$@\" > \"$CLAUDINE_CAPTURED_ARGS\"\n")
         .body("updated body content\n")
-        .install(&path_dir, "goose");
+        .install(fixture.bin_dir(), "goose");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_CAPTURED_ARGS", &captured_args)
         .args(["inline-compose", md_file.to_str().unwrap()])
         .assert()
@@ -89,27 +81,21 @@ fn inline_compose_resolves_env_agent_in_prompt_template() {
 #[cfg(unix)]
 #[test]
 fn inline_compose_rejects_a_document_the_agent_never_updated() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("inline-compose-file-aware");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     let original = "---\nprompt: Generate content\n---\nOriginal body\n";
     fs::write(&md_file, original).unwrap();
 
     // An agent that talks about the work without doing it.
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         "#!/bin/sh\nprintf 'I reviewed the document and it looks fine.\\n'\nexit 0\n",
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+            .command()
         .args(["inline-compose", "--codex", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -131,12 +117,10 @@ fn inline_compose_rejects_a_document_the_agent_never_updated() {
 #[cfg(unix)]
 #[test]
 fn inline_compose_preserves_frontmatter_and_restores_owned_properties() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("inline-compose-file-aware");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     let original =
         "---\nprompt: Generate content\nowner: Human\nlast_updated: '2026-01-01'\n---\nOriginal body\n";
     fs::write(&md_file, original).unwrap();
@@ -144,7 +128,7 @@ fn inline_compose_preserves_frontmatter_and_restores_owned_properties() {
     // A disobedient agent: it rewrites `prompt` and `last_updated` (both owned)
     // alongside the property it was legitimately asked to set.
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\nprintf '%s' {document} > {target}\nprintf 'Rewrote the body.\\n'\nexit 0\n",
             document = common::sh_quote(concat!(
@@ -160,12 +144,8 @@ fn inline_compose_preserves_frontmatter_and_restores_owned_properties() {
         ),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -213,12 +193,10 @@ fn inline_compose_preserves_frontmatter_and_restores_owned_properties() {
 #[cfg(unix)]
 #[test]
 fn inline_compose_keeps_agent_written_frontmatter_across_runs() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("inline-compose-file-aware");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("ap.md");
+    let md_file = fixture.cwd().join("ap.md");
     let prompt_bytes = concat!(
         "prompt: |-\n",
         "    Inventory the wireless access points.  \n",
@@ -237,8 +215,8 @@ fn inline_compose_keeps_agent_written_frontmatter_across_runs() {
     );
     fs::write(&md_file, &original).unwrap();
 
-    let run_count = workspace.path().join("run-count");
-    let captured_args = workspace.path().join("captured-args");
+    let run_count = fixture.cwd().join("run-count");
+    let captured_args = fixture.cwd().join("captured-args");
     // A file-aware agent: it rewrites the whole document, keeping the authored
     // `prompt` node verbatim and setting the two properties it was asked for.
     let agent_document = |version: &str| {
@@ -262,7 +240,7 @@ fn inline_compose_keeps_agent_written_frontmatter_across_runs() {
         )
     };
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\n\
              printf '%s\\n' \"$@\" > \"$CLAUDINE_CAPTURED_ARGS\"\n\
@@ -281,13 +259,8 @@ fn inline_compose_keeps_agent_written_frontmatter_across_runs() {
     );
 
     let run = || {
-        assert_cmd::Command::cargo_bin("claudine")
-            .unwrap()
-            .current_dir(workspace.path())
-            .env("NO_COLOR", "1")
-            .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-            .env("HOME", workspace.path())
-            .env("PATH", &path_dir)
+        fixture
+            .command()
             .env("CLAUDINE_RUN_COUNT", &run_count)
             .env("CLAUDINE_CAPTURED_ARGS", &captured_args)
             .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
@@ -347,19 +320,17 @@ fn inline_compose_keeps_agent_frontmatter_and_refuses_a_malformed_document() {
             Err("could not reconcile the inline document"),
         ),
     ] {
-        let workspace = tempdir().unwrap();
-        let path_dir = workspace.path().join("bin");
-        fs::create_dir_all(&path_dir).unwrap();
-        seed_minimal_config(workspace.path());
+        let fixture = CliProcessFixture::named("inline-compose-frontmatter-drift");
+        fixture.seed_user_config();
 
-        let md_file = workspace.path().join("doc.md");
+        let md_file = fixture.cwd().join("doc.md");
         fs::write(
             &md_file,
             "---\nprompt: Generate content\n---\nOriginal body\n",
         )
         .unwrap();
         write_executable(
-            &path_dir.join("goose"),
+            &fixture.bin_dir().join("goose"),
             r#"#!/bin/sh
 printf '%s' "$CLAUDINE_AGENT_DOCUMENT" > "$CLAUDINE_AGENT_TARGET"
 printf 'Wrote the document.\n'
@@ -367,13 +338,8 @@ exit 0
 "#,
         );
 
-        let assert = assert_cmd::Command::cargo_bin("claudine")
-            .unwrap()
-            .current_dir(workspace.path())
-            .env("NO_COLOR", "1")
-            .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-            .env("HOME", workspace.path())
-            .env("PATH", &path_dir)
+        let assert = fixture
+            .command()
             .env("CLAUDINE_AGENT_DOCUMENT", agent_document)
             .env("CLAUDINE_AGENT_TARGET", &md_file)
             .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
@@ -420,31 +386,27 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn inline_compose_dry_run_leaves_file_unchanged_and_prints_prompt() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("inline-compose-dry-run-unchanged");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     let original =
         "---\nprompt: Generate the documentation\nlast_updated: 2026-01-01\n---\nOriginal body\n";
     fs::write(&md_file, original).unwrap();
 
     // Provider binary writes a sentinel file when it runs; under --dry-run it
     // must never launch, so the sentinel must be absent afterwards.
-    let sentinel = workspace.path().join("provider-ran.flag");
+    let sentinel = fixture.cwd().join("provider-ran.flag");
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\ntouch '{}'\nprintf 'New body from agent\\n'\nexit 0\n",
             sentinel.display()
         ),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .args([
             "inline-compose",
             "--goose",
@@ -481,14 +443,10 @@ fn inline_compose_dry_run_leaves_file_unchanged_and_prints_prompt() {
 #[test]
 #[serial_test::serial]
 fn inline_compose_writes_the_agents_file_and_reports_only_the_final_summary() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
-    seed_minimal_config(&fake_home);
+    let fixture = CliProcessFixture::named("inline-compose-file-aware");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("doc.md");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(
         &md_file,
         "---\nprompt: Generate the document body.\n---\nOriginal placeholder body.\n",
@@ -500,7 +458,7 @@ fn inline_compose_writes_the_agents_file_and_reports_only_the_final_summary() {
     // text-only assistant message, so without the accumulator reset all of them
     // would be reported as the summary.
     write_executable(
-        &path_dir.join("claude"),
+        &fixture.bin_dir().join("claude"),
         &format!(
             r##"#!/bin/sh
 printf '%s\n' '{{"type":"system","subtype":"init","session_id":"claude-final","model":"claude-sonnet-4"}}'
@@ -524,12 +482,8 @@ printf '%s\n' '{{"type":"result","subtype":"success","stop_reason":"end_turn","n
         ),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", &fake_home)
-        .env("PATH", &path_dir)
+    let assert = fixture
+            .command()
         .args(["inline-compose", "--claude", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -572,29 +526,23 @@ printf '%s\n' '{{"type":"result","subtype":"success","stop_reason":"end_turn","n
 #[cfg(unix)]
 #[test]
 fn inline_compose_no_overwrite_on_failure() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("inline-compose-no-overwrite-on-failure");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     let original = "---\nprompt: Generate content\n---\nOriginal body\n";
     fs::write(&md_file, original).unwrap();
 
     // Agent that exits with error and does not modify the file
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 exit 1
 "#,
     );
 
-    let _assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let _assert = fixture
+        .command()
         .args(["inline-compose", "--codex", md_file.to_str().unwrap()])
         .assert();
 
@@ -613,21 +561,17 @@ exit 1
 #[test]
 fn inline_compose_dry_run_quiet_and_silent_are_no_op() {
     for flag in ["--quiet", "--silent"] {
-        let workspace = tempdir().unwrap();
-        let path_dir = workspace.path().join("bin");
-        fs::create_dir_all(&path_dir).unwrap();
-        seed_minimal_config(workspace.path());
+        let fixture = CliProcessFixture::named("inline-compose-dry-run-quiet-silent");
+        fixture.seed_user_config();
 
-        let md_file = workspace.path().join("doc.md");
+        let md_file = fixture.cwd().join("doc.md");
         let original = "---\nprompt: PROMPT_MARKER_QQQ\nagent: goose\n---\nOriginal body\n";
         fs::write(&md_file, original).unwrap();
 
-        write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+        write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
 
-        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
-            .env("HOME", workspace.path())
-            .env("PATH", augmented_path(&path_dir))
+        let output = fixture
+            .command()
             .args([
                 "inline-compose",
                 "--goose",
@@ -663,24 +607,20 @@ fn inline_compose_dry_run_quiet_and_silent_are_no_op() {
 #[cfg(unix)]
 #[test]
 fn inline_compose_dry_run_schema_error_to_stderr_with_clean_stdout() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("inline-compose-dry-run-schema-error");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("doc.md");
+    let md_file = fixture.cwd().join("doc.md");
     // `eager`: an inline run tolerates a required-but-not-eager gap at launch
     // (the agent supplies it), so only an eager property is a launch error.
     let original =
         "---\n$schema:\n  topic: 'string(required;eager)'\nprompt: Plan {{topic}}\nagent: goose\n---\nOriginal body\n";
     fs::write(&md_file, original).unwrap();
 
-    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let output = fixture
+        .command()
         .args([
             "inline-compose",
             "--goose",
@@ -721,21 +661,17 @@ mod opencode_model_integration {
 
     #[test]
     fn no_model_provided_renders_blockquote_without_text_above() {
-        let workspace = tempdir().unwrap();
-        let path_dir = workspace.path().join("bin");
-        fs::create_dir_all(&path_dir).unwrap();
+        let fixture = CliProcessFixture::named("opencode-no-model");
 
         write_executable(
-            &path_dir.join("opencode"),
+            &fixture.bin_dir().join("opencode"),
             r#"#!/bin/sh
 exit 0
 "#,
         );
 
-        let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
-            .env("HOME", workspace.path())
-            .env("PATH", &path_dir)
+        let assert = fixture
+            .command()
             .args(["opencode", "summarize"])
             .assert()
             .code(1);
@@ -759,22 +695,19 @@ exit 0
 
     #[test]
     fn cli_model_proceeds_past_resolver() {
-        let workspace = tempdir().unwrap();
-        let path_dir = workspace.path().join("bin");
-        fs::create_dir_all(&path_dir).unwrap();
-        let args_path = workspace.path().join("args.txt");
+        let fixture = CliProcessFixture::named("opencode-cli-model");
+        let args_path = fixture.cwd().join("args.txt");
 
         write_executable(
-            &path_dir.join("opencode"),
+            &fixture.bin_dir().join("opencode"),
             r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 exit 0
 "#,
         );
 
-        assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
-            .env("PATH", &path_dir)
+        fixture
+            .command()
             .env("CLAUDINE_ARGS_FILE", &args_path)
             .args(["opencode", "--model", "test-model", "summarize"])
             .assert()
@@ -786,22 +719,18 @@ exit 0
 
     #[test]
     fn invalid_model_error_shows_suggestions() {
-        let workspace = tempdir().unwrap();
-        let path_dir = workspace.path().join("bin");
-        fs::create_dir_all(&path_dir).unwrap();
+        let fixture = CliProcessFixture::named("opencode-invalid-model");
 
         write_executable(
-            &path_dir.join("opencode"),
+            &fixture.bin_dir().join("opencode"),
             r#"#!/bin/sh
 printf 'Error: ProviderModelNotFoundError: model bad-model not found\nsuggestions: ["provider/a", "provider/b"]\n' >&2
 exit 1
 "#,
         );
 
-        let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
-            .env("HOME", workspace.path())
-            .env("PATH", &path_dir)
+        let assert = fixture
+            .command()
             .env("OPENCODE_MODEL", "bad-model")
             .args(["opencode", "summarize"])
             .assert()
@@ -827,13 +756,11 @@ exit 1
 
     #[test]
     fn config_file_model_resolves_successfully() {
-        let workspace = tempdir().unwrap();
-        let path_dir = workspace.path().join("bin");
-        fs::create_dir_all(&path_dir).unwrap();
-        let args_path = workspace.path().join("args.txt");
-        let env_path = workspace.path().join("env.txt");
+        let fixture = CliProcessFixture::named("opencode-config-model");
+        let args_path = fixture.cwd().join("args.txt");
+        let env_path = fixture.cwd().join("env.txt");
 
-        let config_dir = workspace.path().join(".config/opencode");
+        let config_dir = fixture.home().join(".config/opencode");
         fs::create_dir_all(&config_dir).unwrap();
         fs::write(
             config_dir.join("config.json"),
@@ -842,7 +769,7 @@ exit 1
         .unwrap();
 
         write_executable(
-            &path_dir.join("opencode"),
+            &fixture.bin_dir().join("opencode"),
             r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 printf 'MODEL=%s\n' "$MODEL" > "$CLAUDINE_ENV_FILE"
@@ -850,10 +777,8 @@ exit 0
 "#,
         );
 
-        assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
-            .env("HOME", workspace.path())
-            .env("PATH", &path_dir)
+        fixture
+            .command()
             .env("CLAUDINE_ARGS_FILE", &args_path)
             .env("CLAUDINE_ENV_FILE", &env_path)
             .args(["opencode", "summarize"])
@@ -873,8 +798,6 @@ exit 0
 
 // -- file-aware inline launch (2026-09-05 inline flow, Phase 4) -----------
 
-/// A Goose stub that records its argv and environment, edits the active
-/// document the way a file-aware agent does, and returns a summary.
 #[cfg(unix)]
 /// A Goose stub that records its launch and writes the document.
 ///
@@ -900,15 +823,10 @@ const RECORDING_PRELUDE: &str = "printf '%s\\n' \"$@\" > \"$CLAUDINE_CAPTURED_AR
      printf 'GOOSE_MODE=%s\\n' \"${GOOSE_MODE-unset}\" > \"$CLAUDINE_CAPTURED_ENV\"\n";
 
 #[cfg(unix)]
-fn inline_compose_cmd(workspace: &std::path::Path, path_dir: &std::path::Path) -> assert_cmd::Command {
-    let mut cmd = assert_cmd::Command::cargo_bin("claudine").unwrap();
-    cmd.current_dir(workspace)
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace)
-        .env("PATH", path_dir)
-        .env("CLAUDINE_CAPTURED_ARGS", workspace.join("captured_args.txt"))
-        .env("CLAUDINE_CAPTURED_ENV", workspace.join("captured_env.txt"));
+fn inline_compose_cmd(fixture: &CliProcessFixture) -> assert_cmd::Command {
+    let mut cmd = fixture.command();
+    cmd.env("CLAUDINE_CAPTURED_ARGS", fixture.cwd().join("captured_args.txt"))
+        .env("CLAUDINE_CAPTURED_ENV", fixture.cwd().join("captured_env.txt"));
     cmd
 }
 
@@ -918,15 +836,13 @@ fn inline_compose_cmd(workspace: &std::path::Path, path_dir: &std::path::Path) -
 #[cfg(unix)]
 #[test]
 fn inline_compose_delivers_the_native_document_path_and_file_aware_guardrails() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    let docs = workspace.path().join("my docs");
+    let fixture = CliProcessFixture::named("inline-compose-file-aware");
+    fixture.seed_user_config();
+    let docs = fixture.cwd().join("my docs");
     fs::create_dir_all(&docs).unwrap();
     let md_file = docs.join("voip notes.md");
     write_recording_goose(
-        &path_dir,
+        fixture.bin_dir(),
         &md_file,
         "researched_by: goose\nproducts:\n  handset: Yealink\n",
     );
@@ -947,12 +863,12 @@ fn inline_compose_delivers_the_native_document_path_and_file_aware_guardrails() 
     )
     .unwrap();
 
-    inline_compose_cmd(workspace.path(), &path_dir)
+    inline_compose_cmd(&fixture)
         .args(["inline-compose", md_file.to_str().unwrap()])
         .assert()
         .success();
 
-    let argv = fs::read_to_string(workspace.path().join("captured_args.txt")).unwrap();
+    let argv = fs::read_to_string(fixture.cwd().join("captured_args.txt")).unwrap();
     // The host may spell the temp dir with or without its `/private` symlink
     // prefix; the document identity Claudine resolved is one of the two.
     let spellings = [
@@ -975,7 +891,7 @@ fn inline_compose_delivers_the_native_document_path_and_file_aware_guardrails() 
     assert!(!argv.contains("Return the replacement Markdown body"), "{argv}");
     assert!(!argv.contains("\\\\"), "backslashes must never be doubled: {argv}");
 
-    let env = fs::read_to_string(workspace.path().join("captured_env.txt")).unwrap();
+    let env = fs::read_to_string(fixture.cwd().join("captured_env.txt")).unwrap();
     assert_eq!(env.trim(), "GOOSE_MODE=auto", "Goose's minimum writable posture");
 }
 
@@ -984,13 +900,11 @@ fn inline_compose_delivers_the_native_document_path_and_file_aware_guardrails() 
 #[cfg(unix)]
 #[test]
 fn inline_compose_uses_a_caller_supplied_prompt_without_persisting_it() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("inline-compose-file-aware");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("doc.md");
-    write_recording_goose(&path_dir, &md_file, "products:\n  handset: Yealink\n");
+    let md_file = fixture.cwd().join("doc.md");
+    write_recording_goose(fixture.bin_dir(), &md_file, "products:\n  handset: Yealink\n");
     let authored = concat!(
         "---\n",
         "$schema:\n",
@@ -1002,7 +916,7 @@ fn inline_compose_uses_a_caller_supplied_prompt_without_persisting_it() {
     );
     fs::write(&md_file, authored).unwrap();
 
-    inline_compose_cmd(workspace.path(), &path_dir)
+    inline_compose_cmd(&fixture)
         .args([
             "inline-compose",
             md_file.to_str().unwrap(),
@@ -1011,7 +925,7 @@ fn inline_compose_uses_a_caller_supplied_prompt_without_persisting_it() {
         .assert()
         .success();
 
-    let argv = fs::read_to_string(workspace.path().join("captured_args.txt")).unwrap();
+    let argv = fs::read_to_string(fixture.cwd().join("captured_args.txt")).unwrap();
     assert!(argv.contains("Transient research request"), "{argv}");
     let after = fs::read_to_string(&md_file).unwrap();
     assert!(!after.contains("Transient research request"), "transient prompt persisted: {after}");
@@ -1023,20 +937,18 @@ fn inline_compose_uses_a_caller_supplied_prompt_without_persisting_it() {
 #[cfg(unix)]
 #[test]
 fn inline_compose_without_an_eager_prompt_fails_before_launch_naming_it() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("inline-compose-file-aware");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("doc.md");
-    write_recording_goose(&path_dir, &md_file, "");
+    let md_file = fixture.cwd().join("doc.md");
+    write_recording_goose(fixture.bin_dir(), &md_file, "");
     fs::write(
         &md_file,
         "---\n$schema:\n  prompt: 'string(required;eager)'\n  products: 'object(required)'\nagent: goose\n---\nbody\n",
     )
     .unwrap();
 
-    let assert = inline_compose_cmd(workspace.path(), &path_dir)
+    let assert = inline_compose_cmd(&fixture)
         .args(["inline-compose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -1047,7 +959,7 @@ fn inline_compose_without_an_eager_prompt_fails_before_launch_naming_it() {
         "a required-but-not-eager property is never a launch gap for inline-compose: {stderr}"
     );
     assert!(
-        !workspace.path().join("captured_args.txt").exists(),
+        !fixture.cwd().join("captured_args.txt").exists(),
         "the provider must not launch"
     );
 }
@@ -1057,16 +969,14 @@ fn inline_compose_without_an_eager_prompt_fails_before_launch_naming_it() {
 #[cfg(unix)]
 #[test]
 fn inline_compose_refuses_an_explicit_write_deny_before_spawn() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("inline-compose-file-aware");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("doc.md");
-    write_recording_goose(&path_dir, &md_file, "");
+    let md_file = fixture.cwd().join("doc.md");
+    write_recording_goose(fixture.bin_dir(), &md_file, "");
     fs::write(&md_file, "---\nprompt: Update me\nagent: goose\n---\nbody\n").unwrap();
 
-    let assert = inline_compose_cmd(workspace.path(), &path_dir)
+    let assert = inline_compose_cmd(&fixture)
         .env("GOOSE_MODE", "chat")
         .args(["inline-compose", md_file.to_str().unwrap()])
         .assert()
@@ -1075,7 +985,7 @@ fn inline_compose_refuses_an_explicit_write_deny_before_spawn() {
     assert!(stderr.contains("GOOSE_MODE=chat"), "must name the denial: {stderr}");
     assert!(stderr.contains("explicitly denies file edits"), "{stderr}");
     assert!(
-        !workspace.path().join("captured_args.txt").exists(),
+        !fixture.cwd().join("captured_args.txt").exists(),
         "the provider must not launch under a denied posture"
     );
     assert_eq!(fs::read_to_string(&md_file).unwrap(), "---\nprompt: Update me\nagent: goose\n---\nbody\n");

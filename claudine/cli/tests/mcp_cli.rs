@@ -11,7 +11,7 @@ use claudine::mcp::types::{
 };
 use predicates::str::contains;
 mod common;
-use common::{TestWorkspace, init_git_repo};
+use common::{CliProcessFixture, init_git_repo};
 #[cfg(unix)]
 use common::{write, write_executable, write_json};
 
@@ -119,9 +119,8 @@ fn seed_provider_state(
 #[cfg(unix)]
 #[test]
 fn mcp_show_json_includes_provenance() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("mcp-show-json");
+    let home = fixture.home().to_path_buf();
 
     let server = make_server("calendar");
     seed_catalog(&home, std::slice::from_ref(&server));
@@ -135,9 +134,8 @@ fn mcp_show_json_includes_provenance() {
         &home.join(".codex/config.toml"),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    let assert = fixture
+        .command()
         .args(["mcp", "show", "calendar", "--json"])
         .assert()
         .success();
@@ -152,17 +150,15 @@ fn mcp_show_json_includes_provenance() {
 #[cfg(unix)]
 #[test]
 fn mcp_config_json_uses_new_command_name() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("mcp-config-json");
+    let home = fixture.home().to_path_buf();
 
     let mut server = make_server("calendar");
     server.aliases.push("gcal".into());
     seed_catalog(&home, std::slice::from_ref(&server));
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    let assert = fixture
+        .command()
         .args(["mcp", "config", "gcal", "--json"])
         .assert()
         .success();
@@ -176,24 +172,15 @@ fn mcp_config_json_uses_new_command_name() {
 #[cfg(unix)]
 #[test]
 fn mcp_check_json_reports_invalid_servers() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("mcp-check-json");
+    let home = fixture.home().to_path_buf();
 
     let mut invalid = make_server("broken");
     invalid.command = None;
     seed_catalog(&home, &[invalid]);
 
-    // Run from the isolated workspace, not the ambient (real) repository:
-    // `mcp check` resolves the repo root from the cwd, and inside this
-    // monorepo that discovery pays a full git worktree-metadata refresh,
-    // which is slow enough under full-suite contention to trip nextest's
-    // termination ceiling. The assertion below covers catalog validation
-    // only; a repo root contributes nothing to it.
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    let assert = fixture
+        .command()
         .args(["mcp", "check", "--json"])
         .assert()
         .success();
@@ -209,11 +196,9 @@ fn mcp_check_json_reports_invalid_servers() {
 
 #[test]
 fn mcp_default_repo_uses_repo_root_from_nested_directory() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    let repo_root = workspace.path().join("repo");
+    let fixture = CliProcessFixture::named("mcp-default-repo-nested");
+    let repo_root = fixture.workspace_path().join("repo");
     let nested = repo_root.join("claudine/cli");
-    fs::create_dir_all(&home).unwrap();
     fs::create_dir_all(&nested).unwrap();
 
     if !init_git_repo(&repo_root) {
@@ -221,10 +206,12 @@ fn mcp_default_repo_uses_repo_root_from_nested_directory() {
         return;
     }
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&nested)
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    // ambient-context escape: the subject is repo-root discovery from a nested
+    // directory, so the launch CWD must be the repository this test built.
+    fixture
+        .command_builder()
+        .ambient_context(&nested)
+        .build()
         .args(["mcp", "default", "--repo", "calendar", "slack"])
         .assert()
         .success();
@@ -238,11 +225,10 @@ fn mcp_default_repo_uses_repo_root_from_nested_directory() {
 #[cfg(unix)]
 #[test]
 fn mcp_export_reports_unresolved_defaults_and_uses_native_name() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    let repo_root = workspace.path().join("repo");
+    let fixture = CliProcessFixture::named("mcp-export-unresolved");
+    let home = fixture.home().to_path_buf();
+    let repo_root = fixture.workspace_path().join("repo");
     let nested = repo_root.join("claudine/cli");
-    fs::create_dir_all(&home).unwrap();
     fs::create_dir_all(&nested).unwrap();
 
     if !init_git_repo(&repo_root) {
@@ -279,10 +265,12 @@ args = ["-y", "@test/google-calendar"]
         &codex_config,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&nested)
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    // ambient-context escape: repo-scoped export resolves its target from the
+    // launch CWD, which must be inside the repository this test built.
+    let assert = fixture
+        .command_builder()
+        .ambient_context(&nested)
+        .build()
         .args([
             "mcp", "export", "codex", "--scope", "repo", "--apply", "--json",
         ])
@@ -301,20 +289,16 @@ args = ["-y", "@test/google-calendar"]
 #[cfg(unix)]
 #[test]
 fn codex_wrapper_mcp_dry_run_shows_cleaned_prompt_and_shadow_file() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(home.join(".codex")).unwrap();
-    fs::create_dir_all(&path_dir).unwrap();
-    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+    let fixture = CliProcessFixture::named("mcp-codex-dry-run");
+    let home = fixture.home().to_path_buf();
+    fs::create_dir_all(fixture.home().join(".codex")).unwrap();
+    write_executable(&fixture.bin_dir().join("codex"), "#!/bin/sh\nexit 0\n");
 
     seed_catalog(&home, &[make_server("calendar")]);
     seed_defaults(&home, &["calendar"]);
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .args([
             "codex",
             "--mcp",
@@ -336,22 +320,17 @@ fn codex_wrapper_mcp_dry_run_shows_cleaned_prompt_and_shadow_file() {
 #[cfg(unix)]
 #[test]
 fn gemini_and_opencode_wrapper_mcp_dry_run_show_provider_specific_injection() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(home.join(".gemini")).unwrap();
-    fs::create_dir_all(&path_dir).unwrap();
-    write_executable(&path_dir.join("gemini"), "#!/bin/sh\nexit 0\n");
-    write_executable(&path_dir.join("opencode"), "#!/bin/sh\nexit 0\n");
+    let fixture = CliProcessFixture::named("mcp-gemini-opencode-dry-run");
+    let home = fixture.home().to_path_buf();
+    fs::create_dir_all(fixture.home().join(".gemini")).unwrap();
+    write_executable(&fixture.bin_dir().join("gemini"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("opencode"), "#!/bin/sh\nexit 0\n");
 
     seed_catalog(&home, &[make_server("linear"), make_server("github")]);
     seed_defaults(&home, &[]);
 
-    let gemini = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
-        .env("PATH", &path_dir)
+    let gemini = fixture
+        .command()
         .args([
             "gemini",
             "--mcp",
@@ -368,12 +347,9 @@ fn gemini_and_opencode_wrapper_mcp_dry_run_show_provider_specific_injection() {
     assert!(gemini_stderr.contains("--allowed-mcp-server-names linear"));
     assert!(gemini_stderr.contains(".gemini/settings.json"));
 
-    let opencode = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    let opencode = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
-        .env("PATH", &path_dir)
         .args([
             "opencode",
             "--mcp",
@@ -393,20 +369,16 @@ fn gemini_and_opencode_wrapper_mcp_dry_run_show_provider_specific_injection() {
 #[cfg(unix)]
 #[test]
 fn claude_wrapper_mcp_reports_sync_guidance() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(home.join(".claude")).unwrap();
-    fs::create_dir_all(&path_dir).unwrap();
-    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+    let fixture = CliProcessFixture::named("mcp-claude-sync-guidance");
+    let home = fixture.home().to_path_buf();
+    fs::create_dir_all(fixture.home().join(".claude")).unwrap();
+    write_executable(&fixture.bin_dir().join("claude"), "#!/bin/sh\nexit 0\n");
 
     seed_catalog(&home, &[make_server("calendar")]);
     seed_defaults(&home, &["calendar"]);
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .args(["claude", "--mcp", "--dry-run", "--", "--print", "do work"])
         .assert()
         .failure()
@@ -421,19 +393,14 @@ fn claude_wrapper_mcp_reports_sync_guidance() {
 #[cfg(unix)]
 #[test]
 fn mcp_list_outside_repo_returns_no_repo_defaults() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    let non_repo = workspace.path().join("not-a-repo");
-    fs::create_dir_all(&home).unwrap();
-    fs::create_dir_all(&non_repo).unwrap();
+    let fixture = CliProcessFixture::named("mcp-list-outside-repo");
+    let home = fixture.home().to_path_buf();
 
     seed_catalog(&home, &[make_server("calendar")]);
     seed_defaults(&home, &["calendar"]);
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&non_repo)
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    let assert = fixture
+        .command()
         .args(["mcp", "--json"])
         .assert()
         .success();
@@ -447,16 +414,10 @@ fn mcp_list_outside_repo_returns_no_repo_defaults() {
 
 #[test]
 fn mcp_default_repo_fails_outside_repo() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    let non_repo = workspace.path().join("not-a-repo");
-    fs::create_dir_all(&home).unwrap();
-    fs::create_dir_all(&non_repo).unwrap();
+    let fixture = CliProcessFixture::named("mcp-default-repo-outside");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&non_repo)
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    fixture
+        .command()
         .args(["mcp", "default", "--repo", "calendar"])
         .assert()
         .failure()
@@ -471,11 +432,8 @@ fn mcp_default_repo_fails_outside_repo() {
 #[cfg(unix)]
 #[test]
 fn mcp_remove_cascades_to_user_defaults() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    let non_repo = workspace.path().join("not-a-repo");
-    fs::create_dir_all(&home).unwrap();
-    fs::create_dir_all(&non_repo).unwrap();
+    let fixture = CliProcessFixture::named("mcp-remove-user-defaults");
+    let home = fixture.home().to_path_buf();
 
     let server = make_server("calendar");
     let other = make_server("slack");
@@ -483,10 +441,8 @@ fn mcp_remove_cascades_to_user_defaults() {
     seed_defaults(&home, &["calendar", "slack"]);
 
     // Remove calendar (--json to skip interactive confirmation)
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&non_repo)
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    let assert = fixture
+        .command()
         .args(["mcp", "remove", "calendar", "--json"])
         .assert()
         .success();
@@ -512,10 +468,9 @@ fn mcp_remove_cascades_to_user_defaults() {
 #[cfg(unix)]
 #[test]
 fn mcp_remove_cascades_to_repo_defaults() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    let repo_root = workspace.path().join("repo");
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("mcp-remove-repo-defaults");
+    let home = fixture.home().to_path_buf();
+    let repo_root = fixture.workspace_path().join("repo");
     fs::create_dir_all(&repo_root).unwrap();
 
     if !init_git_repo(&repo_root) {
@@ -534,10 +489,12 @@ fn mcp_remove_cascades_to_repo_defaults() {
         },
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&repo_root)
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    // ambient-context escape: repo defaults are read from the launch CWD's
+    // repository, which this test built.
+    let assert = fixture
+        .command_builder()
+        .ambient_context(&repo_root)
+        .build()
         .args(["mcp", "remove", "calendar", "--json"])
         .assert()
         .success();
@@ -562,13 +519,10 @@ fn mcp_remove_cascades_to_repo_defaults() {
 
 #[test]
 fn mcp_sync_rejects_positional_provider() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("mcp-sync-positional");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    fixture
+        .command()
         .args(["mcp", "sync", "codex"])
         .assert()
         .failure();
@@ -582,10 +536,9 @@ fn mcp_sync_rejects_positional_provider() {
 #[cfg(unix)]
 #[test]
 fn effective_defaults_repo_replaces_user() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    let repo_root = workspace.path().join("repo");
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("mcp-repo-replaces-user");
+    let home = fixture.home().to_path_buf();
+    let repo_root = fixture.workspace_path().join("repo");
     fs::create_dir_all(&repo_root).unwrap();
 
     if !init_git_repo(&repo_root) {
@@ -606,10 +559,12 @@ fn effective_defaults_repo_replaces_user() {
     );
 
     // List from repo context — active defaults should be repo-only, not user-only
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&repo_root)
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    // ambient-context escape: the subject is repo-over-user defaults, read from
+    // the launch CWD's repository.
+    let assert = fixture
+        .command_builder()
+        .ambient_context(&repo_root)
+        .build()
         .args(["mcp", "--json"])
         .assert()
         .success();
@@ -630,21 +585,16 @@ fn effective_defaults_repo_replaces_user() {
 #[cfg(unix)]
 #[test]
 fn strict_mode_errors_on_missing_tag() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&home).unwrap();
-    fs::create_dir_all(&path_dir).unwrap();
-    write_executable(&path_dir.join("opencode"), "#!/bin/sh\nexit 0\n");
+    let fixture = CliProcessFixture::named("mcp-strict-missing-tag");
+    let home = fixture.home().to_path_buf();
+    write_executable(&fixture.bin_dir().join("opencode"), "#!/bin/sh\nexit 0\n");
 
     seed_catalog(&home, &[make_server("calendar")]);
     seed_defaults(&home, &["calendar"]);
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
-        .env("PATH", &path_dir)
         .args([
             "opencode",
             "--mcp",
@@ -661,12 +611,9 @@ fn strict_mode_errors_on_missing_tag() {
 #[cfg(unix)]
 #[test]
 fn strict_mode_errors_on_ambiguous_tag() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&home).unwrap();
-    fs::create_dir_all(&path_dir).unwrap();
-    write_executable(&path_dir.join("opencode"), "#!/bin/sh\nexit 0\n");
+    let fixture = CliProcessFixture::named("mcp-strict-ambiguous-tag");
+    let home = fixture.home().to_path_buf();
+    write_executable(&fixture.bin_dir().join("opencode"), "#!/bin/sh\nexit 0\n");
 
     seed_catalog(
         &home,
@@ -674,11 +621,9 @@ fn strict_mode_errors_on_ambiguous_tag() {
     );
     seed_defaults(&home, &[]);
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
-        .env("PATH", &path_dir)
         .args([
             "opencode",
             "--mcp",
@@ -700,17 +645,15 @@ fn strict_mode_errors_on_ambiguous_tag() {
 #[cfg(unix)]
 #[test]
 fn mcp_remove_alias_reports_owner_and_remaining() {
-    let workspace = TestWorkspace::named("claudine-mcp-it");
-    let home = workspace.path().join("home");
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("mcp-remove-alias");
+    let home = fixture.home().to_path_buf();
 
     let mut server = make_server("calendar");
     server.aliases = vec!["gcal".into(), "cal".into()];
     seed_catalog(&home, std::slice::from_ref(&server));
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    let assert = fixture
+        .command()
         .args(["mcp", "remove", "gcal", "--json"])
         .assert()
         .success();

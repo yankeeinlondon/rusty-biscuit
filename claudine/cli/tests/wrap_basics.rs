@@ -5,20 +5,17 @@
 
 use predicates::str::contains;
 use std::fs;
-use tempfile::tempdir;
 mod common;
 use common::wrap::*;
-use common::{strip_ansi, write_dry_run_provider_stub};
+use common::{CliProcessFixture, strip_ansi, write_dry_run_provider_stub};
 #[cfg(unix)]
 use common::write_executable;
 
 #[test]
 fn help_lists_wrapper_subcommands() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .args(["--help"])
-        .assert()
-        .success();
+    let fixture = CliProcessFixture::named("wrap-basics-help");
+
+    let assert = fixture.command().args(["--help"]).assert().success();
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
     insta::assert_snapshot!(strip_ansi(&stdout));
@@ -26,8 +23,10 @@ fn help_lists_wrapper_subcommands() {
 
 #[test]
 fn wrapper_help_includes_expected_flags() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let fixture = CliProcessFixture::named("wrap-basics-wrapper-help");
+
+    let assert = fixture
+        .command()
         .args(["codex", "--help"])
         .assert()
         .success();
@@ -63,8 +62,10 @@ fn wrapper_help_includes_expected_flags() {
 
 #[test]
 fn wrapper_rejects_edit_and_interactive_conflict() {
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let fixture = CliProcessFixture::named("wrap-basics-edit-interactive");
+
+    fixture
+        .command()
         .args(["codex", "--edit", "--interactive"])
         .assert()
         .failure()
@@ -76,16 +77,14 @@ fn wrapper_rejects_edit_and_interactive_conflict() {
 #[cfg(unix)]
 #[test]
 fn wrapper_preserves_passthrough_args_and_injects_env() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    let args_path = workspace.path().join("args.txt");
-    let env_path = workspace.path().join("env.txt");
-    let stdin_path = workspace.path().join("stdin.txt");
+    let fixture = CliProcessFixture::named("wrap-basics-passthrough");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
+    let env_path = fixture.cwd().join("env.txt");
+    let stdin_path = fixture.cwd().join("stdin.txt");
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 /bin/cat > "$CLAUDINE_STDIN_FILE"
@@ -99,14 +98,11 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
-        .current_dir(workspace.path())
         .args(["codex", "--yolo", "--", "--json", "summarize repo"])
         .assert()
         .success();
@@ -136,24 +132,20 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn wrapper_rejects_edit_without_interactive_terminal_before_launch() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    let args_path = workspace.path().join("args.txt");
+    let fixture = CliProcessFixture::named("wrap-basics-edit-no-tty");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .args(["codex", "summarize repo", "--edit"])
         .assert()
@@ -169,24 +161,20 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn wrapper_preserves_post_boundary_edit_passthrough() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    let args_path = workspace.path().join("args.txt");
+    let fixture = CliProcessFixture::named("wrap-basics-post-boundary-edit");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .args(["codex", "--", "--edit", "--version"])
         .assert()
@@ -202,25 +190,20 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn codex_wrapper_uses_shadow_home_for_repo_prompt_overlay_without_repo_flag() {
-    let workspace = tempdir().unwrap();
-    let repo_dir = workspace.path().join("repo");
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    let env_path = workspace.path().join("env.txt");
+    let fixture = CliProcessFixture::named("wrap-basics-shadow-home");
+    fixture.seed_user_config();
+    let env_path = fixture.cwd().join("env.txt");
 
-    fs::create_dir_all(&repo_dir).unwrap();
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(&fake_home);
-    fs::create_dir_all(fake_home.join(".codex")).unwrap();
-    fs::create_dir_all(repo_dir.join(".claude/commands")).unwrap();
+    fs::create_dir_all(fixture.home().join(".codex")).unwrap();
+    fs::create_dir_all(fixture.cwd().join(".claude/commands")).unwrap();
     fs::write(
-        repo_dir.join(".claude/commands/review.md"),
+        fixture.cwd().join(".claude/commands/review.md"),
         "---\ndescription: review\n---\n",
     )
     .unwrap();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 {
   printf 'HOME=%s\n' "$HOME"
@@ -234,68 +217,64 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&repo_dir)
-        .env("NO_COLOR", "1")
-        .env("HOME", &fake_home)
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ENV_FILE", &env_path)
         .args(["codex", "--", "--version"])
         .assert()
         .success();
 
     let env_lines = fs::read_to_string(&env_path).unwrap();
-    assert!(env_lines.contains(&format!("HOME={}", fake_home.join(".claudine").display())));
+    assert!(env_lines.contains(&format!(
+        "HOME={}",
+        fixture.home().join(".claudine").display()
+    )));
     assert!(env_lines.contains("HAS_REPO_PROMPT=1"));
 }
 
 #[cfg(unix)]
 #[test]
 fn wrapper_reports_removed_sensitive_env_names() {
-    let workspace = tempdir().unwrap();
-    let cwd_dir = workspace.path().join("cwd");
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&cwd_dir).unwrap();
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(&fake_home);
-    fs::create_dir_all(fake_home.join(".codex")).unwrap();
+    let fixture = CliProcessFixture::named("wrap-basics-sensitive-env");
+    fixture.seed_user_config();
+    fs::create_dir_all(fixture.home().join(".codex")).unwrap();
 
     // Seed a deterministic system-prompt.md next to the launch CWD so the
     // pre-flight token count is stable across repo state and machines.
-    fs::write(
-        cwd_dir.join("system-prompt.md"),
-        "You are a test fixture system prompt.\n",
-    )
-    .unwrap();
+    fixture.write_root_system_prompt("You are a test fixture system prompt.\n");
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env_clear()
-        .env("HOME", &fake_home)
-        .env("NO_COLOR", "1")
-        .env("PATH", &path_dir)
+    // The snapshot pins the removed/included environment names, which claudine
+    // reads from its own inherited environment — a developer machine carrying
+    // `GITHUB_TOKEN` would otherwise add a line the snapshot does not have.
+    let assert = fixture
+        .command_builder()
+        .inherit_no_env()
+        .build()
         .env("TERM", "dumb")
-        // Wide enough that no env-value line ever wraps: wrap position depends
-        // on the UNREDACTED tempdir path length, which varies by host (macOS
-        // /var/folders vs Linux /tmp), so at 80 the snapshot is host-dependent.
+        // A deliberate render width, not an isolation workaround: the builder
+        // already removes an inherited `TERM_WIDTH` and leaves claudine on its
+        // 80-column fallback. This snapshot needs 200 because the reported
+        // `PWD` is the fixture cwd, whose length varies with the host temp
+        // root, and at 80 that path word-wraps and can no longer be redacted to
+        // `<workspace>` — the snapshot would then differ between macOS's
+        // `/private/var/folders/...` and Linux's `/tmp`.
         .env("TERM_WIDTH", "200")
         .env("OPENAI_API_KEY", "keep")
         .env("INTERNAL_TOKEN", "remove")
-        .current_dir(&cwd_dir)
         .args(["codex", "--include", "OPENAI_API_KEY", "--", "--version"])
         .assert()
         .success();
 
     let stderr = String::from_utf8_lossy(&assert.get_output().stderr);
     let redacted = redact_workspace_paths(
-        workspace.path(),
+        fixture.workspace_path(),
         &redact_claudine_pid(&redact_temp_home(&redact_session_id(&strip_ansi(&stderr)))),
     );
     insta::assert_snapshot!(redacted);
@@ -304,22 +283,18 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn wrapper_propagates_child_exit_code() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-basics-exit-code");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 exit 17
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .args(["codex", "--", "--version"])
         .assert()
         .code(17);
@@ -328,15 +303,13 @@ exit 17
 #[cfg(unix)]
 #[test]
 fn wrapper_consumes_non_interactive_alias_from_passthrough() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    let args_path = workspace.path().join("args.txt");
-    let stdin_path = workspace.path().join("stdin.txt");
+    let fixture = CliProcessFixture::named("wrap-basics-non-interactive-alias");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
+    let stdin_path = fixture.cwd().join("stdin.txt");
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 /bin/cat > "$CLAUDINE_STDIN_FILE"
@@ -344,13 +317,10 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .env("CLAUDINE_STDIN_FILE", &stdin_path)
-        .current_dir(workspace.path())
         .args(["codex", "--json", "summarize repo"])
         .assert()
         .success();
@@ -373,22 +343,18 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn wrapper_logs_are_written_to_stderr_not_stdout() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-basics-stderr-routing");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .args(["codex", "--", "--version"])
         .assert()
         .success()
@@ -400,22 +366,18 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn wrapper_rejects_direct_provider_yolo_flag_with_guidance() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-basics-direct-yolo");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("claude"),
+        &fixture.bin_dir().join("claude"),
         r#"#!/bin/sh
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .args(["claude", "--dangerously-skip-permissions", "hi"])
         .assert()
         .code(1)
@@ -431,28 +393,24 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn wrapper_sets_interactive_true_by_default() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    // Isolate HOME so the wrapper reads a seeded empty config instead of the
-    // developer's real `~/.claudine/config.json`, whose lifecycle actions can
-    // spawn detached side-effect processes that hold the stdout pipe open
-    // (assert_cmd then blocks on the pipe and nextest reports leaked handles).
-    seed_minimal_config(workspace.path());
-    let env_path = workspace.path().join("env.txt");
+    let fixture = CliProcessFixture::named("wrap-basics-interactive-default");
+    // Seeded rather than left absent: the wrapper must read a config with no
+    // lifecycle actions in it. A config that has them can spawn detached
+    // side-effect processes that hold the stdout pipe open — assert_cmd then
+    // blocks on the pipe and nextest reports leaked handles.
+    fixture.seed_user_config();
+    let env_path = fixture.cwd().join("env.txt");
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 printf 'INTERACTIVE=%s\n' "$INTERACTIVE" > "$CLAUDINE_ENV_FILE"
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ENV_FILE", &env_path)
         .args(["codex", "--", "--version"])
         .assert()
@@ -465,22 +423,18 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn wrapper_header_shows_provider_name() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-basics-header");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .args(["codex", "--", "--version"])
         .assert()
         .success();
@@ -504,23 +458,19 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn wrapper_dry_run_prints_command_and_exits_zero() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-basics-dry-run");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 echo "SHOULD NOT RUN"
 exit 1
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .args(["codex", "--dry-run", "--", "--version"])
         .assert()
         .success()
@@ -535,24 +485,15 @@ exit 1
 
 #[test]
 fn codex_dry_run_discovered_replace_system_prompt_uses_model_instructions_file() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    fs::write(
-        workspace.path().join("system-prompt.md"),
-        "---\nmode: replace\n---\n\nUse the replacement prompt.\n",
-    )
-    .unwrap();
+    let fixture = CliProcessFixture::named("wrap-basics-replace-delivery");
+    fixture.seed_user_config();
+    fixture.write_root_system_prompt("---\nmode: replace\n---\n\nUse the replacement prompt.\n");
 
-    write_dry_run_provider_stub(&path_dir, "codex");
+    write_dry_run_provider_stub(fixture.bin_dir(), "codex");
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
-        .current_dir(workspace.path())
         .args(["codex", "--dry-run", "inspect the repo"])
         .assert()
         .success()
@@ -572,24 +513,15 @@ fn codex_dry_run_discovered_replace_system_prompt_uses_model_instructions_file()
 
 #[test]
 fn codex_dry_run_discovered_replace_system_prompt_reports_effective_mode() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    fs::write(
-        workspace.path().join("system-prompt.md"),
-        "---\nmode: replace\n---\n\nUse the replacement prompt.\n",
-    )
-    .unwrap();
+    let fixture = CliProcessFixture::named("wrap-basics-replace-mode-report");
+    fixture.seed_user_config();
+    fixture.write_root_system_prompt("---\nmode: replace\n---\n\nUse the replacement prompt.\n");
 
-    write_dry_run_provider_stub(&path_dir, "codex");
+    write_dry_run_provider_stub(fixture.bin_dir(), "codex");
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
-        .current_dir(workspace.path())
         .args(["codex", "--dry-run", "inspect the repo"])
         .assert()
         .success()
@@ -610,25 +542,21 @@ fn codex_dry_run_discovered_replace_system_prompt_reports_effective_mode() {
 #[cfg(unix)]
 #[test]
 fn wrapper_quiet_suppresses_summary() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let system_prompt = workspace.path().join("system-prompt.md");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-basics-quiet");
+    fixture.seed_user_config();
+    let system_prompt = fixture.cwd().join("quiet-prompt.md");
     fs::write(&system_prompt, "Quiet mode prompt").unwrap();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 exit 0
 "#,
     );
 
     // --quiet shows header but suppresses env details and info
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .args([
             "codex",
             "--quiet",
@@ -656,10 +584,8 @@ exit 0
     );
 
     // --silent suppresses everything
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .args(["codex", "--silent", "--", "--version"])
         .assert()
         .success();
@@ -674,18 +600,14 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn wrapper_missing_explicit_system_prompt_fails_visibly() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let missing_prompt = workspace.path().join("missing-prompt.md");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-basics-missing-prompt");
+    fixture.seed_user_config();
+    let missing_prompt = fixture.cwd().join("missing-prompt.md");
 
-    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("codex"), "#!/bin/sh\nexit 0\n");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .args([
             "codex",
             "--append-system-prompt",
@@ -709,24 +631,20 @@ fn wrapper_missing_explicit_system_prompt_fails_visibly() {
 #[cfg(unix)]
 #[test]
 fn wrapper_universal_model_flag_passes_to_provider() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    let args_path = workspace.path().join("args.txt");
+    let fixture = CliProcessFixture::named("wrap-basics-model-flag");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
 
     write_executable(
-        &path_dir.join("claude"),
+        &fixture.bin_dir().join("claude"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .args(["claude", "--model", "claude-sonnet-4-6", "hi"])
         .assert()
@@ -745,22 +663,18 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn wrapper_removes_new_sensitive_env_patterns() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-basics-sensitive-patterns");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .env("SSH_PRIVATE_KEY", "secret")
         .env("AWS_ACCESS_KEY_ID", "secret")
         .env("DB_CREDENTIAL", "secret")
@@ -782,23 +696,19 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn wrapper_timeout_rejects_in_interactive_mode() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-basics-timeout-interactive");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 exit 0
 "#,
     );
 
     // No prompt → interactive by default → --timeout should fail
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .args(["codex", "--timeout", "30s"])
         .assert()
         .code(1)
@@ -807,10 +717,8 @@ exit 0
         ));
 
     // --interactive + --timeout → explicit conflict
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .args(["codex", "--timeout", "30s", "-i", "--", "hello"])
         .assert()
         .code(1)
@@ -824,24 +732,20 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn wrapper_redacts_sensitive_args_in_agent_params() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    let env_path = workspace.path().join("env.txt");
+    let fixture = CliProcessFixture::named("wrap-basics-agent-params-redaction");
+    fixture.seed_user_config();
+    let env_path = fixture.cwd().join("env.txt");
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 printf 'AGENT_PARAMS=%s\n' "$AGENT_PARAMS" > "$CLAUDINE_ENV_FILE"
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ENV_FILE", &env_path)
         .args([
             "codex",
@@ -869,14 +773,12 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn wrapper_injects_claudine_pid_into_provider_env() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
-    let env_path = workspace.path().join("env.txt");
+    let fixture = CliProcessFixture::named("wrap-basics-pid-injection");
+    fixture.seed_user_config();
+    let env_path = fixture.cwd().join("env.txt");
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 {
   printf 'CLAUDINE_PID=%s\n' "$CLAUDINE_PID"
@@ -890,10 +792,8 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("CLAUDINE_ENV_FILE", &env_path)
         .args(["codex", "--", "--version"])
         .assert()

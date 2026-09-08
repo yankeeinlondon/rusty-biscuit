@@ -1,41 +1,26 @@
 #![cfg(unix)]
 
 use std::fs;
-use tempfile::tempdir;
 
-fn write_executable(path: &std::path::Path, body: &str) {
-    fs::write(path, body).unwrap();
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        let mut perms = fs::metadata(path).unwrap().permissions();
-        perms.set_mode(0o755);
-        fs::set_permissions(path, perms).unwrap();
-    }
-}
+mod common;
+use common::{CliProcessFixture, write_executable};
 
 #[cfg(unix)]
 #[test]
 fn direct_wrap_opencode_argv() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let args_path = workspace.path().join("args.txt");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("direct-wrap-opencode-argv");
+    let args_path = fixture.cwd().join("args.txt");
 
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .args([
@@ -93,23 +78,19 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn direct_wrap_goose_argv() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let args_path = workspace.path().join("args.txt");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("direct-wrap-goose-argv");
+    let args_path = fixture.cwd().join("args.txt");
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
-        .env("NO_COLOR", "1")
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .env("GOOSE_MODEL", "test-model")
         .env("CLAUDINE_ARGS_FILE", &args_path)
         .args(["goose", "--yolo", "--", "my goose prompt"])

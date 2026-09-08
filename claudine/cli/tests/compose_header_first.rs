@@ -11,44 +11,39 @@
 //! first line, and that `--silent` / `--quiet` behave as before.
 
 use std::fs;
-use tempfile::tempdir;
+use std::path::PathBuf;
 
 mod common;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
 /// The removed banner token — must never reappear.
 const BANNER_TOKEN: &str = "Composing";
 /// The execution header carries the compose badge.
 const HEADER_TOKEN: &str = "Compose";
 
-fn make_workspace_with_goose() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+fn make_workspace_with_goose() -> (CliProcessFixture, PathBuf) {
+    let fixture = CliProcessFixture::named("compose-header-first");
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 echo "Agent response"
 exit 0
 "#,
     );
 
-    let md_file = workspace.path().join("prompt.md");
+    let md_file = fixture.cwd().join("prompt.md");
     fs::write(&md_file, "# Compose body\nHello from compose.\n").unwrap();
-    (workspace, path_dir, md_file)
+    (fixture, md_file)
 }
 
-fn make_workspace_with_goose_inline() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf)
-{
+fn make_workspace_with_goose_inline() -> (CliProcessFixture, PathBuf) {
     // inline-compose requires a frontmatter `prompt:` property because
     // the prompt body is composed inline (a separate `prompt` block) and
     // injected into the agent invocation. The plain compose flow has no
     // such requirement.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("inline-compose-header-first");
 
-    let md_file = workspace.path().join("prompt.md");
+    let md_file = fixture.cwd().join("prompt.md");
     fs::write(
         &md_file,
         "---\nprompt: |\n  Hello from inline compose.\n---\n# Body\n",
@@ -58,21 +53,17 @@ fn make_workspace_with_goose_inline() -> (tempfile::TempDir, std::path::PathBuf,
     // refused as a run that did no work.
     common::InlineAgentStub::new(&md_file)
         .body("# Body\n\nAgent response\n")
-        .install(&path_dir, "goose");
-    (workspace, path_dir, md_file)
+        .install(fixture.bin_dir(), "goose");
+    (fixture, md_file)
 }
 
 #[cfg(unix)]
 #[test]
 fn compose_execution_header_is_the_first_signal() {
-    let (workspace, path_dir, md_file) = make_workspace_with_goose();
+    let (fixture, md_file) = make_workspace_with_goose();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -112,14 +103,10 @@ fn compose_execution_header_is_the_first_signal() {
 #[cfg(unix)]
 #[test]
 fn compose_silent_suppresses_the_execution_header() {
-    let (workspace, path_dir, md_file) = make_workspace_with_goose();
+    let (fixture, md_file) = make_workspace_with_goose();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", "--goose", "--silent", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -142,14 +129,10 @@ fn compose_silent_suppresses_the_execution_header() {
 fn compose_quiet_keeps_the_execution_header() {
     // `--quiet` suppresses env details and the prompt block but keeps the
     // execution header so the user still gets immediate feedback.
-    let (workspace, path_dir, md_file) = make_workspace_with_goose();
+    let (fixture, md_file) = make_workspace_with_goose();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", "--goose", "--quiet", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -170,14 +153,10 @@ fn compose_quiet_keeps_the_execution_header() {
 #[cfg(unix)]
 #[test]
 fn inline_compose_execution_header_is_the_first_signal() {
-    let (workspace, path_dir, md_file) = make_workspace_with_goose_inline();
+    let (fixture, md_file) = make_workspace_with_goose_inline();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -199,14 +178,10 @@ fn inline_compose_execution_header_is_the_first_signal() {
 #[cfg(unix)]
 #[test]
 fn inline_compose_silent_suppresses_the_execution_header() {
-    let (workspace, path_dir, md_file) = make_workspace_with_goose_inline();
+    let (fixture, md_file) = make_workspace_with_goose_inline();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args([
             "inline-compose",
             "--goose",

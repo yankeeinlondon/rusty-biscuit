@@ -88,9 +88,13 @@ fn isolated_fixture_can_opt_in_to_package_scoped_prompt_discovery() {
     );
     write_dry_run_provider_stub(fixture.bin_dir(), "codex");
 
+    // Escape: ambient context. Package-scoped discovery is measured from the
+    // launch directory, so the run is pinned to the package this test built
+    // inside its own workspace.
     let assertion = fixture
-        .command()
-        .current_dir(&package)
+        .command_builder()
+        .ambient_context(&package)
+        .build()
         .env("CLAUDINE_SYSTEM_PROMPT", "verbose")
         .env("PATHEXT", ".COM;.EXE;.BAT;.CMD")
         .args(["codex", "--dry-run", "inspect the package"])

@@ -6,30 +6,24 @@
 //! `common::wrap`.
 
 use std::fs;
-use tempfile::tempdir;
 mod common;
-use common::wrap::*;
-use common::{augmented_path, init_git_repo, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
 #[cfg(unix)]
 #[test]
 fn wrapper_perf_emits_report_to_stderr_only() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-perf-stderr-only");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .args(["codex", "--perf", "--", "--version"])
         .assert()
         .success()
@@ -54,24 +48,14 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn wrapper_perf_reports_source_context_probe_and_reuse_counts() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    assert!(init_git_repo(workspace.path()));
-    seed_minimal_config(workspace.path());
-    fs::write(
-        workspace.path().join("system-prompt.md"),
-        "Request-owned system prompt.\n",
-    )
-    .unwrap();
-    write_executable(&path_dir.join("codex"), "#!/bin/sh\nexit 0\n");
+    let fixture = CliProcessFixture::named("wrap-perf-source-context");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    fixture.write_root_system_prompt("Request-owned system prompt.\n");
+    write_executable(&fixture.bin_dir().join("codex"), "#!/bin/sh\nexit 0\n");
 
-    let assert = assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .args(["codex", "--perf", "inspect the repository"])
         .assert()
         .success();
@@ -86,23 +70,19 @@ fn wrapper_perf_reports_source_context_probe_and_reuse_counts() {
 #[cfg(unix)]
 #[test]
 fn wrapper_dry_run_perf_emits_report_with_skipped_note() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-perf-dry-run");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 echo "SHOULD NOT RUN"
 exit 1
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .args(["codex", "--dry-run", "--perf", "--", "--version"])
         .assert()
         .success()
@@ -127,22 +107,18 @@ exit 1
 #[cfg(unix)]
 #[test]
 fn wrapper_failure_perf_emits_report_before_the_error_returns() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("wrap-perf-failure");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .args(["codex", "--perf", "--timeout", "1s"])
         .assert()
         .failure();
@@ -166,25 +142,19 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_perf_emits_report_to_stderr() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-perf-stderr");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: perf test\n---\n# Hello\n").unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\necho 'Agent response'\nexit 0\n",
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", "--goose", "--perf", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -212,27 +182,22 @@ fn compose_perf_emits_report_to_stderr() {
 #[cfg(unix)]
 #[test]
 fn composition_setup_and_provider_handoff_order_matches_phase_1_baseline() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-perf-setup-order");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("setup-order.md");
+    let md_file = fixture.cwd().join("setup-order.md");
     fs::write(
         &md_file,
         "---\nagent: goose\ninitialize:\n  stack:\n    - action: {stdout: \"phase:initialize\"}\n---\n# Setup ordering\n",
     )
     .unwrap();
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\nprintf 'phase:provider cwd=%s\\n' \"$PWD\"\n",
     );
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let output = fixture
+        .command()
         .args(["compose", "--goose", "--perf", md_file.to_str().unwrap()])
         .output()
         .unwrap();
@@ -250,7 +215,7 @@ fn composition_setup_and_provider_handoff_order_matches_phase_1_baseline() {
         .find("phase:provider")
         .unwrap_or_else(|| panic!("provider marker missing: {stdout}"));
     assert!(initialize < provider, "initialize must precede provider handoff: {stdout}");
-    let canonical_workspace = workspace.path().canonicalize().unwrap();
+    let canonical_workspace = fixture.cwd().canonicalize().unwrap();
     assert!(
         stdout.contains(&format!("cwd={}", canonical_workspace.display())),
         "provider must launch in the selected workspace: {stdout}"
@@ -286,35 +251,25 @@ fn composition_setup_and_provider_handoff_order_matches_phase_1_baseline() {
 #[cfg(unix)]
 #[test]
 fn compose_perf_stdout_matches_non_perf() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-perf-stdout-parity");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: perf test\n---\n# Hello\n").unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\necho 'Agent response'\nexit 0\n",
     );
 
-    let perf_assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let perf_assert = fixture
+        .command()
         .args(["compose", "--goose", "--perf", md_file.to_str().unwrap()])
         .assert()
         .success();
 
-    let plain_assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let plain_assert = fixture
+        .command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -331,12 +286,10 @@ fn compose_perf_stdout_matches_non_perf() {
 #[cfg(unix)]
 #[test]
 fn inline_compose_perf_emits_report_to_stderr() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("inline-compose-perf-stderr");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(
         &md_file,
         "---\ntitle: inline perf\nprompt: say hello\n---\n# Body\n",
@@ -345,14 +298,10 @@ fn inline_compose_perf_emits_report_to_stderr() {
 
     common::InlineAgentStub::new(&md_file)
         .body("Replacement body\n")
-        .install(&path_dir, "goose");
+        .install(fixture.bin_dir(), "goose");
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args([
             "inline-compose",
             "--goose",
@@ -382,13 +331,11 @@ fn inline_compose_perf_emits_report_to_stderr() {
 #[cfg(unix)]
 #[test]
 fn inline_compose_perf_stdout_matches_non_perf() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("inline-compose-perf-stdout-parity");
+    fixture.seed_user_config();
 
-    let md_file_perf = workspace.path().join("test-perf.md");
-    let md_file_plain = workspace.path().join("test-plain.md");
+    let md_file_perf = fixture.cwd().join("test-perf.md");
+    let md_file_plain = fixture.cwd().join("test-plain.md");
     let content = "---\ntitle: inline perf\nprompt: say hello\n---\n# Body\n";
     fs::write(&md_file_perf, content).unwrap();
     fs::write(&md_file_plain, content).unwrap();
@@ -396,7 +343,7 @@ fn inline_compose_perf_stdout_matches_non_perf() {
     // Each run has its own active document, so the stub reads the target out of
     // the delivered prompt rather than being pinned to one path.
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\n{find_doc}CLAUDINE_ADD=''\nCLAUDINE_BODY='Replacement body\n'\n{rewrite}printf 'Replaced the body.\\n'\nexit 0\n",
             find_doc = common::INLINE_DOC_FROM_PROMPT,
@@ -404,12 +351,8 @@ fn inline_compose_perf_stdout_matches_non_perf() {
         ),
     );
 
-    let perf_assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let perf_assert = fixture
+        .command()
         .args([
             "inline-compose",
             "--goose",
@@ -419,12 +362,8 @@ fn inline_compose_perf_stdout_matches_non_perf() {
         .assert()
         .success();
 
-    let plain_assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let plain_assert = fixture
+        .command()
         .args(["inline-compose", "--goose", md_file_plain.to_str().unwrap()])
         .assert()
         .success();
@@ -441,23 +380,19 @@ fn inline_compose_perf_stdout_matches_non_perf() {
 #[cfg(unix)]
 #[test]
 fn compose_dry_run_perf_renders_report_without_agent_execution() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("compose-perf-dry-run");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: dry run perf\n---\n# Hello\n").unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\necho 'should not run'\nexit 0\n",
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .args([
             "compose",
             "--goose",
@@ -495,25 +430,19 @@ fn compose_dry_run_perf_renders_report_without_agent_execution() {
 #[cfg(unix)]
 #[test]
 fn perf_arg_parsing_includes_clap_time() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("perf-arg-parsing");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: arg parse perf\n---\n# Hello\n").unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\necho 'Agent response'\nexit 0\n",
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", "--goose", "--perf", md_file.to_str().unwrap()])
         .assert()
         .success();

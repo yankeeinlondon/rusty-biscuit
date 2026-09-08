@@ -1,15 +1,11 @@
-use std::fs;
-
 mod common;
-use common::{TestWorkspace, init_git_repo, write};
+use common::{CliProcessFixture, init_git_repo, write};
 
 #[test]
 fn handle_reads_repo_scoped_config_from_cwd_repo_root() {
-    let workspace = TestWorkspace::named("claudine-handle-repo-it");
-    let home_dir = workspace.path().join("home");
-    let repo_root = workspace.path().join("repo");
-    fs::create_dir_all(&home_dir).unwrap();
-    fs::create_dir_all(&repo_root).unwrap();
+    let fixture = CliProcessFixture::named("handle-repo-config");
+    let home_dir = fixture.home().to_path_buf();
+    let repo_root = fixture.cwd().to_path_buf();
 
     // Skip if git is unavailable in the test environment.
     if !init_git_repo(&repo_root) {
@@ -47,10 +43,8 @@ fn handle_reads_repo_scoped_config_from_cwd_repo_root() {
         &serde_json::to_string_pretty(&repo_config).unwrap(),
     );
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&repo_root)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    let output = fixture
+        .command()
         .args(["handle", "session_start", "--provider", "claude"])
         .write_stdin(r#"{"hook_event_name":"SessionStart","session_id":"repo-cfg-123"}"#)
         .assert()
@@ -68,11 +62,9 @@ fn handle_reads_repo_scoped_config_from_cwd_repo_root() {
 
 #[test]
 fn handle_logs_wrapper_package_context_from_env() {
-    let workspace = TestWorkspace::named("claudine-handle-repo-it");
-    let home_dir = workspace.path().join("home");
-    let repo_root = workspace.path().join("repo");
-    fs::create_dir_all(&home_dir).unwrap();
-    fs::create_dir_all(&repo_root).unwrap();
+    let fixture = CliProcessFixture::named("handle-repo-package-env");
+    let home_dir = fixture.home().to_path_buf();
+    let repo_root = fixture.cwd().to_path_buf();
 
     if !init_git_repo(&repo_root) {
         eprintln!("Skipping integration test: git init unavailable");
@@ -109,10 +101,8 @@ fn handle_logs_wrapper_package_context_from_env() {
         &serde_json::to_string_pretty(&repo_config).unwrap(),
     );
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&repo_root)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    let output = fixture
+        .command()
         .env("PACKAGE_AREA", "claudine")
         .env("PACKAGE", "claudine-cli")
         .args(["handle", "session_start", "--provider", "claude"])

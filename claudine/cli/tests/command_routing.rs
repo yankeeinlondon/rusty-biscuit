@@ -1,7 +1,7 @@
 
 mod common;
 
-use common::{TestWorkspace, strip_ansi, write};
+use common::{CliProcessFixture, strip_ansi, write};
 use claudine::actions::HookAction;
 use claudine::events::AgenticEvent;
 
@@ -29,13 +29,11 @@ fn seed_user_config(home: &std::path::Path) {
 
 #[test]
 fn providers_command_routes_to_stdout() {
-    let workspace = TestWorkspace::named("claudine-command-routing");
-    let home = workspace.path().join("home");
-    seed_user_config(&home);
+    let fixture = CliProcessFixture::named("command-routing-providers");
+    seed_user_config(fixture.home());
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    let output = fixture
+        .command()
         .arg("providers")
         .assert()
         .success()
@@ -54,14 +52,11 @@ fn providers_command_routes_to_stdout() {
 
 #[test]
 fn hooks_support_command_routes_without_detected_agents() {
-    let workspace = TestWorkspace::named("claudine-command-routing");
-    let home = workspace.path().join("home");
-    seed_user_config(&home);
+    let fixture = CliProcessFixture::named("command-routing-hooks-support");
+    seed_user_config(fixture.home());
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
-        .env("TERM_WIDTH", "160")
+    let output = fixture
+        .command()
         .args(["hooks", "--support"])
         .assert()
         .success()
@@ -85,8 +80,8 @@ fn hooks_support_command_routes_without_detected_agents() {
 
 #[test]
 fn explicit_config_path_loads_configured_actions() {
-    let workspace = TestWorkspace::named("claudine-command-routing");
-    let config_path = workspace.path().join("config.json");
+    let fixture = CliProcessFixture::named("command-routing-explicit-config");
+    let config_path = fixture.cwd().join("config.json");
     write(
         &config_path,
         r#"{
@@ -115,8 +110,8 @@ fn explicit_config_path_loads_configured_actions() {
             })
     );
 
-    assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
+    fixture
+        .command()
         .args(["actions", "--help"])
         .assert()
         .success();
@@ -124,14 +119,12 @@ fn explicit_config_path_loads_configured_actions() {
 
 #[test]
 fn agents_and_commands_route_to_empty_state_messages() {
-    let workspace = TestWorkspace::named("claudine-command-routing");
-    let home = workspace.path().join("home");
-    seed_user_config(&home);
+    let fixture = CliProcessFixture::named("command-routing-empty-state");
+    seed_user_config(fixture.home());
 
     let agents_stdout = String::from_utf8(
-        assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("HOME", &home)
-            .env("NO_COLOR", "1")
+        fixture
+            .command()
             .arg("agents")
             .assert()
             .success()
@@ -146,9 +139,8 @@ fn agents_and_commands_route_to_empty_state_messages() {
     );
 
     let commands_stdout = String::from_utf8(
-        assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("HOME", &home)
-            .env("NO_COLOR", "1")
+        fixture
+            .command()
             .arg("commands")
             .assert()
             .success()
@@ -173,6 +165,8 @@ fn completions_emit_supplement_aware_bash_zsh_fish_scripts() {
     // test pins the three script contracts so unintended regressions
     // surface at install time rather than at runtime on a user's
     // shell.
+    let fixture = CliProcessFixture::named("command-routing-completions");
+
     for (shell, markers) in [
         (
             "bash",
@@ -212,8 +206,8 @@ fn completions_emit_supplement_aware_bash_zsh_fish_scripts() {
             ],
         ),
     ] {
-        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
+        let output = fixture
+            .command()
             .args(["completions", shell])
             .assert()
             .success()
@@ -253,6 +247,8 @@ fn completions_retain_legacy_bootstrap_for_powershell_and_elvish() {
     // PowerShell and Elvish keep the previous one-line `COMPLETE=<shell>`
     // bootstrap so stale installations and future shell additions don't
     // regress.
+    let fixture = CliProcessFixture::named("command-routing-legacy-completions");
+
     for (shell, expected) in [
         (
             "powershell",
@@ -260,8 +256,8 @@ fn completions_retain_legacy_bootstrap_for_powershell_and_elvish() {
         ),
         ("elvish", "eval (E:COMPLETE=elvish claudine | slurp)\n"),
     ] {
-        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
+        let output = fixture
+            .command()
             .args(["completions", shell])
             .assert()
             .success()
@@ -283,15 +279,12 @@ fn completions_retain_legacy_bootstrap_for_powershell_and_elvish() {
 
 #[test]
 fn no_color_and_plain_suppress_ansi_output() {
-    let workspace = TestWorkspace::named("claudine-command-routing");
-    let home = workspace.path().join("home");
-    seed_user_config(&home);
+    let fixture = CliProcessFixture::named("command-routing-plain-output");
+    seed_user_config(fixture.home());
 
     let no_color_stdout = String::from_utf8(
-        assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("HOME", &home)
-            .env("NO_COLOR", "1")
-            .env_remove("FORCE_COLOR")
+        fixture
+            .command()
             .arg("providers")
             .assert()
             .success()
@@ -302,10 +295,13 @@ fn no_color_and_plain_suppress_ansi_output() {
     .unwrap();
     assert_eq!(strip_ansi(&no_color_stdout), no_color_stdout);
 
+    // `--plain` is the subject here, so the fixture's default `NO_COLOR` has to
+    // go: leaving it set would suppress color on its own and the assertion
+    // would hold whether `--plain` worked or not.
     let plain_stdout = String::from_utf8(
-        assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("HOME", &home)
-            .env_remove("FORCE_COLOR")
+        fixture
+            .command()
+            .env_remove("NO_COLOR")
             .arg("--plain")
             .arg("providers")
             .assert()
@@ -320,10 +316,14 @@ fn no_color_and_plain_suppress_ansi_output() {
 
 #[test]
 fn force_color_enables_ansi_in_non_tty_context() {
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
+    let fixture = CliProcessFixture::named("command-routing-force-color");
+    let missing = fixture.cwd().join("definitely-missing-sequence.md");
+
+    let output = fixture
+        .command()
         .env("FORCE_COLOR", "1")
         .env_remove("NO_COLOR")
-        .args(["sequence", "/tmp/definitely-missing-sequence.md"])
+        .args(["sequence", missing.to_str().unwrap()])
         .assert()
         .failure()
         .get_output()
@@ -339,9 +339,12 @@ fn force_color_enables_ansi_in_non_tty_context() {
 
 #[test]
 fn errors_stay_on_stderr_for_command_failures() {
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .args(["sequence", "/tmp/definitely-missing-sequence.md"])
+    let fixture = CliProcessFixture::named("command-routing-error-stream");
+    let missing = fixture.cwd().join("definitely-missing-sequence.md");
+
+    let output = fixture
+        .command()
+        .args(["sequence", missing.to_str().unwrap()])
         .assert()
         .failure()
         .get_output()

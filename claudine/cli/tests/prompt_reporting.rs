@@ -6,71 +6,49 @@
 //! suppression behaviour across standard `compose` workflows.
 
 use std::fs;
-use tempfile::tempdir;
+use std::path::PathBuf;
 
 mod common;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
-fn make_workspace_with_goose() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+fn make_workspace_with_goose() -> (CliProcessFixture, PathBuf) {
+    let fixture = CliProcessFixture::named("prompt-reporting");
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 echo "Agent response"
 exit 0
 "#,
     );
 
-    let md_file = workspace.path().join("prompt.md");
+    let md_file = fixture.cwd().join("prompt.md");
     fs::write(&md_file, "# Compose body\nHello from compose.\n").unwrap();
-    (workspace, path_dir, md_file)
+    (fixture, md_file)
 }
 
-fn make_workspace_with_goose_and_system_prompt() -> (
-    tempfile::TempDir,
-    std::path::PathBuf,
-    std::path::PathBuf,
-    std::path::PathBuf,
-) {
-    let (workspace, path_dir, md_file) = make_workspace_with_goose();
-    let sp_file = workspace.path().join("system-prompt.md");
-    fs::write(
-        &sp_file,
+fn make_workspace_with_goose_and_system_prompt() -> (CliProcessFixture, PathBuf, PathBuf) {
+    let (fixture, md_file) = make_workspace_with_goose();
+    let sp_file = fixture.write_root_system_prompt(
         "# Test System Prompt\n\nThis is a test system prompt for token counting.\n",
-    )
-    .unwrap();
-    (workspace, path_dir, md_file, sp_file)
+    );
+    (fixture, md_file, sp_file)
 }
 
-fn make_workspace_with_goose_and_verbose_system_prompt() -> (
-    tempfile::TempDir,
-    std::path::PathBuf,
-    std::path::PathBuf,
-    std::path::PathBuf,
-) {
-    let (workspace, path_dir, md_file) = make_workspace_with_goose();
-    let sp_file = workspace.path().join("system-prompt.md");
-    fs::write(
-        &sp_file,
+fn make_workspace_with_goose_and_verbose_system_prompt() -> (CliProcessFixture, PathBuf, PathBuf) {
+    let (fixture, md_file) = make_workspace_with_goose();
+    let sp_file = fixture.write_root_system_prompt(
         "---\nverbosity: verbose\n---\n\n# Test System Prompt\n\nThis is a test system prompt for token counting.\n",
-    )
-    .unwrap();
-    (workspace, path_dir, md_file, sp_file)
+    );
+    (fixture, md_file, sp_file)
 }
 
 #[cfg(unix)]
 #[test]
 fn compose_default_shows_summary_and_short_user_prompt() {
-    let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
+    let (fixture, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args([
             "compose",
             "--goose",
@@ -112,14 +90,10 @@ fn compose_default_shows_summary_and_short_user_prompt() {
 #[cfg(unix)]
 #[test]
 fn compose_verbose_shows_full_prompts() {
-    let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
+    let (fixture, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args([
             "compose",
             "--goose",
@@ -162,14 +136,10 @@ fn compose_verbose_shows_full_prompts() {
 fn compose_quiet_shows_system_summary_and_full_agent_prompt() {
     // Spec 6.3: `--quiet` forces the System Prompt to Summary mode but is a
     // no-op for the User Prompt — header and body still render.
-    let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
+    let (fixture, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args([
             "compose",
             "--goose",
@@ -213,14 +183,10 @@ fn compose_quiet_shows_system_summary_and_full_agent_prompt() {
 #[cfg(unix)]
 #[test]
 fn compose_silent_suppresses_all_prompt_reporting() {
-    let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
+    let (fixture, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args([
             "compose",
             "--goose",
@@ -257,16 +223,7 @@ fn compose_silent_suppresses_all_prompt_reporting() {
 #[cfg(unix)]
 #[test]
 fn compose_long_user_prompt_uses_frontback_truncation() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    write_executable(
-        &path_dir.join("goose"),
-        r#"#!/bin/sh
-echo "Agent response"
-exit 0
-"#,
-    );
+    let (fixture, md_file) = make_workspace_with_goose();
 
     // Create a user prompt with >40 lines
     // List items (not a bare paragraph): consecutive non-blank Markdown lines
@@ -276,15 +233,10 @@ exit 0
         .map(|i| format!("- Line {i}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let md_file = workspace.path().join("prompt.md");
     fs::write(&md_file, format!("# Long Prompt\n\n{long_prompt}\n")).unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -320,14 +272,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_system_prompt_summary_shows_token_count() {
-    let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
+    let (fixture, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args([
             "compose",
             "--goose",
@@ -354,14 +302,10 @@ fn compose_system_prompt_summary_shows_token_count() {
 #[cfg(unix)]
 #[test]
 fn compose_env_var_verbose_shows_full_system_prompt() {
-    let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
+    let (fixture, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .env("CLAUDINE_SYSTEM_PROMPT", "verbose")
         .args([
             "compose",
@@ -389,14 +333,10 @@ fn compose_env_var_verbose_shows_full_system_prompt() {
 #[cfg(unix)]
 #[test]
 fn compose_env_var_quiet_shows_summary_only() {
-    let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
+    let (fixture, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .env("CLAUDINE_SYSTEM_PROMPT", "quiet")
         .args([
             "compose",
@@ -428,14 +368,10 @@ fn compose_env_var_quiet_shows_summary_only() {
 #[cfg(unix)]
 #[test]
 fn compose_env_var_silent_suppresses_system_prompt() {
-    let (workspace, path_dir, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
+    let (fixture, md_file, sp_file) = make_workspace_with_goose_and_system_prompt();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .env("CLAUDINE_SYSTEM_PROMPT", "silent")
         .args([
             "compose",
@@ -459,16 +395,7 @@ fn compose_env_var_silent_suppresses_system_prompt() {
 #[cfg(unix)]
 #[test]
 fn compose_user_prompt_at_40_lines_renders_full() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    write_executable(
-        &path_dir.join("goose"),
-        r#"#!/bin/sh
-echo "Agent response"
-exit 0
-"#,
-    );
+    let (fixture, md_file) = make_workspace_with_goose();
 
     // Build a prompt whose final body has exactly 40 lines. The compose
     // pipeline doesn't add lines for a body-only file, so 40 numbered lines
@@ -477,15 +404,10 @@ exit 0
         .map(|i| format!("Line{i}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let md_file = workspace.path().join("prompt.md");
     fs::write(&md_file, &body).unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -515,16 +437,7 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_user_prompt_at_41_lines_uses_frontback() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    write_executable(
-        &path_dir.join("goose"),
-        r#"#!/bin/sh
-echo "Agent response"
-exit 0
-"#,
-    );
+    let (fixture, md_file) = make_workspace_with_goose();
 
     // List items so each renders on its own row (a bare paragraph would
     // reflow into a single row and never exceed the front/back row budget).
@@ -532,15 +445,10 @@ exit 0
         .map(|i| format!("- Line{i:03}"))
         .collect::<Vec<_>>()
         .join("\n");
-    let md_file = workspace.path().join("prompt.md");
     fs::write(&md_file, &body).unwrap();
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -561,18 +469,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_frontmatter_verbose_shows_full_system_prompt() {
-    let (workspace, path_dir, md_file, sp_file) =
-        make_workspace_with_goose_and_verbose_system_prompt();
+    let (fixture, md_file, sp_file) = make_workspace_with_goose_and_verbose_system_prompt();
 
-    // Run from the isolated workspace (as the sibling system-prompt tests
-    // do): with the ambient monorepo as cwd, compose's repository discovery
-    // pays a full git worktree-metadata refresh that can exceed nextest's
-    // 30s termination ceiling under full-suite contention.
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args([
             "compose",
             "--goose",

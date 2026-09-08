@@ -6,12 +6,9 @@
 //! `BlockError` report (path, line number, hint) instead of flat text.
 
 use std::fs;
-use tempfile::tempdir;
 
 mod common;
-#[cfg(unix)]
-use common::CliProcessFixture;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
 #[cfg(windows)]
 fn shim_name(name: &str) -> String {
@@ -52,10 +49,8 @@ fn failing_rustc_shim() -> &'static str {
 #[cfg(unix)]
 #[test]
 fn compose_shell_expansion_failure_renders_rich_block() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let md_file = workspace.path().join("compose.md");
+    let fixture = CliProcessFixture::named("contextual-errors-shell-expansion");
+    let md_file = fixture.cwd().join("compose.md");
     fs::write(
         &md_file,
         "---\ntitle: Shell demo\n---\n\nPre.\n\n::shell rm -rf /\n\nPost.\n",
@@ -65,13 +60,12 @@ fn compose_shell_expansion_failure_renders_rich_block() {
     // Fake claude binary so the wrapper pipeline picks a provider and
     // reaches shell-expansion resolution.
     write_executable(
-        &path_dir.join(shim_name("claude")),
+        &fixture.bin_dir().join(shim_name("claude")),
         successful_provider_shim(),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .args(["compose", "--claude", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -100,10 +94,8 @@ fn compose_shell_expansion_failure_renders_rich_block() {
 /// including in archive-only environments without a Rust toolchain.
 #[test]
 fn compose_shell_execution_failure_renders_rich_block() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let md_file = workspace.path().join("compose.md");
+    let fixture = CliProcessFixture::named("contextual-errors-shell-execution");
+    let md_file = fixture.cwd().join("compose.md");
     fs::write(
         &md_file,
         "---\ntitle: Shell demo\n---\n\nPre.\n\n::shell rustc --edition=invalid\n\nPost.\n",
@@ -113,20 +105,19 @@ fn compose_shell_execution_failure_renders_rich_block() {
     // Fake claude binary so the wrapper pipeline picks a provider and
     // reaches shell-expansion resolution.
     write_executable(
-        &path_dir.join(shim_name("claude")),
+        &fixture.bin_dir().join(shim_name("claude")),
         successful_provider_shim(),
     );
     write_executable(
-        &path_dir.join(shim_name("rustc")),
+        &fixture.bin_dir().join(shim_name("rustc")),
         failing_rustc_shim(),
     );
 
     // `--silent` suppresses the execution header so the only stderr output
     // is the structured error block, letting us assert the full captured
     // stderr is ANSI-free under `NO_COLOR=1`.
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .args(["compose", "--yolo", "--silent", "--claude", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -220,21 +211,18 @@ fn compose_system_prompt_shell_failure_renders_rich_block() {
 /// file paths in the chain.
 #[test]
 fn compose_transclusion_cycle_renders_file_chain() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let a = workspace.path().join("a.md");
-    let b = workspace.path().join("b.md");
+    let fixture = CliProcessFixture::named("contextual-errors-transclusion-cycle");
+    let a = fixture.cwd().join("a.md");
+    let b = fixture.cwd().join("b.md");
     fs::write(&a, "Start a.\n\n::file ./b.md\n\nEnd a.\n").unwrap();
     fs::write(&b, "Start b.\n\n::file ./a.md\n\nEnd b.\n").unwrap();
 
     // Fake claude binary so the wrapper pipeline picks a provider and
     // reaches transclusion resolution.
-    write_executable(&path_dir.join("claude"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("claude"), "#!/bin/sh\nexit 0\n");
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .args(["compose", "--claude", a.to_str().unwrap()])
         .assert()
         .failure();

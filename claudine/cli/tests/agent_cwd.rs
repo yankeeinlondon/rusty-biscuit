@@ -1,7 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use assert_cmd::Command;
+mod common;
+use common::CliProcessFixture;
 use predicates::prelude::*;
 
 const CLAUDE_BEFORE_PROMPT: &str =
@@ -9,10 +10,10 @@ const CLAUDE_BEFORE_PROMPT: &str =
 
 #[test]
 fn handle_rejects_present_non_absolute_agent_cwd() {
-    let home = tempfile::tempdir().unwrap();
-    write_config(home.path(), None);
-    claudine_command(home.path())
-        .current_dir(home.path())
+    let fixture = CliProcessFixture::named("agent-cwd");
+    let home = fixture.home();
+    write_config(home, None);
+    fixture.command()
         .env("AGENT_CWD", "relative/path")
         .args(["handle", "before_prompt", "--provider", "claude"])
         .write_stdin(CLAUDE_BEFORE_PROMPT)
@@ -25,44 +26,45 @@ fn handle_rejects_present_non_absolute_agent_cwd() {
 
 #[test]
 fn handle_without_agent_cwd_passes_its_absolute_entry_cwd_to_hook_action() {
-    let home = tempfile::tempdir().unwrap();
-    let entry = tempfile::tempdir().unwrap();
-    let observed = home.path().join("observed.txt");
+    let fixture = CliProcessFixture::named("agent-cwd");
+    let home = fixture.home();
+    let entry = fixture.cwd();
+    let observed = home.join("observed.txt");
     let (command, params) = recording_action(&observed);
-    write_config(home.path(), Some((&command, &params)));
+    write_config(home, Some((&command, &params)));
 
-    claudine_command(home.path())
-        .current_dir(entry.path())
+    fixture.command()
         .env_remove("AGENT_CWD")
         .args(["handle", "before_prompt", "--provider", "claude"])
         .write_stdin(CLAUDE_BEFORE_PROMPT)
         .assert()
         .success();
 
-    assert_same_path(&read_path(&observed), entry.path());
+    assert_same_path(&read_path(&observed), entry);
 }
 
 #[test]
 fn handle_retains_wrapper_launch_directory_across_provider_cwd() {
-    let home = tempfile::tempdir().unwrap();
-    let wrapper_launch = tempfile::tempdir().unwrap();
-    let provider_cwd = tempfile::tempdir().unwrap();
-    let observed = home.path().join("observed.txt");
+    let fixture = CliProcessFixture::named("agent-cwd");
+    let home = fixture.home();
+    let wrapper_launch = fixture.workspace_path().join("wrapper-launch");
+    fs::create_dir(&wrapper_launch).unwrap();
+    let provider_cwd = fixture.cwd();
+    let observed = home.join("observed.txt");
     let (command, params) = recording_action(&observed);
-    write_config(home.path(), Some((&command, &params)));
+    write_config(home, Some((&command, &params)));
 
-    claudine_command(home.path())
-        .current_dir(provider_cwd.path())
-        .env("AGENT_CWD", wrapper_launch.path())
+    fixture.command()
+        .env("AGENT_CWD", &wrapper_launch)
         .args(["handle", "before_prompt", "--provider", "claude"])
         .write_stdin(CLAUDE_BEFORE_PROMPT)
         .assert()
         .success();
 
-    assert_same_path(&read_path(&observed), wrapper_launch.path());
+    assert_same_path(&read_path(&observed), &wrapper_launch);
     assert_ne!(
         fs::canonicalize(read_path(&observed)).unwrap(),
-        fs::canonicalize(provider_cwd.path()).unwrap()
+        fs::canonicalize(provider_cwd).unwrap()
     );
 }
 
@@ -71,12 +73,13 @@ fn handle_retains_wrapper_launch_directory_across_provider_cwd() {
 fn ordinary_nested_cli_overwrites_stale_agent_cwd_for_provider_child() {
     use std::os::unix::fs::PermissionsExt;
 
-    let home = tempfile::tempdir().unwrap();
-    let entry = tempfile::tempdir().unwrap();
-    let tools = tempfile::tempdir().unwrap();
-    let observed = home.path().join("provider-observed.txt");
-    write_config(home.path(), None);
-    let provider = tools.path().join("codex");
+    let fixture = CliProcessFixture::named("agent-cwd");
+    let home = fixture.home();
+    let entry = fixture.cwd();
+    let tools = fixture.bin_dir();
+    let observed = home.join("provider-observed.txt");
+    write_config(home, None);
+    let provider = tools.join("codex");
     fs::write(
         &provider,
         "#!/bin/sh\nprintf %s \"$AGENT_CWD\" > \"$CLAUDINE_OBSERVED\"\nexit 0\n",
@@ -87,22 +90,14 @@ fn ordinary_nested_cli_overwrites_stale_agent_cwd_for_provider_child() {
     fs::set_permissions(&provider, permissions)
     .unwrap();
 
-    claudine_command(home.path())
-        .current_dir(entry.path())
-        .env("PATH", tools.path())
+    fixture.command()
         .env("CLAUDINE_OBSERVED", &observed)
         .env("AGENT_CWD", "/stale/parent")
         .args(["codex", "say hi"])
         .assert()
         .success();
 
-    assert_same_path(&read_path(&observed), entry.path());
-}
-
-fn claudine_command(home: &Path) -> Command {
-    let mut command = Command::cargo_bin("claudine").unwrap();
-    command.env("HOME", home).env("USERPROFILE", home);
-    command
+    assert_same_path(&read_path(&observed), entry);
 }
 
 fn write_config(home: &Path, action: Option<(&str, &str)>) {

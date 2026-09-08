@@ -10,10 +10,9 @@
 //! Feature: `2026-04-17-cli-pre-processing`.
 
 use std::fs;
-use tempfile::tempdir;
 
 mod common;
-use common::strip_ansi;
+use common::{CliProcessFixture, strip_ansi};
 
 /// Minimal frontmatter-only markdown fixture that composition can resolve.
 const FIXTURE_MD: &str = "---\ntitle: argv normalization fixture\n---\n\nHello.\n";
@@ -51,11 +50,11 @@ fn write_fixture(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
 ///    leak into the output.
 #[test]
 fn headline_compose_with_interleaved_flag_renders_help() {
-    let workspace = tempdir().unwrap();
-    let fixture = write_fixture(workspace.path(), "greet.md");
+    let cli = CliProcessFixture::named("argv-normalization");
+    let fixture = write_fixture(cli.cwd(), "greet.md");
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let assert = cli
+        .command()
         .args([
             "compose",
             fixture.to_str().unwrap(),
@@ -104,11 +103,11 @@ fn headline_compose_with_interleaved_flag_renders_help() {
 /// setters) must also render the help screen.
 #[test]
 fn headline_compose_with_trailing_help_renders_help() {
-    let workspace = tempdir().unwrap();
-    let fixture = write_fixture(workspace.path(), "simple.md");
+    let cli = CliProcessFixture::named("argv-normalization");
+    let fixture = write_fixture(cli.cwd(), "simple.md");
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let assert = cli
+        .command()
         .args(["compose", fixture.to_str().unwrap(), "--help"])
         .assert()
         .success();
@@ -131,11 +130,11 @@ fn headline_compose_with_trailing_help_renders_help() {
 /// reports Claude as the selected provider.
 #[test]
 fn headline_compose_with_fuzzy_provider_resolves_to_claude() {
-    let workspace = tempdir().unwrap();
-    let fixture = write_fixture(workspace.path(), "fuzzy.md");
+    let cli = CliProcessFixture::named("argv-normalization");
+    let fixture = write_fixture(cli.cwd(), "fuzzy.md");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let output = cli
+        .command()
         .args([
             "compose",
             "--provider",
@@ -168,11 +167,11 @@ fn headline_compose_with_fuzzy_provider_resolves_to_claude() {
 /// behaviorally identical — Rule 3 does not fire, Rule 1/2 rewrite nothing.
 #[test]
 fn headline_compose_with_plain_setter_behaves_as_before() {
-    let workspace = tempdir().unwrap();
-    let fixture = write_fixture(workspace.path(), "plain.md");
+    let cli = CliProcessFixture::named("argv-normalization");
+    let fixture = write_fixture(cli.cwd(), "plain.md");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let output = cli
+        .command()
         .args([
             "compose",
             fixture.to_str().unwrap(),
@@ -207,15 +206,14 @@ fn headline_compose_with_plain_setter_behaves_as_before() {
 /// still parse all flags and succeed under `--dry-run`.
 #[test]
 fn headline_compose_with_setter_then_late_flags_preserves_flag_semantics() {
-    let workspace = tempdir().unwrap();
-    let fixture = write_fixture(workspace.path(), "clarify.md");
-    let empty_path = workspace.path().join("empty-path");
-    fs::create_dir(&empty_path).unwrap();
-
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("TERM_WIDTH", "120")
-        .env("PATH", empty_path)
+    let cli = CliProcessFixture::named("argv-normalization");
+    let fixture = write_fixture(cli.cwd(), "clarify.md");
+    let output = cli
+        // Escape: fake-only PATH. The dry run must not find a host `gemini`,
+        // whose real path would then reach the assertions below.
+        .command_builder()
+        .fake_only_path()
+        .build()
         .args([
             "compose",
             fixture.to_str().unwrap(),
@@ -258,15 +256,14 @@ fn headline_compose_with_setter_then_late_flags_preserves_flag_semantics() {
 /// the setter rather than disappearing into the positional bucket.
 #[test]
 fn headline_compose_with_setter_before_late_flags_preserves_flag_semantics() {
-    let workspace = tempdir().unwrap();
-    let fixture = write_fixture(workspace.path(), "setter-first.md");
-    let empty_path = workspace.path().join("empty-path");
-    fs::create_dir(&empty_path).unwrap();
-
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("TERM_WIDTH", "120")
-        .env("PATH", empty_path)
+    let cli = CliProcessFixture::named("argv-normalization");
+    let fixture = write_fixture(cli.cwd(), "setter-first.md");
+    let output = cli
+        // Escape: fake-only PATH. The dry run must not find a host `gemini`,
+        // whose real path would then reach the assertions below.
+        .command_builder()
+        .fake_only_path()
+        .build()
         .args([
             "compose",
             fixture.to_str().unwrap(),
@@ -314,8 +311,9 @@ fn headline_compose_with_setter_before_late_flags_preserves_flag_semantics() {
 /// shell cannot redirect this subprocess into clap's completion bootstrap.
 #[test]
 fn passthrough_version_flag_still_prints_version_string() {
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let cli = CliProcessFixture::named("argv-passthrough-version");
+    let output = cli
+        .command()
         .env_remove("COMPLETE")
         .env_remove("_CLAP_COMPLETE_INDEX")
         .arg("--version")
@@ -335,8 +333,9 @@ fn passthrough_version_flag_still_prints_version_string() {
 /// grouped help screen through Claudine's custom help handler.
 #[test]
 fn passthrough_root_help_renders_custom_help_screen() {
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let cli = CliProcessFixture::named("argv-passthrough-root-help");
+    let output = cli
+        .command()
         .arg("--help")
         .assert()
         .success()
@@ -362,6 +361,7 @@ fn passthrough_root_help_renders_custom_help_screen() {
 /// `ArgAction::Help` arg on every non-wrapper subcommand to compensate.
 #[test]
 fn non_composition_subcommands_accept_help_flag() {
+    let cli = CliProcessFixture::named("argv-subcommand-help");
     for sub in [
         "completions",
         "hooks",
@@ -370,8 +370,8 @@ fn non_composition_subcommands_accept_help_flag() {
         "providers",
         "agents",
     ] {
-        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
+        let output = cli
+            .command()
             .args([sub, "--help"])
             .assert()
             .success()
@@ -392,8 +392,9 @@ fn non_composition_subcommands_accept_help_flag() {
 /// here; Rules 1 and 2 have nothing to rewrite.
 #[test]
 fn passthrough_hooks_describe_still_runs() {
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let cli = CliProcessFixture::named("argv-hooks-describe");
+    let output = cli
+        .command()
         .args(["hooks", "--describe"])
         .assert()
         .success()
@@ -442,8 +443,9 @@ fn passthrough_hooks_describe_still_runs() {
 /// Code CLI and the assertion would fail noisily.
 #[test]
 fn complete_env_short_circuits_before_argv_normalization() {
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let cli = CliProcessFixture::named("argv-complete-env");
+    let output = cli
+        .command()
         .env("COMPLETE", "bash")
         .assert()
         .success()
@@ -466,12 +468,13 @@ fn complete_env_short_circuits_before_argv_normalization() {
 
 #[test]
 fn complete_env_short_circuits_wrapper_argv_without_launching_provider() {
+    let cli = CliProcessFixture::named("argv-complete-env-wrapper");
     // Without the `maybe_complete()` hook, this invocation would fall
     // through to the wrapper launch path and either spawn the Claude
     // Code binary or fail with a "claude not found" error on stderr.
     // The short-circuit is what keeps shell completion setup cheap.
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let output = cli
+        .command()
         .env("COMPLETE", "bash")
         .args(["claude", "--some-passthrough-flag"])
         .assert()
@@ -498,11 +501,11 @@ fn non_owned_flag_after_file_is_forwarded_to_agent() {
     // including a near-miss like `--claud` — placed *after* the composition
     // file starts the agent tail and is forwarded verbatim rather than
     // rejected by clap. The dry-run "Provider args" row audits the tail.
-    let workspace = tempdir().unwrap();
-    let fixture = write_fixture(workspace.path(), "near-miss.md");
+    let cli = CliProcessFixture::named("argv-normalization");
+    let fixture = write_fixture(cli.cwd(), "near-miss.md");
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let assert = cli
+        .command()
         .args([
             "compose",
             fixture.to_str().unwrap(),
@@ -533,11 +536,11 @@ fn non_owned_flag_after_file_is_forwarded_to_agent() {
 fn non_owned_flag_before_file_errors_with_ordering_guidance() {
     // The ordering rule: an unowned switch before the composition file is a
     // partition error with targeted guidance, not a silent guess.
-    let workspace = tempdir().unwrap();
-    let fixture = write_fixture(workspace.path(), "near-miss.md");
+    let cli = CliProcessFixture::named("argv-normalization");
+    let fixture = write_fixture(cli.cwd(), "near-miss.md");
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let assert = cli
+        .command()
         .args(["compose", "--claud", fixture.to_str().unwrap()])
         .assert()
         .failure();

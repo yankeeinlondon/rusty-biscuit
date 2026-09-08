@@ -6,24 +6,19 @@
 //! `common::wrap`.
 
 use std::fs;
-use tempfile::tempdir;
 mod common;
 use common::wrap::*;
-use common::{strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
 #[cfg(unix)]
 #[test]
 fn codex_structured_mode_reconstructs_stdout_and_writes_summary_event() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    let args_path = workspace.path().join("args.txt");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
-    seed_minimal_config(&fake_home);
+    let fixture = CliProcessFixture::named("codex-structured-summary");
+    fixture.seed_user_config();
+    let args_path = fixture.cwd().join("args.txt");
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 printf '%s\n' "$@" > "$CLAUDINE_ARGS_FILE"
 LAST=""
@@ -46,13 +41,9 @@ printf '%s' 'Final assistant response' > "$LAST"
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", &fake_home)
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .env("CLAUDINE_ARGS_FILE", &args_path)
-        .current_dir(workspace.path())
         .args(["codex", "--model", "codex-mini", "summarize repo"])
         .assert()
         .success()
@@ -69,7 +60,7 @@ printf '%s' 'Final assistant response' > "$LAST"
     assert!(args.lines().any(|line| line == "--json"));
     assert!(args.lines().any(|line| line == "--output-last-message"));
 
-    let log_path = today_log_path(&fake_home);
+    let log_path = today_log_path(fixture.home());
     let log_contents = fs::read_to_string(log_path).unwrap();
     assert_eq!(
         log_contents
@@ -88,15 +79,11 @@ printf '%s' 'Final assistant response' > "$LAST"
 #[cfg(unix)]
 #[test]
 fn wrapper_structured_summary_includes_pids_in_jsonl() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
-    seed_minimal_config(&fake_home);
+    let fixture = CliProcessFixture::named("wrap-structured-pids");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 printf '%s\n' '{"type":"thread.started","thread_id":"thread-pid-test"}'
 printf '%s\n' '{"type":"turn.started"}'
@@ -106,15 +93,13 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", &fake_home)
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .args(["codex", "--model", "codex-mini", "test prompt"])
         .assert()
         .success();
 
-    let log_path = today_log_path(&fake_home);
+    let log_path = today_log_path(fixture.home());
     let log_contents = fs::read_to_string(log_path).unwrap();
 
     let summary_line = log_contents
@@ -164,28 +149,24 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn wrapper_dry_run_does_not_fabricate_agent_pid_in_jsonl() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("structured-quiet-verbose");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 echo "SHOULD NOT RUN"
 exit 1
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .args(["codex", "--dry-run", "--", "--version"])
         .assert()
         .success();
 
-    let log_path = today_log_path(workspace.path());
+    let log_path = today_log_path(fixture.home());
     assert!(
         !log_path.exists(),
         "dry run must not create a JSONL log file; found: {log_path:?}"
@@ -195,22 +176,18 @@ exit 1
 #[cfg(unix)]
 #[test]
 fn wrapper_missing_binary_does_not_fabricate_agent_pid_in_jsonl() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("structured-verbose-no-tools");
+    fixture.seed_user_config();
 
     // Do NOT create a codex binary — binary resolution will fail.
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
+    fixture
+        .command()
         .args(["codex", "--", "--version"])
         .assert()
         .failure();
 
-    let log_path = today_log_path(workspace.path());
+    let log_path = today_log_path(fixture.home());
     assert!(
         !log_path.exists(),
         "failed binary resolution must not create a JSONL log file; found: {log_path:?}"
@@ -220,15 +197,11 @@ fn wrapper_missing_binary_does_not_fabricate_agent_pid_in_jsonl() {
 #[cfg(unix)]
 #[test]
 fn structured_verbosity_controls_stream_stderr_lines() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
-    seed_minimal_config(&fake_home);
+    let fixture = CliProcessFixture::named("wrap-dry-run-no-pid");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("gemini"),
+        &fixture.bin_dir().join("gemini"),
         r#"#!/bin/sh
 printf '%s\n' '{"type":"init","session_id":"gem-1","model":"gemini-2.5-pro"}'
 printf '%s\n' 'not-json'
@@ -238,12 +211,8 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", &fake_home)
-        .env("PATH", &path_dir)
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["gemini", "say hi"])
         .assert()
         .success()
@@ -258,12 +227,8 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
     assert!(default_stderr.contains("5 cached tokens"));
     assert!(default_stderr.contains("no tool calls"));
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", &fake_home)
-        .env("PATH", &path_dir)
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["gemini", "--quiet", "say hi"])
         .assert()
         .success()
@@ -279,12 +244,8 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
     assert!(quiet_stderr.contains("5 cached tokens"));
     assert!(quiet_stderr.contains("no tool calls"));
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", &fake_home)
-        .env("PATH", &path_dir)
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["gemini", "--silent", "say hi"])
         .assert()
         .success()
@@ -300,15 +261,11 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
 #[cfg(unix)]
 #[test]
 fn gemini_structured_success_suppresses_provider_stderr_noise() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
-    seed_minimal_config(&fake_home);
+    let fixture = CliProcessFixture::named("wrap-missing-binary-no-pid");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("gemini"),
+        &fixture.bin_dir().join("gemini"),
         r#"#!/bin/sh
 cat >&2 <<'EOF'
     at throwErrorIfNotOK (file:///tmp/fake.mjs:1:1)
@@ -320,12 +277,8 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", &fake_home)
-        .env("PATH", &path_dir)
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["gemini", "--quiet", "say hi"])
         .assert()
         .success()
@@ -343,15 +296,11 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
 #[cfg(unix)]
 #[test]
 fn structured_completion_summary_is_separated_on_stderr() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
-    seed_minimal_config(&fake_home);
+    let fixture = CliProcessFixture::named("structured-verbosity");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("gemini"),
+        &fixture.bin_dir().join("gemini"),
         r#"#!/bin/sh
 printf '%s\n' '{"type":"init","session_id":"gem-2","model":"gemini-2.5-pro"}'
 printf '%s\n' '{"type":"message","role":"assistant","content":"Hello without newline"}'
@@ -359,12 +308,8 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", &fake_home)
-        .env("PATH", &path_dir)
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["gemini", "--quiet", "say hi"])
         .assert()
         .success()
@@ -381,15 +326,11 @@ printf '%s\n' '{"type":"result","status":"success","stats":{"total_tokens":30,"i
 #[cfg(unix)]
 #[test]
 fn structured_verbose_summary_restores_rich_prose_fields() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
-    seed_minimal_config(&fake_home);
+    let fixture = CliProcessFixture::named("gemini-structured-stderr-noise");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("gemini"),
+        &fixture.bin_dir().join("gemini"),
         r#"#!/bin/sh
 printf '%s\n' '{"type":"init","session_id":"gem-3","model":"gemini-2.5-pro"}'
 printf '%s\n' '{"type":"message","role":"assistant","content":"Verbose summary"}'
@@ -399,10 +340,8 @@ printf '%s\n' '{"type":"result","status":"success","cost_usd":0.02,"stats":{"tot
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", &fake_home)
-        .env("PATH", &path_dir)
+    let assert = fixture
+        .command()
         .args(["gemini", "-v", "say hi"])
         .assert()
         .success()
@@ -423,15 +362,11 @@ printf '%s\n' '{"type":"result","status":"success","cost_usd":0.02,"stats":{"tot
 #[cfg(unix)]
 #[test]
 fn structured_quiet_verbose_uses_old_verbose_summary_renderer() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
-    seed_minimal_config(&fake_home);
+    let fixture = CliProcessFixture::named("structured-completion-summary");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("claude"),
+        &fixture.bin_dir().join("claude"),
         r#"#!/bin/sh
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"claude-1","model":"claude-sonnet-4"}'
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Quiet verbose summary"}]}}'
@@ -440,12 +375,8 @@ printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","nu
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", &fake_home)
-        .env("PATH", &path_dir)
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["claude", "--quiet", "-v", "say hi"])
         .assert()
         .success()
@@ -468,15 +399,11 @@ printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","nu
 #[cfg(unix)]
 #[test]
 fn structured_verbose_summary_reports_no_tool_calls_when_absent() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    let fake_home = workspace.path().join("home");
-    fs::create_dir_all(&path_dir).unwrap();
-    fs::create_dir_all(&fake_home).unwrap();
-    seed_minimal_config(&fake_home);
+    let fixture = CliProcessFixture::named("structured-verbose-summary");
+    fixture.seed_user_config();
 
     write_executable(
-        &path_dir.join("claude"),
+        &fixture.bin_dir().join("claude"),
         r#"#!/bin/sh
 printf '%s\n' '{"type":"system","subtype":"init","session_id":"claude-2","model":"claude-sonnet-4"}'
 printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"No tools here"}],"role":"assistant"}}'
@@ -484,12 +411,8 @@ printf '%s\n' '{"type":"result","duration_ms":4600,"total_cost_usd":0.02,"usage"
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", &fake_home)
-        .env("PATH", &path_dir)
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["claude", "-v", "say hi"])
         .assert()
         .success()
@@ -506,16 +429,14 @@ printf '%s\n' '{"type":"result","duration_ms":4600,"total_cost_usd":0.02,"usage"
 #[cfg(unix)]
 #[test]
 fn codex_structured_compose_filters_stdin_banner() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("codex-compose-stdin-banner");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\nHello Codex\n").unwrap();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 last_message=""
 prev=""
@@ -537,12 +458,8 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"output_token
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", "--codex", "--quiet", md_file.to_str().unwrap()])
         .assert()
         .success()
@@ -555,16 +472,14 @@ printf '%s\n' '{"type":"turn.completed","usage":{"input_tokens":20,"output_token
 #[cfg(unix)]
 #[test]
 fn codex_structured_compose_surfaces_live_tool_progress() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("codex-compose-tool-progress");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: test\n---\nHello Codex\n").unwrap();
 
     write_executable(
-        &path_dir.join("codex"),
+        &fixture.bin_dir().join("codex"),
         r#"#!/bin/sh
 last_message=""
 prev=""
@@ -589,12 +504,8 @@ fi
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["compose", "--codex", "--quiet", md_file.to_str().unwrap()])
         .assert()
         .success()

@@ -4,13 +4,33 @@
 //!
 //! Split out of the `wrap_commands.rs` god file; shared fixtures live in
 //! `common::wrap`.
+//!
+//! ## Budget sizing
+//!
+//! A timeout test costs its budget plus up to one watchdog tick plus
+//! termination, so every budget here is the smallest value that still leaves
+//! the semantics it is testing unambiguous:
+//!
+//! - `1s` budget — the floor for the hang tests. Their fixtures write every
+//!   pre-hang line back-to-back with no `sleep`, so the largest gap the
+//!   wrapper can observe between fixture writes is scheduling jitter; `1s` is
+//!   far above four times that even on a contended WSL2 runner, and a shorter
+//!   budget would start to measure the runner rather than the hang.
+//! - `0.2s` tick (`CLAUDINE_WATCHDOG_INTERVAL`) — the rule is evaluated on a
+//!   ticker, so the tick is pure added latency between breach and kill.
+//! - `0.5s` grace (`CLAUDINE_KILL_GRACE`) — a ceiling on the SIGTERM→SIGKILL
+//!   wait, not a delay. Every fixture in this file exits on `TERM`, so the
+//!   grace is not reached; it only bounds the escalation if one ever hangs.
+//!
+//! [`watchdog_opencode_post_fanout_silence_does_not_kill_prematurely`] is the
+//! deliberate exception: its contract is "silence shorter than the budget must
+//! not kill", so its budget stays wide and only its tick and grace shrink.
 
 use std::fs;
 use std::time::Duration;
-use tempfile::tempdir;
 mod common;
 use common::wrap::*;
-use common::{strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
 /// Replay the reference hang shape: 9 task_started, 7 task_completed, then
 /// silence. With a low subagent-idle threshold the watchdog should terminate
@@ -19,12 +39,10 @@ use common::{strip_ansi, write_executable};
 #[test]
 #[serial_test::serial]
 fn watchdog_subagent_hang_terminates_and_names_stuck_ids() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("watchdog-step-timeout");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: watchdog test\n---\nHello\n").unwrap();
 
     // Build a shell script that emits 9 task_started, 7 task_completed, then blocks.
@@ -53,18 +71,17 @@ printf '%s\n' '{"type":"step_finish","sessionID":"hang-test","part":{"reason":"t
     }
     script.push_str("while :; do /bin/sleep 1; done\n");
 
-    write_executable(&path_dir.join("opencode"), &script);
+    write_executable(&fixture.bin_dir().join("opencode"), &script);
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
-        .env("CLAUDINE_STEP_TIMEOUT", "2s")
-        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
-        .env("CLAUDINE_KILL_GRACE", "1s")
+        // 19 pre-hang lines, all back-to-back `printf`s: the silence the
+        // budget must not confuse with a hang is scheduling jitter only.
+        // See the module note for the 1s / 0.2s / 0.5s derivation.
+        .env("CLAUDINE_STEP_TIMEOUT", "1s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "0.2s")
+        .env("CLAUDINE_KILL_GRACE", "0.5s")
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .timeout(Duration::from_secs(60))
         .assert()
@@ -93,7 +110,7 @@ printf '%s\n' '{"type":"step_finish","sessionID":"hang-test","part":{"reason":"t
     );
 
     // Assert the JSONL summary field.
-    let log_path = today_log_path(workspace.path());
+    let log_path = today_log_path(fixture.home());
     if log_path.exists() {
         let log = fs::read_to_string(&log_path).unwrap();
         let last = log.lines().last().unwrap();
@@ -115,16 +132,14 @@ printf '%s\n' '{"type":"step_finish","sessionID":"hang-test","part":{"reason":"t
 #[test]
 #[serial_test::serial]
 fn watchdog_stream_idle_timeout_after_tool_call_hang() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("watchdog-completes-before-timeout");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: idle test\n---\nHello\n").unwrap();
 
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
@@ -138,16 +153,14 @@ while :; do /bin/sleep 1; done
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
-        .env("CLAUDINE_STEP_TIMEOUT", "2s")
-        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
-        .env("CLAUDINE_KILL_GRACE", "1s")
+        // Four pre-hang lines, all back-to-back `printf`s; same 1s / 0.2s /
+        // 0.5s floor as the subagent-hang test above.
+        .env("CLAUDINE_STEP_TIMEOUT", "1s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "0.2s")
+        .env("CLAUDINE_KILL_GRACE", "0.5s")
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .timeout(Duration::from_secs(60))
         .assert()
@@ -171,18 +184,16 @@ while :; do /bin/sleep 1; done
 #[test]
 #[serial_test::serial]
 fn watchdog_wall_clock_timeout_terminates_active_stream() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("watchdog-wall-clock-timeout");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: wall-clock test\n---\nHello\n").unwrap();
 
     // Fake provider keeps emitting events forever (~10/sec) so the parent
     // stream is never silent — only the wall-clock budget can stop it.
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
@@ -199,18 +210,17 @@ done
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
-        .env("CLAUDINE_TIMEOUT", "2s")
+        // The wall-clock budget runs from child spawn and the fixture emits
+        // ~10 events/s forever, so no amount of contention can end the run
+        // before the budget does — 1s needs no fixture-latency margin at all.
+        .env("CLAUDINE_TIMEOUT", "1s")
         // Disable step_timeout so only the wall-clock rule can fire.
         .env("CLAUDINE_STEP_TIMEOUT", "0s")
-        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
-        .env("CLAUDINE_KILL_GRACE", "1s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "0.2s")
+        .env("CLAUDINE_KILL_GRACE", "0.5s")
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .timeout(Duration::from_secs(60))
         .assert()
@@ -234,7 +244,7 @@ done
     );
 
     // Assert the JSONL summary field.
-    let log_path = today_log_path(workspace.path());
+    let log_path = today_log_path(fixture.home());
     if log_path.exists() {
         let log = fs::read_to_string(&log_path).unwrap();
         let last = log.lines().last().unwrap();
@@ -280,12 +290,10 @@ done
 #[test]
 #[serial_test::serial]
 fn watchdog_opencode_post_fanout_silence_does_not_kill_prematurely() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("watchdog-post-fanout-silence");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(
         &md_file,
         "---\ntitle: opencode regression repro\n---\nHello\n",
@@ -301,7 +309,7 @@ fn watchdog_opencode_post_fanout_silence_does_not_kill_prematurely() {
     //   5. silence longer than step_timeout
     //   6. clean exit 0
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
@@ -319,12 +327,8 @@ exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
         // step_timeout must be longer than the post-text silence above (1s)
         // so the grace can apply and the child exits cleanly before the
@@ -335,8 +339,11 @@ exit 0
         // wall clock past a tight 3s budget. A real silence regression
         // would still fail because the byte heartbeat never lands.
         .env("CLAUDINE_STEP_TIMEOUT", "15s")
-        .env("CLAUDINE_WATCHDOG_INTERVAL", "2s")
-        .env("CLAUDINE_KILL_GRACE", "1s")
+        // Tick and grace shrink to the file-wide values; the budget above does
+        // not, because this test's whole point is that it is never reached.
+        // A finer tick only makes the (never-taken) breach path faster.
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "0.2s")
+        .env("CLAUDINE_KILL_GRACE", "0.5s")
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .timeout(Duration::from_secs(30))
         .assert()
@@ -358,7 +365,7 @@ exit 0
     // The synthesised JSONL summary must NOT report a step_timeout exit
     // reason — the child exited cleanly, so any exit_reason should reflect
     // a normal completion (or be absent).
-    let log_path = today_log_path(workspace.path());
+    let log_path = today_log_path(fixture.home());
     if log_path.exists() {
         let log = fs::read_to_string(&log_path).unwrap();
         if let Some(last) = log.lines().last() {
@@ -390,17 +397,15 @@ exit 0
 #[test]
 #[serial_test::serial]
 fn compose_non_harness_respects_cli_timeout() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("watchdog-disabled-step-timeout");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(&md_file, "---\ntitle: cli timeout test\n---\nHello\n").unwrap();
 
     // Fake provider emits events forever so only wall-clock can stop it.
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
@@ -414,21 +419,20 @@ done
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_STEP_TIMEOUT", "0s")
-        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
-        .env("CLAUDINE_KILL_GRACE", "1s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "0.2s")
+        .env("CLAUDINE_KILL_GRACE", "0.5s")
         .args([
             "compose",
             "--opencode",
+            // Same wall-clock reasoning as
+            // `watchdog_wall_clock_timeout_terminates_active_stream`: the
+            // fixture never stops emitting, so 1s carries no latency margin.
             "--timeout",
-            "2s",
+            "1s",
             md_file.to_str().unwrap(),
         ])
         .timeout(Duration::from_secs(120))
@@ -458,12 +462,10 @@ done
 #[test]
 #[serial_test::serial]
 fn inline_compose_non_harness_respects_cli_step_timeout() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    seed_minimal_config(workspace.path());
+    let fixture = CliProcessFixture::named("watchdog-timeout-disabled");
+    fixture.seed_user_config();
 
-    let md_file = workspace.path().join("test.md");
+    let md_file = fixture.cwd().join("test.md");
     fs::write(
         &md_file,
         "---\ntitle: cli step timeout test\nprompt: hello\n---\nBody\n",
@@ -472,7 +474,7 @@ fn inline_compose_non_harness_respects_cli_step_timeout() {
 
     // Fake provider emits one event then blocks forever.
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
@@ -486,22 +488,22 @@ while :; do /bin/sleep 1; done
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", &path_dir)
-        .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_TIMEOUT", "0s")
-        .env("CLAUDINE_STEP_TIMEOUT", "2s")
-        .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
-        .env("CLAUDINE_KILL_GRACE", "1s")
+        // Four pre-hang lines, all back-to-back `printf`s; same 1s / 0.2s /
+        // 0.5s floor as the hang tests above. The env value is the loser in
+        // this test — the CLI flag below is what the assertion proves — but
+        // it is kept in step so the losing budget cannot mask a regression.
+        .env("CLAUDINE_STEP_TIMEOUT", "1s")
+        .env("CLAUDINE_WATCHDOG_INTERVAL", "0.2s")
+        .env("CLAUDINE_KILL_GRACE", "0.5s")
         .args([
             "inline-compose",
             "--opencode",
             "--step-timeout",
-            "2s",
+            "1s",
             md_file.to_str().unwrap(),
         ])
         .timeout(Duration::from_secs(60))
@@ -516,7 +518,7 @@ while :; do /bin/sleep 1; done
         "stderr should contain step_timeout breach message from CLI --step-timeout; got: {plain}"
     );
 
-    let log_path = today_log_path(workspace.path());
+    let log_path = today_log_path(fixture.home());
     if log_path.exists() {
         let log = fs::read_to_string(&log_path).unwrap();
         let last = log.lines().last().unwrap();

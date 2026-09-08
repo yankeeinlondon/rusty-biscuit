@@ -12,11 +12,9 @@
 
 mod common;
 
-use common::wrap::seed_minimal_config;
-use common::{InlineAgentStub, strip_ansi, write_executable};
+use common::{CliProcessFixture, InlineAgentStub, strip_ansi, write_executable};
 use std::fs;
 use std::path::{Path, PathBuf};
-use tempfile::{TempDir, tempdir};
 
 /// A document whose schema requires one property the agent must supply.
 ///
@@ -35,7 +33,7 @@ const RESEARCH_DOC: &str = concat!(
 );
 
 struct Fixture {
-    workspace: TempDir,
+    workspace: CliProcessFixture,
     bin: PathBuf,
     document: PathBuf,
 }
@@ -44,12 +42,11 @@ impl Fixture {
     /// A workspace whose active document lives in its own directory, so a test
     /// can make *only* the document's directory unwritable.
     fn new(document_text: &str) -> Self {
-        let workspace = tempdir().unwrap();
-        let bin = workspace.path().join("bin");
-        fs::create_dir_all(&bin).unwrap();
-        let docs = workspace.path().join("docs");
+        let workspace = CliProcessFixture::named("inline-completion-lifecycle");
+        let bin = workspace.bin_dir().to_path_buf();
+        let docs = workspace.cwd().join("docs");
         fs::create_dir_all(&docs).unwrap();
-        seed_minimal_config(workspace.path());
+        workspace.seed_user_config();
         let document = docs.join("doc.md");
         fs::write(&document, document_text).unwrap();
         Self {
@@ -60,17 +57,11 @@ impl Fixture {
     }
 
     fn path(&self) -> &Path {
-        self.workspace.path()
+        self.workspace.cwd()
     }
 
     fn command(&self) -> assert_cmd::Command {
-        let mut cmd = assert_cmd::Command::cargo_bin("claudine").unwrap();
-        cmd.current_dir(self.path())
-            .env("NO_COLOR", "1")
-            .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-            .env("HOME", self.path())
-            .env("PATH", &self.bin);
-        cmd
+        self.workspace.command()
     }
 
     /// Run `inline-compose` against the fixture's document.
@@ -142,8 +133,14 @@ fn a_missing_completion_property_fails_the_run_and_keeps_the_written_artifact() 
         stderr.contains("researched_by"),
         "the status block must name the unsatisfied property:\n{stderr}"
     );
+    // Terminal width and the temporary path length can wrap this diagnostic.
+    let prose = stderr
+        .lines()
+        .map(|line| line.trim().trim_start_matches('┃').trim())
+        .collect::<Vec<_>>()
+        .join(" ");
     assert!(
-        stderr.contains("does not satisfy its `$schema`"),
+        prose.contains("does not satisfy its `$schema`"),
         "the completion-schema block must render:\n{stderr}"
     );
     let written = fixture.document_text();
