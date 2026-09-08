@@ -6,9 +6,8 @@
 //! behavior so divergence introduced by later phases fails loudly.
 
 use std::fs;
-use tempfile::tempdir;
 mod common;
-use common::{augmented_path, init_git_repo, write, write_executable};
+use common::{CliProcessFixture, init_git_repo, write, write_executable};
 
 // ============================================================================
 // Phase 1: convergence between non-harness and harness-enabled inline compose
@@ -39,25 +38,19 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn inline_compose_writes_expected_final_body() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("inline-compose-cli");
 
-    stage_opencode_inline_body_writer(&path_dir);
+    stage_opencode_inline_body_writer(fixture.bin_dir());
 
-    let source = workspace.path().join("bare.md");
-    fs::write(
+    let source = fixture.cwd().join("bare.md");
+    write(
         &source,
         "---\nprompt: Generate the body\n---\nOriginal body.\n",
-    )
-    .unwrap();
+    );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
-        .current_dir(workspace.path())
         .args(["inline-compose", "--opencode", source.to_str().unwrap()])
         .assert()
         .success();
@@ -82,9 +75,9 @@ fn inline_compose_writes_expected_final_body() {
 #[cfg(unix)]
 #[test]
 fn inline_compose_uses_source_doc_repository_not_launch_cwd() {
-    let workspace = tempdir().unwrap();
-    let source_root = workspace.path().join("source");
-    let launch_root = workspace.path().join("launch");
+    let fixture = CliProcessFixture::named("inline-compose-cli");
+    let source_root = fixture.cwd().join("source");
+    let launch_root = fixture.cwd().join("launch");
     fs::create_dir_all(&source_root).unwrap();
     fs::create_dir_all(&launch_root).unwrap();
     assert!(init_git_repo(&source_root));
@@ -104,15 +97,14 @@ fn inline_compose_uses_source_doc_repository_not_launch_cwd() {
         "---\nprompt: |\n  CWD={{ ctx.cwd }}\n  ::file snippet.md\n---\nOriginal body.\n",
     );
 
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    write_executable(&path_dir.join("goose"), "#!/bin/sh\nexit 0\n");
+    write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(&launch_root)
+    // The subject is the launch CWD losing to the source document's repository,
+    // so the launch directory has to be a repository this test built.
+    let assert = fixture
+        .command_builder()
+        .ambient_context(&launch_root)
+        .build()
         .args([
             "inline-compose",
             "--goose",

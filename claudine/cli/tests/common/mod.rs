@@ -9,8 +9,8 @@
 //! construction rather than by a per-test `.env(...)` chain.
 //! `spawn_site_guard.rs` keeps the alternatives — a raw
 //! `assert_cmd::Command::cargo_bin("claudine")` and a [`claudine_bin`]
-//! shell-out — out of the other L1 binaries, with a reasoned allow-list for
-//! the files this contract has not reached yet.
+//! shell-out — out of the other L1 binaries. Its allow-list is empty: every
+//! L1 binary now goes through this builder.
 //!
 //! The contract does not end at the spawn. [`CliProcessFixture::command`]
 //! returns a bare `assert_cmd::Command`, so a call site could undo the pinned
@@ -23,7 +23,21 @@
 //! The default command pins `current_dir` to the fixture `cwd`, points
 //! `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA` at the fixture `home`,
 //! removes `HOMEDRIVE`/`HOMEPATH`/`XDG_CONFIG_HOME`, and sets
-//! `CLAUDINE_RENDEZVOUS_REPORT=false` and `NO_COLOR=1`.
+//! `CLAUDINE_RENDEZVOUS_REPORT=false`, `NO_COLOR=1`, `PLAYA_DRY_RUN=1`, and a
+//! fixture-local `PLAYA_SPOOL_DIR`.
+//!
+//! ### Why audio is a spawn-contract concern
+//!
+//! A lifecycle audio effect does not play in-process: claudine re-execs
+//! *itself* as playa's detached spool worker, which outlives the command that
+//! enqueued the job — by design, so a doorbell survives the CLI exiting. An L1
+//! test that reaches one therefore leaves two orphaned `claudine` processes on
+//! the developer's machine and plays a sound through their speakers, neither of
+//! which any assertion asked for. `PLAYA_DRY_RUN=1` is what keeps the effect a
+//! decision the test can observe instead of a process it has to own, and the
+//! fixture-local spool keeps a job that *is* under test out of the shared
+//! per-user root. `detached_audio.rs`, whose subject is the worker itself, is
+//! the one file that opts back in.
 //!
 //! ### The inheritance contract
 //!
@@ -89,16 +103,43 @@
 //! the `.cmd` stubs the fixture writes, so the knob would be unusable rather
 //! than merely strict. Nothing else returns; the rest of what a cleared run
 //! needs is the call site's to re-add.
+//!
+//! ### Two command surfaces, one policy
+//!
+//! [`ClaudineCommandBuilder::build`] returns an `assert_cmd::Command`, which
+//! has no `spawn`: it can only run a child to completion. A test whose subject
+//! *is* the running child — signal delivery, a deadline expiring, streaming
+//! stdout, `CREATE_NEW_PROCESS_GROUP`, an `expectrl` session — needs a
+//! `std::process::Command`, and until it had one it had to build that command
+//! by hand and re-derive the isolation above at the call site.
+//! [`ClaudineCommandBuilder::build_std`] (and the
+//! [`CliProcessFixture::command_std`] shorthand) is that command, carrying the
+//! same policy and the same escapes.
+//!
+//! The two surfaces share no trait and neither hands back the other, so the
+//! policy is neither a receiver method nor a copy: it is computed once as a
+//! [`ChildEnvironment`] — clear flag, ordered removes, ordered sets,
+//! `current_dir` — and applied by two [`ConfigurableCommand`] impls of four
+//! one-line methods. `cli_process_fixture.rs` asserts the two surfaces produce
+//! the same effective environment against a recording stub, so a policy change
+//! that reaches only one of them fails there rather than in a Windows-only
+//! test six months later.
 
 #![allow(dead_code)]
 
 pub(crate) mod completion;
+pub(crate) mod host_tools;
 pub(crate) mod incomplete_subagents;
 #[cfg(unix)]
 pub(crate) mod pty;
 pub(crate) mod source_scan;
 pub(crate) mod wrap;
 
+// Re-exported so a call site keeps saying `common::helper_command`; the
+// definitions live in their own file for the binaries that include it alone.
+pub use host_tools::{GIT_PLUMBING_VARS, helper_command};
+
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{self, Command};
@@ -331,6 +372,15 @@ impl CliProcessFixture {
         self.command_builder().build()
     }
 
+    /// The same command as a `std::process::Command`, for a test that has to
+    /// hold the child alive.
+    ///
+    /// Identical policy to [`CliProcessFixture::command`]; see the module docs'
+    /// "Two command surfaces" section for when to reach for it.
+    pub fn command_std(&self) -> Command {
+        self.command_builder().build_std()
+    }
+
     /// The same command, before its defaults are traded for one of the named
     /// escapes.
     pub fn command_builder(&self) -> ClaudineCommandBuilder<'_> {
@@ -453,24 +503,77 @@ impl<'fixture> ClaudineCommandBuilder<'fixture> {
     /// `CLAUDINE_PROBE_CAPTURE` at a call site — survive.
     pub fn build(self) -> assert_cmd::Command {
         let mut command = assert_cmd::Command::cargo_bin("claudine").unwrap();
+        self.child_environment().apply(&mut command);
+        command
+    }
+
+    /// The same contract on a `std::process::Command`, for a call site that
+    /// has to keep the child.
+    ///
+    /// The program is resolved through [`claudine_bin`] rather than
+    /// `assert_cmd`'s `cargo_bin`, so a relocated `cargo nextest archive` run
+    /// finds it; both name the same file whenever the runner built the binary.
+    pub fn build_std(self) -> Command {
+        let mut command = Command::new(claudine_bin());
+        self.child_environment().apply(&mut command);
+        command
+    }
+
+    /// Apply the same policy to a command the fixture did not build.
+    ///
+    /// For the one shape [`ClaudineCommandBuilder::build_std`] cannot express:
+    /// a test whose subject is a *shell* redirect around the claudine launch,
+    /// so the child the PTY owns is `/bin/sh` and claudine is its grandchild.
+    /// The claudine path still comes from `build_std().get_program()` rather
+    /// than a hand-rolled `cargo_bin`, and the environment the shell hands down
+    /// is this one — which is the whole reason the policy is data.
+    pub fn apply_policy_to(&self, command: &mut Command) {
+        self.child_environment().apply(command);
+    }
+
+    /// The policy both surfaces apply, computed once.
+    ///
+    /// Ordered exactly as the two `build` methods used to spell it inline:
+    /// clear (and the Windows console restore) first, then the inherited
+    /// scrub, then the fixture defaults — so a default living inside a
+    /// scrubbed namespace survives its own sweep, and a per-key `.env` after
+    /// `build()` still wins.
+    fn child_environment(&self) -> ChildEnvironment {
+        let mut ops = Vec::new();
         if !self.inherit_env {
-            command.env_clear();
-            restore_windows_console_variables(&mut command);
+            for (key, value) in windows_console_variables() {
+                ops.push(EnvironmentOp::Set(key, value));
+            }
         }
-        scrub_inherited_environment(&mut command);
-        command
-            .current_dir(&self.current_dir)
-            .env("HOME", self.fixture.home())
-            .env("USERPROFILE", self.fixture.home())
-            .env_remove("HOMEDRIVE")
-            .env_remove("HOMEPATH")
-            .env_remove("XDG_CONFIG_HOME")
-            .env("APPDATA", self.fixture.home())
-            .env("LOCALAPPDATA", self.fixture.home())
-            .env("PATH", self.path_value())
-            .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-            .env("NO_COLOR", "1");
-        command
+        for key in inherited_scrub_keys() {
+            ops.push(EnvironmentOp::Remove(key));
+        }
+        let home = self.fixture.home().as_os_str();
+        for (key, value) in [("HOME", home), ("USERPROFILE", home)] {
+            ops.push(EnvironmentOp::Set(key.into(), value.to_os_string()));
+        }
+        for key in ["HOMEDRIVE", "HOMEPATH", "XDG_CONFIG_HOME"] {
+            ops.push(EnvironmentOp::Remove(key.into()));
+        }
+        for (key, value) in [
+            ("APPDATA", home.to_os_string()),
+            ("LOCALAPPDATA", home.to_os_string()),
+            ("PATH", self.path_value()),
+            ("CLAUDINE_RENDEZVOUS_REPORT", "false".into()),
+            ("NO_COLOR", "1".into()),
+            ("PLAYA_DRY_RUN", "1".into()),
+            (
+                "PLAYA_SPOOL_DIR",
+                self.fixture.workspace_path().join("playa-spool").into(),
+            ),
+        ] {
+            ops.push(EnvironmentOp::Set(key.into(), value));
+        }
+        ChildEnvironment {
+            clear: !self.inherit_env,
+            ops,
+            current_dir: self.current_dir.clone(),
+        }
     }
 
     fn path_value(&self) -> std::ffi::OsString {
@@ -489,38 +592,121 @@ impl<'fixture> ClaudineCommandBuilder<'fixture> {
     }
 }
 
-/// The `GIT_*` plumbing variables that override cwd-based repository discovery.
+/// The inherited environment families the L1 spawn contract removes, in the
+/// order the child command receives them.
 ///
-/// An inherited pair defeats `current_dir` entirely, in the fixture as well as
-/// in the child: on 2026-08-31 a pre-push hook run of this suite inherited
-/// `GIT_DIR` and drove fixture `git` commands into the real repository,
-/// committing fixture files onto a feature branch.
-const GIT_PLUMBING_VARS: [&str; 5] = [
-    "GIT_DIR",
-    "GIT_WORK_TREE",
-    "GIT_INDEX_FILE",
-    "GIT_COMMON_DIR",
-    "GIT_OBJECT_DIRECTORY",
-];
-
-/// Remove the inherited environment families the L1 spawn contract owns.
-///
-/// `CLAUDINE_*` goes by prefix rather than by name: the namespace is ~48 names
-/// across `lib/src` and `cli/src` and grows without this helper being told.
+/// `CLAUDINE_*` and `PLAYA_*` go by prefix rather than by name: the first
+/// namespace is ~48 names across `lib/src` and `cli/src` and grows without this
+/// helper being told, and the second carries the two keys — `PLAYA_DRY_RUN`,
+/// `PLAYA_SPOOL_DIR` — whose fixture defaults decide whether a lifecycle audio
+/// effect spawns a detached worker on the developer's machine.
+/// Only names the *parent* actually carries are listed — removing a key a
+/// command never had is a no-op, and enumerating the parent is the only way a
+/// prefix rule can be expressed as a key list at all.
 /// `TERM_WIDTH`/`COLUMNS`/`FORCE_COLOR` go because `cli/src/log.rs` reads them
 /// before falling back to 80 columns, and because `FORCE_COLOR` would otherwise
 /// out-vote the `NO_COLOR=1` the builder sets.
-fn scrub_inherited_environment(command: &mut assert_cmd::Command) {
-    for (key, _) in std::env::vars_os() {
-        if key.to_string_lossy().starts_with("CLAUDINE_") {
-            command.env_remove(&key);
+fn inherited_scrub_keys() -> Vec<OsString> {
+    let mut keys: Vec<OsString> = std::env::vars_os()
+        .map(|(key, _)| key)
+        .filter(|key| {
+            let key = key.to_string_lossy();
+            key.starts_with("CLAUDINE_") || key.starts_with("PLAYA_")
+        })
+        .collect();
+    keys.extend(GIT_PLUMBING_VARS.iter().map(OsString::from));
+    keys.extend(["TERM_WIDTH", "COLUMNS", "FORCE_COLOR"].map(OsString::from));
+    keys
+}
+
+/// One ordered operation on the child's environment block.
+///
+/// A `Vec` of these rather than a map, because two of the contract's rules are
+/// ordering rules: `CLAUDINE_RENDEZVOUS_REPORT` is set *after* the
+/// `CLAUDINE_*` sweep that would otherwise remove it, and the Windows console
+/// restore runs after the clear that took those three away.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EnvironmentOp {
+    Remove(OsString),
+    Set(OsString, OsString),
+}
+
+/// The L1 spawn contract as data, ready to apply to either command surface.
+///
+/// `assert_cmd::Command` and `std::process::Command` share no trait, and
+/// neither hands back the other, so "one shared implementation" cannot be a
+/// method on a receiver. It is this description plus [`ChildEnvironment::apply`],
+/// which is the only code that decides what a `claudine` child inherits.
+pub struct ChildEnvironment {
+    /// Whether the child starts from an empty block ([`ClaudineCommandBuilder::inherit_no_env`]).
+    clear: bool,
+    /// Removes and sets, in application order.
+    ops: Vec<EnvironmentOp>,
+    /// The pinned launch directory.
+    current_dir: PathBuf,
+}
+
+impl ChildEnvironment {
+    /// Apply the policy to `command`.
+    pub fn apply<C: ConfigurableCommand>(&self, command: &mut C) {
+        if self.clear {
+            command.clear_environment();
         }
+        for op in &self.ops {
+            match op {
+                EnvironmentOp::Remove(key) => command.remove_variable(key),
+                EnvironmentOp::Set(key, value) => command.set_variable(key, value),
+            }
+        }
+        command.pin_current_dir(&self.current_dir);
     }
-    for key in GIT_PLUMBING_VARS {
-        command.env_remove(key);
+}
+
+/// The four calls [`ChildEnvironment::apply`] needs from a command surface.
+///
+/// Deliberately not `std::process::Command`'s own method names: an adapter
+/// that merely forwarded them could be replaced by the inherent method and the
+/// policy would drift back into the call site unnoticed.
+pub trait ConfigurableCommand {
+    fn clear_environment(&mut self);
+    fn remove_variable(&mut self, key: &OsStr);
+    fn set_variable(&mut self, key: &OsStr, value: &OsStr);
+    fn pin_current_dir(&mut self, dir: &Path);
+}
+
+impl ConfigurableCommand for assert_cmd::Command {
+    fn clear_environment(&mut self) {
+        self.env_clear();
     }
-    for key in ["TERM_WIDTH", "COLUMNS", "FORCE_COLOR"] {
-        command.env_remove(key);
+
+    fn remove_variable(&mut self, key: &OsStr) {
+        self.env_remove(key);
+    }
+
+    fn set_variable(&mut self, key: &OsStr, value: &OsStr) {
+        self.env(key, value);
+    }
+
+    fn pin_current_dir(&mut self, dir: &Path) {
+        self.current_dir(dir);
+    }
+}
+
+impl ConfigurableCommand for Command {
+    fn clear_environment(&mut self) {
+        self.env_clear();
+    }
+
+    fn remove_variable(&mut self, key: &OsStr) {
+        self.env_remove(key);
+    }
+
+    fn set_variable(&mut self, key: &OsStr, value: &OsStr) {
+        self.env(key, value);
+    }
+
+    fn pin_current_dir(&mut self, dir: &Path) {
+        self.current_dir(dir);
     }
 }
 
@@ -544,31 +730,33 @@ fn windows_system_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from(WINDOWS_SYSTEM_ROOT_FALLBACK))
 }
 
-/// Put the Windows console plumbing back after
-/// [`ClaudineCommandBuilder::inherit_no_env`] has cleared the child.
+/// The Windows console plumbing to put back after
+/// [`ClaudineCommandBuilder::inherit_no_env`] has cleared the child; empty
+/// everywhere else.
 ///
 /// `env_clear()` on Windows also removes `PATHEXT` — without which the fixture
 /// `bin` resolves none of its `.cmd` stubs — `COMSPEC`, and the `SystemRoot`
 /// that [`minimal_system_path`] reads. These three are what the console host
 /// itself needs; restoring only them keeps the knob a tightening rather than a
 /// trap, and a Unix run is untouched.
-fn restore_windows_console_variables(command: &mut assert_cmd::Command) {
-    #[cfg(windows)]
-    {
-        let system_root = windows_system_root();
-        let comspec = std::env::var_os("COMSPEC")
-            .unwrap_or_else(|| system_root.join("System32").join("cmd.exe").into_os_string());
-        let pathext = std::env::var_os("PATHEXT")
-            .unwrap_or_else(|| std::ffi::OsString::from(WINDOWS_PATHEXT_FALLBACK));
-        command
-            .env("SystemRoot", &system_root)
-            .env("COMSPEC", comspec)
-            .env("PATHEXT", pathext);
+///
+/// The platform test is `cfg!` rather than `#[cfg]` so both arms compile on
+/// every leg: a Unix run proves the restore stays Windows-only, which is the
+/// half of the contract a macOS or Linux host can verify at all.
+fn windows_console_variables() -> Vec<(OsString, OsString)> {
+    if !cfg!(windows) {
+        return Vec::new();
     }
-    #[cfg(not(windows))]
-    {
-        let _ = command;
-    }
+    let system_root = windows_system_root();
+    let comspec = std::env::var_os("COMSPEC")
+        .unwrap_or_else(|| system_root.join("System32").join("cmd.exe").into_os_string());
+    let pathext = std::env::var_os("PATHEXT")
+        .unwrap_or_else(|| OsString::from(WINDOWS_PATHEXT_FALLBACK));
+    vec![
+        (OsString::from("SystemRoot"), system_root.into_os_string()),
+        (OsString::from("COMSPEC"), comspec),
+        (OsString::from("PATHEXT"), pathext),
+    ]
 }
 
 /// The system directories the default `PATH` carries behind the fixture `bin`.
@@ -606,15 +794,10 @@ pub fn write_json<T: serde::Serialize>(path: &Path, value: &T) {
 /// Create a git repository at `path`, returning whether `git init` succeeded.
 ///
 /// This runs from the *parent* process, which has a fully inherited
-/// environment — so the `GIT_*` plumbing family is scrubbed here as well as on
-/// the child command; see [`GIT_PLUMBING_VARS`] for the incident.
+/// environment, so it goes through [`helper_command`] rather than
+/// `Command::new("git")`; see [`GIT_PLUMBING_VARS`] for the incident.
 pub fn init_git_repo(path: &Path) -> bool {
-    ensure_test_tracing_initialized();
-    let mut command = Command::new("git");
-    for key in GIT_PLUMBING_VARS {
-        command.env_remove(key);
-    }
-    command
+    helper_command("git")
         .arg("init")
         .current_dir(path)
         .status()

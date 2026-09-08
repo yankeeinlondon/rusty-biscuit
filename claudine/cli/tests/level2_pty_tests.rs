@@ -11,7 +11,6 @@ mod common;
 use common::{pty_available, write_executable};
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_wrapper_summary_shows_badges() {
     require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
 
@@ -41,7 +40,6 @@ fn level2_pty_wrapper_summary_shows_badges() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_non_interactive_detection() {
     require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
 

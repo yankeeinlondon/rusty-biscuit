@@ -1,15 +1,24 @@
-use std::path::PathBuf;
+mod common;
+use common::CliProcessFixture;
 
-fn repo_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir.join("../..").canonicalize().unwrap()
+/// A fixture whose launch directory is a repository this test built.
+///
+/// Every report below reads the launch context, so the launch directory has to
+/// be a repository — but it never has to be *this* repository. Pointing the
+/// suite at the rusty-biscuit checkout made each of these ~24 processes walk
+/// the monorepo and render its real contents; an empty `git init` proves the
+/// same contract (`ctx.repo_root` resolves, rows are non-null) against topology
+/// the test wrote.
+fn repository_fixture() -> CliProcessFixture {
+    let fixture = CliProcessFixture::named("context-command");
+    fixture.initialize_repository();
+    fixture
 }
 
 #[test]
 fn context_default_exits_zero_and_produces_stdout() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
+    let assert = repository_fixture()
+        .command()
         .args(["context"])
         .assert()
         .success();
@@ -36,10 +45,11 @@ fn context_default_exits_zero_and_produces_stdout() {
 
 #[test]
 fn context_default_works_outside_repo() {
-    let temp_dir = std::env::temp_dir();
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(&temp_dir)
+    // Deliberately *not* `repository_fixture()`: the fixture workspace is built
+    // under the system temp directory and is never a repository until a test
+    // makes it one, which is exactly this row's precondition.
+    let assert = CliProcessFixture::named("context-command-outside-repo")
+        .command()
         .args(["context"])
         .assert()
         .success();
@@ -57,9 +67,8 @@ fn context_default_works_outside_repo() {
 
 #[test]
 fn context_values_exits_zero_and_produces_stdout() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
+    let assert = repository_fixture()
+        .command()
         .args(["context", "--values"])
         .assert()
         .success();
@@ -84,19 +93,25 @@ fn context_values_exits_zero_and_produces_stdout() {
 /// values. The aliases (`ctx.utc`/`ctx.dow`/`ctx.dow_abbr`) are themselves
 /// first-class descriptor rows in the `Date and Time → Aliases` subsection, but
 /// their canonical counterparts must also resolve to non-null values.
+///
+/// Absorbs the former `context_values_renders_non_null_for_canonical_keys`,
+/// which asked the identical question of `ctx.today` through a second launch of
+/// the same command. The two names described one contract, and the pair was
+/// easy to read as broader coverage than it was; `ctx.today` is now the fourth
+/// key in the list below, so every assertion the pair made still runs.
 #[test]
 fn context_values_renders_canonical_keys_non_null() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
+    let assert = repository_fixture()
+        .command()
         .args(["context", "--values"])
         .assert()
         .success();
 
     let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
 
-    // Check canonical keys that correspond to the old aliases.
-    for key in ["ctx.now_utc", "ctx.day", "ctx.day_abbr"] {
+    // Check canonical keys that correspond to the old aliases, plus `ctx.today`,
+    // which always resolves and so is the strictest sentinel of the four.
+    for key in ["ctx.now_utc", "ctx.day", "ctx.day_abbr", "ctx.today"] {
         let row = stdout
             .lines()
             .find(|line| line.contains(key))
@@ -108,33 +123,10 @@ fn context_values_renders_canonical_keys_non_null() {
     }
 }
 
-/// Regression: `--values` must also surface canonical values, not just
-/// aliases. `ctx.today` always has a value, so use it as a sentinel.
-#[test]
-fn context_values_renders_non_null_for_canonical_keys() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
-        .args(["context", "--values"])
-        .assert()
-        .success();
-
-    let stdout = String::from_utf8_lossy(&assert.get_output().stdout);
-    let today_row = stdout
-        .lines()
-        .find(|line| line.contains("ctx.today"))
-        .unwrap_or_else(|| panic!("expected ctx.today row; got stdout:\n{stdout}"));
-    assert!(
-        !today_row.contains("null"),
-        "ctx.today must have a real value; row: {today_row}",
-    );
-}
-
 #[test]
 fn context_expressions_exits_zero_and_produces_stdout() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
+    let assert = repository_fixture()
+        .command()
         .args(["context", "--expressions"])
         .assert()
         .success();
@@ -177,9 +169,8 @@ fn context_expressions_exits_zero_and_produces_stdout() {
 
 #[test]
 fn context_side_effects_exits_zero_and_produces_stdout() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
+    let assert = repository_fixture()
+        .command()
         .args(["context", "--side-effects"])
         .assert()
         .success();
@@ -206,9 +197,8 @@ fn context_side_effects_exits_zero_and_produces_stdout() {
 /// first data row's contents being promoted to a header.
 #[test]
 fn context_expressions_truthiness_table_uses_real_headers() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
+    let assert = repository_fixture()
+        .command()
         .args(["context", "--expressions"])
         .assert()
         .success();
@@ -243,9 +233,8 @@ fn context_expressions_truthiness_table_uses_real_headers() {
 /// header and the operator cells both carry inline code.
 #[test]
 fn context_expressions_inline_code_renders_without_leaking_markup() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
+    let assert = repository_fixture()
+        .command()
         .args(["context", "--expressions"])
         .assert()
         .success();
@@ -266,9 +255,8 @@ fn context_expressions_inline_code_renders_without_leaking_markup() {
 
 #[test]
 fn context_default_writes_footer_to_stderr() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
+    let assert = repository_fixture()
+        .command()
         .args(["context"])
         .assert()
         .success();
@@ -290,9 +278,8 @@ fn context_default_writes_footer_to_stderr() {
 
 #[test]
 fn context_values_writes_footer_to_stderr() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
+    let assert = repository_fixture()
+        .command()
         .args(["context", "--values"])
         .assert()
         .success();
@@ -314,9 +301,8 @@ fn context_values_writes_footer_to_stderr() {
 
 #[test]
 fn context_expressions_writes_footer_to_stderr() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
+    let assert = repository_fixture()
+        .command()
         .args(["context", "--expressions"])
         .assert()
         .success();
@@ -338,9 +324,8 @@ fn context_expressions_writes_footer_to_stderr() {
 
 #[test]
 fn context_side_effects_writes_footer_to_stderr() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
+    let assert = repository_fixture()
+        .command()
         .args(["context", "--side-effects"])
         .assert()
         .success();
@@ -435,10 +420,9 @@ fn assert_one_row_each(kind: &str, expected: &[String], actual: &[String]) {
 /// Runs `claudine context <args>` at a wide terminal (200 cells) so no canonical
 /// identifier wraps, then returns the rendered first-column cells.
 fn context_first_column_cells(args: &[&str]) -> Vec<String> {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let assert = repository_fixture()
+        .command()
         .env("COLUMNS", "200")
-        .current_dir(repo_root())
         .args(args)
         .assert()
         .success();
@@ -517,9 +501,8 @@ fn context_side_effects_includes_every_capability() {
 #[test]
 fn context_deterministic_output() {
     let run = || {
-        let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
-            .current_dir(repo_root())
+        let assert = repository_fixture()
+            .command()
             .args(["context"])
             .assert()
             .success();
@@ -538,9 +521,8 @@ fn context_deterministic_output() {
 #[test]
 fn context_no_markdown_parsing_artifacts() {
     for args in [vec!["context"], vec!["context", "--values"], vec!["context", "--expressions"], vec!["context", "--side-effects"]] {
-        let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
-            .current_dir(repo_root())
+        let assert = repository_fixture()
+            .command()
             .args(&args)
             .assert()
             .success();
@@ -570,9 +552,8 @@ fn context_clap_rejects_combined_flags() {
         vec!["context", "--expressions", "--side-effects"],
         vec!["context", "--values", "--expressions", "--side-effects"],
     ] {
-        assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
-            .current_dir(repo_root())
+        repository_fixture()
+            .command()
             .args(&pair)
             .assert()
             .failure();
@@ -586,9 +567,8 @@ fn context_clap_rejects_combined_flags() {
 /// `--values` must include every context row, even when null/unavailable.
 #[test]
 fn context_values_preserves_null_rows() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
+    let assert = repository_fixture()
+        .command()
         .args(["context", "--values"])
         .assert()
         .success();
@@ -634,22 +614,21 @@ fn context_side_effects_makes_no_filesystem_changes() {
         out
     }
 
-    let home = tempfile::tempdir().expect("home sandbox");
-    let work = tempfile::tempdir().expect("work sandbox");
+    // The fixture already supplies the separate sandbox `HOME` this row needs.
+    let fixture = CliProcessFixture::named("context-side-effects-sandbox");
+    let work = fixture.cwd();
     // A sentinel the report must not touch.
-    fs::write(work.path().join("sentinel.txt"), b"untouched").unwrap();
+    fs::write(work.join("sentinel.txt"), b"untouched").unwrap();
 
-    let before = snapshot(work.path());
+    let before = snapshot(work);
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", home.path())
-        .current_dir(work.path())
+    fixture
+        .command()
         .args(["context", "--side-effects"])
         .assert()
         .success();
 
-    let after = snapshot(work.path());
+    let after = snapshot(work);
     assert_eq!(
         before, after,
         "`context --side-effects` must not create, delete, or modify any file in the work dir"
@@ -664,9 +643,8 @@ fn context_side_effects_makes_no_filesystem_changes() {
 /// Side-effects report must use "capabilities" language and avoid availability claims.
 #[test]
 fn context_side_effects_uses_capability_language() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
+    let assert = repository_fixture()
+        .command()
         .args(["context", "--side-effects"])
         .assert()
         .success();
@@ -690,9 +668,8 @@ fn context_side_effects_uses_capability_language() {
 #[test]
 fn context_footer_no_availability_claims() {
     for args in [vec!["context"], vec!["context", "--values"], vec!["context", "--expressions"], vec!["context", "--side-effects"]] {
-        let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
-            .current_dir(repo_root())
+        let assert = repository_fixture()
+            .command()
             .args(&args)
             .assert()
             .success();
@@ -744,13 +721,18 @@ fn context_reports_preserve_all_columns_at_minimum_supported_width() {
         ),
     ];
 
+    // One fixture for the whole sweep. The combination under test is
+    // width × report mode; the repository is not part of it, and rebuilding a
+    // `TempDir` plus a `git init` for each of the twelve launches was the bulk
+    // of this test's cost.
+    let fixture = repository_fixture();
+
     // 53 is the minimum supported width; 60 and 80 confirm columns persist above it.
     for width in ["53", "60", "80"] {
         for (args, headers, sentinel) in cases {
-            let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-                .env("NO_COLOR", "1")
+            let assert = fixture
+                .command()
                 .env("COLUMNS", width)
-                .current_dir(repo_root())
                 .args(*args)
                 .assert()
                 .success();
@@ -791,12 +773,13 @@ fn context_reports_preserve_all_columns_at_minimum_supported_width() {
 #[test]
 fn context_default_report_never_drops_type_column_at_any_width() {
     let mut saw_header_row = false;
+    // One fixture for the whole width sweep; see the sibling sweep above.
+    let fixture = repository_fixture();
 
     for width in ["35", "40", "45", "50", "53", "56", "60"] {
-        let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
+        let assert = fixture
+            .command()
             .env("COLUMNS", width)
-            .current_dir(repo_root())
             .args(["context"])
             .assert()
             .success();
@@ -825,9 +808,8 @@ fn context_default_report_never_drops_type_column_at_any_width() {
 /// The "Interpolation vs. Condition Mode" introduction uses corrected wording.
 #[test]
 fn context_expressions_corrected_interpolation_wording() {
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
+    let assert = repository_fixture()
+        .command()
         .args(["context", "--expressions"])
         .assert()
         .success();

@@ -40,7 +40,6 @@
 
 use std::fs;
 use std::path::Path;
-use std::process::Command;
 use std::time::{Duration, Instant};
 
 
@@ -48,8 +47,8 @@ use std::time::{Duration, Instant};
 use expectrl::{Expect, Session};
 
 mod common;
-use common::TestWorkspace;
-use common::completion::{fake_home, write_file as write};
+use common::CliProcessFixture;
+use common::completion::write_file as write;
 
 /// Number of timed iterations per scenario.
 ///
@@ -162,15 +161,12 @@ fn seed_workspace(root: &Path) {
 // Timed invocation helpers.
 // ---------------------------------------------------------------------
 
-fn run_complete_once(cwd: &Path, home: &Path, argv_tail: &[&str]) -> Duration {
+fn run_complete_once(fixture: &CliProcessFixture, argv_tail: &[&str]) -> Duration {
     let current = argv_tail.len();
-    let reference = assert_cmd::Command::cargo_bin("claudine").unwrap();
-    let program = reference.get_program().to_os_string();
-    let mut cmd = Command::new(program);
-    cmd.current_dir(cwd)
-        .env("HOME", home)
-        .env("NO_COLOR", "1")
-        .env_remove("COMPLETE")
+    // The raw surface, because the measurement is the wall clock across one
+    // `output()` — `assert_cmd` would add its own assertion machinery to it.
+    let mut cmd = fixture.command_std();
+    cmd.env_remove("COMPLETE")
         .env_remove("_CLAP_COMPLETE_INDEX")
         .env_remove("_CLAP_IFS")
         .arg("__complete")
@@ -219,12 +215,12 @@ fn compute_stats(samples: &[Duration]) -> Stats {
     }
 }
 
-fn measure(label: &str, cwd: &Path, home: &Path, argv_tail: &[&str]) -> Stats {
+fn measure(label: &str, fixture: &CliProcessFixture, argv_tail: &[&str]) -> Stats {
     for _ in 0..WARMUP {
-        let _ = run_complete_once(cwd, home, argv_tail);
+        let _ = run_complete_once(fixture, argv_tail);
     }
     let samples: Vec<Duration> = (0..ITERATIONS)
-        .map(|_| run_complete_once(cwd, home, argv_tail))
+        .map(|_| run_complete_once(fixture, argv_tail))
         .collect();
     let stats = compute_stats(&samples);
     println!(
@@ -246,43 +242,30 @@ fn measure(label: &str, cwd: &Path, home: &Path, argv_tail: &[&str]) -> Stats {
 #[test]
 #[ignore = "performance harness; run explicitly with --ignored"]
 fn perf_compose_empty_partial_meets_target() {
-    let ws = TestWorkspace::named("complete-perf-compose-empty");
-    seed_workspace(ws.path());
-    let home = fake_home(ws.path());
+    let fixture = CliProcessFixture::named("complete-perf-compose-empty");
+    seed_workspace(fixture.cwd());
 
-    let stats = measure("compose empty partial", ws.path(), &home, &["compose", ""]);
+    let stats = measure("compose empty partial", &fixture, &["compose", ""]);
     assert_perf_target("compose empty partial", stats);
 }
 
 #[test]
 #[ignore = "performance harness; run explicitly with --ignored"]
 fn perf_compose_long_prefix_meets_target() {
-    let ws = TestWorkspace::named("complete-perf-compose-long");
-    seed_workspace(ws.path());
-    let home = fake_home(ws.path());
+    let fixture = CliProcessFixture::named("complete-perf-compose-long");
+    seed_workspace(fixture.cwd());
 
-    let stats = measure(
-        "compose long prefix `pla`",
-        ws.path(),
-        &home,
-        &["compose", "pla"],
-    );
+    let stats = measure("compose long prefix `pla`", &fixture, &["compose", "pla"]);
     assert_perf_target("compose long prefix `pla`", stats);
 }
 
 #[test]
 #[ignore = "performance harness; run explicitly with --ignored"]
 fn perf_inline_compose_empty_partial_meets_target() {
-    let ws = TestWorkspace::named("complete-perf-inline-empty");
-    seed_workspace(ws.path());
-    let home = fake_home(ws.path());
+    let fixture = CliProcessFixture::named("complete-perf-inline-empty");
+    seed_workspace(fixture.cwd());
 
-    let stats = measure(
-        "inline-compose empty partial",
-        ws.path(),
-        &home,
-        &["inline-compose", ""],
-    );
+    let stats = measure("inline-compose empty partial", &fixture, &["inline-compose", ""]);
     assert_perf_target("inline-compose empty partial", stats);
 }
 
@@ -338,19 +321,17 @@ const ENTER_WARMUP: usize = 3;
 /// `Esc` as soon as a candidate path appears, so provider resolution and
 /// composition execution never run.
 #[cfg(unix)]
-fn run_enter_once(cwd: &Path, home: &Path, partial: &str) -> Duration {
+fn run_enter_once(fixture: &CliProcessFixture, partial: &str) -> Duration {
     // The init wizard intercepts stdin when no user config exists; stage
     // an empty config so the default `prompt_for_missing = true` applies.
-    let config_dir = home.join(".claudine");
+    let config_dir = fixture.home().join(".claudine");
     fs::create_dir_all(&config_dir).unwrap();
     fs::write(config_dir.join("config.json"), "{}").unwrap();
 
-    let program = assert_cmd::Command::cargo_bin("claudine").unwrap().get_program().to_os_string();
-    let mut cmd = Command::new(program);
-    cmd.current_dir(cwd)
-        .env("HOME", home)
-        .env("NO_COLOR", "1")
-        .env_remove("COMPLETE")
+    // `expectrl` needs a live `std::process::Command`; the builder's raw
+    // surface hands one over carrying the same policy.
+    let mut cmd = fixture.command_std();
+    cmd.env_remove("COMPLETE")
         .env_remove("_CLAP_COMPLETE_INDEX")
         .env_remove("_CLAP_IFS")
         .args(["compose", partial]);
@@ -403,12 +384,12 @@ fn run_enter_once(cwd: &Path, home: &Path, partial: &str) -> Duration {
 }
 
 #[cfg(unix)]
-fn measure_enter(label: &str, cwd: &Path, home: &Path, partial: &str) -> Stats {
+fn measure_enter(label: &str, fixture: &CliProcessFixture, partial: &str) -> Stats {
     for _ in 0..ENTER_WARMUP {
-        let _ = run_enter_once(cwd, home, partial);
+        let _ = run_enter_once(fixture, partial);
     }
     let samples: Vec<Duration> = (0..ENTER_ITERATIONS)
-        .map(|_| run_enter_once(cwd, home, partial))
+        .map(|_| run_enter_once(fixture, partial))
         .collect();
     let stats = compute_stats(&samples);
     println!(
@@ -427,16 +408,10 @@ fn measure_enter(label: &str, cwd: &Path, home: &Path, partial: &str) -> Stats {
 #[test]
 #[ignore = "performance harness; run explicitly with --ignored"]
 fn perf_enter_compose_partial_meets_target() {
-    let ws = TestWorkspace::named("enter-autocomplete-perf-compose");
-    seed_workspace(ws.path());
-    let home = fake_home(ws.path());
+    let fixture = CliProcessFixture::named("enter-autocomplete-perf-compose");
+    seed_workspace(fixture.cwd());
 
-    let stats = measure_enter(
-        "enter compose partial `repo`",
-        ws.path(),
-        &home,
-        "repo",
-    );
+    let stats = measure_enter("enter compose partial `repo`", &fixture, "repo");
     assert_perf_target("enter compose partial `repo`", stats);
 }
 

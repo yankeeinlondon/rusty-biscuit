@@ -5055,7 +5055,7 @@ exit 0
     // baseline inside this isolated fixture, then make the tracked plan dirty
     // before Claudine captures its invocation snapshot.
     let git = |args: &[&str]| {
-        std::process::Command::new("git")
+        common::helper_command("git")
             .arg("-C")
             .arg(&root)
             .args(args)

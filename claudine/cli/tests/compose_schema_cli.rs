@@ -20,15 +20,14 @@
 
 #[cfg(unix)]
 use std::fs;
-#[cfg(unix)]
-use tempfile::tempdir;
 
 mod common;
 use common::completion::{
     run_complete, seed_cargo_workspace_members as seed_cargo_workspace, write_file,
 };
+use common::CliProcessFixture;
 #[cfg(unix)]
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{strip_ansi, write_executable};
 
 // ============================================================================
 // Non-interactive MissingProperties surface
@@ -37,39 +36,31 @@ use common::{augmented_path, strip_ansi, write_executable};
 #[cfg(unix)]
 #[test]
 fn compose_and_inline_bare_sidecar_advisory_render_once_and_silent_suppresses_it() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let sidecar = workspace.path().join("schema.yaml");
+    let fixture = CliProcessFixture::named("compose-schema-cli");
+    let sidecar = fixture.cwd().join("schema.yaml");
     fs::write(
         &sidecar,
         "source_marker: string(required)\nspec: 'file(eager; required)'\ncaller_spec: 'file(eager; required)'\n",
     )
     .unwrap();
-    let md_file = workspace.path().join("plan.md");
+    let md_file = fixture.cwd().join("plan.md");
     fs::write(
         &md_file,
         "---\n$schema: ./schema.yaml\ntitle: Hello\n---\nPlan.\n",
     )
     .unwrap();
-    let inline_file = workspace.path().join("inline.md");
+    let inline_file = fixture.cwd().join("inline.md");
     let inline_source =
         "---\n$schema: ./schema.yaml\nprompt: Update the body.\n---\nOriginal body.\n";
     fs::write(&inline_file, inline_source).unwrap();
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\nprintf 'Updated body.\\n'\nexit 0\n",
     );
 
     let run = |subcommand: &str, file: &std::path::Path, silent: bool| {
-        let mut command = assert_cmd::Command::cargo_bin("claudine").unwrap();
-        command
-            .env("NO_COLOR", "1")
-            .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
-            .env("HOME", workspace.path())
-            .env("PATH", augmented_path(&path_dir))
-            .current_dir(workspace.path())
-            .args([subcommand, "--goose"]);
+        let mut command = fixture.command();
+        command.args([subcommand, "--goose"]);
         if silent {
             command.arg("--silent");
         }
@@ -112,12 +103,10 @@ fn compose_and_inline_bare_sidecar_advisory_render_once_and_silent_suppresses_it
 #[cfg(unix)]
 #[test]
 fn compose_missing_required_property_reports_without_launching_provider() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("compose-schema-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("plan.md");
+    let md_file = fixture.cwd().join("plan.md");
     fs::write(
         &md_file,
         r#"---
@@ -132,18 +121,14 @@ Plan for {{topic}}.
     // Provider stub records every invocation so we can prove it was
     // never called — schema validation must abort before launch.
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho touched >> {count}\nexit 0\n",
             count = count_path.display()
         ),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture.command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -183,12 +168,10 @@ fn compose_frontmatter_interactive_true_still_reports_missing_on_non_tty() {
     // not on the resolved session interactivity. When stdin/stderr are piped,
     // the missing required property must surface as a typed MissingProperties
     // report without hanging or prompting.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("compose-schema-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("plan.md");
+    let md_file = fixture.cwd().join("plan.md");
     fs::write(
         &md_file,
         r#"---
@@ -202,18 +185,14 @@ Plan for {{topic}}.
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho touched >> {count}\nexit 0\n",
             count = count_path.display()
         ),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture.command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -241,11 +220,9 @@ Plan for {{topic}}.
 #[cfg(unix)]
 #[test]
 fn compose_set_override_satisfies_required_schema() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("compose-schema-cli");
 
-    let md_file = workspace.path().join("plan.md");
+    let md_file = fixture.cwd().join("plan.md");
     fs::write(
         &md_file,
         r#"---
@@ -258,15 +235,11 @@ Plan for {{topic}}.
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    fixture.command()
         .args([
             "compose",
             "--goose",
@@ -280,12 +253,10 @@ Plan for {{topic}}.
 #[cfg(unix)]
 #[test]
 fn compose_invalid_required_property_aborts_without_prompt() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("compose-schema-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("plan.md");
+    let md_file = fixture.cwd().join("plan.md");
     // `count: not-a-number` is a present-but-invalid required value.
     // Per the Phase 2 contract, this is a hard SchemaValidation abort with
     // no Interactive Mode fallback.
@@ -302,18 +273,14 @@ Plan for {{count}}.
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho touched >> {count}\nexit 0\n",
             count = count_path.display()
         ),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture.command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -351,12 +318,10 @@ fn compose_schema_grammar_error_reports_invalid_schema_without_launching_provide
     // type-and-constraint string is a grammar error. It must surface as the
     // typed `invalid schema` report (not a path-focused `schema load failed`),
     // name the offending property, and never launch the provider.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("compose-schema-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("plan.md");
+    let md_file = fixture.cwd().join("plan.md");
     fs::write(
         &md_file,
         "---\n$schema:\n    spec: file(required, match(**/*spec*.md))\nspec: \"x\"\n---\nPlan.\n",
@@ -364,18 +329,14 @@ fn compose_schema_grammar_error_reports_invalid_schema_without_launching_provide
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho touched >> {count}\nexit 0\n",
             count = count_path.display()
         ),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture.command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -407,11 +368,9 @@ fn compose_schema_grammar_error_force_color_highlights_line_and_links_file() {
     // append the frontmatter excerpt with the offending `$schema.spec` line
     // highlighted and an OSC8 link to the prompt file. The excerpt is TTY-gated
     // but `FORCE_COLOR=1` lifts the gate even under a piped stderr.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("compose-schema-cli");
 
-    let md_file = workspace.path().join("plan.md");
+    let md_file = fixture.cwd().join("plan.md");
     fs::write(
         &md_file,
         "---\n$schema:\n    spec: file(required, match(**/*spec*.md))\nspec: \"x\"\n---\nPlan.\n",
@@ -419,16 +378,13 @@ fn compose_schema_grammar_error_force_color_highlights_line_and_links_file() {
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
+    let assert = fixture.command()
         .env_remove("NO_COLOR")
         .env("FORCE_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -466,11 +422,9 @@ fn compose_template_value_for_required_enum_does_not_fail_pre_validation() {
     // resolve the template into a valid enum member before the
     // prepare-time validator runs. Previously the pre-validator rejected
     // the raw string `"{{ env.AGENT }}"` as not matching the enum.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("compose-schema-cli");
 
-    let md_file = workspace.path().join("plan.md");
+    let md_file = fixture.cwd().join("plan.md");
     fs::write(
         &md_file,
         r#"---
@@ -487,15 +441,11 @@ Plan for {{runtime_agent}}.
     // composition reached the launch step (i.e. pre-validation and
     // preflight did not abort).
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    fixture.command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -513,11 +463,9 @@ fn compose_invalid_optional_setter_is_dropped_and_run_succeeds() {
     // supplied via `key=value` must be elided from the run's overrides on
     // the drop-and-retry pass — not only from source frontmatter — so the
     // composition continues with a warning instead of failing.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("compose-schema-cli");
 
-    let md_file = workspace.path().join("plan.md");
+    let md_file = fixture.cwd().join("plan.md");
     fs::write(
         &md_file,
         r#"---
@@ -531,15 +479,11 @@ Plan for {{topic}}.
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    fixture.command()
         .args([
             "compose",
             "--goose",
@@ -563,12 +507,10 @@ fn compose_loop_missing_required_surfaces_typed_missing_properties() {
     // compose failure. Policy: missing required values inside loops fail
     // as MissingProperties; interactive collection is not driven inside
     // loops (see `compose.rs` loop closure comment).
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("compose-schema-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("loopy.md");
+    let md_file = fixture.cwd().join("loopy.md");
     fs::write(
         &md_file,
         r#"---
@@ -584,18 +526,14 @@ Plan for {{topic}}.
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho touched >> {count}\nexit 0\n",
             count = count_path.display()
         ),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture.command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -636,12 +574,10 @@ fn inline_compose_wrong_type_prompt_takes_precedence_over_schema_scrub() {
     // PromptPropertyWrongType contract must surface BEFORE the schema
     // scrub silently drops `prompt` as an invalid optional. The user
     // needs to see "must be a string, got number" — not "prompt missing".
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("compose-schema-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("inline.md");
+    let md_file = fixture.cwd().join("inline.md");
     fs::write(
         &md_file,
         r#"---
@@ -655,18 +591,14 @@ ignored body
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho touched >> {count}\nexit 0\n",
             count = count_path.display()
         ),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture.command()
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -697,12 +629,10 @@ fn inline_compose_missing_required_surfaces_typed_missing_properties() {
     // Inline-compose schema validation must produce a typed
     // CompositionError (not a raw Darkmatter MarkdownError) when a
     // required property is missing — same contract as direct compose.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("compose-schema-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("inline.md");
+    let md_file = fixture.cwd().join("inline.md");
     fs::write(
         &md_file,
         r#"---
@@ -716,18 +646,14 @@ ignored body
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho touched >> {count}\nexit 0\n",
             count = count_path.display()
         ),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture.command()
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -777,12 +703,10 @@ fn compose_shell_expanded_value_satisfying_schema_succeeds() {
     // pass: Darkmatter defers compose-time validation for shell-bearing
     // values, and claudine's post-shell re-validation accepts the
     // resolved value.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    write_shell_whitelist(workspace.path(), &["echo"]);
+    let fixture = CliProcessFixture::named("compose-schema-cli");
+    write_shell_whitelist(fixture.cwd(), &["echo"]);
 
-    let md_file = workspace.path().join("plan.md");
+    let md_file = fixture.cwd().join("plan.md");
     fs::write(
         &md_file,
         r#"---
@@ -796,15 +720,11 @@ Plan for tier {{tier}}.
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    fixture.command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -816,13 +736,11 @@ fn compose_shell_expanded_value_violating_schema_aborts_without_launching_provid
     // The companion case: a `$(...)` expression that resolves to a value
     // outside the enum must be rejected by the post-shell validator, and
     // the provider stub must not be launched.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    write_shell_whitelist(workspace.path(), &["echo"]);
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("compose-schema-cli");
+    write_shell_whitelist(fixture.cwd(), &["echo"]);
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("plan.md");
+    let md_file = fixture.cwd().join("plan.md");
     fs::write(
         &md_file,
         r#"---
@@ -836,18 +754,14 @@ Plan for tier {{tier}}.
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho touched >> {count}\nexit 0\n",
             count = count_path.display()
         ),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture.command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -870,13 +784,11 @@ fn inline_compose_shell_expanded_value_violating_schema_aborts_without_launching
     // Same contract for inline-compose: a `$(...)` expression that
     // resolves to a value outside the enum must be rejected by the
     // post-shell validator. Provider stub must not be launched.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    write_shell_whitelist(workspace.path(), &["echo"]);
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("compose-schema-cli");
+    write_shell_whitelist(fixture.cwd(), &["echo"]);
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("inline.md");
+    let md_file = fixture.cwd().join("inline.md");
     fs::write(
         &md_file,
         r#"---
@@ -891,18 +803,14 @@ ignored body
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho touched >> {count}\nexit 0\n",
             count = count_path.display()
         ),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture.command()
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -930,11 +838,9 @@ fn compose_invalid_optional_in_file_emits_visible_warning() {
     // values that fail validation are silently elided by claudine, with
     // only a `tracing::warn!` event that is off by default. The CLI must
     // surface a user-visible stderr warning naming the dropped property.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("compose-schema-cli");
 
-    let md_file = workspace.path().join("plan.md");
+    let md_file = fixture.cwd().join("plan.md");
     fs::write(
         &md_file,
         r#"---
@@ -950,15 +856,11 @@ Plan for {{topic}}.
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture.command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -984,11 +886,9 @@ Plan for {{topic}}.
 fn compose_invalid_optional_setter_emits_visible_warning() {
     // Setter-supplied invalid optional values should also surface a
     // user-visible stderr warning naming the dropped property.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("compose-schema-cli");
 
-    let md_file = workspace.path().join("plan.md");
+    let md_file = fixture.cwd().join("plan.md");
     fs::write(
         &md_file,
         r#"---
@@ -1002,15 +902,11 @@ Plan for {{topic}}.
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture.command()
         .args([
             "compose",
             "--goose",
@@ -1047,19 +943,17 @@ Plan for {{topic}}.
 #[cfg(unix)]
 #[test]
 fn compose_lazy_plan_output_composes_with_present_eager_review() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("compose-schema-cli");
 
     // The eager `review` input exists; the lazy `plan` output names a path that
     // does NOT exist yet (this run would create it).
     fs::write(
-        workspace.path().join("design-review.md"),
+        fixture.cwd().join("design-review.md"),
         "# Review\n",
     )
     .unwrap();
 
-    let md_file = workspace.path().join("plan-review.md");
+    let md_file = fixture.cwd().join("plan-review.md");
     fs::write(
         &md_file,
         r#"---
@@ -1077,15 +971,11 @@ Implement {{plan}} from {{review}}.
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         "#!/bin/sh\ncat > /dev/null\nexit 0\n",
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    fixture.command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -1094,15 +984,13 @@ Implement {{plan}} from {{review}}.
 #[cfg(unix)]
 #[test]
 fn compose_missing_eager_review_aborts_without_launching_provider() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("compose-schema-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
     // Same prompt, but the eager `review` input is absent from disk. The lazy
     // `plan` output is still a not-yet-existing path; only the missing eager
     // `review` may cause the failure.
-    let md_file = workspace.path().join("plan-review.md");
+    let md_file = fixture.cwd().join("plan-review.md");
     fs::write(
         &md_file,
         r#"---
@@ -1120,18 +1008,14 @@ Implement {{plan}} from {{review}}.
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho touched >> {count}\nexit 0\n",
             count = count_path.display()
         ),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture.command()
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -1158,12 +1042,35 @@ Implement {{plan}} from {{review}}.
 
 #[test]
 fn compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area() {
-    let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+    let checkout = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(std::path::Path::parent)
         .expect("claudine CLI crate should live two levels below the repository root")
         .to_path_buf();
-    let home = tempfile::tempdir().unwrap();
+
+    // The subject is a *shipped* prompt's plan expression, so the real
+    // `prompts/plan.md` is the artifact under test — but the two launch
+    // directories it is exercised from must be repositories this test owns, not
+    // the rusty-biscuit checkout. Both files are copied at their checkout-
+    // relative paths, so every relative reference in them resolves identically.
+    let fixture = CliProcessFixture::named("compose-schema-cli");
+    fixture.initialize_repository();
+    let root = fixture.cwd().to_path_buf();
+    for relative in [
+        "prompts/plan.md",
+        "claudine/cli/tests/fixtures/shipped_plan_route/spec.md",
+    ] {
+        let source = checkout.join(relative);
+        common::write(
+            &root.join(relative),
+            &std::fs::read_to_string(&source)
+                .unwrap_or_else(|error| panic!("shipped artifact {relative}: {error}")),
+        );
+    }
+    // `--dry-run` never reaches the provider, but discovery still has to find
+    // one; the stub keeps that off the host's installed `claude`, and it fails
+    // loudly if the dry run ever does launch it.
+    common::write_dry_run_provider_stub(fixture.bin_dir(), "claude");
 
     let area = root.join("claudine");
     let runs = [
@@ -1180,12 +1087,13 @@ fn compose_eager_spec_setter_anchors_before_plan_expression_from_root_and_area()
     ];
 
     for (launch_dir, prompt_arg, setter) in runs {
-        let assert = assert_cmd::Command::cargo_bin("claudine")
-            .unwrap()
-            .env("NO_COLOR", "1")
-            .env("HOME", home.path())
+        let assert = fixture
+            .command_builder()
+            // The invariance claim *is* the launch directory, so each run is
+            // pinned to one of the two the copy above staged.
+            .ambient_context(launch_dir)
+            .build()
             .env("CLAUDE_CODE_EXIT", "0")
-            .current_dir(launch_dir)
             .args(["compose", "--claude", "--dry-run", prompt_arg, setter])
             .assert()
             .success();

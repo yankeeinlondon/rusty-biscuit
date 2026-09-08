@@ -1,15 +1,10 @@
-use std::fs;
-
 use serde_json::Value;
 mod common;
-use common::{TestWorkspace, write};
+use common::{CliProcessFixture, write};
 
 #[test]
 fn handle_json_includes_protect_decisions() {
-    let workspace = TestWorkspace::named("claudine-protect-it");
-    let root = workspace.path();
-    let home = root.join("home");
-    fs::create_dir_all(&home).unwrap();
+    let fixture = CliProcessFixture::named("claudine-protect-it");
 
     let config = serde_json::json!({
         "version": "1.0",
@@ -39,7 +34,7 @@ fn handle_json_includes_protect_decisions() {
         }
     });
     write(
-        &home.join(".claudine/config.json"),
+        &fixture.home().join(".claudine/config.json"),
         &serde_json::to_string_pretty(&config).unwrap(),
     );
 
@@ -50,9 +45,8 @@ fn handle_json_includes_protect_decisions() {
       "tool_input":{"command":"rm -rf /tmp/protect-test"}
     }"#;
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("HOME", &home)
-        .env("NO_COLOR", "1")
+    let output = fixture
+        .command()
         .args(["handle", "before_tool", "--provider", "claude", "--json"])
         .write_stdin(payload)
         .assert()

@@ -12,10 +12,8 @@
 //! which found the diagnostic was only exercised by scanner-level unit tests and
 //! not at the user-observable CLI boundary.
 
-use std::fs;
-use tempfile::tempdir;
 mod common;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write, write_executable};
 
 // ============================================================================
 // Shared assertion harness
@@ -47,28 +45,23 @@ fn assert_removed_key_rejected(
     expected_key: &str,
     expected_replacement_substr: &str,
 ) {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let marker = workspace.path().join("provider-launched.txt");
+    let fixture = CliProcessFixture::named("compose-removed-validation-keys");
+    let marker = fixture.cwd().join("provider-launched.txt");
 
-    let md = workspace.path().join("prompt.md");
-    fs::write(&md, md_content).unwrap();
+    let md = fixture.cwd().join("prompt.md");
+    write(&md, md_content);
 
     // Any invocation records to the marker so we can prove the stub never ran.
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho touched >> {m}\nexit 0\n",
             m = marker.display()
         ),
     );
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let output = fixture
+        .command()
         .args([subcommand, "--goose", md.to_str().unwrap()])
         .output()
         .unwrap();

@@ -8,9 +8,8 @@
 //! `interactive: true` and non-string `prompt` properties.
 
 use std::fs;
-use tempfile::tempdir;
 mod common;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
 // ============================================================================
 // Inline mode: a `prompt` frontmatter property switches each step from
@@ -27,13 +26,11 @@ fn sequence_with_prompt_property_runs_each_step_inline() {
     // interpolation), NOT the document body, and the provider's output
     // replaces the body on disk. Regression target: the sequence
     // orchestrator previously hardcoded compose mode and sent the body.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let prompts_path = workspace.path().join("all-prompts.txt");
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("sequence-prompt-property");
+    let prompts_path = fixture.cwd().join("all-prompts.txt");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         r#"---
@@ -52,7 +49,7 @@ SENTINEL ORIGINAL BODY — must never be sent as the agent prompt.
     // every invocation, then emit a distinct replacement body on stdout so
     // the inline closure can rewrite the document.
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 prev=""
 for arg in "$@"; do
@@ -75,13 +72,10 @@ exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("CLAUDINE_PROMPTS_FILE", &prompts_path)
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .current_dir(workspace.path())
         .args(["sequence", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -144,12 +138,10 @@ fn sequence_rejects_interactive_true_frontmatter_via_cli() {
     // up front with the sequence-specific diagnostic, before any provider
     // step is launched. This exercises the rendered CLI error surface (not
     // just the unit-level `reject_sequence_interactive`).
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("sequence-prompt-property");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\ninteractive: true\nsequence:\n  - alpha\n  - beta\n---\nStep {{state}}.\n",
@@ -159,18 +151,15 @@ fn sequence_rejects_interactive_true_frontmatter_via_cli() {
     // Provider stub records every invocation so the test can prove no step
     // ever launched.
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho touched >> {count}\nexit 0\n",
             count = count_path.display()
         ),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["sequence", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -213,12 +202,10 @@ fn sequence_rejects_non_string_prompt_property() {
     // A `prompt` frontmatter property that is present but not a string is
     // an inline-mode contract violation and must be rejected up front with
     // the same typed error `inline-compose` raises — before any step runs.
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("sequence-prompt-property");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         "---\nprompt: 42\nsequence:\n  - alpha\n---\nBody\n",
@@ -226,18 +213,15 @@ fn sequence_rejects_non_string_prompt_property() {
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho touched >> {count}\nexit 0\n",
             count = count_path.display()
         ),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args(["sequence", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();

@@ -14,10 +14,27 @@
 //! builder is the one supported spawn; this guard keeps the alternative from
 //! regrowing.
 //!
-//! [`SPAWN_ALLOWLIST`] is a burn-down list, not a permanent exemption table:
-//! every entry names a file and states why it still spawns raw. An entry that
+//! [`SPAWN_ALLOWLIST`] was a burn-down list, not a permanent exemption table:
+//! every entry named a file and stated why it still spawned raw. An entry that
 //! matches no live site fails the guard, so a migration cannot leave the list
-//! stale, and a file with a live site but no entry fails it too.
+//! stale, and a file with a live site but no entry fails it too. **The list is
+//! now empty** — the burn-down reached zero — so the second arm is the one that
+//! carries the contract: any raw spawn anywhere in the governed population is a
+//! failure.
+//!
+//! ### The sanctioned forms
+//!
+//! There are two, and the detector recognizes neither as a site because
+//! neither names a binary: `CliProcessFixture::command()` for a run to
+//! completion, and `command_std()` / `command_builder().build_std()` for a
+//! test that has to keep the child — a signal, a deadline, a streaming read,
+//! `CREATE_NEW_PROCESS_GROUP`, an `expectrl` session. The raw path carries the
+//! same environment policy as the `assert_cmd` one (`common/mod.rs`
+//! § "Two command surfaces"), which is what makes it sanctioned; a
+//! `std::process::Command::new(claudine_bin())` written out by hand carries
+//! none of it and stays a violation.
+//! `detector_treats_the_builders_raw_command_path_as_a_sanctioned_form`
+//! pins both halves.
 //!
 //! ## The isolation gate
 //!
@@ -36,6 +53,13 @@
 //! is why the allow-list is empty: the escapes are spelled on the builder, not
 //! on the command.
 //!
+//! The scan is textual, so it reads a raw `std::process::Command` from
+//! `build_std()` exactly as it reads an `assert_cmd::Command` from `build()`:
+//! the same five forms, the same named escapes, the same allow-list. What the
+//! raw surface adds — `.spawn()`, `.stdout(…)`, `.creation_flags(…)`, a
+//! `Child` held across a signal — is not an escape and is not flagged, because
+//! keeping the child is the reason that surface exists.
+//!
 //! ## What each gate governs
 //!
 //! `level2_*`, `level3_*`, and `real_*` files are out of both scans. They drive
@@ -45,10 +69,11 @@
 //!
 //! The isolation gate narrows that population twice more:
 //!
-//! - [`SPAWN_ALLOWLIST`] files are out. They still spawn raw and set their own
-//!   environment by hand, so flagging them would be noise on code the burn-down
-//!   has not reached. Deleting a file's spawn entry is the single edit that
-//!   turns the isolation contract on for it.
+//! - [`SPAWN_ALLOWLIST`] files are out. A file that still spawns raw sets its
+//!   own environment by hand, so flagging it would be noise on code the
+//!   burn-down has not reached. Deleting a file's spawn entry is the single
+//!   edit that turns the isolation contract on for it — which is why the
+//!   isolation population is now the whole L1 suite: the list is empty.
 //! - A file that never names `CliProcessFixture` is out. It holds no
 //!   builder-produced command, so it has no isolation to defeat —
 //!   `system_prompt_perf_bench.rs` pins `.current_dir` on a
@@ -58,8 +83,12 @@
 //! The residual blind spot is the mirror of that last rule: a `.current_dir` on
 //! a non-claudine command *inside* a governed file reads the same as one on a
 //! fixture command, because the scan is textual and does not resolve receivers.
-//! No governed file has one today; the file that acquires one takes an
-//! allow-list entry saying which command it targets.
+//! No governed file has one today — where the burn-down surfaced one
+//! (`sequence_magic_reference.rs`'s fixture `git init`, `loop_cli.rs`'s) the
+//! resolution was to route it through `common::init_git_repo` /
+//! `CliProcessFixture::initialize_repository`, which own the `.current_dir`
+//! themselves. The file that acquires a genuine one takes an allow-list entry
+//! saying which command it targets.
 //!
 //! ## Reading the burn-down
 //!
@@ -82,7 +111,8 @@
 //! - `file` — one allow-listed file that still holds live sites, with its
 //!   count and the allow-list reason it carries.
 //! - `reason` — the roll-up for one reason: how many files and how many sites
-//!   are still exempt under it. This is the number that has to reach zero.
+//!   are still exempt under it. This is the number that had to reach zero, and
+//!   has; a green census now carries no `file` and no `reason` record at all.
 //! - `total` — `files`/`sites` still allow-listed, `scanned_sites` the
 //!   detector found in total, and `governed_files` the size of the population
 //!   scanned. `sites` below `scanned_sites` means live sites are *unlisted*,
@@ -95,11 +125,11 @@
 //!
 //! ```console
 //! $ cat target/nextest/ci-reports/spawn-site-burn-down.jsonl
-//! {"kind":"file","gate":"spawn","file":"compose_cli.rs","reason":"outside this fix's scope","sites":4}
-//! …
-//! {"kind":"reason","gate":"spawn","reason":"outside this fix's scope","files":34,"sites":168}
-//! {"kind":"total","gate":"spawn","files":36,"sites":170,"scanned_sites":170,"governed_files":83}
+//! {"kind":"total","gate":"spawn","files":0,"sites":0,"scanned_sites":0,"governed_files":89}
 //! ```
+//!
+//! While the burn-down was live the same file carried one `file` record per
+//! exempt file and one `reason` roll-up per reason ahead of that `total`.
 
 // Included directly rather than through `mod common;`: this binary needs the
 // sanitizer and nothing else, and `common/mod.rs` drags in the fixture surface
@@ -155,172 +185,29 @@ struct AllowEntry {
     reason: &'static str,
 }
 
-/// Reason shared by the spawn-shaped files this fix does not touch.
+/// Reason a file is still spawn-exempt, kept for the guard's own unit tests and
+/// for whichever file next earns an entry.
+///
+/// It reads "outside this fix's scope" because that is what the entries it once
+/// covered said. **No live entry carries it**: the burn-down reached zero in
+/// Phase 5 of `claudine/fixes/2026-09-07-faster-claudine-tests`, and a new entry
+/// under this reason would be a regression, not a deferral — the criterion is
+/// "zero generic exemptions". A file that genuinely cannot use the builder needs
+/// its own reason naming the specific technical necessity, plus equivalent
+/// isolation proof at the entry.
 const OUT_OF_SCOPE: &str = "outside this fix's scope";
 
-/// Reason shared by the two Windows console-control tests.
-///
-/// Both hold the spawned `claudine` as a live [`std::process::Child`] — they
-/// inject `GenerateConsoleCtrlEvent` while it runs and then poll `try_wait` —
-/// and both need `CREATE_NEW_PROCESS_GROUP` so the event reaches only the
-/// wrapper subtree and not the test runner's own console group.
-/// `assert_cmd::Command` offers neither: it has no `spawn`, only the blocking
-/// `output`/`assert` family, and it never hands back the inner
-/// `std::process::Command` that `CommandExt::creation_flags` extends. Closing
-/// these two needs a fixture builder that can yield a `std::process::Command`,
-/// not a call-site migration.
-const NEEDS_LIVE_CHILD: &str =
-    "needs a live Child + CREATE_NEW_PROCESS_GROUP; assert_cmd has neither";
-
 /// Seeded from the raw-spawn census taken when this guard landed (Phase 2 of
-/// `claudine/fixes/2026-08-01-cli-slow-tests`). Each migration phase deletes
-/// its file's entry; the list shrinking is how the burn-down is observed.
-const SPAWN_ALLOWLIST: &[AllowEntry] = &[
-    AllowEntry {
-        file: "completion_contract.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "completion_perf.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "completion_resolution_round_trip.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "compose_cli.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "compose_interactive_timeout_cli.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "compose_removed_validation_keys.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "compose_schema_cli.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "compose_system_prompt_lifetime.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "compose_ttff_perf.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "composition_outputs.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "context_command.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "effective_diagnostic_render.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "errors_command.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "handle_blocking_output.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "handle_deadline.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "inline_compose_cli.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "level1_compose_autocomplete_failure_pty.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "level1_inline_compose_mismatch_pty.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "level1_structured_error_message.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "loop_cli.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "protect_cli.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "provider_error_finalize.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "sequence_cli.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "sequence_ctrl_c_windows.rs",
-        reason: NEEDS_LIVE_CHILD,
-    },
-    AllowEntry {
-        file: "sequence_errors_cli.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "sequence_groups.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "sequence_jit.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "sequence_magic_reference.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "sequence_overlay_pty.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "sequence_prompt_property.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "sequence_sources_cli.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "shipped_prompts.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "skills_integration.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "wrap_ctrl_c_windows.rs",
-        reason: NEEDS_LIVE_CHILD,
-    },
-    AllowEntry {
-        file: "wrap_sequence_composition.rs",
-        reason: OUT_OF_SCOPE,
-    },
-    AllowEntry {
-        file: "wrap_sigint.rs",
-        reason: OUT_OF_SCOPE,
-    },
-];
+/// `claudine/fixes/2026-08-01-cli-slow-tests`). Each migration phase deleted
+/// its file's entry; the list shrinking is how the burn-down was observed.
+///
+/// **Empty**, and that is the acceptance criterion rather than an accident.
+/// The last two entries were the Windows console-control pair, exempt because
+/// `assert_cmd::Command` has no `spawn` and never hands back the inner
+/// `std::process::Command` that `CommandExt::creation_flags` extends — closing
+/// them needed the builder's `build_std()` surface, which Phase 4 added. Every
+/// remaining live-child, PTY, and streaming-read test now goes through it.
+const SPAWN_ALLOWLIST: &[AllowEntry] = &[];
 
 /// Files allowed to undo the builder's isolation after `build()`.
 ///
@@ -539,16 +426,25 @@ fn governs_spawn(relative: &str, _source: &str) -> bool {
     !excluded(relative)
 }
 
-/// Whether `relative` is named by [`SPAWN_ALLOWLIST`].
-fn spawn_allowlisted(relative: &str) -> bool {
-    SPAWN_ALLOWLIST.iter().any(|entry| entry.file == relative)
+/// Whether `relative` is named by `allowlist`.
+fn listed(relative: &str, allowlist: &[AllowEntry]) -> bool {
+    allowlist.iter().any(|entry| entry.file == relative)
 }
 
 /// Whether a file is in the isolation gate's population — the migrated L1 files
 /// that actually hold a builder-produced command. See the module docs for why
 /// each narrowing is there.
+///
+/// Parameterized by the spawn allow-list so the widening rule stays testable
+/// once [`SPAWN_ALLOWLIST`] is empty: an assertion written against the live
+/// list can only say "no file is exempt", which is the same thing a broken
+/// predicate says.
+fn governs_isolation_against(relative: &str, source: &str, spawn_allowlist: &[AllowEntry]) -> bool {
+    !excluded(relative) && !listed(relative, spawn_allowlist) && obtains_a_fixture_command(source)
+}
+
 fn governs_isolation(relative: &str, source: &str) -> bool {
-    !excluded(relative) && !spawn_allowlisted(relative) && obtains_a_fixture_command(source)
+    governs_isolation_against(relative, source, SPAWN_ALLOWLIST)
 }
 
 /// Every file under `root` a gate governs, as `(relative path, source)`.
@@ -590,14 +486,6 @@ fn sites_in(
         }));
     }
     sites
-}
-
-fn scan(
-    root: &Path,
-    governs: fn(&str, &str) -> bool,
-    detect: fn(&str) -> Vec<(usize, &'static str)>,
-) -> Result<Vec<Site>, String> {
-    Ok(sites_in(&governed_files(root, governs)?, detect))
 }
 
 // ---------------------------------------------------------------------------
@@ -970,6 +858,108 @@ fn detector_ignores_prose_neighbors_and_other_binaries() {
     assert!(spawn_sites("let p = bin_exe(\"claudine\");\n").is_empty());
 }
 
+/// The Phase 4 raw-command path: sanctioned where it comes from the builder,
+/// a violation where it is hand-rolled.
+#[test]
+fn detector_treats_the_builders_raw_command_path_as_a_sanctioned_form() {
+    // Sanctioned: neither spelling names a binary, so neither can inherit the
+    // runner's launch context. The policy came from the builder.
+    assert!(spawn_sites("let mut child = fixture.command_std().spawn().unwrap();\n").is_empty());
+    assert!(
+        spawn_sites("let command = fixture.command_builder().host_path().build_std();\n")
+            .is_empty()
+    );
+    assert!(
+        spawn_sites("let session = expectrl::session::OsSession::spawn(command)?;\n").is_empty()
+    );
+
+    // Still a violation: reaching for the binary directly is what the raw path
+    // replaces, and `.spawn()` does not launder it.
+    assert_eq!(
+        spawn_sites("let mut child = std::process::Command::new(common::claudine_bin()).spawn();\n"),
+        [(1, FORM_CLAUDINE_BIN)]
+    );
+    assert_eq!(
+        spawn_sites("Command::new(biscuit_test_harness::bin_exe!(\"claudine\")).spawn();\n"),
+        [(1, FORM_BIN_EXE)]
+    );
+    assert_eq!(
+        spawn_sites("let mut c = assert_cmd::Command::cargo_bin(\"claudine\").unwrap();\n"),
+        [(1, FORM_CARGO_BIN)]
+    );
+
+    // Negatives: another binary, prose, and a string literal naming the form.
+    assert!(spawn_sites("Command::new(bin_exe!(\"md\")).spawn();\n").is_empty());
+    assert!(
+        spawn_sites("//! Prefer `command_std()` to `Command::new(claudine_bin())`.\n").is_empty()
+    );
+    assert!(spawn_sites("let doc = \"Command::new(claudine_bin())\";\n").is_empty());
+}
+
+/// The isolation gate reads a raw fixture command exactly as it reads an
+/// `assert_cmd` one — and does not mistake the raw surface's own methods for
+/// escapes.
+#[test]
+fn isolation_detector_reads_a_raw_fixture_command_like_an_assert_cmd_one() {
+    assert_eq!(
+        isolation_sites("let mut child = fixture.command_std();\nchild.current_dir(root);\n"),
+        [(2, FORM_CURRENT_DIR)]
+    );
+    assert_eq!(
+        isolation_sites("fixture.command_std().env(\"PATH\", augmented_path(&dir));\n"),
+        [(1, FORM_PATH_ENV), (1, FORM_AUGMENTED_PATH)]
+    );
+    assert_eq!(
+        isolation_sites("fixture.command_std().env_remove(\"PATH\");\n"),
+        [(1, FORM_PATH_ENV_REMOVE)]
+    );
+    assert_eq!(
+        isolation_sites("let mut c = fixture.command_builder().build_std();\nc.env_clear();\n"),
+        [(2, FORM_ENV_CLEAR)]
+    );
+
+    // Keeping the child is the raw surface's purpose, not an escape from the
+    // isolation the builder gave it.
+    assert!(
+        isolation_sites("let child = fixture.command_std().stdout(Stdio::piped()).spawn()?;\n")
+            .is_empty()
+    );
+    assert!(isolation_sites("command.creation_flags(CREATE_NEW_PROCESS_GROUP);\n").is_empty());
+    assert!(isolation_sites("let output = child.wait_with_output()?;\n").is_empty());
+}
+
+/// The isolation gate's population widens by one edit: deleting a file's
+/// [`SPAWN_ALLOWLIST`] entry. Phase 5 does that per batch, and this is what
+/// makes the widening automatic rather than a second list to maintain.
+#[test]
+fn deleting_a_spawn_entry_is_what_widens_the_isolation_population() {
+    let migrated = "let fixture = CliProcessFixture::named(\"x\");\n";
+    // A synthetic list, not the live one: the rule has to stay provable after
+    // the burn-down empties `SPAWN_ALLOWLIST`, and it is the *entry* that is
+    // the input, not whichever file happens still to carry one.
+    const BEFORE: &[AllowEntry] = &[AllowEntry {
+        file: "not_yet_migrated.rs",
+        reason: OUT_OF_SCOPE,
+    }];
+    const AFTER: &[AllowEntry] = &[];
+
+    // With the entry: out of the isolation gate whatever its source says.
+    assert!(!governs_isolation_against("not_yet_migrated.rs", migrated, BEFORE));
+    // Without it — the single edit a migration batch makes — the same file and
+    // the same source are governed.
+    assert!(governs_isolation_against("not_yet_migrated.rs", migrated, AFTER));
+    // A file holding no fixture command stays out either way — it has no
+    // builder isolation to undo.
+    assert!(!governs_isolation_against("not_yet_migrated.rs", "fn main() {}\n", AFTER));
+    // And the tier exclusions still win over both.
+    assert!(!governs_isolation_against("level2_context_capture.rs", migrated, AFTER));
+    // The live gate delegates to exactly this predicate.
+    assert_eq!(
+        governs_isolation("not_yet_migrated.rs", migrated),
+        governs_isolation_against("not_yet_migrated.rs", migrated, SPAWN_ALLOWLIST)
+    );
+}
+
 #[test]
 fn isolation_detector_finds_every_escape_as_executable_code() {
     assert_eq!(
@@ -1112,6 +1102,13 @@ fn reconciliation_reports_unlisted_sites_stale_and_unexplained_entries() {
     assert_eq!(result.burn_down, BTreeMap::from([("allowed.rs".into(), 2)]));
 }
 
+/// A second reason, used only by the synthetic census below.
+///
+/// The artifact groups by reason, so proving that roll-up needs two distinct
+/// reasons in one census — and after the burn-down reached zero there is no
+/// live second reason to borrow.
+const SAMPLE_SECOND_REASON: &str = "needs a live Child; assert_cmd has no spawn";
+
 /// A synthetic two-file census, shared by the artifact tests.
 fn sample_burn_down() -> BurnDown {
     const ALLOWLIST: &[AllowEntry] = &[
@@ -1121,7 +1118,7 @@ fn sample_burn_down() -> BurnDown {
         },
         AllowEntry {
             file: "windows_ctrl_c.rs",
-            reason: NEEDS_LIVE_CHILD,
+            reason: SAMPLE_SECOND_REASON,
         },
         AllowEntry {
             file: "already_migrated.rs",
@@ -1165,7 +1162,7 @@ fn the_artifact_carries_per_file_counts_the_reason_rollup_and_the_totals() {
             "\n",
         ),
         out = OUT_OF_SCOPE,
-        live = NEEDS_LIVE_CHILD,
+        live = SAMPLE_SECOND_REASON,
     );
 
     assert_eq!(sample_burn_down().to_jsonl(), expected);
@@ -1216,18 +1213,51 @@ fn an_unwritable_destination_warns_instead_of_failing_the_guard() {
     emit_report_to(&path, &sample_burn_down());
 }
 
+/// Non-vacuity for the spawn gate now that the burn-down is at zero.
+///
+/// "No raw spawn site anywhere" is the passing state *and* what a gate that
+/// reads no files at all reports, so the population is asserted directly, and a
+/// planted raw form is asserted to still be found. Until Phase 5 this test
+/// could lean on the live sites the allow-list covered; it cannot any more,
+/// because there are none.
 #[test]
-fn an_empty_allowlist_leaves_every_live_site_unlisted() {
-    // Non-vacuity: the guard's population is real, so deleting the allow-list
-    // wholesale must surface it rather than pass on an empty scan.
-    let sites = scan(&tests_root(), governs_spawn, spawn_sites).expect("spawn-site scan");
+fn the_spawn_gate_reads_a_real_population_and_still_finds_a_planted_site() {
+    let governed = governed_files(&tests_root(), governs_spawn).expect("spawn-site population");
     assert!(
-        !sites.is_empty(),
-        "the scan found no spawn sites at all — the detector or the scan root is wrong"
+        governed.len() > 50,
+        "the spawn gate scanned only {} file(s); the L1 population is ~90, so the scan root \
+         or the predicate is wrong",
+        governed.len()
     );
-    let result = reconcile(&sites, &[]);
-    assert_eq!(result.unlisted.len(), sites.len());
-    assert!(result.burn_down.is_empty());
+    // The population is the real L1 suite, not a stray directory.
+    let names: BTreeSet<&str> = governed.iter().map(|(file, _)| file.as_str()).collect();
+    for expected in ["wrap_basics.rs", "sequence_cli.rs", "wrap_ctrl_c_windows.rs"] {
+        assert!(names.contains(expected), "{expected} must be governed: {names:?}");
+    }
+
+    // Every governed file is clean — that is the acceptance criterion.
+    let sites = sites_in(&governed, spawn_sites);
+    assert!(
+        sites.is_empty(),
+        "the burn-down is at zero, so any site here is a regression:\n{sites:?}"
+    );
+
+    // …and the detector that reported zero is the one that still finds a site
+    // when there is one to find, so the zero above is a fact, not a blind spot.
+    let planted = spawn_sites(&format!(
+        "{}\nlet c = assert_cmd::Command::cargo_bin(\"claudine\").unwrap();\n",
+        governed[0].1
+    ));
+    assert_eq!(planted.len(), 1, "a planted raw spawn must still be detected");
+    let result = reconcile(
+        &[Site {
+            file: "planted.rs".into(),
+            line: planted[0].0,
+            form: planted[0].1,
+        }],
+        SPAWN_ALLOWLIST,
+    );
+    assert_eq!(result.unlisted.len(), 1, "and must reconcile as unlisted");
 }
 
 /// Non-vacuity for the isolation gate. It reports zero escapes, which is
@@ -1252,14 +1282,16 @@ fn the_isolation_gate_governs_the_migrated_files_and_only_those() {
         "cli_process_fixture.rs",
         "ctx_launch_anchor.rs",
         "propagated_context_fixtures.rs",
+        // Phase 5's batches, each governed the moment its spawn entry went.
+        "compose_schema_cli.rs",
+        "sequence_cli.rs",
+        "loop_cli.rs",
     ] {
         assert!(
             governed.contains(migrated),
             "{migrated} is a migrated L1 file and must be governed: {governed:?}"
         );
     }
-    // Still on the spawn burn-down: it sets its own environment by hand.
-    assert!(!governed.contains("sequence_cli.rs"));
     // Never obtains a fixture command; its `.current_dir` pins a `git` child.
     assert!(!governed.contains("system_prompt_perf_bench.rs"));
     // The tier and `common/` exclusions still apply.

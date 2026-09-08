@@ -75,7 +75,6 @@ fn compose_command(workspace_dir: &std::path::Path, bin_dir: &std::path::Path, m
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_schema_prompt_collects_string_and_launches_provider() {
     require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
 
@@ -128,7 +127,6 @@ fn level2_pty_schema_prompt_collects_string_and_launches_provider() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_schema_prompt_collects_enum_selection() {
     require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
 
@@ -173,7 +171,6 @@ fn level2_pty_schema_prompt_collects_enum_selection() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_schema_prompt_collects_boolean() {
     require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
 
@@ -217,7 +214,6 @@ fn level2_pty_schema_prompt_collects_boolean() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_schema_prompt_number_retries_on_invalid_input() {
     require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
 
@@ -281,7 +277,6 @@ fn level2_pty_schema_prompt_number_retries_on_invalid_input() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_schema_silent_suppresses_prompt_under_tty() {
     require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
 
@@ -345,7 +340,6 @@ fn level2_pty_schema_silent_suppresses_prompt_under_tty() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_schema_status_does_not_report_templated_enum_as_invalid() {
     // Regression test for review-4 medium finding. When the schema status
     // report renders before Interactive Mode prompts for a missing
@@ -431,7 +425,6 @@ fn level2_pty_schema_status_does_not_report_templated_enum_as_invalid() {
 // the resolved session interactivity value is derived.
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_schema_prompt_precedes_provider_launch_with_interactive_flag() {
     // `compose -i` requests an interactive session via CLI flag. The missing
     // required property must still be collected before the provider stub
@@ -502,7 +495,6 @@ fn level2_pty_schema_prompt_precedes_provider_launch_with_interactive_flag() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_schema_prompt_precedes_provider_launch_with_frontmatter_interactive() {
     // A document with `interactive: true` in frontmatter selects interactive
     // session mode without a CLI flag. Schema collection must still complete
@@ -568,7 +560,6 @@ fn level2_pty_schema_prompt_precedes_provider_launch_with_frontmatter_interactiv
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_schema_prompt_appears_even_when_no_interactive_overrides_frontmatter() {
     // `--no-interactive` overrides a document's `interactive: true` frontmatter,
     // so the resolved session mode is non-interactive. The schema collection
@@ -718,7 +709,6 @@ fn drive_inline_compose_collection(cmd: Command, marker: &std::path::Path) {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_inline_compose_interactive_flag_collects_before_launch() {
     // `inline-compose -i --codex` requests an interactive session via flag.
     // The missing required `topic` must be collected before Codex launches.
@@ -765,7 +755,6 @@ fn level2_pty_inline_compose_interactive_flag_collects_before_launch() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_inline_compose_frontmatter_interactive_collects_before_launch() {
     // `interactive: true` frontmatter selects an interactive session for
     // `inline-compose` with no CLI flag. The missing required `topic` must

@@ -2,14 +2,12 @@
 
 mod common;
 
-use common::wrap::seed_minimal_config;
-use common::augmented_path;
+use common::CliProcessFixture;
 use common::write;
 #[cfg(unix)]
 use common::write_executable;
 use std::fs;
 use std::path::Path;
-use tempfile::tempdir;
 
 const FINDINGS_REPORT: &str = "---\nstatus: findings\nprovider: claude\nfindings:\n  - invalid research remains\n---\n";
 
@@ -38,16 +36,14 @@ exit /b 0\r\n",
 
 #[test]
 fn exhausted_resumes_fail_command_and_preserve_findings_report() {
-    let workspace = tempdir().expect("temporary workspace");
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).expect("create fake provider directory");
-    seed_minimal_config(workspace.path());
-    write_persistently_invalid_claude(&bin_dir);
+    let fixture = CliProcessFixture::named("provider-error-finalize");
+    fixture.seed_user_config();
+    write_persistently_invalid_claude(fixture.bin_dir());
 
-    let findings = workspace.path().join("findings.md");
+    let findings = fixture.cwd().join("findings.md");
     write(&findings, FINDINGS_REPORT);
-    let invocations = workspace.path().join("invocations.log");
-    let prompt = workspace.path().join("research.md");
+    let invocations = fixture.cwd().join("invocations.log");
+    let prompt = fixture.cwd().join("research.md");
     let findings_yaml = serde_json::to_string(&findings.to_string_lossy()).expect("quote path");
     write(
         &prompt,
@@ -72,12 +68,8 @@ Research remains invalid.
         ),
     );
 
-    let assertion = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(workspace.path())
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("USERPROFILE", workspace.path())
-        .env("PATH", augmented_path(&bin_dir))
+    let assertion = fixture
+        .command()
         .env("CLAUDINE_INVOCATIONS", &invocations)
         .args(["compose", "--claude", prompt.to_str().expect("UTF-8 prompt path")])
         .assert()

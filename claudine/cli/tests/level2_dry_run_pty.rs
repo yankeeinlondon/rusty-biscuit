@@ -234,7 +234,6 @@ fn capture_approval_prompt(staged: &StagedApproval, dry_run: bool) -> Vec<String
 /// for real (its output lands in the rendered body) without ever launching
 /// the provider.
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_dry_run_shell_approval_prompt_appears_and_allows() {
     require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
 
@@ -295,7 +294,6 @@ fn level2_pty_dry_run_shell_approval_prompt_appears_and_allows() {
 /// satisfying the spec's "exactly as in normal mode" wording with a comparison
 /// rather than a single-mode existence check.
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_dry_run_approval_prompt_matches_normal_mode() {
     require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
 

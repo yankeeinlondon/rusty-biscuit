@@ -1,9 +1,5 @@
-use std::path::PathBuf;
-
-fn repo_root() -> PathBuf {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    manifest_dir.join("../..").canonicalize().unwrap()
-}
+mod common;
+use common::CliProcessFixture;
 
 /// Strips ANSI CSI escape sequences so a captured heading line compares as plain
 /// text even if a trailing reset survives under `NO_COLOR`.
@@ -26,11 +22,9 @@ fn strip_ansi(input: &str) -> String {
 
 #[test]
 fn errors_default_exits_zero_and_lists_representative_codes() {
-    let assert = assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
-        .env("NO_COLOR", "1")
+    let assert = CliProcessFixture::named("errors-command")
+        .command()
         .env("COLUMNS", "200")
-        .current_dir(repo_root())
         .args(["errors"])
         .assert()
         .success();
@@ -75,11 +69,9 @@ fn errors_default_lists_every_code_contiguously() {
     // clause, so the human report must contain it as one unbroken substring —
     // never wrapped across the `Code` cell. Guards against any future code being
     // silently split out of the introspection surface.
-    let assert = assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
-        .env("NO_COLOR", "1")
+    let assert = CliProcessFixture::named("errors-command")
+        .command()
         .env("COLUMNS", "200")
-        .current_dir(repo_root())
         .args(["errors"])
         .assert()
         .success();
@@ -95,11 +87,9 @@ fn errors_default_lists_every_code_contiguously() {
 
 #[test]
 fn errors_default_groups_by_category() {
-    let assert = assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
-        .env("NO_COLOR", "1")
+    let assert = CliProcessFixture::named("errors-command")
+        .command()
         .env("COLUMNS", "200")
-        .current_dir(repo_root())
         .args(["errors"])
         .assert()
         .success();
@@ -118,10 +108,8 @@ fn errors_default_groups_by_category() {
 
 #[test]
 fn errors_json_emits_valid_array_with_known_code() {
-    let assert = assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
+    let assert = CliProcessFixture::named("errors-command")
+        .command()
         .args(["errors", "--json"])
         .assert()
         .success();
@@ -151,10 +139,8 @@ fn errors_json_emits_valid_array_with_known_code() {
 
 #[test]
 fn errors_json_covers_every_registered_code() {
-    let assert = assert_cmd::Command::cargo_bin("claudine")
-        .unwrap()
-        .env("NO_COLOR", "1")
-        .current_dir(repo_root())
+    let assert = CliProcessFixture::named("errors-command")
+        .command()
         .args(["errors", "--json"])
         .assert()
         .success();

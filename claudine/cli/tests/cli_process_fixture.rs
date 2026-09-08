@@ -46,6 +46,9 @@ fn write_probe_stub(bin_dir: &Path) {
                 ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo HOMEPATH=[%HOMEPATH%]\r\n",
                 ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo CONTROL=[%FIXTURE_PROBE_CONTROL%]\r\n",
                 ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo CLAUDINE_STEP_TIMEOUT=[%CLAUDINE_STEP_TIMEOUT%]\r\n",
+                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo CLAUDINE_RENDEZVOUS_REPORT=[%CLAUDINE_RENDEZVOUS_REPORT%]\r\n",
+                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo PLAYA_DRY_RUN=[%PLAYA_DRY_RUN%]\r\n",
+                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo PLAYA_SPOOL_DIR=[%PLAYA_SPOOL_DIR%]\r\n",
                 ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo GIT_DIR=[%GIT_DIR%]\r\n",
                 ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo GIT_WORK_TREE=[%GIT_WORK_TREE%]\r\n",
                 ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo TERM_WIDTH=[%TERM_WIDTH%]\r\n",
@@ -73,6 +76,9 @@ fn write_probe_stub(bin_dir: &Path) {
   printf 'HOMEPATH=[%s]\n' "$HOMEPATH"
   printf 'CONTROL=[%s]\n' "$FIXTURE_PROBE_CONTROL"
   printf 'CLAUDINE_STEP_TIMEOUT=[%s]\n' "$CLAUDINE_STEP_TIMEOUT"
+  printf 'CLAUDINE_RENDEZVOUS_REPORT=[%s]\n' "$CLAUDINE_RENDEZVOUS_REPORT"
+  printf 'PLAYA_DRY_RUN=[%s]\n' "$PLAYA_DRY_RUN"
+  printf 'PLAYA_SPOOL_DIR=[%s]\n' "$PLAYA_SPOOL_DIR"
   printf 'GIT_DIR=[%s]\n' "$GIT_DIR"
   printf 'GIT_WORK_TREE=[%s]\n' "$GIT_WORK_TREE"
   printf 'TERM_WIDTH=[%s]\n' "$TERM_WIDTH"
@@ -107,6 +113,36 @@ fn run_probe(mut command: assert_cmd::Command, capture: &Path) -> BTreeMap<Strin
         .assert()
         .success();
 
+    read_probe(capture)
+}
+
+/// The same, through the raw `std::process::Command` surface.
+///
+/// Spawned rather than run to completion: holding a live [`std::process::Child`]
+/// is the whole reason the raw path exists, so every raw-path assertion below
+/// also proves the command it was handed can be spawned at all.
+fn run_probe_std(mut command: std::process::Command, capture: &Path) -> BTreeMap<String, String> {
+    let output = command
+        .env("CLAUDINE_PROBE_CAPTURE", capture)
+        .args([PROVIDER, "record the environment"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("the raw fixture command must spawn")
+        .wait_with_output()
+        .expect("the raw fixture child must be reapable");
+    assert!(
+        output.status.success(),
+        "the raw fixture command failed: {}\nstdout:\n{}\nstderr:\n{}",
+        output.status,
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr),
+    );
+
+    read_probe(capture)
+}
+
+fn read_probe(capture: &Path) -> BTreeMap<String, String> {
     let recorded = std::fs::read_to_string(capture).unwrap_or_else(|error| {
         panic!(
             "the fixture stub did not record anything at {}: {error}",
@@ -410,6 +446,280 @@ fn inherit_no_env_keeps_the_defaults_and_drops_everything_else() {
     }
 }
 
+/// Export the families the builder scrubs, so a comparison between the two
+/// command surfaces covers the removals and not only the defaults.
+///
+/// Under nextest each test runs in its own process, so mutating this process'
+/// environment before the first spawn cannot affect another test.
+fn export_scrubbed_sentinels() {
+    unsafe {
+        std::env::set_var("CLAUDINE_STEP_TIMEOUT", "sentinel-step-timeout");
+        std::env::set_var("GIT_DIR", "/sentinel-git/.git");
+        std::env::set_var("GIT_WORK_TREE", "/sentinel-git");
+        std::env::set_var("XDG_CONFIG_HOME", "/sentinel-xdg");
+        std::env::set_var("TERM_WIDTH", "44");
+        std::env::set_var("COLUMNS", "44");
+        std::env::set_var("FORCE_COLOR", "1");
+        std::env::set_var("FIXTURE_PROBE_CONTROL", "sentinel-control");
+    }
+}
+
+/// The drift test for the two command surfaces.
+///
+/// `build()` and `build_std()` apply one computed `ChildEnvironment`, but
+/// nothing in the type system says they must: each takes its own program and
+/// its own adapter. A policy change reaching only the `assert_cmd` half would
+/// otherwise surface as a live-child test that inherited the developer's
+/// `$HOME` — the exact failure the builder exists to prevent — so the two are
+/// compared here against what the child actually received.
+#[test]
+fn both_command_surfaces_hand_the_child_the_same_environment() {
+    let (fixture, assert_cmd_capture) = probe_fixture("fixture-surface-drift");
+    let std_capture = fixture.workspace_path().join("probe-capture-std.txt");
+    export_scrubbed_sentinels();
+
+    let through_assert_cmd = run_probe(fixture.command(), &assert_cmd_capture);
+    let through_std = run_probe_std(fixture.command_std(), &std_capture);
+
+    assert_eq!(
+        through_assert_cmd, through_std,
+        "the assert_cmd and raw command surfaces gave the child different environments"
+    );
+    // Non-vacuity: two identically broken surfaces would also compare equal,
+    // so the policy itself is asserted on the raw half.
+    assert_parent_environment_reached_the_child(&through_std);
+    for key in [
+        "CLAUDINE_STEP_TIMEOUT",
+        "GIT_DIR",
+        "GIT_WORK_TREE",
+        "XDG_CONFIG_HOME",
+        "TERM_WIDTH",
+        "COLUMNS",
+        "FORCE_COLOR",
+    ] {
+        assert_eq!(
+            through_std[key], "[]",
+            "the raw command surface let an inherited {key} through"
+        );
+    }
+    assert_same_dir(
+        &through_std["CWD"],
+        fixture.cwd(),
+        "the raw command surface must launch from the fixture cwd, not the checkout",
+    );
+    assert_same_dir(
+        &through_std["HOME"],
+        fixture.home(),
+        "the raw command surface must point HOME at the fixture home",
+    );
+}
+
+/// Reporting stays off on **both** surfaces, even against a parent that turned
+/// it on.
+///
+/// `CLAUDINE_RENDEZVOUS_REPORT` is the one default that lives inside a
+/// namespace the builder also sweeps, so "the child gets `false`" is not the
+/// default alone — it is the default *plus* the ordering that applies the
+/// sweep first. Neither half is expressed in a type, and a live-child test on
+/// the raw surface is exactly where a session report would start reaching a
+/// developer's daemon, so both are asserted here rather than left to the
+/// set-equality comparison above (two identically enabled surfaces compare
+/// equal).
+#[test]
+fn both_command_surfaces_disable_rendezvous_reporting_over_an_enabled_parent() {
+    let (fixture, assert_cmd_capture) = probe_fixture("fixture-rendezvous-report");
+    let std_capture = fixture.workspace_path().join("probe-capture-std.txt");
+    unsafe {
+        std::env::set_var("CLAUDINE_RENDEZVOUS_REPORT", "true");
+    }
+
+    let through_assert_cmd = run_probe(fixture.command(), &assert_cmd_capture);
+    let through_std = run_probe_std(fixture.command_std(), &std_capture);
+
+    for (surface, recorded) in [
+        ("assert_cmd", &through_assert_cmd),
+        ("raw", &through_std),
+    ] {
+        assert_eq!(
+            recorded["CLAUDINE_RENDEZVOUS_REPORT"], "[false]",
+            "the {surface} surface handed the child {:?} instead of the disabled \
+             default, so an unrelated test can reach a live rendezvous daemon",
+            recorded["CLAUDINE_RENDEZVOUS_REPORT"],
+        );
+    }
+}
+
+/// Audio stays a decision the test can read, not a process it has to own.
+///
+/// A lifecycle audio effect makes claudine re-exec *itself* as playa's
+/// detached spool worker, which deliberately outlives the command that
+/// enqueued the job. `just test-leaks` caught two orphaned `claudine`
+/// processes from one L1 test that composed a shipped prompt with such an
+/// effect, and each run also played a sound on the developer's machine. So
+/// both keys are asserted here rather than left to a whole-suite sweep that
+/// only reports the symptom: `PLAYA_DRY_RUN` stops the worker existing, and
+/// `PLAYA_SPOOL_DIR` keeps a job that *is* under test out of the shared
+/// per-user spool root.
+///
+/// The parent exports the values that would defeat both, because they live in
+/// the `PLAYA_*` namespace the builder sweeps — so this is the same
+/// scrub-then-default ordering the reporting test above pins.
+#[test]
+fn both_command_surfaces_keep_audio_out_of_the_developers_machine() {
+    let (fixture, assert_cmd_capture) = probe_fixture("fixture-playa-defaults");
+    let std_capture = fixture.workspace_path().join("probe-capture-std.txt");
+    unsafe {
+        std::env::set_var("PLAYA_DRY_RUN", "0");
+        std::env::set_var("PLAYA_SPOOL_DIR", "/sentinel-shared-spool");
+    }
+
+    let through_assert_cmd = run_probe(fixture.command(), &assert_cmd_capture);
+    let through_std = run_probe_std(fixture.command_std(), &std_capture);
+
+    for (surface, recorded) in [
+        ("assert_cmd", &through_assert_cmd),
+        ("raw", &through_std),
+    ] {
+        assert_eq!(
+            recorded["PLAYA_DRY_RUN"], "[1]",
+            "the {surface} surface let the parent re-enable real playback, so a \
+             lifecycle audio effect would spawn a detached worker that outlives \
+             the test",
+        );
+        assert_same_dir(
+            recorded["PLAYA_SPOOL_DIR"].trim_matches(['[', ']']),
+            &fixture.workspace_path().join("playa-spool"),
+            "the {surface} surface must point the spool at the fixture, not at \
+             the shared per-user root",
+        );
+    }
+}
+
+/// The cleared-environment arm of the same drift contract.
+///
+/// `inherit_no_env()` is where the two surfaces are most likely to diverge: the
+/// Windows console restore is the only conditional the policy carries, and it
+/// is unreachable on the hosts most runs happen on. Comparing the surfaces
+/// checks it on `windows-latest` without a Windows-only test, and the `cfg!`
+/// arm below pins the platform half a Unix run can see.
+#[test]
+fn both_command_surfaces_clear_the_environment_the_same_way() {
+    let (fixture, assert_cmd_capture) = probe_fixture("fixture-surface-drift-cleared");
+    let std_capture = fixture.workspace_path().join("probe-capture-std.txt");
+    export_scrubbed_sentinels();
+
+    let through_assert_cmd = run_probe(
+        fixture.command_builder().inherit_no_env().build(),
+        &assert_cmd_capture,
+    );
+    let through_std = run_probe_std(
+        fixture.command_builder().inherit_no_env().build_std(),
+        &std_capture,
+    );
+
+    assert_eq!(
+        through_assert_cmd, through_std,
+        "the two command surfaces cleared the child's environment differently"
+    );
+    assert_eq!(
+        through_std["CONTROL"], "[]",
+        "a cleared environment must not carry the parent's own variables"
+    );
+    for key in ["PATHEXT", "COMSPEC", "SYSTEMROOT"] {
+        if cfg!(windows) {
+            assert_ne!(
+                through_std[key], "[]",
+                "{key} must come back after env_clear on the raw surface too, or the \
+                 console host cannot launch the fixture's .cmd stubs"
+            );
+        } else {
+            assert_eq!(
+                through_std[key], "[]",
+                "{key} is Windows console plumbing; a Unix run must not gain it"
+            );
+        }
+    }
+}
+
+/// The `PATH` escapes have to reach the raw surface, or the live-child cohort
+/// migrating onto it in Phase 5D loses them and rebuilds `PATH` by hand — which
+/// is the per-call-site environment chain the builder replaced.
+#[test]
+fn the_raw_command_surface_keeps_the_named_path_escapes() {
+    let (fixture, fake_only_capture) = probe_fixture("fixture-raw-path-escapes");
+    let host_capture = fixture.workspace_path().join("probe-capture-host.txt");
+
+    // Escape: fake-only PATH. The proof is the absence of the minimal system
+    // set, exactly as on the `assert_cmd` surface.
+    let fake_only = run_probe_std(
+        fixture.command_builder().fake_only_path().build_std(),
+        &fake_only_capture,
+    );
+    // Escape: full host PATH. The subject is the escape itself, so the tool it
+    // needs is "whatever the host has".
+    let host = run_probe_std(
+        fixture.command_builder().host_path().build_std(),
+        &host_capture,
+    );
+
+    assert_eq!(
+        path_entries(&fake_only["PATH"]),
+        vec![fixture.bin_dir().to_path_buf()],
+        "the fake-only escape must expose nothing but the fixture bin on the raw surface"
+    );
+    let child = path_entries(&host["PATH"]);
+    assert_eq!(
+        child.first(),
+        Some(&fixture.bin_dir().to_path_buf()),
+        "the fixture bin must still win resolution under the host escape: {child:?}"
+    );
+    for entry in path_entries(&std::env::var("PATH").unwrap_or_default()) {
+        assert!(
+            child.contains(&entry),
+            "the host escape must keep host PATH entry {} on the raw surface: {child:?}",
+            entry.display()
+        );
+    }
+}
+
+#[test]
+fn the_raw_command_surface_keeps_the_ambient_context_escape() {
+    let (fixture, capture) = probe_fixture("fixture-raw-ambient-context");
+    let Some((repo_root, launch_dir, _bin)) = create_claudine_monorepo(fixture.workspace_path())
+    else {
+        eprintln!("skipping: `git init` unavailable on this host");
+        return;
+    };
+
+    // Escape: ambient context. As on the `assert_cmd` surface, the subject is
+    // launch-context discovery from a nested package directory.
+    let recorded = run_probe_std(
+        fixture
+            .command_builder()
+            .ambient_context(&launch_dir)
+            .build_std(),
+        &capture,
+    );
+
+    assert_same_dir(
+        &recorded["CWD"],
+        &repo_root,
+        "the raw surface's ambient-context escape must anchor on the test-built repository",
+    );
+}
+
+/// The containment check is the builder's, not the surface's: it fires at
+/// `command_builder()` time and so protects `build_std()` identically.
+#[test]
+#[should_panic(expected = "is not inside the fixture workspace")]
+fn the_raw_command_surface_rejects_an_ambient_context_outside_the_workspace() {
+    let fixture = CliProcessFixture::named("fixture-raw-ambient-context-rejected");
+    let _ = fixture
+        .command_builder()
+        .ambient_context(Path::new(env!("CARGO_MANIFEST_DIR")))
+        .build_std();
+}
+
 #[test]
 fn fake_only_path_escape_carries_the_fixture_bin_alone() {
     let (fixture, capture) = probe_fixture("fixture-fake-only-path");
@@ -508,6 +818,44 @@ fn ambient_context_escape_rejects_a_directory_that_does_not_exist() {
     let _ = fixture.command_builder().ambient_context(&missing);
 }
 
+/// The parent-side half of the isolation contract.
+///
+/// The builder protects the `claudine` child; the fixture's own `git init` runs
+/// from the test process with its whole environment intact. With `GIT_DIR`
+/// exported, `git init` builds the repository *there* and leaves the fixture
+/// directory bare — which is how, on 2026-08-31, a pre-push hook run committed
+/// fixture files onto a feature branch. The hijack destination here is inside
+/// the fixture workspace, so the failing case would create a throwaway
+/// directory rather than touch anything real.
+#[test]
+fn a_parent_side_git_cannot_be_relocated_by_an_inherited_gitdir() {
+    let fixture = CliProcessFixture::named("fixture-parent-side-git");
+    let hijacked = fixture.workspace_path().join("hijacked-repository");
+    let work = fixture.workspace_path().join("intended-repository");
+    std::fs::create_dir_all(&work).expect("fixture work directory");
+
+    // Under nextest each test runs in its own process, so this cannot affect
+    // another test.
+    unsafe {
+        std::env::set_var("GIT_DIR", &hijacked);
+    }
+
+    if !common::init_git_repo(&work) {
+        eprintln!("skipping: `git init` unavailable on this host");
+        return;
+    }
+
+    assert!(
+        work.join(".git").exists(),
+        "git init must build the repository in the directory the fixture named"
+    );
+    assert!(
+        !hijacked.exists(),
+        "an inherited GIT_DIR relocated the fixture's own repository to {}",
+        hijacked.display()
+    );
+}
+
 /// The fixture workspace is built under `std::env::temp_dir()`, so a developer
 /// whose temp dir sits inside the checkout gets a workspace claudine's
 /// repository discovery walks straight back out of.
@@ -550,5 +898,20 @@ fn a_workspace_inside_the_checkout_is_rejected_by_naming_the_temp_dir_variable()
     assert!(
         common::checkout_containment_error(&sibling, &checkout).is_none(),
         "a sibling sharing a textual prefix must not read as containment"
+    );
+
+    // Why `named()` canonicalizes before calling this: a spelling that *resolves*
+    // inside the checkout but does not lexically begin with it slips through a
+    // component comparison. Both arguments arriving canonical is the
+    // precondition, not an optimization — and it is what makes the raw path
+    // `build_std()` opens inherit the same protection, since the check is on the
+    // fixture rather than on either command surface.
+    let uncanonical = PathBuf::from("elsewhere")
+        .join("..")
+        .join("rusty-biscuit-stand-in")
+        .join("fixture");
+    assert!(
+        common::checkout_containment_error(&uncanonical, &checkout).is_none(),
+        "the check compares path components; an uncanonicalized argument is a caller bug"
     );
 }

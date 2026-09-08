@@ -7,6 +7,15 @@
 //! `wait_for_raw_mode`), and the config / goose-stub stagers are shared by
 //! both, so they live here **verbatim**. Gated `#[cfg(unix)]` at the
 //! `mod pty;` site because `expectrl::session::OsSession` is Unix-only.
+//!
+//! ## No runner-visible serialization
+//!
+//! PTY tests carry no `#[serial]`: `Session::spawn` allocates a fresh
+//! `/dev/ptmx` pair per call and each test's fixture root is unique
+//! (`CliProcessFixture::named` keys on pid + nanos + counter), so there is no
+//! resource two of them can contend for. The `serial(pty)` group these files
+//! used to declare was also unenforceable — `serial_test` coordinates threads
+//! inside one process, and nextest gives every test its own.
 
 #![allow(dead_code)]
 
@@ -34,6 +43,48 @@ const DSR_REPLY: &[u8] = b"\x1b[1;1R";
 /// [`ALT_SCREEN_ENTER`], which only fullscreen prompts emit — it is the
 /// universal proof that raw mode is active. See [`wait_for_raw_mode`].
 const KBD_ENHANCEMENT_PUSH: &str = "\x1b[>11u";
+
+/// The OSC colour queries `biscuit_terminal::Terminal` construction writes to
+/// `/dev/tty` — foreground (OSC 10) and background (OSC 11) — paired with the
+/// replies a real emulator sends.
+///
+/// A bare expectrl PTY has no emulator behind it, so an unanswered query costs
+/// the child biscuit-terminal's whole `DEFAULT_TIMEOUT` (1 s) *per code* before
+/// it can render its first byte. That is not the child doing work: it is the
+/// test forcing the child to wait out a timeout, which is exactly what a
+/// readiness deadline must replace with observation. Answering is the same
+/// contract [`answer_pending_dsr`] already honours for the cursor probe.
+///
+/// The replies are biscuit-terminal's own manufactured pair from
+/// `lib/tests/level1_terminal_osc_cache.rs`: a dark background and a light
+/// foreground, i.e. the ordinary developer terminal these tests' styling
+/// assertions were written against.
+const COLOR_QUERY_ANSWERS: [(&[u8], &[u8]); 2] = [
+    (b"\x1b]10;?\x07", b"\x1b]10;rgb:e5e5/e5e5/e5e5\x07"),
+    (b"\x1b]11;?\x07", b"\x1b]11;rgb:1e1e/1e1e/1e1e\x07"),
+];
+
+/// Reply to any [`COLOR_QUERY_ANSWERS`] query present in `chunk`.
+///
+/// Matched against the **newly read chunk** rather than the cumulative
+/// transcript, and deliberately so: every waiter below starts with its own
+/// answer state, and `bg_color`/`text_color` are `OnceLock`-cached in the
+/// child, so a cumulative match would re-send a reply long after the query —
+/// by which point the prompt is in raw mode and the reply's leading `ESC`
+/// reads as a cancel keystroke. Missing a query split across two reads costs
+/// only the timeout that was there before, so this fails safe.
+fn answer_color_queries(session: &mut OsSession, chunk: &[u8]) {
+    let mut replied = false;
+    for (query, reply) in COLOR_QUERY_ANSWERS {
+        if chunk.windows(query.len()).any(|w| w == query) {
+            let _ = session.write_all(reply);
+            replied = true;
+        }
+    }
+    if replied {
+        let _ = session.flush();
+    }
+}
 
 /// Reply to every not-yet-answered [`DSR_QUERY`] in `data`, advancing
 /// `answered` so each query is answered exactly once across repeated calls
@@ -69,6 +120,7 @@ pub(crate) fn read_for(session: &mut OsSession, total_deadline: Duration) -> Str
         match session.try_read(&mut scratch) {
             Ok(0) => break,
             Ok(n) => {
+                answer_color_queries(session, &scratch[..n]);
                 buf.extend_from_slice(&scratch[..n]);
                 // A re-prompt (e.g. the number-retry loop) spins up a second
                 // inline viewport mid-drain; answer its DSR query too.
@@ -101,6 +153,7 @@ pub(crate) fn wait_for_marker(session: &mut OsSession, marker: &str, deadline: D
         match session.try_read(&mut scratch) {
             Ok(0) => break,
             Ok(n) => {
+                answer_color_queries(session, &scratch[..n]);
                 transcript.push_str(&String::from_utf8_lossy(&scratch[..n]));
                 // A marker that renders inside an inline viewport (e.g. the
                 // number-retry validation error) only appears after the
@@ -188,6 +241,7 @@ pub(crate) fn wait_for_raw_mode(session: &mut OsSession, seed: String, deadline:
         match session.try_read(&mut scratch) {
             Ok(0) => break,
             Ok(n) => {
+                answer_color_queries(session, &scratch[..n]);
                 transcript.push_str(&String::from_utf8_lossy(&scratch[..n]));
                 answer_pending_dsr(session, transcript.as_bytes(), &mut dsr_answered);
             }
@@ -237,6 +291,7 @@ pub(crate) fn wait_for_raw_mode_reentry(
         match session.try_read(&mut scratch) {
             Ok(0) => break,
             Ok(n) => {
+                answer_color_queries(session, &scratch[..n]);
                 transcript.push_str(&String::from_utf8_lossy(&scratch[..n]));
                 answer_pending_dsr(session, transcript.as_bytes(), &mut dsr_answered);
             }

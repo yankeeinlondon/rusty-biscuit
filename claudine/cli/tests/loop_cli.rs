@@ -7,9 +7,8 @@
 //! max-iterations overrides, fail-fast semantics, and FAIL_FAST deprecation.
 
 use std::fs;
-use tempfile::tempdir;
 mod common;
-use common::{augmented_path, strip_ansi, write_executable};
+use common::{CliProcessFixture, strip_ansi, write_executable};
 
 // ============================================================================
 // Basic loop execution
@@ -18,12 +17,10 @@ use common::{augmented_path, strip_ansi, write_executable};
 #[cfg(unix)]
 #[test]
 fn compose_loop_runs_iterations() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("loop-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -38,7 +35,7 @@ Count is {{counter}}
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -51,12 +48,9 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .current_dir(workspace.path())
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -68,12 +62,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn inline_compose_loop_runs_iterations() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("loop-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -89,7 +81,7 @@ Body
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -103,12 +95,9 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .current_dir(workspace.path())
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -126,12 +115,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn inline_compose_loop_with_prompt_frontmatter_and_empty_body_runs() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("loop-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -146,7 +133,7 @@ loop:
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -160,12 +147,9 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .current_dir(workspace.path())
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -185,12 +169,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_max_iterations_flag_overrides_frontmatter() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("loop-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -205,7 +187,7 @@ Count is {{counter}}
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -218,12 +200,9 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .current_dir(workspace.path())
         .args([
             "compose",
             "--goose",
@@ -241,12 +220,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_max_iterations_env_overrides_default() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("loop-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -261,7 +238,7 @@ Count is {{counter}}
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -274,13 +251,10 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
         .env("CLAUDINE_MAX_ITERATIONS", "2")
-        .current_dir(workspace.path())
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -296,12 +270,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_fail_fast_deprecated_env_emits_warning() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("loop-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -316,7 +288,7 @@ Count is {{counter}}
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -329,15 +301,12 @@ exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
         .env("FAIL_FAST", "true")
         .env_remove("CLAUDINE_FAIL_FAST")
         .env("RUST_LOG", "warn")
-        .current_dir(workspace.path())
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -359,13 +328,11 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn sequence_uses_claudine_fail_fast_env() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
-    let env_path = workspace.path().join("child-env.txt");
+    let fixture = CliProcessFixture::named("loop-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
+    let env_path = fixture.cwd().join("child-env.txt");
 
-    let md_file = workspace.path().join("seq.md");
+    let md_file = fixture.cwd().join("seq.md");
     fs::write(
         &md_file,
         r#"---
@@ -380,7 +347,7 @@ Run step {{state}}
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -394,14 +361,11 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
         .env("CLAUDINE_ENV_FILE", &env_path)
         .env_remove("FAIL_FAST")
-        .current_dir(workspace.path())
         .args([
             "sequence",
             "--goose",
@@ -426,12 +390,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_loop_fail_fast_false_continues_after_failure() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("loop-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -447,7 +409,7 @@ Count is {{counter}}
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -463,12 +425,9 @@ exit 0
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .current_dir(workspace.path())
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -488,12 +447,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_loop_fail_fast_true_stops_on_first_failure() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("loop-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -509,7 +466,7 @@ Count is {{counter}}
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -522,12 +479,9 @@ exit 7
 "#,
     );
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .current_dir(workspace.path())
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -547,12 +501,10 @@ exit 7
 #[cfg(unix)]
 #[test]
 fn compose_loop_max_iterations_cap_exceeded() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("loop-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -568,7 +520,7 @@ Count is {{counter}}
     .unwrap();
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -581,12 +533,9 @@ exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .current_dir(workspace.path())
         .args(["compose", "--goose", md_file.to_str().unwrap()])
         .assert()
         .failure();
@@ -617,11 +566,9 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_loop_step_timeout_surfaces_as_iteration_failure() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("loop-cli");
 
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -640,7 +587,7 @@ Iteration {{counter}}
     // engages) and then hangs silently — triggers the step_timeout
     // watchdog kill on the very first iteration.
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
@@ -652,15 +599,12 @@ while :; do /bin/sleep 1; done
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_STEP_TIMEOUT", "2s")
         .env("CLAUDINE_WATCHDOG_INTERVAL", "1s")
         .env("CLAUDINE_KILL_GRACE", "1s")
-        .current_dir(workspace.path())
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .timeout(std::time::Duration::from_secs(60))
         .assert()
@@ -701,11 +645,9 @@ while :; do /bin/sleep 1; done
 #[cfg(unix)]
 #[test]
 fn compose_loop_rate_limit_abort_exits_75() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("loop-cli");
 
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -725,7 +667,7 @@ Iteration {{counter}}
     // `summary.rate_limit.is_throttled = true` for the iteration. With
     // `--on-rate-limit abort`, the loop must halt and return exit code 75.
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
@@ -738,12 +680,9 @@ exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
-        .current_dir(workspace.path())
         .args([
             "compose",
             "--opencode",
@@ -786,11 +725,9 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_loop_rate_limit_abort_exits_75_on_loop_doc() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("loop-cli");
 
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -806,7 +743,7 @@ Iteration {{counter}}
     .unwrap();
 
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
@@ -819,12 +756,9 @@ exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
-        .current_dir(workspace.path())
         .args([
             "compose",
             "--opencode",
@@ -868,12 +802,10 @@ exit 0
 #[test]
 #[serial_test::serial]
 fn compose_loop_rate_limit_pause_waits_then_continues() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("loop-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -893,7 +825,7 @@ Iteration {{counter}}
     // trims the production 5s safety margin to 1s so the test exercises the
     // real pause-then-continue path without the full wall-clock wait.
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
@@ -922,14 +854,11 @@ exit 0
     );
 
     let start = std::time::Instant::now();
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
         .env("CLAUDINE_COUNT_FILE", &count_path)
         .env("CLAUDINE_PAUSE_RESET_MARGIN", "1s")
-        .current_dir(workspace.path())
         .args([
             "compose",
             "--opencode",
@@ -964,11 +893,9 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_loop_rate_limit_pause_without_reset_aborts() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("loop-cli");
 
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -987,7 +914,7 @@ Iteration {{counter}}
     // `is_throttled = true` but no usable wait window. Default `pause`
     // policy must fall through to abort.
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
@@ -1000,12 +927,9 @@ exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
-        .current_dir(workspace.path())
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .timeout(std::time::Duration::from_secs(30))
         .assert()
@@ -1035,9 +959,7 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_loop_file_required_setter_revalidates_against_launch_cwd_each_iteration() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("loop-cli");
 
     // Create a git repo at the workspace so the wrap layer's
     // `detect_repo_root` resolves to a directory ABOVE the launch CWD.
@@ -1045,13 +967,9 @@ fn compose_loop_file_required_setter_revalidates_against_launch_cwd_each_iterati
     // `plan=...` path resolves. Without the CWD-restore fix, iteration 2
     // would resolve `plan` against the repo root instead of the subdir
     // and validation would fail.
-    std::process::Command::new("git")
-        .args(["init", "-q"])
-        .current_dir(workspace.path())
-        .status()
-        .unwrap();
+    fixture.initialize_repository();
 
-    let subdir = workspace.path().join("package");
+    let subdir = fixture.cwd().join("package");
     fs::create_dir_all(&subdir).unwrap();
     let plan_dir = subdir.join("features");
     fs::create_dir_all(&plan_dir).unwrap();
@@ -1061,7 +979,7 @@ fn compose_loop_file_required_setter_revalidates_against_launch_cwd_each_iterati
     // Prompt is at the repo root (not the subdir) so we point at it via
     // `../` from the subdir, matching the real-world layout where the
     // user runs from a package area against a repo-root prompts file.
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -1080,10 +998,10 @@ Phase {{phase}} of {{total_phases}}.
     )
     .unwrap();
 
-    let count_path = workspace.path().join("call-count.txt");
+    let count_path = fixture.cwd().join("call-count.txt");
 
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         r#"#!/bin/sh
 count=0
 if [ -f "$CLAUDINE_COUNT_FILE" ]; then
@@ -1096,12 +1014,14 @@ exit 0
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command_builder()
+        // The launch CWD *is* the subject: `plan=` must keep resolving against
+        // the package subdirectory across iterations, not against the repo root
+        // this test created above it.
+        .ambient_context(&subdir)
+        .build()
         .env("CLAUDINE_COUNT_FILE", &count_path)
-        .current_dir(&subdir)
         .args([
             "compose",
             "--goose",
@@ -1135,11 +1055,9 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_loop_exit_reason_surfaces_on_non_harness_doc() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("loop-cli");
 
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -1156,7 +1074,7 @@ Iteration {{counter}}
     // exits non-zero. The loop must surface the exit_reason honestly instead
     // of mislabeling it as an invalid loop definition.
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
@@ -1169,12 +1087,9 @@ exit 1
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
-        .current_dir(workspace.path())
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .timeout(std::time::Duration::from_secs(30))
         .assert()
@@ -1203,11 +1118,9 @@ exit 1
 #[cfg(unix)]
 #[test]
 fn compose_loop_exit_reason_surfaces_on_loop_doc() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("loop-cli");
 
-    let md_file = workspace.path().join("loop.md");
+    let md_file = fixture.cwd().join("loop.md");
     fs::write(
         &md_file,
         r#"---
@@ -1221,7 +1134,7 @@ Iteration {{counter}}
     .unwrap();
 
     write_executable(
-        &path_dir.join("opencode"),
+        &fixture.bin_dir().join("opencode"),
         r#"#!/bin/sh
 if [ "$1" = "models" ]; then
   printf '%s\n' '["test-model"]'
@@ -1234,12 +1147,9 @@ exit 1
 "#,
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let assert = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
-        .current_dir(workspace.path())
         .args(["compose", "--opencode", md_file.to_str().unwrap()])
         .timeout(std::time::Duration::from_secs(30))
         .assert()

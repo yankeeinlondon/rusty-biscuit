@@ -118,7 +118,6 @@ fn plan_with_file_array_schema(root: &std::path::Path) -> std::path::PathBuf {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_provided_partial_single_match_confirms_and_launches() {
     require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
 
@@ -175,7 +174,6 @@ fn level2_pty_provided_partial_single_match_confirms_and_launches() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_provided_partial_zero_match_preserves_error() {
     require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
 
@@ -209,7 +207,6 @@ fn level2_pty_provided_partial_zero_match_preserves_error() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_provided_partial_file_array_scalar_confirms_and_launches() {
     require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
 
@@ -258,7 +255,6 @@ fn level2_pty_provided_partial_file_array_scalar_confirms_and_launches() {
 }
 
 #[test]
-#[serial_test::serial(pty)]
 fn level2_pty_provided_partial_file_array_array_confirms_and_launches() {
     require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
 

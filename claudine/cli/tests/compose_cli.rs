@@ -6,9 +6,8 @@
 //! behavior so divergence introduced by later phases fails loudly.
 
 use std::fs;
-use tempfile::tempdir;
 mod common;
-use common::{augmented_path, init_git_repo, strip_ansi, write, write_executable};
+use common::{CliProcessFixture, init_git_repo, strip_ansi, write, write_executable};
 
 // ============================================================================
 // Phase 1: convergence between non-harness and harness-enabled direct compose
@@ -36,25 +35,16 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_direct_produces_expected_stdout_body() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
+    let fixture = CliProcessFixture::named("compose-cli");
 
-    stage_opencode_body_writer(&path_dir);
+    stage_opencode_body_writer(fixture.bin_dir());
 
-    let bare_file = workspace.path().join("bare.md");
-    fs::write(
-        &bare_file,
-        "---\n---\nCompose this document.\n",
-    )
-    .unwrap();
+    let bare_file = fixture.cwd().join("bare.md");
+    write(&bare_file, "---\n---\nCompose this document.\n");
 
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    let output = fixture
+        .command()
         .env("OPENCODE_MODEL", "test-model")
-        .current_dir(workspace.path())
         .args(["compose", "--opencode", bare_file.to_str().unwrap()])
         .assert()
         .success()
@@ -86,37 +76,31 @@ fn compose_direct_produces_expected_stdout_body() {
 #[cfg(unix)]
 #[test]
 fn compose_dry_run_malformed_whole_value_spec_path_aborts_without_leaking() {
-    let workspace = tempdir().unwrap();
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let count_path = workspace.path().join("call-count.txt");
+    let fixture = CliProcessFixture::named("compose-cli");
+    let count_path = fixture.cwd().join("call-count.txt");
 
-    let md_file = workspace.path().join("plan.md");
-    fs::write(
+    let md_file = fixture.cwd().join("plan.md");
+    write(
         &md_file,
         "---\n\
          review: features/2026-06-19-review-findings/review-2.md\n\
          spec_path: \"{{ dirname(review) + '/spec.md') }}\"\n\
          ---\n\
          Implement against {{ spec_path }}.\n",
-    )
-    .unwrap();
+    );
 
     // Provider stub records every invocation so we can prove it was never
     // launched — preparation must abort before the dry-run provider seam.
     write_executable(
-        &path_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho touched >> {count}\nexit 0\n",
             count = count_path.display()
         ),
     );
 
-    let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
-        .current_dir(workspace.path())
+    let assert = fixture
+        .command()
         .args([
             "compose",
             "--goose",
@@ -173,20 +157,15 @@ fn compose_dry_run_malformed_whole_value_spec_path_aborts_without_leaking() {
 #[cfg(unix)]
 #[test]
 fn compose_transclusion_resolves_source_first_on_collision() {
-    let workspace = tempdir().unwrap();
-    let root = workspace.path();
-    assert!(
-        init_git_repo(root),
-        "source-first transclusion needs a real git worktree root"
-    );
+    let fixture = CliProcessFixture::named("compose-cli");
+    fixture.initialize_repository();
+    let root = fixture.cwd();
 
-    let path_dir = root.join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
     let capture = root.join("delivered-prompt.txt");
     // Capture argv, file-valued args (the wrapper may pass the prompt as a
     // tmpfile), and stdin — the composed prompt lands in one of them.
     write_executable(
-        &path_dir.join("claude"),
+        &fixture.bin_dir().join("claude"),
         r#"#!/bin/sh
 {
   for a in "$@"; do
@@ -208,12 +187,9 @@ exit 0
     let doc = root.join("prompts/doc.md");
     write(&doc, "---\n---\n::file shared.md\n");
 
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", root)
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command()
         .env("CLAUDINE_PROMPT_CAPTURE", &capture)
-        .current_dir(root)
         .args(["compose", "--claude", doc.to_str().unwrap()])
         .assert()
         .success();
@@ -247,10 +223,10 @@ exit 0
 #[cfg(unix)]
 #[test]
 fn compose_transclusion_uses_source_doc_repository_not_launch_cwd() {
-    let workspace = tempdir().unwrap();
+    let fixture = CliProcessFixture::named("compose-cli");
 
     // --- Primary repo: source doc + correct transclusion target ------------
-    let repo_root = workspace.path().join("repo");
+    let repo_root = fixture.cwd().join("repo");
     fs::create_dir_all(&repo_root).unwrap();
     assert!(
         init_git_repo(&repo_root),
@@ -267,7 +243,7 @@ fn compose_transclusion_uses_source_doc_repository_not_launch_cwd() {
     );
 
     // --- Unrelated repo: decoy transclusion target --------------------------
-    let decoy_root = workspace.path().join("decoy");
+    let decoy_root = fixture.cwd().join("decoy");
     fs::create_dir_all(&decoy_root).unwrap();
     // `git init` on the decoy too: with no git root, biscuit-file's ambient
     // gix walk could find repo_root by walking up, so we give decoy its own
@@ -293,11 +269,9 @@ fn compose_transclusion_uses_source_doc_repository_not_launch_cwd() {
     // wins, not the launch CWD's decoy repository.
     write(&doc, "---\n---\n::file nested.md\n");
 
-    let path_dir = workspace.path().join("bin");
-    fs::create_dir_all(&path_dir).unwrap();
-    let capture = workspace.path().join("delivered-prompt.txt");
+    let capture = fixture.cwd().join("delivered-prompt.txt");
     write_executable(
-        &path_dir.join("claude"),
+        &fixture.bin_dir().join("claude"),
         r#"#!/bin/sh
 {
   for a in "$@"; do
@@ -312,12 +286,13 @@ exit 0
     // Launch from the decoy repo while targeting the document in repo_root.
     // If repository discovery were still CWD-driven, the decoy's snippet.md
     // would win and the delivered prompt would contain the decoy marker.
-    assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
-        .env("HOME", workspace.path())
-        .env("PATH", augmented_path(&path_dir))
+    fixture
+        .command_builder()
+        // The subject is the launch CWD losing to the source document's
+        // repository, so the launch directory is the decoy repo this test built.
+        .ambient_context(&decoy_root)
+        .build()
         .env("CLAUDINE_PROMPT_CAPTURE", &capture)
-        .current_dir(&decoy_root)
         .args(["compose", "--claude", doc.to_str().unwrap()])
         .assert()
         .success();

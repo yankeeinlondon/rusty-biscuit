@@ -15,7 +15,7 @@
 
 
 mod common;
-use common::TestWorkspace;
+use common::{CliProcessFixture, TestWorkspace};
 use common::completion::{
     run_complete, seed_cargo_workspace_members as seed_cargo_workspace, write_file,
 };
@@ -28,8 +28,8 @@ use common::completion::{
 fn completions_subcommand_outputs_bootstrap_script() {
     // `claudine completions <shell>` must print a registration script that
     // shells out to the hidden `__complete` subcommand on every `<TAB>`.
-    let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .env("NO_COLOR", "1")
+    let output = CliProcessFixture::named("completion-contract")
+        .command()
         .args(["completions", "bash"])
         .output()
         .expect("completions subprocess to run");
@@ -45,8 +45,8 @@ fn completions_subcommand_outputs_bootstrap_script() {
 #[test]
 fn completions_subcommand_supports_all_three_shells() {
     for shell in ["bash", "zsh", "fish"] {
-        let output = assert_cmd::Command::cargo_bin("claudine").unwrap()
-            .env("NO_COLOR", "1")
+        let output = CliProcessFixture::named("completion-contract")
+            .command()
             .args(["completions", shell])
             .output()
             .expect("completions subprocess to run");
