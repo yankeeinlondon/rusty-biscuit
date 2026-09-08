@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use serial_test::serial;
 
 mod common;
-use common::TestWorkspace;
+use common::{CliProcessFixture, TestWorkspace};
 
 /// Regression guard: a plain `claudine handle turn_complete` with no config
 /// and a representative Gemini payload must complete in well under the 15s
@@ -12,11 +12,9 @@ use common::TestWorkspace;
 #[test]
 #[serial]
 fn handle_turn_complete_fast_path_completes_under_3s() {
-    let workspace = TestWorkspace::named("claudine-handle-deadline-it");
-    let home_dir = workspace.path().join("home");
-    let cwd = workspace.path().join("cwd");
-    fs::create_dir_all(&home_dir).unwrap();
-    fs::create_dir_all(&cwd).unwrap();
+    // The no-config fast path excludes host config (USERPROFILE on Windows)
+    // and best-effort rendezvous reporting, neither of which is timed here.
+    let fixture = CliProcessFixture::named("claudine-handle-deadline-it");
 
     let payload = serde_json::json!({
         "hook_event_name": "AfterAgent",
@@ -26,16 +24,14 @@ fn handle_turn_complete_fast_path_completes_under_3s() {
     })
     .to_string();
 
-    let start = Instant::now();
-    let assertion = assert_cmd::Command::cargo_bin("claudine").unwrap()
-        .current_dir(&cwd)
-        .env("HOME", &home_dir)
-        .env("NO_COLOR", "1")
+    let mut command = fixture.command();
+    command
         .env("CLAUDINE_HANDLE_DEADLINE_SECONDS", "5")
-        .args(["handle", "turn_complete", "--provider", "gemini"])
+        .args(["handle", "turn_complete", "--provider", "gemini", "--json"])
         .write_stdin(payload)
-        .assert()
-        .success();
+        .timeout(Duration::from_secs(5));
+    let start = Instant::now();
+    let assertion = command.assert().success();
     let elapsed = start.elapsed();
 
     assert!(
@@ -43,7 +39,10 @@ fn handle_turn_complete_fast_path_completes_under_3s() {
         "fast-path turn_complete should finish in <3s; took {elapsed:?}"
     );
 
-    drop(assertion);
+    let output: serde_json::Value = serde_json::from_slice(&assertion.get_output().stdout).unwrap();
+    assert_eq!(output["provider"], "gemini");
+    assert_eq!(output["event"], "turn_complete");
+    assert!(output["response"].is_null());
 }
 
 /// Verify the deadline itself fires: with a 1s deadline and stdin left open

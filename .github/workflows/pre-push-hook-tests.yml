@@ -45,12 +45,12 @@ jobs:
         # fresh repos, so a shallow clone is sufficient for them, but
         # we fetch full history defensively in case future tests grow
         # to inspect the real working tree.
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v3
 
       - name: Run pre-push hook tests
         run: just test-pre-push-hook

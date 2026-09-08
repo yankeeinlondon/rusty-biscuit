@@ -464,6 +464,11 @@ impl<'fixture> ClaudineCommandBuilder<'fixture> {
             .env_remove("HOMEDRIVE")
             .env_remove("HOMEPATH")
             .env_remove("XDG_CONFIG_HOME")
+            // Model resolution consults the generic `MODEL` environment
+            // variable ahead of frontmatter (`composition::select` precedence
+            // step 3), and a Claudine-wrapped agent session exports one — so an
+            // unscrubbed host silently replaces every fixture's model.
+            .env_remove("MODEL")
             .env("APPDATA", self.fixture.home())
             .env("LOCALAPPDATA", self.fixture.home())
             .env("PATH", self.path_value())
@@ -757,6 +762,170 @@ pub fn write_executable(path: &Path, content: &str) {
     #[cfg(not(unix))]
     {
         write(path, content);
+    }
+}
+
+/// Wrap `value` in a POSIX single-quoted word, escaping embedded quotes.
+#[cfg(unix)]
+pub fn sh_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// POSIX-shell fragment that replaces `$CLAUDINE_DOC`'s body with
+/// `$CLAUDINE_BODY`, inserting `$CLAUDINE_ADD` before the closing delimiter.
+///
+/// Builtins only. Inline fixtures routinely set `PATH` to the stub directory
+/// alone, so a fragment that reached for `cat`, `awk`, or `mv` would silently
+/// do nothing and look like an agent that refused the task.
+#[cfg(unix)]
+pub const INLINE_BODY_REWRITE: &str = concat!(
+    "CLAUDINE_OUT=''\n",
+    "CLAUDINE_N=0\n",
+    "while IFS= read -r CLAUDINE_LINE || [ -n \"$CLAUDINE_LINE\" ]; do\n",
+    "  if [ \"$CLAUDINE_LINE\" = '---' ] && [ \"$CLAUDINE_N\" -lt 2 ]; then\n",
+    "    CLAUDINE_N=$((CLAUDINE_N + 1))\n",
+    "    if [ \"$CLAUDINE_N\" -eq 2 ]; then CLAUDINE_OUT=\"$CLAUDINE_OUT$CLAUDINE_ADD\"; fi\n",
+    "    CLAUDINE_OUT=\"$CLAUDINE_OUT$CLAUDINE_LINE\n\"\n",
+    "    continue\n",
+    "  fi\n",
+    "  if [ \"$CLAUDINE_N\" -lt 2 ]; then CLAUDINE_OUT=\"$CLAUDINE_OUT$CLAUDINE_LINE\n\"; fi\n",
+    "done < \"$CLAUDINE_DOC\"\n",
+    "printf '%s%s' \"$CLAUDINE_OUT\" \"$CLAUDINE_BODY\" > \"$CLAUDINE_DOC\"\n",
+);
+
+/// POSIX-shell fragment that recovers the active document from the delivered
+/// prompt header into `$CLAUDINE_DOC`, the same way a real agent learns it.
+///
+/// For a fixture whose active document is not known when the stub is written —
+/// a sequence task, or a proxied target. Scans argv first, then stdin, because
+/// prompt delivery is per provider and per session mode.
+#[cfg(unix)]
+pub const INLINE_DOC_FROM_PROMPT: &str = concat!(
+    "CLAUDINE_DOC=''\n",
+    "for CLAUDINE_ARG in \"$@\"; do\n",
+    "  case \"$CLAUDINE_ARG\" in\n",
+    "    *'**Document:** `'*)\n",
+    "      CLAUDINE_DOC=\"${CLAUDINE_ARG#*'**Document:** `'}\"\n",
+    "      CLAUDINE_DOC=\"${CLAUDINE_DOC%%\\`*}\"\n",
+    "      ;;\n",
+    "  esac\n",
+    "done\n",
+    "if [ -z \"$CLAUDINE_DOC\" ]; then\n",
+    "  while IFS= read -r CLAUDINE_ARG; do\n",
+    "    case \"$CLAUDINE_ARG\" in\n",
+    "      *'**Document:** `'*)\n",
+    "        CLAUDINE_DOC=\"${CLAUDINE_ARG#*'**Document:** `'}\"\n",
+    "        CLAUDINE_DOC=\"${CLAUDINE_DOC%%\\`*}\"\n",
+    "        break\n",
+    "        ;;\n",
+    "    esac\n",
+    "  done\n",
+    "fi\n",
+);
+
+/// A provider stub that behaves like a file-aware inline agent.
+///
+/// Under the 2026-09-05 inline contract the agent *is* the writer: it edits the
+/// active document and returns a short summary, and Claudine reads the file
+/// back. A stub that only prints to stdout is a stub that did no work, so every
+/// inline fixture builds its script here — the body is rewritten in place, the
+/// authored frontmatter is preserved byte-for-byte, and only the declared
+/// additions are inserted.
+///
+/// Every field is embedded as a POSIX single-quoted word, so any content is
+/// safe. `prelude` is emitted verbatim and must end with a newline when set.
+#[cfg(unix)]
+pub struct InlineAgentStub<'a> {
+    document: &'a Path,
+    prelude: &'a str,
+    frontmatter_additions: &'a str,
+    body: &'a str,
+    body_is_literal: bool,
+    summary: &'a str,
+    exit_code: i32,
+}
+
+#[cfg(unix)]
+impl<'a> InlineAgentStub<'a> {
+    /// An agent that replaces `document`'s body and reports one line.
+    pub fn new(document: &'a Path) -> Self {
+        Self {
+            document,
+            prelude: "",
+            frontmatter_additions: "",
+            body: "Agent body\n",
+            body_is_literal: true,
+            summary: "Wrote the requested content.",
+            exit_code: 0,
+        }
+    }
+
+    /// Shell run before the edit — argv capture, run counters, sentinels.
+    pub fn prelude(mut self, prelude: &'a str) -> Self {
+        self.prelude = prelude;
+        self
+    }
+
+    /// Frontmatter lines inserted immediately before the closing delimiter.
+    pub fn frontmatter_additions(mut self, additions: &'a str) -> Self {
+        self.frontmatter_additions = additions;
+        self
+    }
+
+    /// The body the agent writes.
+    pub fn body(mut self, body: &'a str) -> Self {
+        self.body = body;
+        self.body_is_literal = true;
+        self
+    }
+
+    /// The body as a shell word the caller quotes itself, so a fixture whose
+    /// body must vary per run can interpolate a variable set in the prelude.
+    pub fn body_expression(mut self, expression: &'a str) -> Self {
+        self.body = expression;
+        self.body_is_literal = false;
+        self
+    }
+
+    /// The final response the agent returns to the caller.
+    pub fn summary(mut self, summary: &'a str) -> Self {
+        self.summary = summary;
+        self
+    }
+
+    /// Exit with `code` after the edit.
+    pub fn exit_code(mut self, code: i32) -> Self {
+        self.exit_code = code;
+        self
+    }
+
+    /// Render the `/bin/sh` script.
+    pub fn script(&self) -> String {
+        let document = sh_quote(&self.document.display().to_string());
+        let additions = sh_quote(self.frontmatter_additions);
+        let body = if self.body_is_literal {
+            sh_quote(self.body)
+        } else {
+            self.body.to_string()
+        };
+        let summary = sh_quote(self.summary);
+        let prelude = &self.prelude;
+        let exit_code = self.exit_code;
+        format!(
+            "#!/bin/sh\n\
+             {prelude}\
+             CLAUDINE_DOC={document}\n\
+             CLAUDINE_ADD={additions}\n\
+             CLAUDINE_BODY={body}\n\
+             {INLINE_BODY_REWRITE}\
+             printf '%s\\n' {summary}\n\
+             exit {exit_code}\n"
+        )
+    }
+
+    /// Write the script to `bin_dir/binary` as an executable.
+    pub fn install(&self, bin_dir: &Path, binary: &str) {
+        write_executable(&bin_dir.join(binary), &self.script());
     }
 }
 

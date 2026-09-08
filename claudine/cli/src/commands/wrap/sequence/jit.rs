@@ -157,7 +157,16 @@ pub(super) fn compose_step(
     // frontmatter is missing required values must report that rather than let
     // Darkmatter's compose surface a raw `SchemaValidationFailed`, which would
     // hide the property names the caller needs to collect or report.
-    let pre = composition::pre_validate_schema(source, Some(set_overrides), ctx.launch_area)?;
+    let pre = composition::pre_validate_schema_for_mode(
+        source,
+        Some(set_overrides),
+        ctx.launch_area,
+        if ctx.inline_mode {
+            composition::CompositionMode::InlineFrontmatterPrompt
+        } else {
+            composition::CompositionMode::ChainedDocument
+        },
+    )?;
     emit_dropped_optional_warnings(&pre.dropped_optionals);
     let step_source = pre.source;
     let step_overrides = pre

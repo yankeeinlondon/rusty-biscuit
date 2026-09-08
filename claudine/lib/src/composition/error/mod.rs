@@ -328,43 +328,99 @@ pub enum CompositionError {
         source_kind: SessionInteractivitySource,
     },
 
-    /// The provider returned an invalid response for inline composition.
-    #[error("invalid inline composition response: {0}")]
-    InvalidInlineResponse(String),
-
-    /// The provider returned a delimited frontmatter block that is not valid YAML.
-    #[error("invalid inline composition response: response frontmatter is not valid YAML: {source}")]
-    InlineResponseFrontmatterYaml {
-        /// YAML parser failure retained for diagnostic discovery.
-        #[source]
-        source: biscuit_file::serde_yaml_ng::Error,
-    },
-
-    /// A parsed response property could not be serialized as a YAML node.
+    /// Inline completion was requested without the active document's guard.
+    ///
+    /// A wiring error, not an authoring one: the guard is captured whenever an
+    /// inline document is invoked or adopted, so its absence means a caller
+    /// assembled a [`CompletionContext`] the mode cannot serve.
+    ///
+    /// [`CompletionContext`]: super::completion::CompletionContext
     #[error(
-        "invalid inline composition response: response frontmatter property {key:?} could not be serialized: {source}"
+        "inline completion for {} requires the active document's inline guard",
+        biscuit_file::to_portable_string(source_path)
     )]
-    InlineResponseFrontmatterSerialize {
-        /// Semantic property name from the response mapping.
-        key: String,
-        /// YAML serializer failure retained for diagnostic discovery.
-        #[source]
-        source: biscuit_file::serde_yaml_ng::Error,
+    InlineGuardMissing {
+        /// The active document whose guard was absent.
+        source_path: PathBuf,
     },
 
-    /// Stamping `last_updated` into the rebuilt inline document failed.
+    /// The agent's inline document could not be read back after the run.
+    #[error(
+        "could not read the inline document {}: {source}",
+        biscuit_file::to_portable_string(path)
+    )]
+    InlineArtifactUnreadable {
+        /// The active document the agent was asked to edit.
+        path: PathBuf,
+        /// The typed OS failure the read raised.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// The agent's inline document could not be reconciled with the
+    /// closure-owned nodes.
     ///
-    /// The typed sibling of [`InvalidInlineResponse`] for the one inline-closure
-    /// step that has a concrete cause in hand: `rewrite_inline_document`'s
-    /// fallback path parses the source as Markdown and re-inserts
-    /// `last_updated`, and `fm_insert` is its only fallible call. `Display` is
-    /// byte-identical to the `InvalidInlineResponse(format!(…))` it replaced —
-    /// the prose is a user-visible surface, and typing the error is not a
-    /// licence to reword it.
+    /// Carries the typed `MarkdownError` so the CLI's top-level walker renders
+    /// Darkmatter's frontmatter-edit block (malformed YAML, a non-mapping root,
+    /// or a duplicate owned key) instead of a flat string. The document path is
+    /// deliberately absent: `MarkdownError` alone already sits at the
+    /// `clippy::result_large_err` floor, and the caller names the file.
+    #[error("could not reconcile the inline document: {0}")]
+    InlineArtifactEditFailed(#[source] MarkdownError),
+
+    /// The agent left the document body empty or semantically unchanged.
     ///
-    /// [`InvalidInlineResponse`]: CompositionError::InvalidInlineResponse
-    #[error("invalid inline composition response: failed to update last_updated: {0}")]
-    InlineRewriteFailed(#[source] MarkdownError),
+    /// The body half of the completion verdict (spec §D5). Never carries a
+    /// stamp: the closure refuses before writing anything.
+    #[error(
+        "the agent did not update {} (body {reason})",
+        biscuit_file::to_portable_string(source_path)
+    )]
+    CompletionBodyUnchanged {
+        /// The active document the verdict was taken against.
+        source_path: PathBuf,
+        /// Whether the candidate body was empty or unchanged.
+        reason: super::closure::BodyRejection,
+    },
+
+    /// The document does not satisfy its `$schema` at the completion seam.
+    ///
+    /// The schema half of the completion verdict (spec §D5). For
+    /// `inline-compose` the successfully written artifact is intentionally
+    /// kept; only the run's terminal signal changes.
+    #[error(
+        "{} does not satisfy its schema at completion ({} {})",
+        biscuit_file::to_portable_string(source_path),
+        problems.len(),
+        if problems.len() == 1 { "problem" } else { "problems" }
+    )]
+    CompletionSchemaFailed {
+        /// The active document the verdict was taken against.
+        source_path: PathBuf,
+        /// Per-property failures, in schema declaration order.
+        problems: Vec<super::completion::CompletionProblem>,
+        /// Full per-property status rendered by the same component used before
+        /// launch.
+        status: super::schema::SchemaStatusReport,
+    },
+
+    /// Restoring the inline guard's captured baseline failed.
+    ///
+    /// The rollback cause attached to an initiating failure (spec §D4). Its
+    /// presence means the document on disk is whatever the run left behind:
+    /// the initiating diagnostic is retained, and nothing may claim the file
+    /// was restored.
+    #[error(
+        "could not restore {} to its pre-run state: {source}",
+        biscuit_file::to_portable_string(path)
+    )]
+    InlineRollbackFailed {
+        /// The active document whose restoration failed.
+        path: PathBuf,
+        /// The typed OS failure the restoring write raised.
+        #[source]
+        source: std::io::Error,
+    },
 
     /// The document's existing `hash` frontmatter property is malformed.
     ///

@@ -296,6 +296,7 @@ display_policy:
   tool_result_summary: prefer_body
   info_event_suppression: []
   collapse_task_progress: false
+  suppress_synthetic_tool_calls: false
   suppress_subscription_rate_limit: false
   # Unknown/unmodeled item lifecycle markers. When the inner `item.type` is
   # something Claudine does not classify (new Codex builds, experimental

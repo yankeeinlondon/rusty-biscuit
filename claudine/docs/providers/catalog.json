@@ -114,6 +114,7 @@
             "stderr_noise_prefixes": [],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "show"
           }
         },
@@ -3479,6 +3480,7 @@
             "stderr_noise_prefixes": [],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": true,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "show"
           }
         },
@@ -9155,6 +9157,7 @@
             ],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "prefer_body"
           }
         },
@@ -14622,6 +14625,7 @@
               "[LocalAgentExecutor]"
             ],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "show"
           }
         },
@@ -19453,6 +19457,7 @@
             "stderr_noise_prefixes": [],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "show"
           }
         },
@@ -24380,6 +24385,7 @@
             ],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "show"
           }
         },
@@ -29521,6 +29527,7 @@
             "stderr_noise_prefixes": [],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "show"
           }
         },
@@ -34100,6 +34107,7 @@
             ],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": true,
             "tool_result_summary": "show"
           }
         },
@@ -40289,6 +40297,7 @@
             "stderr_noise_prefixes": [],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "show"
           }
         },
@@ -45157,6 +45166,7 @@
             "stderr_noise_prefixes": [],
             "stdout_noise_prefixes": [],
             "suppress_subscription_rate_limit": false,
+            "suppress_synthetic_tool_calls": false,
             "tool_result_summary": "show"
           }
         },

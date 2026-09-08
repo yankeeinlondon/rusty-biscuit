@@ -1,6 +1,6 @@
 # homelab
 
-Home automation control for AV equipment over the local network.
+Home automation control across the Homelab.
 
 ## Packages
 
@@ -16,13 +16,9 @@ Home automation control for AV equipment over the local network.
 ## Supported AV Devices
 
 - **Arcam Amplifiers** (_supports PA240, PA410, PA720 though focus has been on PA240_)
-    - Discrete on/off endpoints
-    - Provides a _heartbeat_ service which can keep the Arcam from deep sleep (making it inaccessible)
+    - 
 - **Sony AZ7000ES AV Receiver** (_likely to work on other AZ models_)
-    - Discrete on/off endpoints
-    - Enumerates input sources (factory and user defined)
-    - Allows selection of discrete input source
-    - Allows for discrete mute on/off
+    - 
     - 
 - **Samsung SmartTV** (_S95C is focus_)
     - Discrete off, Wake on LAN for on
@@ -35,20 +31,66 @@ Home automation control for AV equipment over the local network.
     - 
 
 
-## Supported Homelab Services (future)
+## Supported Homelab Services
 
-- MQTT Subscriber
-- Ping Monitor
-- 
+- AV
+    - [Arcam PA Amps](#arcam)
+    - [Sony STR AV Receivers](#sony)
+    - [Unfolded Circle Integrations](#unfolded-circle-integrations)
+    - [Samsung Smart TV](#samsung-smarttv)
+- Networking
+    - [Unifi](#unifi)
+    - [Tailscale](#tailscale)
+- Automation
+    - [Home Assistant](#home-assistant)
+    - [MQTT Broker](#mqtt-broker)
 
 ### Arcam
 
-- PA240, PA410, PA720 amplifiers (binary protocol over TCP port 50000)
+- PA240, PA410, PA720 amplifiers 
+  - Arcam provides a binary protocol over TCP port 50000
+- Discrete on/off endpoints
+- Provides a _heartbeat_ service which can keep the Arcam from deep sleep (making it inaccessible)
 
 ### Sony
 
 - STR-ES, STR-DA, STR-ZA, STR-DN series receivers (JSON-RPC over HTTP port 10000)
+- Primary target is the **Sony AZ700ES** AV receiver
 - Native Web API (port 80) for zone status and settings
+- Discrete on/off endpoints
+- Enumerates input sources (factory and user defined)
+- Allows selection of discrete input source
+- Allows for discrete mute on/off
+
+### Samsung SmartTV
+
+- discrete on and off
+- wake on LAN
+- primary target is the S95C OLED panel
+
+### Unifi
+
+- CLI reporting and control via `homey unifi ...`
+    - `homey unifi gateways`
+    - `homey unifi vlans`
+    - `homey unifi switches`
+- Server supports smart events monitoring at `/unifi` endpoint
+
+### Tailscale
+
+- CLI reporting and control via `homey tailscale ...`
+    - the goal is to provide a higher level functional service than the existing Tailscale CLI
+- CLI features include:
+    - `homey tailscale review <tailnet>` - use AI to evaluate the current configuration of the Tailnet and report on any changes that are recommended 
+
+
+### Home Assistant
+
+
+### MQTT Broker
+
+
+
 
 ## Environment Variables
 
@@ -59,18 +101,20 @@ Home automation control for AV equipment over the local network.
 
 ## Quick Start
 
+From the homelab directory in this repo you will have access to a _justfile_ that allows for:
+
 ```bash
 # Build all packages
-just -f homelab/justfile build
+just build
 
 # Install the CLI
-just -f homelab/justfile install
+just install
 
 # Install the server
-just -f homelab/justfile install-server
+just install-server
 
 # Run the server in dev mode
-just -f homelab/justfile server
+just server
 ```
 
 ## Unfolded Circle Integrations

@@ -49,31 +49,27 @@ SENTINEL ORIGINAL BODY — must never be sent as the agent prompt.
     .unwrap();
 
     // Goose stub: record the `-t <prompt>` argument (the agent prompt) for
-    // every invocation, then emit a distinct replacement body on stdout so
-    // the inline closure can rewrite the document.
-    write_executable(
-        &path_dir.join("goose"),
-        r#"#!/bin/sh
-prev=""
-for arg in "$@"; do
-  if [ "$prev" = "-t" ]; then
-    {
-      printf -- '--- invocation ---\n'
-      printf '%s\n' "$arg"
-    } >> "$CLAUDINE_PROMPTS_FILE"
-  fi
-  prev="$arg"
-done
-count=0
-if [ -f "$CLAUDINE_COUNT_FILE" ]; then
-  IFS= read -r count < "$CLAUDINE_COUNT_FILE"
-fi
-count=$((count + 1))
-printf '%s' "$count" > "$CLAUDINE_COUNT_FILE"
-printf 'Body produced by inline step %s\n' "$count"
-exit 0
-"#,
-    );
+    // every invocation, then edit the document the way a file-aware inline
+    // agent does so each step reaches its closure.
+    common::InlineAgentStub::new(&md_file)
+        .prelude(
+            "prev=''\n\
+             for arg in \"$@\"; do\n\
+             if [ \"$prev\" = '-t' ]; then\n\
+             printf -- '--- invocation ---\\n' >> \"$CLAUDINE_PROMPTS_FILE\"\n\
+             printf '%s\\n' \"$arg\" >> \"$CLAUDINE_PROMPTS_FILE\"\n\
+             fi\n\
+             prev=\"$arg\"\n\
+             done\n\
+             count=0\n\
+             if [ -f \"$CLAUDINE_COUNT_FILE\" ]; then\n\
+             IFS= read -r count < \"$CLAUDINE_COUNT_FILE\"\n\
+             fi\n\
+             count=$((count + 1))\n\
+             printf '%s' \"$count\" > \"$CLAUDINE_COUNT_FILE\"\n",
+        )
+        .body_expression("\"Body produced by inline step $count\n\"")
+        .install(&path_dir, "goose");
 
     let assert = assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")

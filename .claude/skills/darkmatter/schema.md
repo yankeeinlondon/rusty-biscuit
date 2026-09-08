@@ -59,6 +59,23 @@ properties, and defaulted properties do not materialize. A compose run with no
 effective schema and all validation-only APIs remain non-mutating. Repeated
 schema passes are idempotent, and present values are preserved exactly.
 
+Runtime consumers use `SchemaPhase::Launch` and `SchemaPhase::Completion` on
+an already-resolved `EffectiveSchema`. `required` and `eager` are independent
+axes, derived recursively:
+
+| Declaration | Launch | Completion |
+|---|---|---|
+| neither | absence allowed; a present value is type-checked | absence allowed; a present value is type-checked |
+| `eager` | absence allowed; a present value is validated eagerly | absence allowed; a present value is type-checked |
+| `required` | absence may be deferred; a present value is type-checked | must be present and valid |
+| `required; eager` | must be present and valid | must be present and valid |
+
+Explicit null counts as absence, so an eager-only null is allowed at both
+phases. Completion observes the final working instance without coercion, while
+the existing unphased `validate*` authoring behavior remains unchanged. Raw JSON
+Schema retains its authored `required` behavior at both phases, and trigger
+match conditions reject `eager` because matching has no runtime phase.
+
 Caller records retain an immutable raw value and file-resolution origin per
 property. Before frontmatter interpolation pass 1, an exactly selected eager or
 non-recursive lazy file arm materializes that value from its caller origin.
@@ -98,6 +115,11 @@ excluded keys without executing anything.
   encoded content format.
 - `type-definition` validates one property definition.
 - `schema` validates one complete `$schema` declaration.
+- `eager` is universal timing metadata and never controls presence. Ordinary
+  schema preparation retains the existing `file` existence check, while phase
+  validation stays passive; `file(eager)[]` owns item validity and
+  `file[](eager)` owns the array property's validation timing. Declare
+  `required` independently when the property must exist.
 
 The meta-types delegate to the same passive parser used by authoring and DMLS.
 They do not perform imports, I/O, matching side effects, or rewrites.

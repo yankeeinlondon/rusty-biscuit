@@ -37,7 +37,7 @@ types through the contract surface.
   spawns the provider process and streams its stdout. Already a `claudine`
   dependency.
 - `serde_json` — schema and structured-payload `Value`s.
-- `jsonschema` (`0.42`, `default-features = false`) — adapter-owned JSON Schema
+- `jsonschema` (`0.55`, `default-features = false`) — adapter-owned JSON Schema
   (Draft 2020-12) validation. The contract crate deliberately bundles no schema
   engine, so validation lives here. Pinned to the workspace-wide `0.42` used by
   `darkmatter` and `schematic-gen`.

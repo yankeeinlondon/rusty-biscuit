@@ -19,6 +19,9 @@ pub struct DisplayPolicy {
     /// Whether task-progress narration lines are held back and collapsed
     /// into the matching tool-call line that follows.
     pub collapse_task_progress: bool,
+    /// Whether synthetic request-side tool calls remain in the semantic
+    /// stream but are omitted from live terminal output.
+    pub suppress_synthetic_tool_calls: bool,
     /// Whether the generic rate-limit warning is suppressed when session
     /// metadata shows subscription (non-API-key) auth.
     pub suppress_subscription_rate_limit: bool,

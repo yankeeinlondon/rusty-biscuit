@@ -1180,6 +1180,25 @@ const GUARD_ALLOWLIST: &[GuardEntry] = &[
         tag: KEEP,
         reason: "OpenCode wire parser speaks only for OpenCode and its Kilo fork; identity guard rejects misuse.",
     },
+    // --- CLI: the inline write-grant policy matrix (2026-09-05 inline flow).
+    GuardEntry {
+        path: "claudine/cli/src/commands/wrap/write_grant.rs",
+        form: FORM_MATCH,
+        providers: &[
+            "Antigravity",
+            "Claude",
+            "Codex",
+            "Gemini",
+            "Goose",
+            "Kilo",
+            "KimiCode",
+            "OpenCode",
+            "Pi",
+            "QwenCode",
+        ],
+        tag: KEEP,
+        reason: "The minimum-writable-posture matrix is one cross-provider policy (never widen to bypass, explicit denies win, native roots) reviewed and table-tested as a unit; splitting it across ten profiles would hide those invariants.",
+    },
 ];
 
 fn guard_entry_matches(entry: &GuardEntry, site: &Site) -> bool {

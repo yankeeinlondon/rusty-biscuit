@@ -124,6 +124,15 @@ pub(crate) struct MaterializedHarnessPrompt {
     /// identity. Empty for the passthrough seed and the synthesized empty prompt.
     pub(crate) selection_hints: claudine::composition::EffectiveSelectionHints,
     pub(crate) inline_closure_plan: Option<claudine::composition::InlineClosurePlan>,
+    /// The `$schema` this read resolved at stabilized launch, retained for the
+    /// completion verdict.
+    ///
+    /// Carried rather than re-resolved at the end of the run: completion is
+    /// passive, so it judges the contract the launch was planned against. A run
+    /// that edits its own `$schema` therefore cannot weaken the verdict it is
+    /// about to face (spec §D5). `None` when the document declares no schema,
+    /// and for the passthrough seed.
+    pub(crate) launch_schema: Option<claudine::composition::LaunchSchema>,
     pub(crate) file_resolution_context: Option<biscuit_file::FileResolutionContext>,
     /// Exact early-binding context used for this materialization.
     pub(crate) compose_context: Option<darkmatter::markdown::compose::ComposeContext>,

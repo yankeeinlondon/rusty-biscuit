@@ -482,10 +482,11 @@ Identical to compose Step 3.
 3. Creates `ComposeContext` and `ComposeOptions` (same as direct)
 4. Calls `temp_md.compose_with(compose_opts)` through Darkmatter on the temporary document
 5. Extracts effective frontmatter, agent/model hints, lifecycle config
-6. **Appends guardrails** via `load_or_create_guardrails(source_repo_root)` — adds instructions like "Return the replacement Markdown body content only". Guardrails are loaded from `.claudine/inline-compose.md` in the repo root (created on first use), falling back to a built-in default.
-7. **Captures pre-execution Simple hash** via `source.markdown.compute_hash(MdHashKind::Simple, &inline_hash_options())` for closure validation
+6. **Wraps the prompt** with a header naming the document's native absolute path (plus a `$schema` property table when one is declared) and the guardrails from `load_or_create_guardrails(source_repo_root)` — "write the requested content into its body… then re-read the file", never touch `prompt`/`hash`/`last_updated`, and return a two-to-three-paragraph summary. Guardrails are loaded from `.claudine/inline-compose.md` in the repo root (created on first use); a materialized copy that is byte-equal to a shipped default is migrated, and a customized file is left alone.
+7. **Captures the inline guard** — the document's native path, its full pre-run text, and its pre-execution Simple hash (`inline_hash_options()`) — for reconciliation and rollback
+8. **Retains the launch-resolved schema and launch report** so the completion verdict never resolves the schema again
 
-**Returns:** `PreparedComposition { mode: InlineFrontmatterPrompt, ..., closure: Inline(InlineClosurePlan { original_document_text, original_hash }) }`
+**Returns:** `PreparedComposition { mode: InlineFrontmatterPrompt, ..., launch_schema, closure: Inline(InlineClosurePlan { document_path, original_document_text, original_hash }) }`
 
 **Affected by:**
 
@@ -525,51 +526,49 @@ Runs the same pipeline as compose Step 6, with these differences:
 
 #### Step 9: Inline Closure (inline-compose — unique)
 
-After the provider completes, the inline closure pipeline rewrites the target file:
+The agent is the writer, so the closure reads the document back and reconciles
+it. No provider output is parsed.
 
 ##### 9a. Exit Code Validation
 
-- Exit 130/143 (interrupted): reports interruption, returns error
-- Exit 0: reports agent completed
-- Non-zero: reports agent error
+- Exit 130/143 (interrupted): restores the captured baseline, reports interruption, returns error
+- Non-zero: restores the captured baseline, reports agent error
+- Exit 0: reports agent completed and continues to reconciliation
 
-##### 9b. Body Extraction
+##### 9b. Reconciliation
 
-`closure::extract_replacement_body(&final_response)`:
+`closure::reconcile_inline_artifact(plan, today, evidence)`:
 
-1. Trims whitespace, rejects empty
-2. Strips accidental frontmatter fences from provider output
-3. Validates body is non-empty
+1. Reads and parses the agent's document from disk; a malformed document, a non-mapping root, or a duplicate owned key fails without modifying it
+2. Runs `darkmatter::markdown::cleanup::cleanup_content()` on the candidate body in memory, so the cleaned body is what is hashed, stamped, and written
+3. Rejects a trimmed-empty body, and a body whose **non-strict** Simple body hash equals the baseline's (leading/trailing whitespace and blank lines ignored, internal whitespace significant) — unless the operation already produced a body change, which is what makes a metadata-only `retry`/`resume` recoverable
+4. Restores `prompt`, `hash`, and `last_updated` textually from the pre-run snapshot via Darkmatter's `restore_properties_text`, warning once per property the agent touched. Every other frontmatter byte the agent wrote is kept
+5. Computes the agent's semantic top-level `FrontmatterDelta` (addition, replacement, deletion; value-preserving reformatting is not a change) for the completion instance, excluding the owned properties
+6. Stamps `last_updated` (local `YYYY-MM-DD`) and the Darkmatter `Simple` hash (see [Composition — `hash` property](composition.md#hash-property-auto-stamped)), then writes atomically exactly once via `atomic_write()`
 
-##### 9c. Document Reconstruction
+##### 9c. Completion Verdict
 
-`closure::apply_inline_closure(plan, body, path, today, post_run_fm)`:
-
-1. Validates replacement body is non-empty
-2. Runs `darkmatter::markdown::cleanup::cleanup_content()` on the body so the cleaned body is what is hashed, stamped, and written (one atomic write; `result.body_cleaned` records whether cleanup changed anything)
-3. Rejects when the **body segment** of the Simple hash of the *cleaned* body matches the original
-4. Compares frontmatter to detect new and modified properties
-5. Calls `rewrite_inline_document()`:
-
-    - Splits frontmatter from source text (preserving byte-for-byte layout including block scalars)
-    - Updates `last_updated` to today's date (local time, `YYYY-MM-DD`)
-    - Stamps a Darkmatter `Simple` content hash into the `hash:` frontmatter property (see [Composition — `hash` property](composition.md#hash-property-auto-stamped))
-    - Merges new frontmatter properties from agent (inserted before `last_updated`)
-    - Preserves original frontmatter values (reverts agent modifications with a warning)
-
-6. Writes atomically via `atomic_write()`
+`completion::complete_active_document()` then judges the retained schema at
+`SchemaPhase::Completion` and chooses `success` or `failure` — for `compose` as
+well as `inline-compose`. See
+[Composition — Completion Verdict](composition.md#completion-verdict).
 
 ##### 9d. Summary Emission
 
-Summary is deferred until after closure validation messages (unlike compose which emits immediately), so the section separator does not split the validation block.
+The agent's final response is the run summary shown to the caller and stored as
+the run output for `{{ last(outputs) }}`. It is never written to the document.
+It is emitted after the closure's validation messages (unlike compose, which
+emits immediately), so the section separator does not split the validation
+block.
 
 **Affected by:**
 
 | Input                      | Impact                                                                                            |
 |----------------------------|---------------------------------------------------------------------------------------------------|
-| Frontmatter `last_updated` | Auto-updated by Claudine on each successful write                                                 |
-| Frontmatter `hash`         | Auto-stamped Darkmatter `Simple` content hash on each successful write                            |
-| Provider output            | Must be replacement body content only (no frontmatter); guardrails instruct the agent accordingly |
+| Frontmatter `last_updated` | Restored from the snapshot, then re-stamped on each successful write                              |
+| Frontmatter `hash`         | Restored from the snapshot, then re-stamped on each successful write                              |
+| Frontmatter `$schema`      | The launch-resolved schema governs the completion verdict; an agent edit governs the *next* run   |
+| The document on disk       | The agent's deliverable; its body must have changed meaningfully and be non-empty                 |
 | `--silent`                 | Suppresses check/validation messages                                                              |
 
 ---
@@ -940,7 +939,8 @@ Resolve → Pre-Flight → Prepare → Select Provider → Launch → Closure
 - **Prepare**: `composition::prepare_direct()` or `composition::prepare_inline()` composes through Darkmatter with the pre-approved command set and produces a `PreparedComposition` with `effective_frontmatter`
 - **Select**: Provider selection applies the precedence chain described in [Provider Selection](#provider-selection)
 - **Launch**: `wrap::composition::execute_composition_request()` runs the provider through the full wrapper pipeline (env, MCP, harness, streaming)
-- **Closure**: `composition::closure::rewrite_inline_document()` reconstructs the document for inline mode; direct mode outputs to stdout; sequence iterates the pipeline per step
+- **Closure**: `composition::closure::reconcile_inline_artifact()` reads the agent's document back and reconciles it for inline mode; direct mode outputs to stdout; sequence iterates the pipeline per step
+- **Verdict**: `composition::completion::complete_active_document()` judges the retained schema at `SchemaPhase::Completion` for both modes and chooses `success` or `failure`, once per composition
 
 ## Performance Reporting
 
@@ -972,7 +972,7 @@ Shell approval currently runs during Phase 1a for every step, which means the us
 
 ### 4. Inline Closure Diff Preview
 
-The inline closure pipeline writes the replacement body atomically with no preview. Adding an optional `--diff` flag that opens a diff view (terminal or editor) before write-back would give users a chance to review and approve the agent's changes, reducing the risk of destructive overwrites from poorly-behaved agent output.
+The closure reconciles the agent's document and writes it atomically with no preview. Adding an optional `--diff` flag that opens a diff view (terminal or editor) against the captured baseline before write-back would give users a chance to review and approve the agent's changes, reducing the risk of accepting a poorly-behaved run.
 
 ### 5. Compose Result Caching
 
@@ -982,9 +982,9 @@ When the same file is composed with the same set of overrides multiple times (e.
 
 Harness properties currently apply uniformly across all sequence steps. Allowing per-step harness overrides (e.g., different timeouts or post-checks for specific steps) would enable more fine-grained control without requiring separate template files.
 
-### 7. Streaming Provider Support for Inline Closure
+### 7. Single-File Write Grants
 
-The legacy (non-structured) capture path for inline-compose reads the entire provider response into memory before writing. For large documents, a streaming closure that incrementally writes the body as it arrives (with rollback on failure) would reduce peak memory and improve perceived latency.
+The inline write grant adds the document's *parent directory* as the provider's additional writable root, because that is the narrowest unit every provider's root mechanism accepts. Providers that grow a per-file allowance (or a path-pattern permission) could be granted the one document instead, closing the gap between "the agent may write this file" and "the agent may write this directory".
 
 ### 8. Structured Error Recovery for Sequence
 

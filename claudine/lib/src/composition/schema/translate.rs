@@ -1,6 +1,6 @@
 use super::*;
 
-pub(super) fn schema_error_to_composition_error(
+pub(in crate::composition) fn schema_error_to_composition_error(
     source_path: &std::path::Path,
     fallback_message: String,
     schema_error: Option<&SchemaError>,
@@ -116,7 +116,17 @@ pub(super) fn translate_schema_failure(
     }
 
     let effective = load_effective_schema(source, options.file_ref_fallback_dir.as_deref())?;
-    let categorized = categorize_problems(&problems, effective.as_ref());
+    let phase = match mode {
+        PrepareMode::Inline => Some(SchemaPhase::Launch),
+        PrepareMode::Direct(_) => None,
+    };
+    let mut categorized = categorize_problems(&problems, effective.as_ref(), phase);
+    if matches!(mode, PrepareMode::Direct(_)) {
+        // Direct compose fills a required property its own expression left
+        // `null` at launch, through interactive collection; see
+        // `promote_null_required_to_missing`.
+        promote_null_required_to_missing(&mut categorized, effective.as_ref(), None);
+    }
 
     if !categorized.invalid_required.is_empty() {
         return Err(build_schema_validation_error(
@@ -157,7 +167,12 @@ pub(super) fn translate_schema_failure(
         return match run_prepare(&retry_source, retry_options, mode) {
             Ok(prepared) => Ok(prepared),
             Err(retry_err) => {
-                handle_retry_error(source, retry_err, options.file_ref_fallback_dir.as_deref())
+                handle_retry_error(
+                    source,
+                    retry_err,
+                    options.file_ref_fallback_dir.as_deref(),
+                    phase,
+                )
             }
         };
     }
@@ -184,6 +199,7 @@ pub(super) fn handle_retry_error(
     source: &ResolvedCompositionSource,
     err: CompositionError,
     file_ref_fallback_dir: Option<&std::path::Path>,
+    phase: Option<SchemaPhase>,
 ) -> Result<PreparedComposition, CompositionError> {
     let CompositionError::ComposeFailed(MarkdownError::SchemaValidationFailed {
         problems,
@@ -195,7 +211,7 @@ pub(super) fn handle_retry_error(
     };
 
     let effective = load_effective_schema(source, file_ref_fallback_dir)?;
-    let categorized = categorize_problems(&problems, effective.as_ref());
+    let categorized = categorize_problems(&problems, effective.as_ref(), phase);
 
     if !categorized.invalid_required.is_empty() {
         return Err(build_schema_validation_error(
@@ -362,7 +378,10 @@ pub(super) fn filter_droppable_invalid_optionals(
     });
     invalid_optional
         .iter()
-        .filter(|problem| !is_eager_file_problem(shape, problem))
+        .filter(|problem| {
+            top_level_pointer_segment(&problem.path)
+                .is_none_or(|name| !is_eager(shape, &name))
+        })
         .cloned()
         .collect()
 }

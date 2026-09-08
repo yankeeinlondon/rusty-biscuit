@@ -190,6 +190,7 @@ test-real *args="":
     set -uo pipefail
     rc=0
     CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-contract --features real-tests --test real_provider {{ args }} || rc=$?
+    CLAUDINE_CONTRACT_REAL=1 cargo nextest run -p claudine-cli --features real-tests --test real_inline_write_grant {{ args }} || rc=$?
     CLAUDINE_CONTRACT_REAL=1 cargo test -p claudine-cli --features real-tests --test real_opencode_yolo_subagent {{ args }} || rc=$?
     exit $rc
 

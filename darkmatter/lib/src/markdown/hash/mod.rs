@@ -27,7 +27,10 @@ pub use kind::{KindRelation, MdHashKind, ParseMdHashKindError, select_kind};
 pub use options::{DEFAULT_HASH_PROPERTY, LAST_UPDATED_KEY, MdHashOptions};
 pub use save::SaveDecision;
 pub use stored::{StoredHash, StoredHashValue};
-pub use write::apply_hash_save_text;
+pub use write::{
+    FrontmatterDelta, FrontmatterDeltaEntry, RestoredDocument, apply_hash_save_text,
+    restore_properties_text,
+};
 
 use crate::markdown::Markdown;
 use crate::markdown::FrontmatterMap;

@@ -113,14 +113,21 @@ pub(crate) fn apply_opencode_yolo_config_overlay(
         return Ok(());
     }
 
+    apply_opencode_config_overlay(env_plan, claudine::opencode_config::yolo_permission_block())
+}
+
+/// Merge one JSON overlay into the child's `OPENCODE_CONFIG_CONTENT`, keeping
+/// the dry-run / preflight env display (`env_plan.added`) in step with the
+/// child's actual env.
+pub(crate) fn apply_opencode_config_overlay(
+    env_plan: &mut env::EnvPlan,
+    overlay: serde_json::Value,
+) -> Result<()> {
     const KEY: &str = "OPENCODE_CONFIG_CONTENT";
     let key = std::ffi::OsStr::new(KEY);
     let current = env_plan.env.get(key).map(|v| v.as_os_str());
-    let merged = claudine::opencode_config::merge_overlay(
-        current,
-        claudine::opencode_config::yolo_permission_block(),
-    )
-    .wrap_err("failed to merge OPENCODE_CONFIG_CONTENT")?;
+    let merged = claudine::opencode_config::merge_overlay(current, overlay)
+        .wrap_err("failed to merge OPENCODE_CONFIG_CONTENT")?;
     env_plan
         .env
         .insert(key.to_os_string(), std::ffi::OsString::from(merged.clone()));
@@ -479,6 +486,7 @@ fn passthrough_launch_intent(
                 is_inline: false,
                 model: args.model.clone(),
                 mcp_body_tags: Vec::new(),
+                writable_document: None,
             },
             harness_base_args.to_vec(),
             codex_last_message,

@@ -296,10 +296,9 @@ fn inline_compose_perf_emits_report_to_stderr() {
     )
     .unwrap();
 
-    write_executable(
-        &fixture.bin_dir().join("goose"),
-        "#!/bin/sh\necho 'Replacement body'\nexit 0\n",
-    );
+    common::InlineAgentStub::new(&md_file)
+        .body("Replacement body\n")
+        .install(fixture.bin_dir(), "goose");
 
     let assert = fixture
         .command()
@@ -341,9 +340,15 @@ fn inline_compose_perf_stdout_matches_non_perf() {
     fs::write(&md_file_perf, content).unwrap();
     fs::write(&md_file_plain, content).unwrap();
 
+    // Each run has its own active document, so the stub reads the target out of
+    // the delivered prompt rather than being pinned to one path.
     write_executable(
         &fixture.bin_dir().join("goose"),
-        "#!/bin/sh\necho 'Replacement body'\nexit 0\n",
+        &format!(
+            "#!/bin/sh\n{find_doc}CLAUDINE_ADD=''\nCLAUDINE_BODY='Replacement body\n'\n{rewrite}printf 'Replaced the body.\\n'\nexit 0\n",
+            find_doc = common::INLINE_DOC_FROM_PROMPT,
+            rewrite = common::INLINE_BODY_REWRITE,
+        ),
     );
 
     let perf_assert = fixture

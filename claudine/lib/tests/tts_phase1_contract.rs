@@ -2,7 +2,7 @@ use std::{fs, path::PathBuf};
 
 fn fix_artifact(name: &str) -> String {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../fixes/2026-09-03-tts-not-finishing")
+        .join("../fixes/_completed/2026-09-03-tts-not-finishing")
         .join(name);
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
@@ -66,7 +66,7 @@ fn regression_matrix_covers_every_phase_one_failure_category() {
 #[test]
 fn protocol_fixture_corpus_is_versioned_and_redacts_diagnostic_records() {
     let fixture_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../fixes/2026-09-03-tts-not-finishing/fixtures");
+        .join("../fixes/_completed/2026-09-03-tts-not-finishing/fixtures");
     let mut fixture_names = Vec::new();
 
     for entry in fs::read_dir(&fixture_dir).expect("protocol fixture directory must exist") {

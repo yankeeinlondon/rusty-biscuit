@@ -1,6 +1,6 @@
 //! Integration tests for `md schema about`.
 
-use darkmatter::markdown::schemas::schema_type_descriptors;
+use darkmatter::markdown::schemas::{schema_constraint_descriptors, schema_type_descriptors};
 use darkmatter::testing::strip_ansi_codes;
 use predicates::prelude::*;
 
@@ -55,6 +55,79 @@ fn schema_about_prints_simplified_schema_reference() {
             "schema about should not show `{absent}` without --verbose"
         );
     }
+}
+
+/// The constraint table's `Meaning` cell for the row whose `Write` cell is
+/// `keyword`, unwrapped back into a single line.
+///
+/// The column is word-wrapped to the rendered table width, so a `contains`
+/// check against the descriptor's own sentence cannot work; the continuation
+/// rows (empty `Write` cell) must be rejoined first.
+fn constraint_row_meaning(plain: &str, keyword: &str) -> String {
+    let mut meaning: Vec<&str> = Vec::new();
+    for line in plain.lines() {
+        let Some(after_border) = line.trim_start().strip_prefix('│') else {
+            if meaning.is_empty() {
+                continue;
+            }
+            break;
+        };
+        let cells: Vec<&str> = after_border.split('│').collect();
+        let (Some(write), Some(description)) = (cells.first(), cells.get(2)) else {
+            continue;
+        };
+        let write = write.trim();
+        if write == keyword {
+            meaning.push(description.trim());
+        } else if !meaning.is_empty() {
+            if !write.is_empty() {
+                break;
+            }
+            meaning.push(description.trim());
+        }
+    }
+    meaning.join(" ")
+}
+
+#[test]
+fn schema_about_renders_the_shipped_eager_descriptor_verbatim() {
+    let eager = schema_constraint_descriptors()
+        .iter()
+        .find(|descriptor| descriptor.keyword == "eager")
+        .expect("the catalog declares `eager`");
+    // Prose rendering lowers the descriptor's inline-code backticks to styled
+    // spans, so the plain-text comparison drops them.
+    let expected = eager.description.replace('`', "");
+
+    let output = md_cmd().args(["schema", "about"]).output().expect("run md schema about");
+    assert!(output.status.success(), "schema about should succeed");
+    let plain = strip_ansi_codes(&String::from_utf8_lossy(&output.stdout));
+
+    let rendered = constraint_row_meaning(&plain, "eager");
+    assert_eq!(
+        rendered, expected,
+        "the shipped catalog description must reach `md schema about` verbatim: {plain}"
+    );
+    // The row is word-wrapped to the table column, so the retired claim can only
+    // be searched for in the rejoined cell, never in the raw report text.
+    assert!(
+        !rendered.contains("Requires the containing property"),
+        "the retired eager-implies-required claim must not ship: {rendered}"
+    );
+    assert!(
+        rendered.contains("absence is allowed unless required is also declared"),
+        "the shipped report must state that eager does not control presence: {rendered}"
+    );
+    assert_eq!(
+        constraint_row_meaning(&plain, "required"),
+        schema_constraint_descriptors()
+            .iter()
+            .find(|descriptor| descriptor.keyword == "required")
+            .expect("the catalog declares `required`")
+            .description
+            .replace('`', ""),
+        "the presence axis keeps its own separate row: {plain}"
+    );
 }
 
 #[test]

@@ -313,14 +313,12 @@ fn malformed_frontmatter_keeps_parse_precedence_not_mismatch() {
 // ============================================================================
 
 #[cfg(unix)]
-fn write_goose_stub(bin_dir: &std::path::Path) {
-    // Minimal Goose stub: ignore the delivered prompt, emit a replacement
-    // body on stdout, and succeed. inline-compose rewrites the doc body with
-    // this output.
-    write_executable(
-        &bin_dir.join("goose"),
-        "#!/bin/sh\ncat > /dev/null 2>&1\necho 'composed replacement body'\nexit 0\n",
-    );
+fn write_goose_stub(bin_dir: &std::path::Path, document: &std::path::Path) {
+    // Minimal Goose stub: behave like a file-aware inline agent — replace the
+    // document's body and return a summary — so the run reaches its closure.
+    common::InlineAgentStub::new(document)
+        .body("composed replacement body\n")
+        .install(bin_dir, "goose");
 }
 
 #[cfg(unix)]
@@ -330,14 +328,13 @@ fn prompt_with_null_sequence_proceeds_to_ordinary_behavior() {
     // to ordinary inline-compose behavior and runs the provider.
     let fixture = CliProcessFixture::named("inline-compose-mismatch-provider");
     fixture.seed_user_config();
-    write_goose_stub(fixture.bin_dir());
-
     let md_file = fixture.cwd().join("doc.md");
     fs::write(
         &md_file,
         "---\nprompt: Do something\nsequence: null\n---\nbody\n",
     )
     .unwrap();
+    write_goose_stub(fixture.bin_dir(), &md_file);
 
     let assert = fixture
         .command()
@@ -358,10 +355,9 @@ fn prompt_without_sequence_retains_inline_behavior() {
     // Criterion 5: `prompt` + no sequence key → ordinary inline-compose.
     let fixture = CliProcessFixture::named("inline-compose-mismatch-provider");
     fixture.seed_user_config();
-    write_goose_stub(fixture.bin_dir());
-
     let md_file = fixture.cwd().join("doc.md");
     fs::write(&md_file, "---\nprompt: Do something\n---\nbody\n").unwrap();
+    write_goose_stub(fixture.bin_dir(), &md_file);
 
     let assert = fixture
         .command()
@@ -414,10 +410,9 @@ fn override_cannot_create_mismatch() {
     // document must NOT create a mismatch — the run proceeds normally.
     let fixture = CliProcessFixture::named("inline-compose-mismatch-provider");
     fixture.seed_user_config();
-    write_goose_stub(fixture.bin_dir());
-
     let md_file = fixture.cwd().join("doc.md");
     fs::write(&md_file, "---\nprompt: Do something\n---\nbody\n").unwrap();
+    write_goose_stub(fixture.bin_dir(), &md_file);
 
     let assert = fixture
         .command()

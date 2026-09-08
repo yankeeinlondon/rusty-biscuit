@@ -721,7 +721,10 @@ fn drive_inline_compose_collection(cmd: Command, marker: &std::path::Path) {
 #[serial_test::serial(pty)]
 fn level2_pty_inline_compose_interactive_flag_collects_before_launch() {
     // `inline-compose -i --codex` requests an interactive session via flag.
-    // The missing required `topic` must be collected before Codex launches.
+    // The missing `topic` must be collected before Codex launches. It is
+    // declared `eager` because that is the half of the split inline mode
+    // collects at launch; a plain `required` property is deferred to the
+    // completion verdict and is deliberately never prompted for here.
     require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
 
     let workspace = tempdir().unwrap();
@@ -736,7 +739,7 @@ fn level2_pty_inline_compose_interactive_flag_collects_before_launch() {
         concat!(
             "---\n",
             "$schema:\n",
-            "  topic: 'string(required)'\n",
+            "  topic: 'string(required;eager)'\n",
             "prompt: Generate notes about {{topic}}.\n",
             "---\n",
             "Original body.\n",
@@ -768,7 +771,7 @@ fn level2_pty_inline_compose_interactive_flag_collects_before_launch() {
 #[serial_test::serial(pty)]
 fn level2_pty_inline_compose_frontmatter_interactive_collects_before_launch() {
     // `interactive: true` frontmatter selects an interactive session for
-    // `inline-compose` with no CLI flag. The missing required `topic` must
+    // `inline-compose` with no CLI flag. The missing `eager` `topic` must
     // still be collected before Codex launches.
     require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
 
@@ -784,7 +787,7 @@ fn level2_pty_inline_compose_frontmatter_interactive_collects_before_launch() {
         concat!(
             "---\n",
             "$schema:\n",
-            "  topic: 'string(required)'\n",
+            "  topic: 'string(required;eager)'\n",
             "interactive: true\n",
             "prompt: Generate notes about {{topic}}.\n",
             "---\n",

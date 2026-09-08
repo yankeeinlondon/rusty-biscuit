@@ -59,6 +59,7 @@ pub mod discriminant;
 pub mod errors;
 pub mod example;
 pub mod format;
+mod phase;
 mod reference;
 pub mod resolve;
 pub mod rewrite;
@@ -97,6 +98,7 @@ pub use detect::{
 };
 pub use discriminant::select_literal_discriminant_arm;
 pub use errors::SchemaError;
+pub use phase::SchemaPhase;
 pub use reference::{SchemaReference, SchemaReferenceKind, classify_schema_reference};
 pub use rewrite::NormalizationOutcome;
 pub use simplified::{
@@ -682,6 +684,37 @@ impl DarkmatterSchemas {
         }
     }
 
+    /// Validates a document's frontmatter at a runtime [`SchemaPhase`].
+    ///
+    /// The phase-aware twin of [`Self::validate`]: the same effective schema
+    /// resolution, judged through
+    /// [`EffectiveSchema::validate_for_phase_with_positions`].
+    ///
+    /// ## Errors
+    ///
+    /// See [`Self::validate`].
+    pub fn validate_for_phase(
+        &self,
+        source: &Markdown,
+        phase: SchemaPhase,
+    ) -> Result<ValidationReport, SchemaError> {
+        let frontmatter_value = frontmatter_as_json(source);
+        let positions = positions_for(source);
+        match self.effective_for(source)? {
+            Some(effective) => effective.validate_for_phase_with_positions(
+                &frontmatter_value,
+                &positions,
+                phase,
+            ),
+            None => Ok(ValidationReport {
+                valid: true,
+                problems: Vec::new(),
+                pending: Vec::new(),
+                advisories: Vec::new(),
+            }),
+        }
+    }
+
     /// Returns a shared reference to the underlying validator cache. Useful
     /// for sharing the cache between subsystems (e.g. a long-running CLI).
     pub fn cache(&self) -> &ValidatorCache {
@@ -790,6 +823,88 @@ impl EffectiveSchema {
     ) -> ValidationReport {
         let coerced = coerce::coerce_frontmatter(&self.json_schema, frontmatter);
         self.validate_instance(&coerced.value, positions)
+    }
+
+    /// Validates a working frontmatter instance at a runtime schema phase.
+    ///
+    /// SimplifiedSchema phase rules are projected from the already-resolved
+    /// schema: `eager` controls when a present value is validated, while
+    /// `required` controls whether it must be present. Raw JSON Schema retains
+    /// its authored behavior in both phases. The caller's instance and the
+    /// effective schema are not mutated.
+    ///
+    /// ## Errors
+    ///
+    /// Returns [`SchemaError`] when the phase projection cannot be converted,
+    /// merged, or compiled into a validator.
+    pub fn validate_for_phase(
+        &self,
+        frontmatter: &Value,
+        phase: SchemaPhase,
+    ) -> Result<ValidationReport, SchemaError> {
+        self.validate_for_phase_with_positions(frontmatter, &PositionMap::new(), phase)
+    }
+
+    /// Phase-aware validation with source positions attached to problems.
+    pub fn validate_for_phase_with_positions(
+        &self,
+        frontmatter: &Value,
+        positions: &PositionMap,
+        phase: SchemaPhase,
+    ) -> Result<ValidationReport, SchemaError> {
+        let (projected, mut json_schema) = match &self.simplified {
+            Some(simplified) => {
+                let projected = phase::project(simplified, phase);
+                let projected_document = simplified::to_json_schema(&projected)?;
+                let json_schema =
+                    phase::merge_with_effective(&self.json_schema, projected_document)?;
+                (Some(projected), json_schema)
+            }
+            None => (None, self.json_schema.as_ref().clone()),
+        };
+        phase::make_passive(&mut json_schema);
+        let validator = Arc::new(validate::build_validator_in_context(
+            &json_schema,
+            self.base_dir.as_deref(),
+            self.file_ref_fallback_dir.as_deref(),
+            self.file_resolution_context.as_ref(),
+        )?);
+        let arm_validators = json_schema
+            .get("anyOf")
+            .and_then(Value::as_array)
+            .map(|arms| {
+                arms.iter()
+                    .map(|arm| {
+                        let root = validate::wrap_arm_as_root_schema(arm);
+                        validate::build_validator_in_context(
+                            &root,
+                            self.base_dir.as_deref(),
+                            self.file_ref_fallback_dir.as_deref(),
+                            self.file_resolution_context.as_ref(),
+                        )
+                        .map(Arc::new)
+                    })
+                    .collect::<Result<Vec<_>, SchemaError>>()
+            })
+            .transpose()?;
+        let projected = Self {
+            simplified: projected,
+            json_schema: Arc::new(json_schema),
+            origins: self.origins.clone(),
+            validator,
+            arm_validators,
+            base_dir: self.base_dir.clone(),
+            file_ref_fallback_dir: self.file_ref_fallback_dir.clone(),
+            file_resolution_context: self.file_resolution_context.clone(),
+            dependencies: self.dependencies.clone(),
+            advisories: self.advisories.clone(),
+        };
+        Ok(match phase {
+            SchemaPhase::Launch => projected.validate_with_positions(frontmatter, positions),
+            SchemaPhase::Completion => {
+                projected.validate_raw_with_positions(frontmatter, positions)
+            }
+        })
     }
 
     /// Validates a frontmatter JSON value against this schema **without any

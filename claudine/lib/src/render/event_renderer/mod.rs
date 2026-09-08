@@ -171,6 +171,12 @@ impl EventRenderer {
         self.resolve_pending_task_progress(event, terminal, &mut units);
 
         match event {
+            SemanticEvent::ToolCall { extra, .. }
+                if self.policy.suppress_synthetic_tool_calls
+                    && extra
+                        .get("synthetic_tool_call")
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false) => {}
             SemanticEvent::ToolCall { .. } => {
                 if let Some(display) = ToolCallDisplay::from_call(event) {
                     let desc = self.render_tool_display(display);

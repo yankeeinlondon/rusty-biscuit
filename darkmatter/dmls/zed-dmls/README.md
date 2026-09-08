@@ -24,14 +24,26 @@ zed-dmls/
 
 ## Binary resolution order
 
-`language_server_command` resolves the `dmls` binary in this order (the proven
-IWE pattern):
+`language_server_command` resolves the `dmls` binary in this order:
 
-1. **PATH** — `worktree.which("dmls")`.
-2. **Settings override** — `binary.path` (and optional `binary.arguments`) from
+1. **Settings override** — `binary.path` (and optional `binary.arguments`) from
    the extension's LSP settings.
+2. **PATH** — `worktree.which("dmls")`.
 3. **GitHub release download** — the platform-matched asset from the latest
    `dmls` release, cached by version so it downloads once per upgrade.
+
+The settings override is first because it is the only step that works for
+**single-file worktrees**: opening a lone file outside the current project gives
+Zed no directory to load a shell environment from, so `which` searches a bare
+PATH and misses a `~/.cargo/bin` install. Pin the absolute path to cover it:
+
+```json
+{
+  "lsp": {
+    "dmls": { "binary": { "path": "/absolute/path/to/dmls" } }
+  }
+}
+```
 
 Per-platform release asset names (see the release recipe `just dist` in
 `darkmatter/justfile`):
@@ -95,8 +107,10 @@ just install-dmls
 just zed-doctor
 ```
 
-After installing the binary, `install-dmls` stages this directory when Zed's
-data directory exists. Staging copies it (including the bundled `extension.wasm`)
+After installing the binary, `install-dmls` recompiles `extension.wasm` from
+`src/lib.rs` (`just zed-wasm`; a host without the `wasm32-wasip2` target warns
+and keeps the committed module) and stages this directory when Zed's data
+directory exists. Staging copies it (including the bundled `extension.wasm`)
 to a stable per-user location and points Zed's `extensions/installed/dmls`
 link at it, repairing a dangling link from a removed worktree. Exit status `3`
 means the link could not be made automatically; the output names the stable

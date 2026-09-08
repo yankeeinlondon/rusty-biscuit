@@ -418,7 +418,7 @@ fn replaced_delegate_executable_is_rejected_before_launch() {
 fn shipped_fixture(name: &str) -> String {
     fs::read_to_string(
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../claudine/fixes/2026-09-03-tts-not-finishing/fixtures")
+            .join("../../claudine/fixes/_completed/2026-09-03-tts-not-finishing/fixtures")
             .join(name),
     )
     .expect("shipped protocol fixture should read")

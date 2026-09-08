@@ -697,6 +697,7 @@ pub const REGISTRY: &[RegistryEntry] = &[
                 "tool_result_summary",
                 "info_event_suppression",
                 "collapse_task_progress",
+                "suppress_synthetic_tool_calls",
                 "suppress_subscription_rate_limit",
                 "silent_extension_kinds",
                 "stdout_noise_prefixes",

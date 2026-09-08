@@ -41,6 +41,7 @@ pub(super) fn display_policy_record(entry: &RegistryEntry, raw: &Value) -> Resul
         "tool_result_summary",
         "info_event_suppression",
         "collapse_task_progress",
+        "suppress_synthetic_tool_calls",
         "suppress_subscription_rate_limit",
         "silent_extension_kinds",
         "stdout_noise_prefixes",
@@ -90,7 +91,11 @@ pub(super) fn display_policy_record(entry: &RegistryEntry, raw: &Value) -> Resul
             });
         }
     }
-    for key in ["collapse_task_progress", "suppress_subscription_rate_limit"] {
+    for key in [
+        "collapse_task_progress",
+        "suppress_synthetic_tool_calls",
+        "suppress_subscription_rate_limit",
+    ] {
         let value = require(key)?;
         if !value.is_boolean() {
             return Err(GenError::UnmappableValue {

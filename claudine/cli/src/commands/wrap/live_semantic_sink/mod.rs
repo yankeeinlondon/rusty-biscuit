@@ -759,6 +759,7 @@ mod tests {
 
     mod content_guard;
     mod dispatch_and_recording;
+    mod final_response_contract;
     mod golden_stderr;
     mod provider_extension_and_opencode;
     mod render_basics;

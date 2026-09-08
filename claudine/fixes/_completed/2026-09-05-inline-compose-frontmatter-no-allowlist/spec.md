@@ -4,6 +4,7 @@ created: 2026-09-05
 updated: 2026-09-05
 area: claudine
 implemented: true
+review_iterations: 2
 packages:
     - claudine
 supersedes: _completed/2026-09-01-inline-compose-frontmatter (D2 and D3 only)

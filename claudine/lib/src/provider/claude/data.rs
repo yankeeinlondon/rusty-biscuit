@@ -320,6 +320,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
         tool_result_summary: ToolResultSummary::Show,
         info_event_suppression: &[],
         collapse_task_progress: true,
+        suppress_synthetic_tool_calls: false,
         suppress_subscription_rate_limit: true,
         silent_extension_kinds: &[
             "stream_event",

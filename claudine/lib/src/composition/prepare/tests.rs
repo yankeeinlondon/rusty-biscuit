@@ -158,11 +158,20 @@ fn inline_composition_uses_effective_frontmatter() {
     let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
     assert_eq!(prepared.mode, CompositionMode::InlineFrontmatterPrompt);
     assert!(prepared.prompt.contains("List three colors"));
-    assert!(
-        prepared
-            .prompt
-            .contains("Return the replacement Markdown body content in your final response")
+    // File-aware header first, the author's prompt, then the guardrails bound
+    // to the same native path.
+    let header = format!("**Document:** `{}`", source.resolved_path.display());
+    assert!(prepared.prompt.starts_with(&header), "{}", prepared.prompt);
+    let guardrail = format!(
+        "The document you are updating is `{}`.",
+        source.resolved_path.display()
     );
+    assert!(prepared.prompt.contains(&guardrail), "{}", prepared.prompt);
+    assert!(prepared.prompt.contains("Never modify the `prompt`, `hash`, or `last_updated`"));
+    assert!(prepared.prompt.contains("summary of what you did"));
+    assert!(prepared.prompt.find("List three colors").unwrap() < prepared.prompt.find("IMPORTANT").unwrap());
+    assert!(!prepared.prompt.contains("Return the replacement Markdown body"));
+    assert!(prepared.launch_schema.is_none(), "no `$schema` declared");
 
     // Effective frontmatter should contain composed keys
     assert!(prepared.effective_frontmatter.is_object());
@@ -176,6 +185,7 @@ fn inline_composition_uses_effective_frontmatter() {
     // Closure should be Inline with captured hash
     match &prepared.closure {
         CompositionClosurePlan::Inline(plan) => {
+            assert_eq!(plan.document_path, source.resolved_path);
             assert!(!plan.original_document_text.is_empty());
             // Simple hash should produce a non-empty `<fm>-<body>` string.
             let flat = plan.original_hash.flat_string();
@@ -186,12 +196,125 @@ fn inline_composition_uses_effective_frontmatter() {
 }
 
 #[test]
+fn inline_composition_warns_but_preserves_retired_custom_guardrails() {
+    let dir = TempDir::new().unwrap();
+    let custom_path = dir.path().join(".claudine/inline-compose.md");
+    fs::create_dir_all(custom_path.parent().unwrap()).unwrap();
+    let custom = "> Do not edit the source file directly.\n> Return your answer.\n";
+    fs::write(&custom_path, custom).unwrap();
+    let source = make_source(
+        &dir,
+        &[("prompt", json!("Write the report"))],
+        "Old content",
+    );
+
+    let prepared = prepare_inline(
+        &source,
+        PrepareOptions {
+            source_repo_root: Some(dir.path().to_path_buf()),
+            ..PrepareOptions::default()
+        },
+    )
+    .expect("retired customization warns instead of blocking");
+
+    assert!(prepared.prompt.contains("Do not edit the source file directly"));
+    assert_eq!(fs::read_to_string(&custom_path).unwrap(), custom);
+    let warning = prepared
+        .warnings
+        .iter()
+        .find(|warning| warning.stage == "inline_guardrails")
+        .expect("migration warning");
+    assert!(warning.message.contains(".claudine/inline-compose.md"));
+    assert!(warning.message.contains("Migrate"));
+}
+
+#[test]
 fn inline_composition_missing_prompt() {
     let dir = TempDir::new().unwrap();
     let source = make_source(&dir, &[("title", json!("Test"))], "Content");
 
     let err = prepare_inline(&source, PrepareOptions::default()).unwrap_err();
     assert!(matches!(err, CompositionError::PromptPropertyMissing));
+}
+
+#[test]
+fn inline_composition_prefers_a_caller_supplied_prompt_and_keeps_the_file_untouched() {
+    // AC13: the caller's `prompt` overlay wins before the first interpolation
+    // pass and is delivered verbatim; the authored file is not rewritten.
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[("prompt", json!("authored {{ title }}")), ("title", json!("T"))], "Old");
+    let before = fs::read_to_string(&source.resolved_path).unwrap();
+
+    let prepared = prepare_inline(
+        &source,
+        PrepareOptions {
+            set_overrides: Some(json!({ "prompt": "caller {{ title }}" })),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+
+    assert!(prepared.prompt.contains("caller T"), "{}", prepared.prompt);
+    assert!(!prepared.prompt.contains("authored"), "{}", prepared.prompt);
+    assert_eq!(prepared.effective_frontmatter["prompt"], json!("caller T"));
+    assert_eq!(fs::read_to_string(&source.resolved_path).unwrap(), before);
+}
+
+#[test]
+fn inline_prompt_table_marks_only_required_properties_required_at_completion() {
+    // The table the agent actually receives, through the normal preparation
+    // path: `eager` is a launch-timing constraint, so an eager-only property
+    // stays optional at completion.
+    let dir = TempDir::new().unwrap();
+    let source = make_source(
+        &dir,
+        &[
+            (
+                "$schema",
+                json!({
+                    "spec": "string(eager)",
+                    "plan": "string(required; eager)",
+                    "summary": "string(required)",
+                    "notes": "string",
+                }),
+            ),
+            ("prompt", json!("Do the work")),
+            ("plan", json!("the plan")),
+        ],
+        "Old content",
+    );
+
+    let prepared = prepare_inline(&source, PrepareOptions::default()).unwrap();
+
+    assert!(
+        prepared.prompt.contains("**Schema properties:**"),
+        "{}",
+        prepared.prompt
+    );
+    for row in [
+        "| `spec` | `string(eager)` | absent | optional |",
+        "| `plan` | `string(required;eager)` | present | required |",
+        "| `summary` | `string(required)` | absent | required |",
+        "| `notes` | `string` | absent | optional |",
+    ] {
+        assert!(prepared.prompt.contains(row), "{row}\n{}", prepared.prompt);
+    }
+}
+
+#[test]
+fn inline_composition_missing_prompt_is_satisfied_by_an_override() {
+    let dir = TempDir::new().unwrap();
+    let source = make_source(&dir, &[("title", json!("Test"))], "Content");
+
+    let prepared = prepare_inline(
+        &source,
+        PrepareOptions {
+            set_overrides: Some(json!({ "prompt": "from the caller" })),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert!(prepared.prompt.contains("from the caller"));
 }
 
 #[test]

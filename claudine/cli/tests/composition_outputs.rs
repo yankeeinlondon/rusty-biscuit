@@ -254,13 +254,19 @@ fn provider_stderr_is_excluded_from_the_captured_entry() {
 #[test]
 fn inline_compose_success_sees_this_runs_output() {
     let workspace = tempdir().unwrap();
-    let path_dir = fake_goose(workspace.path(), "generated body", 0);
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
     let md = workspace.path().join("doc.md");
     fs::write(
         &md,
         "---\ntitle: t\nprompt: Write something.\nsuccess:\n  info: 'inline-last={{ last(outputs) }}'\n---\nold body\n",
     )
     .unwrap();
+    // Inline mode's output is the agent's summary, and the agent is the writer.
+    common::InlineAgentStub::new(&md)
+        .body("agent-written body\n")
+        .summary("generated body")
+        .install(&path_dir, "goose");
 
     let (_, stderr) = run(
         workspace.path(),

@@ -88,20 +88,19 @@ Body
     )
     .unwrap();
 
-    write_executable(
-        &path_dir.join("goose"),
-        r#"#!/bin/sh
-count=0
-if [ -f "$CLAUDINE_COUNT_FILE" ]; then
-  IFS= read -r count < "$CLAUDINE_COUNT_FILE"
-fi
-count=$((count + 1))
-printf '%s' "$count" > "$CLAUDINE_COUNT_FILE"
-cat > /dev/null
-printf 'Generated body %s' "$count"
-exit 0
-"#,
-    );
+    // Each iteration is a complete inline composition, so the agent must edit
+    // the document every time — a body that repeats would be refused.
+    common::InlineAgentStub::new(&md_file)
+        .prelude(
+            "count=0\n\
+             if [ -f \"$CLAUDINE_COUNT_FILE\" ]; then\n\
+             IFS= read -r count < \"$CLAUDINE_COUNT_FILE\"\n\
+             fi\n\
+             count=$((count + 1))\n\
+             printf '%s' \"$count\" > \"$CLAUDINE_COUNT_FILE\"\n",
+        )
+        .body_expression("\"Generated body $count\n\"")
+        .install(&path_dir, "goose");
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")
@@ -145,20 +144,19 @@ loop:
     )
     .unwrap();
 
-    write_executable(
-        &path_dir.join("goose"),
-        r#"#!/bin/sh
-count=0
-if [ -f "$CLAUDINE_COUNT_FILE" ]; then
-  IFS= read -r count < "$CLAUDINE_COUNT_FILE"
-fi
-count=$((count + 1))
-printf '%s' "$count" > "$CLAUDINE_COUNT_FILE"
-cat > /dev/null
-printf 'Generated body %s' "$count"
-exit 0
-"#,
-    );
+    // Each iteration is a complete inline composition, so the agent must edit
+    // the document every time — a body that repeats would be refused.
+    common::InlineAgentStub::new(&md_file)
+        .prelude(
+            "count=0\n\
+             if [ -f \"$CLAUDINE_COUNT_FILE\" ]; then\n\
+             IFS= read -r count < \"$CLAUDINE_COUNT_FILE\"\n\
+             fi\n\
+             count=$((count + 1))\n\
+             printf '%s' \"$count\" > \"$CLAUDINE_COUNT_FILE\"\n",
+        )
+        .body_expression("\"Generated body $count\n\"")
+        .install(&path_dir, "goose");
 
     assert_cmd::Command::cargo_bin("claudine").unwrap()
         .env("NO_COLOR", "1")

@@ -78,6 +78,51 @@ pub(super) fn status_block(err: &CompositionError) -> StatusBlock {
                 .error_header(ErrorHeader::new("CompositionError", "schema validation"))
                 .body(body)
         }
+        CompositionError::CompletionBodyUnchanged {
+            source_path,
+            reason,
+        } => {
+            let file_link = render_file_link(source_path);
+            let (what, hint) = match reason {
+                crate::composition::closure::BodyRejection::Empty => (
+                    "left the body empty",
+                    "The agent is told the document's absolute path in its prompt. Check that \
+                     it can write there, and that the prompt asks for body content.",
+                ),
+                crate::composition::closure::BodyRejection::Unchanged => (
+                    "did not change the body",
+                    "The agent's summary is shown above. Check whether it read the wrong file, \
+                     refused the task, or reported the work without performing it.",
+                ),
+            };
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "document not updated"))
+                .body(format!(
+                    "The agent {what} of {file_link}, so nothing was stamped or written."
+                ))
+                .hint(hint)
+        }
+        CompositionError::CompletionSchemaFailed {
+            source_path,
+            status,
+            ..
+        } => {
+            let file_link = render_file_link(source_path);
+            let body = vec![
+                Prose::new(format!(
+                    "{file_link} does not satisfy its `$schema` now that the run has completed."
+                )),
+                crate::composition::schema::schema_status_report_prose(status),
+            ];
+            StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new("CompositionError", "completion schema"))
+                .body(body)
+                .hint(
+                    "A property declared `required` must be present and valid when the run \
+                     finishes. Either the producing actor did not set it, or the schema \
+                     declares an obligation nothing fulfills.",
+                )
+        }
         CompositionError::MissingProperties {
             source_path,
             missing,

@@ -540,7 +540,16 @@ fn load_guarded_in_context(
         schema_roots,
         request_context,
         stack,
-    );
+    )
+    .map_err(|source| match source {
+        SchemaError::Grammar { .. }
+        | SchemaError::Convert { .. }
+        | SchemaError::Aggregate { .. } => SchemaError::ReferencedSchema {
+            path: canonical.clone(),
+            source: Box::new(source),
+        },
+        other => other,
+    });
     stack.leave();
     loaded
 }

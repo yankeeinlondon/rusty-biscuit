@@ -250,6 +250,9 @@ pub(crate) struct RebuiltLaunchIdentity {
     /// MCP tags lexed from the refreshed body, sorted and deduped. Empty when
     /// MCP is not enabled for the invocation.
     pub(crate) mcp_tags: Vec<String>,
+    /// The effective inline write-grant posture, `None` for a run that writes
+    /// no document. Part of the permission facet the session key compares.
+    pub(crate) write_posture: Option<String>,
     /// Stdout noise prefixes for the rebuilt profile in the rebuilt session
     /// mode (empty when interactive, matching the invocation's own gate).
     pub(crate) stdout_noise: &'static [&'static str],
@@ -348,6 +351,12 @@ pub(crate) fn rebuild_launch_identity(
         is_inline: intent.is_inline,
         model: model.clone(),
         mcp_body_tags: mcp_tags.clone(),
+        // The active document is the one the agent must write; a proxied
+        // target therefore moves this facet with the hand-off.
+        writable_document: intent
+            .is_inline
+            .then(|| source_path.map(Path::to_path_buf))
+            .flatten(),
     };
     let use_structured = facets.use_structured();
     let plan = launch_plan::build_launch_plan(&intent.launch_plan_inputs, &facets)?;
@@ -463,6 +472,7 @@ pub(crate) fn rebuild_launch_identity(
         launch_env,
         system_prompt_artifacts: plan.system_prompt_artifacts,
         warnings: plan.warnings,
+        write_posture: plan.write_posture,
     })
 }
 

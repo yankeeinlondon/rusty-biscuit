@@ -2,7 +2,7 @@
 
 use darkmatter::markdown::Markdown;
 use darkmatter::markdown::compose::expression::{ExpressionFinder, parse_condition};
-use darkmatter::markdown::schemas::DarkmatterSchemas;
+use darkmatter::markdown::schemas::{DarkmatterSchemas, SchemaPhase};
 use ignore::WalkBuilder;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
@@ -181,6 +181,94 @@ fn shipped_prompts_have_parseable_schemas_and_expressions() {
         "shipped prompt contract failures:\n{}",
         errors.join("\n")
     );
+}
+
+/// Every shipped schema must successfully construct both phase projections.
+#[test]
+fn shipped_prompt_schemas_project_at_both_phases() {
+    let mut failures = Vec::new();
+    for prompt in shipped_prompt_paths() {
+        let Ok(markdown) = Markdown::try_from(prompt.as_path()) else {
+            continue;
+        };
+        let Ok(Some(effective)) = DarkmatterSchemas::new().effective_for(&markdown) else {
+            continue;
+        };
+        let empty = Value::Object(serde_json::Map::new());
+        for phase in [SchemaPhase::Launch, SchemaPhase::Completion] {
+            if let Err(error) = effective.validate_for_phase(&empty, phase) {
+                failures.push(format!("{} ({phase:?}): {error}", prompt.display()));
+            }
+        }
+    }
+
+    assert!(
+        failures.is_empty(),
+        "shipped prompt phase-projection failures:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// End-to-end through the real shipped artifact and the normal invocation
+/// path: `implement-plan.md` derives `spec` from a sibling `spec.md` and
+/// deliberately yields `null` when there is none. While `spec` was declared
+/// `eager` that combination was a launch requirement the document could not
+/// satisfy, and the run failed with ``spec — null is not of type "string"``.
+///
+/// `--dry-run` stops after provider resolution, so the shipped document's
+/// `say:`/`effect:`/`shell:` lifecycle effects never run. The completion half
+/// of the same document is covered end-to-end by
+/// `level2_shipped_implement_plan_*`, whose fixture also stages no sibling
+/// spec.
+#[cfg(unix)]
+#[test]
+fn shipped_implement_plan_launches_without_a_sibling_spec() {
+    use std::fs;
+
+    use common::CliProcessFixture;
+    use common::{strip_ansi, write_executable};
+
+    let fixture = CliProcessFixture::named("implement-plan-no-spec");
+    fixture.initialize_repository();
+    fixture.seed_user_config();
+    let prompts = fixture.cwd().join("prompts");
+    copy_shipped_prompts(&prompts);
+    let feature_dir = fixture.home().join("features/no-spec-here");
+    fs::create_dir_all(&feature_dir).unwrap();
+    write_executable(&fixture.bin_dir().join("codex"), "#!/bin/sh\nexit 0\n");
+
+    let plan = feature_dir.join("plan.md");
+    fs::write(&plan, "---\ntotal_phases: 3\nphase: 1\n---\n# Plan\n").unwrap();
+    assert!(
+        !feature_dir.join("spec.md").exists(),
+        "the regression needs a plan with no sibling spec"
+    );
+
+    let assert = fixture
+        .command()
+        .arg("compose")
+        .arg(prompts.join("_implement/implement-plan.md"))
+        .arg(format!("plan={}", plan.display()))
+        .args(["--dry-run", "-y", "--codex"])
+        .assert()
+        .success();
+
+    let output = assert.get_output();
+    let rendered = strip_ansi(&format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    ));
+    assert!(
+        rendered.contains("spec: null"),
+        "the run must actually reach the null branch this regression is about: {rendered}"
+    );
+    for marker in ["is not of type", "schema validation", "MissingProperties"] {
+        assert!(
+            !rendered.contains(marker),
+            "an absent optional spec must not be a launch problem ({marker}): {rendered}"
+        );
+    }
 }
 
 /// The copy the CLI contract test composes must be the shipped corpus, not a

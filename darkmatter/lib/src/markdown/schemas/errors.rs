@@ -27,6 +27,26 @@ use thiserror::Error;
 /// Errors produced by the schemas subsystem.
 #[derive(Debug, Error)]
 pub enum SchemaError {
+    /// Multiple independent property definitions failed conversion.
+    ///
+    /// Children retain their typed property and source information. Root
+    /// structural failures remain standalone variants because traversal
+    /// cannot continue meaningfully after them.
+    #[error("multiple SimplifiedSchema properties are invalid ({})", errors.len())]
+    Aggregate { errors: Vec<SchemaError> },
+
+    /// A typed schema-definition failure originating in a referenced file.
+    ///
+    /// The wrapper preserves both the source path and the original error tree
+    /// so editor clients can retain per-property diagnostics while pointing
+    /// related information at the file that authored those properties.
+    #[error("referenced schema `{}` is invalid: {source}", path.display())]
+    ReferencedSchema {
+        path: PathBuf,
+        #[source]
+        source: Box<SchemaError>,
+    },
+
     /// A SimplifiedSchema failed to parse.
     ///
     /// `property` identifies the offending property (or a synthetic name like
@@ -279,6 +299,36 @@ impl biscuit_terminal::errors::BlockError for SchemaError {
         use biscuit_terminal::errors::{ErrorHeader, StatusBlockExt};
 
         match self {
+            SchemaError::Aggregate { errors } => StatusBlock::new(StatusState::Error)
+                .error_header(ErrorHeader::new(
+                    "SchemaError",
+                    "multiple schema properties are invalid",
+                ))
+                .body(
+                    errors
+                        .iter()
+                        .map(|error| Prose::new(Prose::escape_text(&error.to_string())))
+                        .collect::<Vec<_>>(),
+                )
+                .hint("Fix each listed property definition, then validate the schema again."),
+            SchemaError::ReferencedSchema { path, source } => {
+                StatusBlock::new(StatusState::Error)
+                    .error_header(ErrorHeader::new(
+                        "SchemaError",
+                        "referenced schema is invalid",
+                    ))
+                    .body(vec![
+                        Prose::new(format!(
+                            "The schema at <cyan>{}</cyan> contains an invalid definition.",
+                            Prose::escape_text(&path.display().to_string())
+                        )),
+                        Prose::new(format!(
+                            "<dim>Cause:</dim> {}",
+                            Prose::escape_text(&source.to_string())
+                        )),
+                    ])
+                    .hint("Fix the referenced schema definition, then validate again.")
+            }
             SchemaError::Grammar {
                 property,
                 message,

@@ -15,12 +15,14 @@ use std::path::Path;
 
 pub mod agent_message;
 pub mod closure;
+pub mod completion;
 pub mod coordinator;
 mod error;
 pub mod file_detail;
 pub mod frontmatter_excerpt;
 mod guardrails;
 pub mod hints;
+pub mod inline_prompt;
 #[cfg(test)]
 mod interpolation_conformance;
 pub(crate) mod json_util;
@@ -43,6 +45,14 @@ pub mod sequence;
 mod types;
 
 pub use agent_message::{agent_state_breakdown, invalid_agent_message};
+pub use closure::{
+    BodyRejection, CLOSURE_OWNED_PROPERTIES, InlineArtifact, InlineReconciliation,
+    reconcile_inline_artifact, reconcile_inline_artifact_with_evidence, restore_inline_baseline,
+};
+pub use completion::{
+    BodyEvidence, CompletionContext, CompletionOutcome, CompletionProblem, CompletionProblemKind,
+    CompletionVerdict, complete_active_document, evaluate_completion,
+};
 pub use coordinator::{
     ActionLocation, ActiveDocumentState, AttemptOutcome, CommandOutputPolicy, ControlBudget,
     ControlBudgetKind, DocumentIteration, DocumentOverlay, DocumentTransition,
@@ -61,6 +71,7 @@ pub use error::{
 };
 pub use file_detail::{FileDetail, extract_markdown_detail, extract_yaml_sequence_detail};
 pub use frontmatter_excerpt::FrontmatterExcerpt;
+pub use guardrails::{document_path_span, native_document_path};
 pub use launch_workspace::{LaunchWorkspaceContext, PackageContext};
 #[allow(deprecated)]
 pub use lifecycle::{
@@ -127,9 +138,11 @@ pub use resolve::{
 };
 pub use schema::{
     InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
-    SchemaStatusReport, build_schema_status_report, drop_invalid_optionals,
-    pre_validate_schema, prepare_direct_with_schema, prepare_direct_with_schema_and_prompt,
-    prepare_inline_with_schema,
+    SchemaStatusReport, build_schema_status_report, build_schema_status_report_for_mode,
+    description_suffix, drop_invalid_optionals, escape_schema_prose, launch_phase_for_mode,
+    pre_validate_schema, pre_validate_schema_for_mode, prepare_direct_with_schema,
+    prepare_direct_with_schema_and_prompt, prepare_inline_with_schema, render_optional_line,
+    render_required_line, schema_status_report_prose,
 };
 pub use select::{
     build_candidate_set, build_installed_snapshot, build_picker_plan, build_picker_plan_with_hints,
@@ -158,7 +171,7 @@ pub use sequence::task::{
 pub use types::{
     AgentHint, AgentResolutionState, AmbientVariable, CallerInputLayers, CompositionClosurePlan,
     CompositionExecutionRequest, CompositionMode, EffectiveSelectionHints, InlineClosurePlan,
-    InstalledProviderSnapshot, LoopAction, LoopCondition, LoopConfig, ModelHint,
+    InstalledProviderSnapshot, LaunchSchema, LoopAction, LoopCondition, LoopConfig, ModelHint,
     ModelResolutionReason, OnRateLimit, OutputFormat, PickerInfluence, PreparedComposition,
     ProviderPickerOption, ProviderPickerPlan, ProviderResolutionReason, ResolutionMode,
     ResolvedCompositionSource, ResolvedExecutionTarget, ResolvedSessionInteractivity,

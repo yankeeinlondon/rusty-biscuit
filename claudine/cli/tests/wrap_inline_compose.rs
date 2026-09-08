@@ -56,14 +56,10 @@ fn inline_compose_resolves_env_agent_in_prompt_template() {
     .unwrap();
 
     let captured_args = fixture.cwd().join("captured_args.txt");
-    write_executable(
-        &fixture.bin_dir().join("goose"),
-        r#"#!/bin/sh
-printf '%s\n' "$@" > "$CLAUDINE_CAPTURED_ARGS"
-printf 'updated body content\n'
-exit 0
-"#,
-    );
+    common::InlineAgentStub::new(&md_file)
+        .prelude("printf '%s\\n' \"$@\" > \"$CLAUDINE_CAPTURED_ARGS\"\n")
+        .body("updated body content\n")
+        .install(fixture.bin_dir(), "goose");
 
     fixture
         .command()
@@ -80,98 +76,124 @@ exit 0
     );
 }
 
+/// AC7: an agent that returns a summary without editing the file fails, and the
+/// document is byte-identical to the pre-run snapshot.
 #[cfg(unix)]
 #[test]
-fn inline_compose_rejects_empty_captured_output() {
-    let fixture = CliProcessFixture::named("inline-compose-empty-output");
+fn inline_compose_rejects_a_document_the_agent_never_updated() {
+    let fixture = CliProcessFixture::named("inline-compose-file-aware");
     fixture.seed_user_config();
 
     let md_file = fixture.cwd().join("test.md");
-    fs::write(
-        &md_file,
-        "---\nprompt: Generate content\n---\nOriginal body\n",
-    )
-    .unwrap();
-
-    // Agent that produces no replacement body.
-    write_executable(
-        &fixture.bin_dir().join("codex"),
-        r#"#!/bin/sh
-exit 0
-"#,
-    );
-
-    {
-        let assert = fixture
-            .command()
-            .args(["inline-compose", "--codex", md_file.to_str().unwrap()])
-            .assert();
-
-        let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
-        let plain = strip_ansi(&stderr);
-        assert!(
-            plain.contains("valid replacement body") || plain.contains("empty response"),
-            "should report invalid captured output; stderr was: {plain}"
-        );
-    }
-}
-
-#[cfg(unix)]
-#[test]
-fn inline_compose_preserves_frontmatter() {
-    let fixture = CliProcessFixture::named("inline-compose-preserve-frontmatter");
-    fixture.seed_user_config();
-
-    let md_file = fixture.cwd().join("test.md");
-    let original = "---\nprompt: Generate content\nlast_updated: 2026-01-01\n---\nOriginal body\n";
+    let original = "---\nprompt: Generate content\n---\nOriginal body\n";
     fs::write(&md_file, original).unwrap();
 
-    // Agent returns frontmatter + body on stdout. Claudine should strip the
-    // accidental frontmatter wrapper and preserve the original source frontmatter.
-    let provider_output =
-        "---\nprompt: CHANGED\nlast_updated: 2099-01-01\n---\nNew body from agent\n";
-    let escaped = provider_output.replace('\'', "'\\''");
+    // An agent that talks about the work without doing it.
+    write_executable(
+        &fixture.bin_dir().join("codex"),
+        "#!/bin/sh\nprintf 'I reviewed the document and it looks fine.\\n'\nexit 0\n",
+    );
 
+    let assert = fixture
+            .command()
+        .args(["inline-compose", "--codex", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+
+    let plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(
+        plain.contains("did not update"),
+        "should report the untouched document; stderr was: {plain}"
+    );
+    assert_eq!(
+        fs::read_to_string(&md_file).unwrap(),
+        original,
+        "a refused candidate must leave the document byte-identical"
+    );
+}
+
+/// AC6: the agent's authored frontmatter survives, the three caller-owned
+/// properties are restored with one warning each, and the stamp is fresh.
+#[cfg(unix)]
+#[test]
+fn inline_compose_preserves_frontmatter_and_restores_owned_properties() {
+    let fixture = CliProcessFixture::named("inline-compose-file-aware");
+    fixture.seed_user_config();
+
+    let md_file = fixture.cwd().join("test.md");
+    let original =
+        "---\nprompt: Generate content\nowner: Human\nlast_updated: '2026-01-01'\n---\nOriginal body\n";
+    fs::write(&md_file, original).unwrap();
+
+    // A disobedient agent: it rewrites `prompt` and `last_updated` (both owned)
+    // alongside the property it was legitimately asked to set.
     write_executable(
         &fixture.bin_dir().join("goose"),
-        &format!("#!/bin/sh\nprintf '%s' '{}'\nexit 0\n", escaped),
+        &format!(
+            "#!/bin/sh\nprintf '%s' {document} > {target}\nprintf 'Rewrote the body.\\n'\nexit 0\n",
+            document = common::sh_quote(concat!(
+                "---\n",
+                "prompt: CHANGED\n",
+                "owner: Human\n",
+                "researched_by: goose\n",
+                "last_updated: '2099-01-01'\n",
+                "---\n",
+                "New body from agent\n",
+            )),
+            target = common::sh_quote(&md_file.display().to_string()),
+        ),
     );
 
     let assert = fixture
         .command()
         .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
-        .assert();
+        .assert()
+        .success();
 
     let final_content = fs::read_to_string(&md_file).unwrap();
     assert!(
         final_content.contains("prompt: Generate content"),
-        "original frontmatter prompt should be preserved; file: {final_content}"
+        "the authored `prompt` must be restored; file: {final_content}"
+    );
+    assert!(
+        !final_content.contains("CHANGED"),
+        "the agent's `prompt` must not survive; file: {final_content}"
+    );
+    assert!(
+        final_content.contains("researched_by: goose"),
+        "the agent's own frontmatter must survive; file: {final_content}"
     );
 
     let today = Local::now().format("%Y-%m-%d").to_string();
     assert!(
-        final_content.contains(&format!("last_updated: {today}")),
+        final_content.contains(&format!("last_updated: '{today}'")),
         "last_updated should be today; file: {final_content}"
     );
-
-    // Body should be updated
     assert!(
         final_content.contains("New body from agent"),
         "body should be from agent; file: {final_content}"
     );
 
-    let stderr = String::from_utf8_lossy(&assert.get_output().stderr).to_string();
-    let plain = strip_ansi(&stderr);
-    assert!(
-        plain.contains("Preserved original frontmatter"),
-        "should report Claudine-managed frontmatter preservation; stderr was: {plain}"
-    );
+    let plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    let normalized = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+    for property in ["prompt", "last_updated"] {
+        assert!(
+            normalized.contains(&format!(
+                "The agent changed the caller-owned property \"{property}\" — restored the authored value"
+            )),
+            "expected one restore warning for `{property}`; stderr was:\n{plain}"
+        );
+    }
 }
 
+/// AC6 / AC9b: the agent authors frontmatter and body directly into the file
+/// across runs. The authored `prompt` bytes never move, the stamp stays
+/// coherent with what was written, and a second run refreshes rather than
+/// duplicating the agent's own properties.
 #[cfg(unix)]
 #[test]
-fn inline_compose_harvests_and_refreshes_response_frontmatter() {
-    let fixture = CliProcessFixture::named("inline-compose-refresh-frontmatter");
+fn inline_compose_keeps_agent_written_frontmatter_across_runs() {
+    let fixture = CliProcessFixture::named("inline-compose-file-aware");
     fixture.seed_user_config();
 
     let md_file = fixture.cwd().join("ap.md");
@@ -195,18 +217,45 @@ fn inline_compose_harvests_and_refreshes_response_frontmatter() {
 
     let run_count = fixture.cwd().join("run-count");
     let captured_args = fixture.cwd().join("captured-args");
+    // A file-aware agent: it rewrites the whole document, keeping the authored
+    // `prompt` node verbatim and setting the two properties it was asked for.
+    let agent_document = |version: &str| {
+        format!(
+            concat!(
+                "---\n",
+                "{}",
+                "access_points:\n",
+                "  - Office-{}\n",
+                "  - Studio-{}\n",
+                "generated_by: obedient-stub-{}\n",
+                "last_updated: '2026-01-01'\n",
+                "---\n",
+                "{} access-point inventory.\n",
+            ),
+            prompt_bytes,
+            version,
+            version,
+            version,
+            if version == "v1" { "Initial" } else { "Refreshed" }
+        )
+    };
     write_executable(
         &fixture.bin_dir().join("goose"),
-        r#"#!/bin/sh
-printf '%s\n' "$@" > "$CLAUDINE_CAPTURED_ARGS"
-if [ -f "$CLAUDINE_RUN_COUNT" ]; then
-  printf '%s\n' '---' 'access_points:' '  - Office-v2' '  - Studio-v2' 'generated_by: obedient-stub-v2' '---' 'Refreshed access-point inventory.'
-else
-  : > "$CLAUDINE_RUN_COUNT"
-  printf '%s\n' '---' 'access_points:' '  - Office-v1' '  - Studio-v1' 'generated_by: obedient-stub-v1' '---' 'Initial access-point inventory.'
-fi
-exit 0
-"#,
+        &format!(
+            "#!/bin/sh\n\
+             printf '%s\\n' \"$@\" > \"$CLAUDINE_CAPTURED_ARGS\"\n\
+             if [ -f \"$CLAUDINE_RUN_COUNT\" ]; then\n\
+             printf '%s' {v2} > {document}\n\
+             else\n\
+             : > \"$CLAUDINE_RUN_COUNT\"\n\
+             printf '%s' {v1} > {document}\n\
+             fi\n\
+             printf 'Updated the inventory.\\n'\n\
+             exit 0\n",
+            document = common::sh_quote(&md_file.display().to_string()),
+            v1 = common::sh_quote(&agent_document("v1")),
+            v2 = common::sh_quote(&agent_document("v2")),
+        ),
     );
 
     let run = || {
@@ -219,24 +268,19 @@ exit 0
             .success()
     };
 
-    let first = run();
-    let first_stderr = strip_ansi(&String::from_utf8_lossy(&first.get_output().stderr));
-    assert!(first_stderr.contains("Inserted frontmatter property \"access_points\""));
-    assert!(first_stderr.contains("Inserted frontmatter property \"generated_by\""));
+    run();
     let first_content = fs::read_to_string(&md_file).unwrap();
-    assert!(first_content.contains(prompt_bytes));
+    assert!(first_content.contains(prompt_bytes), "{first_content}");
     assert!(first_content.contains("Office-v1"));
     assert!(first_content.contains("generated_by: obedient-stub-v1"));
 
     let delivered_prompt = fs::read_to_string(&captured_args).unwrap();
-    assert!(delivered_prompt.contains("If the prompt asks you to add or update frontmatter properties"));
+    assert!(delivered_prompt.contains("Never modify the `prompt`, `hash`, or `last_updated`"));
+    assert!(!delivered_prompt.contains("If the prompt asks you to add or update frontmatter properties"));
 
-    let second = run();
-    let second_stderr = strip_ansi(&String::from_utf8_lossy(&second.get_output().stderr));
-    assert!(second_stderr.contains("Updated frontmatter property \"access_points\""));
-    assert!(second_stderr.contains("Updated frontmatter property \"generated_by\""));
+    run();
     let final_content = fs::read_to_string(&md_file).unwrap();
-    assert!(final_content.contains(prompt_bytes));
+    assert!(final_content.contains(prompt_bytes), "{final_content}");
     assert!(final_content.contains("Office-v2"));
     assert!(final_content.contains("Studio-v2"));
     assert!(final_content.contains("generated_by: obedient-stub-v2"));
@@ -260,17 +304,20 @@ exit 0
     assert!(!comparison.frontmatter_changed && !comparison.body_changed);
 }
 
+/// The 2026-09-01 drift semantics invert: on-disk frontmatter the agent wrote
+/// is the deliverable, not drift to restore. A structurally broken document is
+/// still refused, and refusal never stamps.
 #[cfg(unix)]
 #[test]
-fn inline_compose_reports_property_and_unclassified_frontmatter_drift() {
-    for (current, expected_notice) in [
+fn inline_compose_keeps_agent_frontmatter_and_refuses_a_malformed_document() {
+    for (agent_document, expectation) in [
         (
-            "---\nprompt: Generate content\nadded: value\n---\nOriginal body\n",
-            "Frontmatter property \"added\" changed on disk during the run — restored the authored value",
+            "---\nprompt: Generate content\nadded: value\n---\nReplacement body\n",
+            Ok("added: value"),
         ),
         (
-            "---\nprompt: [\n---\nOriginal body\n",
-            "could not be compared property by property — restored the authored frontmatter",
+            "---\nprompt: [\n---\nReplacement body\n",
+            Err("could not reconcile the inline document"),
         ),
     ] {
         let fixture = CliProcessFixture::named("inline-compose-frontmatter-drift");
@@ -285,88 +332,51 @@ fn inline_compose_reports_property_and_unclassified_frontmatter_drift() {
         write_executable(
             &fixture.bin_dir().join("goose"),
             r#"#!/bin/sh
-printf '%s' "$CLAUDINE_DRIFT_CONTENT" > "$CLAUDINE_DRIFT_TARGET"
-printf 'Replacement body\n'
+printf '%s' "$CLAUDINE_AGENT_DOCUMENT" > "$CLAUDINE_AGENT_TARGET"
+printf 'Wrote the document.\n'
 exit 0
 "#,
         );
 
         let assert = fixture
             .command()
-            .env("CLAUDINE_DRIFT_CONTENT", current)
-            .env("CLAUDINE_DRIFT_TARGET", &md_file)
+            .env("CLAUDINE_AGENT_DOCUMENT", agent_document)
+            .env("CLAUDINE_AGENT_TARGET", &md_file)
             .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
-            .assert()
-            .success();
+            .assert();
 
         let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
-        let normalized_stderr = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
+        let written = fs::read_to_string(&md_file).unwrap();
+        match expectation {
+            Ok(kept) => {
+                assert!(
+                    written.contains(kept),
+                    "the agent's frontmatter must be kept, not restored; file:\n{written}"
+                );
+                assert!(written.contains("hash:"), "an accepted run stamps; file:\n{written}");
+            }
+            Err(message) => {
+                assert!(
+                    stderr.contains(message),
+                    "expected {message:?}; stderr was:\n{stderr}"
+                );
+                assert!(
+                    !written.contains("hash:"),
+                    "a refused run must not stamp; file:\n{written}"
+                );
+                // AC17: a closure parse failure rolls the guard's baseline back
+                // atomically, so the malformed text the agent left is gone.
+                assert_eq!(
+                    written, "---\nprompt: Generate content\n---\nOriginal body\n",
+                    "a parse failure must restore the captured baseline"
+                );
+            }
+        }
         assert!(
-            normalized_stderr.contains(expected_notice),
-            "expected drift notice {expected_notice:?}; stderr was:\n{stderr}"
-        );
-        assert!(
-            !stderr.contains("The document body changed on disk during the run"),
-            "frontmatter-only drift must not produce a body notice; stderr was:\n{stderr}"
+            !stderr.contains("changed on disk during the run"),
+            "the retired drift wording must be gone; stderr was:\n{stderr}"
         );
     }
-}
-
-#[cfg(unix)]
-#[test]
-fn inline_compose_reports_canonical_value_and_body_drift() {
-    let fixture = CliProcessFixture::named("inline-compose-value-body-drift");
-    fixture.seed_user_config();
-
-    let md_file = fixture.cwd().join("doc.md");
-    let original = concat!(
-        "---\n",
-        "prompt: |-\n",
-        "  First\n",
-        "  Second\n",
-        "title: Mine\n",
-        "---\n",
-        "Original body\n",
-    );
-    fs::write(&md_file, original).unwrap();
-    write_executable(
-        &fixture.bin_dir().join("goose"),
-        r#"#!/bin/sh
-printf '%s' "$CLAUDINE_DRIFT_CONTENT" > "$CLAUDINE_DRIFT_TARGET"
-printf 'Replacement body\n'
-exit 0
-"#,
-    );
-
-    let drifted = concat!(
-        "---\n",
-        "prompt: \"First\\nSecond\"\n",
-        "title: Theirs\n",
-        "---\n",
-        "Changed body\n",
-    );
-    let assert = fixture
-        .command()
-        .env("CLAUDINE_DRIFT_CONTENT", drifted)
-        .env("CLAUDINE_DRIFT_TARGET", &md_file)
-        .args(["inline-compose", "--goose", md_file.to_str().unwrap()])
-        .assert()
-        .success();
-
-    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
-    let normalized_stderr = stderr.split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(normalized_stderr.contains(
-        "Frontmatter property \"title\" changed on disk during the run — restored the authored value"
-    ));
-    assert!(normalized_stderr.contains(
-        "The document body changed on disk during the run — applied the captured replacement body"
-    ));
-    assert!(!normalized_stderr.contains("agent changed"));
-
-    let written = fs::read_to_string(md_file).unwrap();
-    assert!(written.contains("prompt: |-\n  First\n  Second\n"));
-    assert!(written.contains("title: Mine\n"));
-    assert!(written.ends_with("---\nReplacement body\n"));
 }
 
 /// Phase 4 dry-run: `inline-compose --dry-run` runs the full composition
@@ -427,16 +437,13 @@ fn inline_compose_dry_run_leaves_file_unchanged_and_prints_prompt() {
     );
 }
 
+/// AC5: the agent writes the file and its final response is the run summary.
+/// Neither the interstitial narration nor the summary itself reaches the body.
 #[cfg(unix)]
 #[test]
 #[serial_test::serial]
-fn inline_compose_writes_only_final_response_not_narration() {
-    // Regression: with a structured provider that narrates between tool
-    // calls, inline-compose must write ONLY the agent's final response (the
-    // output text after the last tool call) into the document body. The
-    // interstitial "Let me read…/Now let me write…" narration must never
-    // leak into the artifact.
-    let fixture = CliProcessFixture::named("inline-compose-final-response-only");
+fn inline_compose_writes_the_agents_file_and_reports_only_the_final_summary() {
+    let fixture = CliProcessFixture::named("inline-compose-file-aware");
     fixture.seed_user_config();
 
     let md_file = fixture.cwd().join("doc.md");
@@ -446,25 +453,37 @@ fn inline_compose_writes_only_final_response_not_narration() {
     )
     .unwrap();
 
-    // Claude stream-json stub: narrate, call a tool, narrate again, call a
-    // second tool, then emit the FINAL response. Each narration block is a
-    // separate text-only assistant message, so without the fix all of them
-    // accumulate into `assistant_text` and leak into the body.
+    // Claude stream-json stub: narrate, call a tool, narrate again, write the
+    // document, then emit the FINAL summary. Each narration block is a separate
+    // text-only assistant message, so without the accumulator reset all of them
+    // would be reported as the summary.
     write_executable(
         &fixture.bin_dir().join("claude"),
-        r##"#!/bin/sh
-printf '%s\n' '{"type":"system","subtype":"init","session_id":"claude-final","model":"claude-sonnet-4"}'
-printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Let me read the research documents first."}]}}'
-printf '%s\n' '{"type":"tool_use","name":"read_file","input":{"path":"research.md"}}'
-printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"Now let me write the document."}]}}'
-printf '%s\n' '{"type":"tool_use","name":"write_file","input":{"path":"doc.md"}}'
-printf '%s\n' '{"type":"assistant","message":{"content":[{"type":"text","text":"# Final Document\n\nThis is the only content that belongs in the body."}]}}'
-printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","num_turns":3,"duration_ms":100,"usage":{"input_tokens":3,"output_tokens":60}}'
+        &format!(
+            r##"#!/bin/sh
+printf '%s\n' '{{"type":"system","subtype":"init","session_id":"claude-final","model":"claude-sonnet-4"}}'
+printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Let me read the research documents first."}}]}}}}'
+printf '%s\n' '{{"type":"tool_use","name":"read_file","input":{{"path":"research.md"}}}}'
+printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"Now let me write the document."}}]}}}}'
+printf '%s' {agent_document} > '{document}'
+printf '%s\n' '{{"type":"tool_use","name":"write_file","input":{{"path":"doc.md"}}}}'
+printf '%s\n' '{{"type":"assistant","message":{{"content":[{{"type":"text","text":"I researched the handsets and wrote the document."}}]}}}}'
+printf '%s\n' '{{"type":"result","subtype":"success","stop_reason":"end_turn","num_turns":3,"duration_ms":100,"usage":{{"input_tokens":3,"output_tokens":60}}}}'
 "##,
+            document = md_file.display(),
+            agent_document = common::sh_quote(concat!(
+                "---\n",
+                "prompt: Generate the document body.\n",
+                "---\n",
+                "# Final Document\n",
+                "\n",
+                "This is the only content that belongs in the body.\n",
+            )),
+        ),
     );
 
-    fixture
-        .command()
+    let assert = fixture
+            .command()
         .args(["inline-compose", "--claude", md_file.to_str().unwrap()])
         .assert()
         .success();
@@ -472,24 +491,35 @@ printf '%s\n' '{"type":"result","subtype":"success","stop_reason":"end_turn","nu
     let final_doc = fs::read_to_string(&md_file).unwrap();
     assert!(
         final_doc.contains("This is the only content that belongs in the body."),
-        "the final response should be written to the body; doc:\n{final_doc}"
+        "the agent's file is the deliverable; doc:\n{final_doc}"
     );
-    assert!(
-        !final_doc.contains("Let me read the research documents first."),
-        "first narration block leaked into the body; doc:\n{final_doc}"
-    );
-    assert!(
-        !final_doc.contains("Now let me write the document."),
-        "second narration block leaked into the body; doc:\n{final_doc}"
-    );
-    assert!(
-        !final_doc.contains("Original placeholder body."),
-        "the original body should have been replaced; doc:\n{final_doc}"
-    );
-    // Frontmatter is preserved through the inline rewrite.
+    for narration in [
+        "Let me read the research documents first.",
+        "Now let me write the document.",
+        "I researched the handsets and wrote the document.",
+        "Original placeholder body.",
+    ] {
+        assert!(
+            !final_doc.contains(narration),
+            "{narration:?} must not reach the body; doc:\n{final_doc}"
+        );
+    }
     assert!(
         final_doc.contains("prompt: Generate the document body."),
         "original frontmatter should be preserved; doc:\n{final_doc}"
+    );
+
+    // Narration is never reported as the run's outcome. Publishing the summary
+    // itself into run output is the lifecycle-routing step (plan Phase 6).
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    let stdout = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stdout));
+    assert!(
+        stdout.contains("I researched the handsets and wrote the document."),
+        "the final response must be published as the run summary; stdout was:\n{stdout}"
+    );
+    assert!(
+        !stderr.contains("Let me read the research documents first."),
+        "narration must not be reported as the summary; stderr was:\n{stderr}"
     );
 }
 
@@ -581,8 +611,10 @@ fn inline_compose_dry_run_schema_error_to_stderr_with_clean_stdout() {
     fixture.seed_user_config();
 
     let md_file = fixture.cwd().join("doc.md");
+    // `eager`: an inline run tolerates a required-but-not-eager gap at launch
+    // (the agent supplies it), so only an eager property is a launch error.
     let original =
-        "---\n$schema:\n  topic: 'string(required)'\nprompt: Plan {{topic}}\nagent: goose\n---\nOriginal body\n";
+        "---\n$schema:\n  topic: 'string(required;eager)'\nprompt: Plan {{topic}}\nagent: goose\n---\nOriginal body\n";
     fs::write(&md_file, original).unwrap();
 
     write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");
@@ -762,4 +794,199 @@ exit 0
             "ConfigDefault should NOT push --model to child args"
         );
     }
+}
+
+// -- file-aware inline launch (2026-09-05 inline flow, Phase 4) -----------
+
+#[cfg(unix)]
+/// A Goose stub that records its launch and writes the document.
+///
+/// `frontmatter_additions` are the properties this fixture's agent is expected
+/// to supply — the completion verdict enforces the document's `$schema` once
+/// the run finishes, so a launch-surface fixture has to leave a *satisfied*
+/// document behind or it would be asserting on a failed run.
+fn write_recording_goose(
+    path_dir: &std::path::Path,
+    document: &std::path::Path,
+    frontmatter_additions: &str,
+) {
+    common::InlineAgentStub::new(document)
+        .prelude(RECORDING_PRELUDE)
+        .frontmatter_additions(frontmatter_additions)
+        .body("updated body content\n")
+        .summary("Recorded the launch and updated the document.")
+        .install(path_dir, "goose");
+}
+
+#[cfg(unix)]
+const RECORDING_PRELUDE: &str = "printf '%s\\n' \"$@\" > \"$CLAUDINE_CAPTURED_ARGS\"\n\
+     printf 'GOOSE_MODE=%s\\n' \"${GOOSE_MODE-unset}\" > \"$CLAUDINE_CAPTURED_ENV\"\n";
+
+#[cfg(unix)]
+fn inline_compose_cmd(fixture: &CliProcessFixture) -> assert_cmd::Command {
+    let mut cmd = fixture.command();
+    cmd.env("CLAUDINE_CAPTURED_ARGS", fixture.cwd().join("captured_args.txt"))
+        .env("CLAUDINE_CAPTURED_ENV", fixture.cwd().join("captured_env.txt"));
+    cmd
+}
+
+/// AC5 / AC19: the delivered prompt names the document's exact native
+/// absolute path (spaces intact, nothing escaped) and carries the file-aware
+/// guardrails, and Goose is launched in its writable posture.
+#[cfg(unix)]
+#[test]
+fn inline_compose_delivers_the_native_document_path_and_file_aware_guardrails() {
+    let fixture = CliProcessFixture::named("inline-compose-file-aware");
+    fixture.seed_user_config();
+    let docs = fixture.cwd().join("my docs");
+    fs::create_dir_all(&docs).unwrap();
+    let md_file = docs.join("voip notes.md");
+    write_recording_goose(
+        fixture.bin_dir(),
+        &md_file,
+        "researched_by: goose\nproducts:\n  handset: Yealink\n",
+    );
+    fs::write(
+        &md_file,
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  prompt: 'string(required;eager)'\n",
+            "  last_updated: 'string(required)'\n",
+            "  researched_by: 'string(required)'\n",
+            "  products: 'object(required)'\n",
+            "prompt: Research VoIP handsets\n",
+            "agent: goose\n",
+            "---\n",
+            "original body\n",
+        ),
+    )
+    .unwrap();
+
+    inline_compose_cmd(&fixture)
+        .args(["inline-compose", md_file.to_str().unwrap()])
+        .assert()
+        .success();
+
+    let argv = fs::read_to_string(fixture.cwd().join("captured_args.txt")).unwrap();
+    // The host may spell the temp dir with or without its `/private` symlink
+    // prefix; the document identity Claudine resolved is one of the two.
+    let spellings = [
+        md_file.clone(),
+        md_file.canonicalize().unwrap_or_else(|_| md_file.clone()),
+    ];
+    let expected_span = spellings
+        .iter()
+        .map(|path| format!("`{}`", path.display()))
+        .find(|span| argv.contains(&format!("**Document:** {span}")))
+        .unwrap_or_else(|| panic!("the prompt header must name the native absolute path; argv was: {argv}"));
+    assert!(
+        argv.contains(&format!("The document you are updating is {expected_span}.")),
+        "guardrails must be bound to the same path; argv was: {argv}"
+    );
+    assert!(argv.contains("Never modify the `prompt`, `hash`, or `last_updated`"), "{argv}");
+    assert!(argv.contains("summary of what you did"), "{argv}");
+    assert!(argv.contains("| `products` | `object(required)` | absent | required |"), "{argv}");
+    assert!(argv.contains("| `prompt` | `string(required;eager)` | present | required |"), "{argv}");
+    assert!(!argv.contains("Return the replacement Markdown body"), "{argv}");
+    assert!(!argv.contains("\\\\"), "backslashes must never be doubled: {argv}");
+
+    let env = fs::read_to_string(fixture.cwd().join("captured_env.txt")).unwrap();
+    assert_eq!(env.trim(), "GOOSE_MODE=auto", "Goose's minimum writable posture");
+}
+
+/// AC3 / AC13: an eager `prompt` supplied by the caller satisfies the launch
+/// gate, becomes the delivered prompt, and is never written to the file.
+#[cfg(unix)]
+#[test]
+fn inline_compose_uses_a_caller_supplied_prompt_without_persisting_it() {
+    let fixture = CliProcessFixture::named("inline-compose-file-aware");
+    fixture.seed_user_config();
+
+    let md_file = fixture.cwd().join("doc.md");
+    write_recording_goose(fixture.bin_dir(), &md_file, "products:\n  handset: Yealink\n");
+    let authored = concat!(
+        "---\n",
+        "$schema:\n",
+        "  prompt: 'string(required;eager)'\n",
+        "  products: 'object(required)'\n",
+        "agent: goose\n",
+        "---\n",
+        "original body\n",
+    );
+    fs::write(&md_file, authored).unwrap();
+
+    inline_compose_cmd(&fixture)
+        .args([
+            "inline-compose",
+            md_file.to_str().unwrap(),
+            "prompt=Transient research request",
+        ])
+        .assert()
+        .success();
+
+    let argv = fs::read_to_string(fixture.cwd().join("captured_args.txt")).unwrap();
+    assert!(argv.contains("Transient research request"), "{argv}");
+    let after = fs::read_to_string(&md_file).unwrap();
+    assert!(!after.contains("Transient research request"), "transient prompt persisted: {after}");
+    assert!(!after.contains("\nprompt:"), "no prompt property may be authored into the file: {after}");
+}
+
+/// AC3: with `prompt` absent and no caller value, a non-TTY run fails before
+/// launch naming `prompt` — through the schema, so it is collectable on a TTY.
+#[cfg(unix)]
+#[test]
+fn inline_compose_without_an_eager_prompt_fails_before_launch_naming_it() {
+    let fixture = CliProcessFixture::named("inline-compose-file-aware");
+    fixture.seed_user_config();
+
+    let md_file = fixture.cwd().join("doc.md");
+    write_recording_goose(fixture.bin_dir(), &md_file, "");
+    fs::write(
+        &md_file,
+        "---\n$schema:\n  prompt: 'string(required;eager)'\n  products: 'object(required)'\nagent: goose\n---\nbody\n",
+    )
+    .unwrap();
+
+    let assert = inline_compose_cmd(&fixture)
+        .args(["inline-compose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(stderr.contains("prompt"), "must name the missing eager property: {stderr}");
+    assert!(
+        !stderr.contains("products"),
+        "a required-but-not-eager property is never a launch gap for inline-compose: {stderr}"
+    );
+    assert!(
+        !fixture.cwd().join("captured_args.txt").exists(),
+        "the provider must not launch"
+    );
+}
+
+/// AC19: an explicit approval deny refuses before any provider spawns and is
+/// never widened to bypass.
+#[cfg(unix)]
+#[test]
+fn inline_compose_refuses_an_explicit_write_deny_before_spawn() {
+    let fixture = CliProcessFixture::named("inline-compose-file-aware");
+    fixture.seed_user_config();
+
+    let md_file = fixture.cwd().join("doc.md");
+    write_recording_goose(fixture.bin_dir(), &md_file, "");
+    fs::write(&md_file, "---\nprompt: Update me\nagent: goose\n---\nbody\n").unwrap();
+
+    let assert = inline_compose_cmd(&fixture)
+        .env("GOOSE_MODE", "chat")
+        .args(["inline-compose", md_file.to_str().unwrap()])
+        .assert()
+        .failure();
+    let stderr = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(stderr.contains("GOOSE_MODE=chat"), "must name the denial: {stderr}");
+    assert!(stderr.contains("explicitly denies file edits"), "{stderr}");
+    assert!(
+        !fixture.cwd().join("captured_args.txt").exists(),
+        "the provider must not launch under a denied posture"
+    );
+    assert_eq!(fs::read_to_string(&md_file).unwrap(), "---\nprompt: Update me\nagent: goose\n---\nbody\n");
 }

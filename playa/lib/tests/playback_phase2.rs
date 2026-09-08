@@ -122,7 +122,7 @@ fn report_schema_round_trips_and_defaults_additive_fields() {
     assert_eq!(prior_report.route, PlaybackRoute::DryRun);
 
     let fixture: serde_json::Value = serde_json::from_str(include_str!(
-        "../../../claudine/fixes/2026-09-03-tts-not-finishing/fixtures/v1-delegated-report.json"
+        "../../../claudine/fixes/_completed/2026-09-03-tts-not-finishing/fixtures/v1-delegated-report.json"
     ))
     .unwrap();
     let fixture_report: PlaybackReport =

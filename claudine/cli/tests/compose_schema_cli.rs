@@ -56,10 +56,11 @@ fn compose_and_inline_bare_sidecar_advisory_render_once_and_silent_suppresses_it
     let inline_source =
         "---\n$schema: ./schema.yaml\nprompt: Update the body.\n---\nOriginal body.\n";
     fs::write(&inline_file, inline_source).unwrap();
-    write_executable(
-        &path_dir.join("goose"),
-        "#!/bin/sh\nprintf 'Updated body.\\n'\nexit 0\n",
-    );
+    // `compose` ignores the stub's edit; `inline-compose` requires it, because
+    // the agent is the writer.
+    common::InlineAgentStub::new(&inline_file)
+        .body("Updated body.\n")
+        .install(&path_dir, "goose");
 
     let run = |subcommand: &str, file: &std::path::Path, silent: bool| {
         let mut command = assert_cmd::Command::cargo_bin("claudine").unwrap();
@@ -172,6 +173,75 @@ Plan for {{topic}}.
     assert!(
         !count_path.exists(),
         "no provider session should have been launched; stub recorded a call"
+    );
+}
+
+/// AC9a / AC13, compose half: a required property authored as a conditional
+/// expression is judged *after* the document's own expression has had its
+/// chance. With no caller value the expression yields `null`, which — with
+/// Interactive Mode denied on a non-TTY — is a launch error naming the
+/// property, not a wrong-type failure and not a silent launch. Supplying the
+/// input the expression depends on makes the same run succeed.
+#[cfg(unix)]
+#[test]
+fn compose_conditional_required_property_fails_before_launch_when_interaction_is_denied() {
+    let workspace = tempdir().unwrap();
+    let path_dir = workspace.path().join("bin");
+    fs::create_dir_all(&path_dir).unwrap();
+    let count_path = workspace.path().join("call-count.txt");
+
+    let md_file = workspace.path().join("plan.md");
+    fs::write(
+        &md_file,
+        concat!(
+            "---\n",
+            "$schema:\n",
+            "  spec: 'string'\n",
+            "  foo: 'string(required)'\n",
+            "foo: \"{{ spec ? spec + '-derived' : null }}\"\n",
+            "---\n",
+            "Plan for {{foo}}.\n",
+        ),
+    )
+    .unwrap();
+    write_executable(
+        &path_dir.join("goose"),
+        &format!(
+            "#!/bin/sh\necho touched >> {count}\nexit 0\n",
+            count = count_path.display()
+        ),
+    );
+
+    let run = |args: &[&str]| {
+        let mut command = assert_cmd::Command::cargo_bin("claudine").unwrap();
+        command
+            .env("NO_COLOR", "1")
+            .env("CLAUDINE_RENDEZVOUS_REPORT", "false")
+            .env("HOME", workspace.path())
+            .env("PATH", augmented_path(&path_dir))
+            .current_dir(workspace.path())
+            .args(["compose", "--goose", md_file.to_str().unwrap()])
+            .args(args)
+            .assert()
+    };
+
+    let assert = run(&[]).failure();
+    let plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert!(
+        plain.to_lowercase().contains("missing properties"),
+        "a null-resolving required property is a missing-property gap, not a type \
+         failure; stderr:\n{plain}"
+    );
+    assert!(plain.contains("foo"), "stderr:\n{plain}");
+    assert!(
+        !count_path.exists(),
+        "compose must never start with a required property unsatisfied"
+    );
+
+    run(&["spec=alpha"]).success();
+    assert!(
+        fs::read_to_string(&count_path).unwrap().contains("touched"),
+        "the resolvable expression must neither prompt nor fail"
     );
 }
 
@@ -695,8 +765,10 @@ ignored body
 #[test]
 fn inline_compose_missing_required_surfaces_typed_missing_properties() {
     // Inline-compose schema validation must produce a typed
-    // CompositionError (not a raw Darkmatter MarkdownError) when a
-    // required property is missing — same contract as direct compose.
+    // CompositionError (not a raw Darkmatter MarkdownError) when an eager
+    // property is missing — same contract as direct compose. (A
+    // required-but-not-eager property is deferred to the agent at inline
+    // launch, so only `eager` is a launch gate here.)
     let workspace = tempdir().unwrap();
     let path_dir = workspace.path().join("bin");
     fs::create_dir_all(&path_dir).unwrap();
@@ -707,7 +779,7 @@ fn inline_compose_missing_required_surfaces_typed_missing_properties() {
         &md_file,
         r#"---
 $schema:
-  topic: 'string(required)'
+  topic: 'string(required;eager)'
 prompt: 'Generate a plan for {{topic}}'
 ---
 ignored body

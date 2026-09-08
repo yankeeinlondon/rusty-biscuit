@@ -1,10 +1,14 @@
 ---
-hash: ef46db3751d8e999-b93fde9ea706954b
-last_updated: 2026-08-01
+hash: ef46db3751d8e999-2da5ce434094e5be
+last_updated: 2026-09-06
 ---
 # Claudine Change Timeline
 
 Condensed history of significant Claudine features and refactors, newest first. Each entry names the feature/fix slug and the durable takeaway; deep references live in the linked docs. For current behavior always trust [architecture.md](architecture.md), [cli-reference.md](cli-reference.md), and the repo `docs/topics/*` — this file is historical context, not a spec.
+
+## 2026-09
+
+- **2026-09-05 — `inline-flow-and-validations`**: Reversed four uncommunicated steps of drift that had turned `inline-compose` from "the agent updates this document" into "the agent answers a question and Claudine transcribes it". The agent is **file-aware** again: it receives the document's native absolute path (never JSON-escaped), a `$schema` property table when one is declared, and guardrails naming the three closure-owned properties (`prompt`, `hash`, `last_updated`); it writes the body and any requested frontmatter itself, and its final response is a two-to-three-paragraph **summary for the caller** that never enters the document. The response-block frontmatter channel, its allowlist, and the closure-local YAML node editor are all deleted — the closure now reads the file back and restores the owned nodes textually through Darkmatter's `restore_properties_text`. A single **completion verdict** (`composition::completion::complete_active_document`) serves both modes at one lifecycle seam — `initialize → launch validation → start → provider → inline closure → verdict → success | failure → finalize` — asking whether the body changed meaningfully (inline only, non-strict `Simple` body hash) and whether the launch-resolved `$schema` is satisfied. `SchemaPhase::{Launch, Completion}` makes `eager` a **universal** SimplifiedSchema timing constraint ("validate at launch when present") independent of `required` ("must be present by the time the run completes"), so inline launch no longer blocks on optional eager properties that the agent may omit or required non-eager properties it is supposed to supply; DMLS anchors schema-definition errors per property instead of reporting only the first. A failed verdict is ordinary `failure` recovery (`retry`/`resume`/`proxy`), but a validly written artifact is **kept** on a completion-schema failure while a provider failure, exit 130, or refused body atomically restores the operation-level baseline. `wrap::write_grant` launches every provider in the narrowest posture that can write the document and refuses an explicit deny before spawn rather than widening to a bypass. See the fix spec/plan, [Composition § Completion Verdict](composition.md#completion-verdict), and [Lifecycle](lifecycle.md#the-completion-verdict-decides-which-terminal-event-fires).
 
 ## 2026-08
 

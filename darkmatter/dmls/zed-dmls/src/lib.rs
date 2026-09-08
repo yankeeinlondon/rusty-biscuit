@@ -1,6 +1,6 @@
 //! Thin Zed extension that launches the native `dmls` binary.
 //!
-//! Contains no language logic: it resolves the binary (PATH → settings override
+//! Contains no language logic: it resolves the binary (settings override → PATH
 //! → GitHub release download, cached by version) and returns the command Zed
 //! runs. All Markdown/Darkmatter intelligence lives in `dmls`.
 
@@ -24,18 +24,20 @@ impl DmlsExtension {
         language_server_id: &LanguageServerId,
         worktree: &zed::Worktree,
     ) -> Result<String> {
-        // 1. PATH.
-        if let Some(path) = worktree.which("dmls") {
-            return Ok(path);
-        }
-
-        // 2. Settings override (`binary.path`).
+        // 1. Settings override (`binary.path`). An explicit choice outranks PATH,
+        //    and it is the only step that works for single-file worktrees: Zed
+        //    loads no shell environment for those, so `which` sees a bare PATH.
         if let Ok(settings) = LspSettings::for_worktree("dmls", worktree) {
             if let Some(binary) = settings.binary {
                 if let Some(path) = binary.path {
                     return Ok(path);
                 }
             }
+        }
+
+        // 2. PATH.
+        if let Some(path) = worktree.which("dmls") {
+            return Ok(path);
         }
 
         // 3. GitHub release download, cached by version.
@@ -55,7 +57,8 @@ impl DmlsExtension {
                 require_assets: true,
                 pre_release: false,
             },
-        )?;
+        )
+        .map_err(unresolved_binary_error)?;
 
         let (platform, arch) = zed::current_platform();
         let asset_name = asset_name(&release.version, platform, arch);
@@ -85,6 +88,22 @@ impl DmlsExtension {
         self.cached_binary_path = Some(binary_path.clone());
         Ok(binary_path)
     }
+}
+
+/// Message for the terminal failure: no local binary, and no published release
+/// to fall back on.
+///
+/// The release lookup is the last resort, so its transport error (typically a
+/// bare `404` while `REPO` names an unpublished repository) is the text Zed
+/// shows the user. Lead with the two steps that actually resolve the binary.
+fn unresolved_binary_error(release_error: String) -> String {
+    format!(
+        "could not resolve the `dmls` binary. It is not on this worktree's PATH \
+         (single-file buffers carry no shell environment) and \
+         `lsp.dmls.binary.path` is not set in Zed's settings. Install it with \
+         `just install-dmls`, or set `lsp.dmls.binary.path` to its absolute \
+         path. Downloading a release from `{REPO}` also failed: {release_error}"
+    )
 }
 
 /// Release asset name for a platform, matching the `just dist` recipe naming.
