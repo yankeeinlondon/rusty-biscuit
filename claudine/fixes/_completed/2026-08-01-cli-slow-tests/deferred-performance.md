@@ -1,6 +1,7 @@
 ---
 fix: 2026-08-01-cli-slow-tests
 created: 2026-09-07
+updated: 2026-09-07
 ---
 
 # Deferred performance measurements — `2026-08-01-cli-slow-tests`
@@ -8,6 +9,17 @@ created: 2026-09-07
 Performance verification that a review asked for and an implementation cycle
 could not legitimately produce. Each entry names the finding it maps back to,
 the review that raised it, and precisely what has to happen before it can close.
+
+## Status as of 2026-09-07 (successor's Phase 1)
+
+Read by
+[`2026-09-07-faster-claudine-tests` Phase 1](../../2026-09-07-faster-claudine-tests/log.md),
+whose gate is to resolve both items in writing before any of its own code lands.
+
+| Item | Status |
+|---|---|
+| 1 — AC4 CI targets, four environments × three green runs | **OPEN.** Still a committed-state problem: nothing has been committed, pushed or merged, so no post-change CI run exists. |
+| 2 — Windows compilation of the `#[cfg(windows)]` arms | **COMPILE HALF CLOSED** for `x86_64-pc-windows-gnu`; MSVC-specific surface and all runtime behavior remain open. See the addendum below. |
 
 ## 1. Acceptance criterion 4 — CI targets on four environments × three green runs
 
@@ -126,3 +138,44 @@ hoisted out of `cfg` blocks so a typo is a macOS compile error rather than a
 
 The same push that closes item 1. The `windows-latest` leg is the first
 compiler these arms will ever see.
+
+### Addendum, 2026-09-07 — the compile half closed without the push
+
+The paragraph above was wrong on one point, and the successor's Phase 1 found it
+while running the gate: `windows-latest` is *not* the only compiler available.
+The failing command recorded above targets **MSVC**
+(`x86_64-pc-windows-msvc`), which drags in `aws-lc-sys` and its Windows SDK
+header requirement. The area's own `just check-windows` recipe targets **mingw**
+(`x86_64-pc-windows-gnu`, `--tests`, `-Wa,-mbig-obj`), which has no such
+dependency. That recipe was never run during implementation cycle 3.
+
+Run on the same macOS host at `9fc5151a0`, after
+`rustup target add x86_64-pc-windows-gnu` supplied the missing standard library:
+
+```text
+cargo check -p claudine -p claudine-cli --tests --target x86_64-pc-windows-gnu
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 37s
+EXIT=0
+```
+
+So every arm in the "what is unverified anywhere" list above now compiles:
+`restore_windows_console_variables`' three `.env()` calls, the Windows arm of
+`inherit_no_env_keeps_the_defaults_and_drops_everything_else`,
+`minimal_system_path()`'s `%SystemRoot%\System32` arm, and the `.cmd` recording
+stub in `cli_process_fixture.rs`. A typo in those arms is now a local error
+rather than a `windows-latest` surprise.
+
+**Still open, and not weakened by this.** Compiling is not running. The honest
+risk stated above — that a cleared Windows environment is missing a *fourth*
+thing claudine needs — is a runtime question that only the `windows-latest` leg
+answers. mingw is also not MSVC, so anything MSVC-specific in the native
+dependency graph is still unproven. Item 2 therefore closes fully with item 1's
+push, not before.
+
+**Incidental finding.** The mingw check emits three unused-import warnings the
+host build does not, all residue of `#[cfg(unix)]`-gated cases:
+`claudine/cli/tests/wrap_basics.rs:7` (`std::fs`),
+`claudine/cli/tests/wrap_basics.rs:9` (`common::wrap::*`), and
+`claudine/cli/tests/compose_caller_file_provenance.rs:5` (`write_executable`).
+Warnings, not errors; carried to the successor's Phase 5, which edits both
+files.

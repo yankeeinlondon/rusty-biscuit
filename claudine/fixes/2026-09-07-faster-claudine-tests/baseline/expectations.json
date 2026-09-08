@@ -1,0 +1,31 @@
+{
+  "_comment": [
+    "Expectations for `junit-metrics.ts` over the four-leg baseline.",
+    "`requiredTests` are the nine timeout-shaped tests the predecessor fix's",
+    "acceptance criterion 4 measures: their absence from a leg is a gate failure,",
+    "so a run that silently stopped executing one cannot read as a speed-up.",
+    "`enforceTimeoutFloors` stays false for the baseline because those floors were",
+    "ratified under the pre-fix first-event grace; Phase 3 re-derives them under",
+    "the 2026-08-31 spawn-fallback silence clock and Phase 9 turns enforcement on",
+    "for the candidate sets."
+  ],
+  "environments": ["ubuntu-latest", "macos-latest", "windows-latest", "wsl2-ubuntu"],
+  "cells": [
+    { "tier": "L1", "package": "claudine-cli" }
+  ],
+  "requiredTests": [
+    "watchdog_subagent_hang_terminates_and_names_stuck_ids",
+    "watchdog_stream_idle_timeout_after_tool_call_hang",
+    "watchdog_wall_clock_timeout_terminates_active_stream",
+    "watchdog_opencode_post_fanout_silence_does_not_kill_prematurely",
+    "compose_non_harness_respects_cli_timeout",
+    "inline_compose_non_harness_respects_cli_step_timeout",
+    "sequence_per_step_step_timeout_override",
+    "opencode_stderr_rate_limit_before_stdout_forces_early_termination",
+    "opencode_stderr_stream_error_cap_1_17_8_forces_early_termination",
+    "inline_compose_wrong_type_prompt_takes_precedence_over_schema_scrub",
+    "a_loop_accumulates_outputs_and_retains_mutations_across_iterations"
+  ],
+  "pendingEnvironments": [],
+  "enforceTimeoutFloors": false
+}
