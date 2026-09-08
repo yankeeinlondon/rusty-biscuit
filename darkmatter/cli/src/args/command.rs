@@ -324,9 +324,9 @@ pub enum Command {
 
     /// Open a markdown file in your preferred editor.
     ///
-    /// Resolves the file using biscuit-file's FileReference system (supports `@`, `!`,
-    /// `vault:`, etc.). Creates the file if it doesn't exist. Blocks until the editor
-    /// exits. Returns the fully qualified filename on success.
+    /// Resolves the file using biscuit-file's FileReference system (supports `@`, `&`,
+    /// `^`, `vault:`, etc.). Creates the file if it doesn't exist. Blocks until the
+    /// editor exits. Returns the fully qualified filename on success.
     ///
     /// Editor priority: $EDITOR > $VISUAL > first installed from default list.
     Edit {

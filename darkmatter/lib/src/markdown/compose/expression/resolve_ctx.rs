@@ -292,7 +292,7 @@ pub fn normalize_path_arg(raw: &str) -> String {
 /// - **explicit** `./`/`../` → the document `base_dir` only, no fallback;
 /// - **implicit** bare paths → `base_dir` first, then the repository root;
 /// - `~`/`~/…` → the user's home directory only;
-/// - `@`/`!`/`vault:`/`%`/absolute/URL → their existing `FileReference`
+/// - `@`/`&`/`^`/`vault:`/`%`/absolute/URL → their existing `FileReference`
 ///   semantics against the context's configured roots.
 ///
 /// The launch-area fallback the previous two-step resolver consulted is
