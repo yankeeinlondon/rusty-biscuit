@@ -1339,7 +1339,7 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
         for required in (
             "targets: wasm32-wasip2",
             ".github/ci/zed-extension.json",
-            "actions/cache@v4",
+            "actions/cache@v5",
             "sha256sum --check --strict",
             "just zed-verify",
         ):
@@ -1396,7 +1396,7 @@ class WorkflowContractTests(unittest.TestCase):
             "- name: Download the resolved package policy", 1
         )[1].split("- name: Build ci-rollup", 1)[0]
         policy, current, newest = verdict_downloads.split(
-            "uses: actions/download-artifact@v4"
+            "uses: actions/download-artifact@v7"
         )[1:]
 
         self.assertIn("name: ci-scope", policy)

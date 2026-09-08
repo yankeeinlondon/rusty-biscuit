@@ -139,9 +139,9 @@ jobs:
     # never ran.
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v3
       - name: Install native prerequisites
         shell: bash
         env:
@@ -184,7 +184,7 @@ jobs:
             >"$RUNNER_TEMP/status/status.json"
       - name: Upload producer status
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: status-${{ inputs.package }}-check-${{ matrix.os }}
           path: ${{ runner.temp }}/status
@@ -228,9 +228,9 @@ jobs:
       # and exits 0.
       BISCUIT_FRONTEND_REQUIRED: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) && '1' || '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v3
       - name: Install native prerequisites
         shell: bash
         env:
@@ -320,12 +320,12 @@ jobs:
       # environment capability table; nothing here decides it.
       - name: Set up pnpm
         if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 10
       - name: Set up Node
         if: ${{ contains(fromJSON(inputs.node-environments), matrix.environment) }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
       # Runtime reachability, mirroring the L2 tier's `tmux -V`: a capability
@@ -369,7 +369,7 @@ jobs:
       # its {package, environment, tier} identity.
       - name: Upload L1 JUnit
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: junit-${{ inputs.package }}-L1-${{ matrix.environment }}
           path: target/nextest/ci-reports
@@ -412,7 +412,7 @@ jobs:
           fi
       - name: Upload producer status
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: status-${{ inputs.package }}-L1-${{ matrix.environment }}
           path: ${{ runner.temp }}/status
@@ -431,9 +431,9 @@ jobs:
       # `lint-frontend` must fail rather than self-skip.
       BISCUIT_FRONTEND_REQUIRED: ${{ contains(fromJSON(inputs.node-environments), 'ubuntu-latest') && '1' || '' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v3
       - name: Install native prerequisites
         shell: bash
         env:
@@ -462,7 +462,7 @@ jobs:
           done
       - name: Cache the pinned Zed extension packager
         if: ${{ contains(fromJSON(inputs.runner-tools), 'zed-extension') }}
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ${{ runner.tool_cache }}/zed-extension/${{ steps.zed-extension-pin.outputs.zed_commit }}/zed-extension
           key: zed-extension-${{ steps.zed-extension-pin.outputs.zed_commit }}-${{ steps.zed-extension-pin.outputs.linux_x86_64_sha256 }}
@@ -495,12 +495,12 @@ jobs:
       # the `test` job gets.
       - name: Set up pnpm
         if: ${{ contains(fromJSON(inputs.node-environments), 'ubuntu-latest') }}
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 10
       - name: Set up Node
         if: ${{ contains(fromJSON(inputs.node-environments), 'ubuntu-latest') }}
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
       - name: Verify the pnpm toolchain
@@ -554,7 +554,7 @@ jobs:
           fi
       - name: Upload producer status
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: status-${{ inputs.package }}-lint
           path: ${{ runner.temp }}/status
@@ -592,9 +592,9 @@ jobs:
     env:
       BISCUIT_CI_ENVIRONMENT: ${{ matrix.environment }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v3
       - name: Install native prerequisites
         shell: bash
         env:
@@ -721,7 +721,7 @@ jobs:
       # the L1 upload for why the single overwritten file is not enough.
       - name: Upload L2 JUnit
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: junit-${{ inputs.package }}-L2-${{ matrix.environment }}
           path: target/nextest/ci-reports
@@ -742,7 +742,7 @@ jobs:
             >"$RUNNER_TEMP/status/status.json"
       - name: Upload producer status
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: status-${{ inputs.package }}-L2-${{ matrix.environment }}
           path: ${{ runner.temp }}/status
@@ -766,9 +766,9 @@ jobs:
       BISCUIT_BROWSER_REQUIRED: "1"
       BISCUIT_CI_ENVIRONMENT: ${{ matrix.environment }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install just
-        uses: extractions/setup-just@v2
+        uses: extractions/setup-just@v3
       - name: Install native prerequisites
         shell: bash
         env:
@@ -794,7 +794,7 @@ jobs:
       # the L1 upload for why the single overwritten file is not enough.
       - name: Upload browser JUnit
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: junit-${{ inputs.package }}-browser-${{ matrix.environment }}
           path: target/nextest/ci-reports
@@ -815,7 +815,7 @@ jobs:
             >"$RUNNER_TEMP/status/status.json"
       - name: Upload producer status
         if: ${{ always() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: status-${{ inputs.package }}-browser-${{ matrix.environment }}
           path: ${{ runner.temp }}/status
