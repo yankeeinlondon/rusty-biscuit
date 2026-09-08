@@ -10,7 +10,7 @@ initialize:
     stack:
         - when: "length(ctx.staged_files) == 0"
           action:
-              - message: "🤨  `just commit` was called in **{{ctx.area}}** but there were no staged filed to commit!"
+              - message: "🤨  request to commit staged files was called in **{{ctx.area}}** but there were no staged files to commit!"
               - warn: "no staged files to commit so exiting commit task"
               - stop
 success:
