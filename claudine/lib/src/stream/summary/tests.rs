@@ -313,3 +313,28 @@ fn populated_subagent_outcomes_round_trip_with_raw_status_and_anonymity() {
         Some("evaporated")
     );
 }
+
+#[test]
+fn a_padded_raw_status_round_trips_from_the_ledger_byte_for_byte() {
+    use crate::stream::task_ledger::TaskLedger;
+
+    let mut ledger = TaskLedger::new();
+    ledger.record_terminal(Some("task-1"), Some("alpha"), Some("  Evaporated  "));
+    ledger.record_terminal(Some("task-2"), Some("beta"), Some("  stopped "));
+    let mut summary = StreamExecutionSummary::default();
+    ledger.apply_to_summary(&mut summary);
+
+    let json = serde_json::to_string(&summary).unwrap();
+    assert!(json.contains(r#""raw_status":"  Evaporated  ""#), "{json}");
+    assert!(json.contains(r#""raw_status":"  stopped ""#), "{json}");
+    let restored: StreamExecutionSummary = serde_json::from_str(&json).unwrap();
+    assert_eq!(restored.subagent_outcomes, summary.subagent_outcomes);
+    assert_eq!(
+        restored.subagent_outcomes[0].raw_status.as_deref(),
+        Some("  Evaporated  ")
+    );
+    assert_eq!(
+        restored.subagent_outcomes[1].raw_status.as_deref(),
+        Some("  stopped ")
+    );
+}

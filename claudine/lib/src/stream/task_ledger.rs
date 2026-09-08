@@ -122,8 +122,11 @@ pub struct SubagentOutcome {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     pub outcome: TaskOutcome,
-    /// The provider's raw status string, preserved verbatim so an unrecognized
-    /// vocabulary can be diagnosed from machine data alone.
+    /// The provider's raw status string, preserved byte-for-byte — padding and
+    /// case included, and a whitespace-only string kept as-is — so an
+    /// unrecognized vocabulary can be diagnosed from machine data alone.
+    /// `None` only when the provider supplied no status. Normalization belongs
+    /// to classification and display, never to this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub raw_status: Option<String>,
 }
@@ -273,6 +276,9 @@ impl TaskLedger {
 
     /// Record a terminal observation. The most recent terminal observation for
     /// an ID wins, which is what lets a later success clear an earlier stop.
+    ///
+    /// Classification trim- and case-normalizes the status; the stored
+    /// `raw_status` is the authored string, untouched.
     pub fn record_terminal(
         &mut self,
         task_id: Option<&str>,
@@ -283,10 +289,7 @@ impl TaskLedger {
         let index = self.entry_index(task_id, name);
         self.entries[index].state = EntryState::Terminal {
             outcome,
-            raw_status: raw_status
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(str::to_string),
+            raw_status: raw_status.map(str::to_string),
         };
     }
 

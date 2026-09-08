@@ -472,6 +472,31 @@ fn summary_event_projects_subagent_outcomes_at_the_top_level_of_extra() {
 }
 
 #[test]
+fn summary_event_projects_a_padded_raw_status_verbatim() {
+    use crate::stream::task_ledger::TaskLedger;
+
+    let mut ledger = TaskLedger::new();
+    ledger.record_terminal(Some("sa_1"), Some("alpha"), Some("  Evaporated  "));
+    ledger.record_terminal(Some("sa_2"), Some("beta"), Some("  stopped "));
+    let mut summary = StreamExecutionSummary::default();
+    ledger.apply_to_summary(&mut summary);
+    let env = EnvironmentContext::default();
+    let meta = summary_to_event_meta(&summary, StreamProtocol::StreamJson, &env);
+
+    let facts = meta.extra["subagent_outcomes"]
+        .as_array()
+        .expect("subagent_outcomes must be an array");
+    assert_eq!(facts.len(), 2);
+    assert_eq!(facts[0]["outcome"], Value::String("unknown_status".into()));
+    assert_eq!(
+        facts[0]["raw_status"],
+        Value::String("  Evaporated  ".into())
+    );
+    assert_eq!(facts[1]["outcome"], Value::String("stopped".into()));
+    assert_eq!(facts[1]["raw_status"], Value::String("  stopped ".into()));
+}
+
+#[test]
 fn summary_event_omits_subagent_outcomes_on_a_clean_run() {
     let summary = StreamExecutionSummary::default();
     let env = EnvironmentContext::default();

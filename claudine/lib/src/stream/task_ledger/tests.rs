@@ -84,6 +84,36 @@ fn an_inherently_terminal_event_with_an_unknown_status_is_unresolved() {
 }
 
 #[test]
+fn a_padded_status_is_classified_normalized_but_stored_verbatim() {
+    // Review-3 finding 2: trim/case normalization is for matching only. The
+    // stored fact must be the authored bytes so the live `SubagentStop.status`
+    // and the final machine data never disagree.
+    let mut ledger = TaskLedger::new();
+    ledger.record_terminal(Some("t1"), Some("alpha"), Some("  Evaporated  "));
+    ledger.record_terminal(Some("t2"), Some("beta"), Some("  stopped "));
+    let incomplete = ledger.incomplete_outcomes();
+    assert_eq!(incomplete.len(), 2);
+    assert_eq!(incomplete[0].outcome, TaskOutcome::UnknownStatus);
+    assert_eq!(incomplete[0].raw_status.as_deref(), Some("  Evaporated  "));
+    assert_eq!(incomplete[1].outcome, TaskOutcome::Stopped);
+    assert_eq!(incomplete[1].raw_status.as_deref(), Some("  stopped "));
+    // Display still trims; verbatim storage must not leak padding there.
+    assert_eq!(incomplete[0].describe(), "alpha (Evaporated)");
+    assert_eq!(incomplete[1].describe(), "beta (stopped)");
+}
+
+#[test]
+fn a_whitespace_only_terminal_status_is_stored_verbatim_and_described_by_outcome() {
+    let mut ledger = TaskLedger::new();
+    ledger.record_terminal(Some("t1"), Some("alpha"), Some("   "));
+    let incomplete = ledger.incomplete_outcomes();
+    assert_eq!(incomplete.len(), 1);
+    assert_eq!(incomplete[0].outcome, TaskOutcome::UnknownStatus);
+    assert_eq!(incomplete[0].raw_status.as_deref(), Some("   "));
+    assert_eq!(incomplete[0].describe(), "alpha (unknown status)");
+}
+
+#[test]
 fn an_inherently_terminal_event_with_no_status_is_unresolved_not_success() {
     let mut ledger = TaskLedger::new();
     ledger.record_terminal(Some("t1"), None, None);
@@ -379,4 +409,105 @@ fn an_empty_string_task_id_is_treated_as_anonymous() {
     let incomplete = ledger.incomplete_outcomes();
     assert_eq!(incomplete.len(), 2);
     assert!(incomplete.iter().all(|fact| fact.task_id.is_none()));
+}
+
+#[test]
+fn a_message_only_provider_failure_is_preserved_in_the_headline() {
+    // Review-3 finding 1: Claude's `result.is_error=true` records text with no
+    // error kind. That text is the actionable cause and must survive
+    // finalization even though no kind exists to hang it on.
+    let mut ledger = TaskLedger::new();
+    ledger.record_start(Some("t1"), Some("alpha"));
+    ledger.record_terminal(Some("t1"), Some("alpha"), Some("Evaporated"));
+
+    let mut summary = StreamExecutionSummary {
+        is_error: true,
+        error_message: Some("Provider rejected the request".into()),
+        ..Default::default()
+    };
+    ledger.apply_to_summary(&mut summary);
+
+    assert_eq!(
+        summary.error_kind.as_deref(),
+        Some(INCOMPLETE_SUBAGENTS_ERROR_KIND)
+    );
+    let message = summary.error_message.as_deref().unwrap();
+    assert!(
+        message.contains("after provider failure: Provider rejected the request"),
+        "{message}"
+    );
+    assert!(message.contains("alpha"), "{message}");
+}
+
+#[test]
+fn a_blank_error_kind_with_a_message_reads_as_message_only() {
+    let mut ledger = TaskLedger::new();
+    ledger.record_terminal(Some("t1"), Some("alpha"), Some("stopped"));
+
+    let mut summary = StreamExecutionSummary {
+        is_error: true,
+        error_kind: Some("   ".into()),
+        error_message: Some("Provider rejected the request".into()),
+        ..Default::default()
+    };
+    ledger.apply_to_summary(&mut summary);
+
+    let message = summary.error_message.as_deref().unwrap();
+    assert!(
+        message.contains("after provider failure: Provider rejected the request"),
+        "{message}"
+    );
+    // A blank kind must not leave a dangling gap before the colon.
+    assert!(!message.contains("failure :"), "{message}");
+    assert!(!message.contains("failure  "), "{message}");
+}
+
+#[test]
+fn a_long_message_only_failure_keeps_its_reservation_and_the_task_list_gives_way() {
+    let mut ledger = TaskLedger::new();
+    for index in 0..30 {
+        let id = format!("task-{index}");
+        let name = format!("a-very-long-sub-agent-task-name-number-{index}");
+        ledger.record_start(Some(&id), Some(&name));
+        ledger.record_terminal(Some(&id), Some(&name), Some("stopped"));
+    }
+
+    let mut summary = StreamExecutionSummary {
+        is_error: true,
+        error_message: Some(format!(
+            "\u{1b}[31mProvider rejected the request\u{1b}[0m\n{}",
+            "x".repeat(500)
+        )),
+        ..Default::default()
+    };
+    ledger.apply_to_summary(&mut summary);
+
+    let message = summary.error_message.as_deref().unwrap();
+    assert!(!message.contains('\u{1b}'), "escapes leaked: {message:?}");
+    assert!(
+        !message.contains('\n') && !message.contains('\r'),
+        "multi-line: {message:?}"
+    );
+    assert!(
+        message.chars().count() <= 240,
+        "{} chars: {message}",
+        message.chars().count()
+    );
+    assert!(
+        message.starts_with("30 sub-agent tasks did not complete; after provider failure: Provider rejected the request"),
+        "{message}"
+    );
+    let clause_start = message.find("after provider failure").unwrap();
+    let clause_end = message.find("; incomplete:").expect("task list follows the clause");
+    let clause_chars = message[clause_start..clause_end].chars().count();
+    assert!(
+        clause_chars <= PRIOR_FAILURE_CLAUSE_MAX_CHARS,
+        "clause of {clause_chars} chars exceeds its reservation: {message}"
+    );
+    // The truncation landed on the tail (task list), not on the clause.
+    assert!(
+        !message.contains("a-very-long-sub-agent-task-name-number-29"),
+        "{message}"
+    );
+    assert_eq!(summary.subagent_outcomes.len(), 30);
 }

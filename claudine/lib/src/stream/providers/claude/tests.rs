@@ -1055,3 +1055,72 @@ fn a_task_free_session_never_grows_the_ledger() {
     assert!(!summary.is_error);
     assert!(summary.subagent_outcomes.is_empty());
 }
+
+#[test]
+fn a_message_only_result_failure_survives_incomplete_subagent_finalization() {
+    // Review-3 finding 1 probe: `result.is_error=true` records text without a
+    // kind, and an unresolved task then finalizes the summary. Both facts
+    // must reach the concise message.
+    let (_sink, mut parser) = new_parser();
+    for line in [
+        r#"{"type":"system","subtype":"init","session_id":"s1","model":"claude-opus"}"#,
+        r#"{"type":"task_started","task_id":"sa_1","name":"alpha"}"#,
+        r#"{"type":"task_notification","task_id":"sa_1","name":"alpha","status":"Evaporated"}"#,
+        r#"{"type":"result","is_error":true,"result":"Provider rejected the request"}"#,
+    ] {
+        parser.feed_line(line);
+    }
+    let summary = parser.finish(0);
+
+    assert!(summary.is_error);
+    assert_eq!(summary.error_kind.as_deref(), Some("incomplete_subagents"));
+    let message = summary.error_message.as_deref().unwrap();
+    assert!(message.contains("Provider rejected the request"), "{message}");
+    assert!(message.contains("alpha"), "{message}");
+    assert_eq!(summary.subagent_outcomes.len(), 1);
+}
+
+#[test]
+fn a_padded_terminal_status_reaches_the_summary_byte_for_byte() {
+    // Review-3 finding 2 probe: the authored status must survive the ledger
+    // unchanged and agree with the status the live `SubagentStop` carried.
+    let (sink, mut parser) = new_parser();
+    for line in [
+        r#"{"type":"system","subtype":"init","session_id":"s1","model":"claude-opus"}"#,
+        r#"{"type":"task_started","task_id":"sa_1","name":"alpha"}"#,
+        r#"{"type":"task_started","task_id":"sa_2","name":"beta"}"#,
+        r#"{"type":"task_notification","task_id":"sa_1","name":"alpha","status":"  Evaporated  "}"#,
+        r#"{"type":"task_notification","task_id":"sa_2","name":"beta","status":"  stopped "}"#,
+        r#"{"type":"result","is_error":false,"result":"done"}"#,
+    ] {
+        parser.feed_line(line);
+    }
+    let summary = parser.finish(0);
+
+    assert!(summary.is_error);
+    let outcomes = &summary.subagent_outcomes;
+    assert_eq!(outcomes.len(), 2);
+    assert_eq!(
+        outcomes[0].outcome,
+        crate::stream::task_ledger::TaskOutcome::UnknownStatus
+    );
+    assert_eq!(outcomes[0].raw_status.as_deref(), Some("  Evaporated  "));
+    assert_eq!(
+        outcomes[1].outcome,
+        crate::stream::task_ledger::TaskOutcome::Stopped
+    );
+    assert_eq!(outcomes[1].raw_status.as_deref(), Some("  stopped "));
+
+    let live_statuses: Vec<Option<String>> = sink
+        .snapshot()
+        .into_iter()
+        .filter_map(|event| match event {
+            SemanticEvent::SubagentStop { status, .. } => Some(status),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        live_statuses,
+        vec![Some("  Evaporated  ".to_string()), Some("  stopped ".to_string())]
+    );
+}
