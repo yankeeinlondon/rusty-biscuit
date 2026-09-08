@@ -1,0 +1,120 @@
+(lldb) target create "/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/target/debug/deps/claudine-81387882c57fec34"
+Current executable set to '/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/target/debug/deps/claudine-81387882c57fec34' (arm64).
+(lldb) breakpoint set -r 'capture_file_resolution_context' --auto-continue true
+Breakpoint 1: 10 locations.
+(lldb) breakpoint set -r 'GitRepo.*::discover' --auto-continue true
+Breakpoint 2: 2 locations.
+(lldb) breakpoint set -r 'resolve_repo_root' --auto-continue true
+Breakpoint 3: 7 locations.
+(lldb) process launch -- composition::schema:: --test-threads=1
+
+running 75 tests
+test composition::schema::classify::semantic_type_tests::semantic_schema_types_are_not_single_widget_values ... [32mok(B[m
+test composition::schema::tests::drop_invalid_optionals_keeps_optional_eager_file_failures ... [32mok(B[m
+test composition::schema::tests::drop_invalid_optionals_keeps_unresolvable_eager_file_for_validation ... [32mok(B[m
+test composition::schema::tests::drop_invalid_optionals_keeps_unresolved_eager_file_when_no_fallback ... [32mok(B[m
+test composition::schema::tests::drop_invalid_optionals_skips_template_bearing_values ... [32mok(B[m
+test composition::schema::tests::drop_invalid_optionals_still_drops_literal_invalid_values ... [32mok(B[m
+test composition::schema::tests::enum_missing_required_includes_members_in_type_label ... [32mok(B[m
+test composition::schema::tests::file_property_and_file_exists_agree_across_schema_and_body ... [32mok(B[m
+test composition::schema::tests::inline_compose_with_schema_validates_after_prompt_check ... [32mok(B[m
+test composition::schema::tests::inline_compose_with_valid_prompt_and_schema_succeeds ... [32mok(B[m
+test composition::schema::tests::interactive_options_allowed_only_when_all_flags_true ... [32mok(B[m
+test composition::schema::tests::interactive_options_default_is_denied ... [32mok(B[m
+test composition::schema::tests::invalid_optional_drop_leaves_missing_required_surfaced ... [32mok(B[m
+test composition::schema::tests::invalid_optional_is_dropped_and_retried ... [32mok(B[m
+test composition::schema::tests::invalid_optional_setter_is_dropped_and_retried ... [32mok(B[m
+test composition::schema::tests::invalid_required_returns_schema_validation_error ... [32mok(B[m
+test composition::schema::tests::missing_boolean_property_maps_to_boolean_shape ... [32mok(B[m
+test composition::schema::tests::missing_enum_array_property_maps_to_enum_many_shape ... [32mok(B[m
+test composition::schema::tests::missing_enum_property_maps_to_enum_one_shape ... [32mok(B[m
+test composition::schema::tests::missing_file_array_property_maps_to_file_array_shape ... [32mok(B[m
+test composition::schema::tests::missing_file_property_maps_to_file_shape ... [32mok(B[m
+test composition::schema::tests::missing_file_property_preserves_match_patterns ... [32mok(B[m
+test composition::schema::tests::missing_number_property_maps_to_number_shape ... [32mok(B[m
+test composition::schema::tests::missing_object_property_has_no_interactive_shape ... [32mok(B[m
+test composition::schema::tests::missing_required_returns_missing_properties_error ... [32mok(B[m
+test composition::schema::tests::missing_required_surfaces_description_metadata ... [32mok(B[m
+test composition::schema::tests::missing_required_surfaces_frontmatter_description ... [32mok(B[m
+test composition::schema::tests::missing_string_property_maps_to_text_plain_shape ... [32mok(B[m
+test composition::schema::tests::no_schema_passes_through_unchanged ... [32mok(B[m
+test composition::schema::tests::optional_string_resolved_to_null_passes_direct ... [32mok(B[m
+test composition::schema::tests::optional_string_resolved_to_null_passes_inline ... [32mok(B[m
+test composition::schema::tests::post_shell_invalid_optional_is_dropped_with_diagnostic ... [32mok(B[m
+test composition::schema::tests::post_shell_invalid_required_returns_schema_validation_error ... [32mok(B[m
+test composition::schema::tests::post_shell_valid_value_passes ... [32mok(B[m
+test composition::schema::tests::pre_validate_defers_template_invalid_required_to_prepare_time ... [32mok(B[m
+test composition::schema::tests::pre_validate_does_not_reject_template_bearing_value ... [32mok(B[m
+test composition::schema::tests::pre_validate_schema_defers_caller_eager_file_to_canonical_preparation ... [32mok(B[m
+test composition::schema::tests::pre_validate_schema_ignores_launch_copy_when_source_exists ... [32mok(B[m
+test composition::schema::tests::pre_validate_schema_keeps_unresolved_caller_file_partials_interactive ... [32mok(B[m
+test composition::schema::tests::pre_validate_schema_rejects_launch_only_file ... [32mok(B[m
+test composition::schema::tests::pre_validate_schema_reports_optional_eager_file_failures ... [32mok(B[m
+test composition::schema::tests::pre_validate_schema_resolves_file_against_document_dir ... [32mok(B[m
+test composition::schema::tests::pre_validate_still_surfaces_genuinely_missing_required ... [32mok(B[m
+test composition::schema::tests::pre_validate_still_surfaces_literal_invalid_required ... [32mok(B[m
+test composition::schema::tests::pre_validation_drop_surfaces_diagnostic ... [32mok(B[m
+test composition::schema::tests::provided_file_array_match_partial_reports_unresolved_file_reference ... [32mok(B[m
+test composition::schema::tests::provided_file_array_with_non_string_elements_stays_schema_validation ... [32mok(B[m
+test composition::schema::tests::provided_file_match_partial_reports_unresolved_file_reference ... [32mok(B[m
+test composition::schema::tests::provided_file_scalar_for_array_property_match_partial_reports_unresolved_file_reference ... [32mok(B[m
+test composition::schema::tests::provided_file_without_match_stays_schema_validation ... [32mok(B[m
+test composition::schema::tests::provided_partial_value_handles_scalar_and_array_for_file_array ... [32mok(B[m
+test composition::schema::tests::required_string_resolved_to_null_fails_schema_validation ... [32mok(B[m
+test composition::schema::tests::root_union_schema_string_arm_stays_document_relative_through_claudine_load ... [32mok(B[m
+test composition::schema::tests::schema_parse_error_for_grammar_failure_names_property_and_keeps_path_load_distinct ... [32mok(B[m
+test composition::schema::tests::schema_parse_error_for_invalid_schema_shape ... [32mok(B[m
+test composition::schema::tests::schema_reference_stays_document_relative_through_claudine_load ... [32mok(B[m
+test composition::schema::tests::schema_validates_while_lifecycle_err_span_is_deferred ... [32mok(B[m
+test composition::schema::tests::scratch_dump_file_array_problems ... [32mok(B[m
+test composition::schema::tests::sequence_step_pre_validation_resolves_file_against_document_dir ... [32mok(B[m
+test composition::schema::tests::set_overrides_can_supply_missing_required ... [32mok(B[m
+test composition::schema::tests::shipped_implement_plan_prepares_with_unset_optional_commit_message ... [32mok(B[m
+test composition::schema::tests::shipped_implement_plan_preserves_supplied_commit_message_in_preflight_command ... [32mok(B[m
+test composition::schema::tests::status_report_categorizes_required_and_optional ... [32mok(B[m
+test composition::schema::tests::status_report_does_not_mark_templated_optional_as_invalid ... [32mok(B[m
+test composition::schema::tests::status_report_does_not_mark_templated_required_as_invalid ... [32mok(B[m
+test composition::schema::tests::status_report_flags_invalid_optional ... [32mok(B[m
+test composition::schema::tests::status_report_is_none_when_no_schema ... [32mok(B[m
+test composition::schema::tests::status_report_marks_document_dir_file_valid ... [32mok(B[m
+test composition::schema::tests::status_report_marks_invalid_required_correctly ... [32mok(B[m
+test composition::schema::tests::status_report_marks_missing_required_correctly ... [32mok(B[m
+test composition::schema::tests::status_report_overrides_supply_missing_required ... [32mok(B[m
+test composition::schema::tests::text_format_label_returns_human_strings ... [32mok(B[m
+test composition::schema::tests::top_level_pointer_segment_handles_escaped_keys ... [32mok(B[m
+test composition::schema::tests::valid_required_property_passes ... [32mok(B[m
+test composition::schema::tests::value_needs_composition_detects_nested_templates ... [32mok(B[m
+
+test result: [32mok(B[m. 75 passed; 0 failed; 0 ignored; 0 measured; 3967 filtered out; finished in 4.76s
+
+Process 59575 launched: '/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/target/debug/deps/claudine-81387882c57fec34' (arm64)
+Process 59575 exited with status = 0 (0x00000000)
+(lldb) breakpoint list
+Current breakpoints:
+1: regex = 'capture_file_resolution_context', locations = 10, resolved = 10, hit count = 102 Options: enabled auto-continue 
+  1.1: where = claudine-81387882c57fec34`and_then<&std::path::Path, sniff::filesystem::repo::types::RepoInfo, claudine::composition::resolve::capture_file_resolution_context::{closure_env#2}> + 24 at option.rs:1542:15, address = 0x00000001008bff94, resolved, hit count = 11 
+  1.2: where = claudine-81387882c57fec34`map_err<std::path::PathBuf, std::io::error::Error, claudine::composition::error::CompositionError, claudine::composition::resolve::capture_file_resolution_context::{closure_env#0}> + 20 at result.rs:966:15, address = 0x0000000100d68cf4, resolved, hit count = 11 
+  1.3: where = claudine-81387882c57fec34`map<sniff::filesystem::git::types::GitRepo, std::path::PathBuf, claudine::composition::resolve::capture_file_resolution_context::{closure_env#1}> + 28 at option.rs:1161:15, address = 0x00000001008baa04, resolved, hit count = 11 
+  1.4: where = claudine-81387882c57fec34`capture_file_resolution_context + 32 at mod.rs:57:9, address = 0x0000000101ddcb8c, resolved, hit count = 36 
+  1.5: where = claudine-81387882c57fec34`capture_file_resolution_context + 60 at resolve.rs:62:9, address = 0x0000000100f1b66c, resolved, hit count = 11 
+  1.6: where = claudine-81387882c57fec34`{closure#0} + 20 at resolve.rs:63:50, address = 0x0000000100ef82dc, resolved, hit count = 0 
+  1.7: where = claudine-81387882c57fec34`{closure#2} + 28 at resolve.rs:72:26, address = 0x0000000100ef838c, resolved, hit count = 11 
+  1.8: where = claudine-81387882c57fec34`{closure#1} + 20 at resolve.rs:69:26, address = 0x0000000100ef83d0, resolved, hit count = 11 
+  1.9: where = claudine-81387882c57fec34`call_once<fn(&std::path::Path) -> biscuit_file::file_reference::context::FileResolutionContext, (&std::path::Path)> + 20 at function.rs:250:5, address = 0x0000000101ce6288, resolved, hit count = 0 
+  1.10: where = claudine-81387882c57fec34`map<&std::path::Path, biscuit_file::file_reference::context::FileResolutionContext, fn(&std::path::Path) -> biscuit_file::file_reference::context::FileResolutionContext> + 28 at option.rs:1161:15, address = 0x0000000101e4da50, resolved, hit count = 0 
+
+2: regex = 'GitRepo.*::discover', locations = 2, resolved = 2, hit count = 49 Options: enabled auto-continue 
+  2.1: where = claudine-81387882c57fec34`{closure#0} + 8 [inlined] metadata at callsite.rs:369:9, address = 0x00000001022c6bc0, resolved, hit count = 0 
+  2.2: where = claudine-81387882c57fec34`discover + 96 at types.rs:604:5, address = 0x00000001022cee74, resolved, hit count = 49 
+
+3: regex = 'resolve_repo_root', locations = 7, resolved = 7, hit count = 0 Options: enabled auto-continue 
+  3.1: where = claudine-81387882c57fec34`call_once<claudine::linking::paths::tests::resolve_repo_root_falls_back_to_cwd_when_not_in_repo::{closure_env#0}, ()> + 12 at function.rs:250:5, address = 0x0000000101094ec4, resolved, hit count = 0 
+  3.2: where = claudine-81387882c57fec34`resolve_repo_root + 48 at paths.rs:334:28, address = 0x00000001009666c0, resolved, hit count = 0 
+  3.3: where = claudine-81387882c57fec34`call_once<claudine::linking::paths::tests::resolve_repo_root_returns_nested_git_root::{closure_env#0}, ()> + 12 at function.rs:250:5, address = 0x0000000101094d5c, resolved, hit count = 0 
+  3.4: where = claudine-81387882c57fec34`resolve_repo_root_returns_nested_git_root + 20 at paths.rs:482:19, address = 0x0000000100a61704, resolved, hit count = 0 
+  3.5: where = claudine-81387882c57fec34`resolve_repo_root_falls_back_to_cwd_when_not_in_repo + 20 at paths.rs:500:19, address = 0x0000000100a62600, resolved, hit count = 0 
+  3.6: where = claudine-81387882c57fec34`{closure#0} + 16 at paths.rs:481:51, address = 0x0000000100a05b60, resolved, hit count = 0 
+  3.7: where = claudine-81387882c57fec34`{closure#0} + 16 at paths.rs:499:62, address = 0x0000000100a05c50, resolved, hit count = 0 
+
+
+--- stderr ---

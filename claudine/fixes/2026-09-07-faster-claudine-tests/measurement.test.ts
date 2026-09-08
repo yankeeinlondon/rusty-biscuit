@@ -213,6 +213,9 @@ test("buildReport joins the manifest to its logs, diffs identities, and gates", 
     assert.ok(report.markdown.includes("- added: `claudine-cli::context_command leaky_but_passing`"));
     assert.ok(report.markdown.includes("- removed: `claudine-cli::context_command old_identity`"));
     assert.ok(report.markdown.includes("| `context` | 2 | 0.40 / 0.40 / 0.40 s | 2 |"));
+    // Same log at both revisions → every pair's ratio is exactly 1, which is not an improvement.
+    assert.ok(report.markdown.includes("| `just test` | elapsed | 2 | 1.000 / 1.000 / 1.000 | **no** |"));
+    assert.ok(report.markdown.includes("| `just test` | summed | 2 | 1.000 / 1.000 / 1.000 | **no** |"));
     assert.ok(report.violations.some((v) => v.startsWith("[target-short]")), "two executions are not ten");
     assert.ok(report.violations.some((v) => v.startsWith("[target-unmatched]")));
     assert.ok(!report.violations.some((v) => v.startsWith("[unstable-identities]")));

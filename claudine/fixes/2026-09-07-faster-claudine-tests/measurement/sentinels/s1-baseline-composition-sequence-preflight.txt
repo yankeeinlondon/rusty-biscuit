@@ -1,0 +1,89 @@
+(lldb) target create "/private/tmp/rb-baseline-9fc5151a0/target/debug/deps/claudine-81387882c57fec34"
+Current executable set to '/private/tmp/rb-baseline-9fc5151a0/target/debug/deps/claudine-81387882c57fec34' (arm64).
+(lldb) breakpoint set -r 'capture_file_resolution_context' --auto-continue true
+Breakpoint 1: 10 locations.
+(lldb) breakpoint set -r 'GitRepo.*::discover' --auto-continue true
+Breakpoint 2: 2 locations.
+(lldb) breakpoint set -r 'resolve_repo_root' --auto-continue true
+Breakpoint 3: 7 locations.
+(lldb) process launch -- composition::sequence::preflight:: --test-threads=1
+
+running 44 tests
+test composition::sequence::preflight::tests::blocked::direct_group_execution_is_rejected ... [32mok(B[m
+test composition::sequence::preflight::tests::blocked::group_loop_is_rejected ... [32mok(B[m
+test composition::sequence::preflight::tests::blocked::nested_group_task_is_rejected ... [32mok(B[m
+test composition::sequence::preflight::tests::blocked::nested_sequence_prompt_document_is_rejected ... [32mok(B[m
+test composition::sequence::preflight::tests::blocked::sequence_documents_pass_the_kind_gate ... [32mok(B[m
+test composition::sequence::preflight::tests::catalogs::duplicate_catalog_entries_are_ambiguous ... [32mok(B[m
+test composition::sequence::preflight::tests::catalogs::leading_at_is_a_file_reference_not_a_catalog_name ... [32mok(B[m
+test composition::sequence::preflight::tests::catalogs::magic_catalog_reference_splits_on_first_at ... [32mok(B[m
+test composition::sequence::preflight::tests::catalogs::missing_catalog_entry_lists_what_is_available ... [32mok(B[m
+test composition::sequence::preflight::tests::catalogs::named_catalog_entry_resolves ... [32mok(B[m
+test composition::sequence::preflight::tests::cycles::prompt_back_to_the_sequence_source_is_a_cycle ... [32mok(B[m
+test composition::sequence::preflight::tests::cycles::task_cycle_reports_the_full_chain ... [32mok(B[m
+test composition::sequence::preflight::tests::group_schema::empty_task_list_is_rejected ... [32mok(B[m
+test composition::sequence::preflight::tests::group_schema::group_defaults_apply_to_prompts_and_yield_to_task_overrides ... [32mok(B[m
+test composition::sequence::preflight::tests::group_schema::invalid_execution_mode_is_rejected ... [32mok(B[m
+test composition::sequence::preflight::tests::group_schema::max_parallel_on_a_serial_group_is_rejected ... [32mok(B[m
+test composition::sequence::preflight::tests::group_schema::meaningless_task_field_is_rejected ... [32mok(B[m
+test composition::sequence::preflight::tests::group_schema::single_task_parallel_group_with_cap_one_is_accepted ... [32mok(B[m
+test composition::sequence::preflight::tests::group_schema::zero_max_parallel_is_rejected ... [32mok(B[m
+test composition::sequence::preflight::tests::loading::cross_repo_task_nested_reference_uses_its_own_repository_context ... [32mok(B[m
+test composition::sequence::preflight::tests::loading::loads_tasks_groups_and_prompts_transitively ... [32mok(B[m
+test composition::sequence::preflight::tests::loading::nested_references_resolve_from_their_authoring_directory ... [32mok(B[m
+test composition::sequence::preflight::tests::loading::nested_references_reuse_all_request_resolution_inputs ... [32mok(B[m
+test composition::sequence::preflight::tests::loading::shared_document_across_branches_is_not_a_cycle ... [32mok(B[m
+test composition::sequence::preflight::tests::shell::bracket_target_identity_is_rejected_on_every_graph_shell_surface ... [32mok(B[m
+test composition::sequence::preflight::tests::shell::command_lists_keep_declaration_order ... [32mok(B[m
+test composition::sequence::preflight::tests::shell::computed_ctx_and_env_indexes_fail_closed_at_graph_preflight ... [32mok(B[m
+test composition::sequence::preflight::tests::shell::guarded_setup_and_teardown_commands_are_collected ... [32mok(B[m
+test composition::sequence::preflight::tests::shell::key_value_shell_actions_and_on_error_are_collected ... [32mok(B[m
+test composition::sequence::preflight::tests::shell::lifecycle_late_binding_in_a_shell_command_is_rejected ... [32mok(B[m
+test composition::sequence::preflight::tests::shell::non_identity_ctx_and_env_references_stay_legal_in_shell_commands ... [32mok(B[m
+test composition::sequence::preflight::tests::shell::outputs_in_a_shell_command_is_rejected ... [32mok(B[m
+test composition::sequence::preflight::tests::shell::per_step_state_produces_per_step_bytes ... [32mok(B[m
+test composition::sequence::preflight::tests::shell::shell_bytes_are_resolved_once_and_stored ... [32mok(B[m
+test composition::sequence::preflight::tests::shell::target_identity_in_a_graph_phase_shell_command_is_rejected ... [32mok(B[m
+test composition::sequence::preflight::tests::shell::target_identity_in_a_teardown_shell_command_is_rejected ... [32mok(B[m
+test composition::sequence::preflight::tests::steps::bodyless_step_has_no_task ... [32mok(B[m
+test composition::sequence::preflight::tests::steps::external_task_expands_to_the_referenced_file ... [32mok(B[m
+test composition::sequence::preflight::tests::steps::mixed_steps_retain_identity_and_order ... [32mok(B[m
+test composition::sequence::preflight::tests::steps::task_file_with_the_wrong_kind_is_rejected ... [32mok(B[m
+test composition::sequence::preflight::tests::write_back::collision_with_the_sequence_source_is_caught ... [32mok(B[m
+test composition::sequence::preflight::tests::write_back::parallel_siblings_targeting_one_document_collide ... [32mok(B[m
+test composition::sequence::preflight::tests::write_back::plain_compose_siblings_do_not_collide ... [32mok(B[m
+test composition::sequence::preflight::tests::write_back::serial_group_may_reuse_an_inline_compose_target ... [32mok(B[m
+
+test result: [32mok(B[m. 44 passed; 0 failed; 0 ignored; 0 measured; 3996 filtered out; finished in 17.54s
+
+Process 54682 launched: '/private/tmp/rb-baseline-9fc5151a0/target/debug/deps/claudine-81387882c57fec34' (arm64)
+Process 54682 exited with status = 0 (0x00000000)
+(lldb) breakpoint list
+Current breakpoints:
+1: regex = 'capture_file_resolution_context', locations = 10, resolved = 10, hit count = 372 Options: enabled auto-continue 
+  1.1: where = claudine-81387882c57fec34`map<sniff::filesystem::git::types::GitRepo, std::path::PathBuf, claudine::composition::resolve::capture_file_resolution_context::{closure_env#1}> + 28 at option.rs:1161:15, address = 0x0000000100b4f650, resolved, hit count = 62 
+  1.2: where = claudine-81387882c57fec34`map_err<std::path::PathBuf, std::io::error::Error, claudine::composition::error::CompositionError, claudine::composition::resolve::capture_file_resolution_context::{closure_env#0}> + 20 at result.rs:966:15, address = 0x0000000100c45fc0, resolved, hit count = 62 
+  1.3: where = claudine-81387882c57fec34`and_then<&std::path::Path, sniff::filesystem::repo::types::RepoInfo, claudine::composition::resolve::capture_file_resolution_context::{closure_env#2}> + 24 at option.rs:1542:15, address = 0x0000000100b54be0, resolved, hit count = 62 
+  1.4: where = claudine-81387882c57fec34`capture_file_resolution_context + 32 at mod.rs:57:9, address = 0x0000000101dd2114, resolved, hit count = 0 
+  1.5: where = claudine-81387882c57fec34`capture_file_resolution_context + 60 at resolve.rs:62:9, address = 0x000000010069b870, resolved, hit count = 62 
+  1.6: where = claudine-81387882c57fec34`{closure#0} + 20 at resolve.rs:63:50, address = 0x000000010066da8c, resolved, hit count = 0 
+  1.7: where = claudine-81387882c57fec34`{closure#2} + 28 at resolve.rs:72:26, address = 0x000000010066db3c, resolved, hit count = 62 
+  1.8: where = claudine-81387882c57fec34`{closure#1} + 20 at resolve.rs:69:26, address = 0x000000010066db80, resolved, hit count = 62 
+  1.9: where = claudine-81387882c57fec34`call_once<fn(&std::path::Path) -> biscuit_file::file_reference::context::FileResolutionContext, (&std::path::Path)> + 20 at function.rs:250:5, address = 0x0000000101cdb810, resolved, hit count = 0 
+  1.10: where = claudine-81387882c57fec34`map<&std::path::Path, biscuit_file::file_reference::context::FileResolutionContext, fn(&std::path::Path) -> biscuit_file::file_reference::context::FileResolutionContext> + 28 at option.rs:1161:15, address = 0x0000000101e42ef8, resolved, hit count = 0 
+
+2: regex = 'GitRepo.*::discover', locations = 2, resolved = 2, hit count = 65 Options: enabled auto-continue 
+  2.1: where = claudine-81387882c57fec34`{closure#0} + 8 [inlined] metadata at callsite.rs:369:9, address = 0x00000001022bc034, resolved, hit count = 0 
+  2.2: where = claudine-81387882c57fec34`discover + 96 at types.rs:604:5, address = 0x00000001022c42e8, resolved, hit count = 65 
+
+3: regex = 'resolve_repo_root', locations = 7, resolved = 7, hit count = 0 Options: enabled auto-continue 
+  3.1: where = claudine-81387882c57fec34`resolve_repo_root_returns_nested_git_root + 20 at paths.rs:424:19, address = 0x0000000100145c30, resolved, hit count = 0 
+  3.2: where = claudine-81387882c57fec34`resolve_repo_root_falls_back_to_cwd_when_not_in_repo + 20 at paths.rs:442:19, address = 0x0000000100146868, resolved, hit count = 0 
+  3.3: where = claudine-81387882c57fec34`call_once<claudine::linking::paths::tests::resolve_repo_root_returns_nested_git_root::{closure_env#0}, ()> + 12 at function.rs:250:5, address = 0x00000001004c7758, resolved, hit count = 0 
+  3.4: where = claudine-81387882c57fec34`resolve_repo_root + 48 at paths.rs:334:28, address = 0x0000000100c0028c, resolved, hit count = 0 
+  3.5: where = claudine-81387882c57fec34`call_once<claudine::linking::paths::tests::resolve_repo_root_falls_back_to_cwd_when_not_in_repo::{closure_env#0}, ()> + 12 at function.rs:250:5, address = 0x00000001004c7884, resolved, hit count = 0 
+  3.6: where = claudine-81387882c57fec34`{closure#0} + 16 at paths.rs:423:51, address = 0x00000001000fbb98, resolved, hit count = 0 
+  3.7: where = claudine-81387882c57fec34`{closure#0} + 16 at paths.rs:441:62, address = 0x00000001000fbc60, resolved, hit count = 0 
+
+
+--- stderr ---

@@ -1,0 +1,37 @@
+sentinel	revision	subject	counter	value	note
+S1 ambient discovery	baseline	composition::schema:: (75 tests, one process)	capture_file_resolution_context	73	mod.rs:57 = 36 (other crate, not counted); resolve.rs:62 = 73
+S1 ambient discovery	baseline	composition::schema:: (75 tests, one process)	GitRepo.*::discover	111	types.rs:604 = 111
+S1 ambient discovery	baseline	composition::schema:: (75 tests, one process)	resolve_repo_root	0	paths.rs:334 = 0
+S1 ambient discovery	baseline	composition::sequence::preflight:: (44 tests, one process)	capture_file_resolution_context	62	mod.rs:57 = 0 (other crate, not counted); resolve.rs:62 = 62
+S1 ambient discovery	baseline	composition::sequence::preflight:: (44 tests, one process)	GitRepo.*::discover	65	types.rs:604 = 65
+S1 ambient discovery	baseline	composition::sequence::preflight:: (44 tests, one process)	resolve_repo_root	0	paths.rs:334 = 0
+S1 ambient discovery	baseline	composition::sequence::task:: (106 tests, one process)	capture_file_resolution_context	84	mod.rs:57 = 0 (other crate, not counted); resolve.rs:62 = 84
+S1 ambient discovery	baseline	composition::sequence::task:: (106 tests, one process)	GitRepo.*::discover	84	types.rs:604 = 84
+S1 ambient discovery	baseline	composition::sequence::task:: (106 tests, one process)	resolve_repo_root	0	paths.rs:334 = 0
+S1 ambient discovery	baseline	linking::paths:: (10 tests, one process)	capture_file_resolution_context	0	mod.rs:57 = 0 (other crate, not counted); resolve.rs:62 = 0
+S1 ambient discovery	baseline	linking::paths:: (10 tests, one process)	GitRepo.*::discover	10	types.rs:604 = 10
+S1 ambient discovery	baseline	linking::paths:: (10 tests, one process)	resolve_repo_root	10	paths.rs:334 = 10
+S1 ambient discovery	candidate	composition::schema:: (75 tests, one process)	capture_file_resolution_context	11	mod.rs:57 = 36 (other crate, not counted); resolve.rs:62 = 11
+S1 ambient discovery	candidate	composition::schema:: (75 tests, one process)	GitRepo.*::discover	49	types.rs:604 = 49
+S1 ambient discovery	candidate	composition::schema:: (75 tests, one process)	resolve_repo_root	0	paths.rs:334 = 0
+S1 ambient discovery	candidate	composition::sequence::preflight:: (44 tests, one process)	capture_file_resolution_context	2	mod.rs:57 = 0 (other crate, not counted); resolve.rs:62 = 2
+S1 ambient discovery	candidate	composition::sequence::preflight:: (44 tests, one process)	GitRepo.*::discover	5	types.rs:604 = 5
+S1 ambient discovery	candidate	composition::sequence::preflight:: (44 tests, one process)	resolve_repo_root	0	paths.rs:334 = 0
+S1 ambient discovery	candidate	composition::sequence::task:: (106 tests, one process)	capture_file_resolution_context	0	mod.rs:57 = 0 (other crate, not counted); resolve.rs:62 = 0
+S1 ambient discovery	candidate	composition::sequence::task:: (106 tests, one process)	GitRepo.*::discover	0	types.rs:604 = 0
+S1 ambient discovery	candidate	composition::sequence::task:: (106 tests, one process)	resolve_repo_root	0	paths.rs:334 = 0
+S1 ambient discovery	candidate	linking::paths:: (11 tests, one process)	capture_file_resolution_context	0	mod.rs:57 = 0 (other crate, not counted); resolve.rs:62 = 0
+S1 ambient discovery	candidate	linking::paths:: (11 tests, one process)	GitRepo.*::discover	3	types.rs:604 = 3
+S1 ambient discovery	candidate	linking::paths:: (11 tests, one process)	resolve_repo_root	3	paths.rs:334 = 3
+S2 error_guards scans	baseline	18 identities, one process each	run_scan hits summed over processes	12	
+S2 error_guards identities	baseline	error_guards	identities	18	
+S2 error_guards scans	candidate	8 identities, one process each	run_scan hits summed over processes	1	
+S2 error_guards identities	candidate	error_guards	identities	8	
+S3 context_command git init	baseline	27 tests run: 27 passed	git init invocations (parent side)	0	0 inside the checkout
+S3 context_command git any	baseline	context_command	all git invocations logged	46	
+S3 context_command source	baseline	context_command.rs	current_dir(repo_root()) launch sites	23	
+S3 context_command source	baseline	context_command.rs	repository_fixture() call sites	0	
+S3 context_command git init	candidate	26 tests run: 26 passed	git init invocations (parent side)	34	0 inside the checkout
+S3 context_command git any	candidate	context_command	all git invocations logged	36	
+S3 context_command source	candidate	context_command.rs	current_dir(repo_root()) launch sites	0	
+S3 context_command source	candidate	context_command.rs	repository_fixture() call sites	23	

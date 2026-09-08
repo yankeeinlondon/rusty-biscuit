@@ -503,6 +503,30 @@ export function buildReport(
       );
     }
     lines.push("");
+    // Paired alternation: the protocol alternates so that each baseline run
+    // has a candidate neighbour taken under the same host state. The ratio
+    // per pair is insensitive to slow drift that the whole-series bracket
+    // above cannot separate from the effect.
+    lines.push("#### Paired alternation (candidate ÷ baseline, same sequence number)");
+    lines.push("");
+    lines.push("| Suite | Column | Pairs | Ratio min / median / max | Every pair improved |");
+    lines.push("|---|---|---:|---|---|");
+    for (const suite of suites) {
+      const b = counted.filter((r) => r.run.suite === suite && r.run.revision === "baseline");
+      const c = counted.filter((r) => r.run.suite === suite && r.run.revision === "candidate");
+      const pairs = b
+        .map((bm) => [bm, c.find((cm) => cm.run.sequence === bm.run.sequence)] as const)
+        .filter((pair): pair is readonly [RunMetrics, RunMetrics] => pair[1] !== undefined);
+      if (pairs.length === 0) continue;
+      for (const column of ["elapsedS", "summedS"] as const) {
+        const ratios = pairs.map(([bm, cm]) => cm[column] / bm[column]);
+        const s = spread(ratios);
+        lines.push(
+          `| \`${suite}\` | ${column === "elapsedS" ? "elapsed" : "summed"} | ${pairs.length} | ${s.min.toFixed(3)} / ${s.median.toFixed(3)} / ${s.max.toFixed(3)} | ${s.max < 1 ? "yes" : "**no**"} |`,
+        );
+      }
+    }
+    lines.push("");
     lines.push("#### Identity changes");
     lines.push("");
     for (const suite of suites) {
@@ -528,8 +552,9 @@ export function buildReport(
     );
     lines.push("|---|---:|---|---:|---|---:|---|");
     for (const cohort of cohorts) {
-      const per = new Map<string, { tests: number[]; summed: number[] }>();
-      for (const m of counted) {
+      // A cohort lives in the suite(s) that run it; a run of an unrelated
+      // suite contributes no sample rather than a zero.
+      const perRun = counted.map((m) => {
         let tests = 0;
         let summed = 0;
         for (const inv of m.invocations) {
@@ -540,6 +565,12 @@ export function buildReport(
             }
           }
         }
+        return { m, tests, summed };
+      });
+      const suitesWithCohort = new Set(perRun.filter((s) => s.tests > 0).map((s) => s.m.run.suite));
+      const per = new Map<string, { tests: number[]; summed: number[] }>();
+      for (const { m, tests, summed } of perRun) {
+        if (!suitesWithCohort.has(m.run.suite)) continue;
         const entry = per.get(m.run.revision) ?? { tests: [], summed: [] };
         entry.tests.push(tests);
         entry.summed.push(summed);

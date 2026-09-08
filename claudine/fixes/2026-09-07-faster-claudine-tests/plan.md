@@ -247,6 +247,38 @@ packages_touched_during_phase_7:
     - claudine-cli
     - rendezvous-core
     - rendezvous-daemon
+phase_8_status: >-
+    complete — 55 local runs at two revisions, all green; paired
+    candidate ÷ baseline 0.64–0.77 for `just test` in every pair; every
+    eliminated-work claim has an lldb work counter or a shim sentinel behind
+    it; local numbers are attribution only and the CI tranche (Phase 9) is
+    still pending on the operator merge
+# Measurement tooling and its recorded evidence. No Rust source was touched.
+source_files_during_phase_8:
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement.test.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement-runner.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/sentinels.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement/plan.json
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement/plan-series-2.json
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement/cohorts.json
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement/targets.json
+docs_updated_during_phase_8:
+    - claudine/fixes/2026-09-07-faster-claudine-tests/plan.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/log.md
+# Generated evidence: provenance, run manifests, gzipped recipe logs, the two
+# reports, and the sentinel transcripts under `measurement/`.
+docs_created_during_phase_8:
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement/report.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement/series-2/report.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement/sentinels/summary.tsv
+# Nothing this phase found falsified a written skill claim; Phase 10 owns the
+# skill review and the three candidates are listed in `log.md` § Carried forward.
+skills_files_updated_during_phase_8: []
+# Measurement only: every package in the blast radius was *run*, none was
+# edited. The baseline was measured in a detached worktree with its own build
+# directory (`/tmp/rb-baseline-9fc5151a0`), left in place for Phases 9–10.
+packages_touched_during_phase_8: []
 ---
 
 # Execution plan — Faster Claudine tests through complete evaluation and explicit fixtures
@@ -1354,7 +1386,7 @@ Document-only updates do not trigger Rust suites. These phases may prepare a
 PR and its acceptance report while CI evidence is pending; the dependency map
 below describes final evidence completion, not a barrier to PR review.
 
-- [ ] Warm the preserved baseline and candidate artifacts, then collect
+- [x] Warm the preserved baseline and candidate artifacts, then collect
       **five alternating warm runs per revision** of each required full L1
       population. Extract changed-cohort identities, counts, and summed test
       durations from those same reports; do not also run every cohort in
@@ -1366,27 +1398,104 @@ below describes final evidence completion, not a barrier to PR review.
       directories warm and prevent concurrent edits or competing workloads
       during measurement. Reuse earlier samples only if their provenance and
       alternating sequence match this protocol.
-- [ ] Execute each **changed** timeout, readiness, or concurrency
+      Done, twice. Baseline is a detached worktree at `9fc5151a0` with its own
+      build directory; candidate is this tree. `measurement-runner.ts` ran
+      one uncounted warm-up per suite and revision (they absorbed 175 / 28 /
+      298 crates of per-invocation feature re-unification; every counted run
+      compiled nothing), then `baseline, candidate, …` five times for
+      `just test` and for `just test-rendezvous`, then the candidate-only load
+      rounds — 45 runs, all exit 0, in `measurement/`. `measurement.ts` reads
+      the logs, keeps the three costs apart, and gates on count mismatches,
+      unstable identity sets and any non-passing result. Cohorts
+      (`measurement/cohorts.json`) come out of those same suite reports; no
+      cohort was run in isolation. The host was not quiet — system daemons held
+      two to four cores and one baseline run sat at 88.6 s against a 49–55 s
+      neighbourhood — so the whole-suite delta did not clear the strict drift
+      bracket and a second alternating series of ten `just test` runs was
+      taken in a quieter window (`measurement/series-2/`). Series 2, medians:
+      runner elapsed **52.30 → 37.89 s**, summed **819.42 → 587.89 s**,
+      build/setup 1.5–1.9 s at both; candidate ÷ baseline per adjacent pair
+      0.643–0.765 (elapsed) and 0.637–0.758 (summed), improved in all ten pairs
+      across both series. Identities 6861 → 6873 (+28 / −16, every one named
+      in the report); failures, timeouts, leaks and retries 0 in every run.
+      `just test-rendezvous` is unchanged (paired median 0.96), as claimed.
+- [x] Execute each **changed** timeout, readiness, or concurrency
       contract ten times under representative suite load. Count compatible
       candidate measurement runs toward those ten executions and run only the
       remaining repetitions with a fixed representative load cohort. Record
       the target set, spread, failures, and leak results. Do not repeat
       unchanged tests separately merely because their file was migrated.
-- [ ] Measure any cold-build claim in an isolated build directory — never by
+      Target set in `measurement/targets.json`: the five
+      `composition::sequence::task` reap / interrupt tests, the three L1 PTY
+      binaries (11 identities), the rendezvous endpoint test, and the four L2
+      PTY binaries whose `serial(pty)` was removed (19 identities) — 36
+      identities, **eleven executions each**: one warm-up, five alternating,
+      five load rounds. The load cohort is the full L1 population of the
+      target's own package set (`just test`, `just test-rendezvous`), and for
+      the L2 binaries the four running together at `-j 8`, the concurrency the
+      removed group used to forbid. 0 non-passing, 0 retries, 0 leaks across
+      396 executions. Reap tests 0.038–0.106 s; L1 PTY 0.24–1.21 s; one L2
+      outlier, `level2_pty_provided_partial_single_match_confirms_and_launches`
+      at 4.609 s once against a 0.81 s median, passing. Files that were only
+      migrated were not re-run separately.
+- [x] Measure any cold-build claim in an isolated build directory — never by
       clearing the developer's working cache.
-- [ ] Prove eliminated discovery and unrelated launches with **work counters or
+      No cold-build claim exists in Phases 4–7 (`log.md` contains no such
+      claim; the only "cold" in this plan is this bullet). Nothing to measure.
+      The baseline worktree's build directory was created for the alternation,
+      not for a claim, and the developer's cache was never cleared.
+- [x] Prove eliminated discovery and unrelated launches with **work counters or
       sentinel effects**, independently of timing. A timing improvement is not
       evidence that a walk was removed.
-- [ ] Keep the three costs separate in every table: build/setup, runner elapsed,
+      `sentinels.ts`, transcripts in `measurement/sentinels/`. The counters
+      are lldb breakpoint hit counts at the entry location of the function
+      each claim names, on the binaries the suite ran, at both revisions.
+      **The CWD walk** (`capture_file_resolution_context`, one process per
+      module): `composition::schema` 73 → 11, `sequence::preflight` 62 → 2,
+      `sequence::task` 84 → 0; `resolve_repo_root` in `linking::paths`
+      10 → 3. Each survivor is a test Phase 6 named as deliberately kept on
+      real discovery. **The repeated scan**: `run_scan` — the `OnceLock`
+      initializer behind `scan_production_sources` — fired in 12 of 18
+      `error_guards` processes at the baseline and in 1 of 8 on the
+      candidate. **The launch origin**: a `git` shim on `PATH` during
+      `just test-cli --test context_command` logged 44 `rev-parse
+      --show-toplevel` calls from the checkout root and 0 `git init` at the
+      baseline, against 34 `git init` under `$TMPDIR`, 0 inside the checkout
+      and 0 `show-toplevel` on the candidate — 26 tests, 34 repositories,
+      which is the hoisted sweeps building one each instead of 12 and 7.
+      `just test-leaks claudine` and the two structural gates were re-run and
+      are recorded in `log.md`; the baseline leak sweep was not repeated
+      because Phase 7 recorded that it plays audio on the host.
+- [x] Keep the three costs separate in every table: build/setup, runner elapsed,
       summed test duration. Track identities, counts, failures, skips, timeouts,
       retries and slow cases alongside speed so lost coverage cannot read as an
       optimization.
-- [ ] Record local numbers as **attribution only**; they establish no CI target.
+      Every table `measurement.ts` emits carries build/setup (wall − elapsed),
+      runner elapsed and summed duration as separate columns beside tests,
+      passed, failed, timed out, skipped, leaks, retries and slow marks, and
+      lists the added and removed identities by name. The recipes themselves
+      still do not separate build from run; the runner measures wall time
+      around them, which is why the column exists locally at all.
+- [x] Record local numbers as **attribution only**; they establish no CI target.
+      Stated at the head of the Phase 8 log section and in the report's
+      preamble; `attribution.ts`'s budget gate still refuses non-CI provenance
+      and nothing from this phase feeds it.
 
 **Validation checkpoint 8** — five alternating runs per revision cover the full L1
 populations and changed cohorts through shared reports; ten executions cover
 each changed timing/concurrency contract; each eliminated-work
 claim has a counter or sentinel behind it.
+
+**Passed.** Five alternating runs per revision of `just test` (twice) and of
+`just test-rendezvous`, every cohort read from those reports; eleven
+executions of each of the 36 target identities, 0 non-passing; three work
+counters and two structural gates behind the three eliminated-work claims.
+The one thing the checkpoint did not get is a whole-suite delta that clears
+the strict drift bracket — the host's daemons saw to that in both series — and
+`log.md` reports it as such beside the paired reading (candidate ÷ baseline
+0.64–0.77 in all ten pairs) rather than choosing. Full record in `log.md`
+§ Phase 8; every table in `measurement/report.md` and
+`measurement/series-2/report.md`.
 
 ---
 

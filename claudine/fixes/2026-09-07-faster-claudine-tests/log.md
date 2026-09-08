@@ -1,6 +1,6 @@
 ---
 fix: 2026-09-07-faster-claudine-tests
-phase: 3
+phase: 8
 created: 2026-09-07
 ---
 
@@ -1471,3 +1471,325 @@ Skips 11 → 9 is the same two renames leaving the filtered-out set.
   and friends write to `log::data`, so a width sweep cannot move below the CLI.
   Adding a capture seam is a production change and stays out of scope; if a
   later fix wants the width matrix cheaper, that seam is the prerequisite.
+
+---
+
+## Phase 8 — Local measurement (RB5, first evidence tranche)
+
+**Outcome: complete. Every number in this section is local and is attribution
+only; it establishes no CI target.** Phases 4–7 are implemented and committed on
+`fix/cli-slow-tests` except Phase 7's library test edit, which is in the working
+tree; Phase 1's CI checkpoint is still blocked on the operator merge, so the CI
+tranche (Phase 9) remains pending.
+
+### Validation record — recorded once, reused by Phases 9–10
+
+Reuse this evidence while `claudine/**` source, `.config/nextest.toml`,
+`just/devops.just`, `claudine/justfile` and the toolchain below are unchanged;
+a change to any of them re-runs only the affected suite.
+
+| Field | Value |
+|---|---|
+| Commands | `just test` (five crates, one nextest invocation); `just test-rendezvous` (three invocations); `BISCUIT_L2_THREADS=8 just _test_l2 claudine-cli --features terminal-tests --test level2_dry_run_pty --test level2_provided_partial_file_pty --test level2_pty_tests --test level2_schema_prompt_pty` — the `test-l2` recipe's own parallel self-spawn path, narrowed to the four PTY binaries because `test-l2` would also run `claudine-gen`'s L2 set, where none of this phase's targets live |
+| Selection | `_tier_filter L1` for the first two; `_tier_filter L2` for the third. `BISCUIT_TEST_FILTER` unset |
+| Features | none (L1); `terminal-tests` (L2 PTY) |
+| Profile | `default` — `NEXTEST_PROFILE` and `BISCUIT_CI_ENVIRONMENT` unset, so no CI test-group cap applies and nextest schedules 16-way |
+| Platform | aarch64-apple-darwin, macOS 27.0 (26A5425a), Apple M4 Max, 16 cores, 128 GiB |
+| Toolchain | rustc 1.97.1 (8bab26f4f 2026-07-14), cargo-nextest 0.9.136, just 1.56.0, node v22.20.0, `RUSTC_WRAPPER=kache` |
+| Baseline source | detached worktree `/tmp/rb-baseline-9fc5151a0` at `9fc5151a0` (the revision Phase 1's local gates ran at), clean, own `target/` |
+| Candidate source | this worktree, `fix/cli-slow-tests` @ `dabbeca02`, dirty: `claudine/lib/src/composition/sequence/task/tests.rs` (Phase 7, uncommitted) plus `.claude/skills/claudine/SKILL.md`, `.claude/skills/rust-testing/SKILL.md` and this fix's documents |
+| Environment | ambient `CLAUDINE_INTERACTIVE`, `CLAUDINE_PID`, `CLAUDINE_SESSION_ID` from the agent session (the builder scrubs `CLAUDINE_*` from every child; Phase 5's `exported_claudine_application_variables_do_not_change_the_result` covers the namespace); no `NEXTEST_*`, `BISCUIT_*`, `MODEL`, `PLAYA_*`, `NO_COLOR`, `FORCE_COLOR`. `GIT_TERMINAL_PROMPT=0` exported by the runner |
+| Cache state | both build directories warm before any counted run. The uncounted warm-ups absorbed 175 (`just test`, baseline), 28 (candidate), 298 (`just test-rendezvous`, baseline) and 1 (L2 PTY) crates: each recipe unifies features for its own package selection, so a raw eight-package `nextest run --no-run` had not produced the five-package artifacts. Every counted run reports `Compiling` ×0 and `Finished … in 1.1–2.9 s` |
+| Concurrency and load | one recipe at a time, never two. No cargo, nextest or editor work of mine ran alongside; a `claudine codex --yolo` session from another worktree was present and idle (0 % CPU). System daemons were not idle: `identityservicesd` 30–90 %, `WindowServer` ~50 %, `coreaudiod` ~26 %, `Snagit` ~22 % of one core each at various points, i.e. two to four cores of noise the runs could not exclude. Load average and the second `top` sample's CPU idle are recorded before every run in `runs.jsonl` |
+| Result | 55 recipe runs, **all exit 0**, 0 failed / timed out / leaked / retried tests |
+| Artifacts | [`measurement/provenance.json`](measurement/provenance.json), [`measurement/runs.jsonl`](measurement/runs.jsonl), `measurement/runs/*.log.gz` (verbatim recipe output, gzipped), [`measurement/report.md`](measurement/report.md); series 2 under [`measurement/series-2/`](measurement/series-2/); sentinels under [`measurement/sentinels/`](measurement/sentinels/) |
+
+Tooling, all in this directory and all `node:test`-covered like the earlier
+gates: [`measurement-runner.ts`](measurement-runner.ts) drives the plan
+([`measurement/plan.json`](measurement/plan.json)) and refuses to start on a
+cold build directory; [`measurement.ts`](measurement.ts) reads the logs, keeps
+the three costs apart, and **exits 1** on a truncated log, a count that
+disagrees with nextest's own summary, an identity set that is not stable across
+one revision's runs, a target with fewer than ten executions, or any
+non-passing result; [`sentinels.ts`](sentinels.ts) takes the work counters.
+
+```bash
+npx tsx --test measurement.test.ts                      # 10 tests
+npx tsx measurement-runner.ts --plan measurement/plan.json --out measurement
+npx tsx measurement.ts report --manifest measurement/runs.jsonl \
+    --cohorts measurement/cohorts.json --targets measurement/targets.json
+npx tsx sentinels.ts --baseline /tmp/rb-baseline-9fc5151a0 --candidate "$(git rev-parse --show-toplevel)" \
+    --out measurement/sentinels                         # re-reads saved transcripts
+```
+
+### Protocol, and why it ran twice
+
+Per suite and revision: one uncounted warm-up, then `baseline, candidate,
+baseline, candidate, …` five times, then five candidate-only load rounds and
+ten L2 PTY rounds (series 1, 45 runs, 13:15–13:41 local). The host was not
+quiet during the `just test` alternation: the first counted baseline run took
+88.6 s of runner elapsed against a 49–55 s neighbourhood, and the CPU-idle
+reading before its candidate neighbour was 0.97 %. The whole-series drift
+bracket that produces — 74 % for the baseline, 57 % for the candidate — is wider
+than the effect, so the strict rule (a median delta must clear both revisions'
+max − min) reports the whole-suite delta as *not established* even though every
+pair improved. A second alternating series of ten `just test` runs was taken
+50 minutes later in a quieter window (13:43–13:51, CPU idle 64–83 % before
+every run); its bracket is narrower (42 % / 32 %) but the host still drifted
+upward mid-series (baseline runs 37 → 59 s), and the strict rule still fails.
+
+Both series are reported. The reading that survives both is the **paired**
+one, which is what alternation exists to produce: each baseline run has a
+candidate neighbour taken under the same host state, and the candidate ÷
+baseline ratio per pair is insensitive to drift the whole-series bracket cannot
+separate from the effect.
+
+### Headline — `just test`, three costs apart
+
+| | Baseline (9fc5151a0) | Candidate | Paired ratio min / median / max |
+|---|---:|---:|---|
+| Build/setup (wall − elapsed), series 2 | 1.5–1.9 s | 1.6–1.7 s | — |
+| Runner elapsed, series 2 medians | 52.30 s | **37.89 s** | 0.643 / **0.712** / 0.765 |
+| Summed test duration, series 2 medians | 819.42 s | **587.89 s** | 0.637 / **0.707** / 0.758 |
+| Runner elapsed, series 1 medians | 53.44 s | 36.01 s | 0.563 / 0.653 / 0.876 |
+| Summed test duration, series 1 medians | 836.68 s | 558.03 s | 0.566 / 0.646 / 0.863 |
+| Identities run | 6861 | 6873 | +28 / −16 |
+| Skipped | 11 | 9 | the two renamed tier identities now run |
+| Failed / timed out / leaked / retried | 0 / 0 / 0 / 0 | 0 / 0 / 0 / 0 | every run |
+| Slow marks (> 5 s) per run | 1–58 | 0–10 | series 1; 1–20 vs 0–1 in series 2 |
+
+Improved in **all ten pairs** across both series. The magnitude carries the
+host's noise — roughly −25 % to −36 % elapsed depending on the pair — and the
+number to quote is the paired median, **0.71**, not the whole-series delta.
+Summed duration moved by the same ratio as elapsed, which is the column that
+matters for the CI leg that runs `claudine-cli` at `max-threads = 1`
+(attribution.md § The concurrency fact).
+
+`just test-rendezvous`: paired median 0.96 elapsed / 0.95 summed, min–max
+0.66–1.08 — **no change, and none was claimed**; Phase 7 added one test there
+(272 → 273) and touched no timing.
+
+### Changed cohorts, from the same suite reports
+
+Series 2, medians of summed duration across the five alternating runs of each
+revision; *established* means the median delta clears both revisions' own
+max − min. Full table with min/max in [`series-2/report.md`](measurement/series-2/report.md);
+series 1's in [`report.md`](measurement/report.md) agrees in direction on every
+row.
+
+| Cohort | Tests B → C | Summed B → C | Delta | Established |
+|---|---|---:|---:|---|
+| lib `composition::sequence::preflight` | 44 → 44 | 45.30 → 4.05 s | −91 % | yes |
+| lib `composition::sequence::task` | 106 → 106 | 70.38 → 15.35 s | −78 % | yes |
+| lib `composition::schema` | 75 → 75 | 58.95 → 14.43 s | −76 % | yes |
+| lib `linking::paths` | 10 → 11 | 14.74 → 2.09 s | −86 % | yes |
+| `error_guards` | 18 → 8 | 60.13 → 3.25 s | −95 % | yes |
+| `context_command` | 27 → 26 | 43.79 → 12.79 s | −71 % | yes |
+| `sequence_overlay_pty` | 7 → 7 | 18.11 → 4.23 s | −77 % | yes |
+| Phase 5C context / errors / completion family | 84 → 83 | 52.66 → 21.36 s | −59 % | yes |
+| Phase 5D live-child and PTY cohort | 11 → 12 | 20.46 → 6.23 s | −70 % | yes |
+| guards, probes, fixture self-tests | 62 → 71 | 69.82 → 21.90 s | −69 % | inside drift (series 1: −75 %) |
+| Phase 5A compose family | 69 → 69 | 20.54 → 16.34 s | −20 % | inside drift |
+| Phase 5B sequence / loop family | 155 → 155 | 49.09 → 46.66 s | −5 % | inside drift |
+| all `claudine-cli::*` integration binaries | 2489 → 2498 | 417.36 → 310.66 s | −26 % | inside drift |
+| all `claudine` lib tests | 4040 → 4042 | 361.31 → 220.35 s | −39 % | inside drift |
+| `claudine-cli` bin unit tests (untouched) | 1694 → 1694 | 81.83 → 89.69 s | +10 % | inside drift — the control |
+| contract / catalog-types / gen (untouched) | 223 → 224 | 27.91 → 29.35 s | +5 % | inside drift — the control |
+
+The two untouched cohorts are the controls: they move by +5–10 % between
+revisions under the same host, which is the size of the noise, and the
+established rows move by −59 % to −95 %. The Phase 5A/5B families were migrated
+to the fixture for isolation (RB2), not for speed; the plan attributed no
+timing claim to them and none is made here. **No cohort was run in isolation.**
+
+The identity change is +28 / −16, every one named in the report's *Identity
+changes* list, and reconciles to Phases 4–7's own records: +8 `cli_process_fixture`
+self-tests, +8 `contamination_probes`, +4 `spawn_site_guard`, +2 `error_guards`
+(the corpus test and its non-vacuity witness) against −12 merged
+scan-backed identities, +2 `event_renderer` against −1 `stream::stderr`
+tautology, `linking::paths` +2 / −1 (one rename, one addition), −1
+`context_command` duplicate, and the two renamed tier identities
+(`compose_sigint_during_prep_exits_130_with_notice`,
+`shipped_corpus_builds_deterministically`) entering L1. The rendezvous
+endpoint test is the +1 there.
+
+### Ten executions of every changed timing / concurrency contract
+
+Target set: [`measurement/targets.json`](measurement/targets.json) — 13
+entries, 36 identities. Each ran **eleven** times on the candidate: one
+warm-up, five alternating, five load rounds. The representative load is the
+full L1 population of the target's own package set (`just test` for the
+library and CLI targets, `just test-rendezvous` for the endpoint test); for
+the four L2 PTY binaries it is the four running together at `-j 8`, which is
+exactly the concurrency the removed `serial(pty)` group used to forbid.
+Migrated-but-unchanged files (`wrap_sigint`, `handle_deadline`,
+`compose_ttff_perf`, `completion_perf`) were not re-run separately.
+
+| Target | Identities | Executions | Min | Median | Max | Non-passing / retries |
+|---|---:|---:|---:|---:|---:|---|
+| `composition::sequence::task` reap waits → pid observation (4) | 4 | 44 | 0.038 s | 0.049–0.067 s | 0.106 s | 0 / 0 |
+| `…::the_system_shell_interrupts_a_running_tree` marker wait | 1 | 11 | 0.062 s | 0.075 s | 0.088 s | 0 / 0 |
+| `sequence_overlay_pty` (OSC 10/11 answered; concurrent) | 7 | 77 | 0.266 s | 0.34–0.75 s | 1.211 s | 0 / 0 |
+| `level1_compose_autocomplete_failure_pty`, `level1_inline_compose_mismatch_pty` | 4 | 44 | 0.243 s | 0.32–0.59 s | 0.848 s | 0 / 0 |
+| `rendezvous-daemon::pairing_and_sync::endpoints_are_stable_per_fixture_and_distinct_across_fixtures` | 1 | 11 | 0.287 s | 0.354 s | 1.062 s | 0 / 0 |
+| four L2 PTY binaries at `-j 8` | 19 | 209 | 0.279 s | 0.29–4.63 s | 4.713 s | 0 / 0 |
+
+396 executions, 0 non-passing, 0 retries, 0 leaks. One outlier is recorded
+rather than smoothed: `level2_pty_provided_partial_single_match_confirms_and_launches`
+took 4.609 s once against a 0.81 s median (its neighbour
+`level2_pty_dry_run_approval_prompt_matches_normal_mode` sits at 4.6 s every
+time, so a scheduling collision at `-j 8` is the likely cause), and passed.
+Per-identity rows are in [`report.md`](measurement/report.md).
+
+### Cold-build claims
+
+None exist. Phases 4–7 made no cold-build claim (`log.md` and the plan carry
+no such statement outside the Phase 8 bullet itself), so there was nothing to
+measure. The baseline worktree's isolated build directory was created for the
+alternation, not for a claim; the developer's working cache was never cleared.
+For the record only: the raw eight-package `nextest run --no-run` there took
+3 m 18 s through kache, and the recipes' own feature-unified builds a further
+1 m 37 s (`just test`) and 56 s + 1 m 14 s + 3 s (`just test-rendezvous`).
+
+### Work counters and sentinel effects, independent of timing
+
+[`sentinels.ts`](sentinels.ts); raw transcripts and the summary in
+[`measurement/sentinels/`](measurement/sentinels/). The counters are lldb
+breakpoint hit counts at the **entry location** of the function each claim
+says is no longer called, on the same test binaries the suite ran (resolved
+with the suite's own five-package selection so feature unification names the
+same artifact — the script fails if `cargo` compiles anything). A regex
+breakpoint also lands on the closures a function instantiates, which fire once
+per call each; only the entry location in the defining file is counted, and
+every other location is listed in the record. libtest colours its summary
+under lldb's terminal, which the first pass of the parser missed; the
+transcripts were re-read rather than re-run.
+
+**S1 — the ambient CWD walk in the redirected library modules** (Phase 6's
+`resolve_fixture_source`). One process per module, `--test-threads=1`, every
+test passing at both revisions:
+
+| Module (tests) | `capture_file_resolution_context` B → C | `GitRepo::discover` B → C | `resolve_repo_root` B → C |
+|---|---:|---:|---:|
+| `composition::schema` (75) | 73 → **11** | 111 → 49 | 0 → 0 |
+| `composition::sequence::preflight` (44) | 62 → **2** | 65 → 5 | 0 → 0 |
+| `composition::sequence::task` (106) | 84 → **0** | 84 → 0 | 0 → 0 |
+| `linking::paths` (10 → 11) | 0 → 0 | 10 → 3 | 10 → **3** |
+
+The survivors are the calls Phase 6 said it kept: `schema`'s
+`make_source_in` / `serial(schema_validation_cwd)` tests and the two
+`shipped_implement_plan_*` cases (11), `preflight`'s
+`cross_repo_task_nested_reference_uses_its_own_repository_context` (2), and in
+`linking::paths` the two `resolve_repo_root_*` tests plus
+`new_roots_the_table_at_the_process_home_and_the_resolved_repository` (3).
+`discover` in `schema` stays at 49 because the retained tests build and
+discover their own repositories — that is their subject.
+
+**S2 — one production scan per `error_guards` process.** `run_scan` is the
+`OnceLock` initializer behind `scan_production_sources`; counted per identity
+in its own process, as nextest runs it, and summed:
+
+| | Identities | Processes that ran `run_scan` |
+|---|---:|---:|
+| baseline | 18 | **12** |
+| candidate | 8 | **1** |
+
+**S3 — where `context_command` launches from.** A `git` shim first on `PATH`
+logged every parent-side invocation with its working directory while
+`just test-cli --test context_command` ran at each revision (27 → 26 tests,
+all passing):
+
+| | `git init` | of which inside the checkout | `git rev-parse --show-toplevel` from the checkout root | `current_dir(repo_root())` sites | `repository_fixture()` sites |
+|---|---:|---:|---:|---:|---:|
+| baseline | 0 | 0 | **44** | 23 | 0 |
+| candidate | **34** | **0** | 0 | 0 | 23 |
+
+The baseline located the monorepo 44 times and launched every context command
+from it; the candidate built 34 repositories under `$TMPDIR` and never asked
+where the checkout was (the two remaining `rev-parse` calls at each revision
+are the recipe's own). Phase 6's hoisting shows in the count too: 26 tests,
+34 inits — the two width sweeps build one repository each instead of 12 and 7.
+
+**S4 — no audio and no survivors.** `just test-leaks claudine` from the repo
+root: **7146 passed / 11 skipped, `leak-sweep: no leaked processes detected`** —
+the same sweep that found two orphaned `claudine` audio workers before Phase
+7's `PLAYA_DRY_RUN` default. The baseline sweep was **not** re-run: Phase 7 recorded that
+it leaves two `claudine` processes behind and plays a sound through the host's
+speakers, and repeating a known side effect on the developer's machine buys
+no evidence the record does not already hold.
+
+**S5 — the structural counters that run in every suite run.**
+`just test-cli --test spawn_site_guard --no-capture` on the candidate: 18
+passed, and the gates wrote
+`{"kind":"total","gate":"spawn","files":0,"sites":0,"scanned_sites":0,"governed_files":90}`
+and
+`{"kind":"total","gate":"isolation","files":0,"sites":0,"scanned_sites":0,"governed_files":74}`
+(copied into `measurement/sentinels/`), against the baseline's recorded 36
+files / 172 raw spawn sites across 89 governed files and 0 escapes across 37.
+Both gates execute inside every one of the 16 candidate `just test` runs above,
+so "zero raw spawn sites" and "zero isolation escapes" were re-proved 16 times
+during measurement, not once.
+
+### Gates
+
+Tests before lint, per Phase 1's stale-binary note. The candidate `just test`
+and `just test-rendezvous` gates are the measurement runs themselves.
+
+| Gate | Area | Result |
+|---|---|---|
+| `just test` ×16 (candidate: series 1 warm-up, five alternating, five load; series 2 five alternating) | `claudine` | 6873 passed / 9 skipped, exit 0, every run |
+| `just test-rendezvous` ×11 (candidate) | `claudine` | 273 passed / 2 skipped, exit 0, every run |
+| `just _test_l2 … --test <4 PTY binaries>` ×11 (candidate) | `claudine` | 19 passed, exit 0, every run |
+| `just test-leaks claudine` | repo root | 7146 passed / 11 skipped, `leak-sweep: no leaked processes detected` |
+| `npx tsx --test measurement.test.ts` | fix directory | 10 passed, 0 failed |
+| `measurement.ts report` (series 1, series 2) | fix directory | `GATE EXIT=0`, `GATE EXIT=0` |
+| `sentinels.ts` | fix directory | `SENTINELS EXIT=0` |
+| `just test` | `sniff` | 2599 passed / 23 skipped, exit 0, 48.2 s |
+| `just lint` | `sniff` | exit 0 |
+| `git diff main -- .config/nextest.toml` | repo root | 16 insertions / 41 deletions, 0 non-comment insertions (AC5, AC7) |
+
+`sniff` is included because the session was started in that area; no `sniff`
+file was read or written by this phase. No Rust source changed in this phase,
+so `just lint` in `claudine` is Phase 7's record.
+
+### Deliberate choices
+
+- **Two series, both reported.** Dropping series 1 would have selected the
+  quieter evidence; it stays, with its bracket, and the paired reading is what
+  reconciles them.
+- **Strict bracket and paired ratio side by side.** The strict rule is kept
+  because it is the one that cannot be gamed by drift in the effect's favour;
+  the paired ratio is added because the protocol's alternation is *for* it.
+  Where they disagree, the log says so rather than picking.
+- **Warm-ups counted toward the ten executions.** They are compatible runs —
+  same binary, same load cohort, the compile happens before the first test
+  starts — so eleven executions are reported rather than ten.
+- **Logs gzipped.** 4.5 MB for 55 verbatim runs instead of ~50 MB; the parser
+  reads either form and the raw per-test vectors are intact.
+- **The load cohort is the whole suite.** A hand-picked "representative"
+  subset would have been a claim about representativeness; the population the
+  targets actually ship in is not.
+- **lldb entry-location counts, not aggregate hit counts**, after the first
+  pass showed a regex breakpoint's aggregate inflated 6.5× by closure
+  locations (474 against 73 real calls). The raw transcripts show both.
+
+### Carried forward
+
+- Phase 9: the CI tranche is the only source for budgets; nothing here may
+  feed `deriveBudgets`. The paired-ratio reading (0.71 elapsed and summed) is
+  the local prior for what the `claudine-cli` `max-threads = 1` leg should
+  show in its *summed* column, and only that.
+- Phase 10: `results.md` can be assembled from `measurement/report.md`,
+  `series-2/report.md` and `sentinels/summary.tsv` without re-running
+  anything, provided the reuse rule at the top of this section still holds.
+- Phase 10 skill candidates (`rust-testing`), recorded here rather than
+  edited in: (a) lldb entry-location hit counts as a work counter for
+  "this call was removed" claims — no root, no instrumentation, and the
+  transcript is the evidence; (b) the per-invocation feature-unification
+  warm-up: a raw `nextest run --no-run` over a wider package set does **not**
+  warm the artifacts a narrower recipe invocation will build; (c) narrowing
+  `test-l2` to named binaries needs `just _test_l2 <pkg> --features … --test …`
+  because the public recipe fans out to a second package.
+- The host: `identityservicesd` at 30–90 % of a core for most of an hour is
+  the same class of background noise the 2026-08-13 triage recorded; it is
+  disclosed, not diagnosed, here.

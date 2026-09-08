@@ -1,0 +1,34 @@
+(lldb) target create "/private/tmp/rb-baseline-9fc5151a0/target/debug/deps/error_guards-8f55991485d8a2b5"
+Current executable set to '/private/tmp/rb-baseline-9fc5151a0/target/debug/deps/error_guards-8f55991485d8a2b5' (arm64).
+(lldb) breakpoint set -r 'run_scan' --auto-continue true
+Breakpoint 1: 15 locations.
+(lldb) process launch -- --exact the_corpus_covers_every_code_a_diagnostic_can_return --test-threads=1
+
+running 1 test
+test the_corpus_covers_every_code_a_diagnostic_can_return ... [32mok(B[m
+
+test result: [32mok(B[m. 1 passed; 0 failed; 0 ignored; 0 measured; 17 filtered out; finished in 6.61s
+
+Process 69145 launched: '/private/tmp/rb-baseline-9fc5151a0/target/debug/deps/error_guards-8f55991485d8a2b5' (arm64)
+Process 69145 exited with status = 0 (0x00000000)
+(lldb) breakpoint list
+Current breakpoints:
+1: regex = 'run_scan', locations = 15, resolved = 15, hit count = 1297 Options: enabled auto-continue 
+  1.1: where = error_guards-8f55991485d8a2b5`run_scan + 28 at source_scan.rs:278:9, address = 0x000000010005ecac, resolved, hit count = 1 
+  1.2: where = error_guards-8f55991485d8a2b5`unwrap_or_else<syn::file::File, syn::error::Error, error_guards::source_scan::run_scan::{closure_env#1}> + 24 at result.rs:1620:15, address = 0x000000010009228c, resolved, hit count = 644 
+  1.3: where = error_guards-8f55991485d8a2b5`unwrap_or_else<alloc::string::String, std::io::error::Error, error_guards::source_scan::run_scan::{closure_env#0}> + 24 at result.rs:1620:15, address = 0x00000001000925a8, resolved, hit count = 644 
+  1.4: where = error_guards-8f55991485d8a2b5`{closure#0} + 16 at source_scan.rs:293:41, address = 0x000000010005a624, resolved, hit count = 0 
+  1.5: where = error_guards-8f55991485d8a2b5`{closure#1} + 16 at source_scan.rs:298:41, address = 0x000000010005a6c0, resolved, hit count = 0 
+  1.6: where = error_guards-8f55991485d8a2b5`call_once<std::sync::once::{impl#2}::call_once_force::{closure_env#0}<std::sync::once_lock::{impl#0}::initialize::{closure_env#0}<error_guards::source_scan::ScanResult, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<error_guards::source_scan::ScanResult, fn() -> error_guards::source_scan::ScanResult>, !>>, (&std::sync::once::OnceState)> + 16 at function.rs:250:5, address = 0x00000001000964d8, resolved, hit count = 0 
+  1.7: where = error_guards-8f55991485d8a2b5`call_once<std::sync::once::{impl#2}::call_once_force::{closure_env#0}<std::sync::once_lock::{impl#0}::initialize::{closure_env#0}<error_guards::source_scan::ScanResult, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<error_guards::source_scan::ScanResult, fn() -> error_guards::source_scan::ScanResult>, !>>, (&std::sync::once::OnceState)> + 28 at function.rs:250:5, address = 0x000000010009953c, resolved, hit count = 0 
+  1.8: where = error_guards-8f55991485d8a2b5`call_once<fn() -> error_guards::source_scan::ScanResult, ()> + 12 at function.rs:250:5, address = 0x0000000100099ba0, resolved, hit count = 1 
+  1.9: where = error_guards-8f55991485d8a2b5`get_or_init<error_guards::source_scan::ScanResult, fn() -> error_guards::source_scan::ScanResult> + 8 at once_lock.rs:321:20, address = 0x0000000100099d38, resolved, hit count = 1 
+  1.10: where = error_guards-8f55991485d8a2b5`get_or_try_init<error_guards::source_scan::ScanResult, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<error_guards::source_scan::ScanResult, fn() -> error_guards::source_scan::ScanResult>, !> + 16 at once_lock.rs:407:9, address = 0x0000000100099d54, resolved, hit count = 1 
+  1.11: where = error_guards-8f55991485d8a2b5`{closure#0}<error_guards::source_scan::ScanResult, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<error_guards::source_scan::ScanResult, fn() -> error_guards::source_scan::ScanResult>, !> + 20 at once_lock.rs:543:19, address = 0x000000010009c98c, resolved, hit count = 1 
+  1.12: where = error_guards-8f55991485d8a2b5`{closure#0}<error_guards::source_scan::ScanResult, fn() -> error_guards::source_scan::ScanResult> + 24 at once_lock.rs:321:50, address = 0x000000010009ca2c, resolved, hit count = 1 
+  1.13: where = error_guards-8f55991485d8a2b5`initialize<error_guards::source_scan::ScanResult, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<error_guards::source_scan::ScanResult, fn() -> error_guards::source_scan::ScanResult>, !> + 16 at once_lock.rs:542:19, address = 0x00000001017f358c, resolved, hit count = 1 
+  1.14: where = error_guards-8f55991485d8a2b5`call_once_force<std::sync::once_lock::{impl#0}::initialize::{closure_env#0}<error_guards::source_scan::ScanResult, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<error_guards::source_scan::ScanResult, fn() -> error_guards::source_scan::ScanResult>, !>> + 24 at once.rs:221:9, address = 0x00000001000a8514, resolved, hit count = 1 
+  1.15: where = error_guards-8f55991485d8a2b5`{closure#0}<std::sync::once_lock::{impl#0}::initialize::{closure_env#0}<error_guards::source_scan::ScanResult, std::sync::once_lock::{impl#0}::get_or_init::{closure_env#0}<error_guards::source_scan::ScanResult, fn() -> error_guards::source_scan::ScanResult>, !>> + 16 at once.rs:226:40, address = 0x00000001000aa33c, resolved, hit count = 1 
+
+
+--- stderr ---

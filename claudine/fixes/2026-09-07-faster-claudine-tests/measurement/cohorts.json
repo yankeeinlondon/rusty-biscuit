@@ -17,7 +17,7 @@
     { "name": "lib linking::paths", "prefixes": [{ "binary": "claudine", "prefix": "linking::paths::" }] },
     { "name": "lib render::event_renderer", "prefixes": [{ "binary": "claudine", "prefix": "render::event_renderer::" }] },
     { "name": "lib stream::stderr", "prefixes": [{ "binary": "claudine", "prefix": "stream::stderr::" }] },
-    { "name": "cli-unit (`claudine-cli` bin tests, untouched)", "binaries": ["claudine-cli"] },
+    { "name": "cli-unit (`claudine-cli` bin tests, untouched)", "binaries": ["claudine-cli::bin/claudine"] },
     { "name": "claudine-gen signals_validation", "binaries": ["claudine-gen::signals_validation"] },
     { "name": "claudine-contract / catalog-types / gen (all, untouched except metadata)", "binaryPrefixes": ["claudine-contract", "claudine-catalog-types", "claudine-gen"] },
     { "name": "rendezvous-daemon pairing_and_sync", "binaries": ["rendezvous-daemon::pairing_and_sync"] },
