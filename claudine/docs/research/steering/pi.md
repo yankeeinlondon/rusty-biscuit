@@ -30,6 +30,37 @@ receipt_guarantees:
   - { mechanism_id: rpc-idle-prompt, request_acceptance: confirmed, persistence: unknown, scheduling: unknown, conversation_delivery: unknown, provider_signals: [agent_start, turn_start, message_start, message_end, agent_end, agent_settled], correlation: request_id, evidence_ids: [official-rpc, source-rpc, source-settled], limitations: "Success is preflight acceptance or immediate extension handling, so it does not universally establish a scheduled model turn; later events lack the request id." }
   - { mechanism_id: rpc-abort-submit, request_acceptance: confirmed, persistence: unknown, scheduling: unknown, conversation_delivery: unknown, provider_signals: ["abort response after idle", "separate prompt response", agent_settled], correlation: request_id, evidence_ids: [official-rpc, source-rpc], limitations: "Abort acknowledgment proves idle, not replacement acceptance." }
 evidence:
+  - claim: RPC abort removes the marked built-in bash external process; killing Pi leaves it running until fixture cleanup. Context, skill, and template discovery remain enabled.
+    id: live-rpc-bash-cleanup-0844
+    limitations: Real Pi 0.84.4/macOS with deterministic local model and built-in bash executing one marked external process. Checked after a 750 ms delay; provider abort removed it, provider SIGKILL did not, and fixture cleanup then removed it. No additional descendants, native Windows/Linux, arbitrary extensions, or cloud inference tested. Not production activation.
+    location: claudine/features/2026-09-08-steering/verification/pi-macos-0.84.4-bash-cleanup.json
+    method: disposable_test
+    observed_on: 2026-09-08
+    version: Pi 0.84.4 macOS
+
+  - claim: Steering accepted during a gated session switch disappears without transcript persistence or model consumption; steering accepted after the switch reaches the new session. Abrupt provider termination after acknowledgment loses queued steering before history or model consumption.
+    id: live-rpc-switch-crash-0844
+    limitations: Real Pi 0.84.4/macOS with deterministic local model and fixture extensions. Controlled idle switch interleaving and kill after acknowledged steering during cooperative tool waits; no exhaustive scheduling, cloud inference, host crash, filesystem durability, or restart. Passing loss assertions do not activate delivery support.
+    location: claudine/features/2026-09-08-steering/verification/pi-macos-0.84.4-switch-crash.json
+    method: disposable_test
+    observed_on: 2026-09-08
+    version: Pi 0.84.4 macOS
+
+  - claim: Abort preserves queued steering as saved user history without immediate model consumption; explicit next prompt consumes it. clear_queue before abort removes it. stdin EOF while tools are held loses even acknowledged steering without saved user history despite exit code zero.
+    id: live-rpc-failures-0844
+    limitations: Real Pi with local deterministic model and cooperative in-process tools on macOS only. EOF tests close stdin while retaining stdout observation; no cloud provider, OS subprocess cleanup, full-duplex loss, host crash, or concurrent target race. Expected failure behavior is a passing regression assertion, not successful message delivery.
+    location: claudine/features/2026-09-08-steering/verification/pi-macos-0.84.4-failures.json
+    method: disposable_test
+    observed_on: 2026-09-08
+    version: Pi 0.84.4 macOS
+  - claim: Real Pi RPC with deterministic local model passed correlated admission, full two-tool batch delivery, same-session continuity, duplicate request IDs, resource expansion, extension-handled input, mutable session identity, and unanswered UI checks.
+    id: live-rpc-fixture-0844
+    limitations: Isolated fixture resources and local deterministic model; no cloud backend, production Claudine adapter, concurrent targeting race, disconnect, abort cleanup, Linux or Windows verification.
+    location: claudine/features/2026-09-08-steering/verification/pi-macos-0.84.4.json
+    method: disposable_test
+    observed_on: 2026-09-08
+    version: Pi 0.84.4 macOS
+
   - { id: official-home, method: official_docs, location: "https://pi.dev/", version: "observed 2026-09-08", observed_on: 2026-09-08, claim: "Pi supports terminal and programmatic operation.", limitations: "Not a protocol specification." }
   - { id: official-rpc, method: official_docs, location: "https://pi.dev/docs/latest/rpc", version: "latest observed 2026-09-08; pinned separately to v0.84.4 source", observed_on: 2026-09-08, claim: "Documents JSONL RPC prompt, steer, follow_up, abort, clear_queue, get_state, responses, queue events, agent_end, and agent_settled.", limitations: "Does not prove live or cross-OS behavior." }
   - { id: official-sdk, method: official_docs, location: "https://pi.dev/docs/latest/sdk", version: "latest observed 2026-09-08", observed_on: 2026-09-08, claim: "In-process AgentSession exposes prompting, queues, abort, state, and event subscriptions.", limitations: "Does not attach to another CLI process." }
@@ -54,9 +85,9 @@ discovery:
   - { id: rpc-windows-native, profile_id: retained-rpc, os: windows, origin: native, method: provider_api, locator: "Owned child pipes plus get_state.", identity_check: "Fresh state and creation identity.", liveness_check: get_state, state_detection: "state/events", observation_source: "cross-platform source", observed_at: "not observed", available_labels: [pid, session_id, state], prerequisites: ["native Windows check"], evidence_ids: [source-rpc] }
   - { id: rpc-windows-claudine, profile_id: retained-rpc, os: windows, origin: claudine, method: claudine_registration, locator: "Future RPC registration.", identity_check: "Registration/get_state.", liveness_check: get_state, state_detection: "state/events", observation_source: "source-derived", observed_at: "not observed", available_labels: [pid, session_id, state], prerequisites: ["future wrapper", "native Windows check"], evidence_ids: [source-rpc, wrapper] }
 mechanisms:
-  - { id: rpc-steer, interface_status: documented, maturity: stable, transport: stdio, initialization: "Launch RPC, retain pipes, continuously drain stdout, correlate get_state.", operation_intent: steer_active_turn, conversation_effect: preserve_running_turn, delivery_boundary: end_of_tool_batch, destination: "Mutable current AgentSession in that child; request has no session id.", authentication: "Possession/protection of child pipes.", startup_requirements: ["retained pipes", "registered expected session"], target_preconditions: ["expected session", "streaming", "not compacting"], target_guards: ["no expected session/operation id", "session replacement can retarget"], request_framing: "LF-delimited UTF-8 JSON stdin.", response_framing: "LF-delimited response interleaved with events.", request_format: '{"id":"id","type":"steer","message":"text"}', response_format: '{"id":"id","type":"response","command":"steer","success":true|false}', long_tool_behavior: "Waits through long tool and entire batch; hangs indefinitely if boundary never arrives.", tool_batch_behavior: continue_all, queue_behavior: "In-memory FIFO; all or one-at-a-time drain; clear_queue removes pending text.", message_interpretation: skills_templates, interruption_phases: [], interruption_partial_failure: "Not applicable.", ordering: "FIFO; concurrent sender ordering untested.", sender_message_id: unsupported, retry_policy: never_retry, duplicate_handling: "No suppression; request id is correlation, not idempotency.", cancellation: "clear_queue before insertion; no per-message recall after insertion; abort retains queues.", limits: "No established size/count/expiry/persistence bounds; extension commands rejected.", evidence_ids: [official-rpc, source-rpc, source-session, source-loop] }
+  - { id: rpc-steer, interface_status: documented, maturity: stable, transport: stdio, initialization: "Launch RPC, retain pipes, continuously drain stdout, correlate get_state.", operation_intent: steer_active_turn, conversation_effect: preserve_running_turn, delivery_boundary: end_of_tool_batch, destination: "Mutable current AgentSession in that child; request has no session id.", authentication: "Possession/protection of child pipes.", startup_requirements: ["retained pipes", "registered expected session"], target_preconditions: ["expected session", "streaming", "not compacting"], target_guards: ["no expected session/operation id", "session replacement can retarget; macOS 0.84.4 gated switch also discards acknowledged steering"], request_framing: "LF-delimited UTF-8 JSON stdin.", response_framing: "LF-delimited response interleaved with events.", request_format: '{"id":"id","type":"steer","message":"text"}', response_format: '{"id":"id","type":"response","command":"steer","success":true|false}', long_tool_behavior: "Waits through long tool and entire batch; hangs indefinitely if boundary never arrives.", tool_batch_behavior: continue_all, queue_behavior: "In-memory FIFO; all or one-at-a-time drain; clear_queue removes pending text.", message_interpretation: skills_templates, interruption_phases: [], interruption_partial_failure: "Not applicable.", ordering: "FIFO; concurrent sender ordering untested.", sender_message_id: unsupported, retry_policy: never_retry, duplicate_handling: "No suppression; request id is correlation, not idempotency.", cancellation: "clear_queue before insertion; no per-message recall after insertion; abort retains queues.", limits: "No established size/count/expiry/persistence bounds; extension commands rejected.", evidence_ids: [official-rpc, source-rpc, source-session, source-loop, live-rpc-switch-crash-0844] }
   - { id: rpc-idle-prompt, interface_status: documented, maturity: stable, transport: stdio, initialization: "Retained RPC with expected idle current session.", operation_intent: start_idle_turn, conversation_effect: resume_same_conversation, delivery_boundary: idle_turn_start, destination: "Mutable current idle AgentSession.", authentication: "Possession/protection of pipes.", startup_requirements: ["retained RPC", "stdout reader"], target_preconditions: ["expected session", "isStreaming false", "not compacting"], target_guards: ["no expected session id", "idle snapshot can race", "busy prompt without streamingBehavior is refused"], request_framing: "LF-delimited JSON.", response_framing: "Correlated preflight response then uncorrelated events.", request_format: '{"id":"id","type":"prompt","message":"text"}', response_format: "success after acceptance, queueing, or extension handling", long_tool_behavior: "Not applicable if idle.", tool_batch_behavior: not_applicable, queue_behavior: "Starts a turn; streamingBehavior can delegate to steer/follow-up.", message_interpretation: input_extension, interruption_phases: [], interruption_partial_failure: "Not applicable.", ordering: "Concurrent idle submissions unverified.", sender_message_id: unsupported, retry_policy: never_retry, duplicate_handling: "No idempotency.", cancellation: "abort cancels resulting run.", limits: "Extensions may handle/transform; skills/templates expand; size unknown.", evidence_ids: [official-rpc, source-rpc, source-session] }
-  - { id: rpc-abort-submit, interface_status: documented, maturity: stable, transport: stdio, initialization: "Retained RPC after explicit manual choice.", operation_intent: interrupt_then_submit, conversation_effect: cancel_turn_same_conversation, delivery_boundary: next_turn, destination: "Abort current operation, then separately prompt revalidated current session.", authentication: "Possession/protection of pipes.", startup_requirements: ["manual approval", "fresh state before both phases"], target_preconditions: ["expected working session", "same idle session before replacement"], target_guards: ["no expected operation/session id", "detect replacement race with get_state"], request_framing: "Two separate LF-delimited commands.", response_framing: "Separate correlated responses and events.", request_format: "abort; await idle; get_state; prompt", response_format: "abort success after idle; separate prompt preflight response", long_tool_behavior: "Abort signals current run; tool child cleanup unverified.", tool_batch_behavior: stop_remaining, queue_behavior: "Abort retains queues; clear only under explicit policy.", message_interpretation: input_extension, interruption_phases: ["approve", "identify", "optionally clear", "abort", "await idle", "revalidate", "prompt"], interruption_partial_failure: "Abort may succeed while prompt fails; original stays canceled and cleared queues stay cleared.", ordering: "Never pipeline phases.", sender_message_id: unsupported, retry_policy: never_retry, duplicate_handling: "No idempotency.", cancellation: "Destructive with no rollback.", limits: "Manual only; forbidden for automatic warnings.", evidence_ids: [official-rpc, source-rpc, source-session] }
+  - { id: rpc-abort-submit, interface_status: documented, maturity: stable, transport: stdio, initialization: "Retained RPC after explicit manual choice.", operation_intent: interrupt_then_submit, conversation_effect: cancel_turn_same_conversation, delivery_boundary: next_turn, destination: "Abort current operation, then separately prompt revalidated current session.", authentication: "Possession/protection of pipes.", startup_requirements: ["manual approval", "fresh state before both phases"], target_preconditions: ["expected working session", "same idle session before replacement"], target_guards: ["no expected operation/session id", "get_state can detect a changed identity but cannot atomically guard a later send"], request_framing: "Two separate LF-delimited commands.", response_framing: "Separate correlated responses and events.", request_format: "abort; await idle; get_state; prompt", response_format: "abort success after idle; separate prompt preflight response", long_tool_behavior: "Abort signals current run; macOS 0.84.4 fixture confirms one built-in bash external process stops. Provider kill leaves that process alive; other trees/platforms unverified.", tool_batch_behavior: stop_remaining, queue_behavior: "Abort retains queues; clear only under explicit policy.", message_interpretation: input_extension, interruption_phases: ["approve", "identify", "optionally clear", "abort", "await idle", "revalidate", "prompt"], interruption_partial_failure: "Abort may succeed while prompt fails; original stays canceled and cleared queues stay cleared.", ordering: "Never pipeline phases.", sender_message_id: unsupported, retry_policy: never_retry, duplicate_handling: "No idempotency.", cancellation: "Destructive with no rollback.", limits: "Manual only; forbidden for automatic warnings.", evidence_ids: [official-rpc, source-rpc, source-session, live-rpc-bash-cleanup-0844] }
 compatibility:
   - { mechanism_id: rpc-steer, profile_id: retained-rpc, os: macos, versions_verified: ["0.84.4 passive only"], documented_version_bounds: unknown, read_only_check: "Version/help plus installed steer/get_state/queue/settled types.", success_criteria: "Exact vocabulary/framing present.", failure_behavior: "Block send.", evidence_ids: [local-pi, source-rpc, source-settled] }
   - { mechanism_id: rpc-steer, profile_id: retained-rpc, os: linux, versions_verified: [], documented_version_bounds: unknown, read_only_check: "Inspect exact installed types.", success_criteria: "Exact match.", failure_behavior: "Block send.", evidence_ids: [official-rpc] }
@@ -67,7 +98,134 @@ compatibility:
   - { mechanism_id: rpc-abort-submit, profile_id: retained-rpc, os: macos, versions_verified: ["0.84.4 passive only"], documented_version_bounds: unknown, read_only_check: "Inspect abort/prompt/clear/get_state shapes.", success_criteria: "All phases match.", failure_behavior: "Disable before abort.", evidence_ids: [local-pi, source-rpc] }
   - { mechanism_id: rpc-abort-submit, profile_id: retained-rpc, os: linux, versions_verified: [], documented_version_bounds: unknown, read_only_check: "Inspect all phase types.", success_criteria: "Exact match.", failure_behavior: "Disable fallback.", evidence_ids: [official-rpc] }
   - { mechanism_id: rpc-abort-submit, profile_id: retained-rpc, os: windows, versions_verified: [], documented_version_bounds: unknown, read_only_check: "Inspect all types and Windows behavior.", success_criteria: "Exact match.", failure_behavior: "Disable fallback.", evidence_ids: [official-rpc] }
-verification: []
+verification:
+- assertions:
+  - abort acknowledgment followed by absence of marked external tool process at observation
+  - provider SIGKILL leaves marked external tool process alive at observation
+  - fixture cleanup removes surviving owned process
+  - fixture context, skill, and template discovery remain enabled
+  evidence_ids:
+  - live-rpc-bash-cleanup-0844
+  fixture: claudine/features/2026-09-08-steering/verification/pi-macos-0.84.4-bash-cleanup.json
+  launch_mode: non_interactive
+  limitations: Real Pi 0.84.4/macOS with deterministic local model and built-in bash executing one marked external process. Checked after a 750 ms delay; provider abort removed it, provider SIGKILL did not, and fixture cleanup then removed it. No additional descendants, native Windows/Linux, arbitrary extensions, or cloud inference tested. Not production activation.
+  mechanism_id: rpc-abort-submit
+  origin: native
+  os: macos
+  outcome: passed
+  profile_id: retained-rpc
+  provider_version: 0.84.4
+  session_state: working
+  tested_on: 2026-09-08
+
+- assertions:
+  - old session remains observable during a pending switch
+  - steering acknowledged during switch is lost when switch completes
+  - steering queued after switch reaches the new session once
+  evidence_ids:
+  - live-rpc-switch-crash-0844
+  fixture: claudine/features/2026-09-08-steering/verification/pi-macos-0.84.4-switch-crash.json
+  launch_mode: non_interactive
+  limitations: Real Pi 0.84.4/macOS with deterministic local model and fixture extensions. Controlled idle switch interleaving and kill after acknowledged steering during cooperative tool waits; no exhaustive scheduling, cloud inference, host crash, filesystem durability, or restart. Passing loss assertions do not activate delivery support.
+  mechanism_id: rpc-steer
+  origin: native
+  os: macos
+  outcome: passed
+  profile_id: retained-rpc
+  provider_version: 0.84.4
+  session_state: idle
+  tested_on: 2026-09-08
+- assertions:
+  - provider killed after observed steering acknowledgment
+  - queued steering neither saved in transcript nor consumed by model before abrupt termination
+  evidence_ids:
+  - live-rpc-switch-crash-0844
+  fixture: claudine/features/2026-09-08-steering/verification/pi-macos-0.84.4-switch-crash.json
+  launch_mode: non_interactive
+  limitations: Real Pi 0.84.4/macOS with deterministic local model and fixture extensions. Controlled idle switch interleaving and kill after acknowledged steering during cooperative tool waits; no exhaustive scheduling, cloud inference, host crash, filesystem durability, or restart. Passing loss assertions do not activate delivery support.
+  mechanism_id: rpc-steer
+  origin: native
+  os: macos
+  outcome: passed
+  profile_id: retained-rpc
+  provider_version: 0.84.4
+  session_state: working
+  tested_on: 2026-09-08
+
+- assertions:
+  - same session and idle after abort
+  - cooperative tool waits canceled without normal completion
+  - uncleared steering persists once in transcript and reaches explicit next model turn
+  - clear_queue before abort prevents persistence and later delivery
+  - malformed replacement rejected independently after abort
+  evidence_ids:
+  - live-rpc-failures-0844
+  fixture: claudine/features/2026-09-08-steering/verification/pi-macos-0.84.4-failures.json
+  launch_mode: non_interactive
+  limitations: Real Pi with local deterministic model and cooperative in-process tools on macOS only. EOF tests close stdin while retaining stdout observation; no cloud provider, OS subprocess cleanup, full-duplex loss, host crash, or concurrent target race. Expected failure behavior is a passing regression assertion, not successful message delivery.
+  mechanism_id: rpc-abort-submit
+  origin: native
+  os: macos
+  outcome: passed
+  profile_id: retained-rpc
+  provider_version: 0.84.4
+  session_state: working
+  tested_on: 2026-09-08
+- assertions:
+  - acknowledged steering not consumed or persisted after stdin EOF while tools are held
+  - successful process exit does not prove delivery
+  - no automatic replay after unobserved acknowledgment
+  evidence_ids:
+  - live-rpc-failures-0844
+  fixture: claudine/features/2026-09-08-steering/verification/pi-macos-0.84.4-failures.json
+  launch_mode: non_interactive
+  limitations: Real Pi with local deterministic model and cooperative in-process tools on macOS only. EOF tests close stdin while retaining stdout observation; no cloud provider, OS subprocess cleanup, full-duplex loss, host crash, or concurrent target race. Expected failure behavior is a passing regression assertion, not successful message delivery.
+  mechanism_id: rpc-steer
+  origin: native
+  os: macos
+  outcome: passed
+  profile_id: retained-rpc
+  provider_version: 0.84.4
+  session_state: working
+  tested_on: 2026-09-08
+
+- assertions:
+  - acceptance precedes tool completion
+  - both tool calls finish before subsequent model input contains steering
+  - same session after settlement
+  - duplicate request ID creates two user messages
+  evidence_ids:
+  - live-rpc-fixture-0844
+  fixture: claudine/features/2026-09-08-steering/verification/pi-macos-0.84.4.json
+  launch_mode: non_interactive
+  limitations: Isolated fixture resources and local deterministic model; no cloud backend, production Claudine adapter, concurrent targeting race, disconnect, abort cleanup, Linux or Windows verification.
+  mechanism_id: rpc-steer
+  origin: native
+  os: macos
+  outcome: passed
+  profile_id: retained-rpc
+  provider_version: 0.84.4
+  session_state: working
+  tested_on: 2026-09-08
+- assertions:
+  - template and skill expansion reach model
+  - context loaded
+  - same conversation across idle prompts
+  - extension-handled prompt succeeds without a model invocation
+  - extension confirmation remains pending without an answer
+  evidence_ids:
+  - live-rpc-fixture-0844
+  fixture: claudine/features/2026-09-08-steering/verification/pi-macos-0.84.4.json
+  launch_mode: non_interactive
+  limitations: Isolated fixture resources and local deterministic model; no cloud backend, production Claudine adapter, concurrent targeting race, disconnect, abort cleanup, Linux or Windows verification.
+  mechanism_id: rpc-idle-prompt
+  origin: native
+  os: macos
+  outcome: passed
+  profile_id: retained-rpc
+  provider_version: 0.84.4
+  session_state: idle
+  tested_on: 2026-09-08
 cases:
   - { profile_id: ordinary-cli, os: macos, launch_mode: interactive, origin: native, session_state: working, support: unknown, discovery_ids: [ordinary-macos-native], mechanism_ids: [], prerequisites: [], evidence_ids: [local-pi], reason: "No documented peer channel; keystroke injection is distinct and untested." }
   - { profile_id: ordinary-cli, os: macos, launch_mode: interactive, origin: native, session_state: idle, support: unknown, discovery_ids: [ordinary-macos-native], mechanism_ids: [], prerequisites: [], evidence_ids: [local-pi], reason: "Terminal input is not an external protocol." }
@@ -106,7 +264,7 @@ cases:
   - { profile_id: retained-rpc, os: windows, launch_mode: non_interactive, origin: claudine, session_state: working, support: unknown, discovery_ids: [rpc-windows-claudine], mechanism_ids: [rpc-steer], prerequisites: ["future wrapper", "native/live tests"], evidence_ids: [official-rpc, wrapper], reason: "Unimplemented/unverified." }
   - { profile_id: retained-rpc, os: windows, launch_mode: non_interactive, origin: claudine, session_state: idle, support: unknown, discovery_ids: [rpc-windows-claudine], mechanism_ids: [rpc-idle-prompt], prerequisites: ["future wrapper", "native/live tests"], evidence_ids: [official-rpc, wrapper], reason: "Unimplemented/unverified." }
 gaps:
-  - { area: activation, detail: "No disposable test record exists.", next_check: "Keep disabled until matching tests pass." }
+  - { area: activation, detail: "Two scoped macOS deterministic-model RPC records now pass; production adapter and broader profile verification remain absent.", next_check: "Keep disabled until matching tests pass." }
   - { area: attachment, detail: "No ordinary-session peer endpoint; files/PIDs do not provide reachability.", next_check: "Recheck releases; otherwise managed launches only." }
   - { area: targeting, detail: "RPC has no expected session/operation guard.", next_check: "Test switch/new/fork races and fail closed." }
   - { area: receipts, detail: "Acceptance is not correlated model delivery; retry/limits/dedup are unknown.", next_check: "Test ordering, duplicate text/ids, disconnects, limits, and retries." }
@@ -178,7 +336,7 @@ receipt_observations:
 
 Pi 0.84.4 has a documented steering candidate only in a deliberately retained RPC child or an in-process SDK object. RPC `steer` preserves the running turn, but waits for the current assistant response and its complete tool-call batch before insertion. Ordinary TUI, print, and JSON sessions expose no documented peer-attachment channel.
 
-Agent `codex` performed this passive refresh. `gpt-5.6-sol` and low effort are launcher-supplied because resolved execution metadata is not exposed to this session. No live Pi session was launched, messaged, interrupted, or resumed; `verification: []` blocks activation.
+Agent `codex` performed this passive refresh. `gpt-5.6-sol` and low effort are launcher-supplied because resolved execution metadata is not exposed to this session. The original passive refresh launched no live Pi session. A subsequent coordinator-run disposable fixture is recorded below; its limited passing results do not activate production adapters.
 
 ## Session discovery
 
@@ -218,7 +376,7 @@ Prefer a Claudine-owned retained RPC child registered at launch: `steer` for wor
 
 ## Gaps
 
-Blockers are the empty live gate, absent ordinary attach, mutable unguarded target, incomplete correlation/idempotency/limits, non-immediate batch boundary, unverified abort cleanup, transformations, and missing Linux/native-Windows evidence.
+Remaining blockers are production-profile live verification, absent ordinary attach, mutable unguarded target, incomplete correlation/idempotency/limits, non-immediate batch boundary, unverified abort cleanup, transformations, and missing Linux/native-Windows evidence.
 
 ## Changelog
 
@@ -242,3 +400,79 @@ from the existing evidence on 2026-09-08. No new provider observation or live te
 was performed. Unexamined profile combinations remain unknown, not unsupported.
 The original fleet model/effort provenance above describes the research run;
 this deterministic contract migration is a separate coordinator edit.
+
+
+## First Disposable Verification Pass
+
+On 2026-09-08, real Pi 0.84.4 RPC passed the opt-in Rust harness on native macOS,
+using a deterministic local model registered by an extension. The test retained
+normal resource discovery in an isolated project; it passed context, skill, and
+template sentinels without resource-disabling flags. Full assertions and sanitized
+event ordering are in [the verification artifact](../../../features/2026-09-08-steering/verification/pi-macos-0.84.4.json).
+
+Steering was acknowledged while a tool remained blocked and reached the next
+model request only after both tools completed. Duplicate correlation IDs did not
+suppress duplicate user messages. Extension-handled input returned success without
+a model invocation. An extension confirmation stayed pending without an answer.
+The harness confirmed that new_session changes identity in the same process; it
+did not test concurrent switch/submit races.
+
+These two passing records apply only to this fixture, OS, and version. Arbitrary
+extensions, cloud providers, generation stalls, queue persistence, disconnects,
+abort cleanup, concurrent senders, and native Linux/Windows remain unverified.
+No production adapter or fallback was enabled.
+
+
+## Abort and Input-Disconnect Verification
+
+The [second disposable pass](../../../features/2026-09-08-steering/verification/pi-macos-0.84.4-failures.json)
+passed four failure scenarios on Pi 0.84.4/macOS using the same local model and
+cooperative tool fixture. Abort canceled both waiting tools. Without prior queue
+clearing, the steering text was saved once in conversation history but was not
+processed by the model until an explicit next prompt. Clearing before abort
+prevented both persistence and later consumption. A malformed replacement was
+rejected separately while the session remained idle.
+
+Closing stdin while tools were held exited Pi with code zero. In both the
+acknowledgment-observed and not-waited-for cases, steering was neither consumed
+nor saved in the session transcript. The latter case is not proof that the
+provider had not accepted it: the experiment drained one acknowledgment afterward.
+This is input EOF, not a full-duplex connection failure or a process/host crash.
+
+Claudine must keep owned RPC input open through settlement. Abort is not message
+withdrawal; clearing pending messages is an explicit separate action, and a later
+turn may consume steering already moved into history. Acceptance and successful
+process exit establish neither model consumption nor durable storage. These
+regression results do not enable a production adapter.
+
+## Controlled Switch and Provider-Kill Verification
+
+The [third disposable pass](../../../features/2026-09-08-steering/verification/pi-macos-0.84.4-switch-crash.json)
+held a session switch in a fixture extension. The old session remained observable,
+and steering was acknowledged while the switch was pending. Completing the
+switch discarded that steering without saving it or sending it to the model.
+By contrast, steering submitted after the switch reached the new session once.
+Killing Pi after acknowledgment during a held tool batch also lost queued text
+before transcript persistence or model consumption.
+
+These exact macOS 0.84.4 outcomes require coordination of session changes and
+submissions. State snapshots are not atomic target guards. A wrapper cannot
+serialize independent extension actions merely by locking its own requests.
+The controlled interleaving is not exhaustive race testing, and provider kill
+does not establish host-failure or restart behavior. No production adapter is
+activated by these additional records.
+
+## Built-In Bash Cleanup Verification
+
+The [external-process experiment](../../../features/2026-09-08-steering/verification/pi-macos-0.84.4-bash-cleanup.json)
+uses the real built-in bash tool with a marked external process and a deterministic
+local model. After a 750 ms observation delay, normal RPC abort had removed the
+process, while SIGKILL of Pi had left it alive. The fixture then removed and
+verified absence of that owned process. This distinguishes provider cancellation
+from cleanup supplied by the test harness after provider failure.
+
+Context, skill, and template discovery remained enabled and observable. This
+scope covers one exec-replaced subprocess on macOS 0.84.4; additional descendants,
+detached processes, native Windows/Linux, and cloud inference remain untested.
+Managed execution therefore needs its own process-ownership cleanup guarantee,
+independent of a provider's normal abort handling.

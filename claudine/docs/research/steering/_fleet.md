@@ -182,6 +182,22 @@ test record identifies its mechanism, exact provider version, OS, launch mode,
 origin, session state, outcome, sanitized fixture, assertions, and limitations.
 An empty list leaves activation blocked; it is valid research. Do not fabricate
 test records or use source inspection as a substitute for a live test.
+When refreshing an existing report, preserve prior disposable-test records and
+their evidence, exact scope, and limitations. If newer evidence conflicts, record
+the conflict for coordinator review; do not erase a test or broaden its scope.
+
+For target safety, distinguish a state query followed by a send from a provider
+operation that atomically checks the intended session. Investigate session changes
+during submission, who can initiate them (including extensions), and what happens
+to acknowledged pending messages. Do not infer race safety from a successful
+identity query or a sequential happy-path test.
+
+For failure handling, distinguish stdin EOF, full transport loss, provider kill,
+controller failure, and host failure. Track pending queues, saved conversation,
+and model consumption separately. For cancellation, distinguish cooperative
+in-process tools from built-in shell tools and their subprocess trees. State
+whether cleanup is performed by the provider, its wrapper, or a fixture watchdog;
+an idle response or canceled tool result alone cannot establish process cleanup.
 
 Populate `access_findings` for every mechanism/profile/OS tuple referenced by a case.
 Distinguish an external sender being able to use a mechanism (`available`) from
@@ -283,6 +299,7 @@ mandatory live-test activation gate. `disposable_test` evidence may be cited onl
 when a real test record exists and its conditions match the claim.
 
 Finish with the saved artifact path, validation result, and unresolved gaps.
-Set `verification: []`; do not run live tests, code tests, or lints. The coordinator reviews
+Retain existing verification; use `verification: []` only when none exists.
+Do not run live tests, code tests, or lints in this passive research fleet. The coordinator reviews
 the pilot before the full roster and permits at most two corrective research turns
 per provider; unresolved findings remain explicit after that budget.
