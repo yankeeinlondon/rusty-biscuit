@@ -34,10 +34,9 @@ impl CliPerf {
     /// Run work inside this command's request-scoped collector.
     pub fn collect<T>(&self, f: impl FnOnce() -> T) -> T {
         match self.collector.as_ref() {
-            Some(collector) => sniff::performance::with_current_collector(
-                Some(Arc::clone(collector)),
-                f,
-            ),
+            Some(collector) => {
+                sniff::performance::with_current_collector(Some(Arc::clone(collector)), f)
+            }
             None => f(),
         }
     }

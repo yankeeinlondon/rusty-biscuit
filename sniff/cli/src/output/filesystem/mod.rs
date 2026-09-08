@@ -447,7 +447,10 @@ pub fn render_hash_section(
                     format!("<lime><i>{}</i></lime> {}<b>{}</b>", kind, dir_part, name)
                 }
                 DeltaKind::Modified => {
-                    format!("<yellow><i>{}</i></yellow> {}<b>{}</b>", kind, dir_part, name)
+                    format!(
+                        "<yellow><i>{}</i></yellow> {}<b>{}</b>",
+                        kind, dir_part, name
+                    )
                 }
                 DeltaKind::Deleted => {
                     format!("<red><i>{}</i></red> {}<b>{}</b>", kind, dir_part, name)
@@ -542,7 +545,12 @@ fn build_git_status_items(
     // Add staged files
     for file in &staged {
         let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string().replace(std::path::MAIN_SEPARATOR, "/");
+        let absolute = git
+            .repo_root
+            .join(&file.path)
+            .display()
+            .to_string()
+            .replace(std::path::MAIN_SEPARATOR, "/");
         let linked_path = format_git_status_filepath(&path, &absolute);
         let action = file.action.label();
         // Only show diff stats for modified files (not created/deleted)
@@ -559,7 +567,12 @@ fn build_git_status_items(
     // Add unstaged files
     for file in &modified {
         let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string().replace(std::path::MAIN_SEPARATOR, "/");
+        let absolute = git
+            .repo_root
+            .join(&file.path)
+            .display()
+            .to_string()
+            .replace(std::path::MAIN_SEPARATOR, "/");
         let linked_path = format_git_status_filepath(&path, &absolute);
         let action = file.action.label();
         let diff_stats = format_diff_stats(file.lines_added, file.lines_removed);
@@ -571,7 +584,12 @@ fn build_git_status_items(
 
     for file in &untracked {
         let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string().replace(std::path::MAIN_SEPARATOR, "/");
+        let absolute = git
+            .repo_root
+            .join(&file.path)
+            .display()
+            .to_string()
+            .replace(std::path::MAIN_SEPARATOR, "/");
         let linked_path = format_git_status_filepath(&path, &absolute);
         let line = format!("<dim>untracked: {linked_path}</dim>");
         status_items.push(line);
@@ -585,7 +603,12 @@ fn build_git_status_items(
         .collect();
     for file in &conflicted {
         let path = file.path.display().to_string();
-        let absolute = git.repo_root.join(&file.path).display().to_string().replace(std::path::MAIN_SEPARATOR, "/");
+        let absolute = git
+            .repo_root
+            .join(&file.path)
+            .display()
+            .to_string()
+            .replace(std::path::MAIN_SEPARATOR, "/");
         let linked_path = format_git_status_filepath(&path, &absolute);
         let line = format!("<red>conflicted: {linked_path}</red>");
         status_items.push(line);
@@ -774,7 +797,9 @@ fn join_alias(prefix: &str, rel: &Path) -> String {
     } else {
         format!(
             "{prefix}/{}",
-            rel.display().to_string().replace(std::path::MAIN_SEPARATOR, "/")
+            rel.display()
+                .to_string()
+                .replace(std::path::MAIN_SEPARATOR, "/")
         )
     }
 }
@@ -799,9 +824,7 @@ fn relative_path_between(base: &std::path::Path, target: &std::path::Path) -> St
 
     if let Ok(rel) = base.strip_prefix(target) {
         let ups = rel.components().count();
-        return std::iter::repeat_n("..", ups)
-            .collect::<Vec<_>>()
-            .join("/");
+        return std::iter::repeat_n("..", ups).collect::<Vec<_>>().join("/");
     }
 
     let base_components: Vec<_> = base.components().collect();

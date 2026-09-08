@@ -750,11 +750,7 @@ fn redact_base_paths(value: &Value, base: &std::path::Path) -> Value {
     portable_roots.sort_by_key(|root| std::cmp::Reverse(root.len()));
     roots.sort_by_key(|root| std::cmp::Reverse(root.as_os_str().len()));
 
-    fn redact_strings(
-        value: &mut Value,
-        roots: &[std::path::PathBuf],
-        portable_roots: &[String],
-    ) {
+    fn redact_strings(value: &mut Value, roots: &[std::path::PathBuf], portable_roots: &[String]) {
         match value {
             Value::String(text) => {
                 for root in roots {
