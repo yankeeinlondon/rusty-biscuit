@@ -418,6 +418,33 @@ pub fn agent_errors_gate_error(
     )
 }
 
+/// Human-facing result for one steering research document.
+pub fn steering_validation(term: &Terminal, result: &crate::SteeringValidation) -> String {
+    if result.is_clean() {
+        return format!("{}\n", Prose::new(format!(
+            "<green>{}</green>: steering research clean ({} profiles, {} cases, {} mechanisms, {} evidence records; verification records: {}, passed: {})",
+            result.provider,
+            result.profiles,
+            result.cases,
+            result.mechanisms,
+            result.evidence,
+            result.verification_records,
+            result.passed_verification_records,
+        ))
+        .render(term));
+    }
+    format!(
+        "{}\n{}",
+        Prose::new(format!(
+            "<red>{}</red>: steering research has {} error(s)",
+            result.provider,
+            result.errors.len()
+        ))
+        .render(term),
+        UnorderedList::new(result.errors.clone()).render(term)
+    )
+}
+
 /// The top-level fatal-error line (stderr).
 pub fn fatal(term: &Terminal, err: &crate::errors::GenError) -> String {
     line(

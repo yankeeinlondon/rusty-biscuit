@@ -192,6 +192,11 @@ claudine init # brings you through a short interactive interview
 
 ::shell claudine providers --plain
 
+Validate the steering research with `claudine providers steering check` (all
+active roster providers) or `claudine providers steering check pi --json` (one
+provider with machine-readable findings). This requires the matching
+`claudine-gen` build. The check validates research structure and relationships;
+it does not send messages or establish live steering support.
 
 
 ## More Information

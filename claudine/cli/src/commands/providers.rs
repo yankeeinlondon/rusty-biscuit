@@ -56,6 +56,8 @@ pub enum ProvidersCommand {
     Generate(GenerateArgs),
     /// Run deterministic checks for provider research topics.
     AgentErrors(AgentErrorsArgs),
+    /// Run deterministic relational and coverage checks for steering research.
+    Steering(SteeringArgs),
 }
 
 /// Arguments accepted by `claudine providers generate`.
@@ -113,6 +115,31 @@ pub struct AgentErrorsCheckArgs {
     pub findings: Option<PathBuf>,
 }
 
+/// Arguments accepted by `claudine providers steering`.
+#[derive(Debug, Args)]
+pub struct SteeringArgs {
+    #[command(subcommand)]
+    pub command: SteeringCommand,
+}
+
+/// Deterministic checks for the `steering` research topic.
+#[derive(Debug, Subcommand)]
+pub enum SteeringCommand {
+    /// Validate one provider, or the complete active roster when omitted.
+    Check(SteeringCheckArgs),
+}
+
+/// Arguments accepted by `claudine providers steering check`.
+#[derive(Debug, Args)]
+pub struct SteeringCheckArgs {
+    /// Provider slug (default: every active research provider).
+    pub slug: Option<String>,
+
+    /// Emit the complete machine-readable result as JSON.
+    #[arg(long)]
+    pub json: bool,
+}
+
 fn supports_custom_resource(provider: Provider, resource: LinkableResource) -> bool {
     capabilities_for(provider)
         .support_for(resource)
@@ -133,6 +160,7 @@ pub fn run(args: ProvidersArgs) -> Result<()> {
         return match command {
             ProvidersCommand::Generate(generate) => run_generate(generate),
             ProvidersCommand::AgentErrors(agent_errors) => run_agent_errors(agent_errors),
+            ProvidersCommand::Steering(steering) => run_steering(steering),
         };
     }
     if args.describe {
@@ -179,6 +207,21 @@ pub fn run(args: ProvidersArgs) -> Result<()> {
     log::data(&format!("\n{rendered}"));
 
     Ok(())
+}
+
+fn run_steering(args: SteeringArgs) -> Result<()> {
+    match args.command {
+        SteeringCommand::Check(check) => {
+            let mut forwarded = vec!["steering", "check"];
+            if let Some(slug) = check.slug.as_deref() {
+                forwarded.push(slug);
+            }
+            if check.json {
+                forwarded.push("--json");
+            }
+            run_gen_passthrough(&forwarded)
+        }
+    }
 }
 
 /// Shells out to the `claudine-gen` binary. `--mapping` renders the
