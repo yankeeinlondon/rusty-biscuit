@@ -1,0 +1,23 @@
+# Draft contract for review and pilot validation. Cross-record references,
+# coverage, and evidence sufficiency also require the checks in _fleet.md.
+$schema:
+    schema_revision: literal(1; required)
+    provider: string(required)
+    created: date(required)
+    last_updated: date(required)
+    agent: string(required)
+    model: string(required)
+    reasoning_effort: literal(low; required)
+    versions_examined: string[](required)
+    access_findings: "{ mechanism_id: string(required), os: enum(macos,linux,windows; required), status: enum(available,setup_required,blocked,unknown; required), prerequisite: string(required), applies_to_existing_sessions: enum(yes,no,unknown; required), evidence_ids: string[](required) }[](required)"
+    delivery_states: "{ mechanism_id: string(required), states: enum(accepted,queued,held,delivered,refused,expired,unknown)[](required), observable_by_external_sender: enum(yes,partial,no,unknown; required), correlation: string(required), evidence_ids: string[](required) }[](required)"
+    evidence: "{ id: string(required), method: enum(official_docs,source_code,local_inspection,disposable_test,inference; required), location: string(required), version: string(required), observed_on: date(required), claim: string(required), limitations: string(required) }[](required)"
+    discovery: "{ id: string(required), os: enum(macos,linux,windows; required), origin: enum(native,claudine; required), method: enum(provider_registry,provider_api,process_inspection,claudine_registration,other; required), locator: string(required), identity_check: string(required), liveness_check: string(required), state_detection: string(required), available_labels: string[](required), prerequisites: string[](required), evidence_ids: string[](required) }[](required)"
+    mechanisms: "{ id: string(required), interface_status: enum(documented,undocumented,unknown; required), transport: enum(unix_socket,named_pipe,http,stdio,hook,extension,other,unknown; required), conversation_effect: enum(preserve_running_turn,cancel_turn_same_conversation,resume_same_conversation,new_conversation,unknown; required), delivery_boundary: enum(during_generation,next_tool_boundary,next_turn,idle_only,unknown; required), acknowledgment: enum(accepted,queued,delivered,none,unknown; required), destination: string(required), authentication: string(required), startup_requirements: string[](required), request_format: string(required), response_format: string(required), long_tool_behavior: string(required), interruption_effects: string(required), ordering: string(required), duplicate_handling: string(required), cancellation: string(required), limits: string(required), evidence_ids: string[](required) }[](required)"
+    compatibility: "{ mechanism_id: string(required), os: enum(macos,linux,windows; required), versions_verified: string[](required), documented_version_bounds: string(required), read_only_check: string(required), success_criteria: string(required), failure_behavior: string(required), evidence_ids: string[](required) }[](required)"
+    verification: "{ mechanism_id: string(required), os: enum(macos,linux,windows; required), provider_version: string(required), launch_mode: enum(interactive,non_interactive; required), origin: enum(native,claudine; required), session_state: enum(working,idle; required), outcome: enum(passed,failed,inconclusive; required), tested_on: date(required), fixture: string(required), assertions: string[](required), limitations: string(required), evidence_ids: string[](required) }[](required)"
+    cases: "{ os: enum(macos,linux,windows; required), launch_mode: enum(interactive,non_interactive; required), origin: enum(native,claudine; required), session_state: enum(working,idle; required), support: enum(non_interrupting,interruption_required,unsupported,unknown; required), discovery_ids: string[](required), mechanism_ids: string[](required), prerequisites: string[](required), evidence_ids: string[](required), reason: string(required) }[](required)"
+    gaps: "{ area: string(required), detail: string(required), next_check: string(required) }[](required)"
+    changes: string[](required)
+    requires_claudine_update: boolean(required)
+    reason: string(required)
