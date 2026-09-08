@@ -140,29 +140,25 @@ pub(crate) fn evaluate_timeout_tick(
         // the stuck-aware suppression above has nothing to suppress
         // against. What survives is the mid-step window: `step_in_flight`
         // is true (a step is open between `step_start` and the next
-        // `step_finish`) AND at least one of the structured-event clock or
-        // the raw-byte clock is still within the budget. Mid-step silence
-        // is expected while subagents work, but if BOTH clocks are stale
-        // beyond the budget the breach still fires — the per-step grace
-        // must not override the byte-heartbeat backstop, otherwise an
-        // OpenCode session that emits `step_start` and then dies silently
-        // (the `2026-05-10` ndjson hang) is suppressed forever.
+        // `step_finish`) AND at least one activity clock is still fresh.
         //
-        // Cold start (no `step_start` and no `step_finish` yet) has no arm
-        // of its own. It used to suppress unconditionally, which made a
-        // provider that never got past its own bootstrap unkillable unless
-        // the opt-in wall-clock `timeout` was set. It is now bounded by the
-        // shared silence budget below, like every other silent state.
-        let both_clocks_stale = match (last_event_at, last_byte_at) {
-            (Some(e), Some(b)) => {
-                now.saturating_duration_since(e) >= budget
-                    && now.saturating_duration_since(b) >= budget
-            }
-            _ => false,
+        // Freshness is a positive property of a clock that exists — an
+        // absent clock is never fresh. Inferring it from "not both clocks
+        // are stale" made every single-clock state look like activity, so
+        // an open step with one populated-but-stale clock and one absent
+        // clock suppressed forever; that is how the `2026-05-10` ndjson
+        // hang survived its own `step_start`. When no clock is fresh —
+        // including the cold-start shape where neither clock exists yet —
+        // evaluation falls through to the shared silence budget below,
+        // which is what bounds a provider that never gets past its own
+        // bootstrap without requiring the opt-in wall-clock `timeout`.
+        let is_fresh = |clock: Option<Instant>| {
+            clock.is_some_and(|t| now.saturating_duration_since(t) < budget)
         };
-        let mid_step_with_recent_activity = step_in_flight && !both_clocks_stale;
+        let any_clock_fresh = is_fresh(last_event_at) || is_fresh(last_byte_at);
         if config.provider == Some(claudine::provider::Provider::OpenCode)
-            && mid_step_with_recent_activity
+            && step_in_flight
+            && any_clock_fresh
         {
             return WatchdogTickResult::Ok;
         }

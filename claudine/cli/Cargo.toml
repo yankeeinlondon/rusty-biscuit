@@ -152,6 +152,10 @@ name = "level2_file_resolution_capture"
 required-features = ["terminal-tests"]
 
 [[test]]
+name = "level2_incomplete_subagents_capture"
+required-features = ["terminal-tests"]
+
+[[test]]
 name = "level2_inline_compose_mismatch_capture"
 required-features = ["terminal-tests"]
 

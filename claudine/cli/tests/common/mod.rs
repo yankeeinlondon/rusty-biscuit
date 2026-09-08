@@ -93,6 +93,7 @@
 #![allow(dead_code)]
 
 pub(crate) mod completion;
+pub(crate) mod incomplete_subagents;
 #[cfg(unix)]
 pub(crate) mod pty;
 pub(crate) mod source_scan;

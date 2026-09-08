@@ -34,6 +34,9 @@ use std::fs;
 use std::time::Duration;
 
 mod common;
+use common::incomplete_subagents::{
+    REPLAY_DOCUMENT, incident_stream, task_notification, task_started, write_replay_provider,
+};
 use common::wrap::today_log_path;
 use common::{CliProcessFixture, strip_ansi};
 
@@ -56,11 +59,7 @@ enum TaskEnding {
 impl TaskEnding {
     /// The stream lines that follow the two `task_started` records.
     fn event_lines(self) -> Vec<String> {
-        let notify = |id: &str, name: &str, status: &str| {
-            format!(
-                r#"{{"type":"task_notification","task_id":"{id}","name":"{name}","status":"{status}"}}"#
-            )
-        };
+        let notify = task_notification;
         match self {
             Self::BothStopped => vec![
                 notify("sa_1", "commit-alpha", "stopped"),
@@ -92,9 +91,7 @@ impl TaskEnding {
     /// Ledger facts follow first-observation order, so this is also the order
     /// the machine record and the diagnostic will use.
     fn start_lines(self) -> Vec<String> {
-        let start = |id: &str, name: &str| {
-            format!(r#"{{"type":"task_started","task_id":"{id}","name":"{name}"}}"#)
-        };
+        let start = task_started;
         match self {
             Self::ManyLongNamedStops => (0..LONG_NAMED_STOP_COUNT)
                 .map(|index| start(&format!("sa_{index}"), &long_task_name(index)))
@@ -115,68 +112,15 @@ fn long_task_name(index: usize) -> String {
     format!("a-deliberately-long-sub-agent-task-name-number-{index}")
 }
 
-/// Install a fake `claude` that replays the incident stream and exits 0.
-fn write_provider(fixture: &CliProcessFixture, ending: TaskEnding) {
-    let mut events = vec![
-        r#"{"type":"system","subtype":"init","session_id":"incident","model":"claude-opus"}"#
-            .to_string(),
-    ];
-    events.extend(ending.start_lines());
-    events.push(
-        r#"{"type":"assistant","message":{"content":[{"type":"text","text":"All done."}]}}"#
-            .to_string(),
-    );
-    events.extend(ending.event_lines());
-    // The parent turn itself succeeds — that is exactly what made the incident
-    // invisible. `is_error` is absent and the native exit below is 0.
-    events.push(
-        r#"{"type":"result","subtype":"success","stop_reason":"end_turn","num_turns":1,"duration_ms":600000}"#
-            .to_string(),
-    );
-
-    #[cfg(unix)]
-    {
-        let body = events
-            .iter()
-            .map(|line| format!("printf '%s\\n' '{line}'\n"))
-            .collect::<String>();
-        // Drain the composed prompt so the wrapper's stdin write cannot race
-        // the child's exit.
-        let script = format!("#!/bin/sh\ncat > /dev/null 2>/dev/null\n{body}exit 0\n");
-        common::write_executable(&fixture.bin_dir().join("claude"), &script);
-    }
-    #[cfg(windows)]
-    {
-        let body = events
-            .iter()
-            .map(|line| format!("echo {line}\r\n"))
-            .collect::<String>();
-        let script = format!("@echo off\r\n{body}exit /b 0\r\n");
-        common::write(&fixture.bin_dir().join("claude.cmd"), &script);
-    }
-}
-
-/// A compose document whose `success` and `failure` stacks each leave a
-/// distinguishable trace, so the test can prove which one ran.
-const DOCUMENT: &str = r#"---
-title: incomplete subagent replay
-success:
-  stack:
-    - action: {append_line: ["events.log", "success-stack-ran"]}
-failure:
-  stack:
-    - action: {append_line: ["events.log", "{{ 'failure-variant=' + err.variant }}"]}
-    - action: {append_line: ["events.log", "{{ 'failure-msg=' + err.msg }}"]}
----
-Replay of the 2026-08-31 silent-success incident.
-"#;
-
 fn replay_fixture(name: &str, ending: TaskEnding) -> (CliProcessFixture, std::path::PathBuf) {
     let fixture = CliProcessFixture::named(name);
     fixture.seed_user_config();
     let md_file = fixture.cwd().join("replay.md");
-    fs::write(&md_file, DOCUMENT).unwrap();
-    write_provider(&fixture, ending);
+    fs::write(&md_file, REPLAY_DOCUMENT).unwrap();
+    write_replay_provider(
+        fixture.bin_dir(),
+        &incident_stream(&ending.start_lines(), &ending.event_lines()),
+    );
     (fixture, md_file)
 }
 
@@ -225,13 +169,18 @@ fn stopped_subagents_fire_the_failure_stack_and_never_the_success_stack() {
         "the success stack must not run when sub-agent work is unresolved; trace: {trace:?}\nstderr: {plain}"
     );
 
-    // 2. The failure stack fired, attributed to the incomplete work rather
-    //    than a generic agent failure or a timeout.
+    // 2. The failure stack fired under the ratified diagnostic identity —
+    //    the locked catalog code and its category, not an incidental fallback
+    //    label — so a `when:` clause can pin the contract.
     assert!(
         trace
             .iter()
-            .any(|line| line == "failure-variant=incomplete_subagents"),
-        "the failure stack must observe the incomplete_subagents label; trace: {trace:?}\nstderr: {plain}"
+            .any(|line| line == "failure-code=provider.incomplete_subagents"),
+        "the failure stack must observe the locked code; trace: {trace:?}\nstderr: {plain}"
+    );
+    assert!(
+        trace.iter().any(|line| line == "failure-category=provider"),
+        "the failure must classify under the provider category; trace: {trace:?}\nstderr: {plain}"
     );
     let message = trace
         .iter()

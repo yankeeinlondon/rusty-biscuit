@@ -22,6 +22,14 @@
 //! - `0.5s` grace (`CLAUDINE_KILL_GRACE`) — a ceiling on the escalation wait,
 //!   not a delay.
 //!
+//! ## Which deadline the stall tests assert
+//!
+//! Acceptance criterion 1 bounds *detection and the termination request* by
+//! `step_timeout` plus one watchdog interval; the platform termination ladder
+//! then owns its own `kill_grace` before SIGKILL. The wrapper's last observable
+//! event is therefore the reaped child, at `step_timeout + one watchdog
+//! interval + kill_grace` — [`REAP_DEADLINE_MS`].
+//!
 //! Nothing here is serialized: each test owns its own fixture home, `PATH`,
 //! and child, and nextest runs every test in its own process, where an
 //! in-process `serial_test` lock would coordinate nothing anyway.
@@ -32,10 +40,41 @@
 //! end these runs — which is the point.
 
 use std::fs;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 mod common;
 use common::wrap::*;
 use common::{CliProcessFixture, strip_ansi};
+
+/// The silence budget every test below configures (`CLAUDINE_STEP_TIMEOUT`).
+const STEP_TIMEOUT_MS: u64 = 2_000;
+/// The watchdog cadence every test below configures
+/// (`CLAUDINE_WATCHDOG_INTERVAL`).
+const WATCHDOG_INTERVAL_MS: u64 = 200;
+/// The escalation grace every test below configures (`CLAUDINE_KILL_GRACE`).
+const KILL_GRACE_MS: u64 = 500;
+
+/// The ratified deadline for the reaped child. Changing any budget literal in
+/// this file without changing these constants fails the stall tests loudly.
+const REAP_DEADLINE_MS: u64 = STEP_TIMEOUT_MS + WATCHDOG_INTERVAL_MS + KILL_GRACE_MS;
+
+/// Slack on the in-wrapper measurement: ticker scheduling jitter, the wait
+/// loop's own wakeup, and the bounded stream-thread join that runs between the
+/// reap and the moment `duration_ms` is stamped.
+///
+/// Sized from 9 runs on a 16-core Mac, isolated and under the full 6843-test
+/// suite: 2116–2416 ms against the 2700 ms deadline. 300 ms leaves roughly
+/// 600 ms of real headroom while still failing on a sub-second regression in
+/// detection latency.
+const IN_WRAPPER_SLACK_MS: u64 = 300;
+
+/// Slack on the wall-clock measurement: everything outside the silence budget —
+/// spawning the debug-profile binary, preflight, composition, model discovery,
+/// and the summary/lifecycle rendering after the child is gone — plus host
+/// contention.
+///
+/// Observed over the same 9 runs at 149–843 ms; 2 s is roughly 2.4× the worst
+/// local sample, for a cold or heavily loaded CI runner.
+const PROCESS_SLACK_MS: u64 = 2_000;
 
 /// What the fake provider does once the wrapper starts streaming from it.
 ///
@@ -138,14 +177,61 @@ fn last_exit_reason(fixture: &CliProcessFixture) -> Option<String> {
         .map(str::to_string)
 }
 
+/// The wrapper's own spawn-to-reap measurement for the last run.
+///
+/// These fixtures never reach a provider summary, so `extra.duration_ms` is
+/// always the wrapper's `started_at.elapsed()` fallback — stamped once the
+/// child has been reaped and the stream threads joined, and anchored on the
+/// exact instant the silence rule measures from. That makes it the tightest
+/// quantity these tests can observe: it excludes this test's own process
+/// startup, composition, and post-run rendering.
+fn last_child_lifetime_ms(fixture: &CliProcessFixture) -> Option<u64> {
+    let log_path = today_log_path(fixture.home());
+    let log = fs::read_to_string(&log_path).ok()?;
+    let last = log.lines().last()?.to_string();
+    let entry: serde_json::Value = serde_json::from_str(&last).ok()?;
+    entry
+        .get("extra")
+        .and_then(|e| e.get("duration_ms"))
+        .and_then(serde_json::Value::as_u64)
+}
+
+/// Assert the reap deadline on both quantities a stall test can observe.
+///
+/// The in-wrapper measurement is the real gate; the wall-clock one exists so a
+/// regression that somehow bypasses the summary still cannot hide.
+fn assert_reaped_within_deadline(fixture: &CliProcessFixture, elapsed: Duration, plain: &str) {
+    let child_ms = last_child_lifetime_ms(fixture)
+        .expect("session_end must carry duration_ms, or the deadline goes unasserted");
+    assert!(
+        child_ms <= REAP_DEADLINE_MS + IN_WRAPPER_SLACK_MS,
+        "the child lived {child_ms}ms; the ratified reap deadline is \
+         {REAP_DEADLINE_MS}ms (step_timeout + one watchdog interval + kill_grace) \
+         plus {IN_WRAPPER_SLACK_MS}ms of scheduling slack; stderr: {plain}"
+    );
+
+    let elapsed_ms = u64::try_from(elapsed.as_millis()).unwrap_or(u64::MAX);
+    assert!(
+        elapsed_ms <= REAP_DEADLINE_MS + PROCESS_SLACK_MS,
+        "the whole wrapped run took {elapsed_ms}ms; the ratified reap deadline is \
+         {REAP_DEADLINE_MS}ms plus {PROCESS_SLACK_MS}ms for wrapper startup and \
+         teardown; in-wrapper measurement was {child_ms}ms; stderr: {plain}"
+    );
+}
+
 /// Acceptance criterion 1. A child that spawns successfully and then writes
 /// nothing has no activity clock at all, so before this fix `step_timeout`
 /// had no reference to measure from and only the opt-in wall-clock `timeout`
 /// could end the run. None is set here.
+///
+/// The outer `.timeout(...)` is only a hang backstop, so a genuinely wedged
+/// wrapper fails as a timeout instead of blocking the suite; the deadline is
+/// asserted by [`assert_reaped_within_deadline`].
 #[test]
 fn watchdog_startup_stall_terminates_without_a_wall_clock_timeout() {
     let (fixture, md_file) = stall_fixture("startup-silent", ProviderBehavior::SilentForever);
 
+    let started = Instant::now();
     let assert = fixture
         .command()
         .env("OPENCODE_MODEL", "test-model")
@@ -156,8 +242,10 @@ fn watchdog_startup_stall_terminates_without_a_wall_clock_timeout() {
         .timeout(Duration::from_secs(60))
         .assert()
         .failure();
+    let elapsed = started.elapsed();
 
     let plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert_reaped_within_deadline(&fixture, elapsed, &plain);
     assert!(
         plain.contains("no output since the wrapped process launched"),
         "the breach must be reported as a startup stall, not a mid-run one; got: {plain}"
@@ -270,11 +358,17 @@ fn watchdog_opencode_healthy_step_survives() {
 /// cold-start guard keyed on a missing `provider_status`. The stall is now
 /// bounded, and the diagnostic distinguishes it from the no-output case
 /// above.
+///
+/// "Bounded" is the whole point of the test, so the same reap deadline is
+/// asserted here. The silence clock is anchored on the `init` event rather
+/// than on spawn, but that event is the fixture's first line, so the deadline
+/// is the same one to within the child's own startup.
 #[test]
 fn watchdog_opencode_stall_before_first_step_is_bounded() {
     let (fixture, md_file) =
         stall_fixture("startup-opencode-cold", ProviderBehavior::OneEventThenSilent);
 
+    let started = Instant::now();
     let assert = fixture
         .command()
         .env("OPENCODE_MODEL", "test-model")
@@ -285,8 +379,10 @@ fn watchdog_opencode_stall_before_first_step_is_bounded() {
         .timeout(Duration::from_secs(60))
         .assert()
         .failure();
+    let elapsed = started.elapsed();
 
     let plain = strip_ansi(&String::from_utf8_lossy(&assert.get_output().stderr));
+    assert_reaped_within_deadline(&fixture, elapsed, &plain);
     assert!(
         plain.contains("no stream activity"),
         "activity did arrive, so the breach is anchored on it, not on launch; got: {plain}"
