@@ -8,18 +8,40 @@
 //! flow analysis cannot prove is reported `UNCONTROLLED` — the guard fails
 //! closed.
 //!
-//! A file that names `Command` through a glob import (`use super::*`) is
-//! censused too: intra-crate globs are resolved to the module's backing file so
-//! the alias is inherited. An unqualified name is only ever a process command
-//! when some resolved import supplies it — `clap::Command::new` spells its own
-//! path and stays out.
+//! Both ends of that contract are resolved by *identity* rather than by
+//! spelling. A path constructs a process command when its segments resolve
+//! through an import of the `Command` type, of the `process` module, or of the
+//! `std`/`tokio` crate root — so `process::Command::new` and `p::Command::new`
+//! are censused, while `clap::Command::new` resolves elsewhere and stays out.
+//! A `type` alias whose target resolves the same way names the type too, and
+//! an alias of such an alias with it. A call discharges the obligation when it
+//! is qualified by the helper's own module (`crate::child_environment`,
+//! `claudine::child_environment`, or a `use` alias of it), or when an import
+//! bound the bare name to that item. A function that merely shares the name
+//! governs nothing.
+//!
+//! A file that names either through a glob import (`use super::*`) is censused
+//! too: intra-crate globs are resolved to the module's backing file so the
+//! bindings are inherited. A locally defined function or module still wins
+//! over a glob-inherited import, as it does in Rust.
+//!
+//! An item is left out only when its `cfg` predicate is proven false outside
+//! test builds. `not(test)` and `any(test, unix)` select production code and
+//! stay in the census; `test` and `all(test, unix)` do not.
+//!
+//! An allowlisted factory may name the caller that governs its product, but
+//! only for a command that leaves the factory: a child the factory executes
+//! itself is `UNCONTROLLED` regardless.
 //!
 //! Known limits of the analysis, each deliberately conservative or scoped:
 //!
 //! - a closure or `async` body is analyzed from the state at its definition
 //!   site and its effects do not flow back to the enclosing path;
 //! - macro arguments are read as observations (`debug!`, `format!`), not as
-//!   hand-offs that could execute a child.
+//!   hand-offs that could execute a child;
+//! - a local `type` or `struct` that shadows a glob-inherited `Command` name
+//!   is still censused. That error is a loud false positive the inventory
+//!   check surfaces, never a silent pass, so it is not resolved.
 //!
 //! Regenerate after an intentional spawn-seam change:
 //!
@@ -90,60 +112,208 @@ impl CommandKind {
     }
 }
 
+/// Names bound to one item, resolved from `use` trees. A name is meaningful
+/// only against the item it was bound to, which is what keeps `clap::Command`
+/// and a same-named local helper out of the analysis.
 #[derive(Default)]
-struct Aliases {
+struct AliasSet {
     std: BTreeSet<String>,
     tokio: BTreeSet<String>,
 }
 
-impl Aliases {
-    fn collect(file: &syn::File) -> Self {
-        let mut collector = AliasCollector::default();
-        collector.visit_file(file);
-        collector.aliases
+impl AliasSet {
+    fn kind_of(&self, name: &str) -> Option<CommandKind> {
+        if self.std.contains(name) {
+            Some(CommandKind::Std)
+        } else if self.tokio.contains(name) {
+            Some(CommandKind::Tokio)
+        } else {
+            None
+        }
+    }
+
+    fn insert(&mut self, kind: CommandKind, name: String) {
+        match kind {
+            CommandKind::Std => self.std.insert(name),
+            CommandKind::Tokio => self.tokio.insert(name),
+        };
     }
 
     fn merge(&mut self, other: Self) {
         self.std.extend(other.std);
         self.tokio.extend(other.tokio);
     }
+}
 
-    /// An *unqualified* `Alias::new` is a process command only when an import —
-    /// written in the file or inherited through a glob — brought that alias into
-    /// scope. A longer path has to spell the real one, so `clap::Command::new`
-    /// stays out of the census even in a file that also has `std::process::Command`
-    /// in scope.
+struct Aliases {
+    /// Names bound to the `Command` *type*: `use std::process::Command as Cmd`
+    /// or `type Cmd = std::process::Command`.
+    command: AliasSet,
+    /// Names bound to the `process` *module*: `use std::process as p`.
+    process_module: AliasSet,
+    /// Names bound to the *crate root*. Seeded with the crate's own name: an
+    /// extern crate is in scope without a `use`, which is how production spells
+    /// `std::process::Command::new`.
+    crate_root: AliasSet,
+    /// Names bound to [`HELPER`] itself, including through a rename.
+    helper: BTreeSet<String>,
+    /// Names bound to [`HELPER_MODULE`]: `use crate::child_environment`.
+    helper_module: BTreeSet<String>,
+}
+
+impl Default for Aliases {
+    fn default() -> Self {
+        Self {
+            command: AliasSet::default(),
+            process_module: AliasSet::default(),
+            crate_root: AliasSet {
+                std: BTreeSet::from(["std".to_string()]),
+                tokio: BTreeSet::from(["tokio".to_string()]),
+            },
+            helper: BTreeSet::new(),
+            helper_module: BTreeSet::new(),
+        }
+    }
+}
+
+impl Aliases {
+    fn collect(file: &syn::File) -> Self {
+        let mut collector = AliasCollector::default();
+        collector.visit_file(file);
+        let mut aliases = collector.aliases;
+        aliases.resolve_type_aliases(collector.type_aliases);
+        aliases
+    }
+
+    /// A `type` alias binds its name to whatever its target resolves to.
+    /// Iterated to a fixed point so an alias of an alias resolves whichever
+    /// order the two were declared in.
+    fn resolve_type_aliases(&mut self, mut pending: Vec<(String, Vec<String>)>) {
+        loop {
+            let before = pending.len();
+            let mut remaining = Vec::new();
+            for (alias, target) in pending {
+                let segments: Vec<&str> = target.iter().map(String::as_str).collect();
+                match self.kind_for_type(&segments) {
+                    Some(kind) => self.command.insert(kind, alias),
+                    None => remaining.push((alias, target)),
+                }
+            }
+            if remaining.len() == before {
+                return;
+            }
+            pending = remaining;
+        }
+    }
+
+    fn merge(&mut self, other: Self) {
+        self.command.merge(other.command);
+        self.process_module.merge(other.process_module);
+        self.crate_root.merge(other.crate_root);
+        self.helper.extend(other.helper);
+        self.helper_module.extend(other.helper_module);
+    }
+
     fn kind_for_constructor(&self, path: &syn::Path) -> Option<CommandKind> {
         let segments: Vec<_> = path.segments.iter().map(|segment| segment.ident.to_string()).collect();
-        if segments.last().map(String::as_str) != Some("new") || segments.len() < 2 {
+        let segments: Vec<&str> = segments.iter().map(String::as_str).collect();
+        let [type_path @ .., "new"] = segments.as_slice() else {
             return None;
+        };
+        self.kind_for_type(type_path)
+    }
+
+    /// Resolves a type path against what each of its segments was bound to,
+    /// so every ordinary spelling is censused — the imported type or a `type`
+    /// alias of it, the imported `process` module, and the crate root — while
+    /// a `Command` that resolves to something else, `clap`'s, never is.
+    fn kind_for_type(&self, segments: &[&str]) -> Option<CommandKind> {
+        match segments {
+            [alias] => self.command.kind_of(alias),
+            [module, "Command"] => self.process_module.kind_of(module),
+            [root, "process", "Command"] => self.crate_root.kind_of(root),
+            _ => None,
         }
-        if let [alias, _] = segments.as_slice() {
-            if self.std.contains(alias) {
-                return Some(CommandKind::Std);
+    }
+
+    /// Resolves a call path against the *item* [`HELPER`] names, not against
+    /// its terminal segment. A qualified call must be rooted at the helper's
+    /// module; a bare call must have been bound to the item by an import, or be
+    /// written in the file that defines it.
+    fn is_helper_call(&self, path: &syn::Path, scope: &BareHelperScope) -> bool {
+        let segments: Vec<_> = path.segments.iter().map(|segment| segment.ident.to_string()).collect();
+        let segments: Vec<&str> = segments.iter().map(String::as_str).collect();
+        match segments.as_slice() {
+            [name] => scope.resolves_bare_name(name, &self.helper),
+            [module, name] if *name == HELPER => {
+                self.helper_module.contains(*module) && !scope.local_modules.contains(*module)
             }
-            if self.tokio.contains(alias) {
-                return Some(CommandKind::Tokio);
+            [root, module, name] if *name == HELPER => {
+                *module == HELPER_MODULE && HELPER_ROOTS.contains(root)
             }
-            return None;
+            _ => false,
         }
-        if segments.ends_with(&[
-            "std".to_string(),
-            "process".to_string(),
-            "Command".to_string(),
-            "new".to_string(),
-        ]) {
-            return Some(CommandKind::Std);
+    }
+}
+
+/// What the scanned file itself says about a helper name it could resolve.
+///
+/// A local `fn` and a `use` of the same name collide in the value namespace, so
+/// they cannot both be written in one module — but a local `fn` legally shadows
+/// a name a *glob* import brought in. Treating any locally defined function as
+/// the winner therefore rejects both shadowing forms, and rejects nothing a
+/// module could legitimately have resolved to the shared helper. A local `mod`
+/// stands in the same relation to a glob-imported module in the type
+/// namespace, so the helper's module binding gets the same treatment.
+struct BareHelperScope {
+    /// Free functions the file declares outside `#[cfg(test)]`.
+    local_functions: BTreeSet<String>,
+    /// Modules the file declares outside `#[cfg(test)]`, inline or `mod x;`.
+    local_modules: BTreeSet<String>,
+    /// The file is the one that defines [`HELPER`], where the bare name is it.
+    definition_site: bool,
+}
+
+impl BareHelperScope {
+    fn for_file(path: &str, file: &syn::File) -> Self {
+        let mut collector = LocalItemCollector::default();
+        collector.visit_file(file);
+        Self {
+            local_functions: collector.functions,
+            local_modules: collector.modules,
+            definition_site: path == HELPER_DEFINITION_FILE,
         }
-        if segments.ends_with(&[
-            "tokio".to_string(),
-            "process".to_string(),
-            "Command".to_string(),
-            "new".to_string(),
-        ]) {
-            return Some(CommandKind::Tokio);
+    }
+
+    fn resolves_bare_name(&self, name: &str, imported: &BTreeSet<String>) -> bool {
+        if self.definition_site && name == HELPER {
+            return true;
         }
-        None
+        imported.contains(name) && !self.local_functions.contains(name)
+    }
+}
+
+#[derive(Default)]
+struct LocalItemCollector {
+    functions: BTreeSet<String>,
+    modules: BTreeSet<String>,
+}
+
+impl<'ast> Visit<'ast> for LocalItemCollector {
+    fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
+        if cfg_test(&item.attrs) {
+            return;
+        }
+        self.modules.insert(item.ident.to_string());
+        visit::visit_item_mod(self, item);
+    }
+
+    fn visit_item_fn(&mut self, item: &'ast syn::ItemFn) {
+        if cfg_test(&item.attrs) {
+            return;
+        }
+        self.functions.insert(item.sig.ident.to_string());
+        visit::visit_item_fn(self, item);
     }
 }
 
@@ -298,6 +468,9 @@ fn collect_glob_tree(tree: &syn::UseTree, prefix: &mut Vec<String>, targets: &mu
 #[derive(Default)]
 struct AliasCollector {
     aliases: Aliases,
+    /// `type` aliases as `(name, target path)`, resolved once the walk is over
+    /// because a target may be a `use` or another alias declared further down.
+    type_aliases: Vec<(String, Vec<String>)>,
 }
 
 impl<'ast> Visit<'ast> for AliasCollector {
@@ -310,6 +483,18 @@ impl<'ast> Visit<'ast> for AliasCollector {
 
     fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
         collect_use_tree(&item.tree, &mut Vec::new(), &mut self.aliases);
+    }
+
+    fn visit_item_type(&mut self, item: &'ast syn::ItemType) {
+        if cfg_test(&item.attrs) {
+            return;
+        }
+        if let syn::Type::Path(target) = item.ty.as_ref()
+            && target.qself.is_none()
+        {
+            let segments = target.path.segments.iter().map(|segment| segment.ident.to_string()).collect();
+            self.type_aliases.push((item.ident.to_string(), segments));
+        }
     }
 }
 
@@ -339,14 +524,36 @@ fn collect_use_tree(tree: &syn::UseTree, prefix: &mut Vec<String>, aliases: &mut
     }
 }
 
+/// `full` is the imported item's path; `alias` is the name it binds, which a
+/// `use ... as` rename makes different from the item's own last segment.
 fn record_alias(full: &[String], alias: String, aliases: &mut Aliases) {
     let full: Vec<&str> = full.iter().map(String::as_str).collect();
     match full.as_slice() {
         ["std", "process", "Command"] => {
-            aliases.std.insert(alias);
+            aliases.command.std.insert(alias);
         }
         ["tokio", "process", "Command"] => {
-            aliases.tokio.insert(alias);
+            aliases.command.tokio.insert(alias);
+        }
+        ["std", "process"] => {
+            aliases.process_module.std.insert(alias);
+        }
+        ["tokio", "process"] => {
+            aliases.process_module.tokio.insert(alias);
+        }
+        ["std"] => {
+            aliases.crate_root.std.insert(alias);
+        }
+        ["tokio"] => {
+            aliases.crate_root.tokio.insert(alias);
+        }
+        [root, module, name]
+            if HELPER_ROOTS.contains(root) && *module == HELPER_MODULE && *name == HELPER =>
+        {
+            aliases.helper.insert(alias);
+        }
+        [root, module] if HELPER_ROOTS.contains(root) && *module == HELPER_MODULE => {
+            aliases.helper_module.insert(alias);
         }
         _ => {}
     }
@@ -360,8 +567,22 @@ struct CommandRecord {
     kind: CommandKind,
     /// The helper was applied to this command somewhere.
     helped: bool,
-    /// This command could execute, or left the function, unhelped.
-    violated: bool,
+    /// This command reached one of its own execution seams unhelped. No caller
+    /// can govern a child this function already started.
+    executed_unhelped: bool,
+    /// This command left the function unhelped. Only this is a hand-off an
+    /// allowlisted governor may describe.
+    escaped_unhelped: bool,
+}
+
+/// Why a command has to carry the helper at the point it reaches.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Obligation {
+    /// It reached `spawn`/`status`/`output`/`exec` on itself.
+    Execution,
+    /// It left local control: returned, in tail position, or handed to code
+    /// this analysis does not follow.
+    Escape,
 }
 
 /// Path-sensitive facts at one point in a function body.
@@ -416,20 +637,26 @@ impl FlowState {
 /// through the bindings that hold it.
 struct FunctionAnalyzer<'a> {
     aliases: &'a Aliases,
+    helper_scope: &'a BareHelperScope,
     commands: Vec<CommandRecord>,
 }
 
 impl<'a> FunctionAnalyzer<'a> {
-    fn analyze(aliases: &'a Aliases, block: &syn::Block) -> Vec<CommandRecord> {
+    fn analyze(
+        aliases: &'a Aliases,
+        helper_scope: &'a BareHelperScope,
+        block: &syn::Block,
+    ) -> Vec<CommandRecord> {
         let mut analyzer = Self {
             aliases,
+            helper_scope,
             commands: Vec::new(),
         };
         let mut state = FlowState::default();
         // A command in the body's tail position is this function's return
         // value: it leaves local control exactly like an argument hand-off.
         let returned = analyzer.block(block, &mut state);
-        analyzer.require_helped(&returned, &state);
+        analyzer.require_helped(&returned, &state, Obligation::Escape);
         analyzer.commands
     }
 
@@ -471,7 +698,7 @@ impl<'a> FunctionAnalyzer<'a> {
                 state.bindings.insert(name, ids);
             }
             // Destructured into something this analysis cannot follow.
-            None => self.require_helped(&ids, state),
+            None => self.require_helped(&ids, state, Obligation::Escape),
         }
     }
 
@@ -537,7 +764,7 @@ impl<'a> FunctionAnalyzer<'a> {
                     Some(name) => {
                         state.bindings.insert(name, ids);
                     }
-                    None => self.require_helped(&ids, state),
+                    None => self.require_helped(&ids, state, Obligation::Escape),
                 }
                 BTreeSet::new()
             }
@@ -564,12 +791,13 @@ impl<'a> FunctionAnalyzer<'a> {
                     line: call.span().start().line,
                     kind,
                     helped: false,
-                    violated: false,
+                    executed_unhelped: false,
+                    escaped_unhelped: false,
                 });
                 state.live.insert(id);
                 return BTreeSet::from([id]);
             }
-            if function.segments.last().is_some_and(|segment| segment.ident == HELPER) {
+            if self.aliases.is_helper_call(function, self.helper_scope) {
                 let mut targets = BTreeSet::new();
                 for (index, arg) in call.args.iter().enumerate() {
                     if index == 0 {
@@ -599,7 +827,7 @@ impl<'a> FunctionAnalyzer<'a> {
             self.argument(arg, state);
         }
         if EXECUTION_METHODS.contains(&call.method.to_string().as_str()) {
-            self.require_helped(&receiver, state);
+            self.require_helped(&receiver, state, Obligation::Execution);
             return BTreeSet::new();
         }
         // A builder method hands the same command back; an unrecognized method
@@ -669,7 +897,7 @@ impl<'a> FunctionAnalyzer<'a> {
     fn exit(&mut self, value: Option<&syn::Expr>, state: &mut FlowState) {
         if let Some(value) = value {
             let ids = self.expr(value, state);
-            self.require_helped(&ids, state);
+            self.require_helped(&ids, state, Obligation::Escape);
         }
         state.diverged = true;
     }
@@ -681,12 +909,12 @@ impl<'a> FunctionAnalyzer<'a> {
         if let syn::Expr::Reference(reference) = strip_groups(arg) {
             let ids = self.expr(&reference.expr, state);
             if reference.mutability.is_some() {
-                self.require_helped(&ids, state);
+                self.require_helped(&ids, state, Obligation::Escape);
             }
             return;
         }
         let ids = self.expr(arg, state);
-        self.require_helped(&ids, state);
+        self.require_helped(&ids, state, Obligation::Escape);
     }
 
     /// Expression forms without dedicated handling: evaluate their direct
@@ -713,11 +941,22 @@ impl<'a> FunctionAnalyzer<'a> {
 
     /// The proof obligation: every command reaching a point where it can
     /// execute — its own execution seam, or a hand-off to code this analysis
-    /// does not follow — must already carry the helper on this path.
-    fn require_helped(&mut self, ids: &BTreeSet<CommandId>, state: &FlowState) {
+    /// does not follow — must already carry the helper on this path. The two
+    /// causes are recorded apart because only an escape can be discharged
+    /// elsewhere; see [`indirect_governor`].
+    fn require_helped(
+        &mut self,
+        ids: &BTreeSet<CommandId>,
+        state: &FlowState,
+        obligation: Obligation,
+    ) {
         for id in ids {
-            if !state.helped.contains(id) {
-                self.commands[*id].violated = true;
+            if state.helped.contains(id) {
+                continue;
+            }
+            match obligation {
+                Obligation::Execution => self.commands[*id].executed_unhelped = true,
+                Obligation::Escape => self.commands[*id].escaped_unhelped = true,
             }
         }
     }
@@ -767,16 +1006,18 @@ fn child_expressions(expr: &syn::Expr) -> Vec<&syn::Expr> {
 struct FileScanner<'a> {
     path: &'a str,
     aliases: &'a Aliases,
+    helper_scope: &'a BareHelperScope,
     sites: Vec<SpawnSite>,
 }
 
 impl FileScanner<'_> {
     fn scan_function(&mut self, name: String, block: &syn::Block) {
         let indirect = indirect_governor(self.path, &name);
-        for command in FunctionAnalyzer::analyze(self.aliases, block) {
-            let governed_by = if command.helped && !command.violated {
+        for command in FunctionAnalyzer::analyze(self.aliases, self.helper_scope, block) {
+            let proven = command.helped && !command.executed_unhelped && !command.escaped_unhelped;
+            let governed_by = if proven {
                 HELPER.to_string()
-            } else if let Some(governor) = indirect {
+            } else if let Some(governor) = indirect.filter(|_| !command.executed_unhelped) {
                 governor.to_string()
             } else {
                 UNCONTROLLED.to_string()
@@ -827,31 +1068,76 @@ impl<'ast> Visit<'ast> for FileScanner<'_> {
     }
 }
 
+/// An item is test-only when a `cfg` predicate on it is proven false in a
+/// production build — not when the predicate merely mentions `test`.
 fn cfg_test(attrs: &[syn::Attribute]) -> bool {
     attrs
         .iter()
         .filter(|attr| attr.path().is_ident("cfg"))
-        .any(|attr| meta_contains_test(&attr.meta))
+        .any(|attr| {
+            attr.parse_args::<syn::Meta>()
+                .is_ok_and(|predicate| production_truth(&predicate) == CfgTruth::False)
+        })
 }
 
-fn meta_contains_test(meta: &syn::Meta) -> bool {
-    match meta {
-        syn::Meta::Path(path) => path.is_ident("test"),
-        syn::Meta::List(list) => {
-            use syn::parse::Parser;
-            let parser = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
-            parser
-                .parse2(list.tokens.clone())
-                .map(|nested| nested.iter().any(meta_contains_test))
-                .unwrap_or(false)
+/// A `cfg` predicate's value in a production build. Only `test` is known;
+/// every other leaf — `unix`, `feature = "..."` — is unknown, and unknown is
+/// kept in the census.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum CfgTruth {
+    True,
+    False,
+    Unknown,
+}
+
+fn production_truth(predicate: &syn::Meta) -> CfgTruth {
+    let syn::Meta::List(list) = predicate else {
+        return if predicate.path().is_ident("test") {
+            CfgTruth::False
+        } else {
+            CfgTruth::Unknown
+        };
+    };
+    use syn::parse::Parser;
+    let parser = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+    let Ok(operands) = parser.parse2(list.tokens.clone()) else {
+        return CfgTruth::Unknown;
+    };
+    let operands: Vec<CfgTruth> = operands.iter().map(production_truth).collect();
+    if list.path.is_ident("not") {
+        match operands.as_slice() {
+            [CfgTruth::True] => CfgTruth::False,
+            [CfgTruth::False] => CfgTruth::True,
+            _ => CfgTruth::Unknown,
         }
-        syn::Meta::NameValue(_) => false,
+    } else if list.path.is_ident("all") {
+        if operands.contains(&CfgTruth::False) {
+            CfgTruth::False
+        } else if operands.iter().all(|operand| *operand == CfgTruth::True) {
+            CfgTruth::True
+        } else {
+            CfgTruth::Unknown
+        }
+    } else if list.path.is_ident("any") {
+        if operands.contains(&CfgTruth::True) {
+            CfgTruth::True
+        } else if operands.iter().all(|operand| *operand == CfgTruth::False) {
+            CfgTruth::False
+        } else {
+            CfgTruth::Unknown
+        }
+    } else {
+        CfgTruth::Unknown
     }
 }
 
-/// Factories whose product is governed by the caller that executes it. Per the
-/// spec an allowlist may describe an indirect governed path; it may not exempt
-/// a spawned child from `AGENT_CWD`.
+/// Factories whose product is governed by the caller that executes it.
+///
+/// This describes a hand-off and nothing else: it applies only to a command
+/// that leaves the factory without reaching an execution seam inside it. A
+/// child the factory starts itself is one the named caller never sees, so it
+/// stays `UNCONTROLLED`. Per the spec an allowlist may describe an indirect
+/// governed path; it may not exempt a spawned child from `AGENT_CWD`.
 fn indirect_governor(path: &str, function: &str) -> Option<&'static str> {
     match (path, function) {
         ("lib/src/composition/lifecycle/executor.rs", "system_shell_command") => {
@@ -883,9 +1169,11 @@ fn parse_source(path: &str, source: &str) -> syn::File {
 }
 
 fn scan_parsed(path: &str, file: &syn::File, aliases: &Aliases) -> Vec<SpawnSite> {
+    let helper_scope = BareHelperScope::for_file(path, file);
     let mut scanner = FileScanner {
         path,
         aliases,
+        helper_scope: &helper_scope,
         sites: Vec::new(),
     };
     scanner.visit_file(file);
@@ -1236,8 +1524,9 @@ fn awaited_without_the_helper() {
 /// The shape of `cli/src/commands/wrap/exec/wiring/`: a provider spawn seam
 /// written under `use super::*`, in a module its parent re-exports back with
 /// `pub(crate) use session::*` — the cycle the visited set has to survive.
+/// Both bindings travel that hop: the constructor's and the helper's.
 #[test]
-fn a_glob_import_inherits_the_command_alias_from_the_crate() {
+fn a_glob_import_inherits_the_command_and_helper_bindings() {
     let crate_dir = tempfile::tempdir().expect("temp crate");
     let src = crate_dir.path().join("src");
     fs::create_dir_all(src.join("wiring")).expect("temp crate layout");
@@ -1576,4 +1865,156 @@ fn system_shell_command() -> std::process::Command {
     );
     assert_eq!(governors(&scan_source(executor, executed)), vec![UNCONTROLLED]);
     assert_eq!(governors(&scan_source(shell, executed)), vec![UNCONTROLLED]);
+}
+
+/// A `cfg` predicate excludes an item only when it is *proven* test-only.
+/// `not(test)` is the production-only spelling, and `any(test, unix)` is live
+/// production code on Unix; a scanner that skips any predicate mentioning
+/// `test` omits both children from the census.
+#[test]
+fn a_cfg_predicate_excludes_only_items_proven_test_only() {
+    let source = r#"
+use claudine::child_environment::contribute_child_environment;
+use std::process::Command;
+
+#[cfg(not(test))]
+fn governed_production_only() { let mut c = Command::new("x"); contribute_child_environment(&mut c); c.status(); }
+#[cfg(not(test))]
+fn ungoverned_production_only() { Command::new("x").status(); }
+#[cfg(any(test, unix))]
+fn ungoverned_on_unix() { Command::new("x").spawn(); }
+#[cfg(all(not(test), feature = "daemon"))]
+fn ungoverned_behind_feature() { Command::new("x").output(); }
+#[cfg(not(test))]
+mod production_only { fn ungoverned_in_module() { std::process::Command::new("x").spawn(); } }
+
+#[cfg(all(test, unix))]
+fn test_only_on_unix() { Command::new("x").spawn(); }
+#[cfg(not(not(test)))]
+fn doubly_negated_test_only() { Command::new("x").spawn(); }
+#[cfg(test)]
+fn plain_test_only() { Command::new("x").spawn(); }
+#[cfg(test)]
+mod tests { fn ignored() { std::process::Command::new("x").spawn(); } }
+"#;
+    let sites = scan_source("fixture.rs", source);
+    let (governed, uncontrolled) = verdicts(&sites);
+    assert_eq!(governed, BTreeSet::from(["governed_production_only"]));
+    assert_eq!(
+        uncontrolled,
+        BTreeSet::from([
+            "ungoverned_behind_feature",
+            "ungoverned_in_module",
+            "ungoverned_on_unix",
+            "ungoverned_production_only",
+        ])
+    );
+    assert_eq!(sites.len(), 5);
+}
+
+/// `type Cmd = std::process::Command;` is an aliased construction in AC6's
+/// sense. Every spelling the alias target can take — the full path, an
+/// imported `process` module, an imported `Command`, or another alias declared
+/// later in the file — must reach the census, while `clap::Command` behind an
+/// alias still must not.
+#[test]
+fn a_type_alias_still_names_the_process_command() {
+    let source = r#"
+use claudine::child_environment::contribute_child_environment;
+use std::process;
+use std::process::Command;
+
+type Chained = ProcessCommand;
+type ProcessCommand = std::process::Command;
+type AsyncCommand = tokio::process::Command;
+type ViaModule = process::Command;
+type ViaImport = Command;
+type CliCommand = clap::Command;
+
+fn governed_std_alias() { let mut c = ProcessCommand::new("x"); contribute_child_environment(&mut c); c.status(); }
+fn ungoverned_std_alias() { ProcessCommand::new("x").status(); }
+fn governed_tokio_alias() { let mut c = AsyncCommand::new("x"); contribute_child_environment(&mut c); c.output(); }
+fn ungoverned_tokio_alias() { AsyncCommand::new("x").output(); }
+fn ungoverned_module_alias() { ViaModule::new("x").spawn(); }
+fn ungoverned_import_alias() { ViaImport::new("x").spawn(); }
+fn ungoverned_chained_alias() { Chained::new("x").spawn(); }
+fn builds_a_cli() { CliCommand::new("claudine"); }
+"#;
+    let sites = scan_source("fixture.rs", source);
+    assert_eq!(tally(&sites, "governed_std_alias"), (1, 0));
+    assert_eq!(tally(&sites, "ungoverned_std_alias"), (0, 1));
+    assert_eq!(tally(&sites, "governed_tokio_alias"), (1, 0));
+    assert_eq!(tally(&sites, "ungoverned_tokio_alias"), (0, 1));
+    assert_eq!(tally(&sites, "ungoverned_module_alias"), (0, 1));
+    assert_eq!(tally(&sites, "ungoverned_import_alias"), (0, 1));
+    assert_eq!(tally(&sites, "ungoverned_chained_alias"), (0, 1));
+    assert_eq!(
+        sites
+            .iter()
+            .filter(|site| site.function.ends_with("tokio_alias"))
+            .map(|site| site.command_kind)
+            .collect::<Vec<_>>(),
+        vec!["tokio", "tokio"]
+    );
+    assert_eq!(sites.len(), 7);
+}
+
+/// A locally declared `mod` wins over a module a glob import brought in, just
+/// as a local `fn` does, so a same-named local module cannot lend its function
+/// the shared helper's identity. Both the inline and the `mod x;` declaration
+/// form shadow.
+#[test]
+fn a_local_module_shadows_a_glob_inherited_helper_module() {
+    let crate_dir = tempfile::tempdir().expect("temp crate");
+    let src = crate_dir.path().join("src");
+    fs::create_dir_all(&src).expect("temp crate layout");
+    fs::write(src.join("lib.rs"), "mod inline;\nmod declared;\n").expect("crate root");
+    fs::write(
+        src.join("prelude.rs"),
+        "pub use claudine::child_environment;\npub use std::process::Command;\n",
+    )
+    .expect("prelude module");
+
+    let inline_path = src.join("inline.rs");
+    let inline = r#"
+use crate::prelude::*;
+
+mod child_environment {
+    pub fn contribute_child_environment<T>(_: &mut T) {}
+}
+
+fn shadowed_by_inline_module() {
+    let mut c = Command::new("x");
+    child_environment::contribute_child_environment(&mut c);
+    c.spawn();
+}
+
+fn qualified_anyway() {
+    let mut c = Command::new("x");
+    crate::child_environment::contribute_child_environment(&mut c);
+    c.spawn();
+}
+"#;
+    fs::write(&inline_path, inline).expect("inline module");
+
+    let declared_path = src.join("declared.rs");
+    let declared = r#"
+use crate::prelude::*;
+
+mod child_environment;
+
+fn shadowed_by_declaration() {
+    let mut c = Command::new("x");
+    child_environment::contribute_child_environment(&mut c);
+    c.spawn();
+}
+"#;
+    fs::write(&declared_path, declared).expect("declared module");
+
+    let resolver = GlobResolver { src_root: src };
+    let sites = scan_crate_file("inline.rs", &inline_path, inline, &resolver);
+    assert_eq!(tally(&sites, "shadowed_by_inline_module"), (0, 1));
+    assert_eq!(tally(&sites, "qualified_anyway"), (1, 0));
+    let sites = scan_crate_file("declared.rs", &declared_path, declared, &resolver);
+    assert_eq!(tally(&sites, "shadowed_by_declaration"), (0, 1));
 }
