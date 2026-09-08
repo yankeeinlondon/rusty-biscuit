@@ -13,6 +13,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::sync::atomic::AtomicBool;
+// Every `Instant` reader in this file is a Unix-only reap or interrupt test;
+// the `cmd` twins state their budgets as literals.
+#[cfg(unix)]
 use std::time::Instant;
 
 use biscuit_terminal::discovery::detection::ColorDepth;
@@ -102,15 +105,28 @@ impl BackgroundedDescendant {
     }
 
     /// A shell fragment that backgrounds `body` in a process that records its
-    /// pid first.
+    /// pid, and does not return until that pid is on disk.
     ///
     /// `body` runs under its own `/bin/sh -c` rather than in a `( … )`
     /// subshell because POSIX `$$` inside a subshell expands to the *parent*
     /// shell's pid — the command shell, which exits on its own and would prove
     /// nothing about the descendant.
+    ///
+    /// The command shell then waits for the pid file. Without that wait the
+    /// fixture races the contract under test: for a command as short as
+    /// `printf 'now\n'` the reap lands within a few milliseconds, and under
+    /// full-suite load the descendant had not yet reached its first statement
+    /// — so the test failed at its own deadline rather than on the behavior.
+    /// Making publication a precondition of the command completing also
+    /// removes the vacuous case where nothing was ever backgrounded. `exit 90`
+    /// bounds the wait at ~10 s so a broken fixture fails loudly instead of
+    /// hanging.
     fn background(&self, body: &str) -> String {
         format!(
-            "/bin/sh -c 'echo $$ > \"{pid}\"; {body}' &",
+            "/bin/sh -c 'echo $$ > \"{pid}\"; {body}' & \
+             attempts=0; while [ ! -s \"{pid}\" ]; do \
+             attempts=$((attempts + 1)); [ $attempts -lt 1000 ] || exit 90; \
+             sleep 0.01; done;",
             pid = self.pid_path.display(),
         )
     }
@@ -1665,8 +1681,10 @@ mod shell_tasks {
 
     /// Review 6 finding 2: an early wait error must still reap the whole tree
     /// — through the shared epilogue's tree teardown, not a leaked survivor.
-    /// The leading `echo` feeds the injection seam, which arms only once a
-    /// stdout byte has been captured.
+    /// The `echo` feeds the injection seam, which arms only once a stdout byte
+    /// has been captured — so the descendant is backgrounded *before* it, or
+    /// the teardown races the fixture into existence and the reap assertion
+    /// fails on a descendant that never started.
     #[cfg(unix)]
     #[test]
     fn an_early_wait_error_still_reaps_the_whole_tree() {
@@ -1675,7 +1693,7 @@ mod shell_tasks {
         let start = Instant::now();
         let result = SystemTaskShell::failing_wait().run(
             &format!(
-                "echo started; {} sleep 300",
+                "{} echo started; sleep 300",
                 descendant.background(&format!("sleep 1; echo late > \"{}\"", marker.display())),
             ),
             Duration::from_secs(300),
@@ -2008,7 +2026,9 @@ mod shell_streaming {
     /// The injection seam arms on the first captured stdout byte, so
     /// `buffered` is deterministically in flight when the wait error fires;
     /// the backgrounded `late` writer models the descendant a bypassed
-    /// epilogue would have left draining behind the footer.
+    /// epilogue would have left draining behind the footer. It is backgrounded
+    /// *before* `buffered` for that reason: the seam arms on that byte, so a
+    /// descendant staged after it races the teardown into existence.
     #[cfg(unix)]
     #[test]
     fn a_wait_error_settles_readers_before_returning_and_nothing_follows_the_footer() {
@@ -2020,7 +2040,7 @@ mod shell_streaming {
         let started = Instant::now();
         let result = SystemTaskShell::failing_wait().run(
             &format!(
-                "printf 'buffered\\n'; {} sleep 300",
+                "{} printf 'buffered\\n'; sleep 300",
                 descendant.background("sleep 1; printf 'late\\n'"),
             ),
             Duration::from_secs(300),
