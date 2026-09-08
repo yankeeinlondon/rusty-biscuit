@@ -25,6 +25,22 @@ belong here.
   into `git update-index --index-info`. An empty commit is recoverable via
   `git update-ref HEAD <previous-tip> <empty-hash>` (no `git reset`,
   no index/worktree churn).
+- **Temp-index fallback is a *replacement*, not an additive, tree.** Populating
+  a fresh temp index with only the captured `ls-files -s` lines and then
+  `git write-tree` produces a tree containing **only** those paths — not
+  `HEAD + those paths`. The resulting commit's diff against the parent shows
+  every other file in the tree as deleted (10k+ deletions in this monorepo),
+  which is not a recovery case the orchestrator can detect after the fact. The
+  fallback is only correct when the captured set is intended to fully
+  replace HEAD's tree at those paths (e.g. one sibling's slice of a multi-agent
+  batch where another agent owns the rest). When the assigned set is purely
+  additive (no `D ` entries in `git diff --cached --name-only`, and the real
+  index already has exactly that additive set on top of HEAD — i.e. no
+  *other* sibling staged paths need excluding), skip the temp index entirely
+  and run `git write-tree` against the real index, then `commit-tree -S -F - -p
+  HEAD`. The staged snapshot of any `AM`/`MM` paths you want to commit at their
+  pre-supersede content is already in the real index; you only need the temp
+  index when sibling staged paths must be excluded from the tree.
 - `--only` on a clean-superset `MM` path still captures working-tree-only
   content (e.g. a manifest `[[test]]` block whose source file is currently
   untracked). The pre-flight `git show :<path>` only sees the staged blob;
