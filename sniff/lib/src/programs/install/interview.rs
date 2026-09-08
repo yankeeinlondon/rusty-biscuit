@@ -124,16 +124,24 @@ pub trait InstallInterviewDelegate {
 /// Final outcome of an interview session.
 #[derive(Debug, Clone)]
 pub enum InstallInterviewOutcome {
-    Installed { method: InstallationMethod },
-    DryRun { method: InstallationMethod },
+    Installed {
+        method: InstallationMethod,
+    },
+    DryRun {
+        method: InstallationMethod,
+    },
     AbortedByUser,
-    Failed { attempted: Vec<InstallationMethod> },
+    Failed {
+        attempted: Vec<InstallationMethod>,
+    },
     /// Every attempt failed and the last one was killed at its deadline rather
     /// than exiting on its own. A `TimeoutWarning` event was emitted before
     /// this outcome, so the caller need not re-derive the host-modification
     /// caveat. Distinct from `Failed` so a caller can choose a different exit
     /// code or follow-up.
-    TimedOut { attempted: Vec<InstallationMethod> },
+    TimedOut {
+        attempted: Vec<InstallationMethod>,
+    },
     NotInstallable,
 }
 
@@ -456,8 +464,9 @@ mod runner_tests {
 
     /// Builds an executor that reports every attempt as failed, with
     /// `timed_out` under the caller's control.
-    fn failing_executor(timed_out: bool) -> impl Fn(&InstallationMethod, &InstallOptions) -> InstallCapturedOutcome
-    {
+    fn failing_executor(
+        timed_out: bool,
+    ) -> impl Fn(&InstallationMethod, &InstallOptions) -> InstallCapturedOutcome {
         move |method: &InstallationMethod, _opts: &InstallOptions| {
             InstallCapturedOutcome::Completed(InstallCapturedResult {
                 command: method.manager_name().to_string(),

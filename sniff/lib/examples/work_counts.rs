@@ -27,8 +27,8 @@ mod fixtures;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use sniff::filesystem::{detect_filesystem_with_request, detect_git_with_request, detect_repo};
 use sniff::filesystem::repo::detect_repo_structure;
+use sniff::filesystem::{detect_filesystem_with_request, detect_git_with_request, detect_repo};
 use sniff::performance::{PerformanceCollector, PerformanceReport, with_current_collector};
 use sniff::request::{FilesystemRequest, GitRequest, RepoRequest};
 
@@ -96,7 +96,10 @@ fn report(name: &str, case: impl FnOnce() -> sniff::Result<()>) {
 }
 
 fn print_report(report: &PerformanceReport, elapsed: Duration) {
-    println!("elapsed: {:.1} ms (directional only)\n", elapsed.as_secs_f64() * 1000.0);
+    println!(
+        "elapsed: {:.1} ms (directional only)\n",
+        elapsed.as_secs_f64() * 1000.0
+    );
     if report.counters.is_empty() {
         println!("no counters recorded\n");
         return;

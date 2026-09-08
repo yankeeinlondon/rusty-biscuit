@@ -9,9 +9,7 @@ use crate::Result;
 use crate::performance;
 use crate::performance::counters;
 
-use super::detection::{
-    DetectorOutcome, probe_exists,
-};
+use super::detection::{DetectorOutcome, probe_exists};
 use super::seed::{PackageSeed, merge_seeds};
 use super::standard::{MonorepoStandard, PackageProvenance};
 
@@ -47,7 +45,6 @@ pub(super) fn detect_maven_workspace(root: &Path) -> Result<Option<DetectorOutco
     if seeds.is_empty() {
         return Ok(None);
     }
-
 
     Ok(Some(DetectorOutcome {
         standard: MonorepoStandard::MavenMultiModule,

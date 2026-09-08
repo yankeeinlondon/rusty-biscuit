@@ -52,7 +52,9 @@ pub(crate) fn parse_provider_url(
             "expected a positive native ID or canonical provider URL: {error}"
         ))
     })?;
-    if !matches!(url.scheme(), "http" | "https") || url.query().is_some() || url.fragment().is_some()
+    if !matches!(url.scheme(), "http" | "https")
+        || url.query().is_some()
+        || url.fragment().is_some()
     {
         return Err(invalid(
             "canonical provider URLs must be HTTP(S) URLs without query or fragment",
@@ -82,10 +84,7 @@ pub(crate) fn parse_provider_url(
         Some(port) => format!("{}://{host}:{port}", url.scheme()),
         None => format!("{}://{host}", url.scheme()),
     };
-    let repository_url = format!(
-        "{origin}/{}/{}.git",
-        route.namespace, route.repository
-    );
+    let repository_url = format!("{origin}/{}/{}.git", route.namespace, route.repository);
     Ok((
         ResolvedRemote {
             name: raw.to_string(),
@@ -194,7 +193,7 @@ fn flavor_route(
     kind: ReferenceKind,
     is_api: bool,
 ) -> Option<Route> {
-    use ApiFlavor::{Bitbucket, Forgejo, Gitea, GitHub, GitLab};
+    use ApiFlavor::{Bitbucket, Forgejo, GitHub, GitLab, Gitea};
     use ReferenceKind::{CiCdJob, PullRequest};
 
     match (flavor, kind, is_api) {
@@ -264,24 +263,34 @@ fn flavor_route(
             _ => None,
         },
         (Bitbucket, PullRequest, false) => match segments {
-            [workspace, repository, "pull-requests", id] => {
-                flat(flavor, workspace, repository, id)
-            }
+            [workspace, repository, "pull-requests", id] => flat(flavor, workspace, repository, id),
             _ => None,
         },
         // A Bitbucket step is identified by its pipeline, so the native ID this
         // parser hands back is the composite `pipeline/step` the exact-lookup
         // path expects — not the bare step UUID.
         (Bitbucket, CiCdJob, true) => match segments {
-            ["repositories", workspace, repository, "pipelines", parent, "steps", step] => {
-                step_route(workspace, repository, parent, step)
-            }
+            [
+                "repositories",
+                workspace,
+                repository,
+                "pipelines",
+                parent,
+                "steps",
+                step,
+            ] => step_route(workspace, repository, parent, step),
             _ => None,
         },
         (Bitbucket, CiCdJob, false) => match segments {
-            [workspace, repository, "pipelines", "results", parent, "steps", step] => {
-                step_route(workspace, repository, parent, step)
-            }
+            [
+                workspace,
+                repository,
+                "pipelines",
+                "results",
+                parent,
+                "steps",
+                step,
+            ] => step_route(workspace, repository, parent, step),
             _ => None,
         },
 
@@ -370,9 +379,7 @@ fn validated_repository_identity(identity: &str) -> Option<String> {
         && identity.chars().all(|character| {
             character.is_ascii_alphanumeric()
                 || matches!(character, '-' | '_' | '.')
-                || (!character.is_ascii()
-                    && !character.is_control()
-                    && !character.is_whitespace())
+                || (!character.is_ascii() && !character.is_control() && !character.is_whitespace())
         }))
     .then(|| identity.to_string())
 }

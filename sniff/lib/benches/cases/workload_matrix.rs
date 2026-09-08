@@ -13,11 +13,11 @@ use sniff::filesystem::git::{PathHistoryOptions, commits_for_path_at};
 use sniff::filesystem::{
     detect_filesystem_with_request, detect_git_with_request, detect_repo, detect_repo_structure,
 };
+#[cfg(feature = "remote")]
+use sniff::remote::RemoteRepoProvider;
 use sniff::request::{FilesystemRequest, GitRequest};
 #[cfg(feature = "bench-internals")]
 use sniff::services::benchmark::{SyntheticSystemdListing, run_systemd_listing};
-#[cfg(feature = "remote")]
-use sniff::remote::RemoteRepoProvider;
 
 use crate::support::{fixtures, util};
 
@@ -94,20 +94,24 @@ fn register_filesystem_shapes(c: &mut Criterion) {
         });
     });
 
-    group.bench_function("package_scoped_git_inventory_in_500_package_monorepo", |b| {
-        let fixture = fixtures::nested_mixed_monorepo(500);
-        let package = fixture.path().join("crates/rust-0000");
-        let request = FilesystemRequest::new()
-            .git(GitRequest::identity())
-            .without_repo()
-            .without_docs()
-            .without_formatting();
-        b.iter(|| {
-            black_box(
-                detect_filesystem_with_request(black_box(&package), black_box(&request)).unwrap(),
-            );
-        });
-    });
+    group.bench_function(
+        "package_scoped_git_inventory_in_500_package_monorepo",
+        |b| {
+            let fixture = fixtures::nested_mixed_monorepo(500);
+            let package = fixture.path().join("crates/rust-0000");
+            let request = FilesystemRequest::new()
+                .git(GitRequest::identity())
+                .without_repo()
+                .without_docs()
+                .without_formatting();
+            b.iter(|| {
+                black_box(
+                    detect_filesystem_with_request(black_box(&package), black_box(&request))
+                        .unwrap(),
+                );
+            });
+        },
+    );
 
     group.finish();
 }
@@ -201,7 +205,9 @@ fn register_inventory_and_assembly(c: &mut Criterion) {
 fn register_git_shapes(c: &mut Criterion) {
     let mut dirty = util::configure_slow_group(c, "workloads_git_dirty_sizes");
     for &bytes_per_file in DIRTY_FILE_SIZES {
-        dirty.throughput(Throughput::Bytes((DIRTY_FILE_COUNT * bytes_per_file) as u64));
+        dirty.throughput(Throughput::Bytes(
+            (DIRTY_FILE_COUNT * bytes_per_file) as u64,
+        ));
         dirty.bench_with_input(
             BenchmarkId::new("100_files", bytes_per_file),
             &bytes_per_file,

@@ -93,7 +93,9 @@ pub struct SyntheticSystemdResult {
 }
 
 /// Run the production systemd parser, batching, runner dispatch, and projection.
-pub fn run_systemd_listing(iteration: &mut SyntheticSystemdIteration<'_>) -> SyntheticSystemdResult {
+pub fn run_systemd_listing(
+    iteration: &mut SyntheticSystemdIteration<'_>,
+) -> SyntheticSystemdResult {
     let services = systemd::list_systemd_services_with(&mut |args| iteration.dispatch(args));
     SyntheticSystemdResult {
         services,

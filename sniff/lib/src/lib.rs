@@ -4,6 +4,8 @@ use std::time::Instant;
 use tracing::Level;
 use tracing::instrument;
 
+#[cfg(feature = "network")]
+mod credentials;
 pub mod error;
 pub mod executable_index;
 pub mod filesystem;
@@ -16,8 +18,6 @@ pub(crate) mod process;
 pub mod programs;
 #[cfg(feature = "remote")]
 pub mod remote;
-#[cfg(feature = "network")]
-mod credentials;
 pub mod request;
 pub mod services;
 
@@ -311,7 +311,11 @@ fn detect_with_plan_inner(
     filesystem_observation: Option<&FilesystemObservation>,
 ) -> Result<SniffResult> {
     let started = Instant::now();
-    let base = match (&plan.base_dir, filesystem_observation, plan.filesystem.is_some()) {
+    let base = match (
+        &plan.base_dir,
+        filesystem_observation,
+        plan.filesystem.is_some(),
+    ) {
         (Some(base), Some(observation), true) if base != observation.observed_root() => {
             return Err(SniffError::SystemInfo {
                 domain: "filesystem",
@@ -391,18 +395,19 @@ fn detect_with_plan_inner(
         // detection because their system interfaces are safe to overlap.
         #[cfg(not(windows))]
         let (os, hardware, network, filesystem) = std::thread::scope(|s| {
-            let os_handle = plan.os.as_ref().map(|req| {
-                s.spawn(move || detect_os(req))
-            });
-            let hw_handle = plan.hardware.as_ref().map(|req| {
-                s.spawn(move || detect_hardware(req))
-            });
-            let net_handle = plan.network.as_ref().map(|req| {
-                s.spawn(move || detect_network(req))
-            });
-            let fs_handle = plan.filesystem.as_ref().map(|req| {
-                s.spawn(move || detect_filesystem(req))
-            });
+            let os_handle = plan.os.as_ref().map(|req| s.spawn(move || detect_os(req)));
+            let hw_handle = plan
+                .hardware
+                .as_ref()
+                .map(|req| s.spawn(move || detect_hardware(req)));
+            let net_handle = plan
+                .network
+                .as_ref()
+                .map(|req| s.spawn(move || detect_network(req)));
+            let fs_handle = plan
+                .filesystem
+                .as_ref()
+                .map(|req| s.spawn(move || detect_filesystem(req)));
 
             let os = os_handle.map(|h| h.join().unwrap()).transpose();
             let hardware = hw_handle.map(|h| h.join().unwrap()).transpose();

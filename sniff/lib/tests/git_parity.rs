@@ -335,7 +335,10 @@ fn stale_linked_worktree_registration_does_not_derail_requested_repo() {
         norm(dir.path()),
         "detection should stay anchored to the requested repository"
     );
-    assert!(info.worktrees.is_empty(), "stale worktree should be omitted");
+    assert!(
+        info.worktrees.is_empty(),
+        "stale worktree should be omitted"
+    );
 }
 
 #[test]
@@ -712,7 +715,12 @@ fn cli_facing_apis_surface_open_failure_instead_of_absence() {
         "commit_files_at"
     );
     assert!(
-        sniff::filesystem::commits_for_path_at(p, "", sniff::filesystem::PathHistoryOptions::new(5)).is_err(),
+        sniff::filesystem::commits_for_path_at(
+            p,
+            "",
+            sniff::filesystem::PathHistoryOptions::new(5)
+        )
+        .is_err(),
         "commits_for_path_at"
     );
     assert!(
@@ -831,7 +839,12 @@ fn commits_for_path_at_surfaces_corrupt_ancestor() {
     corrupt_loose_object(dir.path(), &root);
 
     assert!(
-        sniff::filesystem::commits_for_path_at(dir.path(), "", sniff::filesystem::PathHistoryOptions::new(10)).is_err(),
+        sniff::filesystem::commits_for_path_at(
+            dir.path(),
+            "",
+            sniff::filesystem::PathHistoryOptions::new(10)
+        )
+        .is_err(),
         "corrupt ancestor must surface through commits_for_path_at"
     );
 }
@@ -935,7 +948,12 @@ fn commits_for_path_at_surfaces_malformed_head() {
     fs::write(dir.path().join(".git").join("HEAD"), b"not a valid head\n").unwrap();
 
     assert!(
-        sniff::filesystem::commits_for_path_at(dir.path(), "", sniff::filesystem::PathHistoryOptions::new(10)).is_err(),
+        sniff::filesystem::commits_for_path_at(
+            dir.path(),
+            "",
+            sniff::filesystem::PathHistoryOptions::new(10)
+        )
+        .is_err(),
         "malformed HEAD must surface through commits_for_path_at"
     );
 }

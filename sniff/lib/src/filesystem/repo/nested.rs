@@ -46,9 +46,9 @@ use super::npm::{
     detect_yarn_workspace,
 };
 use super::nx_turbo::{detect_lerna, detect_nx, detect_turborepo};
+use super::seed::PackageSeed;
 use super::standard::{MonorepoStandard, NestingPolicy};
 use super::topology::DetectorOutcome;
-use super::seed::PackageSeed;
 use super::uv::detect_uv_workspace;
 use crate::Result;
 use crate::filesystem::file_types::should_skip_directory_name;
@@ -399,9 +399,7 @@ fn dispatch_detector_at(
     outcomes: &mut Vec<DetectorOutcome>,
 ) -> Result<()> {
     let outcome = match standard {
-        MonorepoStandard::CargoWorkspace => {
-            detect_cargo_workspace(target, evidence, manifests)?
-        }
+        MonorepoStandard::CargoWorkspace => detect_cargo_workspace(target, evidence, manifests)?,
         MonorepoStandard::NpmWorkspaces => detect_npm_workspace(target, evidence, manifests)?,
         MonorepoStandard::PnpmWorkspaces => detect_pnpm_workspace(target, evidence, manifests)?,
         MonorepoStandard::YarnWorkspaces => detect_yarn_workspace(target, evidence, manifests)?,

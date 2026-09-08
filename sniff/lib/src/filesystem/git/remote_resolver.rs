@@ -116,10 +116,14 @@ pub(crate) fn resolve_remote(
 
     let selected = if let Some(name) = requested {
         if !names.iter().any(|candidate| candidate == name) {
-            return Err(SniffError::RemoteNotConfigured { name: name.to_string() });
+            return Err(SniffError::RemoteNotConfigured {
+                name: name.to_string(),
+            });
         }
         if configured_url(repo, name).is_none() {
-            return Err(SniffError::RemoteUrlMissing { name: name.to_string() });
+            return Err(SniffError::RemoteUrlMissing {
+                name: name.to_string(),
+            });
         }
         Some(name.to_string())
     } else {
@@ -167,7 +171,8 @@ fn configured_url(repo: &gix::Repository, name: &str) -> Option<String> {
 fn resolve_named(repo: &gix::Repository, name: String) -> Result<ResolvedRemote> {
     let fetch_url = configured_url(repo, &name)
         .ok_or_else(|| SniffError::RemoteUrlMissing { name: name.clone() })?;
-    let push_url = repo.config_snapshot()
+    let push_url = repo
+        .config_snapshot()
         .string(format!("remote.{name}.pushurl").as_str())
         .map(|value| value.to_string())
         .filter(|value| !value.trim().is_empty())
@@ -211,8 +216,13 @@ fn parse_identity(remote: &str) -> (Option<RemoteEndpoint>, Option<String>, Opti
     } else {
         return (None, None, None);
     };
-    let mut segments = path.split('/').filter(|segment| !segment.is_empty()).collect::<Vec<_>>();
-    let repository = segments.pop().map(|segment| segment.trim_end_matches(".git").to_string());
+    let mut segments = path
+        .split('/')
+        .filter(|segment| !segment.is_empty())
+        .collect::<Vec<_>>();
+    let repository = segments
+        .pop()
+        .map(|segment| segment.trim_end_matches(".git").to_string());
     let namespace = (!segments.is_empty()).then(|| segments.join("/"));
     (endpoint, namespace, repository)
 }

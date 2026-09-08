@@ -4,11 +4,10 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use git2::{
-    build::CheckoutBuilder, IndexAddOption, Oid, Repository, RepositoryInitOptions, ResetType,
+    IndexAddOption, Oid, Repository, RepositoryInitOptions, ResetType, build::CheckoutBuilder,
 };
 use sniff::{
-    SniffError, filesystem::git::merge_conflicts_with_branch_at,
-    programs::find_program_with_source,
+    SniffError, filesystem::git::merge_conflicts_with_branch_at, programs::find_program_with_source,
 };
 use tempfile::TempDir;
 
@@ -32,7 +31,9 @@ impl Fixture {
         let repo = Repository::init_opts(dir.path(), &options).expect("initialize repository");
         {
             let mut config = repo.config().expect("fixture repository config");
-            config.set_str("user.name", "Sniff Test").expect("fixture user name");
+            config
+                .set_str("user.name", "Sniff Test")
+                .expect("fixture user name");
             config
                 .set_str("user.email", "sniff-test@example.com")
                 .expect("fixture user email");
@@ -64,7 +65,9 @@ impl Fixture {
 
     fn create_branch(&self, name: &str, target: Oid) {
         let commit = self.repo.find_commit(target).expect("branch target");
-        self.repo.branch(name, &commit, false).expect("create branch");
+        self.repo
+            .branch(name, &commit, false)
+            .expect("create branch");
     }
 
     fn checkout(&self, name: &str) {
@@ -104,8 +107,12 @@ impl Fixture {
                         fs::create_dir_all(parent).expect("create rename parent");
                     }
                     fs::rename(&source, &destination).expect("rename fixture file");
-                    index.remove_path(Path::new(from)).expect("stage rename source");
-                    index.add_path(Path::new(to)).expect("stage rename destination");
+                    index
+                        .remove_path(Path::new(from))
+                        .expect("stage rename source");
+                    index
+                        .add_path(Path::new(to))
+                        .expect("stage rename destination");
                 }
             }
         }
@@ -116,7 +123,11 @@ impl Fixture {
         let tree_id = index.write_tree().expect("write fixture tree");
         let tree = self.repo.find_tree(tree_id).expect("fixture tree");
         let signature = git2::Signature::now("Test", "test@example.com").expect("signature");
-        let head_parent = self.repo.head().ok().and_then(|head| head.peel_to_commit().ok());
+        let head_parent = self
+            .repo
+            .head()
+            .ok()
+            .and_then(|head| head.peel_to_commit().ok());
         let mut parents = Vec::new();
         if let Some(parent) = head_parent.as_ref() {
             parents.push(parent);
@@ -127,15 +138,18 @@ impl Fixture {
             .collect::<Vec<_>>();
         parents.extend(extra.iter());
         self.repo
-            .commit(Some("HEAD"), &signature, &signature, message, &tree, &parents)
+            .commit(
+                Some("HEAD"),
+                &signature,
+                &signature,
+                message,
+                &tree,
+                &parents,
+            )
             .expect("commit fixture")
     }
 
-    fn diverged(
-        files: &[(&str, &str)],
-        ours: &[Change<'_>],
-        theirs: &[Change<'_>],
-    ) -> Self {
+    fn diverged(files: &[(&str, &str)], ours: &[Change<'_>], theirs: &[Change<'_>]) -> Self {
         let fixture = Self::new(files);
         let base = fixture.head();
         fixture.create_branch("incoming", base);
@@ -291,10 +305,8 @@ fn structural_conflicts_preserve_every_temporary_index_path() {
         ]
     );
 
-    let ours_change_locations = BTreeSet::from([
-        PathBuf::from("old.txt"),
-        PathBuf::from("ours.txt"),
-    ]);
+    let ours_change_locations =
+        BTreeSet::from([PathBuf::from("old.txt"), PathBuf::from("ours.txt")]);
     assert_ne!(
         actual.into_iter().collect::<BTreeSet<_>>(),
         ours_change_locations,
@@ -449,12 +461,18 @@ fn prediction_preconditions_are_errors() {
     let unrelated = Fixture::new(&[("main.txt", "main\n")]);
     let signature = git2::Signature::now("Test", "test@example.com").expect("signature");
     let blob = unrelated.repo.blob(b"orphan\n").expect("orphan blob");
-    let mut builder = unrelated.repo.treebuilder(None).expect("orphan tree builder");
+    let mut builder = unrelated
+        .repo
+        .treebuilder(None)
+        .expect("orphan tree builder");
     builder
         .insert("orphan.txt", blob, 0o100644)
         .expect("orphan tree entry");
     let tree_id = builder.write().expect("orphan tree");
-    let tree = unrelated.repo.find_tree(tree_id).expect("orphan tree object");
+    let tree = unrelated
+        .repo
+        .find_tree(tree_id)
+        .expect("orphan tree object");
     let orphan = unrelated
         .repo
         .commit(None, &signature, &signature, "orphan", &tree, &[])
@@ -697,8 +715,8 @@ fn live_index_and_worktree_state_do_not_affect_prediction() {
         &[Change::Write("shared.txt", "ours\n")],
         &[Change::Write("shared.txt", "theirs\n")],
     );
-    let expected = merge_conflicts_with_branch_at(fixture.path(), "incoming")
-        .expect("baseline prediction");
+    let expected =
+        merge_conflicts_with_branch_at(fixture.path(), "incoming").expect("baseline prediction");
 
     let incoming = fixture
         .repo
@@ -709,7 +727,11 @@ fn live_index_and_worktree_state_do_not_affect_prediction() {
         .merge(&[&incoming], None, None)
         .expect("create conflicted live index");
     assert!(
-        fixture.repo.index().expect("conflicted index").has_conflicts(),
+        fixture
+            .repo
+            .index()
+            .expect("conflicted index")
+            .has_conflicts(),
         "fixture must contain unresolved live-index stages"
     );
     assert_eq!(
@@ -734,8 +756,7 @@ fn live_index_and_worktree_state_do_not_affect_prediction() {
     .expect("modify attributes in worktree");
     fs::write(fixture.path().join("shared.txt"), "unstaged content\n")
         .expect("modify tracked file");
-    fs::write(fixture.path().join("untracked.txt"), "untracked\n")
-        .expect("create untracked file");
+    fs::write(fixture.path().join("untracked.txt"), "untracked\n").expect("create untracked file");
     let mut index = fixture.repo.index().expect("live index");
     index
         .add_path(Path::new(".gitattributes"))
@@ -793,7 +814,11 @@ fn snapshot(fixture: &Fixture) -> RepositorySnapshot {
     let mut files = BTreeMap::new();
     collect_files(fixture.path(), fixture.path(), &mut files);
     let mut objects = BTreeSet::new();
-    collect_object_ids(&git_dir.join("objects"), &git_dir.join("objects"), &mut objects);
+    collect_object_ids(
+        &git_dir.join("objects"),
+        &git_dir.join("objects"),
+        &mut objects,
+    );
     RepositorySnapshot {
         head,
         refs,

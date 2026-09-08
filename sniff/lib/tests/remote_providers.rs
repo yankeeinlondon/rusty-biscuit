@@ -2638,11 +2638,19 @@ mod snapshot_reuse_tests {
             .mount(&server)
             .await;
 
-        let report = provider.fetch_report("test-owner", "test-repo").await.unwrap();
+        let report = provider
+            .fetch_report("test-owner", "test-repo")
+            .await
+            .unwrap();
 
         // The projections still see the shared evidence.
         assert!(report.documents.iter().any(|d| d.path == "README.md"));
-        assert!(report.documents.iter().any(|d| d.category == DocumentCategory::DocsFolder));
+        assert!(
+            report
+                .documents
+                .iter()
+                .any(|d| d.category == DocumentCategory::DocsFolder)
+        );
         assert!(
             report.ci_cd.iter().any(|c| c.provider == "GitHub Actions"),
             "the .github/workflows blob in the shared tree must still be detected"
@@ -2666,7 +2674,9 @@ mod snapshot_reuse_tests {
             .mount(&server)
             .await;
         Mock::given(method("GET"))
-            .and(path_regex(r"/api/v1/repos/test-owner/test-repo/git/trees/.*"))
+            .and(path_regex(
+                r"/api/v1/repos/test-owner/test-repo/git/trees/.*",
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(gitea_tree_fixture()))
             .expect(1)
             .mount(&server)
@@ -2676,7 +2686,10 @@ mod snapshot_reuse_tests {
             .mount(&server)
             .await;
 
-        let report = provider.fetch_report("test-owner", "test-repo").await.unwrap();
+        let report = provider
+            .fetch_report("test-owner", "test-repo")
+            .await
+            .unwrap();
         assert!(report.documents.iter().any(|d| d.path == "README.md"));
 
         drop(server);
@@ -2701,7 +2714,10 @@ mod snapshot_reuse_tests {
             .mount(&server)
             .await;
 
-        let report = provider.fetch_report("test-owner", "test-repo").await.unwrap();
+        let report = provider
+            .fetch_report("test-owner", "test-repo")
+            .await
+            .unwrap();
         assert_eq!(report.metadata.full_name, "test-owner/test-repo");
 
         drop(server);
@@ -2799,14 +2815,20 @@ mod snapshot_reuse_tests {
             .mount(&server)
             .await;
 
-        let documents = provider.list_documents("test-owner", "test-repo").await.unwrap();
+        let documents = provider
+            .list_documents("test-owner", "test-repo")
+            .await
+            .unwrap();
         assert!(
             documents.iter().any(|d| d.path == "docs/guide.md"),
             "a continued subtree entry must be re-prefixed to a repo-root path"
         );
         assert!(documents.iter().any(|d| d.path == "README.md"));
 
-        let cicd = provider.detect_cicd("test-owner", "test-repo").await.unwrap();
+        let cicd = provider
+            .detect_cicd("test-owner", "test-repo")
+            .await
+            .unwrap();
         assert!(
             cicd.is_some(),
             "workflows recovered by continuation must still detect CI"
@@ -2842,8 +2864,15 @@ mod snapshot_reuse_tests {
             .mount(&server)
             .await;
 
-        let documents = provider.list_documents("test-owner", "test-repo").await.unwrap();
-        assert_eq!(documents.len(), 1, "a failed continuation must not discard the root entries");
+        let documents = provider
+            .list_documents("test-owner", "test-repo")
+            .await
+            .unwrap();
+        assert_eq!(
+            documents.len(),
+            1,
+            "a failed continuation must not discard the root entries"
+        );
         assert_eq!(documents[0].path, "README.md");
     }
 }

@@ -4,10 +4,10 @@ use std::path::Path;
 
 use biscuit_file::serde_yaml_ng;
 
+use crate::Result;
 use crate::package::{DependencyEntry, DependencyKind};
 use crate::performance;
 use crate::performance::counters;
-use crate::Result;
 
 use super::detection::{DetectorOutcome, ManifestStore, RepoEvidence, probe_exists};
 use super::glob::expand_membership_globs;

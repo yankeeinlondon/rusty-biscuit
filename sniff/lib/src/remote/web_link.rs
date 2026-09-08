@@ -128,8 +128,14 @@ mod tests {
     /// point of the shape — so it never reaches a destination.
     #[test]
     fn credentialed_urls_are_dropped() {
-        assert_eq!(link("https://git.example@evil.test/pr/7", "git.example"), None);
-        assert_eq!(link("https://user:token@git.example/pr/7", "git.example"), None);
+        assert_eq!(
+            link("https://git.example@evil.test/pr/7", "git.example"),
+            None
+        );
+        assert_eq!(
+            link("https://user:token@git.example/pr/7", "git.example"),
+            None
+        );
     }
 
     #[test]

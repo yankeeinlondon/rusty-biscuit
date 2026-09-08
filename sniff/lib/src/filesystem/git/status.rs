@@ -570,12 +570,7 @@ fn deleted_side(header: PatchHeader<'_>, old: &[u8], want_patch: bool) -> SideDi
 }
 
 /// A modified side: one diff supplies both the statistics and the hunks.
-fn modified_side(
-    header: PatchHeader<'_>,
-    old: &[u8],
-    new: &[u8],
-    want_patch: bool,
-) -> SideDiff {
+fn modified_side(header: PatchHeader<'_>, old: &[u8], new: &[u8], want_patch: bool) -> SideDiff {
     let (stats, hunks) = diff_once(old, new, want_patch);
     SideDiff {
         stats,
@@ -1065,15 +1060,15 @@ pub(crate) fn detect_merge_conflicts_fallible(repo: &gix::Repository) -> Result<
         repo.index_or_empty()
             .map_err(|error| crate::SniffError::git("index", error))
     }))
-        .map_err(|_| {
-            crate::SniffError::git(
-                "index",
-                std::io::Error::new(
-                    std::io::ErrorKind::InvalidData,
-                    "Git index decoder panicked on malformed input",
-                ),
-            )
-        })??;
+    .map_err(|_| {
+        crate::SniffError::git(
+            "index",
+            std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "Git index decoder panicked on malformed input",
+            ),
+        )
+    })??;
 
     let mut conflicted = Vec::new();
     let mut seen = HashSet::new();

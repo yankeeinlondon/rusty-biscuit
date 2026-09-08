@@ -18,11 +18,10 @@ use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
 use super::{
     count_api_request,
     provider::RemoteRepoProvider,
-    snapshot::{documents_from_tree, RemoteRepoSnapshot, RemoteTree, RemoteTreeFile},
+    snapshot::{RemoteRepoSnapshot, RemoteTree, RemoteTreeFile, documents_from_tree},
     types::{
-        CiCdInfo, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo,
-        OrgRepoRef, PullRequestInfo, PullRequestState, ReleaseInfo, RepoMetadata, TagInfo,
-        TagsAndReleases,
+        CiCdInfo, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo, OrgRepoRef,
+        PullRequestInfo, PullRequestState, ReleaseInfo, RepoMetadata, TagInfo, TagsAndReleases,
     },
 };
 use crate::error::SniffError;
@@ -276,7 +275,6 @@ fn map_schematic_error(err: SchematicError) -> SniffError {
         },
     }
 }
-
 
 #[async_trait]
 impl RemoteRepoProvider for GitLabRemote {
@@ -593,7 +591,6 @@ mod tests {
             "group%2Fsubgroup%2Frepo"
         );
     }
-
 
     #[test]
     fn test_build_key_urls() {

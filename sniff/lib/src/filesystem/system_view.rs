@@ -248,7 +248,8 @@ fn process_file_entry(
     if options.collect_inventory {
         let index = scanned_files.fetch_add(1, Ordering::Relaxed);
         if index < MAX_FILES {
-            let entry_timer = performance::StageTimer::start("filesystem.file_inventory.walk.entry");
+            let entry_timer =
+                performance::StageTimer::start("filesystem.file_inventory.walk.entry");
             performance::increment_counter(counters::FS_INVENTORY_ACCEPTED, 1);
             worker
                 .classifications
@@ -386,7 +387,10 @@ mod tests {
             testing::measure(|| build_filesystem_system_view(dir.path(), inventory_options()));
         let inventory = view.inventory.expect("inventory requested");
 
-        assert!(inventory.truncated, "a tree above the cap must report truncation");
+        assert!(
+            inventory.truncated,
+            "a tree above the cap must report truncation"
+        );
         assert_eq!(inventory.limit, Some(MAX_FILES));
         assert_eq!(
             inventory.total_files_scanned, MAX_FILES,
@@ -409,7 +413,11 @@ mod tests {
         sorted.sort_by(|a, b| a.path.cmp(&b.path));
         assert_eq!(
             sorted.iter().map(|c| &c.path).collect::<Vec<_>>(),
-            inventory.classifications.iter().map(|c| &c.path).collect::<Vec<_>>(),
+            inventory
+                .classifications
+                .iter()
+                .map(|c| &c.path)
+                .collect::<Vec<_>>(),
             "classifications must be sorted by path"
         );
         assert!(
@@ -458,7 +466,10 @@ mod tests {
         let (view, counts) =
             testing::measure(|| build_filesystem_system_view(dir.path(), inventory_options()));
 
-        let classified = view.inventory.expect("inventory requested").total_files_scanned;
+        let classified = view
+            .inventory
+            .expect("inventory requested")
+            .total_files_scanned;
         assert_eq!(
             classified,
             DIR_COUNT * FILES_PER_DIR,
@@ -494,7 +505,11 @@ mod tests {
             entries >= (DIR_COUNT * FILES_PER_DIR + DIR_COUNT) as u64,
             "walk should visit every file and directory; visited {entries}"
         );
-        assert_eq!(counts.get(counters::FS_WALK_STARTS), 1, "one shared walk per request");
+        assert_eq!(
+            counts.get(counters::FS_WALK_STARTS),
+            1,
+            "one shared walk per request"
+        );
     }
 
     #[test]
@@ -523,7 +538,10 @@ mod tests {
         let dir = fixture();
         let (_view, first) =
             testing::measure(|| build_filesystem_system_view(dir.path(), inventory_options()));
-        assert!(first.get(counters::FS_INVENTORY_ACCEPTED) > 0, "first request did work");
+        assert!(
+            first.get(counters::FS_INVENTORY_ACCEPTED) > 0,
+            "first request did work"
+        );
 
         // Walker threads park rather than exit, so a worker that failed to
         // drain would surface its stale buffer here — attributed to a request
@@ -544,7 +562,10 @@ mod tests {
 
         // The default path: no collector installed anywhere.
         let view = performance::without_any_collector(|| {
-            assert!(!performance::is_collecting(), "no collector should be active here");
+            assert!(
+                !performance::is_collecting(),
+                "no collector should be active here"
+            );
             build_filesystem_system_view(dir.path(), inventory_options())
         });
         assert_eq!(

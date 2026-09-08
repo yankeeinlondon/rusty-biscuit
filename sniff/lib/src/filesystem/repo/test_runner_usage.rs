@@ -722,11 +722,7 @@ fn collect_ruby_deps(pkg_dir: &Path, manifests: &ManifestStore, out: &mut HashSe
 }
 
 /// Insert every Maven/Gradle `groupId:artifactId` coordinate into `out`.
-fn collect_jvm_coordinates(
-    pkg_dir: &Path,
-    manifests: &ManifestStore,
-    out: &mut HashSet<String>,
-) {
+fn collect_jvm_coordinates(pkg_dir: &Path, manifests: &ManifestStore, out: &mut HashSet<String>) {
     if let Some(text) = manifests.raw_text(&pkg_dir.join("pom.xml")) {
         for block in text.split("<dependency>").skip(1) {
             let block = &block[..block.find("</dependency>").unwrap_or(block.len())];
@@ -1025,7 +1021,11 @@ mod tests {
 
         let member = root.path().join("crates/lib");
         fs::create_dir_all(&member).unwrap();
-        write(&member, "Cargo.toml", "[package]\nname = \"x\"\nversion = \"0.1\"\n");
+        write(
+            &member,
+            "Cargo.toml",
+            "[package]\nname = \"x\"\nversion = \"0.1\"\n",
+        );
 
         let usage = detect_in_workspace(&member, root.path());
         assert!(
@@ -1057,7 +1057,11 @@ mod tests {
         let root = tempdir().unwrap();
         let member = root.path().join("crates/lib");
         fs::create_dir_all(&member).unwrap();
-        write(&member, "Cargo.toml", "[package]\nname = \"x\"\nversion = \"0.1\"\n");
+        write(
+            &member,
+            "Cargo.toml",
+            "[package]\nname = \"x\"\nversion = \"0.1\"\n",
+        );
 
         let usage = detect_in_workspace(&member, root.path());
         assert!(

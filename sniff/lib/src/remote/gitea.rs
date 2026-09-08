@@ -14,11 +14,12 @@ use schematic_schema::shared::{AuthStrategy, SchematicError, UpdateStrategy};
 use super::{
     count_api_request,
     provider::RemoteRepoProvider,
-    snapshot::{documents_from_tree, RemoteRepoSnapshot, RemoteTree, RemoteTreeFile, CONTINUATION_PREFIXES},
+    snapshot::{
+        CONTINUATION_PREFIXES, RemoteRepoSnapshot, RemoteTree, RemoteTreeFile, documents_from_tree,
+    },
     types::{
-        CiCdInfo, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo,
-        OrgRepoRef, PullRequestInfo, PullRequestState, ReleaseInfo, RepoMetadata, TagInfo,
-        TagsAndReleases,
+        CiCdInfo, DocumentRef, GitProvider, IssueInfo, KeyUrls, OrgInfo, OrgRepoRef,
+        PullRequestInfo, PullRequestState, ReleaseInfo, RepoMetadata, TagInfo, TagsAndReleases,
     },
 };
 use crate::error::SniffError;
@@ -192,12 +193,14 @@ impl GiteaRemote {
                 let Ok(response) = self.client.request::<GitTreeResponse>(request).await else {
                     continue;
                 };
-                recovered.extend(blobs_of(response.tree).into_iter().map(|file| {
-                    RemoteTreeFile {
-                        path: format!("{prefix}/{}", file.path),
-                        size: file.size,
-                    }
-                }));
+                recovered.extend(
+                    blobs_of(response.tree)
+                        .into_iter()
+                        .map(|file| RemoteTreeFile {
+                            path: format!("{prefix}/{}", file.path),
+                            size: file.size,
+                        }),
+                );
             }
             tree.extend_from_continuation(recovered);
         }
@@ -315,7 +318,6 @@ fn map_schematic_error(err: SchematicError) -> SniffError {
         },
     }
 }
-
 
 #[async_trait]
 impl RemoteRepoProvider for GiteaRemote {
@@ -759,7 +761,6 @@ mod tests {
         let provider = GiteaRemote::with_base_url("https://gitea.example.com/api/v1").unwrap();
         assert_eq!(provider.web_url(), "https://gitea.example.com");
     }
-
 
     #[test]
     fn test_build_key_urls() {

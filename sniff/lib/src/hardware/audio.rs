@@ -811,12 +811,9 @@ fn powershell_audio_args(command: &str) -> [&str; 4] {
 
 #[cfg(target_os = "windows")]
 fn run_powershell_with_timeout(command: &str, timeout: std::time::Duration) -> Option<String> {
-    let output = crate::process::run_with_timeout(
-        "powershell",
-        &powershell_audio_args(command),
-        timeout,
-    )
-    .ok()?;
+    let output =
+        crate::process::run_with_timeout("powershell", &powershell_audio_args(command), timeout)
+            .ok()?;
     if !output.status.success() {
         return None;
     }
@@ -1185,7 +1182,10 @@ mod tests {
         assert_eq!(devices.len(), 2);
         assert_eq!(
             devices[0],
-            ("Realtek High Definition Audio".to_string(), "OK".to_string())
+            (
+                "Realtek High Definition Audio".to_string(),
+                "OK".to_string()
+            )
         );
         assert_eq!(devices[1].0, "NVIDIA High Definition Audio");
         assert_eq!(devices[1].1, "OK");

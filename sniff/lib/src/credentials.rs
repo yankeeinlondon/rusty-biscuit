@@ -66,10 +66,7 @@ pub(crate) fn provider_token(flavor: ApiFlavor) -> (Option<String>, &'static str
     )
 }
 
-pub(crate) fn host_bound_provider_token(
-    flavor: ApiFlavor,
-    host: &str,
-) -> (Option<String>, String) {
+pub(crate) fn host_bound_provider_token(flavor: ApiFlavor, host: &str) -> (Option<String>, String) {
     let variable = host_bound_provider_variable(flavor, host);
     (std::env::var(&variable).ok(), variable)
 }

@@ -75,9 +75,7 @@ fn test_detect_completes_in_reasonable_time() {
     let start = Instant::now();
     let _ = detect();
     let elapsed = start.elapsed();
-    let max_millis = if std::env::var("BISCUIT_CI_ENVIRONMENT").as_deref()
-        == Ok("wsl2-ubuntu")
-    {
+    let max_millis = if std::env::var("BISCUIT_CI_ENVIRONMENT").as_deref() == Ok("wsl2-ubuntu") {
         60_000
     } else {
         20_000

@@ -342,7 +342,10 @@ pub(crate) fn classify_file(root: &Path, path: &Path) -> FileClassification {
             return finish_classification(relative_path, classification, started);
         }
         if is_probably_text(bytes) && extension.is_some_and(is_hyperpolyglot_worthwhile) {
-            performance::increment_counter("filesystem.file_inventory.files_classified_by_content", 1);
+            performance::increment_counter(
+                "filesystem.file_inventory.files_classified_by_content",
+                1,
+            );
             // `hyperpolyglot::detect` re-reads the file itself, so this probe
             // is both a file open and the dominant per-file classification
             // cost — worth its own stage even though the walk already timed

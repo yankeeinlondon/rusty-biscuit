@@ -28,8 +28,14 @@ fn formatting_workload_keeps_descendant_work_at_zero() {
     });
     let counts = collector.snapshot(Duration::ZERO).counters;
 
-    assert_eq!(counts.get(counters::FS_WALK_STARTS).copied().unwrap_or(0), 0);
-    assert_eq!(counts.get(counters::FS_WALK_ENTRIES).copied().unwrap_or(0), 0);
+    assert_eq!(
+        counts.get(counters::FS_WALK_STARTS).copied().unwrap_or(0),
+        0
+    );
+    assert_eq!(
+        counts.get(counters::FS_WALK_ENTRIES).copied().unwrap_or(0),
+        0
+    );
 }
 
 #[test]

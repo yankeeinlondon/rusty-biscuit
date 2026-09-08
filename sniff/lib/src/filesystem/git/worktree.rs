@@ -122,7 +122,9 @@ pub fn list_worktrees(base_dir: &Path) -> Result<Option<Vec<WorktreeEntry>>, Box
 /// Identical output to `list_worktrees(repo.repo_root())`, without the second
 /// `trusted_discover`. Exists so an aggregate observation can enumerate
 /// worktrees on the one handle it already holds.
-pub fn list_worktrees_with_repo(repo: &super::GitRepo) -> Result<Vec<WorktreeEntry>, Box<dyn Error>> {
+pub fn list_worktrees_with_repo(
+    repo: &super::GitRepo,
+) -> Result<Vec<WorktreeEntry>, Box<dyn Error>> {
     repo.with_cached_gix(list_worktrees_from_gix)
 }
 
@@ -408,7 +410,11 @@ mod tests {
         repo.worktree("linked", &checkout_path, None).unwrap();
 
         let worktrees = list_worktrees(&checkout_path).unwrap().unwrap();
-        assert_eq!(worktrees.len(), 1, "a bare common repo has no main checkout");
+        assert_eq!(
+            worktrees.len(),
+            1,
+            "a bare common repo has no main checkout"
+        );
         assert_eq!(worktrees[0].name, "linked");
         assert_eq!(
             worktrees[0].path,
@@ -488,13 +494,10 @@ mod tests {
         repo.worktree("native-ü", &wt_path, None).unwrap();
 
         let collector = crate::performance::PerformanceCollector::new_shared();
-        let worktrees = crate::performance::with_current_collector(
-            Some(collector.clone()),
-            || list_worktrees(dir.path()).unwrap().unwrap(),
-        );
-        let counters = collector
-            .snapshot(std::time::Duration::ZERO)
-            .counters;
+        let worktrees = crate::performance::with_current_collector(Some(collector.clone()), || {
+            list_worktrees(dir.path()).unwrap().unwrap()
+        });
+        let counters = collector.snapshot(std::time::Duration::ZERO).counters;
 
         assert_eq!(
             counters
