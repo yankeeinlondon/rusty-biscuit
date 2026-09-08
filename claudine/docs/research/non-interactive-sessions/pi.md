@@ -27,6 +27,149 @@ invocation:
     stdin_support: true
     prompt_arg: "JSONL commands on stdin, for example {\"type\":\"prompt\",\"message\":\"...\"}."
     notes: "Ephemeral variant of the preferred managed RPC launch. Responses and events are JSONL; extension dialog UI requests require policy-aware JSONL responses."
+execution_interfaces:
+  - id: "rpc"
+    kind: retained_subprocess
+    launch: "pi --mode rpc"
+    launch_conditions: ["Retain binary-safe stdin/stdout for the child lifetime", "Complete a correlated get_state readiness probe before submitting user work", "Resolve project trust separately"]
+    input_contract: "LF-delimited JSON commands on stdin with optional correlation ids."
+    observation_contract: "LF-delimited command responses, AgentSessionEvent records, and extension UI requests on stdout; diagnostics on stderr."
+    control_capabilities: ["prompt", "steer", "follow_up", "abort", "get_state", "get_session_stats", "extension_ui_response"]
+    feature_preservation: evidenced_partial
+    preserved_features: ["extensions", "skills", "prompt templates", "context files", "custom tools", "session persistence"]
+    documented_exclusions: ["TUI-only custom components and editor/theme interactions"]
+    unattended_obligations: ["Correlate responses", "Answer or fail extension UI requests under explicit policy", "Continue through agent_settled", "Avoid ambiguous replay"]
+    evidence: ["https://pi.dev/docs/latest/rpc", "https://github.com/earendil-works/pi/blob/v0.84.4/packages/coding-agent/src/modes/rpc/rpc-mode.ts", "https://github.com/earendil-works/pi/blob/v0.84.4/packages/coding-agent/src/modes/rpc/rpc-types.ts"]
+    notes: "Preferred interface for one-shot and retained managed execution."
+  - id: "json"
+    kind: one_shot_cli
+    launch: 'pi --mode json "PROMPT"'
+    launch_conditions: ["Use only before any ambiguous RPC submission", "Verify enabled extensions do not require RPC UI mediation", "Accept loss of bidirectional control"]
+    input_contract: "Initial prompt from argv and merged piped stdin."
+    observation_contract: "Session header and AgentSessionEvent JSONL on stdout; diagnostics on stderr."
+    control_capabilities: []
+    feature_preservation: evidenced_partial
+    preserved_features: ["extensions", "skills", "prompt templates", "context files", "custom tools", "session persistence"]
+    documented_exclusions: ["RPC state queries", "RPC steering and follow-up", "RPC abort", "extension UI response channel"]
+    unattended_obligations: ["Treat extension context as hasUI false", "Preserve stderr for pre-stream failure"]
+    evidence: ["https://pi.dev/docs/latest/json", "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/print-mode.ts"]
+    notes: "Source-backed reduced-control fallback candidate, not the preferred interface."
+  - id: "text"
+    kind: one_shot_cli
+    launch: 'pi -p "PROMPT"'
+    launch_conditions: ["Caller needs only final assistant text"]
+    input_contract: "Prompt from argv and merged piped stdin."
+    observation_contract: "Buffered final text on stdout and failures on stderr."
+    control_capabilities: []
+    feature_preservation: evidenced_partial
+    preserved_features: ["extensions", "skills", "prompt templates", "context files", "custom tools", "session persistence"]
+    documented_exclusions: ["structured live events", "state queries", "steering", "extension UI response channel"]
+    unattended_obligations: ["Treat extension context as hasUI false"]
+    evidence: ["https://pi.dev/docs/latest/usage", "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/print-mode.ts"]
+    notes: "Excluded from Claudine's live wrapper strategy because it hides lifecycle state."
+execution_selection:
+  preferred: "rpc"
+  rationale: "It is the only evidenced candidate combining live structured observation, correlated control, cancellation, state/statistics queries, steering, and an extension UI response channel."
+  readiness_check: "Start pi --mode rpc and require a successful response with the same id to get_state before prompt submission."
+  fallback: "json"
+  fallback_conditions: ["RPC launch or readiness fails before prompt submission", "Enabled feature profile remains usable with hasUI false", "Caller accepts loss of RPC control and receives a capability warning"]
+  replay_policy: "Never replay after prompt acceptance is ambiguous; RPC ids correlate responses but do not document duplicate suppression."
+  feature_parity: "JSON preserves ordinary resource loading but loses RPC commands, steering, state queries, abort, and extension UI mediation."
+  notes: "Trust flags and tool restrictions are separate policy choices, not interface-selection shortcuts."
+unattended_requests:
+  - request: "extension dialog UI"
+    interface: "rpc"
+    observed_behavior: "Pi emits extension_ui_request and waits for a matching extension_ui_response unless the request's own timeout resolves it."
+    required_response: "Return the method-appropriate value only when explicit policy supplies it; otherwise report the unresolved request and terminate through the broker failure path."
+    timeout_behavior: "Request-specific; a request without a timeout can remain pending."
+    policy: "Never fabricate a human response or approval."
+    notes: "Dialog UI is an extension channel and remains separate from native tool execution policy."
+  - request: "project trust"
+    interface: "rpc"
+    observed_behavior: "Non-interactive modes do not show the trust prompt; saved trust, defaultProjectTrust, --approve, or --no-approve determines whether project resources load."
+    required_response: "Choose trust explicitly through wrapper policy before launch."
+    timeout_behavior: "No mid-run prompt is expected."
+    policy: "Do not equate trust with tool approval and do not add resource-disabling flags merely to avoid the decision."
+    notes: "Project resources include extensions, skills, prompt templates, and context files."
+  - request: "project trust"
+    interface: "json"
+    observed_behavior: "Non-interactive modes do not show the trust prompt; saved trust, defaultProjectTrust, --approve, or --no-approve determines whether project resources load."
+    required_response: "Choose trust explicitly through wrapper policy before launch."
+    timeout_behavior: "No mid-run prompt is expected."
+    policy: "Do not equate trust with tool approval and do not add resource-disabling flags merely to avoid the decision."
+    notes: "Project resources include extensions, skills, prompt templates, and context files."
+  - request: "project trust"
+    interface: "text"
+    observed_behavior: "Non-interactive modes do not show the trust prompt; saved trust, defaultProjectTrust, --approve, or --no-approve determines whether project resources load."
+    required_response: "Choose trust explicitly through wrapper policy before launch."
+    timeout_behavior: "No mid-run prompt is expected."
+    policy: "Do not equate trust with tool approval and do not add resource-disabling flags merely to avoid the decision."
+    notes: "Project resources include extensions, skills, prompt templates, and context files."
+  - request: "tool permission or approval"
+    interface: "rpc"
+    observed_behavior: "No native approval request protocol was found; enabled built-in or extension tools execute according to the configured tool/resource surface."
+    required_response: "Constrain tools or sandbox externally before launch when side effects are unacceptable."
+    timeout_behavior: "Not applicable to a native approval request because none was evidenced."
+    policy: "Do not fabricate approvals; extension-defined UI requests remain governed by their own explicit policy."
+    notes: "Incoming extension holds and post-delivery tool policy are distinct concerns."
+  - request: "tool permission or approval"
+    interface: "json"
+    observed_behavior: "No native approval request protocol was found; enabled built-in or extension tools execute according to the configured tool/resource surface."
+    required_response: "Constrain tools or sandbox externally before launch when side effects are unacceptable."
+    timeout_behavior: "Not applicable to a native approval request because none was evidenced."
+    policy: "Do not fabricate approvals; extension-defined UI requests remain governed by their own explicit policy."
+    notes: "Incoming extension holds and post-delivery tool policy are distinct concerns."
+  - request: "tool permission or approval"
+    interface: "text"
+    observed_behavior: "No native approval request protocol was found; enabled built-in or extension tools execute according to the configured tool/resource surface."
+    required_response: "Constrain tools or sandbox externally before launch when side effects are unacceptable."
+    timeout_behavior: "Not applicable to a native approval request because none was evidenced."
+    policy: "Do not fabricate approvals; extension-defined UI requests remain governed by their own explicit policy."
+    notes: "Incoming extension holds and post-delivery tool policy are distinct concerns."
+settlement:
+  - interface: "rpc"
+    operation: "prompt"
+    input_handling: "A correlated prompt response means accepted, queued, or handled. An input extension may handle the request without starting a model turn."
+    turn_scheduling: "A model turn is evidenced by agent_start/turn_start, but accepted input is not itself proof that a turn was scheduled."
+    acceptance_signal: "Successful response matching the prompt command id."
+    turn_terminal_signal: "agent_end ends one pass and carries willRetry; it may be followed by retry, compaction, or queued continuation."
+    settled_signal: "agent_settled after continuation and agent_settled extension handlers complete."
+    process_lifecycle: "The retained RPC process remains alive after settlement; EOF/disposal is separate broker teardown."
+    notes: "The event definition and v0.84.4 RPC forwarding path both expose agent_settled; final success still depends on the final assistant stopReason and error/retry evidence."
+  - interface: "json"
+    operation: "initial prompt"
+    input_handling: "Print-mode startup combines argv prompt text, file references, and piped stdin before invoking the session."
+    turn_scheduling: "AgentSessionEvent records expose agent_start and turn_start when model work begins."
+    acceptance_signal: "No separate early acceptance response exists on the one-way JSON interface."
+    turn_terminal_signal: "agent_end ends one pass and can precede retry, compaction, or queued continuation."
+    settled_signal: "agent_settled is forwarded in the AgentSessionEvent JSONL stream."
+    process_lifecycle: "The one-shot process exits after print-mode settlement and cleanup; startup/runtime failure may appear on stderr with non-zero exit."
+    notes: "There is no safe replay boundary after launch because this interface has no separate submission receipt."
+  - interface: "text"
+    operation: "initial prompt"
+    input_handling: "Print-mode startup combines argv prompt text, file references, and piped stdin before invoking the session."
+    turn_scheduling: "No structured turn-scheduled signal is exposed to the caller."
+    acceptance_signal: "No separate early acceptance signal is exposed."
+    turn_terminal_signal: "No structured turn-terminal signal is exposed."
+    settled_signal: "Final assistant text is written only after the internal run finishes; failure text and exit code 1 cover error/aborted stop reasons."
+    process_lifecycle: "The one-shot process exits after printing final text or an error."
+    notes: "This buffered interface is unsuitable when Claudine needs independently observable turn and settlement events."
+steering_mechanisms:
+  - mechanism: "rpc-steer"
+    operations: ["steer_active_turn"]
+    interface: "rpc"
+    reference: "../steering/pi.md"
+    notes: "The steering report owns its end-of-tool-batch delivery boundary, acknowledgment timing, and rescue suitability."
+  - mechanism: "rpc-idle-prompt"
+    operations: ["start_idle_turn"]
+    interface: "rpc"
+    reference: "../steering/pi.md"
+    notes: "The steering report owns prompt acceptance, extension handling, scheduling uncertainty, and delivery evidence."
+  - mechanism: "rpc-abort-submit"
+    operations: ["interrupt_then_submit"]
+    interface: "rpc"
+    reference: "../steering/pi.md"
+    notes: "The steering report defines this as a manually approved multi-phase operation with partial-failure risk."
 output_formats:
   - name: "text print"
     cli_value: "text or -p"
@@ -658,6 +801,25 @@ Session behavior is configurable. A plain JSON-mode run starts a normal session 
 
 The important automation flag is project trust. Pi's settings docs say non-interactive modes do not show the project trust prompt. Without a saved trust decision, global `defaultProjectTrust: "ask"` and `"never"` ignore project-local resources, while `"always"` trusts them. `--approve` trusts project files for one run; `--no-approve` ignores them for one run. This is a separate policy choice. Claudine should preserve enabled extensions, skills, prompt templates, and context discovery rather than adding `--no-*` resource flags to simplify execution.
 
+## Execution Interface Selection
+
+The evidenced candidates are the retained RPC subprocess and the one-shot JSON and text
+commands. No separate supported local server, network server, SDK execution surface, or
+attach-only control interface was found in the sources reviewed for this report. RPC is
+the preferred interface because it combines the JSON event stream with correlated
+commands, readiness and state queries, statistics, abort, steering, follow-up, and the
+only documented response channel for extension UI requests.
+
+The RPC launch is ready for user work only after a correlated `get_state` succeeds.
+Claudine should preserve normal extension, skill, prompt-template, context-file, custom
+tool, and session loading; project trust and tool restrictions remain explicit policy
+decisions. JSON mode preserves ordinary resource loading but supplies `hasUI: false` to
+extensions and loses state queries, steering, abort, and extension UI mediation. It is
+therefore a fallback only when RPC fails before submission and the enabled feature
+profile remains useful under those losses. Text mode is excluded from live wrapping
+because it buffers away the structured lifecycle. None of the reviewed interfaces
+documents an idempotency key, so an ambiguously accepted prompt must never be replayed.
+
 ## Output Formats
 
 RPC should be Claudine's preferred interface. It is streaming and line-delimited while also providing correlated commands on retained stdin. It exposes tool starts, accumulated tool progress, tool results, assistant deltas, compaction, auto-retry, and terminal state, plus controller operations that the one-way JSON stream cannot provide.
@@ -766,6 +928,27 @@ Pi's most important non-interactive blocking rule is project trust. Non-interact
 Pi does not include a built-in permission system for restricting filesystem, process, network, or credential access. Tool execution is governed by which tools are enabled, by extensions, and by external OS/container restrictions. Claudine should not assume Pi will ask before bash, write, or edit. For deterministic automation, prefer an explicit tool policy such as `--tools read,grep,find,ls` for read-only review, or run Pi inside an external sandbox.
 
 Extensions are the other blocking surface. In print and JSON modes, extension context has `hasUI: false`, and well-behaved extensions should avoid prompting or return defaults. In RPC mode, `hasUI: true`; dialog methods emit `extension_ui_request` and block until the client sends `extension_ui_response` with a matching `id`, unless the request carries a timeout and the agent auto-resolves it. An unattended broker must follow explicit policy; no safe default human answer is established. TUI-only APIs remain limited: `custom()` returns `undefined`, editor/theme getters return empty or unavailable values, and several component setters are no-ops.
+
+## Unattended Requests and Settlement
+
+Pi exposes three different unattended concerns. Project trust is resolved before launch
+from saved trust, `defaultProjectTrust`, `--approve`, or `--no-approve`; it is not a
+mid-run tool approval. Native tool execution has no evidenced approval-request protocol,
+so Claudine must constrain tools or provide an external sandbox before delivery when
+side effects are unacceptable. Extension dialogs in RPC are actual incoming holds:
+`extension_ui_request` requires a matching response unless its request-specific timeout
+resolves it. Claudine may answer only from explicit policy. An unresolved dialog must be
+reported and failed through the broker rather than receiving a fabricated human answer.
+
+Settlement is also distinct from input handling. A successful correlated `prompt`
+response proves only that input was accepted, queued, or handled; an input extension can
+handle it without scheduling a model turn. `agent_start` and `turn_start` evidence model
+work. `agent_end` closes one pass but can precede retry, compaction, or queued work.
+`agent_settled` is forwarded on the RPC event stream after those paths and the associated
+extension handlers complete, making it the operation barrier. The broker process remains
+alive afterward and has its own teardown lifecycle. Detailed delivery and rescue
+semantics for `prompt`, `steer`, `follow_up`, and `abort` remain in the sibling
+[Pi steering report](../steering/pi.md).
 
 ## Subagents
 

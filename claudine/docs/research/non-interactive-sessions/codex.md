@@ -38,6 +38,85 @@ invocation:
     stdin_support: false
     prompt_arg: "cloud list filters"
     notes: "Scriptable cloud task listing, not a local non-interactive agent run."
+execution_interfaces:
+  - id: "exec-json"
+    kind: one_shot_cli
+    launch: 'codex exec --json "PROMPT"'
+    launch_conditions: ["Select sandbox and approval policy explicitly", "Preconfigure authentication"]
+    input_contract: "Prompt by argv or stdin."
+    observation_contract: "Exec JSONL events on stdout; diagnostics and final process status remain separate evidence."
+    control_capabilities: []
+    feature_preservation: evidenced_partial
+    preserved_features: ["skills", "configuration", "project context", "MCP configuration", "session persistence"]
+    documented_exclusions: ["mid-turn bidirectional control"]
+    unattended_obligations: ["Preserve stderr and exit status", "Do not replay ambiguous submissions"]
+    evidence: ["https://developers.openai.com/codex/noninteractive"]
+    notes: "Ordinary supported one-shot execution surface."
+  - id: "app-server"
+    kind: retained_subprocess
+    launch: "codex app-server --listen stdio://"
+    launch_conditions: ["Complete initialize/initialized", "Retain exact thread and turn identities", "Gate experimental methods by installed protocol capability"]
+    input_contract: "JSON-RPC request lines on stdin."
+    observation_contract: "Correlated JSON-RPC responses and lifecycle notifications on stdout."
+    control_capabilities: ["turn/start", "turn/steer", "turn/interrupt", "thread resume"]
+    feature_preservation: unknown
+    preserved_features: []
+    documented_exclusions: []
+    unattended_obligations: ["Track exact expectedTurnId", "Do not retry ambiguous input", "Observe matching turn completion"]
+    evidence: ["../steering/codex.md"]
+    notes: "Proposed managed interface; this backfill does not claim Claudine activation or full feature parity."
+execution_selection:
+  preferred: "exec-json"
+  rationale: "It is the established one-shot wrapper interface; app-server is the richer managed candidate but readiness and feature parity remain unresolved."
+  readiness_check: "Require thread.started and a terminal turn.completed or turn.failed, plus process exit."
+  fallback: ""
+  fallback_conditions: []
+  replay_policy: "Never replay after acceptance is ambiguous."
+  feature_parity: "App-server retains bidirectional control, but parity with ordinary CLI skills, configuration, templates, context, and MCP loading is not fully evidenced."
+  notes: "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed."
+unattended_requests:
+  - request: "tool approval, elicitation, or user-input request"
+    interface: "app-server"
+    observed_behavior: "The managed protocol can expose approval and user-input request state; exact eligible request families depend on protocol version."
+    required_response: "Answer only from explicit caller policy; otherwise cancel or fail with the unresolved request."
+    timeout_behavior: "Unknown from the retained evidence."
+    policy: "Never fabricate approval or human input."
+    notes: "Ordinary exec fails unavailable interactive requests rather than providing a general response channel."
+settlement:
+  - interface: "exec-json"
+    operation: "one-shot prompt"
+    input_handling: "Prompt is accepted during process startup; no separate acceptance receipt is exposed."
+    turn_scheduling: "turn.started establishes scheduled model work."
+    acceptance_signal: "thread.started followed by turn.started"
+    turn_terminal_signal: "turn.completed or turn.failed"
+    settled_signal: "terminal turn event followed by process exit"
+    process_lifecycle: "Exec is one-shot and exits after the turn."
+    notes: "Top-level error and stderr refine failure classification."
+  - interface: "app-server"
+    operation: "managed turn/start"
+    input_handling: "A correlated JSON-RPC response establishes request handling, while notifications establish later execution."
+    turn_scheduling: "turn/started identifies the scheduled turn."
+    acceptance_signal: "successful turn/start response"
+    turn_terminal_signal: "matching turn/completed"
+    settled_signal: "matching turn/completed for the submitted turn"
+    process_lifecycle: "The app-server remains alive after turn settlement."
+    notes: "Post-turn extension settlement beyond turn/completed is not established."
+steering_mechanisms:
+  - mechanism: "app-server-steer"
+    operations: ["active-turn steering"]
+    interface: "app-server"
+    reference: "../steering/codex.md"
+    notes: "Activation remains a separate implementation decision; use the steering report's exact guards."
+  - mechanism: "app-server-turn-start"
+    operations: ["idle turn start"]
+    interface: "app-server"
+    reference: "../steering/codex.md"
+    notes: "Activation remains a separate implementation decision; use the steering report's exact guards."
+  - mechanism: "app-server-interrupt-then-start"
+    operations: ["cancel then replace"]
+    interface: "app-server"
+    reference: "../steering/codex.md"
+    notes: "Activation remains a separate implementation decision; use the steering report's exact guards."
 output_formats:
   - name: "default text"
     cli_value: "no --json"

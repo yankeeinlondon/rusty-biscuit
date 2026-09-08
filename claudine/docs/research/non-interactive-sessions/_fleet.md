@@ -2,8 +2,8 @@
 sequence: "@claudine/docs/providers.yaml"
 operation: "research"
 file: "{{ctx.repo_root}}/claudine/docs/research/non-interactive-sessions/{{state.file}}"
-agent: opencode
-model: kimi-for-coding/k2p7
+agent: codex
+model: gpt-5.6-sol
 update: "{{file_exists(file) && !markdown_body_empty(file)}}"
 initialize:
     stack:
@@ -22,6 +22,8 @@ success:
               - error: "research file was not updated"
         - when: "frontmatter(file, 'last_updated') == ctx.today"
           action:
+              - action: shell
+                command: "md schema validate '{{file}}' --no-trigger-schemas"
               - info: "The **Non-Interactive Sessions** research on **{{state.name}}** completed successfully: {{ link(file) }}"
               - message: "🎉  the **Non-Interactive Sessions** research on **{{state.name}}** completed successfully"
 failure:
@@ -52,6 +54,20 @@ Write the result to `{{file}}`. Include `$schema: ./_schema.yaml` in frontmatter
 document can be validated, but do not treat the schema as the research instructions. The
 instructions below define the facts that matter and the quality bar for this topic.
 
+## Execution Contract
+
+The research task must run with `gpt-5.6-sol` and low reasoning. The sequence launcher
+must explicitly forward `-- -m gpt-5.6-sol -c model_reasoning_effort=low` to Codex and
+verify the actual model and effort in execution metadata. A requested model string is not
+proof of the resolved model. When the provider does not expose resolved execution
+metadata, state that model and effort provenance is launcher-supplied; do not fabricate
+independent verification or silently substitute another model.
+
+You are already the assigned provider researcher. Do not launch another agent,
+`claudine sequence`, or another research coordinator. This pass is source-backed research
+and passive inspection plus writing the assigned report. Do not run live provider
+delivery experiments, modify production code, or request or wait for human approval.
+
 ## What Non-Interactive Means
 
 For this research, **non-interactive** means a mode intended for automation, scripting,
@@ -67,6 +83,21 @@ Then decide which usable RPC or equivalent control interface Claudine should pre
 When recommending a simpler alternative, require source or observed evidence for the
 specific launch profile and feature set, enumerate the lost capabilities, and explain
 why those losses are acceptable for that use case.
+
+Every refreshed report must populate `execution_interfaces`, `execution_selection`,
+`unattended_requests`, `settlement`, and `steering_mechanisms`. These properties are
+optional in the schema only so reports from the previous fleet remain valid until their
+focused refresh. An interface inventory must be evidenced and must explicitly identify
+useful modes that were considered but excluded; covering only the modes already named in
+the report is not evidence that discovery was complete.
+
+Relational fields use exact identifiers. Every `execution_selection.preferred` and
+non-empty `execution_selection.fallback`, plus every `unattended_requests[].interface`,
+`settlement[].interface`, and `steering_mechanisms[].interface`, must equal one declared
+`execution_interfaces[].id`; use one record per interface rather than a comma-delimited
+list. Every `steering_mechanisms[].mechanism` must equal one exact
+`mechanisms[].id` from the provider's sibling steering report, and `reference` must point
+to that report. Deterministic validation should reject dangling or compound identifiers.
 
 The most valuable format is usually structured data that can be parsed while the agent is
 still running. Choose the best format for Claudine and explain why it is the best choice.
@@ -95,6 +126,20 @@ Do not stop at "it is structured." Consider:
   If a feature creates a control obligation, document the obligation and reason about
   policy or a capability-reduced fallback. Keep approval/trust bypass flags as a separate
   security-policy decision.
+- **Launch and fallback boundary:** record prerequisites and a readiness signal for each
+  candidate. A fallback is safe only before user work was submitted, or when the
+  provider documents replay/idempotency. Never replay an ambiguously accepted request.
+- **Input and settlement:** distinguish input transformation or extension handling,
+  model-turn scheduling, the end of one turn/pass, full post-run settlement, and process
+  teardown. Verify a settlement event both where it is defined and where the selected
+  interface forwards it.
+- **Unattended requests:** enumerate provider, tool, extension, MCP, auth, elicitation,
+  and approval requests that can block the selected interface. Record the real timeout
+  or failure behavior and the response channel. Do not fabricate a human answer or
+  approval; unresolved requests require explicit policy and a typed failure path.
+- **Steering references:** name the selected interface's steering/cancellation
+  mechanisms and link to the sibling steering report. Reference its operation and
+  delivery facts instead of copying them into this topic.
 
 When researching configuration, always consider the common **user** and **repo** scopes
 that often combine to create the effective configuration. Be clear about which scope
@@ -184,6 +229,30 @@ After writing the body, set these frontmatter properties:
 - `invocation`: every scriptable launch form. Include the full command shape, whether the
   prompt can come from argv or stdin, and whether the command starts a fresh session,
   resumes a session, or talks to a long-running server.
+- `execution_interfaces`: every evidenced execution/control candidate, its kind, launch
+  conditions, input and observation contracts, control capabilities, preservation
+  evidence state, preserved features, documented exclusions, unattended obligations,
+  and evidence. Use `unknown` when parity was not established; an omitted feature is not
+  a documented exclusion. Include explicit exclusions only for discovered surfaces or
+  features that evidence shows are unavailable or unusable by Claudine. `evidenced_full`
+  and `evidenced_partial` describe the strength and scope of source or observed evidence;
+  they do not assert that Claudine has activated or live-tested the interface.
+- `execution_selection`: the preferred usable RPC or equivalent interface, its readiness
+  check and rationale, the exact pre-submission fallback boundary, replay policy, and
+  feature-parity judgment.
+- `unattended_requests`: each request class that can arrive without a TTY, its actual
+  behavior and response channel, timeout behavior, and explicit policy. Do not infer an
+  approval from silence or manufacture a human response. Each record names exactly one
+  declared execution-interface ID; duplicate the request record when behavior applies to
+  several interfaces.
+- `settlement`: one record per examined interface and operation, separately describing
+  input handling, whether and when a model turn is scheduled, acceptance, turn-terminal,
+  full-settlement, and process-lifecycle signals. Use explicit unknown text when evidence
+  does not establish a signal; do not project one interface's semantics onto another.
+- `steering_mechanisms`: concise references to the sibling steering report for available
+  steering, follow-up, interruption, and cancellation operations. Keep detailed protocol
+  semantics in that report. Use the exact steering `mechanisms[].id`, never a prose label
+  or a grouped list of commands.
 - `output_formats`: every output mode and the exact CLI value that selects it. For each
   one, say whether it is text, single JSON, JSONL/NDJSON, SSE, JSON-RPC lines, or other;
   whether it streams; what behavior changes when that format is selected; and whether
@@ -318,6 +387,7 @@ to mirror frontmatter; the point is to make the research understandable and revi
 
 - `## Summary`
 - `## Non-Interactive Entry Points`
+- `## Execution Interface Selection`
 - `## Output Formats`
 - `## Schema Sources`
 - `## IO Contract`
@@ -327,6 +397,7 @@ to mirror frontmatter; the point is to make the research understandable and revi
 - `## Tools`
 - `## Completion and Exit Status`
 - `## Blocking Behavior`
+- `## Unattended Requests and Settlement`
 - `## Subagents`
 - `## Use Case Detection`
 - `## Headless Constraints`
@@ -344,6 +415,12 @@ format should be used, and what the main parser/wrapper risks are.
 format Claudine should parse. Explain the recommendation in prose, including the tradeoff
 between request/reply output, streaming output, and any secondary logging or event
 streams.
+
+`## Execution Interface Selection` should compare independently launchable control
+surfaces, state their launch conditions and preserved feature set, and justify the
+preferred interface and any fallback. `## Unattended Requests and Settlement` should
+separate accepted input from scheduled model work, turn completion, full settlement,
+and process teardown, and should explain every request the broker may need to answer.
 
 `## Schema Sources` should explain the confidence level behind the stream shape. If the
 best source is a TypeScript union, Rust enum, Pydantic model, generated SDK, or observed
@@ -539,7 +616,8 @@ You are done with this task when the Markdown "{{file}}" has been saved with:
 
 1. all research in the body of the document
 2. and all Frontmatter properties have been set
-3. running `md schema validate '{{file}}'` returns `true` (indicating that all Frontmatter was set correctly)
+3. running `md schema validate '{{file}}' --no-trigger-schemas` exits with status 0
+   (indicating that the frontmatter satisfies the topic schema)
 
 - you do not need to run any tests or lints
 - this task had no code modifications in it

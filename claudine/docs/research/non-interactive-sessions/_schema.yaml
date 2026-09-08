@@ -19,6 +19,22 @@ $schema:
     # Non-interactive invocation forms, such as `-p`, `exec`, `run`, or `--print`.
     invocation: "{ command: string(required), stdin_support: boolean, prompt_arg: string, notes: string }[]"
 
+    # Independently launchable execution/control surfaces. Optional at schema level so
+    # legacy reports remain valid; every refreshed report must populate this inventory.
+    execution_interfaces: "{ id: string(required), kind: enum(one_shot_cli,retained_subprocess,local_server,network_server,sdk,attach_resume,other; required), launch: string(required), launch_conditions: string[], input_contract: string, observation_contract: string, control_capabilities: string[], feature_preservation: enum(evidenced_full,evidenced_partial,unknown; required), preserved_features: string[], documented_exclusions: string[], unattended_obligations: string[], evidence: string[], notes: string }[]"
+
+    # Provider-specific interface choice and safe fallback boundary.
+    execution_selection: "{ preferred: string(required), rationale: string(required), readiness_check: string, fallback: string, fallback_conditions: string[], replay_policy: string, feature_parity: string, notes: string }"
+
+    # Requests that can arrive while no human TTY is available.
+    unattended_requests: "{ request: string(required), interface: string(required), observed_behavior: string(required), required_response: string, timeout_behavior: string, policy: string(required), notes: string }[]"
+
+    # Operation-specific distinction among input acceptance, turn scheduling, and full settlement.
+    settlement: "{ interface: string(required), operation: string(required), input_handling: string(required), turn_scheduling: string(required), acceptance_signal: string, turn_terminal_signal: string, settled_signal: string(required), process_lifecycle: string, notes: string }[]"
+
+    # References into the steering topic; protocol facts stay authoritative there.
+    steering_mechanisms: "{ mechanism: string(required), operations: string[], interface: string(required), reference: string(required), notes: string }[]"
+
     # Structured output formats available in non-interactive mode.
     output_formats: "{ name: string(required), cli_value: string(required), stream: boolean, format: enum(json,jsonl,ndjson,sse,jsonrpc_lines,text,other; required), description: string, side_effects: string }[]"
 

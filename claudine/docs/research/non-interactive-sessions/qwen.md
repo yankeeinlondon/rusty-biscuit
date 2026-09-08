@@ -34,6 +34,89 @@ invocation:
     stdin_support: true
     prompt_arg: "--prompt/-p or piped stdin"
     notes: "Human-readable headless output; useful for humans, weak for Claudine supervision."
+execution_interfaces:
+  - id: "headless-stream-json"
+    kind: one_shot_cli
+    launch: 'qwen -p "prompt" --output-format stream-json --include-partial-messages'
+    launch_conditions: ["Preconfigure authentication, trust, sandbox, and approval policy"]
+    input_contract: "Initial prompt from argv or text stdin."
+    observation_contract: "JSONL on stdout and diagnostics on stderr."
+    control_capabilities: []
+    feature_preservation: evidenced_partial
+    preserved_features: ["skills", "extensions", "project context", "MCP configuration", "session persistence"]
+    documented_exclusions: ["mid-turn bidirectional control in text-input mode"]
+    unattended_obligations: ["Consume through result", "Preserve stderr and exit status"]
+    evidence: ["https://qwenlm.github.io/qwen-code-docs/en/users/features/headless/"]
+    notes: "Ordinary one-shot interface."
+  - id: "stream-json-control"
+    kind: retained_subprocess
+    launch: "qwen --input-format stream-json --output-format stream-json"
+    launch_conditions: ["Retain stdin/stdout", "Implement correlated control_request responses", "Confirm installed protocol readiness"]
+    input_contract: "Bidirectional JSON-line protocol."
+    observation_contract: "JSONL messages including control_request/control_response."
+    control_capabilities: ["stream input", "control responses"]
+    feature_preservation: unknown
+    preserved_features: []
+    documented_exclusions: []
+    unattended_obligations: ["Answer requests only through explicit policy", "Do not replay ambiguous messages"]
+    evidence: ["https://github.com/QwenLM/qwen-code/blob/main/packages/cli/src/nonInteractive/types.ts"]
+    notes: "Managed candidate described upstream as under construction; activation is unresolved."
+  - id: "http-daemon"
+    kind: local_server
+    launch: "Qwen managed HTTP daemon profile from the sibling steering report"
+    launch_conditions: ["Retain authenticated endpoint, session identity, and process ownership"]
+    input_contract: "HTTP requests."
+    observation_contract: "HTTP responses plus SSE lifecycle."
+    control_capabilities: ["follow-up", "idle prompt", "cancel"]
+    feature_preservation: unknown
+    preserved_features: []
+    documented_exclusions: []
+    unattended_obligations: ["Separate initial receipt from processing and settlement"]
+    evidence: ["../steering/qwen.md"]
+    notes: "Proposed managed interface; no activated Claudine support is claimed."
+execution_selection:
+  preferred: "headless-stream-json"
+  rationale: "It is the established parser-grade wrapper surface; retained control and daemon candidates lack resolved readiness and feature parity."
+  readiness_check: "Require init and terminal result records."
+  fallback: ""
+  fallback_conditions: []
+  replay_policy: "Never replay after ambiguous acceptance."
+  feature_parity: "Feature parity for both managed candidates is unknown."
+  notes: "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed."
+unattended_requests:
+  - request: "can_use_tool or human question"
+    interface: "stream-json-control"
+    observed_behavior: "The protocol can emit control_request records such as can_use_tool; question behavior is unresolved."
+    required_response: "Respond only from explicit policy or fail."
+    timeout_behavior: "Unknown."
+    policy: "Never fabricate approval or human input."
+    notes: "Do not force approval-mode auto merely to avoid mediation."
+settlement:
+  - interface: "headless-stream-json"
+    operation: "one-shot prompt"
+    input_handling: "Prompt is supplied at launch without a separate acceptance receipt."
+    turn_scheduling: "assistant and stream events evidence work after init."
+    acceptance_signal: "init followed by assistant activity"
+    turn_terminal_signal: "result"
+    settled_signal: "type=result followed by process exit"
+    process_lifecycle: "The headless process exits after completion."
+    notes: "stderr and nonzero exit cover failures without a result."
+steering_mechanisms:
+  - mechanism: "daemon-follow-up"
+    operations: ["managed prompt control"]
+    interface: "http-daemon"
+    reference: "../steering/qwen.md"
+    notes: "Candidate interface only; use the steering report's delivery and settlement boundaries."
+  - mechanism: "daemon-idle-prompt"
+    operations: ["managed prompt control"]
+    interface: "http-daemon"
+    reference: "../steering/qwen.md"
+    notes: "Candidate interface only; use the steering report's delivery and settlement boundaries."
+  - mechanism: "daemon-cancel-then-prompt"
+    operations: ["managed prompt control"]
+    interface: "http-daemon"
+    reference: "../steering/qwen.md"
+    notes: "Candidate interface only; use the steering report's delivery and settlement boundaries."
 output_formats:
   - name: "text"
     cli_value: "text"

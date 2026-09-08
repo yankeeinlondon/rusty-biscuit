@@ -30,6 +30,76 @@ invocation:
     stdin_support: false
     prompt_arg: "--text/-t TEXT"
     notes: "Runs without retaining a reusable transcript; not useful when Claudine needs resume/recovery."
+execution_interfaces:
+  - id: "run-stream-json"
+    kind: one_shot_cli
+    launch: "goose run --quiet --output-format stream-json -i -"
+    launch_conditions: ["Preconfigure provider, authentication, and permission policy"]
+    input_contract: "Initial instructions from argv, file, or stdin."
+    observation_contract: "Structured JSONL records on stdout; wrapper-owned metadata and exit status remain separate."
+    control_capabilities: []
+    feature_preservation: evidenced_partial
+    preserved_features: ["extensions", "recipes", "project context", "session persistence"]
+    documented_exclusions: ["mid-turn bidirectional control"]
+    unattended_obligations: ["Preserve wrapper metadata", "Treat missing terminal evidence conservatively"]
+    evidence: ["https://block.github.io/goose/docs/guides/goose-cli-commands/"]
+    notes: "Ordinary one-shot interface."
+  - id: "acp-server"
+    kind: network_server
+    launch: "goose acp"
+    launch_conditions: ["Start and register the ACP server", "Retain exact session and active run IDs", "Secure the reachable endpoint"]
+    input_contract: "ACP JSON-RPC requests."
+    observation_contract: "Correlated responses and session/run lifecycle evidence."
+    control_capabilities: ["steer", "session/prompt", "session/cancel"]
+    feature_preservation: unknown
+    preserved_features: []
+    documented_exclusions: []
+    unattended_obligations: ["Observe old-run settlement before replacement", "Never retry ambiguous submission"]
+    evidence: ["../steering/goose.md"]
+    notes: "Proposed managed interface; no Claudine activation or full parity is claimed."
+execution_selection:
+  preferred: "run-stream-json"
+  rationale: "It is the current wrapper-grade one-shot surface; ACP is the bidirectional candidate but its readiness and feature parity remain unresolved."
+  readiness_check: "Require parseable stream records and terminal complete or error evidence."
+  fallback: ""
+  fallback_conditions: []
+  replay_policy: "Do not replay when submission acceptance is ambiguous."
+  feature_parity: "ACP parity for extensions, recipes, templates, and project context is unknown."
+  notes: "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed."
+unattended_requests:
+  - request: "tool approval or human question"
+    interface: "run-stream-json"
+    observed_behavior: "Permission behavior is configurable; human questions fail in the existing headless evidence."
+    required_response: "Use explicit preconfigured policy or fail."
+    timeout_behavior: "Unknown."
+    policy: "Never fabricate approval or human input."
+    notes: "Do not disable extensions or context automatically."
+settlement:
+  - interface: "run-stream-json"
+    operation: "one-shot instructions"
+    input_handling: "Instructions are supplied at launch without a distinct acceptance receipt."
+    turn_scheduling: "Message and tool records evidence work."
+    acceptance_signal: "first session/message record"
+    turn_terminal_signal: "complete or error"
+    settled_signal: "complete or error followed by process termination"
+    process_lifecycle: "The run process is one-shot."
+    notes: "Exit code alone is not reliable according to existing evidence."
+steering_mechanisms:
+  - mechanism: "acp-steer"
+    operations: ["active-run steering", "idle prompt submission", "cancel then replace"]
+    interface: "acp-server"
+    reference: "../steering/goose.md"
+    notes: "Use the steering report's exact session/run guards and settlement sequencing."
+  - mechanism: "acp-idle-prompt"
+    operations: ["active-run steering", "idle prompt submission", "cancel then replace"]
+    interface: "acp-server"
+    reference: "../steering/goose.md"
+    notes: "Use the steering report's exact session/run guards and settlement sequencing."
+  - mechanism: "acp-cancel-submit"
+    operations: ["active-run steering", "idle prompt submission", "cancel then replace"]
+    interface: "acp-server"
+    reference: "../steering/goose.md"
+    notes: "Use the steering report's exact session/run guards and settlement sequencing."
 output_formats:
   - name: text
     cli_value: text
