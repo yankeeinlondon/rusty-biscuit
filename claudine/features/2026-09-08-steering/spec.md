@@ -216,8 +216,8 @@ or source establishes a candidate capability.
 ### Schema Refinements Required by the Second Pilot
 
 These pilot findings informed schema revision 2, now authored in the sidecar.
-The full-fleet refresh migrates the pilot reports before expanding the remaining
-roster. Do not generate runtime eligibility from the former broad case summaries.
+The full-fleet refresh migrates the pilot reports alongside the remaining roster.
+Do not generate runtime eligibility from the former broad case summaries.
 
 1. **Represent launch profiles explicitly.** Introduce provider-defined, stable
    profile IDs describing how the process starts, whether its endpoint is internal
@@ -256,7 +256,8 @@ valid record that loses the behavior needed by the generator.
 
 The [Codex pilot](../../docs/research/steering/codex.md) examined installed
 `codex-cli 0.153.4`, local help/schema, and official versioned documentation.
-It uses revision 1 and identifies further distinctions for the revised contract.
+The initial pilot used revision 1 and identified further distinctions for the
+revised contract; the linked report has since been refreshed to revision 2.
 No live delivery tests were performed.
 
 The [versioned app-server protocol](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/app-server/README.md)
@@ -304,7 +305,7 @@ and partial-interruption findings. It adds these requirements:
    and whether an external client can reach that existing owner.
 
 These changes are now represented in schema revision 2. Validate the revised
-contract against all four pilot reports before full-roster expansion.
+contract against all four pilot reports before accepting full-roster results.
 Live tests must additionally cover stale-turn races, ineligible turns,
 long-running tools and generation, and interruption-completion acknowledgment.
 
@@ -399,8 +400,10 @@ The causal trail is concrete:
   The generator registry consumes output formats from facts; revising research
   prose alone will not change generated behavior.
 
-After the steering contract is refined, revise this existing fleet rather than
-creating a competing source of execution recommendations. Proposed requirements:
+The current research run updates Pi's execution report and this existing fleet
+prompt rather than creating a competing source of execution recommendations.
+Typed execution-interface descriptors and full-roster execution-topic refresh
+remain follow-on work. Requirements for that work:
 
 1. Enumerate execution interfaces before selecting one: output-only CLI,
    bidirectional stdio, local server, and relevant SDK interfaces. Keep transport,
@@ -554,7 +557,7 @@ automatic help only, including whether an unavailable-delivery warning is emitte
 
 ## Proposed Fleet Research Contract
 
-Draft artifacts now exist under `claudine/docs/research/steering/`:
+Research artifacts now exist under `claudine/docs/research/steering/`:
 [`_fleet.md`](../../docs/research/steering/_fleet.md) and
 [`_schema.yaml`](../../docs/research/steering/_schema.yaml). Produce one `<slug>.md`
 per eligible provider after pilot review. Use a Darkmatter
@@ -565,10 +568,12 @@ contract for the authorized full-fleet research, not a generated Rust API.
 | Record | Required information | Consumer decision |
 | --- | --- | --- |
 | Document identity | Schema revision, roster slug, created/updated dates, research agent and model, examined provider versions | Coverage and freshness |
+| Launch profile | Stable profile ID, applicable OS/mode/origin combinations, endpoint ownership, lifetime, startup requirements, feature preservation, baseline marker | Which execution environment a capability actually describes |
 | Evidence | Stable evidence ID, official URL/source permalink or sanitized local artifact, version/commit, date, method, exact claim and limitations | Whether a claim justifies enabling behavior |
 | Discovery method | Method ID, OS, launch origin, registry/API/process mechanism, identity and liveness checks, exposed labels, evidence references | How to find and identify sessions |
 | Delivery mechanism | Mechanism ID, documented/undocumented status, protocol family, startup requirements, destination/authentication description, evidence references | Which hand-written adapter could implement it |
-| Capability case | OS, interactive/non-interactive mode, native/Claudine launch origin, running/idle state, supported/unsupported/unknown verdict, mechanism and discovery references, reason | Whether this particular session can be selected |
+| Capability case | Profile ID, OS, interactive/non-interactive mode, native/Claudine launch origin, running/idle state, supported/unsupported/unknown verdict, mechanism and discovery references, reason | Whether this particular session can be selected |
+| Receipt guarantees | Independent acceptance, persistence, scheduling, and conversation-delivery guarantees; provider signals and correlation; separate later delivery states | What the sender can honestly report and when |
 | Delivery semantics | While-running injection/next-tool-boundary/next-turn/interruption/resume-only/unknown, long-tool behavior, accepted versus delivered acknowledgments, ordering, duplication and cancellation behavior, limits | Honest user feedback and suitability for loop rescue |
 | Compatibility | Tested version versus documented version bounds, feature probes, required flags/configuration, known incompatible variants | Runtime eligibility without broad version assumptions |
 | Live verification | Mechanism, OS, exact version, launch conditions, session state, test date/outcome, sanitized fixture, assertions, limitations, evidence references | Mandatory activation gate distinct from researched support |
@@ -633,7 +638,7 @@ For each roster provider, the prompt must:
    mechanisms as review items; do not retry indefinitely.
 6. Review findings with the user and update this spec's decisions and a per-provider
    capability matrix. Claude Code, OpenCode, Codex, and Pi passive pilots are complete;
-   pilot-driven schema refinements precede the remaining six providers.
+   the full revision-2 roster refresh is now complete; see the run report below.
 7. Plan and run disposable-session tests for candidate mechanisms. Preserve
    sanitized evidence of target identity, actual conversation delivery, delivery
    timing, and effects on the running turn or tool. Acceptance alone does not
@@ -744,26 +749,42 @@ research establishes connection ownership and launch requirements.
 - Update public CLI docs, relevant topic docs, and the Claudine skill with the final
   behavior. Update dependency docs only if dependencies change.
 
+## Full-Fleet Research Outcome
+
+The authorized full steering fleet completed with `gpt-5.6-sol` and low reasoning.
+All ten provider reports use schema revision 2 and pass shape, identity, coverage,
+and relationship checks: **24 launch profiles, 360 cases, 31 mechanisms, and
+91 evidence records**. All 240 ordinary baseline combinations are represented;
+special profiles contribute 120 additional cases. The research sessions' own
+execution metadata confirmed model and effort; mismatched initial launches were
+stopped and excluded. See the [run report](fleet-run.md) for provenance, review
+corrections, per-provider findings, and remaining gates.
+
+The findings reinforce profile-specific selection. Managed control interfaces
+are often available where ordinary CLI sessions expose no external delivery
+channel. Their behavior differs: current-turn steering, tool-boundary pickup,
+next-turn follow-up, idle turn start, and cancellation/replacement must remain
+separate. In particular, Qwen's queued follow-up cannot rescue a current turn
+that never ends. Missing implementation, missing access, and missing live
+verification are distinct from a provider lacking a capability.
+
+Pi's execution report and the existing non-interactive fleet prompt have also
+been updated to prefer usable RPC/control interfaces while preserving provider
+features. This is a research recommendation and implementation target; current
+provider facts, generated metadata, and wrapper behavior remain unchanged.
+
 ## Current Work Boundary
 
-This feature is in specification and research design. No production symbols have
-been edited and no steering message has been sent. The Claude Code passive
-research pilot completed as a delegated `gpt-5.6-sol` agent with low thinking;
-the user requested OpenCode as a second pilot to test whether further schema
-refinement is necessary. That passive pilot is complete with the same model
-and low thinking, and identified the schema refinements above. The user requested
-Codex as a third pilot; it is complete with the same model and low thinking
-against the current revision 1 contract and identified additional schema gaps.
-The user selected Pi as the fourth and final pilot; passive research is complete
-with `gpt-5.6-sol` and low thinking against revision 1. The remaining
-six providers have not started. Before
-implementation edits, run the repository-required GitNexus impact
-analysis on affected symbols and report the blast radius.
+This feature remains in specification and implementation planning. The four
+pilots informed revision 2, and the full passive roster refresh is complete.
+Every report retains `verification: []`. No provider delivery experiments or
+production edits were performed; no steering capability is activated by these
+research results. Unresolved protocol, compatibility, and feature-parity details
+remain explicit in each report.
 
-The draft sidecar passed a synthetic document validation through `md schema
-validate`, and an invalid support enum was correctly rejected. This establishes
-basic schema loading and case-vocabulary validation, not complete fixture coverage,
-cross-record validation, prompt execution, or research accuracy. The draft fleet
-prompt has not yet been executed through Claudine sequence. The delegated pilot
-uses its provider-specific instructions directly. Its initial pass uses passive investigation;
-delivery experiments remain separately planned disposable-session tests.
+Next work is to settle the remaining engineering choices, implement the typed
+metadata consumer and reviewed adapters, and perform the required disposable
+session tests before activation. Before implementation edits, run the
+repository-required GitNexus impact analysis on affected symbols and report the
+blast radius. Schema and relationship validation establish a usable research
+artifact, not factual certainty or successful runtime delivery.
