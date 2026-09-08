@@ -3,7 +3,7 @@ reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-08-31
 implemented: true
-review_iterations: 3
+review_iterations: 4
 ---
 
 # Wrapped runs can stall indefinitely at startup or report success with incomplete work
