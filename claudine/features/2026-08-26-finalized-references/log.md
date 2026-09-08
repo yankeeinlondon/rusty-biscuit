@@ -6,6 +6,7 @@ implementation_4: "2026-09-08T05:55:10-07:00"
 implementation_5: "2026-09-08T06:42:30-07:00"
 implementation_6: "2026-09-08T07:52:23-07:00"
 implementation_7: "2026-09-08T10:33:11-07:00"
+implementation_8: "2026-09-08T11:33:18-07:00"
 deferred_perf_measurement: true
 ---
 
@@ -494,3 +495,62 @@ The files changed for the fixed and partially remediated findings are:
 - `claudine/features/2026-08-26-finalized-references/log.md`
 
 No performance measurement was deferred during review cycle 7, so the existing `deferred_perf_measurement` value and `deferred-performance.md` were not changed for this cycle.
+
+## Implementation of Review Findings #8
+
+> **started at:** 2026-09-08T11:33:18-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Users/ken/.claudine/worktrees/rusty-biscuit/feat-unifi/claudine/features/2026-08-26-finalized-references/review-8.md'
+- this is iteration 8 of the review-to-implement cycle
+- starting the work on 'AC6 cross-crate macro invocation contexts' at 11:36:26
+        - confirmed that `generate_inventory` built a resolver and macro-expansion context set independently for each guarded crate, so a library macro transcriber could not inherit a CLI invocation module's bindings
+        - GitNexus reported LOW upstream risk for `generate_inventory` and `scan_parsed`, with no affected execution processes; its index did not resolve the newer macro-scanner helper symbols, so their indexed risk was UNKNOWN and source inspection bounded them to this Level 1 guard
+        - introduced resolver-carrying expansion contexts: non-exported macros retain definition-crate-only contexts, while `#[macro_export]` macros are evaluated against module contexts from both guarded crates
+        - preserved `$crate` hygiene with an explicit definition-context marker resolved through the macro's defining resolver and module
+        - added a distinct-crate synthetic regression that proves the former context set yields zero sites and the combined context set yields exactly one uncontrolled site, plus a regression for `$crate` definition-crate resolution
+        - focused `cargo nextest run -p claudine-cli --test spawn_inventory --color=never --no-fail-fast` passed all 30 tests
+        - Claudine `just test --no-fail-fast` selected 6,871 Level 1 tests: 6,864 passed and the same seven unrelated `claudine-gen` generated-provider drift checks recorded by review 8 failed; all 30 spawn-inventory tests passed in the area run
+        - the first `just lint` exposed two `needless_borrow` diagnostics in the changed production-inventory loop; removing those borrows resolved the finding, and the final Claudine `just lint` passed for all five area crates plus the 18-test diagnostic guard
+        - the final focused spawn-inventory rerun passed 30/30 after the lint repair
+        - GitNexus `detect_changes` reported low risk, zero affected execution processes, 17 changed indexed symbols, and two changed files; its stale symbol-to-hunk attribution does not enumerate the new scanner helpers or regressions accurately
+- work completed for 'AC6 cross-crate macro invocation contexts' at 11:43:52
+- starting the work on 'AC10 final platform matrix and green scoped gates' at 11:46:28
+        - the Claudine, Rust, Rust-testing, and Sniff skills were read in full before discovery or verification
+        - Sniff identified a native macOS 27.0 arm64 host and confirmed the specification-scoped package areas as biscuit-file, Darkmatter, and Claudine; dependency projections show the expected `biscuit-file → darkmatter → claudine` downstream chain
+        - diagnosed the seven Claudine Level 1 failures as one deterministic source-of-truth omission: commit `e1d6a7599` refreshed Pi's non-interactive research but did not regenerate `lib/src/provider/pi/data.rs` or `docs/providers/catalog.json`; the two drift assertions then caused five generator UX tests to fail because their copied fixture area inherited that drift
+        - `claudine-gen check` proved nine provider fragments plus signals, vocabulary, and families clean; only Pi's fragment and the catalog drifted. GitNexus reported LOW upstream risk for `PI_INFO` and the generated-artifact baseline test, with zero indexed callers or execution processes
+        - regenerated only Pi plus the required all-provider catalog, inspected the resulting diff, and refreshed only those two xxHash baseline entries using `biscuit-hash`; the resulting changes are one runtime metadata value (`-p/text`), the matching research projection in the catalog, and two baseline hashes
+        - focused `cargo nextest run -p claudine-gen --color=never --no-fail-fast` passed all 155 tests, restoring all seven formerly failing drift/generation checks
+        - local macOS biscuit-file gates are green: `just test --no-fail-fast` passed 813/813 plus 6/6 no-default-feature tests, `just lint` passed for the library and CLI, and `just test-l2` reported the tier not applicable; the L2 recipe does not accept trailing Nextest arguments, so the attempted `--no-fail-fast` form was rejected before execution and the canonical no-argument recipe was used
+        - local macOS Darkmatter gates are green: `just test --no-fail-fast` passed 7,709/7,709 with 51 excluded higher-tier tests; `just lint` passed for darkmatter, darkmatter-cli, dmls, zed-dmls-cli, and the `wasm32-wasip2` Zed extension check; `just test-l2 --no-fail-fast` passed 18/18 darkmatter, 69/69 darkmatter-cli, and 3/3 dmls tests under recipe-owned background terminal lifecycle
+        - local macOS Claudine gates are green after the generated-artifact repair: `just test --no-fail-fast` passed 6,871/6,871 with 11 excluded higher-tier tests; `just lint` passed all five area crates and the 18/18 diagnostic guard; `ATUIN_AI__ENABLED=false just test-l2 --no-fail-fast` passed 239/239 claudine-cli and 3/3 claudine-gen tests, including the formerly wedged WezTerm OSC8 case
+        - all Level 2 runs used only package-area recipes, which own background pane/window creation and cleanup; no direct harness command or foreground automation was used
+        - native Linux, native Windows, and WSL final-tree execution remains deferred: the documented `scripts/cross-check.sh` would reset, clean, patch, and execute in shared remote clones, which is outside this finding's read-only evidence authority, and both standing clones currently contain unrelated modifications at stale heads (`a1b9a883e` on Linux and `999a17f58` on Windows versus local `06c720fa0`), so no prior result can establish the current uncommitted tree
+        - bounded read-only `BatchMode=yes` probes found the Linux builder reachable and the Windows builder reachable; Windows now has about 25.9 GiB free on C: and 101.8 GiB on W:, while its WSL2 Ubuntu guest has about 131 GiB free plus Cargo and tmux. These observations improve the prior capacity picture but are availability only, not gate execution evidence
+        - Windows/WSL Level 2 CI provisioning remains a policy gap: `.github/ci/environments.json` still records no native-Windows terminal backend and an archive-only WSL broker/server gap, and `_package-ci.yml` excludes both environments from L2 by construction. Closure requires out-of-scope CI/harness design: ship `biscuit-harness-broker` in the WSL archive and start/prove tmux there; devise and prove a headless native-Windows backend (the recorded `wezterm-mux-server` direction) with non-vacuous backend evidence
+        - hosted CI evidence is unavailable for this uncommitted tree: a read-only `gh run list` attempt stopped cleanly because GitHub CLI has no credentials; authenticating, committing, and pushing are all outside this task's authority, so no hosted result is inferred
+        - final `claudine-gen check` reports all ten providers, catalog, signals, vocabulary, and families clean; `git diff --check` identifies trailing whitespace only in concurrently edited `prompts/commit.md`, which this finding did not touch. Concurrent changes in `claudine/features/2026-09-08-steering/spec.md` and `prompts/commit.md` were preserved
+        - GitNexus `detect_changes` reports LOW risk, 25 changed indexed symbols, zero affected execution processes, and seven changed worktree files; only the three regenerated/baseline files and this log belong to finding 2, alongside finding 1's scanner change and two concurrent Markdown edits
+        - no performance metric was requested or deferred; `deferred_perf_measurement` and `deferred-performance.md` remain unchanged
+- work completed for 'AC10 final platform matrix and green scoped gates' at 12:06:42
+
+### Successful Completion
+
+The implementation of review cycle 8 has completed successfully in 34 minutes 50 seconds. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 was fixed, 1 was deferred (see reasons below):
+
+- `AC10 final platform matrix and green scoped gates` (finding 2, High) was deferred because the complete required final-tree matrix cannot be produced within this session's platform and authority:
+        - native Linux, native Windows, and WSL builders contain unrelated changes at stale revisions; the documented cross-check workflow would destructively reset, clean, and patch those shared clones, which is outside this task's read-only remote authority
+        - Windows and WSL Level 2 remain excluded from hosted CI by construction; closure requires shipping and proving the tmux broker/server in WSL and designing a proven headless native-Windows backend with non-vacuous execution evidence
+        - hosted CI cannot exercise the uncommitted final tree without an authorized commit and push, and the local GitHub CLI has no credentials
+        - no unavailable platform cell was inferred green; the local macOS matrix is fully green after restoring the seven Claudine generator failures
+
+The files changed for the fixed and partially remediated findings are:
+
+- `claudine/cli/tests/spawn_inventory.rs`
+- `claudine/docs/providers/catalog.json`
+- `claudine/gen/tests/fixtures/generated-artifact-baseline.json`
+- `claudine/lib/src/provider/pi/data.rs`
+- `claudine/features/2026-08-26-finalized-references/review-8.md`
+- `claudine/features/2026-08-26-finalized-references/log.md`
+
+No performance measurement was requested or deferred during review cycle 8, so the existing `deferred_perf_measurement` value and `deferred-performance.md` were not changed for this cycle.
