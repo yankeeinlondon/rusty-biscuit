@@ -1,0 +1,127 @@
+{
+  "toolVersion": "@rusty-biscuit/test-audit@0.1.0",
+  "revision": "973d1d9184601ab3409654955ffacc249f4870a5",
+  "dirty": [
+    "M .claude/skills/claudine/signal-handling.md",
+    " M .claude/skills/rust-testing/SKILL.md",
+    " M .claude/skills/rust-testing/test-suite-audits.md",
+    " M .github/workflows/ci.yml",
+    " M claudine/cli/tests/compose_caller_file_provenance.rs",
+    " M claudine/cli/tests/wrap_basics.rs",
+    " D claudine/fixes/2026-09-07-faster-claudine-tests/attribution.test.ts",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/attribution.ts",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/attribution/budgets-pending.json",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/baseline/README.md",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/baseline/expectations.json",
+    " D claudine/fixes/2026-09-07-faster-claudine-tests/inventory-reconciler.test.ts",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/inventory-reconciler.ts",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/inventory.md",
+    " D claudine/fixes/2026-09-07-faster-claudine-tests/junit-metrics.test.ts",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/junit-metrics.ts",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/log.md",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/measurement-runner.ts",
+    " D claudine/fixes/2026-09-07-faster-claudine-tests/measurement.test.ts",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/measurement.ts",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/plan.md",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/spec.md",
+    " M claudine/fixes/_completed/2026-08-01-cli-slow-tests/deferred-performance.md",
+    " M docs/dependencies.md",
+    " M pnpm-lock.yaml",
+    " M pnpm-workspace.yaml",
+    " M scripts/ci/affected_scope.py",
+    " M scripts/ci/test_affected_scope.py",
+    " M sniff/fixes/2026-09-07-faster-sniff-tests/plan.md",
+    "?? claudine/fixes/2026-09-07-faster-claudine-tests/audit.config.json",
+    "?? claudine/fixes/2026-09-07-faster-claudine-tests/baseline/34159725015/",
+    "?? claudine/fixes/2026-09-07-faster-claudine-tests/baseline/34173378609/",
+    "?? claudine/fixes/2026-09-07-faster-claudine-tests/candidate/",
+    "?? claudine/fixes/2026-09-07-faster-claudine-tests/results.md",
+    "?? claudine/fixes/_unscheduled/test-suite-residuals/",
+    "?? darkmatter/fixes/2026-09-07-faster-darkmatter-tests/audit.config.json",
+    "?? darkmatter/fixes/2026-09-07-faster-darkmatter-tests/baseline/",
+    "?? darkmatter/fixes/2026-09-07-faster-darkmatter-tests/enumeration/",
+    "?? sniff/fixes/2026-09-07-faster-sniff-tests/audit.config.json",
+    "?? tools/test-audit/"
+  ],
+  "toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "nextest": "cargo-nextest 0.9.136 (1d5bf1ec9 2026-05-16)",
+  "platform": "arm64-darwin (Darwin 27.0.0)",
+  "capturedAt": "2026-09-08T16:07:24.677Z",
+  "captures": [
+    {
+      "label": "cli-bare",
+      "packages": [
+        "sniff-cli"
+      ],
+      "features": [],
+      "command": "cargo nextest list --message-format json -p sniff-cli",
+      "exitCode": 0,
+      "seconds": 7.1,
+      "identities": 790
+    },
+    {
+      "label": "cli-fixtures",
+      "packages": [
+        "sniff-cli"
+      ],
+      "features": [
+        "test-fixtures"
+      ],
+      "command": "cargo nextest list --message-format json -p sniff-cli --features test-fixtures",
+      "exitCode": 0,
+      "seconds": 0.9,
+      "identities": 792
+    },
+    {
+      "label": "l1-local-all",
+      "packages": [
+        "sniff",
+        "sniff-cli"
+      ],
+      "features": [
+        "sniff/remote"
+      ],
+      "command": "cargo nextest list --message-format json -p sniff -p sniff-cli --features sniff/remote",
+      "exitCode": 0,
+      "seconds": 1,
+      "identities": 2622
+    },
+    {
+      "label": "lib-bare",
+      "packages": [
+        "sniff"
+      ],
+      "features": [],
+      "command": "cargo nextest list --message-format json -p sniff",
+      "exitCode": 0,
+      "seconds": 47.6,
+      "identities": 1558
+    },
+    {
+      "label": "lib-network",
+      "packages": [
+        "sniff"
+      ],
+      "features": [
+        "network"
+      ],
+      "command": "cargo nextest list --message-format json -p sniff --features network",
+      "exitCode": 0,
+      "seconds": 12.8,
+      "identities": 1616
+    },
+    {
+      "label": "lib-remote",
+      "packages": [
+        "sniff"
+      ],
+      "features": [
+        "remote"
+      ],
+      "command": "cargo nextest list --message-format json -p sniff --features remote",
+      "exitCode": 0,
+      "seconds": 0.8,
+      "identities": 1832
+    }
+  ]
+}

@@ -1,0 +1,3 @@
+{"tier":"L1","package":"sniff","xml":"L1/sniff.xml","exit_code":0,"environment":"macos-latest","duration_s":326,"report_present":true}
+{"tier":"L1","package":"sniff-cli","xml":"L1/sniff-cli.xml","exit_code":0,"environment":"macos-latest","duration_s":344,"report_present":true}
+{"tier":"L2","package":"sniff-cli","xml":"L2/sniff-cli.xml","exit_code":0,"environment":"macos-latest","duration_s":228,"report_present":true}

@@ -117,12 +117,13 @@ them should stop and re-derive rather than proceed.
    until Phase 1's checkpoint passes; the same warm-run protocol is this fix's
    evidence and its baseline. Document-only Phases 2–3 may proceed during the
    measurement window.
-2. **The inventory is family-based with a mechanical completeness proof.** A
-   small reconciler script in this fix directory (house convention — the
-   claudine predecessor shipped `junit-metrics.ts`) joins
-   `cargo nextest list --message-format json` output against the inventory's
-   declared families and fails on any unassigned or doubly-assigned identity.
-   Hand enumeration of ~2,280 identities is not a credible deliverable.
+2. **The inventory is family-based with a mechanical completeness proof.** The
+   shared `test-audit reconcile` command (`tools/test-audit`) joins the
+   `capture`d `cargo nextest list --message-format json` listings against
+   this fix's `families.json` and fails on any unassigned or doubly-assigned
+   identity; `test-audit sources` supplies the source-side population. No
+   reconciler is written in this fix directory. Hand enumeration of ~2,280
+   identities is not a credible deliverable.
 3. **One fixture, two command surfaces, one policy.** The builder computes an
    environment description (clear flag, ordered removes, ordered sets,
    `current_dir`, `PATH` value) applied by thin adapters to
@@ -167,15 +168,17 @@ verification are separate milestones.
   environment remain unchanged. A new failure or relevant change invalidates
   the affected evidence, not every prior gate.
 - Document-only phases run the changed analysis tools and their relevant
-  tests, not Rust package suites or unrelated package gates. Reuse the existing
-  Claudine metrics, inventory, and attribution tools after checking their
-  contracts; add only missing area-specific behavior and regression coverage.
-  Do not build a second general-purpose parser or repeat unchanged mutation
-  demonstrations. Preserve malformed-input and completeness failures.
-  Start with `claudine/fixes/2026-09-07-faster-claudine-tests/`'s
-  `junit-metrics.ts`, `inventory-reconciler.ts`, and `attribution.ts` plus their
-  tests. Reference or adapt these locally without introducing a cross-package
-  framework or depending on another agent's concurrently changing files.
+  tests, not Rust package suites or unrelated package gates. The metrics,
+  inventory, attribution, measurement, and work-counter tools are the shared
+  `test-audit` package at `tools/test-audit/` (delivered by the darkmatter
+  fix's Phase 1A on 2026-09-08), driven by this fix's `audit.config.json`.
+  Consume its commands — `just run capture|junit|reconcile|sources|attribute|measure|counters`
+  from `tools/test-audit` — and add only Sniff-specific configuration,
+  evidence data, and focused regressions to the shared suite. Do not copy,
+  rebuild, or adapt the first-generation Claudine scripts, build a second
+  parser, or repeat unchanged mutation demonstrations; the shared suite already
+  preserves malformed-input and completeness failures. See
+  `.claude/skills/rust-testing/test-audit-tooling.md`.
 - Capture each distinct recipe/CI feature selection once per relevant source
   state and derive family membership from those captures. Keep every test in
   the audit, but document common setup and proof once per enumerated family.
@@ -218,12 +221,17 @@ Opens the attribution window. Everything downstream measures against this.
       `test_detect_completes_in_reasonable_time` threads-required override,
       global slow-timeout/leak windows, plus any per-test overrides the
       census finds).
-- [ ] Reuse the existing Claudine TypeScript metrics tool with Sniff-specific
-      inputs. Preserve separate build/setup, runner elapsed, and summed test
-      duration columns and rejection of malformed reports, missing artifacts
-      or tests, duplicate identities, invalid durations, and failed runs.
-      Run existing tool tests once; add focused regressions only for changed
-      behavior instead of rebuilding and re-proving the parser.
+- [ ] Use the shared `test-audit` tool (`tools/test-audit`, `just check`
+      there runs its typecheck and vitest suite) with this fix's
+      `audit.config.json`: `capture` for the listings, `junit` for CI
+      staging trees, `measure parse`/`report` for local console logs, and
+      `counters validate`/`compare` for work-count readings. It already keeps
+      build/setup, runner elapsed, and summed test duration apart and rejects
+      malformed reports, missing artifacts or tests, duplicate identities,
+      invalid durations, failed runs, and incompatible counter provenance
+      (native Windows vs WSL, counter version, request shape, the
+      2026-07-22 caching boundary). Run its suite once; add focused
+      regressions to it only for Sniff-specific behavior.
 - [ ] Preserve a reproducible baseline source state and its build directory.
       Warm its test artifacts, then collect one diagnostic local L1 run
       (`just test`) and one `just sanity` run with its 15-second budget.

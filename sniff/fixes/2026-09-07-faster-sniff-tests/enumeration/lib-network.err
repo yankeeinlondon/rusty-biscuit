@@ -1,0 +1,55 @@
+   Compiling sniff v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/sniff/lib)
+warning: function `provider_token` is never used
+  --> sniff/lib/src/credentials.rs:52:15
+   |
+52 | pub(crate) fn provider_token(flavor: ApiFlavor) -> (Option<String>, &'static str) {
+   |               ^^^^^^^^^^^^^^
+   |
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `sniff` (lib) generated 1 warning
+warning: field `token` is never read
+   --> sniff/lib/src/filesystem/git/remote_observation.rs:304:5
+    |
+303 | struct TestProviderDiscoveryEntry {
+    |        -------------------------- field in this struct
+304 |     token: u64,
+    |     ^^^^^
+    |
+    = note: `TestProviderDiscoveryEntry` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: static `NEXT_TEST_PROVIDER_DISCOVERY_TOKEN` is never used
+   --> sniff/lib/src/filesystem/git/remote_observation.rs:314:8
+    |
+314 | static NEXT_TEST_PROVIDER_DISCOVERY_TOKEN: std::sync::atomic::AtomicU64 =
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: struct `TestProviderDiscoveryGuard` is never constructed
+   --> sniff/lib/src/filesystem/git/remote_observation.rs:318:19
+    |
+318 | pub(crate) struct TestProviderDiscoveryGuard {
+    |                   ^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: method `origins` is never used
+   --> sniff/lib/src/filesystem/git/remote_observation.rs:326:19
+    |
+325 | impl TestProviderDiscoveryGuard {
+    | ------------------------------- method in this implementation
+326 |     pub(crate) fn origins(&self) -> Vec<String> {
+    |                   ^^^^^^^
+
+warning: function `register_test_provider_discovery` is never used
+   --> sniff/lib/src/filesystem/git/remote_observation.rs:347:15
+    |
+347 | pub(crate) fn register_test_provider_discovery(
+    |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `provider_token` is never used
+  --> sniff/lib/src/credentials.rs:52:15
+   |
+52 | pub(crate) fn provider_token(flavor: ApiFlavor) -> (Option<String>, &'static str) {
+   |               ^^^^^^^^^^^^^^
+
+warning: `sniff` (lib test) generated 6 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 12.24s
