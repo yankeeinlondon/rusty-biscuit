@@ -30,3 +30,12 @@ thiserror = "2.0"
 rendezvous-daemon = { path = "../daemon" }
 rendezvous-core = { path = "../core", features = ["test-support"] }
 tempfile = "3"
+
+# Declared rather than defaulted (2026-09-07-faster-claudine-tests, Phase 6).
+# CI runs L1 with no features. The integration targets spawn a real daemon over
+# the platform's local endpoint, which is an in-process fixture rather than an
+# external resource, so they stay L1.
+[package.metadata.ci.tests]
+tiers = ["L1"]
+features = []
+local-features = []

@@ -17,14 +17,25 @@ use std::path::Path;
 
 use super::LocalEndpoint;
 
-/// An endpoint isolated to this process that a daemon will accept.
+/// An endpoint isolated to one fixture that a daemon will accept.
+///
+/// Isolation is keyed on `(parent, name)` on **both** transports, so a fixture
+/// gets the same guarantee whichever one it runs over: the same pair always
+/// names the same endpoint — a fixture may rebuild it to reconnect — and two
+/// fixtures holding different `parent` directories can never collide.
 ///
 /// On Unix this creates a `0700` directory under `parent` and names a socket
 /// inside it; `tempfile` makes `0755` directories, which the daemon refuses,
 /// so a fixture that dropped a socket straight into a temp root would fail the
-/// ownership check rather than exercise it. On Windows the pipe namespace is
-/// flat and has no parent to secure, so `parent` is unused and isolation comes
-/// from the process id in the name.
+/// ownership check rather than exercise it.
+///
+/// On Windows the pipe namespace is flat, so `parent` cannot be a directory
+/// there — it is folded into the pipe name instead. It used to be dropped
+/// entirely, leaving the process id as the only discriminator: two fixtures in
+/// one process asking for the same `name` (which every daemon pairing test
+/// does — `alpha`, `beta`) would then have shared a pipe. Nextest gives each
+/// test its own process and hid that, but the isolation a fixture is entitled
+/// to should not depend on which runner invoked it.
 ///
 /// ## Panics
 ///
@@ -50,14 +61,29 @@ pub fn private_endpoint(parent: &Path, name: &str) -> LocalEndpoint {
     }
     #[cfg(windows)]
     {
-        let _ = parent;
         LocalEndpoint::WindowsNamedPipe(OsString::from(format!(
-            "{}{}-test-{}-{name}",
+            "{}{}-test-{}-{:016x}-{name}",
             super::PIPE_NAME_PREFIX,
             super::ENDPOINT_STEM,
             std::process::id(),
+            fixture_discriminator(parent),
         )))
     }
+}
+
+/// A stable digest of a fixture's `parent` directory, for the flat Windows pipe
+/// namespace.
+///
+/// `DefaultHasher::new()` is keyed with zeros, so the same path yields the same
+/// digest in every process — which is what lets a fixture rebuild an endpoint
+/// it already bound.
+#[cfg(windows)]
+fn fixture_discriminator(parent: &Path) -> u64 {
+    use std::hash::{Hash, Hasher};
+
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    parent.hash(&mut hasher);
+    hasher.finish()
 }
 
 /// The `RENDEZVOUS_ENDPOINT` value that resolves back to `endpoint`.

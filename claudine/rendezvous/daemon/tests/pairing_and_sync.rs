@@ -41,6 +41,40 @@ async fn boot_daemon(tmp: &TempDir, name: &str) -> (ServerHandle, LocalEndpoint)
     (handle, socket)
 }
 
+/// The endpoint isolation every daemon fixture in this crate depends on.
+///
+/// Each test below boots daemons under a *fresh* `TempDir` while reusing the
+/// same handful of names, so two fixtures asking for `alice` must never be
+/// handed one endpoint — otherwise a second test's daemon would answer the
+/// first's client and the convergence assertions would be measuring the wrong
+/// process. On Unix the `TempDir` is the socket's parent directory and this
+/// holds by construction; on Windows the namespace is flat, and the fixture
+/// root has to be folded into the pipe name for the same property to hold.
+/// This lives here rather than beside `private_endpoint` because
+/// `rendezvous-core`'s own suite does not enable the `test-support` feature, so
+/// a test there would compile in no configuration any recipe runs.
+#[test]
+fn endpoints_are_stable_per_fixture_and_distinct_across_fixtures() {
+    let first = TempDir::new().expect("first fixture root");
+    let second = TempDir::new().expect("second fixture root");
+
+    assert_eq!(
+        private_endpoint(first.path(), "alice"),
+        private_endpoint(first.path(), "alice"),
+        "a fixture must be able to rebuild the endpoint it bound",
+    );
+    assert_ne!(
+        private_endpoint(first.path(), "alice"),
+        private_endpoint(second.path(), "alice"),
+        "two fixtures asking for the same daemon name must not share an endpoint",
+    );
+    assert_ne!(
+        private_endpoint(first.path(), "alice"),
+        private_endpoint(first.path(), "bob"),
+        "two daemons inside one fixture must not share an endpoint",
+    );
+}
+
 #[tokio::test]
 async fn paired_daemons_converge_after_direct_sync() {
     let tmp = TempDir::new().expect("tempdir");
