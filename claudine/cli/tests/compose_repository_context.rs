@@ -9,8 +9,9 @@ fn external_prompt_dry_run_preserves_repository_only_context() {
     let fixture = CliProcessFixture::named("compose-repository-context");
     fixture.initialize_repository();
     assert!(std::process::Command::new("git")
+        .arg("-C")
+        .arg(fixture.cwd())
         .args(["remote", "add", "origin", "https://example.com/team/fixture-repo.git"])
-        .current_dir(fixture.cwd())
         .status()
         .unwrap()
         .success());
