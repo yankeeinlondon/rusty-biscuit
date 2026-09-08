@@ -25,6 +25,10 @@ failure:
 ---
 # Steering Research: {{state.name}}
 
+You are the assigned provider researcher, already running inside the fleet.
+Perform the research yourself. Do not launch another agent, `claudine sequence`,
+or another research coordinator to carry out this assignment.
+
 Fleet research prompt using steering schema revision 2. The Claude Code,
 OpenCode, Codex, and Pi passive pilots informed this contract. Refresh those
 reports into revision 2, then use the same contract for the remaining roster.

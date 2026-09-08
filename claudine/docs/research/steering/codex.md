@@ -1409,6 +1409,8 @@ gaps:
 changes:
 - Refreshed the revision 1 Codex pilot into steering schema revision 2.
 - Separated the 24 ordinary baseline combinations from the managed app-server profile.
+- Added all six Claudine-managed non-interactive app-server cases; app-server is a
+  headless protocol and does not inherently require a TTY or human client.
 - Added structured receipt guarantees, launch-profile access, exact-turn guards, interruption
   phases, and relational coverage.
 - Preserved verification as empty; no live delivery test was performed.
@@ -1470,6 +1472,11 @@ Codex CLI 0.153.4 exposes a promising non-interrupting mechanism through its
 experimental app-server protocol: `turn/steer` targets the exact active turn in a
 thread. That capability belongs to a deliberately managed app-server connection.
 It does not make an ordinary `codex` TUI or `codex exec` process attachable.
+The managed client can itself be non-interactive: `codex app-server` is a headless
+protocol process, and initialize, thread, turn, notification, and approval traffic
+do not require a human TTY. A future integration may replace Claudine's one-shot
+`codex exec` launch with a retained app-server while preserving the non-interactive
+user-facing mode.
 
 This passive refresh was performed by agent `codex` with launcher-supplied model
 `gpt-5.6-sol` and reasoning effort `low`. The provider did not expose independent
@@ -1498,6 +1505,12 @@ an ordinary TUI or exec process exposes an app-server endpoint. Future Claudine
 managed launches should record server ownership, transport, process identity,
 thread ID, and active-turn observations. Claudine's own session ID remains
 correlation metadata unless explicitly mapped to the provider thread ID.
+
+Installed help also shows that a user can explicitly launch app-server with stdio,
+Unix-socket, or WebSocket listener options. That supports a candidate native-exposed
+profile in principle, but this pass does not establish endpoint discovery,
+authentication, ownership checks, or native Windows transport behavior. It remains
+an explicit gap rather than being merged into ordinary native CLI cases.
 
 ## Non-interrupting delivery
 
@@ -1600,6 +1613,9 @@ new explicit managed app-server launch profile and durable registration. The
 adapter must preserve thread and active-turn identities, reject stale turn
 snapshots, expose admission separately from terminal processing, and never turn a
 failed steer into an implicit new turn.
+This managed profile applies to both interactive and non-interactive Claudine
+invocations; implementation is missing, but provider support is setup-required
+rather than unsupported.
 
 ## Gaps
 
@@ -1611,6 +1627,8 @@ kind separating steer, idle turn creation, thread resume, and interrupt/replace.
 Revision 2 now carries those distinctions structurally. Remaining blockers are
 runtime verification, native Linux and Windows evidence, ordinary-session
 attachment evidence, and an implemented Claudine adapter.
+The explicitly launched native app-server surface also needs its own profile once
+endpoint ownership, authentication, and discovery have evidence.
 
 ## Changelog
 
@@ -1618,6 +1636,8 @@ The revision 1 pilot was refreshed to revision 2. The refresh partitions all 24
 ordinary baseline combinations from a managed app-server profile, adds receipt
 guarantees and exact-turn guards, and retains the prior passive findings without
 claiming that any live-delivery activation gate passed.
+It now includes managed non-interactive cases because app-server is headless and
+does not require a human client.
 
 ## Sources
 

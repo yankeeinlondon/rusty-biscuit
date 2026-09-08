@@ -62,7 +62,7 @@ schema_sources:
   - url: "https://pi.dev/docs/latest/rpc"
     schema_type: typescript
     formal: false
-    notes: "Official RPC protocol documentation; useful context but broader than the one-shot JSON stream."
+    notes: "Official protocol documentation for the preferred managed RPC interface, including commands, streamed events, and extension UI responses."
   - url: "https://github.com/earendil-works/pi/blob/main/packages/coding-agent/src/modes/rpc/rpc-types.ts"
     schema_type: typescript
     formal: false
