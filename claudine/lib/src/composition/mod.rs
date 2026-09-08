@@ -125,6 +125,8 @@ pub use resolve::{
     resolve_composition_source, resolve_composition_source_in_context,
     validate_file_permissions, without_formal_sequence_keys,
 };
+#[cfg(test)]
+pub(crate) use resolve::resolve_fixture_source;
 pub use schema::{
     InteractiveSchemaOptions, PreValidatedSchema, PropertyState, PropertyStatus,
     SchemaStatusReport, build_schema_status_report, drop_invalid_optionals,

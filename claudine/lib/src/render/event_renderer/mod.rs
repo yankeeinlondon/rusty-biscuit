@@ -460,4 +460,58 @@ mod tests {
             assert!(seen.insert(*name), "duplicate DISPATCH entry for {name}");
         }
     }
+
+    fn renderer() -> EventRenderer {
+        EventRenderer::new(Provider::Claude, PathBuf::from("/repo"), None)
+    }
+
+    /// Replaces `stream::stderr::tests::silent_mode_produces_nothing`, which
+    /// asserted `Verbosity::Silent == Verbosity::Silent` — true of any build,
+    /// including one where the gate below had been deleted. The gate lives
+    /// here, so the assertion does too.
+    #[test]
+    fn silent_verbosity_produces_no_render_units() {
+        let terminal = Terminal::default();
+        let warning = SemanticEvent::Warning {
+            message: "rate limited".to_string(),
+            extra: Value::Null,
+        };
+
+        assert!(
+            !renderer()
+                .render(&warning, &terminal, Verbosity::Normal)
+                .is_empty(),
+            "the fixture event must render something at Normal, or Silent proves nothing"
+        );
+        assert!(
+            renderer()
+                .render(&warning, &terminal, Verbosity::Silent)
+                .is_empty(),
+            "Silent verbosity must produce no emission units"
+        );
+    }
+
+    /// The ordering half of the same contract, called out in `render`'s doc
+    /// comment and untested until now: `SessionStart`'s `api_key_source`
+    /// self-update runs *before* the verbosity gate, because the Claude
+    /// rate-limit suppression policy reads it on a later event. Moving the
+    /// gate above the update would silently disarm that suppression for every
+    /// silent run.
+    #[test]
+    fn session_start_updates_the_auth_source_even_when_silent() {
+        let terminal = Terminal::default();
+        let mut renderer = renderer();
+        let units = renderer.render(
+            &SemanticEvent::SessionStart {
+                session_id: Some("s1".to_string()),
+                model: Some("claude".to_string()),
+                extra: serde_json::json!({ "api_key_source": "ANTHROPIC_API_KEY" }),
+            },
+            &terminal,
+            Verbosity::Silent,
+        );
+
+        assert!(units.is_empty(), "SessionStart is envelope-only");
+        assert_eq!(renderer.api_key_source(), Some("ANTHROPIC_API_KEY"));
+    }
 }

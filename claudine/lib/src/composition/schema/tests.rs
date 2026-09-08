@@ -9,7 +9,12 @@ use tempfile::TempDir;
 fn make_source(dir: &TempDir, document: &str) -> ResolvedCompositionSource {
     let file = dir.path().join("test.md");
     fs::write(&file, document).unwrap();
-    resolve_composition_source(file.to_str().unwrap()).unwrap()
+    // Anchored on the fixture directory rather than the ambient CWD: these
+    // documents are absolute paths inside their own `TempDir`, so the monorepo
+    // topology the ambient entry point walks decides nothing here. The tests
+    // below that *do* assert independence from the process CWD use
+    // `make_source_in` and keep the ambient entry point.
+    crate::composition::resolve_fixture_source(file.to_str().unwrap()).unwrap()
 }
 
 fn shipped_implement_plan() -> PathBuf {

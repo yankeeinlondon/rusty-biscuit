@@ -43,7 +43,12 @@ fn write_yaml(dir: &Path, name: &str, value: &Value) {
 
 /// Resolve a written Markdown source and build its preflight graph.
 fn graph_for(path: &str) -> Result<PreflightGraph, CompositionError> {
-    let source = crate::composition::resolve_composition_source(path)?;
+    // `resolve_fixture_source`, not the ambient entry point: every fixture here
+    // is an absolute path inside its own `TempDir`, so the process CWD's
+    // repository topology decides nothing about how it resolves. Nested
+    // references still re-anchor on their authoring directory, which is what
+    // these tests actually assert.
+    let source = crate::composition::resolve_fixture_source(path)?;
     let plan = resolve_sequence_plan(&source)?.expect("fixture declares a sequence");
     build_preflight_graph(&plan, &source)
 }
@@ -666,7 +671,7 @@ mod blocked {
             &[("kind", json!("sequence")), ("sequence", json!(["a"]))],
             "Body.\n",
         );
-        let resolved = crate::composition::resolve_composition_source(&source).unwrap();
+        let resolved = crate::composition::resolve_fixture_source(&source).unwrap();
         assert!(reject_non_sequence_kind(&resolved).is_ok());
     }
 }

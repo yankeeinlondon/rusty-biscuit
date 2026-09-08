@@ -69,12 +69,14 @@ fn quiet_mode_compact_completion() {
     assert!(compact.contains("$0.0042"));
 }
 
-#[test]
-fn silent_mode_produces_nothing() {
-    // Silent mode is handled by the caller — these formatters
-    // simply aren't called. Verify the enum exists.
-    assert_eq!(Verbosity::Silent, Verbosity::Silent);
-}
+// `silent_mode_produces_nothing` was here. Its whole body was
+// `assert_eq!(Verbosity::Silent, Verbosity::Silent)` — true of every build ever
+// compiled, including one with the silent gate deleted, so it could not
+// distinguish any behavior at all while reading as coverage of the name it
+// carried. Nothing in this module takes a `Verbosity`; the gate is
+// `render::event_renderer::EventRenderer::render`, and the replacement
+// assertions live beside it as `silent_verbosity_produces_no_render_units` and
+// `session_start_updates_the_auth_source_even_when_silent`.
 
 #[test]
 fn missing_fields_gracefully_omitted() {
