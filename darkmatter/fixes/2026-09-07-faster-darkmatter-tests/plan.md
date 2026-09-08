@@ -194,16 +194,12 @@ verification are separate milestones.
   while its relevant sources, dependencies, fixtures, configuration, and
   environment remain unchanged. A new failure or relevant change invalidates
   the affected evidence, not every prior gate.
-- Document-only phases run the changed analysis tools and their relevant
-  tests, not Rust package suites or unrelated package gates. Reuse the existing
-  Claudine metrics, inventory, and attribution tools after checking their
-  contracts; add only missing area-specific behavior and regression coverage.
-  Do not build a second general-purpose parser or repeat unchanged mutation
-  demonstrations. Preserve malformed-input and completeness failures.
-  Start with `claudine/fixes/2026-09-07-faster-claudine-tests/`'s
-  `junit-metrics.ts`, `inventory-reconciler.ts`, and `attribution.ts` plus their
-  tests. Reference or adapt these locally without introducing a cross-package
-  framework or depending on another agent's concurrently changing files.
+- Phase 1 refactors the existing Claudine TypeScript analysis tools into one
+  maintained, reusable implementation. Later phases consume that implementation
+  with area-specific data; do not fork copies into each fix directory.
+  Document-only phases run changed analysis-tool checks, not Rust package
+  suites or unrelated package gates. Preserve malformed-input and completeness
+  failures without repeating unchanged parser or mutation demonstrations.
 - Capture each distinct recipe/CI feature selection once per relevant source
   state and derive family membership from those captures. Keep every test in
   the audit, but document common setup and proof once per enumerated family.
@@ -233,10 +229,131 @@ verification are separate milestones.
   summarizes outcomes. Update phase checkboxes and a short status; do not
   duplicate transcripts or requirement-to-test narratives across documents.
 
-## Phase 1 — Baseline, measurement substrate, and evidence discipline
+## Phase 1 — Shared TypeScript analysis tools, baseline, and evidence discipline
 
-Establishes the attribution window. Everything numeric downstream is compared
-against what this phase captures, so it lands before any source change.
+The plan starts at `phase: 1` and retains eleven phases. This phase includes
+analysis-tool implementation and skill documentation; Darkmatter application
+and test optimization still begins in Phase 4. Preserve the baseline source
+state and raw artifacts before refactoring tools, then process baseline and
+candidate evidence with the same recorded tool version.
+
+### Phase 1A — Refactor the Claudine tools for reuse across package areas
+
+Darkmatter and then Sniff are the immediate required consumers. Phase 1 must
+meet both areas' analysis needs; Sniff is not an optional portability example.
+Claudine compatibility remains required. This phase delivers tooling and area
+configuration, not Sniff's test remediation or its full performance campaign.
+
+- [ ] Read both areas' active performance specs and plans before settling the
+      shared contracts. Record a compact requirement-to-command/configuration
+      mapping for Darkmatter and Sniff, using their actual manifests and recipes
+      to resolve feature and execution routes. Close tooling gaps for both in
+      this phase rather than leaving Sniff to fork or redesign the engine.
+- [ ] Read `junit-metrics.ts`, `inventory-reconciler.ts`, `attribution.ts`, and
+      their tests in `claudine/fixes/2026-09-07-faster-claudine-tests/`.
+      Inventory actual callers and output contracts; run GitNexus impact
+      analysis before modifying existing symbols. Preserve a source snapshot
+      and representative input/output fixtures without interrupting concurrent
+      Claudine work or changing its recorded evidence.
+- [ ] Establish one TypeScript tool package at a stable, shared tooling path
+      outside any dated fix directory. Prefer an existing suitable tooling
+      location; record the chosen path and ownership in the Phase 1 log.
+      Keep command dispatch, input parsing, validation, aggregation, and report
+      rendering separable without building a plugin system or a new test runner.
+      Test execution remains with Nextest and the canonical Just recipes.
+- [ ] Replace hard-coded Claudine roots, package lists, family declarations,
+      environment matrices, expected tests, and timeout budgets with explicit,
+      validated configuration. Support different package/tier/feature selections
+      on different environments; do not assume a rectangular four-host matrix.
+      Keep package policy and investigation data outside the shared engine.
+      Claudine-specific watchdog floors and `launch-cwd-probe.ts` remain local
+      unless a concrete second consumer needs their behavior.
+- [ ] Deliver usable configurations for Darkmatter's four packages and Sniff's
+      library/CLI pair. Darkmatter must keep local-default and CI-selected
+      slow-test populations separate and represent DMLS, browser, terminal,
+      and Zed verification routes. Sniff must distinguish `remote`, `network`,
+      and `test-fixtures` selections; deterministic, native-detector, and real
+      resource families; and the separately timed sanity cohort. Represent
+      non-Nextest routes explicitly without treating an inventory row as
+      evidence that the route executed.
+- [ ] Support both areas' comparison provenance and work-count evidence as
+      data: Darkmatter discovery/composition/effect/HTTP observations; Sniff
+      request shape, counter version, acquisition-versus-execution boundaries,
+      and collector-propagation evidence. Keep native Windows and WSL distinct.
+      Reject or mark incompatible comparisons explicitly, including Sniff
+      comparisons spanning the coordinated production-caching change. Do not
+      infer missing counter evidence from timings or embed either product's
+      detector behavior in the shared tool.
+- [ ] Use Nextest JSON listings and JUnit plus the staging manifest as the
+      primary inputs. Replace the handwritten XML scanner with an established
+      parser; reject malformed or inconsistent evidence. Prefer structured
+      reports for attribution. Retain human-readable log parsing only as a
+      bounded compatibility adapter for existing captures that cannot be
+      regenerated, with a documented supported format and useful errors.
+- [ ] Replace the handwritten Rust lexer with an established parser or an
+      existing repository source-analysis facility where suitable. Keep source
+      discovery separate from runner discovery: macro expansion and platform
+      exclusions must not silently become claims of complete executable
+      coverage. Unsupported syntax or unresolved source/runner differences need
+      explicit diagnostics and dispositions. Do not implement a general Rust
+      parser in TypeScript or add a bespoke Rust service for this refactor.
+- [ ] Preserve evidence integrity: unique identities and family assignment;
+      missing artifacts/tests and invalid durations rejected; failures, skips,
+      and retries disclosed; compatible baseline/candidate populations checked;
+      build/setup, runner elapsed, and summed test duration kept separate.
+      A sum of durations is not cohort wall time. Known pending environments
+      remain pending rather than satisfying a passing gate.
+- [ ] Make invocation reproducible: declare the supported Node version, pin
+      runtime/parser dependencies through the repository's package-manager and
+      lockfile conventions, enable TypeScript checking, and provide documented
+      Just commands for analysis and tool verification. Wire the tool's own
+      checks into an appropriate existing CI route when its inputs change;
+      ordinary Rust test runs must not acquire a Node dependency. Use portable
+      path handling and argument passing; verify macOS/Linux/Windows behavior
+      where available and report missing platform evidence explicitly.
+- [ ] Reuse meaningful existing tests and add focused regressions for changed
+      contracts. Exercise Claudine compatibility and both required consumers,
+      Darkmatter and Sniff, with representative structured artifacts captured
+      from their actual package/feature selections. Run listing reconciliation,
+      report validation, family attribution, and comparison through the shared
+      commands for each area. Use small synthetic negative fixtures to prove
+      rejection of missing feature coverage, incompatible cohorts/counter
+      provenance, and incomplete environment matrices. Missing hosted artifacts
+      remain pending; fixtures prove tool behavior, not hosted performance.
+      Preserve malformed-input, missing-test, duplicate-assignment, and
+      incomplete-capture failures. Compare old and new outputs on preserved
+      Claudine inputs, documenting intentional corrections instead of blindly
+      preserving parser defects. Do not rerun Rust suites to test report parsing.
+- [ ] Migrate Claudine entry points safely: retain thin compatibility wrappers
+      or documented replacement commands where existing plans need them, with
+      one shared implementation and no duplicated parsing logic. Coordinate
+      edits to active Claudine files; do not delete historical artifacts.
+      Record the tool version used for every new report. Darkmatter's later
+      phases must call the shared commands, not copy the source. Update Sniff's
+      active performance plan to consume the delivered commands/configuration
+      and remove instructions to rebuild or adapt Claudine scripts. Its Phase 1
+      still captures its own baseline; it must not repeat the shared refactor.
+- [ ] Update `.claude/skills/rust-testing/SKILL.md` (the existing skill meant by
+      `rust-test`) in this phase, with a concise entry linking to detailed
+      guidance in `test-suite-audits.md` or a focused sibling document. Document
+      installation, canonical commands, configuration, artifact collection,
+      family reconciliation, timing interpretation, pending/failure semantics,
+      and validation reuse. Include working Darkmatter and Sniff examples,
+      Claudine compatibility commands, and minimal onboarding steps for another
+      area. Verify the examples against
+      fixtures; update affected dependency docs and Markdown hashes through the
+      repository's prescribed tooling. Do not create a competing `rust-test`
+      skill or defer this documentation until Phase 11.
+
+**Checkpoint 1A** — one shared implementation serves both Darkmatter and Sniff
+through validated configurations and exercised commands; their requirement
+mapping has no unresolved tooling gaps. Claudine compatibility, reproducible
+typecheck/tests, a CI verification route, Sniff's consumption handoff, and the
+`rust-testing` skill examples for both immediate consumers are present.
+Document missing platform/performance evidence separately from tooling
+readiness. No performance claim depends on silently changing the interpreter.
+
+### Phase 1B — Capture and validate Darkmatter's baseline
 
 - [ ] Record the baseline identity: revision SHA, `git status --porcelain`
       (dirty state), `rustc`/`cargo`/`cargo-nextest` versions, profile, host
@@ -272,13 +389,11 @@ against what this phase captures, so it lands before any source change.
       variability or the budget decision requires them. Missing CI baseline
       legs keep their budgets pending but do not block fixture implementation.
       Keep local observations separate from CI claims.
-- [ ] Reuse the existing Claudine TypeScript metrics/reconciler contracts,
-      adapting only area-specific inputs or missing behavior in this fix
-      directory. Keep failures for malformed reports, missing artifacts/tests,
-      duplicate identities, invalid durations, failed runs, and incomplete
-      family assignment. Run existing tool tests once and add focused tests
-      for changed behavior; link their results rather than re-proving the
-      unchanged parser in each phase.
+- [ ] Use Phase 1A's shared commands with Darkmatter configuration to validate
+      the captured reports. Store configuration and evidence in this fix
+      directory; record the shared tool version and link its existing test
+      results. Add only missing Darkmatter-specific data or focused regressions,
+      never another metrics/reconciler implementation.
 - [ ] Identify the work counters available for later proof — the library's
       `effects-instrumentation` feature (process-wide effect counters),
       `MockHttpServer::request_count()`, and any compose/discovery counters the
@@ -286,11 +401,13 @@ against what this phase captures, so it lands before any source change.
       (discovery, composition, effects, HTTP requests) each covers. Note gaps as
       Phase 7/8 work, not as a reason to fall back on timing.
 
-**Validation checkpoint 1** — reproducible baseline source/build state and
-initial local runs recorded, with three costs separated; metrics validation
-passes; available CI artifacts are linked and missing legs or harnesses are
-pending. This opens implementation. Full alternating measurement belongs to
-Phase 9; CI budget ratification remains pending where inputs are missing.
+**Validation checkpoint 1** — checkpoint 1A is satisfied, including shared-tool
+verification and the `rust-testing` skill update; reproducible baseline
+source/build state and initial local runs are recorded with three costs
+separated; shared metrics validation passes. Available CI artifacts are linked
+and missing legs or harnesses remain pending. This opens Darkmatter fixture
+implementation. Full alternating measurement belongs to Phase 9; CI budget
+ratification remains pending where inputs are missing.
 
 ---
 
@@ -350,7 +467,8 @@ Inventory and analysis only; no Rust application or test changes. Produces `inve
       is a declared no-op for this area, and confirm `sanity`, `test`,
       `test-l2`, `test-l3`, `test-browser`, `doctest`, `coverage`, `bench`,
       `fuzz`, `lint`, `all` all exist and select the four packages.
-- [ ] Run the Phase 1 reconciler over the listings plus the declared families;
+- [ ] Run Phase 1's shared reconciler with Darkmatter configuration over the
+      listings plus the declared families;
       link its output from `inventory.md`. It must exit 0 with every identity
       assigned to exactly one row.
 - [ ] Give every row a disposition: satisfactory, remediation in this fix, or
@@ -419,9 +537,8 @@ and continue implementation without inventing a target.
 
 ## Phase 4 — The deterministic CLI fixture (RB2, infrastructure)
 
-First code phase. Requires checkpoint 1's preserved baseline and local
-checks, not completion of CI sampling. Phases 5–6 depend on the fixture
-contract and its focused verification.
+First Darkmatter fixture code phase. Requires checkpoint 1's shared-tool
+verification, preserved baseline, and local checks, not completion of CI sampling. Phases 5–6 depend on the fixture contract and its focused verification.
 
 - [ ] Add `darkmatter/cli/tests/common/fixture.rs` and re-export from
       `common/mod.rs`. Keeping it out of `mod.rs` holds the shared module near
@@ -843,7 +960,9 @@ assertion was used to reach a number.
       the second consumer and a named owner. Without an owner, the third design
       decays into the first.
 - [ ] Update the `darkmatter` and `rust-testing` skills plus area READMEs
-      **only where the fixture or test workflow actually changed**
+      **only where the fixture or test workflow actually changed**. Verify
+      Phase 1's shared-tool guidance remains accurate; update only subsequent
+      changes instead of rewriting that documentation
       (`CLAUDE.md` § Drift Maintenance). Where a comment or doc now contradicts
       the code, the code is correct — fix or delete the comment and say so.
 - [ ] Confirm no production API changed. If one did, verify downstream
