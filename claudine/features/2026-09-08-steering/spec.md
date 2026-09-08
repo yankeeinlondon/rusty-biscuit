@@ -1,0 +1,531 @@
+# Steering Running Agent Sessions
+
+Status: Draft — interactive requirements discovery; not ready for implementation.
+Created: 2026-09-08
+Updated: 2026-09-08
+
+## Purpose
+
+Let a user course-correct a running agent through `claudine steer "message"`.
+Use the same delivery capability to warn an agent when Claudine detects early
+signs of repetitive output, giving it an opportunity to recover before the
+existing runaway guard terminates it.
+
+Provider support must come from evidence-backed fleet research and generated
+metadata. A provider's ability to resume a completed conversation does not prove
+that it can receive a message during an active run.
+
+## Confirmed Requirements
+
+- Add `claudine steer {msg}` with an interactive list for choosing the intended
+  active session. One invocation sends to the selected session.
+- Support an explicit session ID to bypass the picker, plus a way to list session
+  IDs for scripts. Never infer an automation target. If delivery requires
+  interruption, explicit targeting does not grant permission to interrupt:
+  require the interactive choice, or fail with an explanation when interaction
+  is unavailable. Exact command flags and listing format remain to be specified.
+- Return from `claudine steer` once the provider confirms acceptance. Report
+  “queued” when that is all it confirms; claim delivery only with evidence of
+  delivery. Do not wait for a later tool boundary, agent response, or completed
+  turn. A successful socket write alone is not confirmed provider acceptance.
+- Discover sessions on the same host under the same OS user.
+- Include both sessions launched through Claudine and sessions launched directly
+  through a provider. Discover and steer each wherever technically possible;
+  explain provider or launch-mode limitations for discovered unavailable sessions.
+- Include both actively working sessions and open sessions waiting for input.
+  Mark waiting sessions as idle and explain when sending a message starts their
+  next turn. Ended conversations retained only in history are not active sessions.
+- Keep provider setup separate from `claudine steer`. When steering requires
+  configuration, an extension, or special startup options, explain the missing
+  prerequisite and offer a separate setup path. Sending a message must not
+  install extensions or mutate provider configuration. Research determines the
+  concrete setup guidance; this decision does not require a new setup command.
+- List discovered active sessions even when they cannot be steered. Their rows
+  must be de-emphasized and rendered with a single strikethrough, and selection
+  must be disabled. Also explain why they are unavailable in text.
+- Investigate every eligible entry in [the provider roster](../../docs/providers.yaml).
+  Respect `skip_research`; do not maintain a separate research enumeration.
+- Add an early automatic helper message for suspicious output. Existing stuck-agent
+  termination remains required if the session does not recover.
+- Warn before the existing stop limit without extending it. Sending, accepting,
+  or delivering a warning must not reset guard evidence or timeout clocks.
+- Manual steering prefers non-interrupting delivery. When a provider requires
+  interruption to inject the message, explain that limitation and interactively
+  offer the user the choice to interrupt and deliver, or cancel. Do not interrupt
+  without that explicit choice.
+- Automatic loop intervention never interrupts to deliver steering. If the
+  provider cannot support non-interrupting delivery, warn on STDERR that steering
+  cannot be sent and continue enforcing the existing error limit.
+- Undocumented provider messaging mechanisms are permitted with research-backed
+  compatibility checks. Require evidence for supported versions and verify the
+  actual session's interface before use. Failed or inconclusive checks leave that
+  mechanism unavailable; do not optimistically send through an unknown protocol.
+- Every steering mechanism, documented or undocumented, must pass a live test
+  against a deliberately created disposable agent session before being enabled.
+  Verify delivery to the intended conversation and the claimed interruption
+  behavior. Documentation, source inspection, and compatibility checks alone
+  cannot satisfy this activation gate. Untested mechanisms remain visibly
+  unverified and unavailable for manual or automatic steering.
+  Test evidence applies only to the OS, version, launch conditions, and behavior
+  it establishes; do not imply untested cases passed.
+- Automatic loop warnings are enabled by default, with an explicit opt-out.
+  Opting out disables automatic steering attempts and their unavailable-delivery
+  warnings, but does not disable loop detection, existing stop limits, or manual
+  `claudine steer`. Configure this in user or repo configuration, with repo values
+  overriding user values. An environment variable overrides both at runtime.
+  Precedence is environment > repo config > user config > enabled built-in default.
+  Exact key and environment-variable names remain to be specified. CLI flags and
+  task-document frontmatter overrides are not part of this agreed configuration
+  surface.
+- Trigger an early repetition warning halfway to the configured repetition stop
+  limit: 15 full repetitions for the default limit of 30. Integer rounding for
+  small or odd limits remains to be specified; a warning
+  must never delay or supersede a hard stop.
+- Allow one automatic warning per separate repetition episode, subject to a total
+  default cap of three warnings per agent execution. Ordinary conversation turns
+  do not reset the allowance. Separate agent executions, including separate tasks
+  in a sequence, have independent allowances; the cap is not shared across the
+  outer Claudine command or persisted across executions of a resumed conversation.
+  A new episode requires a sustained break in repetition; a single different
+  line or brief wording change does not qualify. The measurable recovery window
+  will be defined using representative detector fixtures. This warning-eligibility
+  rule does not change the existing detector's hard-stop behavior. Reaching the
+  cap does not change detection or termination limits.
+- Log full steering message text after heuristically replacing potential secrets
+  with `*` characters, together with delivery details. Implement secret detection
+  as shared, reusable functionality; reuse or consolidate existing heuristics
+  rather than creating a steering-specific duplicate.
+- Follow [the typed knowledge pipeline](../../docs/topics/agentic-research-as-a-typed-knowledge-pipeline.md):
+  per-provider prose and schema-validated frontmatter, deterministic consumption,
+  generated provider metadata, and a cross-provider summary.
+- Refine this specification interactively before implementation. Execute research
+  after its schema and prompts are settled sufficiently to produce useful evidence.
+  Research tasks must use `gpt-5.6-sol` with low thinking.
+- Claudine must compile and work on macOS, Linux, and Windows. Provider-specific
+  limitations must be represented per OS rather than inferred from this Mac.
+
+## Existing Behavior and Integration Grounding
+
+Verified from repository source and documentation on 2026-09-08:
+
+- [`ContentDetector`](../../lib/src/runaway/detector.rs) is a pure, stateful
+  detector. It assembles lines across stream chunks and recognizes repeated
+  groups of lines. Its configurable default is 30 full repetitions, with groups
+  up to 16 lines. Separate volume limits default to 50,000 lines or 32 MiB.
+  `reset_turn` resets volume counters but preserves repetition history and cycle
+  state, so a turn boundary must not be interpreted as repetition recovery.
+- Semantic content guards observe assistant output and reasoning, excluding tool
+  arguments and results. The capture path has a volume cap, without live
+  repetition detection. See [timeouts](../../docs/topics/timeouts.md).
+- Explicit exit expressions, repetition, and volume guards produce terminal
+  outcomes. A warning must be a separate nonterminal observation, not a terminal
+  error disguised as recovery.
+- Silence and wall-clock timeouts are separate controls. Sending a steering
+  message must not count as agent progress or refresh their clocks.
+- Provider metadata in `lib/src/provider/<slug>/data.rs` is generated through
+  `claudine-gen`; provider behavior is hand-written separately. Extend that
+  pipeline rather than adding a competing capability table or scattered provider
+  switches. See [provider metadata](../_completed/2026-07-02-provider-metadata/spec.md).
+- Rendezvous already provides a per-user local endpoint abstraction: Unix-domain
+  sockets on macOS/Linux and named pipes on Windows. Its existing
+  [local IPC contract](../../docs/rendezvous/local-ipc.md) is the reference for
+  ownership, identity, and connection handling. Reuse suitable existing discovery
+  and transport facilities after tracing their actual implementation; do not
+  assume session history is proof of a live, reachable session.
+
+The user's Claude Code report describes a PID registry under `~/.claude/sessions/`,
+authenticated sockets under `/tmp/cc-socks/`, and delivery at the next tool round.
+These are **unverified research leads**, including the claims about non-interactive
+availability, authentication, idle notices, and the meaning of registry fields.
+No provider has been classified as steering-capable by this specification yet.
+
+### Claude Code Pilot Findings
+
+The [completed passive pilot](../../docs/research/steering/claude.md) corroborates
+the session registry and peer sockets on macOS with installed Claude Code 2.1.263.
+It records all 24 baseline cases and passes schema and relational review, with
+no live verification records and therefore no activated mechanism.
+
+[Official cross-session documentation](https://code.claude.com/docs/en/cross-session-messaging)
+establishes non-interrupting delivery between tool calls and new-turn delivery
+for idle sessions. Long-running non-interactive sessions have inboxes unless
+launched in bare mode. Contrary to the original sibling-key account, token
+authentication is optional on macOS/Linux and mandatory on native Windows.
+The earlier interim concern about absent `.key` files therefore does not block
+Unix delivery; a supported external credential path remains unresolved on Windows.
+
+Inbound policy may hold or refuse messages. Held messages require approval or a
+policy change and are not merely queued for the next tool boundary. Raw response
+framing and acknowledgment correlation still need implementation-level evidence.
+Claude Code non-interactive sessions cannot display the approval dialog. A held
+message therefore has no human approval path in that session; default-held
+messages expire unless a policy/mode change permits delivery, while explicitly
+held messages can remain until session end. Do not offer “approve in the receiving
+session” as guidance for non-interactive targets. A known hold/refuse policy makes
+unattended steering unavailable; explain the separate setup needed to accept
+messages. If a send unexpectedly reports held, report it as undelivered and
+requiring a policy change, never as queued for automatic delivery. Do not interrupt
+or change provider policy to bypass its inbound controls.
+The pilot identified schema gaps around access prerequisites and acknowledgment
+lifecycle; refine those before full-roster research. No credentials were recorded
+and no active delivery probe was made.
+
+### OpenCode Second Pilot
+
+The user selected OpenCode as a second passive pilot before full-roster research.
+Its purpose is to test both provider capability and whether the schema can
+represent a materially different session architecture.
+
+Repository inspection confirms that Claudine's
+[`OpenCode prompt delivery`](../../cli/src/commands/wrap/profile/opencode.rs)
+passes a non-interactive task as positional arguments to `opencode run`.
+The pilot must distinguish ordinary launches from externally addressable server
+or attached-client launches rather than applying server API capabilities to all
+OpenCode processes. It must also distinguish live conversations from stored
+session history and correlate native provider IDs with Claudine's separately
+assigned execution identity. Findings and any necessary schema changes will be
+recorded here after review.
+
+## Decisions in Progress
+
+The table records accepted product decisions. Remaining implementation choices
+are called out explicitly and must not override those decisions.
+
+| ID | Question | Recommendation | Status |
+| --- | --- | --- | --- |
+| D1 | Include sessions launched directly through the provider? | Include both native and Claudine-launched sessions wherever reliable discovery and delivery exist; explain launch requirements for other sessions. | Accepted by user: both |
+| D2 | Does an automatic warning extend the existing stop threshold? | Warn early and preserve all existing stop thresholds and clocks. Warning frequency is a separate decision. | Accepted by user: warn earlier, keep existing limit |
+| D3 | Which delivery mechanisms may count as steering? | Manual steering offers an explained, interactive interruption fallback; automatic warnings require non-interrupting delivery, otherwise warn on STDERR and retain the existing error limit. | Accepted by user |
+| D4 | May production use an undocumented provider protocol? | Allow research-verified mechanisms with version-specific evidence and runtime compatibility checks; incompatible or unverified mechanisms remain unavailable. | Accepted by user: yes, with compatibility checks |
+| D5 | When and how often should automatic warnings fire? | Warn halfway to the configured repetition stop limit (15 of the default 30), once per separate episode, with a default cap of three warnings per agent execution. Require sustained non-repeating output before a new episode. Conversation turns do not reset the cap; separate executions have independent allowances. Recovery-window sizing and integer edge cases remain implementation details to specify and test. | Threshold, per-episode policy, three-warning default, execution boundary, and sustained-recovery rule accepted by user |
+| D6 | What happens without an interactive terminal? | Support explicit session IDs and a listing usable by scripts; never guess a target. Interruption still requires an interactive choice. Exact flags remain open. | Accepted by user: explicit session ID |
+| D7 | Should automatic help be enabled by default and configurable? | Enable by default; environment override > repo config > user config > built-in default. Opt-out is independent of existing guards and manual steering. Exact names remain to be specified. | Default, opt-out, and configuration precedence accepted by user |
+| D8 | What message content should be retained in logs? | Retain full message text with potential secrets heuristically masked using `*`, plus delivery details. Share reusable detection logic rather than duplicate it for steering. | Accepted by user |
+| D9 | Is a live disposable-session test required before enabling a mechanism? | Require it for every mechanism, documented or undocumented; verify same-conversation delivery and interruption behavior. Untested cases remain unverified and unavailable. | Accepted by user |
+| D10 | Where should prerequisite setup happen? | Explain missing prerequisites in `steer` and offer setup separately; do not turn message delivery into a configuration workflow. | Accepted by user |
+
+## Proposed Session Selection and Delivery Contract
+
+Proposed command forms for implementation review:
+
+```sh
+claudine steer "Recheck the failing test before changing the implementation."
+claudine steer --list
+claudine steer --list --json
+claudine steer --session <session-id> "Recheck the failing test."
+```
+
+`--list` sends nothing and includes unavailable sessions and reasons. Its JSON
+output must include the exact unambiguous ID accepted by `--session`, provider,
+working directory, state, steering availability, and setup requirements. A
+non-interactive invocation without an explicit target fails with guidance to
+list and choose an ID. Listing does not require a message. Use the normal
+Claudine separation between machine-readable stdout and status/warnings on STDERR.
+These flag names are proposed engineering defaults, not an implemented CLI.
+
+1. Accept a nonempty message and discover current-user sessions locally.
+2. Correlate provider records with live process/session identity. Deduplicate
+   native and Claudine observations of the same session. A PID alone is not a
+   sufficient identity because the OS can reuse it.
+3. Display provider, session name or short identity, working directory, running
+   or idle state when known, and enough distinguishing information for identical
+   projects or parallel agents. Exact column layout remains open.
+4. Determine availability for the actual session: provider version, OS, launch
+   mode, required startup options, reachable channel, and implemented adapter.
+   A provider-wide support boolean is insufficient.
+   Distinguish non-interrupting steering, interruption-required steering, and
+   unavailable steering. A session with a supported interruption fallback remains
+   selectable, labeled as requiring interruption; it is not an unavailable row.
+5. Disable unavailable rows with dim styling and single strikethrough. Provide a
+   plain-text reason so color or strikethrough support is not required to understand
+   the list. Use `TerminalRenderable` components for terminal output.
+   Where setup could enable steering, include an actionable separate setup path.
+   Distinguish changes that help an existing session from those requiring a future
+   launch; never imply that configuring the provider retrofits an open session.
+6. Unless an explicit session ID was supplied, let the user select one eligible
+   session, including when only one is eligible. An explicit ID bypasses only the
+   picker, not eligibility checks or required interruption consent.
+   Cancellation sends nothing. No sessions and no selectable sessions have clear
+   empty states; neither falls back to broadcasting.
+7. If the selected session requires interruption, explain what would be stopped
+   and any known effect on running tools. Interactively offer interruption and
+   message delivery or cancellation. Without explicit acceptance, send nothing
+   and interrupt nothing. An unavailable interactive prompt must not imply consent.
+8. Revalidate target identity and availability immediately before delivery. If it
+   ended or changed, report that outcome without redirecting the message elsewhere.
+   If non-interrupting delivery becomes unavailable, never silently switch to
+   interruption; the same explanation and interactive choice are required.
+9. Report only what the protocol establishes: accepted/queued is different from
+   injected into the conversation, and neither proves that the model acted on it.
+   Return after confirmed acceptance without waiting for later delivery or a reply.
+   Report uncertain delivery honestly; do not blindly retry an ambiguous send and
+   risk duplicate messages.
+
+Discovery is best effort. An undiscoverable native session cannot be listed;
+document coverage gaps rather than promising exhaustive discovery without evidence.
+Active sessions include both working and idle-but-open sessions. Research must
+establish how each provider distinguishes those states from ended conversations;
+when state cannot be established reliably, display it as unknown rather than
+guessing that the session is idle or working.
+
+## Proposed Automatic Warning Contract
+
+Automatic intervention applies where Claudine already observes a live semantic
+stream for an agent execution. Discovering a native session for manual steering
+does not itself attach an output monitor or enable automatic intervention for
+that session. The existing capture-only path cannot promise early repetition
+warnings without new live observations.
+
+Proposed configuration names are `steering.automatic.enabled` in user/repo
+configuration and `CLAUDINE_AUTO_STEER` for the runtime override. Apply the agreed
+precedence to explicitly supplied values; an absent repo value must not erase a
+user opt-out. Names and malformed-value diagnostics must be reconciled with
+existing configuration conventions before implementation. This setting controls
+automatic help only, including whether an unavailable-delivery warning is emitted.
+
+- Keep content detection pure. Emit a nonterminal warning observation that a
+  separate runtime delivery component handles using the same service as `steer`.
+- Route directly to the session producing the suspicious stream; automatic help
+  never opens a picker and never guesses among other sessions.
+- Do not block stream consumption, timeout checks, cancellation, or termination
+  while contacting a provider. Delivery attempts and queues must be bounded.
+- A warning describes observed repetition as a suspicion, asks the agent to check
+  whether it is making progress, and suggests changing approach or explaining why
+  it cannot proceed. It must not instruct the agent to claim success or bypass
+  its instructions.
+- Prefer counts and a concise description over echoing arbitrary output into the
+  message. Any excerpts must be bounded and clearly identified as observed data.
+- Proposed message: “Claudine has detected repeated output that may indicate a
+  loop. Please check whether you are making progress toward the user's task.
+  If you are repeating the same approach, change your approach or stop and explain
+  what is preventing progress. Claudine's existing runaway limits still apply.”
+- Unsupported delivery, connection failure, or ambiguous acknowledgment does not
+  disable any existing guard. A hard-stop observation takes priority over pending
+  warnings. Do not enqueue a warning after deciding to terminate the session.
+- If non-interrupting delivery is unsupported for the actual session, emit a
+  warning on STDERR explaining that Claudine cannot send automatic steering and
+  will continue enforcing the existing error limit. Do not offer an interactive
+  prompt, interrupt a turn, or cancel a tool to deliver an automatic warning.
+  Deduplicate this warning so repetitive output does not flood STDERR.
+- A single output chunk can cross both warning and stop thresholds. Processing
+  must preserve the existing hard stop even if no useful delivery window exists.
+- Sending, acknowledging, or replying to a warning is not proof of recovery.
+  Existing detector behavior remains the basis for recognizing changed output;
+  steering itself must not clear accumulated guard evidence.
+- Providers that inject only at the next tool call may be unable to rescue a
+  token-generation loop. Capability metadata and diagnostics must expose that
+  limitation. Recovery is best effort, not a guarantee.
+- Early volume warnings, silence warnings, retry-churn warnings, and changes to
+  explicit exit-expression behavior are not yet agreed scope. Do not silently
+  turn all termination causes into delayed termination.
+
+## Proposed Fleet Research Contract
+
+Draft artifacts now exist under `claudine/docs/research/steering/`:
+[`_fleet.md`](../../docs/research/steering/_fleet.md) and
+[`_schema.yaml`](../../docs/research/steering/_schema.yaml). Produce one `<slug>.md`
+per eligible provider after pilot review. Use a Darkmatter
+SimplifiedSchema sidecar referenced by each document's `$schema` frontmatter.
+The following is the proposed information model; the sidecar is a reviewable
+draft, not a finalized contract or generated Rust API.
+
+| Record | Required information | Consumer decision |
+| --- | --- | --- |
+| Document identity | Schema revision, roster slug, created/updated dates, research agent and model, examined provider versions | Coverage and freshness |
+| Evidence | Stable evidence ID, official URL/source permalink or sanitized local artifact, version/commit, date, method, exact claim and limitations | Whether a claim justifies enabling behavior |
+| Discovery method | Method ID, OS, launch origin, registry/API/process mechanism, identity and liveness checks, exposed labels, evidence references | How to find and identify sessions |
+| Delivery mechanism | Mechanism ID, documented/undocumented status, protocol family, startup requirements, destination/authentication description, evidence references | Which hand-written adapter could implement it |
+| Capability case | OS, interactive/non-interactive mode, native/Claudine launch origin, running/idle state, supported/unsupported/unknown verdict, mechanism and discovery references, reason | Whether this particular session can be selected |
+| Delivery semantics | While-running injection/next-tool-boundary/next-turn/interruption/resume-only/unknown, long-tool behavior, accepted versus delivered acknowledgments, ordering, duplication and cancellation behavior, limits | Honest user feedback and suitability for loop rescue |
+| Compatibility | Tested version versus documented version bounds, feature probes, required flags/configuration, known incompatible variants | Runtime eligibility without broad version assumptions |
+| Live verification | Mechanism, OS, exact version, launch conditions, session state, test date/outcome, sanitized fixture, assertions, limitations, evidence references | Mandatory activation gate distinct from researched support |
+| Implementation gaps | `requires_claudine_update`, reason, unresolved questions, changes on refresh | Follow-up work and review |
+
+Use explicit `unknown` where evidence is missing. `unsupported` requires evidence
+of a limitation; failure to find documentation is not proof of absence. Separate
+native Windows from Linux/WSL observations. Enumerate OS and launch-mode coverage
+so omissions cannot look like support.
+
+Multiple mechanisms may exist for one provider. Keep independently addressable
+mechanism and evidence records rather than collapsing them into one provider-wide
+verdict. Research describes facts; generated code selects only implemented,
+reviewed mechanisms that satisfy the eventual product policy.
+
+### Research Prompt Requirements
+
+For each roster provider, the prompt must:
+
+1. Read the topic schema and use the Claudine skill. Research this provider's
+   current CLI, not a similarly named IDE or hosted product.
+2. Start with official documentation and versioned source. Inspect local help or
+   installed artifacts when useful, distinguishing observations from inference.
+   Use Sniff for host/process discovery and `FileReference` for file-reference
+   resolution where code is needed.
+3. Investigate native peer messaging, SDK/server protocols, structured input,
+   hooks/extensions, and required launch modes. Do not assume stdin is usable or
+   that a documented SDK feature is enabled in ordinary CLI sessions.
+4. Establish whether a new message reaches the same running conversation, at what
+   boundary, and whether any in-flight tool or turn is canceled. Treat resume-only
+   behavior and terminal keystroke injection as distinct findings, not proof of
+   live steering.
+5. Investigate discovery independently from delivery, including native sessions,
+   process liveness, authentication, version differences, and per-OS gaps.
+6. For Claude Code, independently check the user's socket/registry claims. For
+   every provider, require evidence for non-interactive support and long-tool
+   behavior rather than extrapolating from an interactive demonstration.
+7. Produce implementation-level prose: discovery, protocol framing, request/response
+   examples without secrets, timing, failure modes, compatibility, sources, and gaps.
+8. Populate metadata with claim-linked evidence. Preserve creation dates and record
+   changes on refresh; old research is context, not current proof.
+9. Limit writes to assigned research artifacts. Do not send test messages into
+   the user's existing sessions. Any active delivery experiment uses a deliberately
+   created disposable session; provider/model costs and launch details must be
+   defined before that experiment. Do not focus terminal or browser windows.
+10. Validate the artifact with `md schema validate`; report unresolved findings
+    honestly rather than inventing support to satisfy the schema.
+
+### Execution and Quality Gates
+
+1. Review the schema and prompt with the user, especially the distinction between
+   live delivery and interruption/resumption alternatives.
+2. Pilot Claude Code with `gpt-5.6-sol`, low thinking, to challenge the socket lead
+   and whether the schema can express undocumented, tool-boundary delivery.
+3. Revise the schema and prompt from pilot findings, then research the full roster
+   using Claudine sequence orchestration and the same requested model/thinking.
+   Verify model selection in run metadata before accepting results.
+4. Gate artifacts on current schema validity, correct provider identity, complete
+   capability cases, resolvable evidence references, and substantive prose.
+   Timestamp and successful process exit alone are insufficient.
+5. Use bounded lifecycle recovery. Surface contradictory evidence or missing
+   mechanisms as review items; do not retry indefinitely.
+6. Review findings with the user and update this spec's decisions and a per-provider
+   capability matrix. The Claude Code passive pilot is complete; schema refinement
+   precedes the full roster, which has not started.
+7. Plan and run disposable-session tests for candidate mechanisms. Preserve
+   sanitized evidence of target identity, actual conversation delivery, delivery
+   timing, and effects on the running turn or tool. Acceptance alone does not
+   prove delivery. Failed or missing tests block activation of the corresponding
+   capability cases, without preventing publication of research findings.
+8. Add a topic summary under `docs/research/summary/` and publish it through the
+   established Claudine skill publication workflow once findings are accepted.
+
+## Generated Metadata and Runtime Boundary
+
+### Steering Logs and Shared Secret Redaction
+
+Persist manual and automatic steering messages with potential secrets replaced by
+asterisks, together with target identity, origin, timestamps, delivery mechanism,
+interruption choice where applicable, and acknowledgment or failure outcome.
+Redact before persistence, including diagnostic errors or provider responses that
+echo message content. The message delivered to the intended agent retains the
+user's original text; masking applies to the logging copy.
+
+Repository inspection found reusable starting points:
+
+- [`protect::scrub`](../../lib/src/protect/scrub.rs) has a compiled pattern catalog
+  for common API keys, GitHub/Slack tokens, bearer tokens, and JWTs, plus structured
+  sensitive-key handling. Its current policy also masks email addresses, rewrites
+  home paths, and uses `<redacted>`; it is not a drop-in implementation of the
+  requested secret-only asterisk masking.
+- [Wrapper argument sanitization](../../cli/src/commands/wrap/env/sanitize.rs)
+  recognizes sensitive flags, environment key names, and token prefixes; argument
+  masking already uses `****` but is not a free-text redactor.
+- [`messaging::send`](../../lib/src/messaging/send.rs) includes webhook URL
+  redaction, another relevant secret surface.
+
+Implementation must assess these consumers and factor shared secret recognition
+into an appropriate reusable library boundary. Keep consumer-specific formatting
+and privacy policies separate; do not copy pattern catalogs or silently change
+existing consumers' behavior. Exact API, location, and mask length remain design
+details to settle during implementation impact analysis.
+
+Test realistic prose containing tokens, credential assignments, authentication
+headers, and credential-bearing URLs, as well as ordinary text that must remain
+readable. Include overlapping matches, Unicode, multiline content, repeated
+redaction, and provider errors echoing secrets. Heuristic redaction is best
+effort and must not be described as a guarantee that every secret is recognized.
+
+### Metadata Consumption
+
+Extend the existing catalog types, research loading, generator, and drift checks.
+The concrete integration points are shared vocabulary in
+[`catalog-types`](../../catalog-types/src/lib.rs), schema-validated research in
+[`ProviderInputs`](../../gen/src/inputs.rs), declared research ownership in the
+[`mapping registry`](../../gen/src/registry.rs), and existing catalog coercion
+and [Rust emission](../../gen/src/emit/mod.rs). Steering needs a deterministic
+relational/evidence gate in addition to shape validation, including case coverage,
+reference integrity, and live-verification applicability. This is implementation
+work; the draft fleet currently performs schema validation and requests the other
+checks as research review, not as an implemented deterministic guarantee.
+Generated records should express discovery and delivery capabilities, compatibility,
+and known limitations. Protocol implementation stays in reviewed provider behavior
+code behind a common steering interface.
+
+Do not execute research-provided shell snippets as runtime discovery or delivery
+commands. Map validated mechanism identifiers to implemented behavior. Unknown
+mechanisms, missing evidence required by policy, and unsupported runtime versions
+must not make a session selectable. Compatibility probes must be read-only.
+Successful disposable-session test evidence is required in addition to these
+checks. Keep researched capability distinct from activation eligibility so a
+source-documented mechanism can be represented while its implementation or live
+verification is still pending.
+
+Use the same OS user boundary for discovery and send. Provider credentials or peer
+keys are authentication material, never list columns or diagnostic payloads. Keep
+steering local even if Rendezvous knows about paired remote hosts. Revalidate
+ownership and destination identity before using provider-advertised endpoints.
+
+Whether managed-session delivery requires a new Rendezvous operation or an existing
+wrapper-owned channel remains an implementation design question. Resolve it after
+research establishes connection ownership and launch requirements.
+
+## Acceptance Criteria to Refine After Research
+
+- A manual send reaches only the selected, revalidated session; canceled selection
+  and unavailable rows send nothing.
+- Interruption-required sessions are selectable with their limitation explained.
+  Manual interruption occurs only after the user explicitly accepts the fallback;
+  cancellation or inability to prompt leaves the running session untouched.
+- For automatic loop intervention, a session lacking non-interrupting delivery
+  produces a bounded STDERR warning, receives no steering-related interruption,
+  and still terminates if it reaches the existing error limit.
+- Unsupported sessions remain visible with the required styling and a textual
+  reason. Plain-output users can understand their availability.
+- Tests cover duplicate observations, reused PIDs, ended sessions, unavailable
+  endpoints, ambiguous acknowledgments, and concurrent senders.
+- An early warning can be observed before a repetition hard stop. A simulated
+  agent that changes its output avoids a repetition trip under existing detector
+  rules; continued repetition still terminates at the configured threshold.
+- Failed/slow steering cannot stall stream processing or termination. Warning
+  traffic does not refresh watchdog clocks or reset detector counters.
+- Tests cover split chunks, warning and termination in one chunk, unavailable
+  next-tool delivery, bounded warning frequency, and stopping during delivery.
+- Existing exit-expression, volume, timeout, and cancellation behavior remains
+  covered. Research-driven exceptions require explicit changes to this spec.
+- Generated metadata has roster coverage and deterministic drift checks; evidence
+  and schema validation failures are surfaced before generation enables a mechanism.
+- Run appropriate `just test`, `just test-l2`, and `just lint` checks for the eventual
+  implementation. Native Windows, macOS, and Linux transport behavior needs runtime
+  evidence; compilation alone does not prove provider steering support. L2/L3 tests
+  must not take window focus.
+- Update public CLI docs, relevant topic docs, and the Claudine skill with the final
+  behavior. Update dependency docs only if dependencies change.
+
+## Current Work Boundary
+
+This feature is in specification and research design. No production symbols have
+been edited and no steering message has been sent. The Claude Code passive
+research pilot completed as a delegated `gpt-5.6-sol` agent with low thinking;
+the user requested OpenCode as a second pilot to test whether further schema
+refinement is necessary. That passive pilot is now running with the same model
+and low thinking. The remaining eight providers have not started. Before
+implementation edits, run the repository-required GitNexus impact
+analysis on affected symbols and report the blast radius.
+
+The draft sidecar passed a synthetic document validation through `md schema
+validate`, and an invalid support enum was correctly rejected. This establishes
+basic schema loading and case-vocabulary validation, not complete fixture coverage,
+cross-record validation, prompt execution, or research accuracy. The draft fleet
+prompt has not yet been executed through Claudine sequence. The delegated pilot
+uses its provider-specific instructions directly. Its initial pass uses passive investigation;
+delivery experiments remain separately planned disposable-session tests.
