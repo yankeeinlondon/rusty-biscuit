@@ -209,7 +209,14 @@ pub enum HarnessError {
     ShellCommandBlacklisted { command: String, reason: String },
 
     // --- Path resolution ---
-    /// A `@`-prefixed path requires a repo root, but none was available.
+    /// A repository-anchored path required a repository root, but none was
+    /// available.
+    ///
+    /// No production path constructs this today: `&`/`^` references outside a
+    /// repository surface through [`HarnessError::FileReferenceUnresolvable`]
+    /// carrying the resolver's typed `OutsideRepository`, and `@` falls back to
+    /// the home root rather than demanding a repository. The variant is kept
+    /// because it is part of the published error catalog.
     #[error("repo root required to resolve path \"{path}\"")]
     RepoRootRequired { path: String },
 

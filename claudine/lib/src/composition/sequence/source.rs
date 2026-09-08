@@ -29,7 +29,7 @@ use super::normalize::normalize_plan;
 /// Delegates all grammar and candidate ordering to [`FileReference`] and the
 /// shared [`FileResolutionContext`] (D5/D11): implicit refs probe the source
 /// directory before repository scopes; explicit refs pin to the source
-/// directory; `@`/`^`/`vault:`/`~`/absolute keep their usual meanings. The
+/// directory; `@`/`&`/`^`/`vault:`/`~`/absolute keep their usual meanings. The
 /// reference is authored inside the composition source, so the source
 /// document's directory is the base and the launch directory is never a
 /// fallback here.
