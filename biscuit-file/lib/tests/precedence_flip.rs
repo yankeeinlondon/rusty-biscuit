@@ -216,7 +216,7 @@ fn interpolation_staying_implicit_keeps_both_kinds_implicit() {
     assert_eq!(
         detailed.matched_path(),
         Some(repo.join("docs/readme.md").as_path()),
-        "a relative interpolation stays implicit and resolves repository-first",
+        "a relative interpolation stays implicit and falls back to the repository root",
     );
     assert_eq!(detailed.class().kind, FileReferenceKind::ImplicitRelative);
     assert_eq!(detailed.effective_kind(), FileReferenceKind::ImplicitRelative);

@@ -20,12 +20,12 @@ Core library for file format parsing, conversion, and detection as well as file 
 
 ### `FileReference` struct
 
-Parse compact file descriptors and resolve them lazily against runtime context (CWD, git repo root, Cargo workspace, env vars, configured paths).
+Parse compact file descriptors and resolve them lazily against runtime context (CWD, git repo root, package and package-area scopes, env vars, configured paths).
 
 Supported reference types:
 
 - **Relative** (`./foo.md`) and **Absolute** (`/path/to/file`)
-- **Magic** (`@docs/spec.md`) -- searches custom, package, repository, and HOME roots
+- **Magic** (`@docs/spec.md`) -- searches custom, package, package-area, repository, and HOME roots
 - **Repository root** (`&README.md`) -- resolves exactly from the repository root
 - **Repository scoped** (`^README.md`) -- searches package, package-area, then repository roots
 - **Vault** (`vault:notes/today.md`) -- searches Obsidian vault roots
