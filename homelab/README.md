@@ -74,6 +74,7 @@ Home automation control across the Homelab.
     - `homey unifi gateways`
     - `homey unifi vlans`
     - `homey unifi switches`
+    - 
 - Server supports smart events monitoring at `/unifi` endpoint
 
 ### Tailscale
