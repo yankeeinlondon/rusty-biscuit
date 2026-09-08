@@ -29,7 +29,8 @@ features; explicit tier recipes enable the corresponding local targets.
 `CliProcessFixture` in `claudine/cli/tests/common/mod.rs` — `command()` for the
 hermetic default, `command_builder()` when it needs a named escape. The default
 pins `current_dir` to the fixture `cwd`, points the home variables at the
-fixture home, sets `CLAUDINE_RENDEZVOUS_REPORT=false` and `NO_COLOR=1`, and
+fixture home, sets `CLAUDINE_RENDEZVOUS_REPORT=false`, `NO_COLOR=1`,
+`PLAYA_DRY_RUN=1` and a fixture-local `PLAYA_SPOOL_DIR`, and
 composes `PATH` as the fixture `bin` plus a minimal system set (`/usr/bin:/bin`;
 `%SystemRoot%\System32` on Windows) — enough for the `sh`/`cmd`/`git` claudine
 itself spawns by bare name, and short of every prefix an agentic CLI installs
@@ -37,6 +38,12 @@ into. Three escapes exist, each requiring a call-site comment: `fake_only_path()
 (nothing but the fixture stubs), `host_path()` (the old `augmented_path`), and
 `ambient_context(dir)` (launch CWD pinned to a repository the test built inside
 its own workspace — the rusty-biscuit checkout can never be inherited).
+The two `PLAYA_*` defaults are not cosmetic: a lifecycle audio effect makes
+claudine re-exec *itself* as playa's detached spool worker, which outlives the
+command that enqueued the job, so without them an L1 test that composes such a
+prompt leaks two `claudine` processes per run and plays a sound on the host.
+`detached_audio.rs`, whose subject is that worker, is the one file that opts
+back in.
 A test whose subject *is* the running child — a signal, a deadline, a streaming
 read, `CREATE_NEW_PROCESS_GROUP`, an `expectrl` session — uses `command_std()`
 (or `command_builder()…build_std()`), which is the same policy on a

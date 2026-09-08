@@ -37,10 +37,19 @@ test is not required for every implementation edit.
 - **Time and ownership.** Synchronize on readiness or the final condition being
   asserted, with a deadline; do not use a fixed sleep as readiness proof. When
   elapsed time is the contract, preserve its semantic floor and justify the
-  budget, polling cadence, and shutdown margin under CI contention. Fixtures
-  own and clean up children, threads, sockets, and directories on failure too.
-  Serialize only tests sharing an actual resource, using runner-visible
-  coordination when tests execute in separate processes.
+  budget, polling cadence, and shutdown margin under CI contention. Also check
+  whether the *child* is waiting on the harness: a bare PTY answers no terminal
+  query, so a child that probes it — DSR cursor position (`ESC[6n`), OSC 10/11
+  foreground and background colour — pays a full timeout per unanswered probe
+  before it emits anything. Answer each on observation, as
+  `claudine/cli/tests/common/pty.rs` and `biscuit-terminal`'s `ProbeAnswer` do;
+  match the newly-read chunk, not the cumulative transcript, so a late
+  duplicate reply cannot land in a raw-mode prompt as an `ESC` keystroke.
+  Fixtures own and clean up children, threads, sockets, and directories on
+  failure too. Serialize only tests sharing an actual resource, using
+  runner-visible coordination when tests execute in separate processes — and
+  do not label a per-test resource shared: nextest gives every test its own
+  process, so a `#[serial]` group there enforces nothing and misleads.
 - **Reachability.** Confirm that the test's name, `cfg`, required features, and
   recipe select it on the intended platforms. L1 includes hermetic subprocess
   and filesystem tests. OS-specific behavior alone does not require L2/L3.
@@ -506,6 +515,24 @@ test overrides. Keep cache roots and platform home variables inside the
 fixture where the application uses them. Choose a documented deny list or a
 cleared environment based on actual runtime needs; Windows command stubs may
 need `SystemRoot`, `COMSPEC`, and `PATHEXT` restored.
+
+**Also disable the side effects that outlive the process.** Two of claudine's
+defaults exist only because the child can start work that the child's own exit
+does not end:
+
+- `CLAUDINE_RENDEZVOUS_REPORT=false` — absence means *enabled*, so a test that
+  merely forgets the key reports a live session to the developer's daemon.
+- `PLAYA_DRY_RUN=1` plus a fixture-local `PLAYA_SPOOL_DIR` — a lifecycle audio
+  effect makes the CLI re-exec **itself** as playa's detached spool worker,
+  which deliberately survives the command that enqueued the job. Without the
+  default, an L1 test that composes a prompt carrying such an effect leaves two
+  orphaned binaries per run and plays a sound through the developer's speakers.
+  `just test-leaks` is what surfaces this; no assertion in the test will.
+
+Both live inside namespaces the builder sweeps by prefix, so the *ordering* is
+part of the contract: scrub first, then apply defaults. Assert them against a
+parent that exported the opposite value — a set-equality comparison between two
+command surfaces cannot catch a policy that is identically wrong on both.
 
 Give the guard an **explicit allowlist of `(file, one-line reason)` entries with
 stale-entry failure**: an entry matching no live site fails too, so the list
