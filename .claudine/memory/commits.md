@@ -18,6 +18,13 @@ belong here.
   when the working tree is a clean superset of the staged snapshot.
   Otherwise use the temp-index plumbing fallback (`update-index --index-info`
   → `write-tree` → `commit-tree -S -F -` → `git update-ref HEAD <new> <old>`).
+- **Temp-index capture order.** Setting `GIT_INDEX_FILE=$TMPIDX` *before*
+  `git ls-files -s` reads from the temp index (which is empty) and yields an
+  empty commit. Capture the staged blob lines first (they are in the real
+  index), then `export GIT_INDEX_FILE=$TMPIDX`, then pipe the saved lines
+  into `git update-index --index-info`. An empty commit is recoverable via
+  `git update-ref HEAD <previous-tip> <empty-hash>` (no `git reset`,
+  no index/worktree churn).
 - `--only` on a clean-superset `MM` path still captures working-tree-only
   content (e.g. a manifest `[[test]]` block whose source file is currently
   untracked). The pre-flight `git show :<path>` only sees the staged blob;
