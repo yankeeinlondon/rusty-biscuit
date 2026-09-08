@@ -170,21 +170,143 @@ The pilot identified schema gaps around access prerequisites and acknowledgment
 lifecycle; refine those before full-roster research. No credentials were recorded
 and no active delivery probe was made.
 
-### OpenCode Second Pilot
+### OpenCode Second Pilot Findings
 
-The user selected OpenCode as a second passive pilot before full-roster research.
-Its purpose is to test both provider capability and whether the schema can
-represent a materially different session architecture.
+The [OpenCode pilot](../../docs/research/steering/opencode.md) examined installed
+v1.18.29 and pinned source at `16747470f976aca3d362ad730bcd3fe82ecc2c9a`.
+It produced all 24 baseline cases and identified further schema refinements
+needed before full-roster research. No live delivery tests were performed.
 
-Repository inspection confirms that Claudine's
-[`OpenCode prompt delivery`](../../cli/src/commands/wrap/profile/opencode.rs)
-passes a non-interactive task as positional arguments to `opencode run`.
-The pilot must distinguish ordinary launches from externally addressable server
-or attached-client launches rather than applying server API capabilities to all
-OpenCode processes. It must also distinguish live conversations from stored
-session history and correlate native provider IDs with Claudine's separately
-assigned execution identity. Findings and any necessary schema changes will be
-recorded here after review.
+**Launch configuration changes reachability.** The pinned implementation uses
+internal transport for an ordinary TUI launch unless network options are supplied;
+ordinary `run` also uses an in-process server. Explicitly exposed TUI servers,
+`serve`, and `run --attach` have different reachability and lifetimes. Claudine's
+current [prompt delivery](../../cli/src/commands/wrap/profile/opencode.rs) passes
+non-interactive tasks positionally to `run`; it must not assume an external
+endpoint exists. The report records the difference between broad public server
+documentation and the pinned implementation instead of treating documentation
+wording as proof of current endpoint availability.
+
+**Acceptance is weaker than scheduling.** The pinned
+[`promptAsync` handler](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/server/routes/instance/httpapi/handlers/session.ts)
+forks prompt handling without awaiting message persistence before returning 204.
+The [runner](https://github.com/anomalyco/opencode/blob/16747470f976aca3d362ad730bcd3fe82ecc2c9a/packages/opencode/src/effect/runner.ts)
+waits for an existing run when busy rather than scheduling a separate run.
+The research identifies possible later tool-loop consumption and possible lack
+of consumption when no further iteration occurs. These are source-derived
+possibilities requiring disposable tests, not observed successful steering.
+HTTP acceptance therefore cannot be labeled queued or delivered.
+
+**Interruption is a multistep operation.** Abort and replacement-message submission
+are separate requests. If the latter fails, the original work may already be
+stopped. Manual reporting must preserve that partial outcome, and automatic
+warnings must never use the fallback.
+
+**A server is not a session or an OS user.** One server can host multiple
+conversations; a stored conversation may outlive its client. Loopback HTTP alone
+does not establish the required user boundary. Research and runtime checks must
+identify the owning process/user, routing context, conversation, and authentication
+conditions independently.
+
+The current broad cases remain unknown where they combine incompatible launch
+configurations. This is not evidence that OpenCode lacks all steering capability.
+Missing live verification separately blocks activation even when documentation
+or source establishes a candidate capability.
+
+### Schema Refinements Required by the Second Pilot
+
+These pilot findings informed schema revision 2, now authored in the sidecar.
+The full-fleet refresh migrates the pilot reports before expanding the remaining
+roster. Do not generate runtime eligibility from the former broad case summaries.
+
+1. **Represent launch profiles explicitly.** Introduce provider-defined, stable
+   profile IDs describing how the process starts, whether its endpoint is internal
+   or externally reachable, and its lifetime. Capability cases must refer to a
+   specific profile. Preserve OS/origin/mode/state coverage without assigning one
+   verdict to both ordinary and server-attached launches. Generator eligibility
+   consumes specific cases; any broad matrix is a derived summary, not competing
+   source data.
+2. **Record what each acknowledgment proves.** Separate request acceptance,
+   message persistence, scheduled delivery, and confirmed conversation delivery.
+   Record provider signals and evidence for each fact, with explicit unknowns.
+   Preserve the user's return-after-acceptance decision: return promptly, but say
+   only accepted when the protocol confirms no more. Avoid inventing a queued
+   state or equating a stored message with model consumption.
+3. **Separate delivery state from execution state.** A message can reach the
+   agent before its requested tool is blocked by permissions. Incoming-message
+   approval holds and later tool/question holds are different observations.
+   Runtime session observations need a source, observation time, and explicit
+   unknown state; idle cannot be inferred from mere absence in a busy-session map
+   or presence in stored history.
+4. **Make correlation and retry semantics machine-readable.** Capture whether the
+   sender may choose a message ID, how acceptance/delivery events correlate, and
+   whether replaying that ID suppresses duplicates. Unknown duplication behavior
+   must not become a presumed safe retry policy.
+5. **Model partial interruption outcomes.** Describe whether interruption and
+   submission are one operation or separate phases, evidence of stopping, and
+   what the caller can observe if delivery fails after interruption. Preserve
+   those outcomes in diagnostics and steering logs.
+
+Prefer a small shared vocabulary plus provider-specific evidence records over
+an ever-growing enum mirroring every provider's internal state. Research should
+surface unsupported vocabulary for review rather than filling a superficially
+valid record that loses the behavior needed by the generator.
+
+### Codex Third Pilot Findings
+
+The [Codex pilot](../../docs/research/steering/codex.md) examined installed
+`codex-cli 0.153.4`, local help/schema, and official versioned documentation.
+It uses revision 1 and identifies further distinctions for the revised contract.
+No live delivery tests were performed.
+
+The [versioned app-server protocol](https://github.com/openai/codex/blob/rust-v0.153.4/codex-rs/app-server/README.md)
+defines `turn/steer` for an exact active regular turn, requiring `threadId` and
+`expectedTurnId`. A mismatch, idle thread, or ineligible turn rejects steering.
+`turn/start` starts work; `thread/resume` loads a conversation; neither is an
+automatic substitute for rejected steering. Interruption acknowledgment is
+separate from the later completion event. The protocol also distinguishes stdio
+JSONL from WebSocket framing over Unix sockets and marks TCP WebSocket transport
+experimental/unsupported. These transport facts do not establish external access
+to arbitrary ordinary CLI sessions.
+
+The current [Claudine wrapper](../../cli/src/commands/wrap/profile/codex.rs)
+launches `exec` with an initial stdin prompt and uses `exec resume` for resumption.
+Research did not establish an external steering channel into those ordinary
+executions. A managed app-server profile is a distinct integration, and retained
+stdio requires its owning process to expose an authorized local control path.
+
+The broad cases remain unknown where revision 1 combines unmanaged and managed
+profiles. That ambiguity is separate from the live-verification activation gate.
+Accepting input for an active turn does not prove that a model generating tokens
+without a further boundary will consume it in time to escape a repetition loop.
+
+### Additional Schema Refinements from Codex
+
+Codex reinforces OpenCode's launch-profile, acknowledgment, message-correlation,
+and partial-interruption findings. It adds these requirements:
+
+1. **Target preconditions and concurrent changes.** Represent conversation identity
+   separately from the current turn/operation identity. Capture how to obtain
+   that identity, the required expected-ID check, and stale-target outcomes.
+   Rejection must not silently retarget later work or become a new-turn request.
+2. **Operation intent and eligibility.** Distinguish steering current work,
+   starting an idle turn, queuing a follow-up, and interruption followed by input.
+   A target's role and current activity can prohibit direct input despite being
+   active. Record those restrictions and their observable checks.
+3. **Transport, framing, and maturity.** Store carrier transport, wire framing,
+   initialization handshake, authentication, and provider-declared experimental
+   or unsupported status separately. Documented does not imply stable or suitable
+   for production, and a Unix socket does not imply raw newline-delimited JSON.
+4. **Read-only discovery versus loading.** List and inspect already-loaded
+   conversations using passive APIs. Discovery and compatibility checks must not
+   resume, load, start, or fork work merely to make a target appear reachable.
+   Stored history alone is not a live session. Capture control-channel ownership
+   and whether an external client can reach that existing owner.
+
+These changes are now represented in schema revision 2. Validate the revised
+contract against all four pilot reports before full-roster expansion.
+Live tests must additionally cover stale-turn races, ineligible turns,
+long-running tools and generation, and interruption-completion acknowledgment.
 
 ## Decisions in Progress
 
@@ -203,6 +325,117 @@ are called out explicitly and must not override those decisions.
 | D8 | What message content should be retained in logs? | Retain full message text with potential secrets heuristically masked using `*`, plus delivery details. Share reusable detection logic rather than duplicate it for steering. | Accepted by user |
 | D9 | Is a live disposable-session test required before enabling a mechanism? | Require it for every mechanism, documented or undocumented; verify same-conversation delivery and interruption behavior. Untested cases remain unverified and unavailable. | Accepted by user |
 | D10 | Where should prerequisite setup happen? | Explain missing prerequisites in `steer` and offer setup separately; do not turn message delivery into a configuration workflow. | Accepted by user |
+
+### Pi Final Pilot Findings
+
+The user selected Pi as the fourth and final pilot before schema revision.
+The current [Pi wrapper](../../cli/src/commands/wrap/profile/pi.rs) supplies an
+initial stdin prompt, while generated non-interactive flags select print mode
+and JSON event output. This is distinct from Pi's separately documented RPC
+mode; JSON output alone does not establish bidirectional message delivery.
+The [completed passive pilot](../../docs/research/steering/pi.md) examines official
+v0.84.4. Steering waits for the full current assistant tool batch, including
+remaining sequential or parallel calls. Acceptance does not prove incorporation.
+Abort retains pending queues; clearing them is a separate operation. The RPC
+connection targets a mutable current session without an expected-session guard,
+and skill/template interpretation can change message text. These require explicit
+fields and tests in the revised research contract. No live delivery was tested.
+
+In response to the user's question about RPC versus JSON output, the recommended
+managed-launch design is Pi RPC mode for executions Claudine needs to steer.
+RPC retains structured event output while adding inbound commands; JSON output
+mode alone does not supply an ongoing command channel. This is a proposed launch
+change subject to pilot review and mandatory live verification, not implemented
+behavior or proof that independently launched sessions become attachable.
+
+Migration requires retained stdin ownership, command/event demultiplexing,
+response correlation, existing semantic-stream compatibility, unattended handling
+of extension UI requests, and explicit completion/EOF/cleanup behavior. Route
+external `steer` requests to that owner over the established private local control
+boundary; do not have competing readers or writers attach to the child's pipes.
+
+The full-fleet review corrected an earlier pilot assumption: official v0.84.4
+`AgentSessionEvent` includes `agent_settled`, and the RPC subscription forwards it.
+Do not close the process at the earlier `agent_end` event while retries,
+compaction, queued continuation, or extension settlement remain. The refreshed
+[Pi execution research](../../docs/research/non-interactive-sessions/pi.md)
+records the source-backed completion distinction and shutdown requirements.
+
+**User correction:** Pi must retain extensions, skills, prompt templates, and
+context files. Claudine must not automatically inject `--no-extensions`,
+`--no-skills`, `--no-prompt-templates`, or `--no-context-files` as a consequence
+of selecting structured output or RPC mode. Respect explicitly authored provider
+settings rather than disabling these features for unattended execution.
+The earlier suggestion to preserve the current disabling flags is superseded.
+Permission handling, including the existing `--no-approve` behavior, is a separate
+policy concern and is not implicitly authorized to change by this correction.
+
+Research and disposable tests must exercise enabled extensions and resources.
+Determine how extension UI requests behave without a human response path, and
+how skill/template expansion or extension-command interpretation affects a
+steering message. Do not solve those questions by silently disabling the features.
+
+### Follow-on Research: Prefer Bidirectional Control
+
+The user requested revisiting the fleet research that selected JSON instead of
+RPC. The proposed policy is to prefer a usable RPC/control interface for managed
+execution, including one-shot work. RPC and JSON are not competing encodings:
+a control protocol can carry both commands and streaming JSON events.
+Availability must be established for the actual OS, version, and launch profile,
+with provider features preserved. Lack of an existing Claudine adapter is an
+implementation gap, not evidence that a provider interface is unsuitable.
+
+The causal trail is concrete:
+
+- The [non-interactive fleet prompt](../../docs/research/non-interactive-sessions/_fleet.md)
+  asks researchers to choose an output format first and prioritizes streaming
+  over request/reply, without requiring comparison of two-way control plus events.
+- Its [Pi report](../../docs/research/non-interactive-sessions/pi.md) recognizes RPC
+  but recommends JSON because it is simpler for the existing one-shot wrapper.
+  It also recommends disabling extensions and resources, contrary to the user's
+  requirement for this feature.
+- [Pi facts](../../docs/providers/facts/pi.yaml) explicitly omit RPC because the
+  output-format model cannot represent it and copy the disabling companion flags.
+  The generator registry consumes output formats from facts; revising research
+  prose alone will not change generated behavior.
+
+After the steering contract is refined, revise this existing fleet rather than
+creating a competing source of execution recommendations. Proposed requirements:
+
+1. Enumerate execution interfaces before selecting one: output-only CLI,
+   bidirectional stdio, local server, and relevant SDK interfaces. Keep transport,
+   wire encoding, event stream, and control operations as separate facts.
+2. Record each interface's launch and connection ownership, session targeting,
+   prompt/steer/cancel/state operations, acceptance versus completion, queue and
+   process lifetime, unattended requests, and feature parity. Reuse steering
+   mechanism identifiers and evidence instead of duplicating delivery semantics.
+3. Compare candidates for each supported execution profile. Prefer usable RPC;
+   require an evidenced reason for choosing a one-way alternative. Research must
+   distinguish provider limitations, missing Claudine implementation, and missing
+   verification. Do not select an interface solely because today's wrapper handles it.
+4. Separate provider facts from Claudine selection policy. Generate typed execution
+   interface descriptors and selection records through the existing catalog
+   pipeline; keep output formats as an independent property. Do not disguise an
+   RPC adapter as an output-format flag or execute research snippets at runtime.
+5. Validate selection references, compatibility coverage, feature preservation,
+   and fallback reasons. Exercise lifecycle and unattended requests in disposable
+   tests with extensions and skills enabled before activation. Unknown behavior
+   remains unknown rather than being inferred from a protocol's name.
+6. Reconcile research, facts, overrides, generated metadata, parsers, and wrapper
+   lifecycle behavior before declaring a migration complete. Refresh the full
+   eligible roster with `gpt-5.6-sol`, low thinking, after schema/prompt review.
+
+**Accepted fallback policy:** If the preferred RPC interface cannot be used for
+a launch, Claudine may automatically use a verified alternative. Emit a warning
+on STDERR explaining why RPC is unavailable, which interface was selected, and
+which capabilities are unavailable, including steering when applicable. Preserve
+the user's execution settings and enabled provider features; if no verified
+alternative satisfies those requirements, fail with an explanation.
+A missing Claudine implementation remains visible as migration work rather than
+being recorded as a provider limitation. This launch fallback does not authorize
+interrupting an active session or replaying work after an ambiguous submission.
+Manual steering retains its explicit interactive interruption choice; automatic
+loop warnings retain their non-interrupting-only requirement and existing limit.
 
 ## Proposed Session Selection and Delivery Contract
 
@@ -326,8 +559,8 @@ Draft artifacts now exist under `claudine/docs/research/steering/`:
 [`_schema.yaml`](../../docs/research/steering/_schema.yaml). Produce one `<slug>.md`
 per eligible provider after pilot review. Use a Darkmatter
 SimplifiedSchema sidecar referenced by each document's `$schema` frontmatter.
-The following is the proposed information model; the sidecar is a reviewable
-draft, not a finalized contract or generated Rust API.
+The following is the proposed information model; the revision-2 sidecar is the
+contract for the authorized full-fleet research, not a generated Rust API.
 
 | Record | Required information | Consumer decision |
 | --- | --- | --- |
@@ -399,8 +632,8 @@ For each roster provider, the prompt must:
 5. Use bounded lifecycle recovery. Surface contradictory evidence or missing
    mechanisms as review items; do not retry indefinitely.
 6. Review findings with the user and update this spec's decisions and a per-provider
-   capability matrix. The Claude Code passive pilot is complete; schema refinement
-   precedes the full roster, which has not started.
+   capability matrix. Claude Code, OpenCode, Codex, and Pi passive pilots are complete;
+   pilot-driven schema refinements precede the remaining six providers.
 7. Plan and run disposable-session tests for candidate mechanisms. Preserve
    sanitized evidence of target identity, actual conversation delivery, delivery
    timing, and effects on the running turn or tool. Acceptance alone does not
@@ -517,8 +750,13 @@ This feature is in specification and research design. No production symbols have
 been edited and no steering message has been sent. The Claude Code passive
 research pilot completed as a delegated `gpt-5.6-sol` agent with low thinking;
 the user requested OpenCode as a second pilot to test whether further schema
-refinement is necessary. That passive pilot is now running with the same model
-and low thinking. The remaining eight providers have not started. Before
+refinement is necessary. That passive pilot is complete with the same model
+and low thinking, and identified the schema refinements above. The user requested
+Codex as a third pilot; it is complete with the same model and low thinking
+against the current revision 1 contract and identified additional schema gaps.
+The user selected Pi as the fourth and final pilot; passive research is complete
+with `gpt-5.6-sol` and low thinking against revision 1. The remaining
+six providers have not started. Before
 implementation edits, run the repository-required GitNexus impact
 analysis on affected symbols and report the blast radius.
 
