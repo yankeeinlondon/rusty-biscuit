@@ -3,7 +3,7 @@ reviewed: true
 reviewed_by: codex/default
 reviewed_on: 2026-08-31
 implemented: true
-review_iterations: 2
+review_iterations: 3
 ---
 
 # Wrapped runs can stall indefinitely at startup or report success with incomplete work
@@ -142,6 +142,12 @@ ledger finalization, and acceptance criteria together before coding.
   stale for the full budget.
 - Wall-clock `timeout` keeps precedence when both rules breach on the same
   watchdog tick.
+- The `step_timeout` plus one watchdog interval bound governs **detection and
+  the termination request** — the tick on which the wrapper decides the rule
+  breached and signals the child. `kill_grace` is outside that bound: the
+  platform termination ladder is a separately configured budget that
+  necessarily follows, so the child's final reap is bounded by
+  `step_timeout` + one watchdog interval + `kill_grace`.
 - A startup breach remains `ProcessTermination::TimedOut` with
   `error_kind: "step_timeout"` and follows the existing platform-specific
   termination ladder (SIGTERM to SIGKILL on Unix and the established Windows
@@ -164,6 +170,23 @@ ledger finalization, and acceptance criteria together before coding.
 - Preserve unknown terminal status strings in machine data. Do not infer
   success from an unknown value; surface it as unresolved until the provider
   vocabulary is explicitly extended and tested.
+- Because `task_notification` carries no inherent terminality, its status is
+  routed by three explicit vocabularies — successful, unsuccessful, and
+  nonterminal/progress — under this ratified rule:
+  1. an **absent or whitespace-only** status is progress (`Info`); the provider
+     said nothing, so nothing is lost;
+  2. a status in the successful or unsuccessful vocabulary is a terminal
+     observation preserving ID, name, and raw status;
+  3. a status in the **progress** vocabulary (`thinking`, `running`,
+     `in_progress`, `progress`, `started`, `starting`, `pending`, `queued`,
+     `working`, `active`, `resumed`) is progress (`Info`);
+  4. a status that is **present but in none of the three** is a terminal
+     observation with an unresolved outcome, its raw string preserved verbatim.
+  Branch 4 is the fail-closed residue: an unrecognized status must never be
+  read as still-in-flight, because that would silently accept an unknown future
+  terminal status as non-failing. Extending the progress vocabulary requires
+  fixtures, exactly as extending the successful one does. Matching is
+  case-insensitive and trim-normalized throughout.
 - Missing task IDs must not be collapsed into the empty-string ID. Preserve
   each anonymous terminal observation as a distinct fact so one event cannot
   accidentally clear another. Names are display metadata, not identity.
@@ -198,16 +221,41 @@ ledger finalization, and acceptance criteria together before coding.
   `summary.error_message`. Preserve `summary.exit_code` as the provider's real
   exit code (0 in the incident) and preserve
   `ProcessTermination::Completed`, because Claudine did not kill the child.
+  The `error_kind` assignment is **unconditional**: it is the stable
+  machine-facing exit reason for this shape, so an `error_kind` the parser
+  recorded earlier in the attempt may not hold the slot. That earlier failure
+  is still operationally valuable and `error_message` is the only place its
+  text still has, so the composed message names both the incomplete tasks and
+  the displaced provider failure, within the same 240-character concise-message
+  budget. The displaced clause is budget-reserved, so the truncatable tail is
+  the task list — which stays complete in `subagent_outcomes` regardless.
 - Carry `StreamExecutionSummary.is_error` into `AttemptOutcome`.
   `classify_failure` must classify a completed attempt as `AgentFailure` when
   either `exit_code != 0` **or** `is_error` is true. This is the general
   semantic-error contract; it intentionally applies to all providers, not only
   Claude.
-- The failure lifecycle stack fires with `err.kind =
-  "incomplete_subagents"`; the success stack does not fire. This failure is
-  fail-fast unless the document's ordinary `failure` stack explicitly chooses
-  recovery. It is not `Timeout`, `Aborted`, or an automatically retryable
-  transport error.
+- The failure lifecycle stack fires; the success stack does not. This failure
+  is fail-fast unless the document's ordinary `failure` stack explicitly
+  chooses recovery. It is not `Timeout`, `Aborted`, or an automatically
+  retryable transport error.
+- The failure carries two identities, and they are deliberately different
+  spellings of the same condition:
+  - the stable **machine** identity is `summary.error_kind ==
+    "incomplete_subagents"`, carried into the synthetic `session_end` row
+    alongside `extra.subagent_outcomes`;
+  - the **lifecycle-stack** identity is the locked catalog code `err.code ==
+    "provider.incomplete_subagents"` under `err.category == "provider"`, with
+    `disposition: unrecoverable` and `origin: provider` encoding the fail-fast
+    rule above. `err.kind` and `err.variant` are the deprecated spellings of
+    `err.category` and `err.code`, so they read `"provider"` and
+    `"provider.incomplete_subagents"`. A `when:` clause should pin `err.code`.
+
+  The draft asked for `err.kind = "incomplete_subagents"`. That is not
+  implementable: `err.kind` is the deprecated alias for the diagnostic
+  `Category`, a closed 12-value taxonomy, and `incomplete_subagents` is not a
+  category — making it one would corrupt the taxonomy for every other error.
+  Adding the catalog row is the additive, non-breaking way to give the failure
+  the same machine-matchable identity the draft was reaching for.
 - The concise lifecycle/error headline follows the existing 240-character
   hygiene contract and includes the incomplete count and as many names as fit.
   The full terminal diagnostic enumerates every incomplete task using
@@ -234,6 +282,20 @@ ledger finalization, and acceptance criteria together before coding.
   - `.claude/skills/claudine/signal-handling.md`
   - `claudine/docs/topics/non-interactive-sessions.md`
   - `.claude/skills/claudine/summaries/non-interactive-sessions.md`
+    (generated — never hand-edit this file. `just publish-summary-research`
+    composes `claudine/docs/research/summary/*.md` through `md compose` into
+    this directory, so a direct edit is overwritten on the next publish. The
+    durable edit site is the source,
+    `claudine/docs/research/summary/non-interactive-sessions.md`; correct it
+    there and republish. That source's *body* is itself produced by the
+    document's own `sequence`, so a correction that must also survive a
+    research regeneration belongs in the source's frontmatter `prompt` as a
+    standing rule — the precedent is the prompt-iteration technique recorded in
+    `claudine/features/_completed/2026-07-02-provider-metadata/model-config-refresh.md`.
+    This fix did both. Scope note: the summary is a cross-provider research
+    comparison, not a Claudine behavior contract, so only its Claudine-facing
+    recommendations are in scope for a behavior fix — here, the claim that
+    Claude's `result` event is by itself semantic completion)
   - `.claude/skills/claudine/opencode-event-sources.md` (skill-only by
     design — the `2026-05-12-opencode-stderr-returns` fix that created it
     asked for a file under `.claude/skills/claudine/`, so there is no
@@ -295,9 +357,13 @@ than weakening the default.
 ## Acceptance criteria
 
 1. **Generic startup stall:** a re-exec test fixture that emits no output is
-   terminated within `step_timeout` plus one watchdog interval without a
-   wall-clock `timeout`; the summary reports `TimedOut` and
-   `error_kind: "step_timeout"` with a startup-specific message.
+   terminated without a wall-clock `timeout`; the summary reports `TimedOut`
+   and `error_kind: "step_timeout"` with a startup-specific message. The
+   wrapper must decide the breach and signal the child within `step_timeout`
+   plus one watchdog interval, and the child must be reaped within that plus
+   `kill_grace`. The reap is the quantity integration coverage asserts,
+   because it is the last event the wrapper observes; a generous outer process
+   timeout remains only as a hang backstop.
 2. **Startup heartbeat:** non-whitespace bytes before the first semantic event
    refresh the startup silence clock; whitespace-only bytes do not. A fixture
    proves both sides.
@@ -310,7 +376,11 @@ than weakening the default.
    breach when both clocks are stale.
 5. **Terminal normalization:** Claude fixtures prove that `task_progress`
    remains `Info`, terminal `task_notification` preserves ID/name/status, and
-   `status: "stopped"` is not discarded.
+   `status: "stopped"` is not discarded. Fixtures also prove all four
+   notification-routing branches: absent status and an explicit progress word
+   stay `Info`, while a present-but-unrecognized status becomes a terminal
+   unresolved observation whose raw string survives into
+   `subagent_outcomes[].raw_status`.
 6. **Silent-success poisoning:** replay the incident shape (`task_started` x2,
    terminal `task_notification status:"stopped"` x2, result, native exit 0).
    The native exit remains 0 and termination remains `Completed`, but
