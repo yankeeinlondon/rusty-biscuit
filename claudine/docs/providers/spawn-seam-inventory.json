@@ -29,14 +29,14 @@
     },
     {
       "path": "cli/src/commands/providers.rs",
-      "line": 370,
+      "line": 413,
       "function": "gen_command",
       "command_kind": "std",
       "governed_by": "contribute_child_environment"
     },
     {
       "path": "cli/src/commands/providers.rs",
-      "line": 373,
+      "line": 416,
       "function": "gen_command",
       "command_kind": "std",
       "governed_by": "contribute_child_environment"

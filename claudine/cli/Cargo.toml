@@ -259,6 +259,10 @@ required-features = ["real-tests"]
 name = "real_inline_write_grant"
 required-features = ["real-tests"]
 
+[[test]]
+name = "real_pi_steering"
+required-features = ["real-tests"]
+
 # CI policy: claudine-cli owns the area's L2 (PTY/tmux) tier tests. Its tests
 # need inert AI-provider CLI stubs for provider discovery, and the darkmatter
 # `md` binary built into the workspace target dir (inline_compose_hash).

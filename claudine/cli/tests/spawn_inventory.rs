@@ -49,12 +49,14 @@
 //! copy per repetition, and `$crate` as a definition-crate marker, then
 //! censused under the name `macro!` — or `macro!::fn` for a function the
 //! transcriber emits. A non-exported macro is checked in every module context
-//! in its scanned crate; an exported macro is checked in every module context
-//! across both guarded crates. This conservative superset includes every
-//! possible local invocation scope, so invocation-site resolution cannot hide
-//! a construction; an impossible context may instead produce a loud false
-//! positive. A transcriber that yields neither a block nor items fails the
-//! census outright. Invocation arguments are still read as expressions.
+//! in its scanned crate; a macro exported directly or through a
+//! production-reachable `cfg_attr` is checked in every module context across
+//! both guarded crates. Unknown feature and platform predicates are reachable
+//! for this purpose. This conservative superset includes every possible local
+//! invocation scope, so invocation-site resolution cannot hide a construction;
+//! an impossible context may instead produce a loud false positive. A
+//! transcriber that yields neither a block nor items fails the census outright.
+//! Invocation arguments are still read as expressions.
 //!
 //! Glob chains through the crate are followed to any depth; the resolution
 //! stack, not a hop limit, is what terminates the real cycle in
@@ -1542,7 +1544,7 @@ impl<'ast> Visit<'ast> for FileScanner<'_> {
         if let Some(name) = &item.ident
             && item.mac.path.is_ident("macro_rules")
         {
-            let exported = item.attrs.iter().any(|attr| attr.path().is_ident("macro_export"));
+            let exported = production_macro_export(&item.attrs);
             self.scan_macro_rules(&name.to_string(), &item.mac, exported);
         }
         visit::visit_item_macro(self, item);
@@ -1598,6 +1600,32 @@ fn cfg_test(attrs: &[syn::Attribute]) -> bool {
             attr.parse_args::<syn::Meta>()
                 .is_ok_and(|predicate| production_truth(&predicate) == CfgTruth::False)
         })
+}
+
+fn production_macro_export(attrs: &[syn::Attribute]) -> bool {
+    attrs.iter().any(|attr| meta_applies_macro_export(&attr.meta))
+}
+
+fn meta_applies_macro_export(meta: &syn::Meta) -> bool {
+    if meta.path().is_ident("macro_export") {
+        return true;
+    }
+    let syn::Meta::List(list) = meta else {
+        return false;
+    };
+    if !list.path.is_ident("cfg_attr") {
+        return false;
+    }
+    use syn::parse::Parser;
+    let parser = syn::punctuated::Punctuated::<syn::Meta, syn::Token![,]>::parse_terminated;
+    let Ok(arguments) = parser.parse2(list.tokens.clone()) else {
+        return false;
+    };
+    let mut arguments = arguments.iter();
+    let Some(predicate) = arguments.next() else {
+        return false;
+    };
+    production_truth(predicate) != CfgTruth::False && arguments.any(meta_applies_macro_export)
 }
 
 /// A `cfg` predicate's value in a production build. Only `test` is known;
@@ -3050,13 +3078,13 @@ fn main() {
     assert_eq!(sites.len(), 1);
 }
 
-/// An exported transcriber can inherit an ordinary item name from a module in
-/// the other guarded crate. Keeping the definition and invocation resolvers
-/// separate is what makes that cross-crate expansion visible.
+/// A conditionally exported transcriber can inherit an ordinary item name from
+/// a module in the other guarded crate. Keeping the definition and invocation
+/// resolvers separate is what makes that cross-crate expansion visible.
 #[test]
-fn an_exported_macro_rules_transcriber_uses_a_cross_crate_invocation_scope() {
+fn a_conditionally_exported_macro_rules_transcriber_uses_a_cross_crate_invocation_scope() {
     let definition_source = r#"
-#[macro_export]
+#[cfg_attr(not(test), macro_export)]
 macro_rules! launch {
     () => { Command::new("true").status().unwrap() };
 }
@@ -3113,6 +3141,34 @@ fn run() {
     );
     assert_eq!(tally(&after, "launch!"), (0, 1));
     assert_eq!(after.len(), 1);
+}
+
+#[test]
+fn unknown_cfg_attr_predicates_keep_macro_exports_in_the_production_census() {
+    for attribute in [
+        "#[cfg_attr(feature = \"optional-export\", macro_export)]",
+        "#[cfg_attr(unix, macro_export)]",
+        "#[cfg_attr(unix, cfg_attr(feature = \"optional-export\", macro_export))]",
+    ] {
+        let source = format!("{attribute} macro_rules! launch {{ () => {{}} }}");
+        let file = syn::parse_file(&source).unwrap();
+        let syn::Item::Macro(item) = &file.items[0] else {
+            panic!("fixture must parse as a macro_rules! item");
+        };
+        assert!(production_macro_export(&item.attrs), "{attribute}");
+    }
+
+    for attribute in [
+        "#[cfg_attr(test, macro_export)]",
+        "#[cfg_attr(all(test, unix), macro_export)]",
+    ] {
+        let source = format!("{attribute} macro_rules! launch {{ () => {{}} }}");
+        let file = syn::parse_file(&source).unwrap();
+        let syn::Item::Macro(item) = &file.items[0] else {
+            panic!("fixture must parse as a macro_rules! item");
+        };
+        assert!(!production_macro_export(&item.attrs), "{attribute}");
+    }
 }
 
 #[test]
