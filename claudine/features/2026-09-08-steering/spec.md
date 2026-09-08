@@ -551,6 +551,16 @@ automatic help only, including whether an unavailable-delivery warning is emitte
 - Providers that inject only at the next tool call may be unable to rescue a
   token-generation loop. Capability metadata and diagnostics must expose that
   limitation. Recovery is best effort, not a guarantee.
+- Derive automatic rescue suitability from the selected operation's conversation
+  effect and delivery boundary, in addition to access and live-verification gates.
+  A next-turn-only follow-up cannot rescue an endless current turn; report that
+  limitation on STDERR and preserve the existing error limit. It can still be a
+  manual messaging candidate. An idle-start or interruption operation is never
+  an automatic rescue operation for a working session.
+- A next-tool or end-of-batch boundary is a conditional rescue opportunity for
+  repeated tool rounds, not a promise of delivery during uninterrupted generation
+  or a blocked tool. Unknown boundaries remain unknown. Do not create a second
+  independently authored rescue-support flag that can drift from these facts.
 - Early volume warnings, silence warnings, retry-churn warnings, and changes to
   explicit exit-expression behavior are not yet agreed scope. Do not silently
   turn all termination causes into delayed termination.
@@ -562,8 +572,9 @@ Research artifacts now exist under `claudine/docs/research/steering/`:
 [`_schema.yaml`](../../docs/research/steering/_schema.yaml). Produce one `<slug>.md`
 per eligible provider after pilot review. Use a Darkmatter
 SimplifiedSchema sidecar referenced by each document's `$schema` frontmatter.
-The following is the proposed information model; the revision-2 sidecar is the
-contract for the authorized full-fleet research, not a generated Rust API.
+The revision-3 sidecar extends the completed revision-2 fleet with receipt timing,
+interface inventory, and case-specific discovery gaps. This research contract
+is not a generated Rust API.
 
 | Record | Required information | Consumer decision |
 | --- | --- | --- |
@@ -574,6 +585,9 @@ contract for the authorized full-fleet research, not a generated Rust API.
 | Delivery mechanism | Mechanism ID, documented/undocumented status, protocol family, startup requirements, destination/authentication description, evidence references | Which hand-written adapter could implement it |
 | Capability case | Profile ID, OS, interactive/non-interactive mode, native/Claudine launch origin, running/idle state, supported/unsupported/unknown verdict, mechanism and discovery references, reason | Whether this particular session can be selected |
 | Receipt guarantees | Independent acceptance, persistence, scheduling, and conversation-delivery guarantees; provider signals and correlation; separate later delivery states | What the sender can honestly report and when |
+| Receipt observations | Early, terminal, multi-phase, absent, or unknown acknowledgment; exact confirming signal and evidence | Whether acceptance can be reported before execution finishes |
+| Interface inventory | Considered interfaces, included profile references, excluded or unknown alternatives, reasons and evidence | Whether selection considered usable control interfaces and explicit coverage gaps |
+| Discovery gaps | Exact profile/OS/origin/mode/state case, missing discovery evidence, next check | Prevent unrelated gaps from justifying selectable sessions |
 | Delivery semantics | While-running injection/next-tool-boundary/next-turn/interruption/resume-only/unknown, long-tool behavior, accepted versus delivered acknowledgments, ordering, duplication and cancellation behavior, limits | Honest user feedback and suitability for loop rescue |
 | Compatibility | Tested version versus documented version bounds, feature probes, required flags/configuration, known incompatible variants | Runtime eligibility without broad version assumptions |
 | Live verification | Mechanism, OS, exact version, launch conditions, session state, test date/outcome, sanitized fixture, assertions, limitations, evidence references | Mandatory activation gate distinct from researched support |
@@ -692,9 +706,9 @@ The concrete integration points are shared vocabulary in
 [`mapping registry`](../../gen/src/registry.rs), and existing catalog coercion
 and [Rust emission](../../gen/src/emit/mod.rs). Steering needs a deterministic
 relational/evidence gate in addition to shape validation, including case coverage,
-reference integrity, and live-verification applicability. This is implementation
-work; the draft fleet currently performs schema validation and requests the other
-checks as research review, not as an implemented deterministic guarantee.
+reference integrity, and live-verification applicability. The revision-3 fleet
+invokes `claudine providers steering check` through the generator boundary for
+deterministic checks. Source review and matching live tests remain separate gates.
 Generated records should express discovery and delivery capabilities, compatibility,
 and known limitations. Protocol implementation stays in reviewed provider behavior
 code behind a common steering interface.
@@ -752,7 +766,7 @@ research establishes connection ownership and launch requirements.
 ## Full-Fleet Research Outcome
 
 The authorized full steering fleet completed with `gpt-5.6-sol` and low reasoning.
-All ten provider reports use schema revision 2 and pass shape, identity, coverage,
+All ten provider reports completed schema revision 2 and passed shape, identity, coverage,
 and relationship checks: **24 launch profiles, 360 cases, 31 mechanisms, and
 91 evidence records**. All 240 ordinary baseline combinations are represented;
 special profiles contribute 120 additional cases. The research sessions' own
@@ -768,17 +782,93 @@ separate. In particular, Qwen's queued follow-up cannot rescue a current turn
 that never ends. Missing implementation, missing access, and missing live
 verification are distinct from a provider lacking a capability.
 
-Pi's execution report and the existing non-interactive fleet prompt have also
-been updated to prefer usable RPC/control interfaces while preserving provider
-features. This is a research recommendation and implementation target; current
-provider facts, generated metadata, and wrapper behavior remain unchanged.
+Pi's execution report and the existing non-interactive fleet prompt were updated
+in that run to prefer usable RPC/control interfaces while preserving provider
+features. The subsequent contract backfill extends typed interface coverage
+across the execution topic. Delivery adapters and wrapper interface selection
+remain implementation targets.
+
+## Post-Fleet Review: Recommended Research Refinements
+
+Status rechecked on 2026-09-08: all five accepted batches report two successful
+steps and no failures. All ten steering reports pass the schema and relationship
+checks again; Pi's execution report passes its topic schema. All eleven recorded
+research execution contexts confirm `gpt-5.6-sol` with low reasoning. These checks
+establish artifact completeness and execution provenance, not live delivery.
+
+The full run supports targeted contract improvements before metadata consumption.
+The user authorized these next steps. Revision 3 now backfills the completed
+reports from existing evidence; the original revision-2 fleet remains recorded
+in the run history. Another full steering fleet run is not needed for that
+backfill. The refinements below guide the contract and validation work.
+
+1. **Make usefulness for loop rescue explicit.** Qwen can accept a follow-up
+   without interrupting, but waits until the current turn ends. That capability
+   can serve manual messaging while being ineffective against a turn that never
+   ends. Derive rescue eligibility from operation intent and delivery boundary,
+   distinguishing generation loops, repeated tool rounds, and blocked tools.
+   Require evidence for the boundary and retain unknown outcomes. Do not treat
+   `non_interrupting` alone as proof that automatic steering can help.
+2. **Record when acknowledgment becomes available.** Goose's idle prompt returns
+   at turn completion; OpenCode's asynchronous response can precede persistence
+   and scheduling. Add receipt timing and the exact confirming signal alongside
+   the existing independent guarantees. Explicitly represent no separate early
+   acknowledgment. A late successful response must not imply that Claudine can
+   return immediately after submission, and a timeout must not imply rejection.
+3. **Represent execution interfaces independently of output formats.** The
+   non-interactive topic still primarily types invocation and output, despite
+   its improved prompt. Add interface candidates, launch conditions, feature
+   preservation, unattended request handling, and selection/fallback evidence
+   to that topic's contract. Reference steering mechanisms instead of duplicating
+   their protocol facts. Prefer usable bidirectional control; compare actual
+   capabilities when several candidates exist. Kimi's web steering and ACP
+   interruption demonstrate why the protocol name alone cannot select a winner.
+4. **Separate input handling and execution settlement.** Pi extensions can handle
+   accepted input without starting a model turn, and `agent_end` differs from
+   full `agent_settled` completion. Require an operation-specific account of input
+   transformation/handling, turn scheduling, and settlement. Verify lifecycle
+   claims against both the event definition and its forwarding to the selected
+   interface at the examined version. Keep incoming approval holds separate from
+   tool permission requests after delivery; neither permits fabricated approval
+   in an unattended session.
+5. **Make semantic checks durable.** The original run used a temporary coordinator
+   script. The revision-3 fleet calls the maintained generator validation command.
+   Validation includes case-state versus
+   operation compatibility and discovery gaps tied to specific cases. Require an
+   evidenced interface inventory and explicit exclusions: complete coverage of
+   self-declared profiles cannot detect an omitted useful launch mode. Keep source
+   review and live tests separate from deterministic validation.
+
+This follow-up updates the contracts and checks, then backfills affected claims
+from existing evidence. Use focused provider research
+only where evidence is missing or contradictory, with `gpt-5.6-sol` and low
+reasoning. The execution-topic backfill must retain unknowns where interface
+selection or feature parity lacks evidence. Preserve the verified-model
+launch procedure and prohibition on recursive fleet launches in subsequent runs.
+
+### Completed Follow-Up
+
+All ten steering reports now use revision 3, and all ten execution reports have
+typed interface/selection/request/settlement/reference backfills. The permanent
+`claudine providers steering check [slug] [--json]` command validates both
+steering relationships and populated execution-topic references. Generation runs
+this gate before applying generated catalog/data artifacts when the topic exists;
+legacy areas without the topic and the existing hand-owned scaffolding workflow
+remain compatible.
+
+The regenerated catalog contains the new execution-research metadata, with no
+generated provider behavior changes from this follow-up. The catalog byte baseline
+was refreshed with Biscuit-hash. Generator tests pass (161 passed, one skipped),
+generator lint passes, and the generator/provider CLI compile. Source claims and
+live delivery remain separate review gates; see [the run report](fleet-run.md).
 
 ## Current Work Boundary
 
 This feature remains in specification and implementation planning. The four
 pilots informed revision 2, and the full passive roster refresh is complete.
-Every report retains `verification: []`. No provider delivery experiments or
-production edits were performed; no steering capability is activated by these
+The authorized follow-up adds revision-3 metadata and permanent research-validation
+tooling. Every steering report retains `verification: []`. No provider delivery
+experiments were performed; no steering capability is activated by these
 research results. Unresolved protocol, compatibility, and feature-parity details
 remain explicit in each report.
 

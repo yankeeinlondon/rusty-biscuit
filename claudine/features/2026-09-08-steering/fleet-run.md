@@ -164,3 +164,63 @@ Gemini worker is included under Remaining A.
 | Remaining B | `01a0818c-8d1b-7752-85b7-1226f1175744` |
 | Remaining C | `01a08180-0270-7e52-8c7b-38470dddd4bf` |
 | Remaining C | `01a0818a-d283-72e0-8aa4-4af1dde303ef` |
+
+## Revision 3 Follow-Up
+
+The user authorized the post-fleet refinements. The ten steering reports were
+migrated to revision 3 from the existing evidence, retaining their original
+research provenance and empty live-verification records. The backfill adds
+31 receipt-timing observations and an interface inventory with explicit unknown
+coverage where the original profiles omit modes or origins. Discovery gaps now
+have exact case keys; none of the currently supported cases lacks a discovery
+reference. No additional provider experiment was performed.
+
+OpenCode review removed interruption-consent prerequisites from non-interrupting
+Linux paths and corrected asynchronous receipt text that described a synchronous
+response. Request acceptance, useful current-turn delivery, and full settlement
+remain separate concepts. In particular, next-turn queueing stays valid manual
+messaging and does not qualify as rescue of an endless current turn.
+
+The non-interactive execution contract now inventories interfaces independently
+of output formats, with feature-preservation evidence, selection/fallback rules,
+unattended requests, per-interface settlement, and references to steering
+mechanisms. New evidence states describe source-backed findings, not live
+activation. The backfill uses existing research and marks remaining uncertainty;
+it does not reset the dates of the original provider observations.
+
+The fleet success hook now requires `claudine providers steering check <slug>`
+in addition to Darkmatter shape validation. This command belongs to the existing
+generator-binary boundary, with `claudine-gen steering check` as its direct form.
+Future fleet runs must use matching updated builds; a missing command fails the
+gate rather than silently skipping validation.
+
+Final follow-up validation:
+
+- All ten steering reports pass revision-3 shape, relationship, coverage, and
+  execution-topic reference checks through the maintained Rust command.
+- All ten execution reports contain the five new typed sections. Original
+  observation provenance is preserved; backfill notes identify the separate
+  existing-evidence update. Provider backfill/review workers used `gpt-5.6-sol`
+  with low reasoning.
+- The generator and provider CLI compile, and generator lint passes.
+- `just test --no-fail-fast` in `claudine/gen` passes **161 tests, one skipped**,
+  including malformed-reference cases and rejection before generated output writes.
+- Catalog regeneration adds only the five execution-research sections per provider
+  relative to the pre-regeneration working catalog. No generated provider behavior
+  changes result. The catalog byte baseline was updated using Biscuit-hash XXH64.
+- Scoped `git diff --check` passes. No commits or live provider delivery tests
+  were performed.
+
+Generation validates steering before catalog/data/artifact application when the
+topic exists. The existing `--scaffold` onboarding step can still create missing
+hand-owned inputs before that gate; it does not establish research validity.
+Legacy areas without the steering topic retain their prior generation path.
+Research validation does not infer activation from the presence of a test record:
+reports expose verification-record counts and passed-record counts, not a blanket
+provider-level verified flag.
+
+Remaining gaps are provider evidence and implementation work: unknown profile
+combinations, feature parity and unattended request handling, exact delivery
+boundaries and acknowledgment contracts, and disposable delivery tests. A new full
+fleet run is unnecessary for this contract migration. Future research should
+target those gaps, preserving the same model/effort requirements.
