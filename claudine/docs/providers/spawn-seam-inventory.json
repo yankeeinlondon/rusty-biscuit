@@ -56,6 +56,13 @@
       "governed_by": "contribute_child_environment"
     },
     {
+      "path": "cli/src/commands/wrap/exec/wiring/session.rs",
+      "line": 55,
+      "function": "run_kimi_wire_session",
+      "command_kind": "std",
+      "governed_by": "contribute_child_environment"
+    },
+    {
       "path": "lib/src/composition/lifecycle/executor.rs",
       "line": 297,
       "function": "system_shell_command",
