@@ -18,10 +18,10 @@
     "reference": "code merely names a provider (fixtures, constructor arguments); nothing to migrate"
   },
   "totals": {
-    "sites": 1481,
-    "provider_refs": 1588,
+    "sites": 1485,
+    "provider_refs": 1592,
     "by_form": {
-      "direct-ref": 1426,
+      "direct-ref": 1430,
       "eq-comparison": 21,
       "match-provider": 5,
       "matches-macro": 15,
@@ -30,7 +30,7 @@
     },
     "by_dispatch_class": {
       "conditional": 55,
-      "reference": 1426
+      "reference": 1430
     }
   },
   "sites": [
@@ -1103,7 +1103,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/exec/watchdog/evaluate.rs",
-      "line": 164,
+      "line": 159,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1113,7 +1113,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/exec/watchdog/evaluate.rs",
-      "line": 182,
+      "line": 178,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1173,7 +1173,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/exec/watchdog/tests/opencode.rs",
-      "line": 229,
+      "line": 234,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1183,7 +1183,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/exec/watchdog/tests/opencode.rs",
-      "line": 277,
+      "line": 269,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1193,7 +1193,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/exec/watchdog/tests/opencode.rs",
-      "line": 314,
+      "line": 304,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1203,7 +1203,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/exec/watchdog/tests/opencode.rs",
-      "line": 427,
+      "line": 335,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1213,7 +1213,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/exec/watchdog/tests/opencode.rs",
-      "line": 470,
+      "line": 368,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1223,7 +1223,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/exec/watchdog/tests/opencode.rs",
-      "line": 511,
+      "line": 407,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1233,7 +1233,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/exec/watchdog/tests/opencode.rs",
-      "line": 549,
+      "line": 449,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1243,7 +1243,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/exec/watchdog/tests/opencode.rs",
-      "line": 585,
+      "line": 562,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1253,7 +1253,7 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/exec/watchdog/tests/opencode.rs",
-      "line": 614,
+      "line": 605,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
@@ -1263,7 +1263,47 @@
     },
     {
       "path": "claudine/cli/src/commands/wrap/exec/watchdog/tests/opencode.rs",
-      "line": 668,
+      "line": 646,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "OpenCode"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/exec/watchdog/tests/opencode.rs",
+      "line": 684,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "OpenCode"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/exec/watchdog/tests/opencode.rs",
+      "line": 720,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "OpenCode"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/exec/watchdog/tests/opencode.rs",
+      "line": 749,
+      "form": "direct-ref",
+      "dispatch_class": "reference",
+      "providers": [
+        "OpenCode"
+      ],
+      "exempt_candidate": true
+    },
+    {
+      "path": "claudine/cli/src/commands/wrap/exec/watchdog/tests/opencode.rs",
+      "line": 803,
       "form": "direct-ref",
       "dispatch_class": "reference",
       "providers": [
