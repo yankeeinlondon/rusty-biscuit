@@ -5,10 +5,12 @@ agent: codex/gpt-5.6-sol
 created: 2026-09-08T12:10:30-07:00
 spec: 2026-08-26-finalized-references/spec.md
 log: claudine/features/2026-08-26-finalized-references/log.md
-implemented: false
+implemented: true
+implemented_by: codex/gpt-5.6-sol
 description: A **feature** review of `2026-08-26-finalized-references/spec.md`
 feature: 2026-08-26-finalized-references/review-9.md
 previous: 2026-08-26-finalized-references/review-8.md
+next: 2026-08-26-finalized-references/review-10.md
 ---
 
 # Review 9: Finalized References
@@ -126,4 +128,3 @@ IME, mouse behavior, or another encoder-sensitive interaction requiring Level
   workflow and environment capability catalog; Windows and WSL Level 2 are
   still explicitly unprovisioned.
 - `git diff --check` over review 8's implementation files passed.
-

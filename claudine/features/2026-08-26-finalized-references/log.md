@@ -7,6 +7,7 @@ implementation_5: "2026-09-08T06:42:30-07:00"
 implementation_6: "2026-09-08T07:52:23-07:00"
 implementation_7: "2026-09-08T10:33:11-07:00"
 implementation_8: "2026-09-08T11:33:18-07:00"
+implementation_9: "2026-09-08T13:22:38-07:00"
 deferred_perf_measurement: true
 ---
 
@@ -554,3 +555,77 @@ The files changed for the fixed and partially remediated findings are:
 - `claudine/features/2026-08-26-finalized-references/log.md`
 
 No performance measurement was requested or deferred during review cycle 8, so the existing `deferred_perf_measurement` value and `deferred-performance.md` were not changed for this cycle.
+
+## Implementation of Review Findings #9
+
+> **started at:** 2026-09-08T13:22:38-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Users/ken/.claudine/worktrees/rusty-biscuit/feat-unifi/claudine/features/2026-08-26-finalized-references/review-9.md'
+- this is iteration 9 of the review-to-implement cycle
+- starting the work on 'AC6 cross-crate macro census for conditional exports' at 13:24:08
+        - read review 9 and the specification's AC6/D8.7 source-authored spawn-inventory boundary; the gap is limited to production-reachable `cfg_attr` application of `macro_export`
+        - GitNexus could not resolve `visit_item_macro`, `production_truth`, or the distinct-crate regression in its current index, so indexed upstream risk is UNKNOWN; source inspection bounds the change to the passive `spawn_inventory` Level 1 guard with no production runtime caller
+        - added recursive recognition of direct and nested `macro_export` attributes applied by any `cfg_attr` whose production predicate is true or unknown; feature and platform predicates therefore fail closed into the cross-crate census, while predicates proven test-only remain excluded
+        - extended the distinct-crate regression with `#[cfg_attr(not(test), macro_export)]`, preserving its proof that definition-only contexts produce no site and the production cross-crate contexts produce exactly one uncontrolled site; added focused coverage for unknown feature/platform predicates and nested `cfg_attr`
+        - the two finding-specific Level 1 regressions passed 2/2; the complete focused `spawn_inventory` binary passed 30/31, with only `production_spawn_inventory_is_complete_and_governed` failing because its generated census reports the two existing `providers.rs::gen_command` sites at lines 370/373 while the current source and committed artifact place them at 413/416; all 17 production sites remained governed and this conditional-export change introduced no inventory site
+        - Claudine `just test` selected 6,879 Level 1 tests; 5,872 passed before fail-fast stopped on the same pre-existing spawn-inventory line-number artifact mismatch, leaving 1,006 unrun. The failing generated line numbers exactly match a separate worktree's source layout even though the test confirmed its runtime workspace root is this `feat-unifi` worktree; blessing those incorrect line numbers would conceal rather than repair the unrelated scanner/span defect
+        - Claudine `just lint` passed across `claudine-catalog-types`, `claudine`, `claudine-contract`, `claudine-cli`, and `claudine-gen`; the 18-test diagnostic guard also passed
+        - GitNexus `detect_changes` reported LOW risk, zero affected execution processes, 72 changed indexed symbols, and five changed tracked files across the shared worktree; its report includes concurrent faster-compose and steering changes not owned by this finding
+        - `git diff --check` passed for this finding's scanner and log files; concurrent steering files and faster-compose documents were preserved
+- work completed for 'AC6 cross-crate macro census for conditional exports' at 13:35:39
+- starting the work on 'AC10 final platform matrix and green scoped gates' at 13:36:46
+        - read the Claudine, Rust, Rust testing, and Sniff skill instructions in full; used Sniff to confirm the three impacted package areas and the native macOS host before running only package-area recipes
+        - tested an isolated snapshot of `13545c9b0414d6ae2296674b56254b15752d6976` plus the shared worktree delta; the source archive SHA-256 was `4b991d25e4ee795d7fd1903a21ebc59fea24c5517928133b0e4973bc81747c66`, and the standing Linux and Windows builder clones were not reset, cleaned, or mutated
+        - local macOS `biscuit-file` passed `just test` with 813/813 ordinary tests and 6/6 no-default-feature path-text tests, reported Level 2 as not applicable, and passed `just lint` for the library and CLI
+        - local macOS `darkmatter` passed `just test` with 7,709/7,709 tests and 51 higher-tier tests skipped, passed non-vacuous `just test-l2` with 18/18 library, 69/69 CLI, and 3/3 DMLS tests, and passed `just lint` for all native and `wasm32-wasip2` targets
+        - local macOS `claudine` selected 6,879 Level 1 tests and passed 6,878 with 11 skipped; its only failure was the already-recorded generated spawn-inventory line mismatch for `providers.rs::gen_command` (generated 370/373 versus current source and committed artifact 413/416)
+        - local macOS `claudine` Level 2 passed every finalized-reference case; a complete serial package run passed 236/239 with three unrelated stateful shared-pane/capture failures (`level2_dry_run_not_installed_renders_yellow_dim_in_tmux`, `level2_perf_tree_renders_styled_in_tmux`, and `level2_opencode_completion_only_tool_use_renders_one_tool_line`), while an earlier parallel run passed 238/239 and exposed a separate malformed-frontmatter capture mismatch; `just lint` passed all five area crates and the 18/18 diagnostic guard tests
+        - native Linux `biscuit-file` passed 813/813 ordinary tests, 6/6 no-default-feature tests, the explicit no-Level-2 recipe, and both lint targets
+        - native Linux `darkmatter` passed 7,708/7,708 Level 1 tests with 51 higher-tier tests skipped, passed non-vacuous tmux Level 2 at 18/18 library, 69/69 CLI, and 3/3 DMLS tests, and passed all lint targets after installing `wasm32-wasip2` for the builder's exact Rust 1.97.1 toolchain
+        - native Linux `claudine` passed 6,878/6,879 Level 1 tests with 11 skipped; its sole failure was the same generated spawn-inventory mismatch, while non-vacuous tmux Level 2 passed 239/239 CLI and 3/3 generator tests and `just lint` passed all scoped targets
+        - an initial Linux snapshot with an empty repository index caused ten Claudine context timeouts; reconstructing the disposable tree from an exact-base Git bundle without creating a commit removed every timeout, proving they were snapshot artifacts rather than product failures
+        - Windows-hosted WSL2 (`Ubuntu-26.04`, Rust 1.97.1, Just 1.57.0, tmux 3.6) `biscuit-file` passed 813/813 ordinary tests, 6/6 no-default-feature tests, the explicit no-Level-2 recipe, and both lint targets
+        - Windows-hosted WSL2 `darkmatter` passed 7,708/7,708 Level 1 tests with 51 higher-tier tests skipped, executed non-vacuous tmux Level 2 at 18/18 library, 69/69 CLI, and 3/3 DMLS tests, and passed all native and WASI lint targets after installing `wasm32-wasip2` for Rust 1.97.1
+        - Windows-hosted WSL2 `claudine` passed 6,878/6,879 Level 1 tests with 11 skipped and only the same generated spawn-inventory mismatch; non-vacuous tmux Level 2 passed 239/239 CLI and 3/3 generator tests, and all five lint targets plus 18/18 diagnostic guards passed
+        - native Windows was attempted through the `biscuit-file` package recipe but the repository storage preflight stopped before compilation: `W:` had 27,724,689,408 bytes (25.8 GiB) free and `C:` had 27,421,388,800 bytes free, while the recipe requires 50 GiB; `D:` and `E:` had no available capacity
+        - deferred the native-Windows `biscuit-file`, `darkmatter`, and `claudine` Level 1, Level 2, and lint cells because no builder volume met the repository's 50 GiB guard; overriding that safety guard, using a shared target, or stopping and compacting the shared WSL VHD would risk or mutate shared builder state. Remediation is to reclaim at least 50 GiB on a native volume or provision an isolated native-Windows builder with that headroom, then run the three package matrices; native Windows Level 2 also requires a supported live terminal backend to be non-vacuous
+        - removed the exact disposable Linux source and target directories, the WSL source and target directory, and the native-Windows staging directory; moved the local staging bundle directory to the macOS Trash for recoverability. Standing clones and unrelated caches were left untouched
+        - no performance measurement was requested or deferred, so `deferred_perf_measurement` remains unchanged
+- work completed for 'AC10 final platform matrix and green scoped gates' at 15:11:46
+- starting the work on 'spawn-inventory worktree-root gate blocker' at 15:13:36
+        - re-read the Claudine, Rust, Rust-testing, and Sniff skills; Sniff identifies `feat-unifi` as the active worktree and separately identifies `feat-finalized-references`, whose `providers.rs::gen_command` constructors occupy the incorrectly reported lines 370/373
+        - initially investigated a shared-target incremental artifact hypothesis because the stale 370/373 locations matched another worktree; a clean non-incremental rebuild and direct AST instrumentation disproved it by showing that this worktree's scanner read and recorded the current constructors at 413/416
+        - GitNexus reported LOW upstream risk for `workspace_root`: two direct test-only callers (`generate_inventory` and the artifact assertion), one affected test module, and zero affected execution processes; the production inventory assertion itself also has LOW risk and no callers
+        - confirmed the actual cause from the assertion operand order and repository history: `assert_eq!(committed, rendered)` showed the committed artifact's stale 370/373 values on the left and the correct live 413/416 census on the right; commit `5c6ab50e3` inserted the provider mapping code above `gen_command`, while the inventory artifact had not changed since older commit `069289f34`
+        - discarded the runtime-root experiment and its temporary diagnostics, retaining no speculative scanner changes; refreshed only the two stale line numbers in `claudine/docs/providers/spawn-seam-inventory.json`
+        - the focused `spawn_inventory` nextest target passed all 31 tests, including the production inventory artifact gate
+        - the Claudine package-area gates passed: `just test` completed with 6,879 tests passed and 11 higher-tier tests skipped, and `just lint` completed without lint findings
+        - `git diff --check` passed for the implementation, inventory artifact, and log; GitNexus change detection reported LOW risk, no affected execution processes, and also observed unrelated concurrent work that was left untouched
+- work completed for 'spawn-inventory worktree-root gate blocker' at 15:24:22
+- starting the work on 'AC10 post-artifact final-tree revalidation' at 15:25:24
+        - re-read the Claudine, Rust-testing, and Sniff skills; Sniff reconfirmed Claudine as the only impacted package area for the corrected test-inventory artifact
+        - constructed fresh tracked, non-committed snapshots from exact builder-local base objects plus the current worktree patch and untracked files; verified `spawn-seam-inventory.json` contained the corrected 413/416 entries before each gate and left both standing builder clones untouched
+        - native Linux Claudine `just test --no-fail-fast` passed all 6,879 Level 1 tests with 11 higher-tier tests skipped; the corrected production spawn-inventory artifact gate passed
+        - Windows-hosted WSL2 Claudine `just test --no-fail-fast` passed all 6,879 Level 1 tests with 11 higher-tier tests skipped; the corrected production spawn-inventory artifact gate passed
+        - did not rerun Biscuit File, Darkmatter, Claudine Level 2, or Claudine lint because the only relevant final-tree delta was the test inventory JSON artifact and those gates were already green; native Windows remains deferred for the previously recorded storage and terminal-backend reasons
+        - removed the exact temporary Linux source and target directories and the exact WSL source and target plus Windows transfer directory; moved the local revalidation staging directory to the macOS Trash for recoverability
+- work completed for 'AC10 post-artifact final-tree revalidation' at 15:41:29
+
+### Successful Completion
+
+The implementation of review cycle 9 has completed successfully in 2 hours 19 minutes 43 seconds. During this implementation all 2 review findings were evaluated to see if they could be fixed as a part of this implementation cycle: 1 was fixed, 1 was deferred (see reasons below):
+
+- `AC10 final platform matrix and green scoped gates` (finding 2, High) was deferred because the native-Windows portion of the required final-tree matrix could not run safely:
+        - the repository's mandatory storage preflight requires 50 GiB free, but the builder had only 27,724,689,408 bytes free on `W:` and 27,421,388,800 bytes on `C:`, with no usable `D:` or `E:` volume
+        - bypassing the guard, using a shared target, or stopping and compacting the shared WSL VHD would risk or mutate shared builder state
+        - native Windows Level 2 also lacks a supported live terminal backend, so a skipped recipe would not provide the non-vacuous evidence AC10 requires
+        - closure requires at least 50 GiB on an isolated native-Windows volume plus a supported live terminal backend, followed by `just test`, `just test-l2`, and `just lint` in Biscuit File, Darkmatter, and Claudine
+
+The files changed for the fixed and partially remediated findings are:
+
+- `claudine/cli/tests/spawn_inventory.rs`
+- `claudine/docs/providers/spawn-seam-inventory.json`
+- `claudine/features/2026-08-26-finalized-references/review-9.md`
+- `claudine/features/2026-08-26-finalized-references/log.md`
+
+No performance measurement was requested or deferred during review cycle 9, so the existing `deferred_perf_measurement` value and `deferred-performance.md` were not changed for this cycle.
