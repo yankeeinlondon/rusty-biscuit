@@ -207,6 +207,46 @@ packages_touched_during_phase_6:
     - rendezvous-core
     - rendezvous-daemon
     - rendezvous-client
+phase_7_status: >-
+    complete — every sleep site dispositioned, two real defects closed (a
+    process leak that played audio on the host, and Windows endpoint isolation
+    that keyed on the pid alone); area gates green except the one
+    host-condition L2 failure Phases 4-6 already disclosed
+source_files_during_phase_7:
+    - claudine/cli/tests/common/pty.rs
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/cli_process_fixture.rs
+    - claudine/cli/tests/sequence_overlay_pty.rs
+    - claudine/cli/tests/level1_compose_autocomplete_failure_pty.rs
+    - claudine/cli/tests/level1_inline_compose_mismatch_pty.rs
+    - claudine/cli/tests/level2_schema_prompt_pty.rs
+    - claudine/cli/tests/level2_provided_partial_file_pty.rs
+    - claudine/cli/tests/level2_dry_run_pty.rs
+    - claudine/cli/tests/level2_pty_tests.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/rendezvous/core/src/local_endpoint/test_support.rs
+    - claudine/rendezvous/daemon/tests/pairing_and_sync.rs
+docs_updated_during_phase_7:
+    - claudine/fixes/2026-09-07-faster-claudine-tests/plan.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/inventory.md
+docs_created_during_phase_7: []
+# Minimal drift repair only, in the two places this phase's changes falsified a
+# written claim; Phase 10 still owns the full skill/doc review. Both skills
+# described the L1 builder's defaults without the two `PLAYA_*` keys, and
+# `rust-testing`'s time-and-ownership contract had no entry for the inverse
+# case this phase found — the child blocking on a terminal query the harness
+# never answered.
+skills_files_updated_during_phase_7:
+    - .claude/skills/rust-testing/SKILL.md
+    - .claude/skills/claudine/SKILL.md
+# Test-only, except `rendezvous-core`'s `test_support` module — which is gated
+# behind the `test-support` feature and so cannot reach a shipped binary. No
+# production behavior changed.
+packages_touched_during_phase_7:
+    - claudine
+    - claudine-cli
+    - rendezvous-core
+    - rendezvous-daemon
 ---
 
 # Execution plan — Faster Claudine tests through complete evaluation and explicit fixtures
@@ -1229,6 +1269,73 @@ merge, so nothing here is staged or committed.
 **Validation checkpoint 7** — `just test-leaks` at the repo root reports no
 survivors; `just test-daemon` and `just test-rendezvous` green; the ten reruns
 scheduled in Phase 9 have a stable target set recorded.
+
+**Passed, with the same host-condition L2 failure Phases 4-6 disclosed.**
+
+| Gate | Result |
+|---|---|
+| `just test-leaks claudine` (from the repo root) | **`leak-sweep: no leaked processes detected`**, 7146 passed / 11 skipped — against two orphans before the fix |
+| `just test` | 6873 passed / 9 skipped, ~26 s |
+| `just test-cli` | 2498 passed / 9 skipped |
+| `just test-daemon` | 2503 passed / 9 skipped |
+| `just test-rendezvous` | 273 passed / 2 skipped (272 → 273: the new endpoint test) |
+| `just doctest` | exit 0 |
+| `just lint` (claudine **and** `claudine/rendezvous`) | exit 0 |
+| `just check-windows` | exit 0 |
+| `just test-l2 --no-fail-fast` | 236 / 237 — see below |
+
+The leak sweep is scoped to `claudine`, which is this phase's whole blast
+radius; an unscoped workspace sweep would rebuild 35 packages to re-prove the
+other 27 areas' cohorts, which no change here touched.
+
+**`just test-l2` is 236/237.** The survivor is
+`level2_initialize_proxy_block_auto_detects_osc8_in_wezterm`, with Atuin's
+"Atuin AI is not yet configured" prompt visible in the captured WezTerm pane
+swallowing the exit marker — byte-for-byte the condition Phases 4, 5 and 6 each
+recorded, on this host, in a file this phase did not touch. Notably the four
+`level2_*` PTY binaries this phase *did* touch all pass, so answering the OSC
+colour queries did not shift any styling assertion.
+
+**Stability under load.** The converted reap tests are timing-sensitive by
+construction, so they were run under representative suite load rather than in
+isolation: **16 full `just test` runs**. The first three exposed two genuine
+fixture races, both fixed (see the test-count note below); the last **11 were
+consecutive and clean**. One earlier run reported a single nextest `LEAK-FAIL`
+whose identity was not captured and which did not recur in those 11 — recorded
+as unexplained rather than dismissed. Phase 8 owns the ten-rerun evidence
+tranche; this is the stability bar for landing, not that evidence.
+
+**Test-count reconciliation** (not netted). Additions: 3 —
+`both_command_surfaces_disable_rendezvous_reporting_over_an_enabled_parent`,
+`both_command_surfaces_keep_audio_out_of_the_developers_machine`,
+`endpoints_are_stable_per_fixture_and_distinct_across_fixtures`. Removals: 0.
+`just test` 6871 → 6873 (+2, the two `claudine-cli` fixture tests) and
+`just test-rendezvous` 272 → 273 (+1) account for exactly the 3.
+
+**Two fixture races this phase created and closed**, both found by running the
+suite rather than the tests:
+
+1. The descendant could be reaped before it published its pid, because for a
+   command as short as `printf 'now\n'` the reap lands in milliseconds. The
+   command shell now waits for the pid file before completing, which also
+   removes the vacuous case where nothing was backgrounded.
+2. In the two wait-error tests the injected failure arms on the *first captured
+   stdout byte*, so a descendant staged after that byte raced the teardown into
+   existence. Both now background before their first `printf`.
+
+**One finding recorded rather than fixed.**
+`a_failed_ownership_setup_kills_the_spawned_command` cannot observe a
+descendant: the injected failure fires on the statement after `spawn`, so the
+kill reaches the shell before it runs its first command and nothing is ever
+backgrounded — which means its `!marker.exists()` assertion has always held
+vacuously. Converting it to `BackgroundedDescendant` fails on exactly that.
+Strengthening it needs the runner to expose the direct child's pid, a
+production change this fix puts out of scope; the limit is now stated at the
+test instead of implied by its name.
+
+**Sequencing note.** Phase 1's checkpoint is still blocked on the operator
+merge. Phases 4-6 were committed to this branch by the separate commit process
+partway through this phase; nothing here was staged or committed by it.
 
 ---
 

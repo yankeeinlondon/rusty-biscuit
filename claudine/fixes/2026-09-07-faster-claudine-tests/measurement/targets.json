@@ -1,0 +1,18 @@
+{
+  "note": "Every timeout, readiness, or concurrency contract Phases 4-7 changed (inventory.md § Sleep sites, plan.md Phase 7). Migrated-but-unchanged files are deliberately absent. Each needs ten candidate executions under representative load; the five alternating full-suite runs count, the load rounds supply the rest.",
+  "targets": [
+    { "binary": "claudine", "suffix": "::a_successful_command_reaps_its_backgrounded_descendant", "contract": "reap wait: sleep(1600 ms) → observe descendant pid gone, 10 s deadline, 5 ms cadence" },
+    { "binary": "claudine", "suffix": "::an_early_wait_error_still_reaps_the_whole_tree", "contract": "reap wait → pid observation; descendant staged before the first stdout byte" },
+    { "binary": "claudine", "suffix": "::no_frames_arrive_after_a_command_completes", "contract": "reap wait → pid observation" },
+    { "binary": "claudine", "suffix": "::a_wait_error_settles_readers_before_returning_and_nothing_follows_the_footer", "contract": "reap wait → pid observation; descendant staged before the first stdout byte" },
+    { "binary": "claudine", "suffix": "::the_system_shell_interrupts_a_running_tree", "contract": "interrupt readiness: sleep(300 ms) → marker wait, 30 s deadline, 5 ms cadence, released-by-marker asserted" },
+    { "binary": "claudine-cli::sequence_overlay_pty", "contract": "PTY harness answers OSC 10/11 on observation; `serial(pty)` removed (concurrent)" },
+    { "binary": "claudine-cli::level1_compose_autocomplete_failure_pty", "contract": "PTY harness answers OSC 10/11 on observation; `serial(pty)` removed" },
+    { "binary": "claudine-cli::level1_inline_compose_mismatch_pty", "contract": "PTY harness answers OSC 10/11 on observation; `serial(pty)` removed" },
+    { "binary": "rendezvous-daemon::pairing_and_sync", "name": "endpoints_are_stable_per_fixture_and_distinct_across_fixtures", "contract": "endpoint isolation keyed on fixture root, not pid alone" },
+    { "binary": "claudine-cli::level2_dry_run_pty", "contract": "`serial(pty)` removed; runs concurrently with the other PTY binaries at -j 8" },
+    { "binary": "claudine-cli::level2_provided_partial_file_pty", "contract": "`serial(pty)` removed; concurrent at -j 8" },
+    { "binary": "claudine-cli::level2_pty_tests", "contract": "`serial(pty)` removed; concurrent at -j 8" },
+    { "binary": "claudine-cli::level2_schema_prompt_pty", "contract": "`serial(pty)` removed; concurrent at -j 8" }
+  ]
+}
