@@ -72,6 +72,12 @@ belong here.
   in the brief, confirm with `git diff --cached -- <old> <new>` that the old
   side is a deletion of the expected blob, and check `git status --short`
   afterwards for leftover `D` entries.
+- A staged rename is read at the NEW path. Once `git add` has registered the
+  rename, only the new path is in the index; `git show :<old-path>` fails with
+  "path does not exist (neither on disk nor in the index)". Read the staged
+  blob at `git show :<new-path>` (or `git cat-file -p :<new-path>` under zsh).
+  For a rename-only commit the OLD path's content is whatever `git show
+  HEAD:<old-path>` prints; if the rename is R100 the two blobs match.
 
 ## Signing
 

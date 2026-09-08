@@ -17,7 +17,7 @@ The **10 providers** above are the compiled `Provider` enum (`PROVIDER_COUNT = 1
 
 The package follows the monorepo `lib` + `cli` split: library crate `claudine`, CLI crate `claudine-cli` (binary `claudine`). A third sub-crate, `claudine-contract` (`claudine/contract`), implements `biscuit_contract::inference::InferenceAdapter` by running a provider as a single non-interactive, **tool-free, filesystem-isolated** session and returning its final assistant text — letting deterministic consumers (Reaper, Darkmatter) delegate to an agentic CLI via `Arc<dyn InferenceAdapter>` without depending on `claudine` directly. It depends on `claudine` (lib) but **not** `claudine-cli`. v1 enables Claude and Codex; other providers are reported `Unsupported`. See `claudine/contract/README.md` for the provider support matrix and security posture, and the `biscuit-contract` skill for the contract itself.
 
-Alongside these, `claudine/rendezvous/` is a first-class package-area family of **three crates** backing `claudine dashboard` and the (unwired) lifecycle `defer` scheduler, in a `core → {daemon, client}` shape: `rendezvous-core` (leaf — protobuf/gRPC stubs, identity, signed envelopes, sync wire framing, and the typed `LocalEndpoint`), `rendezvous-daemon` (the long-running service: gRPC over the platform's local endpoint, the `redb → Loro → DuckDB` session-log pipeline, register store, QUIC sync engine), and `rendezvous-client` (the portable `connect(&LocalEndpoint)` plus a thin gRPC test client). Both leaf crates depend on `rendezvous-core`, never on each other. Its area justfile (`cd claudine/rendezvous`) exposes `just check|build|test|lint`, each iterating all three crates.
+Alongside these, `claudine/rendezvous/` is a first-class package-area family of **three crates** backing `claudine dashboard` and the (unwired) lifecycle `defer` scheduler, in a `core → {daemon, client}` shape: `rendezvous-core` (leaf — protobuf/gRPC stubs, identity, signed envelopes, sync wire framing, and the typed `LocalEndpoint`), `rendezvous-daemon` (the long-running service: gRPC over the platform's local endpoint, the `redb → Loro → DuckDB` session-log pipeline, register store, QUIC sync engine), and `rendezvous-client` (the portable `connect(&LocalEndpoint)` plus a thin gRPC test client). Both leaf crates depend on `rendezvous-core`, never on each other. Its area justfile (`cd claudine/rendezvous`) now carries the full canonical recipe set, each iterating all three crates: `build`, `check`, `sanity`, `test`, `doctest`, `coverage`, `lint`/`lint-fix`, `install`, plus reasoned "not applicable" stubs for `test-l2`, `test-l3`, `test-browser`, `bench` and `fuzz`. `test-real` is not a stub — it is the only route to `rendezvous-daemon::peer_discovery`'s two `real_*` mDNS identities, which every other recipe's tier filter excludes.
 
 Ordinary local L1 leaves `claudine-cli/daemon-tests`,
 `claudine-cli/terminal-tests`, and both contract/CLI `real-tests` disabled.
@@ -37,10 +37,17 @@ into. Three escapes exist, each requiring a call-site comment: `fake_only_path()
 (nothing but the fixture stubs), `host_path()` (the old `augmented_path`), and
 `ambient_context(dir)` (launch CWD pinned to a repository the test built inside
 its own workspace — the rusty-biscuit checkout can never be inherited).
-`claudine/cli/tests/spawn_site_guard.rs` enforces it: a raw
+A test whose subject *is* the running child — a signal, a deadline, a streaming
+read, `CREATE_NEW_PROCESS_GROUP`, an `expectrl` session — uses `command_std()`
+(or `command_builder()…build_std()`), which is the same policy on a
+`std::process::Command`; `apply_policy_to(&mut cmd)` applies it to a command the
+fixture did not build, for the one shape where claudine is a grandchild of a
+shell. `claudine/cli/tests/spawn_site_guard.rs` enforces it: a raw
 `assert_cmd::Command::cargo_bin("claudine")` or a `claudine_bin()` shell-out
 outside the builder fails the suite unless its file carries a reasoned
-`SPAWN_ALLOWLIST` entry, and an entry matching no live site fails too. Running
+`SPAWN_ALLOWLIST` entry, and an entry matching no live site fails too. **That
+list is empty** — every L1 binary goes through the builder — so any raw spawn is
+now simply a failure. Running
 the binary from the ambient CWD is both a cost (the 35-member workspace walk,
 20–77 s per test on WSL2) and a correctness hazard (the checkout's git state and
 root `system-prompt.md`, the developer's `$HOME`, the host's real provider

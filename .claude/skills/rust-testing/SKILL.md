@@ -467,7 +467,18 @@ reference implementation:
 |---|---|---|
 | Fixture | `claudine/cli/tests/common/mod.rs` — `CliProcessFixture` | Temp `cwd`/`home`/`bin`; `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA` → fixture home, `HOMEDRIVE`/`HOMEPATH`/`XDG_CONFIG_HOME` removed |
 | Builder | `CliProcessFixture::command()` / `command_builder()` | The one supported spawn. `current_dir` pinned to the fixture `cwd` |
+| Raw surface | `command_std()` / `command_builder()…build_std()` | The same policy on a `std::process::Command`, for a test that has to keep the child — a signal, a deadline, a streaming read, an `expectrl` session |
 | Guard | `claudine/cli/tests/spawn_site_guard.rs` | Source scan; a raw `Command::cargo_bin("<bin>")` outside the builder fails the suite |
+
+**Two command surfaces, one policy.** `assert_cmd::Command` has no `spawn`, so a
+live-child test needs a `std::process::Command` — and hand-building one
+re-derives the isolation at the call site, which is the per-test `.env(…)` chain
+the fixture replaced. Do not give the two surfaces separate builders: compute
+the policy once as data (clear flag, ordered removes, ordered sets,
+`current_dir`) and apply it through a small trait each command type implements.
+Then assert the two produce the **same effective environment** against a
+recording stub, so a policy change that reaches only one of them fails there
+rather than in a platform-only test months later.
 
 **Default `PATH` is the fixture `bin` plus a minimal system set** — `/usr/bin:/bin`
 on Unix, `%SystemRoot%\System32` on Windows, `PATHEXT` untouched so `.cmd` stubs
