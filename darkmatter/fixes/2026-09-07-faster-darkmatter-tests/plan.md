@@ -177,6 +177,62 @@ evidence that every suspected cost is present.
 
 ---
 
+## Execution and evidence policy (all phases)
+
+This policy governs every phase checkpoint below. A checkpoint records the
+proof required; it does not require repeating a command whose applicable
+result is already recorded. Implementation, PR review, and final performance
+verification are separate milestones.
+
+- During implementation, run focused tests for the changed binaries or library
+  modules through the canonical recipes. Run the combined area L1 suite and
+  lint after a coherent batch of changes, not after every file or subphase.
+  A shared fixture change requires its affected consumers to be covered.
+- Keep one validation ledger in `log.md`: command, selected packages/tests,
+  features, profile, platform, source state (including dirty changes), result,
+  build/setup time, runner elapsed, and artifact link. Reuse a result only
+  while its relevant sources, dependencies, fixtures, configuration, and
+  environment remain unchanged. A new failure or relevant change invalidates
+  the affected evidence, not every prior gate.
+- Document-only phases run the changed analysis tools and their relevant
+  tests, not Rust package suites or unrelated package gates. Reuse the existing
+  Claudine metrics, inventory, and attribution tools after checking their
+  contracts; add only missing area-specific behavior and regression coverage.
+  Do not build a second general-purpose parser or repeat unchanged mutation
+  demonstrations. Preserve malformed-input and completeness failures.
+  Start with `claudine/fixes/2026-09-07-faster-claudine-tests/`'s
+  `junit-metrics.ts`, `inventory-reconciler.ts`, and `attribution.ts` plus their
+  tests. Reference or adapt these locally without introducing a cross-package
+  framework or depending on another agent's concurrently changing files.
+- Capture each distinct recipe/CI feature selection once per relevant source
+  state and derive family membership from those captures. Keep every test in
+  the audit, but document common setup and proof once per enumerated family.
+  Reuse suite artifacts for attribution; run isolated experiments only to
+  answer a specific unresolved cost question.
+- Run L2/L3/browser/real tiers when their code, shared fixtures, dependencies,
+  or execution routes changed, and at final verification where required by
+  acceptance. Use canonical recipes, preserve focus, and keep unavailable
+  evidence pending. Diagnose an unrelated environment failure once and link
+  the reproduction; do not repeat the whole tier until the relevant code or
+  environment changes. New or unexplained failures still require diagnosis.
+- Preserve the baseline source state and build artifacts before editing. One
+  warm diagnostic run per required population is enough to begin attribution;
+  collect the five alternating baseline/candidate samples together in the
+  measurement phase. Keep separate build directories for the two states and
+  stable feature selections; do not clean caches or alternate rebuilds in a
+  single target directory. Avoid competing builds and measurements on the
+  same host; parallel work is useful only while it does not contend for those
+  resources or shared files.
+- Missing repeated CI samples or unavailable hosts do not block implementation
+  or opening a PR. Keep budgets pending until compatible CI baseline evidence
+  exists; ratify them before judging candidate performance. Preserve the
+  required final sample counts and platform coverage. Do not claim final
+  verification or archive the fix while required evidence remains pending.
+- Keep evidence in one place: `inventory.md` owns family dispositions and
+  budgets, `log.md` owns run records, and `results.md` links those records and
+  summarizes outcomes. Update phase checkboxes and a short status; do not
+  duplicate transcripts or requirement-to-test narratives across documents.
+
 ## Phase 1 — Baseline, measurement substrate, and evidence discipline
 
 Establishes the attribution window. Everything numeric downstream is compared
@@ -191,11 +247,12 @@ against what this phase captures, so it lands before any source change.
       present.
 - [ ] Confirm `git diff main -- .config/nextest.toml` is empty and capture that
       as the fix's starting invariant.
-- [ ] Warm the build (`just build` from `darkmatter/`), then collect **five
-      alternating warm local runs** of the local-default L1 cohort (`just test`)
-      and the sanity cohort (`just sanity`). Keep **build/setup time, runner
-      elapsed time, and summed per-test duration as three separate columns** —
-      a serial sum is not wall clock under nextest concurrency.
+- [ ] Preserve a reproducible baseline source state and its build directory.
+      Warm the test artifacts through the required recipes, then collect one
+      diagnostic local-default L1 run (`just test`) and one sanity run
+      (`just sanity`). Record build/setup, runner elapsed, and summed test
+      duration separately. Collect the five alternating baseline/candidate
+      runs together in Phase 9; there is no candidate to alternate with yet.
 - [ ] Collect one baseline run each for `just doctest`, `just test-l2`,
       `just test-browser`, and `just test-l3`. Where a harness (WezTerm, tmux,
       Chrome, neovim) is absent, record **"pending — harness unavailable"**
@@ -208,16 +265,20 @@ against what this phase captures, so it lands before any source change.
       configured for the four darkmatter packages. **Do not presume four legs**;
       write down what the workflow declares (`_package-ci.yml` natives plus the
       `_wsl-ci.yml` guest, if selected).
-- [ ] Collect **three consecutive CI runs per configured leg** — same workflow
-      definition and runner image, no intervening workflow edits — and store
-      the JUnit artifacts under
-      `darkmatter/fixes/2026-09-07-faster-darkmatter-tests/baseline/<run-id>/`.
-      Record every intervening failed attempt with its cause; selecting only
-      the green attempts is disallowed.
-- [ ] Write the metrics/reconciler script (TypeScript, in this fix directory).
-      It must **fail** on malformed reports, missing expected artifacts or
-      tests, duplicate identities, invalid durations, and failed runs. A script
-      that prints a miss and exits 0 is not a gate.
+- [ ] Reuse compatible existing baseline CI artifacts per configured leg,
+      recording source state, features, workflow, runner image, and failures.
+      Store them under `baseline/<run-id>/`. One valid baseline run per leg
+      supports initial attribution; collect additional baseline samples when
+      variability or the budget decision requires them. Missing CI baseline
+      legs keep their budgets pending but do not block fixture implementation.
+      Keep local observations separate from CI claims.
+- [ ] Reuse the existing Claudine TypeScript metrics/reconciler contracts,
+      adapting only area-specific inputs or missing behavior in this fix
+      directory. Keep failures for malformed reports, missing artifacts/tests,
+      duplicate identities, invalid durations, failed runs, and incomplete
+      family assignment. Run existing tool tests once and add focused tests
+      for changed behavior; link their results rather than re-proving the
+      unchanged parser in each phase.
 - [ ] Identify the work counters available for later proof — the library's
       `effects-instrumentation` feature (process-wide effect counters),
       `MockHttpServer::request_count()`, and any compose/discovery counters the
@@ -225,17 +286,20 @@ against what this phase captures, so it lands before any source change.
       (discovery, composition, effects, HTTP requests) each covers. Note gaps as
       Phase 7/8 work, not as a reason to fall back on timing.
 
-**Validation checkpoint 1** — baseline identity recorded; five alternating warm
-local runs exist for both L1 cohorts with the three costs separated; three
-consecutive CI runs exist per configured leg with failures disclosed; the
-reconciler reproduces the baseline table from the stored artifacts; unavailable
-tiers are named as pending rather than assumed green.
+**Validation checkpoint 1** — reproducible baseline source/build state and
+initial local runs recorded, with three costs separated; metrics validation
+passes; available CI artifacts are linked and missing legs or harnesses are
+pending. This opens implementation. Full alternating measurement belongs to
+Phase 9; CI budget ratification remains pending where inputs are missing.
 
 ---
 
 ## Phase 2 — Complete inventory (RB1, AC1) ‖ runs during Phase 1's CI window
 
-Document-only. No source changes. Produces `inventory.md` in this fix directory.
+Use existing captures, reports, and validated tools. Run only changed
+analysis-tool checks; do not run Rust package gates for document-only work.
+
+Inventory and analysis only; no Rust application or test changes. Produces `inventory.md` in this fix directory.
 
 - [ ] Build the enumeration substrate: `cargo nextest list --message-format
       json` for each of the four packages under **every** feature selection a
@@ -287,7 +351,7 @@ Document-only. No source changes. Produces `inventory.md` in this fix directory.
       `test-l2`, `test-l3`, `test-browser`, `doctest`, `coverage`, `bench`,
       `fuzz`, `lint`, `all` all exist and select the four packages.
 - [ ] Run the Phase 1 reconciler over the listings plus the declared families;
-      paste its output into `inventory.md`. It must exit 0 with every identity
+      link its output from `inventory.md`. It must exit 0 with every identity
       assigned to exactly one row.
 - [ ] Give every row a disposition: satisfactory, remediation in this fix, or
       linked follow-up naming the unmet requirement and the deferral reason.
@@ -303,7 +367,12 @@ shared helper; every row carries a disposition and an execution route.
 
 ## Phase 3 — Attribution and ratified budgets (RB5, first half)
 
-Document-only. Depends on Phases 1 and 2. Resolves the spec's four
+Attribute from stored suite reports first. Run only experiments that resolve
+a specific uncertainty. Missing CI budgets remain pending and must be ratified
+before candidate performance is judged; they do not block implementation.
+
+Analysis only. Uses Phase 1 local evidence and the Phase 2 inventory;
+CI-dependent budget conclusions may remain pending. Resolves the spec's four
 baseline-review decisions **with numbers**.
 
 - [ ] Attribute cost by family against the Phase 1 baseline, keeping build,
@@ -343,13 +412,16 @@ baseline-review decisions **with numbers**.
 answer backed by a measurement; budgets sit next to the baseline in
 `inventory.md`; no budget was derived from a local run alone; production
 findings are filed, not fixed.
+Missing CI inputs leave budget ratification pending; link the missing evidence
+and continue implementation without inventing a target.
 
 ---
 
 ## Phase 4 — The deterministic CLI fixture (RB2, infrastructure)
 
-First code phase. Requires checkpoint 1. Everything in Phases 5–6 depends on it,
-so it lands alone and green.
+First code phase. Requires checkpoint 1's preserved baseline and local
+checks, not completion of CI sampling. Phases 5–6 depend on the fixture
+contract and its focused verification.
 
 - [ ] Add `darkmatter/cli/tests/common/fixture.rs` and re-export from
       `common/mod.rs`. Keeping it out of `mod.rs` holds the shared module near
@@ -406,10 +478,10 @@ so it lands alone and green.
       the authority and record the check as **pending**. Prefer `cfg!(windows)`
       over `#[cfg]` where both arms should compile everywhere.
 
-**Validation checkpoint 4** — `just test` and `just lint` green from
-`darkmatter/`; the fixture's hostile-environment test passes and has a
-demonstrated failing form; `common/mod.rs` stays under the soft cap;
-`git diff main -- .config/nextest.toml` still empty.
+**Validation checkpoint 4** — Focused fixture and affected-consumer tests
+pass, including hostile-environment and Windows-resolution proof; shared
+helper size and override invariants hold. Run area L1 and lint once for the
+completed fixture batch and record their reusable results.
 
 ---
 
@@ -441,9 +513,10 @@ list that Phase 6 burns to zero.
       extend the same guard to those test directories or state in the inventory
       why their spawn populations (1 and 6 sites) are governed differently.
 
-**Validation checkpoint 5** — the guard runs in L1, prints its census, and
-fails on both planted violations and on a stale allow-list entry;
-`just test` and `just lint` green.
+**Validation checkpoint 5** — The guard runs in L1, its census is reconciled,
+and focused tests reject raw spawns, isolation bypasses, and stale entries.
+Reuse Phase 4 fixture evidence where inputs are unchanged; guard-only changes
+do not require another full area run.
 
 ---
 
@@ -451,7 +524,8 @@ fails on both planted violations and on a stale allow-list entry;
 
 Batches **6A, 6B, 6C are mutually parallelizable** — disjoint file sets, each
 deleting only its own allow-list entries. **6D is independent** and may run
-alongside. **6E is the closure gate** and runs last. Each batch ends green
+alongside. **6E is the closure gate** and runs last. Each batch ends with
+its affected tests green
 before the next merges; the guard's stale-entry arm catches a mis-merge.
 
 ### Phase 6A — the seven private helpers plus the two orphan spawns (‖ 6B, 6C)
@@ -542,11 +616,10 @@ The spec's named target. Highest risk of drift, so it goes first.
 - [ ] Reconcile the test count: report additions and removals **separately**,
       never netted, so a lost test cannot read as an optimization.
 
-**Validation checkpoint 6** — `just test`, `just lint`, `just test-l2` green
-from `darkmatter/` (Phase 6 touches `common/`, which every L2 binary compiles);
-zero generic exemptions remain; every contamination probe passes; test-count
-reconciliation shows additions and removals separately;
-`git diff main -- .config/nextest.toml` still empty.
+**Validation checkpoint 6** — All migrated binaries and contamination probes
+pass; zero generic exemptions remain and coverage changes reconcile. Run one
+combined area L1/lint checkpoint after the migration batches and affected L2
+coverage for shared-helper changes. Reuse applicable batch results.
 
 ---
 
@@ -595,10 +668,10 @@ touch the same binary.
       defect the old assertion could not distinguish, and what the replacement
       now detects.
 
-**Validation checkpoint 7** — `just test`, `just doctest`, `just lint` green;
-every passive-path claim is backed by a counter or sentinel assertion, not a
-timing observation; shipped-artifact coverage is still present and named;
-every assertion or population change carries a replacement-proof explanation.
+**Validation checkpoint 7** — Changed library tests pass with passive-path
+counters or sentinels, named shipped-artifact coverage, and replacement proof
+for changed assertions. Run affected doctests if their inputs changed; combine
+the broad L1/lint checkpoint with Phase 8 when practical.
 
 ---
 
@@ -646,21 +719,31 @@ every assertion or population change carries a replacement-proof explanation.
       LEAK-FAIL as the known nextest artifact it is and say so rather than
       papering over it.
 
-**Validation checkpoint 8** — `just test`, `just test-l2`, `just test-browser`
-green (or explicitly pending with the missing harness named); the HTTP fixture
-terminates within its documented bound when the expected request never occurs;
-no detached worker or orphan child survives a failing run; no focus was raised.
+**Validation checkpoint 8** — Affected HTTP, protocol, process, and rendering
+tests pass, including teardown when expected interaction never occurs. Run
+affected L2/browser coverage through canonical recipes, recording unavailable
+harnesses as pending. Verify no surviving workers/children or focus changes;
+reuse the combined Phase 7/8 L1/lint result.
 
 ---
 
 ## Phase 9 — Local measurement (RB5, first evidence tranche)
 
-Requires Phases 4–8 complete and green.
+Requires Phases 4–8 implemented with applicable checks passing; diagnosed
+unrelated environment failures remain explicitly pending.
 
-- [ ] Warm each revision's artifacts, then collect **five alternating warm local
-      runs per revision** for every changed cohort **and** the full relevant L1
-      suite. Alternate baseline/candidate on the same host with matching
-      toolchain, features, profile, concurrency, and fixture inputs.
+- [ ] Warm the preserved baseline and candidate artifacts, then collect
+      **five alternating warm runs per revision** of each required full L1
+      population. Extract changed-cohort identities, counts, and summed test
+      durations from those same reports; do not also run every cohort in
+      isolation. A cohort's summed duration is not its isolated wall time.
+      Run a separate cohort experiment only when selection, resource needs,
+      or an explicit latency claim cannot be represented by the suite runs.
+      Record source state, toolchain, features, profile, platform, concurrency,
+      fixture inputs, cache state, and commands. Keep revision-specific build
+      directories warm and prevent concurrent edits or competing workloads
+      during measurement. Reuse earlier samples only if their provenance and
+      alternating sequence match this protocol.
 - [ ] Record for every run: revision, dirty state, platform, cache state,
       environment, exact commands, test identities, failures, and skips.
 - [ ] Keep the **local-default** and **CI-selected** (`BISCUIT_L1_INCLUDE_SLOW=1`)
@@ -668,8 +751,12 @@ Requires Phases 4–8 complete and green.
       other.
 - [ ] Measure any cold-build claim in an **isolated build directory** — never by
       clearing the developer's working cache.
-- [ ] Re-run every changed timeout or synchronization case repeatedly **under
-      representative suite load**, not in isolation, and report the spread.
+- [ ] Execute each **changed** timeout, readiness, or concurrency
+      contract ten times under representative suite load. Count compatible
+      candidate measurement runs toward those ten executions and run only the
+      remaining repetitions with a fixed representative load cohort. Record
+      the target set, spread, failures, and leak results. Do not repeat
+      unchanged tests separately merely because their file was migrated.
 - [ ] Prove eliminated discovery, composition, effects, and HTTP requests with
       **work counters or sentinel effects**, independent of timing. A timing
       improvement is not evidence that a walk was removed.
@@ -679,9 +766,9 @@ Requires Phases 4–8 complete and green.
 - [ ] Record local numbers as **attribution only**. They establish no CI target
       (Phase 3's budgets do).
 
-**Validation checkpoint 9** — five alternating runs exist per changed cohort and
-for the full L1 suite; repeated runs exist for every changed synchronization
-case; each eliminated-work claim has a counter or sentinel behind it; both
+**Validation checkpoint 9** — five alternating runs per revision cover both full L1
+populations and their changed cohorts through shared reports; ten executions
+cover each changed timing/concurrency contract; each eliminated-work claim has a counter or sentinel behind it; both
 cohorts are reported separately.
 
 ---
@@ -690,14 +777,28 @@ cohorts are reported separately.
 
 Operator-gated: push and read. No implementing agent commits or pushes.
 
-- [ ] Run `just ci-local --lint-only`, then `just ci-local`, for the affected
-      scope before requesting a push.
+Use the configured package/environment matrix captured in Phase 1; do
+not assume every package runs on every host.
+
+- [ ] Complete one consolidated validation of the affected scope before
+      push handoff. Inspect the actual recipe expansion: if `just ci-local`
+      already includes lint, run it once without a preceding
+      `just ci-local --lint-only`. Credit equivalent current-state checks in
+      the validation ledger only where the workflow supports that reuse;
+      otherwise run the required gate once. Record scope, features, and any
+      checks still missing. This step does not authorize a commit or push.
 - [ ] Compile-verify the Windows arms where the mingw toolchain is present;
       state the limitation explicitly where it is not.
-- [ ] Hand off for push, then collect **three consecutive candidate CI runs per
-      configured leg** — same workflow definition and runner image, no
-      intervening workflow edits. Record every intervening failed attempt with
-      its cause.
+- [ ] Open or hand off the PR once implementation and applicable local
+      checks are ready; do not wait for repeated performance CI samples.
+      Use the first candidate run on every configured package/environment leg
+      for cross-platform correctness review, then accumulate **three
+      consecutive green candidate runs per leg** for final performance
+      verification. Reuse qualifying normal CI runs; request extra runs only
+      for missing samples. Keep source state, workflow definition, runner
+      image, and features comparable, and record every intervening failure.
+      Baseline gaps and missing samples remain pending; PR readiness does not
+      imply merge readiness or completion of the performance criteria.
 - [ ] Compare **matched identities within each environment** against that
       environment's own Phase 1 baseline. Show added, removed, and gated tests
       **separately**; do not require identical cross-platform counts.
@@ -717,7 +818,9 @@ Operator-gated: push and read. No implementing agent commits or pushes.
       **pending**, never as passing.
 - [ ] Re-confirm `git diff main -- .config/nextest.toml` is empty.
 
-**Validation checkpoint 10** — three consecutive green runs exist per configured
+**Validation checkpoint 10 (final performance evidence; not PR opening)**
+
+three consecutive green runs exist per configured
 leg, with intervening failures disclosed; every budget is met or its miss is
 explained; no override, retry, timeout increase, tier change, or disabled
 assertion was used to reach a number.
@@ -746,7 +849,7 @@ assertion was used to reach a number.
 - [ ] Confirm no production API changed. If one did, verify downstream
       consumers by impact analysis (Claudine consumes darkmatter), **not** by a
       workspace-wide default test run.
-- [ ] Sweep the acceptance criteria explicitly, one subsection each:
+- [ ] Sweep the acceptance criteria using one compact status-and-evidence table:
   - [ ] **AC1** — every test/family, including extension and higher-tier
         surfaces, has an explicit disposition and execution route; no
         timing-based exclusions (reconciler output attached).
@@ -771,9 +874,27 @@ assertion was used to reach a number.
         retry or timeout-limit increase used as a performance fix.
   - [ ] **AC8** — area skills/READMEs describe the changed fixture and test
         workflow; downstream verification, if needed, was by impact.
-- [ ] Final gate run from `darkmatter/`: `just sanity`, `just lint`,
-      `just doctest`, `just test`, `just test-l2`, `just test-browser`
-      (equivalently `just all`), plus `just check-zed`.
+- [ ] Reconcile the final gate ledger instead of restarting all gates.
+      Credit passing checks from implementation, measurement, and pre-push
+      validation when their relevant source state and environment are still
+      applicable. Run only missing or invalidated checks. If a full-suite
+      run already covers a package subset with the required features, do not
+      repeat that subset just to obtain a second green command. Record known
+      environment failures as pending with links; do not retry them without
+      a relevant change.
+- [ ] Prepare `results.md` and the acceptance review while CI runs. Record
+      each criterion as verified, pending, or an explicitly permitted
+      deferral, with an evidence link; keep the detailed record in its owning
+      document. Final closure still requires the specified measurement samples
+      and applicable acceptance evidence. Pending evidence does not prevent
+      PR review, but it does prevent claiming that verification is complete.
+- [ ] Required final coverage: `just lint`, `just doctest`, `just test`,
+      applicable `just test-l2` and `just test-browser`, and the Zed checks.
+      Credit `just check-zed` when already executed by `just lint`; retain
+      `just zed-verify`'s distinct CI coverage. Credit sanity correctness
+      when its selection is covered by L1; any sanity latency claim requires
+      timing the actual sanity recipe. Do not run `just all` on top of its
+      already verified constituent gates.
 
 **Validation checkpoint 11** — all eight acceptance criteria are answered with
 evidence or an explicitly linked deferral; `results.md` keeps the three
@@ -791,11 +912,15 @@ an owner; no gate was weakened to close a criterion.
 | Phase 7 ‖ Phase 8 | Different concerns (composition boundary vs. resource ownership) and largely different files. |
 | Phase 7/8 ‖ Phase 6 | Library and dmls files vs. CLI test binaries. Serialize only where both touch `cli/tests/common/`. |
 
-**Strictly serial**: Phase 1 → Phase 4 (no code lands before the baseline is
-captured); Phase 4 → Phase 5 → Phase 6 (the fixture must exist before the guard
+**Strictly serial**: Phase 1 → Phase 4 (preserve the baseline source state and initial
+local evidence before editing; CI sampling may continue); Phase 4 → Phase 5 → Phase 6 (the fixture must exist before the guard
 can sanction it, and the guard before the burn-down can be proven complete);
 Phases 6–8 → Phase 9 → Phase 10 → Phase 11 (evidence follows the change it
 measures).
+
+PR preparation and closure-document drafting may overlap CI sampling. The
+sequence below governs final performance verification and archive readiness,
+not permission to open a PR with pending evidence.
 
 ## Dependency order (summary)
 
