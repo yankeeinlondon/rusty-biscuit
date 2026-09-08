@@ -867,10 +867,55 @@ live delivery remain separate review gates; see [the run report](fleet-run.md).
 This feature remains in specification and implementation planning. The four
 pilots informed revision 2, and the full passive roster refresh is complete.
 The authorized follow-up adds revision-3 metadata and permanent research-validation
-tooling. Every steering report retains `verification: []`. No provider delivery
-experiments were performed; no steering capability is activated by these
-research results. Unresolved protocol, compatibility, and feature-parity details
+tooling. The first disposable Pi 0.84.4 macOS RPC experiment now passes with a
+deterministic local model and isolated resource fixtures. Its two scoped records
+cover active steering and idle prompting; the other providers remain untested.
+No production steering capability is activated by these research results.
+Unresolved protocol, compatibility, and feature-parity details
 remain explicit in each report.
+
+See the [uncertainty register](uncertainties.md) for resolved contract gaps versus
+remaining provider questions, and [verification notes](verification/README.md)
+for the reusable opt-in harness, measured outcomes, and next experiments.
+
+The abort/EOF follow-up adds two scoped regression records. In Pi 0.84.4, abort
+can move queued steering into saved history without model consumption; an explicit
+next prompt then consumes that history. Clearing before abort prevents this in
+the fixture, but clearing must remain an explicit queue policy, not an automatic
+way to discard other pending work. Report cancellation, queue/history disposition,
+and replacement acceptance separately.
+
+Closing owned RPC stdin while tools are held can lose acknowledged steering with
+exit code zero. Keep the input channel open through settlement, and do not infer
+delivery or durable storage from acknowledgment or successful process exit.
+Disconnect outcomes must remain undelivered or unknown according to available
+evidence; ambiguous submissions must not be replayed automatically. These findings
+cover input EOF and cooperative tools only, not full transport loss, cloud errors,
+or OS subprocess cleanup.
+
+The controlled switch/crash follow-up establishes two additional Pi 0.84.4/macOS
+failure boundaries. During a switch paused by an extension, `get_state` still
+reports the old session and `steer` can succeed, yet completing the switch loses
+that queued text. Steering submitted after the switch reaches the new session.
+Killing the provider after acknowledgment while tools are held also loses queued
+text before either transcript persistence or model consumption.
+
+The managed controller must serialize session-changing operations with target
+validation and submission, then invalidate cached identity after a switch.
+A pre-send state query alone is insufficient. Where extensions or another actor
+can change the session outside that coordination, require a verified provider
+guard or report that safe targeting is unavailable for that profile. Detecting
+a changed identity after submission does not permit automatic replay into either
+session. Maintain separate queue, conversation-history, and delivery outcomes
+after process failure; an acknowledgment is not a crash-persistence guarantee.
+
+Managed execution must also retain a way to terminate its owned tool processes
+when the provider fails. A provider's abort acknowledgment, idle state, or exited
+main process does not establish that external tools have stopped. Integrate this
+with Claudine's existing termination ownership and platform-specific cleanup;
+verify macOS, Linux, and Windows independently. Report cancellation and remaining
+process cleanup separately, and never signal unrelated sessions. Do not enable
+an interrupting adapter based solely on cooperative in-process tool tests.
 
 Next work is to settle the remaining engineering choices, implement the typed
 metadata consumer and reviewed adapters, and perform the required disposable

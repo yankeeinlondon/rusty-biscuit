@@ -1,0 +1,44 @@
+{
+  "fixture": "real Pi RPC with deterministic local model, gated session switch, and cooperative tools",
+  "limitations": [
+    "controlled interleaving, not exhaustive scheduling stress",
+    "provider process killed after observed acceptance; no host crash, disk durability, or restart tested",
+    "no real cloud inference; isolated profile with fixture extensions enabled"
+  ],
+  "os": "macos",
+  "production_activation": false,
+  "provider": "pi",
+  "provider_version": "0.84.4",
+  "results": [
+    {
+      "new_session_steering_messages": 0,
+      "old_identity_observable_during_switch": true,
+      "persisted_steering_user_messages": 0,
+      "scenario": "steer_during_held_switch",
+      "session_changed": true,
+      "steering_acknowledged": true,
+      "steering_reached_model": false,
+      "switch_acknowledged": true
+    },
+    {
+      "new_session_steering_messages": 1,
+      "old_identity_observable_during_switch": true,
+      "persisted_steering_user_messages": 1,
+      "scenario": "steer_after_switch",
+      "session_changed": true,
+      "steering_acknowledged": true,
+      "steering_reached_model": true,
+      "switch_acknowledged": true
+    },
+    {
+      "acknowledged_before_kill": true,
+      "acknowledgments_observed_after_drain": 1,
+      "exit_code": null,
+      "persisted_steering_user_messages": 0,
+      "scenario": "kill_provider_after_steering_ack",
+      "steering_reached_model": false,
+      "tool_a_finished_normally": false,
+      "tool_b_finished_normally": false
+    }
+  ]
+}

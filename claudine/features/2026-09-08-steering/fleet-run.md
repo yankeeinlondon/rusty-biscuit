@@ -224,3 +224,64 @@ combinations, feature parity and unattended request handling, exact delivery
 boundaries and acknowledgment contracts, and disposable delivery tests. A new full
 fleet run is unnecessary for this contract migration. Future research should
 target those gaps, preserving the same model/effort requirements.
+
+## First Disposable Pi Pass
+
+The user authorized starting targeted verification after the passive fleet and
+contract migration. Pi 0.84.4 on native macOS passed the new opt-in Rust RPC harness
+with a deterministic local model and two controlled tool calls. The test preserves
+normal resource discovery in its isolated project and never contacts existing
+sessions. The fixture-building and uncertainty-review workers used `gpt-5.6-sol`
+with low reasoning; the deterministic test model does not use cloud inference.
+
+The [saved result](verification/pi-macos-0.84.4.json) and
+[verification notes](verification/README.md) identify the assertions, exact nextest
+run, sanitized events, scope, and limitations. Pi now has two passing fixture
+verification records. This supersedes earlier statements that all reports have
+empty verification, while preserving those statements as the passive run history.
+No production adapter is enabled; native Linux/Windows, cloud inference, arbitrary
+extensions, interruption cleanup, disconnects, and concurrent targeting remain open.
+
+## Pi Abort and EOF Follow-Up
+
+The user authorized the next failure experiments. Four scenarios now pass in the
+real Pi 0.84.4/macOS fixture: abort with queued steering, clear-before-abort, stdin
+EOF without waiting for acknowledgment, and stdin EOF after acknowledgment.
+Both abort scenarios also exercise independent malformed-replacement rejection
+and a valid next prompt. The [saved results](verification/pi-macos-0.84.4-failures.json)
+distinguish transcript persistence from model consumption and document the exact
+disconnect boundary. The spec and uncertainty register incorporate the findings.
+
+Both opt-in tests passed with zero skipped; scoped Clippy and research validation
+passed. Pi has four scoped verification records. No production behavior was
+changed or activated, no cloud inference ran, and no existing session was touched.
+
+## Pi Switch, Crash, and External-Tool Follow-Up
+
+All three authorized areas now have disposable macOS Pi 0.84.4 evidence:
+
+- A gated session switch accepts steering against the observable old session,
+  then discards it; submitting after the switch reaches the new session.
+- Abrupt provider termination after acknowledgment loses queued steering before
+  transcript persistence or model consumption.
+- Normal abort removes a marked built-in bash external process, but killing Pi
+  leaves it running until the fixture performs cleanup.
+
+The three Rust tests passed with zero skipped (nextest run
+`ebe8a54f-2fdb-4cdf-8639-9244126eb755`), as did scoped Clippy. The separate
+subprocess runner passed both scenario assertions and cleaned up its process.
+The delegated subprocess work used `gpt-5.6-sol` with low reasoning; the fixtures
+use deterministic local models without cloud inference.
+
+See [verification notes](verification/README.md) for repeat commands and sanitized
+artifacts. Pi now has seven scoped verification records. The spec requires
+coordination between switches and sends, separate queue/history/delivery outcomes,
+and wrapper ownership sufficient for cleanup after provider failure. Existing
+extensions and resource discovery remain enabled.
+
+The passive fleet prompt now asks for these failure distinctions and preserves
+existing live evidence during refresh; its previous unconditional instruction to
+empty verification was inconsistent with retained test records and was corrected.
+No schema revision or full fleet rerun is needed for these representable findings.
+Additional process descendants, broader interleavings, controller/host failure,
+restart, cloud inference, and native Linux/Windows remain explicit unknowns.
