@@ -8,8 +8,8 @@ fn labels(outcomes: &[SubagentOutcome]) -> Vec<String> {
 fn success_allowlist_recognizes_the_three_documented_spellings() {
     for status in ["completed", "success", "succeeded", "SUCCEEDED", "  success "] {
         assert_eq!(
-            terminal_outcome_for_status(Some(status)),
-            Some(TaskOutcome::Succeeded),
+            route_notification_status(Some(status)),
+            NotificationRouting::Terminal(TaskOutcome::Succeeded),
             "`{status}` should be a recognized success"
         );
     }
@@ -18,20 +18,58 @@ fn success_allowlist_recognizes_the_three_documented_spellings() {
 #[test]
 fn stopped_is_terminal_and_unsuccessful() {
     assert_eq!(
-        terminal_outcome_for_status(Some("stopped")),
-        Some(TaskOutcome::Stopped)
+        route_notification_status(Some("stopped")),
+        NotificationRouting::Terminal(TaskOutcome::Stopped)
     );
     assert!(TaskOutcome::Stopped.is_incomplete());
     assert!(!TaskOutcome::Succeeded.is_incomplete());
 }
 
 #[test]
-fn unknown_and_absent_statuses_are_not_terminal_on_their_own() {
-    // The signal an event kind without inherent terminality (a
-    // `task_notification`) uses to stay progress rather than invent an outcome.
-    assert_eq!(terminal_outcome_for_status(Some("thinking")), None);
-    assert_eq!(terminal_outcome_for_status(Some("   ")), None);
-    assert_eq!(terminal_outcome_for_status(None), None);
+fn an_absent_or_blank_notification_status_routes_to_progress() {
+    // Branch 1: the provider said nothing, so there is nothing to preserve.
+    assert_eq!(
+        route_notification_status(None),
+        NotificationRouting::Progress
+    );
+    assert_eq!(
+        route_notification_status(Some("   ")),
+        NotificationRouting::Progress
+    );
+    assert_eq!(
+        route_notification_status(Some("")),
+        NotificationRouting::Progress
+    );
+}
+
+#[test]
+fn every_progress_word_routes_to_progress() {
+    // Branch 3: an explicit in-flight vocabulary, not a fallback.
+    for status in PROGRESS_STATUSES {
+        assert_eq!(
+            route_notification_status(Some(status)),
+            NotificationRouting::Progress,
+            "`{status}` should be a recognized progress word"
+        );
+    }
+    // Normalization applies to this vocabulary too.
+    assert_eq!(
+        route_notification_status(Some("  THINKING ")),
+        NotificationRouting::Progress
+    );
+}
+
+#[test]
+fn a_present_but_unrecognized_notification_status_is_terminal_and_unresolved() {
+    // Branch 4, the fail-closed residue: an uninterpretable word must not be
+    // read as either progress or success.
+    for status in ["evaporated", "vaporized", "  Evaporated  "] {
+        assert_eq!(
+            route_notification_status(Some(status)),
+            NotificationRouting::Terminal(TaskOutcome::UnknownStatus),
+            "`{status}` should fail closed"
+        );
+    }
 }
 
 #[test]
@@ -193,7 +231,12 @@ fn applying_an_incomplete_ledger_poisons_success_without_touching_the_exit_code(
 }
 
 #[test]
-fn a_more_specific_provider_error_kind_survives_ledger_finalization() {
+fn incomplete_work_displaces_an_earlier_provider_error_kind_but_keeps_its_text() {
+    // Spec §4: `incomplete_subagents` is the stable machine-facing exit reason
+    // whenever unresolved work remains, so an earlier parser error kind cannot
+    // hold the slot. The displaced failure is operationally valuable and
+    // `error_message` is the only place it still has, so the composed headline
+    // must name both.
     let mut ledger = TaskLedger::new();
     ledger.record_start(Some("t1"), Some("alpha"));
 
@@ -205,10 +248,86 @@ fn a_more_specific_provider_error_kind_survives_ledger_finalization() {
     };
     ledger.apply_to_summary(&mut summary);
 
-    assert_eq!(summary.error_kind.as_deref(), Some("rate_limit"));
-    assert_eq!(summary.error_message.as_deref(), Some("Too many requests"));
-    // The facts are still recorded even though the headline stays.
+    assert_eq!(
+        summary.error_kind.as_deref(),
+        Some(INCOMPLETE_SUBAGENTS_ERROR_KIND)
+    );
+    let message = summary.error_message.as_deref().unwrap();
+    assert!(
+        message.contains("1 sub-agent task did not complete"),
+        "{message}"
+    );
+    assert!(message.contains("alpha"), "{message}");
+    assert!(message.contains("rate_limit"), "{message}");
+    assert!(message.contains("Too many requests"), "{message}");
     assert_eq!(summary.subagent_outcomes.len(), 1);
+}
+
+#[test]
+fn a_displaced_provider_failure_without_text_is_still_named() {
+    let mut ledger = TaskLedger::new();
+    ledger.record_terminal(Some("t1"), Some("alpha"), Some("stopped"));
+
+    let mut summary = StreamExecutionSummary {
+        is_error: true,
+        error_kind: Some("repeated_stream_error".into()),
+        ..Default::default()
+    };
+    ledger.apply_to_summary(&mut summary);
+
+    let message = summary.error_message.as_deref().unwrap();
+    assert!(message.contains("repeated_stream_error"), "{message}");
+}
+
+#[test]
+fn the_composed_message_still_honors_the_concise_message_contract() {
+    // The displaced text is arbitrary provider output: multi-line, escape
+    // bearing, and far past the 240-character budget. The composed headline
+    // must still be one clamped line, and must still name the displaced
+    // failure — the reservation exists so the task list is what gives way.
+    let mut ledger = TaskLedger::new();
+    for index in 0..30 {
+        let id = format!("task-{index}");
+        let name = format!("a-very-long-sub-agent-task-name-number-{index}");
+        ledger.record_start(Some(&id), Some(&name));
+        ledger.record_terminal(Some(&id), Some(&name), Some("stopped"));
+    }
+
+    let mut summary = StreamExecutionSummary {
+        is_error: true,
+        error_kind: Some("rate_limit".into()),
+        error_message: Some(format!(
+            "\u{1b}[31mToo many requests\u{1b}[0m\nretry later\n{}",
+            "x".repeat(500)
+        )),
+        ..Default::default()
+    };
+    ledger.apply_to_summary(&mut summary);
+
+    let message = summary.error_message.as_deref().unwrap();
+    assert!(!message.contains('\u{1b}'), "escapes leaked: {message:?}");
+    assert!(
+        !message.contains('\n') && !message.contains('\r'),
+        "multi-line: {message:?}"
+    );
+    assert!(
+        message.chars().count() <= 240,
+        "{} chars: {message}",
+        message.chars().count()
+    );
+    assert!(
+        message.starts_with("30 sub-agent tasks did not complete"),
+        "{message}"
+    );
+    assert!(message.contains("rate_limit"), "{message}");
+    assert!(message.contains("Too many requests"), "{message}");
+    // Non-vacuity: the list genuinely had to truncate, which is the direction
+    // the reservation guarantees.
+    assert!(
+        !message.contains("a-very-long-sub-agent-task-name-number-29"),
+        "{message}"
+    );
+    assert_eq!(summary.subagent_outcomes.len(), 30);
 }
 
 #[test]

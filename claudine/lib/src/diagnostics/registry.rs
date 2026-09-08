@@ -161,6 +161,24 @@ pub const CODES: &[CodeSpec] = &[
         severity_override: Some(Severity::Warning),
         detail: &["provider"],
     },
+    CodeSpec {
+        code: "provider.incomplete_subagents",
+        category: Category::Provider,
+        // Fail-fast by ratified contract: the provider abandoned sub-agent work
+        // and then exited cleanly, so nothing generic resolves it. `transient`
+        // would invite a retry handler to loop a run that will abandon the same
+        // work again, and `correctable` would promise an action the author or
+        // operator does not have. Only an explicit `failure` stack recovers it.
+        disposition: Disposition::Unrecoverable,
+        // The agent run abandoned its own work — not the author's document, not
+        // the host, not a Claudine bug.
+        origin: Origin::Provider,
+        severity_override: None,
+        // The synthesized-label path knows the code but no per-instance values,
+        // so both project `null` today; the complete per-task list lives in
+        // `session_end.extra.subagent_outcomes` regardless.
+        detail: &["provider", "incomplete_count"],
+    },
     // --- composition — author's prompt document (Darkmatter) ---
     CodeSpec {
         code: "composition.invalid_file_reference",
@@ -598,6 +616,18 @@ mod tests {
     }
 
     #[test]
+    fn incomplete_subagents_is_unrecoverable_provider_work() {
+        // The ratified fail-fast contract: a run whose sub-agent work was
+        // abandoned must never be picked up by a generic retry handler.
+        let spec = code_spec("provider.incomplete_subagents").unwrap();
+        assert_eq!(spec.category, Category::Provider);
+        assert_eq!(spec.disposition, Disposition::Unrecoverable);
+        assert_eq!(spec.origin, Origin::Provider);
+        assert_eq!(spec.severity(), Severity::Error);
+        assert!(spec.detail.contains(&"incomplete_count"));
+    }
+
+    #[test]
     fn interrupted_origin_is_caller() {
         // error-catalog §7.7: the human pressed Ctrl-C — the caller.
         assert_eq!(code_spec("provider.interrupted").unwrap().origin, Origin::Caller);
@@ -607,8 +637,10 @@ mod tests {
     fn catalog_covers_the_ratified_count() {
         // 12 categories; the faithful transcription of §3 landed at 42, plus the
         // additive `composition.schema_parse` (finding #6) → 43, plus the
-        // additive `composition.shell_approval` (error-propagation §D-14) → 44.
+        // additive `composition.shell_approval` (error-propagation §D-14) → 44,
+        // plus the additive `provider.incomplete_subagents`
+        // (silent-success-and-startup-stall §4) → 45.
         // This pins the count so an accidental drop or duplicate is caught.
-        assert_eq!(CODES.len(), 44);
+        assert_eq!(CODES.len(), 45);
     }
 }

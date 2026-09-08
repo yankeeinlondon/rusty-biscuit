@@ -848,7 +848,9 @@ fn terminal_task_notification_preserves_id_name_and_raw_status() {
 }
 
 #[test]
-fn a_task_notification_without_a_terminal_status_remains_info() {
+fn a_task_notification_with_an_explicit_progress_status_remains_info() {
+    // `thinking` is in the progress vocabulary, which is why this stays `Info`
+    // — not because an unrecognized status defaults to progress.
     let (sink, mut parser) = new_parser();
     parser.feed_line(
         r#"{"type":"task_notification","task_id":"sa_1","message":"still thinking","status":"thinking"}"#,
@@ -858,6 +860,64 @@ fn a_task_notification_without_a_terminal_status_remains_info() {
     let summary = parser.finish(0);
     assert!(!summary.is_error);
     assert!(summary.subagent_outcomes.is_empty());
+}
+
+#[test]
+fn a_task_notification_with_no_status_remains_info_and_stays_clean() {
+    let (sink, mut parser) = new_parser();
+    parser.feed_line(r#"{"type":"task_notification","message":"heartbeat"}"#);
+    parser.feed_line(r#"{"type":"task_notification","task_id":"sa_1","status":"   "}"#);
+    assert_eq!(sink.kinds(), vec!["info", "info"]);
+    let summary = parser.finish(0);
+    assert!(!summary.is_error);
+    assert!(summary.subagent_outcomes.is_empty());
+}
+
+#[test]
+fn an_unrecognized_notification_status_fails_closed_after_a_start() {
+    // A future provider vocabulary must not resolve a started task by being
+    // unreadable: the observation is terminal, unresolved, and keeps its word.
+    let (sink, mut parser) = new_parser();
+    for line in [
+        r#"{"type":"task_started","task_id":"sa_1","name":"researcher"}"#,
+        r#"{"type":"task_notification","task_id":"sa_1","name":"researcher","status":"evaporated"}"#,
+    ] {
+        parser.feed_line(line);
+    }
+    assert_eq!(sink.kinds(), vec!["subagent_start", "subagent_stop"]);
+
+    let summary = parser.finish(0);
+    assert!(summary.is_error);
+    assert_eq!(summary.error_kind.as_deref(), Some("incomplete_subagents"));
+    assert_eq!(summary.subagent_outcomes.len(), 1);
+    let fact = &summary.subagent_outcomes[0];
+    assert_eq!(fact.task_id.as_deref(), Some("sa_1"));
+    assert_eq!(fact.name.as_deref(), Some("researcher"));
+    assert_eq!(fact.raw_status.as_deref(), Some("evaporated"));
+    assert_eq!(
+        fact.outcome,
+        crate::stream::task_ledger::TaskOutcome::UnknownStatus,
+        "an unreadable status must be unresolved, not merely unfinished"
+    );
+}
+
+#[test]
+fn an_unrecognized_notification_status_enrolls_a_fact_without_a_prior_start() {
+    let (_sink, mut parser) = new_parser();
+    parser.feed_line(
+        r#"{"type":"task_notification","task_id":"sa_9","name":"orphan","status":"evaporated"}"#,
+    );
+    let summary = parser.finish(0);
+    assert!(summary.is_error);
+    assert_eq!(summary.subagent_outcomes.len(), 1);
+    assert_eq!(
+        summary.subagent_outcomes[0].raw_status.as_deref(),
+        Some("evaporated")
+    );
+    assert_eq!(
+        summary.subagent_outcomes[0].outcome,
+        crate::stream::task_ledger::TaskOutcome::UnknownStatus
+    );
 }
 
 #[test]

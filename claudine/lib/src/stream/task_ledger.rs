@@ -35,10 +35,6 @@ use super::summary::StreamExecutionSummary;
 const SUCCESS_STATUSES: &[&str] = &["completed", "success", "succeeded"];
 
 /// Raw provider statuses that are terminal but unsuccessful.
-///
-/// Membership matters twice: it classifies the outcome, and — for event kinds
-/// that are not inherently terminal, such as `task_notification` — it is what
-/// makes the observation terminal at all.
 const UNSUCCESSFUL_STATUSES: &[&str] = &[
     "stopped",
     "failed",
@@ -54,6 +50,29 @@ const UNSUCCESSFUL_STATUSES: &[&str] = &[
     "killed",
 ];
 
+/// Raw provider statuses that describe work still in flight.
+///
+/// The third vocabulary exists so that "not terminal" is something the provider
+/// says, rather than something Claudine infers from its own ignorance. Every
+/// entry is a word whose plain meaning is *still going*, so reading it as an
+/// abandoned or failed task would be wrong; anything outside all three lists is
+/// a word Claudine cannot interpret at all, and is failed closed. Extend this
+/// with fixtures when a provider is observed emitting a new in-flight word —
+/// never to silence a status whose meaning is actually unknown.
+const PROGRESS_STATUSES: &[&str] = &[
+    "thinking",
+    "running",
+    "in_progress",
+    "progress",
+    "started",
+    "starting",
+    "pending",
+    "queued",
+    "working",
+    "active",
+    "resumed",
+];
+
 /// `error_kind` stamped on a summary poisoned by incomplete sub-agent work.
 pub const INCOMPLETE_SUBAGENTS_ERROR_KIND: &str = "incomplete_subagents";
 
@@ -66,8 +85,8 @@ pub enum TaskOutcome {
     /// A terminal observation whose raw status is a recognized unsuccessful
     /// state (`stopped` and friends).
     Stopped,
-    /// A terminal observation whose raw status is absent or outside both
-    /// vocabularies. Deliberately not success — see the module note.
+    /// A terminal observation whose raw status is absent or outside every
+    /// recognized vocabulary. Deliberately not success — see the module note.
     UnknownStatus,
     /// The task started and the session ended with no terminal observation.
     Unfinished,
@@ -135,20 +154,52 @@ impl SubagentOutcome {
     }
 }
 
-/// Classify a raw provider status as a terminal outcome.
+/// How a status observed on an event kind without inherent terminality
+/// (`task_notification`) must be handled.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NotificationRouting {
+    /// The event is a progress report and carries nothing worth preserving as
+    /// an outcome.
+    Progress,
+    /// The event is a terminal observation with this outcome.
+    Terminal(TaskOutcome),
+}
+
+/// Route a `task_notification` status through the three status vocabularies.
 ///
-/// Returns `None` when the status is absent or not in either vocabulary, which
-/// is the signal that an event kind carrying no inherent terminality (such as
-/// `task_notification`) is still progress rather than a terminal observation.
-pub fn terminal_outcome_for_status(status: Option<&str>) -> Option<TaskOutcome> {
-    let normalized = status?.trim().to_ascii_lowercase();
-    if normalized.is_empty() {
-        return None;
+/// An absent or blank status is progress because the provider said nothing that
+/// could be preserved; a status in the success or unsuccessful vocabulary is
+/// terminal; a status in [`PROGRESS_STATUSES`] is progress; and a status that is
+/// present but in none of the three is terminal with
+/// [`TaskOutcome::UnknownStatus`]. That last branch is the fail-closed residue:
+/// Claudine cannot read a future provider vocabulary, so an uninterpretable word
+/// must poison success rather than quietly resolve the task.
+pub fn route_notification_status(status: Option<&str>) -> NotificationRouting {
+    let Some(normalized) = normalized_status(status) else {
+        return NotificationRouting::Progress;
+    };
+    if let Some(outcome) = recognized_terminal_outcome(&normalized) {
+        return NotificationRouting::Terminal(outcome);
     }
-    if SUCCESS_STATUSES.contains(&normalized.as_str()) {
+    if PROGRESS_STATUSES.contains(&normalized.as_str()) {
+        return NotificationRouting::Progress;
+    }
+    NotificationRouting::Terminal(TaskOutcome::UnknownStatus)
+}
+
+/// Trim-normalized, case-folded status, or `None` when the provider supplied
+/// nothing to interpret.
+fn normalized_status(status: Option<&str>) -> Option<String> {
+    let normalized = status?.trim().to_ascii_lowercase();
+    (!normalized.is_empty()).then_some(normalized)
+}
+
+/// Classify an already-normalized status against the two terminal vocabularies.
+fn recognized_terminal_outcome(normalized: &str) -> Option<TaskOutcome> {
+    if SUCCESS_STATUSES.contains(&normalized) {
         return Some(TaskOutcome::Succeeded);
     }
-    if UNSUCCESSFUL_STATUSES.contains(&normalized.as_str()) {
+    if UNSUCCESSFUL_STATUSES.contains(&normalized) {
         return Some(TaskOutcome::Stopped);
     }
     None
@@ -159,7 +210,10 @@ pub fn terminal_outcome_for_status(status: Option<&str>) -> Option<TaskOutcome> 
 /// unrecognized status becomes [`TaskOutcome::UnknownStatus`] rather than being
 /// optimistically read as success.
 fn forced_terminal_outcome(status: Option<&str>) -> TaskOutcome {
-    terminal_outcome_for_status(status).unwrap_or(TaskOutcome::UnknownStatus)
+    normalized_status(status)
+        .as_deref()
+        .and_then(recognized_terminal_outcome)
+        .unwrap_or(TaskOutcome::UnknownStatus)
 }
 
 /// The ledger's internal identity for one task.
@@ -264,24 +318,36 @@ impl TaskLedger {
 
     /// Project the ledger onto a finished summary.
     ///
-    /// Incomplete work poisons success: `is_error` flips true and the facts
-    /// land on `subagent_outcomes`. The provider's real `exit_code` and the
-    /// process termination are left untouched — Claudine did not kill the
-    /// child, and manufacturing a nonzero exit would lie about what happened.
-    /// An `error_kind` the parser already set for a more specific provider
-    /// failure is preserved; that failure is the more actionable headline.
+    /// Incomplete work poisons success: `is_error` flips true, the facts land
+    /// on `subagent_outcomes`, and `error_kind` becomes
+    /// [`INCOMPLETE_SUBAGENTS_ERROR_KIND`] **unconditionally** — that label is
+    /// the stable machine-facing exit reason for this shape, so a parser error
+    /// kind recorded earlier in the attempt may not displace it. The provider's
+    /// real `exit_code` and the process termination are left untouched —
+    /// Claudine did not kill the child, and manufacturing a nonzero exit would
+    /// lie about what happened.
+    ///
+    /// A displaced provider failure is not discarded: it is retained inside the
+    /// composed `error_message`, which is the only place that text still has.
+    /// A failure counts whenever *either* a kind or a message is present — a
+    /// Claude `result.is_error` carries text with no kind, and that text is
+    /// the actionable cause.
     pub fn apply_to_summary(&self, summary: &mut StreamExecutionSummary) {
         let incomplete = self.incomplete_outcomes();
         if incomplete.is_empty() {
             return;
         }
-        let message = incomplete_message(&incomplete);
+        let prior = prior_failure_clause(
+            summary.error_kind.as_deref(),
+            summary.error_message.as_deref(),
+        );
+        summary.error_message = Some(crate::harness::concise_message(&compose_message(
+            &incomplete,
+            prior.as_deref(),
+        )));
         summary.subagent_outcomes = incomplete;
         summary.is_error = true;
-        if summary.error_kind.is_none() {
-            summary.error_kind = Some(INCOMPLETE_SUBAGENTS_ERROR_KIND.to_string());
-            summary.error_message = Some(message);
-        }
+        summary.error_kind = Some(INCOMPLETE_SUBAGENTS_ERROR_KIND.to_string());
     }
 
     fn entry_index(&mut self, task_id: Option<&str>, name: Option<&str>) -> usize {
@@ -325,9 +391,24 @@ impl TaskLedger {
 /// Operator-facing headline for a run poisoned by incomplete sub-agent work.
 ///
 /// Names as many tasks as the shared 240-character failure-message budget can
-/// hold; the complete list always remains in `subagent_outcomes`, which is why
-/// truncating here is safe.
+/// hold once [`crate::harness::concise_message`] clamps it; the complete list
+/// always remains in `subagent_outcomes`, which is why truncating here is safe.
 pub fn incomplete_message(incomplete: &[SubagentOutcome]) -> String {
+    compose_message(incomplete, None)
+}
+
+/// Character budget reserved for a displaced provider failure.
+///
+/// The composed message is clamped from the tail, so this reservation is what
+/// keeps the displaced failure — the one fact with no other home once
+/// `error_kind`/`error_message` are overwritten — from being the part that
+/// truncates. Well under the 240-character message budget by construction, so
+/// the task list is always the tail that gives way.
+const PRIOR_FAILURE_CLAUSE_MAX_CHARS: usize = 96;
+
+/// Build the operator headline, optionally naming a displaced provider failure
+/// between the count and the (truncatable) task list.
+fn compose_message(incomplete: &[SubagentOutcome], prior: Option<&str>) -> String {
     let count = incomplete.len();
     let noun = if count == 1 { "task" } else { "tasks" };
     let listed = incomplete
@@ -335,7 +416,45 @@ pub fn incomplete_message(incomplete: &[SubagentOutcome]) -> String {
         .map(SubagentOutcome::describe)
         .collect::<Vec<_>>()
         .join(", ");
-    format!("{count} sub-agent {noun} did not complete: {listed}")
+    match prior {
+        Some(clause) => format!("{count} sub-agent {noun} did not complete; {clause}; incomplete: {listed}"),
+        None => format!("{count} sub-agent {noun} did not complete: {listed}"),
+    }
+}
+
+/// Render the provider failure this finalization displaces, bounded so it
+/// cannot crowd every task name out of the composed headline.
+///
+/// The provider's text is hygiened *before* the clamp, so the cut can never
+/// land inside an escape sequence and leave its tail as visible garbage.
+///
+/// Returns `None` when neither a non-blank kind nor a non-blank message
+/// exists — there is nothing to displace, so the headline carries no clause.
+fn prior_failure_clause(kind: Option<&str>, message: Option<&str>) -> Option<String> {
+    fn present(value: Option<&str>) -> Option<&str> {
+        value.map(str::trim).filter(|text| !text.is_empty())
+    }
+    let clause = match (present(kind), present(message)) {
+        (Some(kind), Some(text)) => format!("after provider failure {kind}: {text}"),
+        (Some(kind), None) => format!("after provider failure {kind}"),
+        (None, Some(text)) => format!("after provider failure: {text}"),
+        (None, None) => return None,
+    };
+    Some(clamp_chars(
+        &crate::harness::concise_message(&clause),
+        PRIOR_FAILURE_CLAUSE_MAX_CHARS,
+    ))
+}
+
+/// Clamp to `budget` characters, reserving one for the ellipsis so the result
+/// never exceeds it.
+fn clamp_chars(text: &str, budget: usize) -> String {
+    if text.chars().count() <= budget {
+        return text.to_string();
+    }
+    let mut clamped: String = text.chars().take(budget.saturating_sub(1)).collect();
+    clamped.push('…');
+    clamped
 }
 
 #[cfg(test)]

@@ -28,7 +28,7 @@ use super::protocol::claude::{
 };
 use super::semantic::{SemanticErrorKind, SemanticEvent, SemanticEventSink};
 use super::summary::{RateLimitInfo, StreamExecutionSummary};
-use super::task_ledger::{TaskLedger, terminal_outcome_for_status};
+use super::task_ledger::{NotificationRouting, TaskLedger, route_notification_status};
 use super::token_usage::NormalizedTokenUsage;
 use crate::provider_id::Provider;
 /// Max number of hook events to buffer before `SessionStart` is emitted.
@@ -652,14 +652,15 @@ impl<S: SemanticEventSink> ClaudeSemanticStreamParser<S> {
         });
     }
 
-    /// Route a `task_notification`: terminal status becomes a terminal
-    /// observation, anything else stays progress. A notification carrying no
-    /// recognized terminal status must not be read as a completion.
+    /// Route a `task_notification` by the ledger's status vocabularies.
+    ///
+    /// Only an absent status or an explicit in-flight word stays progress; a
+    /// status Claudine cannot interpret is terminal-and-unresolved, so a future
+    /// provider vocabulary cannot be silently read as a completion.
     fn handle_task_notification(&mut self, evt: ClaudeTaskEvent, raw_kind: &str) {
-        if terminal_outcome_for_status(evt.status.as_deref()).is_some() {
-            self.handle_task_terminal(evt, raw_kind);
-        } else {
-            self.handle_task_progress(evt, raw_kind);
+        match route_notification_status(evt.status.as_deref()) {
+            NotificationRouting::Terminal(_) => self.handle_task_terminal(evt, raw_kind),
+            NotificationRouting::Progress => self.handle_task_progress(evt, raw_kind),
         }
     }
 
