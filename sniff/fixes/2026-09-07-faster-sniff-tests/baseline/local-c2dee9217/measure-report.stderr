@@ -1,0 +1,2 @@
+pnpm --dir "/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/tools/test-audit" exec tsx src/cli.ts measure report --config ../../sniff/fixes/2026-09-07-faster-sniff-tests/audit.config.json --manifest ../../sniff/fixes/2026-09-07-faster-sniff-tests/baseline/local-c2dee9217/runs.jsonl --markdown
+GATE EXIT=0

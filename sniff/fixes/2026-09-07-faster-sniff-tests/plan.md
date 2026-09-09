@@ -1,14 +1,221 @@
 ---
 total_phases: 10
 created: 2026-09-07
-phase: 1
+phase: 10
 agent: "opencode/zai-coding-plan/glm-5.3"
 yolo: "true"
 fix: 2026-09-07-faster-sniff-tests
 spec: sniff/fixes/2026-09-07-faster-sniff-tests/spec.md
+implemented: true
 packages:
     - sniff
     - sniff-cli
+source_files_during_phase_10: []
+docs_updated_during_phase_10:
+    - sniff/fixes/2026-09-07-faster-sniff-tests/plan.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/log.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/results.md
+docs_created_during_phase_10: []
+skills_files_updated_during_phase_10: []
+source_files_during_phase_9:
+    - sniff/cli/tests/cli_process_fixture.rs
+docs_updated_during_phase_9:
+    - sniff/fixes/2026-09-07-faster-sniff-tests/plan.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/inventory.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/log.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/results.md
+docs_created_during_phase_9: []
+skills_files_updated_during_phase_9: []
+source_files_during_phase_8: []
+docs_updated_during_phase_8:
+    - sniff/fixes/2026-09-07-faster-sniff-tests/plan.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/inventory.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/log.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/results.md
+docs_created_during_phase_8:
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/plan.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/cohorts.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/targets.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/provenance.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/runs.jsonl
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/report.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/report.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/work-counts.stdout
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/work-counts.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/work-counts.validate.txt
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/work-counts.compare.md
+skills_files_updated_during_phase_8: []
+source_files_during_phase_7:
+    - sniff/cli/tests/common/mod.rs
+    - sniff/cli/tests/level2_cicd_styling.rs
+    - sniff/cli/tests/level2_git_status_styling.rs
+    - sniff/cli/tests/tty.rs
+    - sniff/lib/tests/remote_providers.rs
+docs_updated_during_phase_7:
+    - sniff/fixes/2026-09-07-faster-sniff-tests/plan.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/inventory.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/log.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/captures.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/cli-bare.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/cli-bare.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/cli-fixtures.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/cli-fixtures.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/l1-local-all.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/l1-local-all.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-bare.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-bare.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-network.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-network.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-remote.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-remote.json
+docs_created_during_phase_7: []
+skills_files_updated_during_phase_7:
+    - .claude/skills/sniff/SKILL.md
+source_files_during_phase_6:
+    - sniff/lib/src/os/user.rs
+    - sniff/lib/src/programs/types.rs
+    - sniff/lib/tests/bench_fixtures.rs
+    - sniff/lib/tests/benchmark_workloads.rs
+    - sniff/lib/tests/program_installable.rs
+docs_updated_during_phase_6:
+    - sniff/fixes/2026-09-07-faster-sniff-tests/plan.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/inventory.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/log.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/families.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/family-members.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/captures.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/cli-bare.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/cli-bare.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/cli-fixtures.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/cli-fixtures.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/l1-local-all.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/l1-local-all.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-bare.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-bare.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-network.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-network.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-remote.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-remote.json
+docs_created_during_phase_6: []
+skills_files_updated_during_phase_6: []
+source_files_during_phase_5:
+    - sniff/cli/tests/cli.rs
+    - sniff/cli/tests/cli_process_fixture.rs
+    - sniff/cli/tests/common/mod.rs
+    - sniff/cli/tests/install_interactive_pty.rs
+    - sniff/cli/tests/install_interview_cli.rs
+    - sniff/cli/tests/install_plan.rs
+    - sniff/cli/tests/snapshots.rs
+    - sniff/cli/tests/spawn_site_guard.rs
+    - sniff/cli/tests/tty.rs
+    - sniff/lib/tests/foo.rs
+    - sniff/lib/tests/integration.rs
+    - sniff/lib/tests/merge_conflict_prediction.rs
+docs_updated_during_phase_5:
+    - sniff/fixes/2026-09-07-faster-sniff-tests/plan.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/inventory.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/log.md
+docs_created_during_phase_5: []
+skills_files_updated_during_phase_5: []
+source_files_during_phase_4:
+    - sniff/cli/tests/cli.rs
+    - sniff/cli/tests/cli_process_fixture.rs
+    - sniff/cli/tests/common/mod.rs
+    - sniff/cli/tests/common/source_scan.rs
+    - sniff/cli/tests/spawn_site_guard.rs
+docs_updated_during_phase_4:
+    - sniff/fixes/2026-09-07-faster-sniff-tests/plan.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/log.md
+docs_created_during_phase_4: []
+skills_files_updated_during_phase_4:
+    - .claude/skills/sniff/SKILL.md
+source_files_during_phase_3: []
+docs_updated_during_phase_3:
+    - sniff/fixes/2026-09-07-faster-sniff-tests/plan.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/inventory.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/log.md
+docs_created_during_phase_3: []
+skills_files_updated_during_phase_3: []
+source_files_during_phase_2: []
+docs_updated_during_phase_2:
+    - sniff/fixes/2026-09-07-faster-sniff-tests/plan.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/inventory.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/log.md
+docs_created_during_phase_2:
+    - sniff/fixes/2026-09-07-faster-sniff-tests/families.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/family-members.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/sources.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/sources.md
+skills_files_updated_during_phase_2: []
+source_files_during_phase_1: []
+docs_updated_during_phase_1:
+    - sniff/fixes/2026-09-07-faster-sniff-tests/plan.md
+docs_created_during_phase_1:
+    - sniff/fixes/2026-09-07-faster-sniff-tests/log.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/inventory.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/results.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/baseline/local-c2dee9217/metadata.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/baseline/local-c2dee9217/measure-report.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/baseline/local-c2dee9217/work-counts.compare-control.md
+skills_files_updated_during_phase_1: []
+source_code:
+    - sniff/cli/tests/cli.rs
+    - sniff/cli/tests/cli_process_fixture.rs
+    - sniff/cli/tests/common/mod.rs
+    - sniff/cli/tests/common/source_scan.rs
+    - sniff/cli/tests/install_interactive_pty.rs
+    - sniff/cli/tests/install_interview_cli.rs
+    - sniff/cli/tests/install_plan.rs
+    - sniff/cli/tests/level2_cicd_styling.rs
+    - sniff/cli/tests/level2_git_status_styling.rs
+    - sniff/cli/tests/snapshots.rs
+    - sniff/cli/tests/spawn_site_guard.rs
+    - sniff/cli/tests/tty.rs
+    - sniff/lib/src/os/user.rs
+    - sniff/lib/src/programs/types.rs
+    - sniff/lib/tests/bench_fixtures.rs
+    - sniff/lib/tests/benchmark_workloads.rs
+    - sniff/lib/tests/foo.rs
+    - sniff/lib/tests/integration.rs
+    - sniff/lib/tests/merge_conflict_prediction.rs
+    - sniff/lib/tests/program_installable.rs
+    - sniff/lib/tests/remote_providers.rs
+documentation:
+    - sniff/fixes/2026-09-07-faster-sniff-tests/plan.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/inventory.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/log.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/results.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/families.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/family-members.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/sources.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/sources.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/captures.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/cli-bare.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/cli-bare.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/cli-fixtures.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/cli-fixtures.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/l1-local-all.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/l1-local-all.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-bare.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-bare.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-network.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-network.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-remote.err
+    - sniff/fixes/2026-09-07-faster-sniff-tests/enumeration/lib-remote.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/baseline/local-c2dee9217/metadata.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/baseline/local-c2dee9217/measure-report.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/baseline/local-c2dee9217/work-counts.compare-control.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/plan.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/cohorts.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/targets.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/provenance.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/runs.jsonl
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/report.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/report.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/work-counts.stdout
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/work-counts.json
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/work-counts.validate.txt
+    - sniff/fixes/2026-09-07-faster-sniff-tests/measurement/local-phase8/work-counts.compare.md
 ---
 
 # Execution plan — Faster Sniff tests with explicit discovery contracts
@@ -212,16 +419,16 @@ verification are separate milestones.
 
 Opens the attribution window. Everything downstream measures against this.
 
-- [ ] Record the baseline state: branch, revision SHA, dirty files,
+- [x] Record the baseline state: branch, revision SHA, dirty files,
       toolchain (`rustc -vV`), host platform, and the explicit statement that
       the revision **predates** 2026-07-22-inefficient-calling (verified: no
       memoization in `sniff/lib/src/hardware/` or `os/`).
-- [ ] Confirm `git diff main -- .config/nextest.toml` and record the
+- [x] Confirm `git diff main -- .config/nextest.toml` and record the
       overrides in force for sniff cohorts (the `sniff-windows-l1` group, the
       `test_detect_completes_in_reasonable_time` threads-required override,
       global slow-timeout/leak windows, plus any per-test overrides the
       census finds).
-- [ ] Use the shared `test-audit` tool (`tools/test-audit`, `just check`
+- [x] Use the shared `test-audit` tool (`tools/test-audit`, `just check`
       there runs its typecheck and vitest suite) with this fix's
       `audit.config.json`: `capture` for the listings, `junit` for CI
       staging trees, `measure parse`/`report` for local console logs, and
@@ -232,27 +439,27 @@ Opens the attribution window. Everything downstream measures against this.
       (native Windows vs WSL, counter version, request shape, the
       2026-07-22 caching boundary). Run its suite once; add focused
       regressions to it only for Sniff-specific behavior.
-- [ ] Preserve a reproducible baseline source state and its build directory.
+- [x] Preserve a reproducible baseline source state and its build directory.
       Warm its test artifacts, then collect one diagnostic local L1 run
       (`just test`) and one `just sanity` run with its 15-second budget.
       Extract CLI and native-detector cohort data from these reports wherever
       the required selection matches. Collect five alternating runs per
       revision together in Phase 8; do not repeat a separate CLI suite when
       its coverage and summed timings are already in the L1 report.
-- [ ] Capture per-test durations via nextest's JUnit output for the same runs
+- [x] Capture per-test durations via nextest's JUnit output for the same runs
       and store everything under
       `sniff/fixes/2026-09-07-faster-sniff-tests/baseline/<run-id>/`.
-- [ ] Record test identities/counts, failures, skips, timeouts, retries, and
+- [x] Record test identities/counts, failures, skips, timeouts, retries, and
       slow cases (`slow-timeout` 5 s marks) next to the timings so lost
       coverage can never read as an optimization.
-- [ ] Pair one representative cohort with work-counter readings
+- [x] Pair one representative cohort with work-counter readings
       (`PerformanceCollector` snapshot via the `work_counts` example or an
       equivalent bench entry point) so timing claims have a counter baseline.
-- [ ] Write the standing coordination note into this fix's `log`/inventory:
+- [x] Write the standing coordination note into this fix's `log`/inventory:
       the rule that no timing comparison may span a landing of
       2026-07-22-inefficient-calling, and the re-baseline obligation if it
       lands mid-work.
-- [ ] Run `just test-l2` from `sniff/` once and record the L2 pair's baseline
+- [x] Run `just test-l2` from `sniff/` once and record the L2 pair's baseline
       (tmux backend) so Phase 7's sleep replacement has a before measurement.
 
 **Validation checkpoint 1** — reproducible baseline source/build state and
@@ -271,31 +478,31 @@ analysis-tool checks; do not run Rust package gates for document-only work.
 
 Inventory and analysis only; no Rust application or test changes. Produces `inventory.md`.
 
-- [ ] Build the enumeration substrate: capture
+- [x] Build the enumeration substrate: capture
       `cargo nextest list --message-format json` for both packages under
       every feature selection a canonical recipe uses — bare, `remote`,
       `network`, `test-fixtures`, `remote,test-fixtures` — recording command,
       revision, toolchain, and features beside each capture.
-- [ ] Capture the source-side population separately (attribute scan for
+- [x] Capture the source-side population separately (attribute scan for
       `#[test]`, `#[tokio::test]`, `#[rstest]`, plus `#[ignore]` and `#[cfg]`
       gates) and diff against runner discovery. Every source test the runner
       never lists under any recipe is a **cfg/feature exclusion row** with its
       reason and actual execution route. This is where `network`-vs-`remote`
       reachability (spec §1) is proven, not assumed.
-- [ ] Inventory the embedded unit tests explicitly, including the eight
+- [x] Inventory the embedded unit tests explicitly, including the eight
       `real_*` tests in `lib/src/package/network.rs` and any other embedded
       gated tests the diff surfaces — `tests/` targets are not the whole
       population.
-- [ ] Inventory doctests (`just doctest`) and the `lib/benches` entry points
+- [x] Inventory doctests (`just doctest`) and the `lib/benches` entry points
       (the `perf` bench plus its `support/` modules); confirm the area has no
       fuzz targets and record that as a finding rather than an omission.
-- [ ] Inventory shared fixture machinery as first-class rows:
+- [x] Inventory shared fixture machinery as first-class rows:
       `run_isolated_software` (cli.rs), `run_stdout` (snapshots.rs),
       `lib/tests/fixtures.rs`, `lib/tests/fixtures/remote/`,
       `lib/benches/support/{builder,fixtures,plans,network_fixture,
       remote_report_fixture,bench_ids,util}.rs`, and the
       `render_cicd_fixture` test-fixtures helper binary.
-- [ ] Write the per-family rows. Each records: the behavior proved and whether
+- [x] Write the per-family rows. Each records: the behavior proved and whether
       assertions distinguish a plausible failure; the three-purpose split
       (deterministic / native-detector / external-resource); required
       boundary and inputs (CWD, home/config/cache, environment, repository,
@@ -303,7 +510,7 @@ Inventory and analysis only; no Rust application or test changes. Produces `inve
       cleanup; timing floor; runner overrides in force; tier, features,
       platforms; canonical recipe; observed cost with provenance; disposition
       (satisfactory / remediation in this fix / linked follow-up).
-- [ ] Enumerate family membership explicitly. A family row is valid only when
+- [x] Enumerate family membership explicitly. A family row is valid only when
       its members are listed and share setup and proof; anything that differs
       gets its own row. `cli.rs`'s 363 tests split along its section headers
       (repo-JSON aggregates, repo leaf e2e, terminal-subset, section
@@ -312,25 +519,25 @@ Inventory and analysis only; no Rust application or test changes. Produces `inve
       install, plain, blast-radius, recent-commits ×3, repo packages,
       package-areas, stable-JSON shape, help/version/completions/output-mode/
       flag-position).
-- [ ] Classify OS specificity per spec §1: basic native OS API coverage stays
+- [x] Classify OS specificity per spec §1: basic native OS API coverage stays
       ordinary cfg-gated L1; document every proposed tier change with the
       actual resource that motivates it.
-- [ ] Write the runner-override census as its own table: every per-test and
+- [x] Write the runner-override census as its own table: every per-test and
       per-group override touching sniff packages, each marked *justified*
       (naming the contract its floor expresses) or *remove with the cost it
       hides*. Include the `sniff-windows-l1` CI serialization group — its
       comment claims Windows host-network API fail-fast; that claim gets
       evidence or a follow-up, never a silent change.
-- [ ] Record recipe/feature reconciliation findings: `test-real` selecting
+- [x] Record recipe/feature reconciliation findings: `test-real` selecting
       `network` (does any real-gated test require `remote`?); `sanity`
       enabling `test-fixtures` for `sniff-cli` while local `test` leaves it
       off; the `SNIFF_INTERACTIVE_PTY=1` bespoke gate resolving to a route or
       an unreachable-with-reason row; `foo.rs` as a dead test binary.
-- [ ] Reuse the existing completeness reconciler with Sniff's listings and
+- [x] Reuse the existing completeness reconciler with Sniff's listings and
       family declarations. Add only missing area-specific handling; preserve
       failure on unassigned or multiply assigned identities. Link its output
       from `inventory.md` and run focused regressions for any tool changes.
-- [ ] State the disposition of every row. No row may be dispositioned by
+- [x] State the disposition of every row. No row may be dispositioned by
       timing threshold; no exclusions based on historical speed (AC1).
 
 **Validation checkpoint 2** — the reconciler exits 0; the inventory covers
@@ -349,41 +556,41 @@ before candidate performance is judged; they do not block implementation.
 Analysis only. Uses Phase 1 local evidence and the Phase 2 inventory;
 CI-dependent budget conclusions may remain pending.
 
-- [ ] Attribute cost by family against the Phase 1 baseline, keeping build,
+- [x] Attribute cost by family against the Phase 1 baseline, keeping build,
       elapsed, and summed-duration columns separate, and pairing each suspect
       family with work-counter readings. Answer draft decision 1 — *which host
       observations are intentional coverage and which are accidental* — with
       per-family counter deltas (e.g. `GIT_DISCOVERIES`, `FS_WALK_*` fires
       when a CLI test launches from the package directory).
-- [ ] Answer draft decision 2 — *which existing observation/tool seams are
+- [x] Answer draft decision 2 — *which existing observation/tool seams are
       sufficient for deterministic tests* — by mapping each deterministic
       family to the seam that already proves it (captured observations,
       focused requests, wiremock fixtures, builder repositories) and naming
       the gaps that justify new seams in Phase 4.
-- [ ] Answer draft decision 3 — *which feature/tier combinations currently
+- [x] Answer draft decision 3 — *which feature/tier combinations currently
       leave tests unreachable* — from Phase 2's exclusion rows, verifying the
       `test-real`/`network`/`remote` selection explicitly (spec §1: `network`
       alone must not be mistaken for `remote` coverage).
-- [ ] Answer draft decision 4 — *which bespoke gates become tiered or
+- [x] Answer draft decision 4 — *which bespoke gates become tiered or
       recipe-routed and which are removed* — with a per-item decision:
       `SNIFF_INTERACTIVE_PTY` (PTY resource ⇒ canonical L2 route or removal
       with reason), `foo.rs` (dead ⇒ removal), and any others surfaced.
-- [ ] Measure the native-detector cohort separately (real OS/hardware/GPU
+- [x] Measure the native-detector cohort separately (real OS/hardware/GPU
       detector tests) and keep it separate throughout (spec §5: never compare
       a real detector before with a fake projection afterward). Answer draft
       decision 5 — *what cost and concurrency budgets are justified per
       native platform* — including the Windows L1 group: gather evidence for
       the `sniff-windows-l1` serialization's stated host-network fail-fast
       rationale before proposing any concurrency change (spec §4).
-- [ ] Ratify per-family work and timing budgets **after** attribution, written
+- [x] Ratify per-family work and timing budgets **after** attribution, written
       into `inventory.md` beside the baseline table so budget review and
       evidence review are one act. No universal percentage target (spec §5).
       Local timing attributes cost; it does not set a CI target.
-- [ ] Record the acquisition-vs-execution accounting plan for families whose
+- [x] Record the acquisition-vs-execution accounting plan for families whose
       collection boundaries differ, and the collector-propagation checks
       (threads, Rayon, walker workers) required before any lower counter is
       read as less work (spec §3; the performance skill's interpretation trap).
-- [ ] For any production defect surfaced during attribution, open a linked
+- [x] For any production defect surfaced during attribution, open a linked
       issue/spec with the evidence rather than fixing it here.
 
 **Validation checkpoint 3** — all five draft decisions have written answers
@@ -401,13 +608,13 @@ First code phase. Requires the preserved baseline and initial local evidence
 from checkpoint 1. Phases 5–7 depend on the fixture contract and its focused
 verification; missing CI samples do not block this work.
 
-- [ ] Create `sniff/cli/tests/common/mod.rs` with a `SniffCliFixture`
+- [x] Create `sniff/cli/tests/common/mod.rs` with a `SniffCliFixture`
       (naming to taste, modeled on claudine's `CliProcessFixture`): temp
       `cwd`/`home`/`bin` outside the checkout, rejection of fixture roots
       inside the checkout **including after canonicalization**, and a builder
       returning the one supported `assert_cmd::Command` with `current_dir`
       pinned to the fixture cwd.
-- [ ] Implement the environment policy as a computed description — clear/scrub
+- [x] Implement the environment policy as a computed description — clear/scrub
       flag, ordered removes (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE` and
       related plumbing; `HOMEDRIVE`/`HOMEPATH`/`XDG_CONFIG_HOME` and friends;
       rendering inputs such as width/color forcing; application variables),
@@ -415,26 +622,26 @@ verification; missing CI samples do not block this work.
       `PATH`) — applied by thin adapters to both `assert_cmd::Command` and
       `std::process::Command`. Scrub inherited values **before** applying
       intentional overrides so a per-key `.env` after build still wins.
-- [ ] Default `PATH` is the fixture `bin` plus a minimal system set
+- [x] Default `PATH` is the fixture `bin` plus a minimal system set
       (`/usr/bin:/bin` on Unix; `%SystemRoot%\System32` with `PATHEXT`
       untouched on Windows, restoring `SystemRoot`/`COMSPEC` where stubs need
       them) — bounded lookup, not fake-only, per the rust-testing contract.
-- [ ] Provide the named escapes, each requiring a call-site comment naming
+- [x] Provide the named escapes, each requiring a call-site comment naming
       the tool or the proof it needs: `host_path()` (real tool is the
       subject), `fake_only_path()` (absence is the assertion),
       `ambient_context(dir)` (launch CWD pinned to a repository the test
       built, panicking outside it — the route for the ambient-checkout
       aggregate tests `cli.rs` documents).
-- [ ] Grow `run_isolated_software` into the builder (a named software-contract
+- [x] Grow `run_isolated_software` into the builder (a named software-contract
       preset) or convert it to one named escape. It must not survive as a
       parallel convention (spec §2).
-- [ ] Add the raw-command surface (`command_std()` or builder equivalent)
+- [x] Add the raw-command surface (`command_std()` or builder equivalent)
       carrying the identical policy, for `tty.rs`'s `expectrl::spawn` and the
       interactive-PTY flow which need `std::process::Command`.
-- [ ] Add a drift test proving the two surfaces produce the same effective
+- [x] Add a drift test proving the two surfaces produce the same effective
       environment (recording stub through both paths, comparing captured
       key/value sets; Windows arm compiled everywhere via `cfg!(windows)`).
-- [ ] Create `sniff/cli/tests/spawn_site_guard.rs` on claudine's mechanics:
+- [x] Create `sniff/cli/tests/spawn_site_guard.rs` on claudine's mechanics:
       source scan for raw `Command::cargo_bin("sniff")` /
       `cargo::cargo_bin("sniff")` / `bin_exe!` spawns outside the builder,
       with an **explicit `(file, one-line reason)` allowlist whose stale
@@ -443,14 +650,14 @@ verification; missing CI samples do not block this work.
       detector shown to fail then restored — transcript recorded).
       `level2_*` and `real_*` files are out of the scan: they drive real
       terminals and host tooling on purpose.
-- [ ] Seed the allowlist with every current raw-spawn file (Phase 5 burns it
+- [x] Seed the allowlist with every current raw-spawn file (Phase 5 burns it
       down); the guard census prints and writes a JSONL artifact to the
       staging directory on the claudine pattern.
-- [ ] Harden parent-side helper commands too: audit `Command::new("git")` and
+- [x] Harden parent-side helper commands too: audit `Command::new("git")` and
       any other parent-side spawns in the test helpers for inherited Git
       plumbing — isolating only the `sniff` child does not protect those
       (spec §2; see `cli.rs`'s `git()` helper inside the shallow-clone test).
-- [ ] Windows compile authority: no local mingw recipe exists in this area,
+- [x] Windows compile authority: no local mingw recipe exists in this area,
       so record `windows-latest` CI as the authority for Windows-only arms
       and mark local Windows verification pending where the host cannot run
       it (spec AC).
@@ -470,63 +677,63 @@ allowlist entries, and the guard's stale-entry arm catches a mis-merge.
 
 ### Phase 5A — `cli.rs` repository-bearing families (‖ with 5B, 5C)
 
-- [ ] Migrate the repo/git-bearing families in `cli/tests/cli.rs` — the
+- [x] Migrate the repo/git-bearing families in `cli/tests/cli.rs` — the
       `repo --json` aggregate tests, repo leaf end-to-end, terminal-subset,
       repo language/version, blast-radius temp-repo, recent-commits (all
       three sub-families), repo packages, package-areas, and stable-JSON
       shape sections — to the builder, each test's disposable repository
       living inside its own fixture root outside the checkout.
-- [ ] Decide per ambient-checkout test: the deliberately-ambient aggregate
+- [x] Decide per ambient-checkout test: the deliberately-ambient aggregate
       documented at `repo_json_stdout_is_exactly_one_json_document` moves to
       `ambient_context()` on a test-built repository (its shallow-clone
       sibling already proves why ambience is a correctness hazard), or gets a
       named-escape entry with the reason. No silent ambience remains.
-- [ ] Delete these files' allowlist entries; confirm the stale-entry arm
+- [x] Delete these files' allowlist entries; confirm the stale-entry arm
       would fire if one were left behind.
 
 ### Phase 5B — `cli.rs` contract families + satellite files (‖ with 5A, 5C)
 
-- [ ] Migrate the remaining `cli.rs` families — help/version, completions,
+- [x] Migrate the remaining `cli.rs` families — help/version, completions,
       output mode, global flag position, section subcommands, hardware/filesystem
       detail, software (the `run_isolated_software` consumers), test-runner,
       negative, services, scoped enrichment, verbose, invalid subcommand,
       remote, install, plain — plus `snapshots.rs` (`run_stdout`), and
       `install_interview_cli.rs` to the builder.
-- [ ] Migrate `install_plan.rs`'s nine sites; its stub-tool and install-root
+- [x] Migrate `install_plan.rs`'s nine sites; its stub-tool and install-root
       fixtures move into fixture-owned `bin`/roots so platform-specific
       software search roots cannot expose the host roster (spec §2).
-- [ ] Delete this batch's allowlist entries.
+- [x] Delete this batch's allowlist entries.
 
 ### Phase 5C — raw-command cohort + bespoke gates (‖ with 5A, 5B)
 
-- [ ] Route `tty.rs` through the builder's raw-command surface so the
+- [x] Route `tty.rs` through the builder's raw-command surface so the
       `expectrl` session inherits the policy; keep the `#[cfg(unix)]` gate.
-- [ ] Resolve `install_interactive_pty.rs` per Phase 3's decision: route it
+- [x] Resolve `install_interactive_pty.rs` per Phase 3's decision: route it
       through a canonical recipe (an L2 tier with `require_level!` + a real
       backend, named for the PTY resource it needs) or remove it with the
       recorded reason. The `SNIFF_INTERACTIVE_PTY=1` bespoke gate must not
       survive silently unreachable (AC7).
-- [ ] Delete `lib/tests/foo.rs` (dead placeholder binary) and remove any
+- [x] Delete `lib/tests/foo.rs` (dead placeholder binary) and remove any
       recipe/reference drift it leaves (AC7).
-- [ ] Delete this batch's allowlist entries.
+- [x] Delete this batch's allowlist entries.
 
 ### Phase 5D — burn-down closure
 
-- [ ] Assert the allowlist contains **zero generic fixture-migration
+- [x] Assert the allowlist contains **zero generic fixture-migration
       exemptions** (AC5). Any survivor carries a specific technical
       necessity — e.g. the L2 pair, which the guard excludes by tier — plus
       equivalent isolation/ownership evidence written at the entry.
-- [ ] Confirm the two L2 files' raw spawns are covered by their tier
+- [x] Confirm the two L2 files' raw spawns are covered by their tier
       exclusion (not an exemption), and that `install_interactive_pty`'s
       resolution is recorded either way.
-- [ ] Add the contamination probes AC-adjacent checks require, using
+- [x] Add the contamination probes AC-adjacent checks require, using
       **disposable state only** — never an edit to the real checkout or the
       user's configuration: Git plumbing (`GIT_DIR`/`GIT_WORK_TREE` pointed
       at a throwaway repo), home/cache relocation, `PATH` injection of a
       shadowing fake tool, inherited width/color (`COLUMNS=44`,
       `FORCE_COLOR=1`), and a checkout-ancestor `TMPDIR`. Each probe must
       leave unrelated test results unchanged.
-- [ ] Re-run `just test` from `sniff/` with the probes exported and record
+- [x] Re-run `just test` from `sniff/` with the probes exported and record
       that no deterministic test changed its result.
 
 **Validation checkpoint 5** — All migrated binaries and contamination probes
@@ -543,7 +750,7 @@ Touches `lib/tests/` and embedded unit tests; largely disjoint from Phase 5's
 CLI files, so **partially parallelizable with Phase 5** after Phase 4 lands
 (serialize only where a commit would mix both).
 
-- [ ] Walk the deterministic lib families (`integration.rs`,
+- [x] Walk the deterministic lib families (`integration.rs`,
       `focused_provider.rs`, `remote_providers.rs`, `remote_observation.rs`,
       `remote_resolution.rs`, `host_capability_cache.rs`,
       `merge_conflict_prediction.rs`, `uv_with_install_plan.rs`,
@@ -551,36 +758,36 @@ CLI files, so **partially parallelizable with Phase 5** after Phase 4 lands
       observations where full detection is incidental. Tests of aggregate
       behavior keep aggregate execution; do not narrow a request that is
       itself under test (spec §3).
-- [ ] Extend the counter-contract pattern from
+- [x] Extend the counter-contract pattern from
       `benchmark_workloads.rs`/`integration.rs`: absent work is zero; seeded
       execution does not rediscover Git (`GIT_DISCOVERIES` stays at its
       seeded count); projection does not reacquire observations; acquisition
       and execution accounted separately where collection boundaries differ
       (the seeded-observation accounting in the performance skill is the
       reference).
-- [ ] Verify collector propagation across threads, Rayon, and walker workers
+- [x] Verify collector propagation across threads, Rayon, and walker workers
       before interpreting any lower count as less work — the skill's stated
       interpretation trap. Record the verification method per family.
-- [ ] Audit repeated repository construction: identify tests that rebuild
+- [x] Audit repeated repository construction: identify tests that rebuild
       equivalent repositories per case, then share immutable data or shrink to
       representative fixtures via the `lib/benches/support/builder.rs` seam
       (the `#[path]` pattern `git_parity.rs`/`bench_fixtures.rs` already
       use). Remember process-local caches share nothing across nextest test
       processes (spec §3).
-- [ ] Audit the benchmark-fixture tests (`bench_fixtures.rs`,
+- [x] Audit the benchmark-fixture tests (`bench_fixtures.rs`,
       `benchmark_workloads.rs`, `bench_ids_sync.rs`, `bench_plans.rs`) for
       fixture sizes larger than their proof needs; keep separate scaling
       coverage where large topologies or real process behavior are the
       contract (spec §3).
-- [ ] Review snapshot normalization: volatile values may be removed, but the
+- [x] Review snapshot normalization: volatile values may be removed, but the
       identity, selection, ordering, and error behavior under assertion may
       not be erased (spec §3). Record every change.
-- [ ] Repair weak assertions (exit-success-only checks, value-compared-with-
+- [x] Repair weak assertions (exit-success-only checks, value-compared-with-
       itself) in separately reviewable commits; for each, record the original
       failing input where one exists, the defect the old assertion could not
       distinguish, and the additional failure the replacement detects.
       Record every replaced or removed test's coverage mapping (AC-adjacent).
-- [ ] Apply Phase 3's dispositions for any lib families marked
+- [x] Apply Phase 3's dispositions for any lib families marked
       remediation-in-scope; linked follow-ups get their owner documents
       updated instead.
 
@@ -593,39 +800,39 @@ broad L1/lint validation with Phase 7. Record the override delta.
 
 ## Phase 7 — Bounded external effects, cleanup, and waits (RB4, AC4) ‖ with Phase 6
 
-- [ ] Verify the remote-provider deterministic tests run against local
+- [x] Verify the remote-provider deterministic tests run against local
       controlled servers only (wiremock fixtures in `remote_providers.rs`,
       `remote_observation.rs`, `focused_provider.rs`): assert request counts,
       pagination bounds, and typed failures; retain exact-host
       consent/credential-scope behavior; confirm no deterministic test makes
       a hidden live API request (spec §4). Genuine probes stay `real_` under
       `just test-real`.
-- [ ] Audit every subprocess-owning test for drain-while-waiting, deadlines,
+- [x] Audit every subprocess-owning test for drain-while-waiting, deadlines,
       and reaping on error and cancellation — including the PTY sessions
       (`tty.rs`, the routed interactive-PTY test) and any `Command::new` in
       fixtures. Fixtures own and clean up children, threads, sockets, and
       directories on failure too.
-- [ ] Replace the two 200 ms readiness sleeps
+- [x] Replace the two 200 ms readiness sleeps
       (`level2_cicd_styling.rs:39`, `level2_git_status_styling.rs:44`) with
       bounded condition/protocol observation polling on the **final asserted
       content**, with deadlines (spec §4; the rust-testing two-phase
       capture-race note governs the polling shape).
-- [ ] Preserve real termination paths and semantic timing floors for
+- [x] Preserve real termination paths and semantic timing floors for
       timeout-behavior tests; justify each retained floor's budget, polling
       cadence, and shutdown margin in the inventory row.
-- [ ] Ensure unique sockets/ports/directories for server-owning tests and
+- [x] Ensure unique sockets/ports/directories for server-owning tests and
       shutdown/join of local server workers (wiremock guards are scoped).
-- [ ] Audit serialization: keep runner-visible serialization only for
+- [x] Audit serialization: keep runner-visible serialization only for
       actually-shared resources; remove `#[serial]` where the resource is
       per-test, remembering `serial_test` is a no-op across nextest processes
       — genuinely shared state needs runner-visible coordination or a
       test-group. Apply Phase 3's Windows decision for `sniff-windows-l1`
       (evidence-based change, explicit no-change, or follow-up — never a
       silent change).
-- [ ] Prove cleanup for process-owning cohorts with nextest's per-test leak
+- [x] Prove cleanup for process-owning cohorts with nextest's per-test leak
       policy plus the root `just test-leaks` post-run sweep — inspection
       alone is not proof (spec §4).
-- [ ] Run L2 coverage only through `just test-l2` (canonical recipe, shared
+- [x] Run L2 coverage only through `just test-l2` (canonical recipe, shared
       pane broker, no focus changes); verify the L2 pair still passes after
       the sleep replacement.
 
@@ -642,7 +849,7 @@ L1/lint result.
 Requires Phases 5–7 implemented with applicable checks passing; diagnosed
 unrelated environment failures remain explicitly pending.
 
-- [ ] Warm the preserved baseline and candidate artifacts, then collect
+- [x] Warm the preserved baseline and candidate artifacts, then collect
       **five alternating warm runs per revision** of each required full L1
       population. Extract changed-cohort identities, counts, and summed test
       durations from those same reports; do not also run every cohort in
@@ -654,24 +861,24 @@ unrelated environment failures remain explicitly pending.
       directories warm and prevent concurrent edits or competing workloads
       during measurement. Reuse earlier samples only if their provenance and
       alternating sequence match this protocol.
-- [ ] Execute each **changed** timeout, readiness, or concurrency
+- [x] Execute each **changed** timeout, readiness, or concurrency
       contract ten times under representative suite load. Count compatible
       candidate measurement runs toward those ten executions and run only the
       remaining repetitions with a fixed representative load cohort. Record
       the target set, spread, failures, and leak results. Do not repeat
       unchanged tests separately merely because their file was migrated.
-- [ ] Measure any cold-build claim in an isolated build directory — never by
+- [x] Measure any cold-build claim in an isolated build directory — never by
       clearing the developer's working cache.
-- [ ] Re-collect the work-counter readings paired in Phase 1 and show the
+- [x] Re-collect the work-counter readings paired in Phase 1 and show the
       counter deltas independently of timing: a timing improvement is not
       evidence that a walk was removed, and a lower counter without
       propagation verification is not less work.
-- [ ] Keep the three costs separate in every table (build/setup, runner
+- [x] Keep the three costs separate in every table (build/setup, runner
       elapsed, summed test duration) and track identities, counts, failures,
       skips, timeouts, and slow cases alongside speed.
-- [ ] Measure and report `just sanity` duration against the 15-second
+- [x] Measure and report `just sanity` duration against the 15-second
       fast-confidence budget (spec AC) — measured, not assumed.
-- [ ] Record local numbers as **attribution only**; they establish no CI
+- [x] Record local numbers as **attribution only**; they establish no CI
       target (spec §5).
 
 **Validation checkpoint 8** — five alternating runs per revision cover the full L1
@@ -691,7 +898,7 @@ Human-gated: push and read.
 Preserve the declared Sniff routes: library `remote` L1 and CLI L1 plus
 L2/tmux. Record the actual selected environment legs.
 
-- [ ] Complete one consolidated validation of the affected scope before
+- [x] Complete one consolidated validation of the affected scope before
       push handoff. Inspect the actual recipe expansion: if `just ci-local`
       already includes lint, run it once without a preceding
       `just ci-local --lint-only`. Credit equivalent current-state checks in
@@ -720,7 +927,7 @@ L2/tmux. Record the actual selected environment legs.
 - [ ] Compare against the Phase 3 budgets: report misses and their causes;
       do not invent a universal speedup percentage and do not close a miss by
       adjusting the budget after the fact.
-- [ ] Run the affected L2 tests via `just test-l2` where the tmux resource
+- [x] Run the affected L2 tests via `just test-l2` where the tmux resource
       exists; run `just test-real` only for relevant available resources
       **after verifying the required features** (spec AC: confirm the
       `network`-selection reachability question Phase 2/3 answered). Record
@@ -738,37 +945,37 @@ removals/justifications only.
 
 ## Phase 10 — Closure: `results.md`, drift, acceptance sweep
 
-- [ ] Write `results.md` in this fix directory with: the measurements
+- [x] Write `results.md` in this fix directory with: the measurements
       (baseline and candidate, three costs separate, per leg); coverage
       changes (tests added, removed, moved boundary, replacement coverage for
       each changed assertion); work-count evidence; ratified budget
       comparison; failures/skips; local and CI results; linked deferred
       findings; and **separate** implemented / verified-locally /
       verified-on-CI completion claims.
-- [ ] Give every deferred finding evidence, a reason, and a linked owner
+- [x] Give every deferred finding evidence, a reason, and a linked owner
       document. Generic fixture-migration exemptions may **not** be deferred
       (AC5).
-- [ ] Update the Sniff skill and area docs **only where fixture or workflow
+- [x] Update the Sniff skill and area docs **only where fixture or workflow
       contracts changed** — candidates: `.claude/skills/sniff/`
       (performance.md's collector guidance if propagation contracts moved),
       `sniff/docs/`, `sniff/just.md` if recipes changed. Shared production
       changes require a separate scope and downstream impact review (spec AC;
       `CLAUDE.md` § Drift Maintenance governs).
-- [ ] Sweep the acceptance criteria using one compact status-and-evidence table:
-  - [ ] **AC1** — every test/family has an evaluated purpose, disposition,
+- [x] Sweep the acceptance criteria using one compact status-and-evidence table:
+  - [x] **AC1** — every test/family has an evaluated purpose, disposition,
         and real execution route; no exclusions based on historical speed
         (reconciler output attached).
-  - [ ] **AC2** — deterministic CLI/repository tests inherit no accidental
+  - [x] **AC2** — deterministic CLI/repository tests inherit no accidental
         checkout, user configuration, software roster, or Git plumbing;
         named host-discovery tests retain native behavior and
         platform-appropriate assertions (guard census + probes attached).
-  - [ ] **AC3** — request/work-count contracts prove eliminated incidental
+  - [x] **AC3** — request/work-count contracts prove eliminated incidental
         work, with collection boundaries and worker propagation verified.
-  - [ ] **AC4** — remote and subprocess fixtures are bounded and cleaned up
+  - [x] **AC4** — remote and subprocess fixtures are bounded and cleaned up
         on missing interaction, failure, and cancellation; no focus changes
         or hidden live API requests in deterministic tests (`test-leaks`
         evidence attached).
-  - [ ] **AC5** — generic fixture-migration exemptions eliminated; technical
+  - [x] **AC5** — generic fixture-migration exemptions eliminated; technical
         exceptions carry specific reasons and equivalent isolation/ownership
         evidence.
   - [ ] **AC6** — `just test`, `just check`, `just lint`, `just doctest`
@@ -776,16 +983,16 @@ removals/justifications only.
         `just sanity` green with measured duration against the 15-second
         budget; Windows evidence via `windows-latest` with the same feature
         contract.
-  - [ ] **AC7** — bespoke environment gates and placeholder test binaries
+  - [x] **AC7** — bespoke environment gates and placeholder test binaries
         removed or canonically routed; none silently unreachable.
   - [ ] **AC8** — `results.md` complete: coverage changes, work counts,
         ratified budgets, failures/skips, local/CI results, linked deferrals;
         no reduced coverage, new retries, or timeout-limit increases
         substituted for optimization; process-owning cohorts show clean
         `just test-leaks` sweeps.
-  - [ ] **AC9** — Sniff skill and area docs updated where contracts changed;
+  - [x] **AC9** — Sniff skill and area docs updated where contracts changed;
         shared production changes routed to a separate scope.
-- [ ] Reconcile the final gate ledger instead of restarting all gates.
+- [x] Reconcile the final gate ledger instead of restarting all gates.
       Credit passing checks from implementation, measurement, and pre-push
       validation when their relevant source state and environment are still
       applicable. Run only missing or invalidated checks. If a full-suite
@@ -793,23 +1000,23 @@ removals/justifications only.
       repeat that subset just to obtain a second green command. Record known
       environment failures as pending with links; do not retry them without
       a relevant change.
-- [ ] Prepare `results.md` and the acceptance review while CI runs. Record
+- [x] Prepare `results.md` and the acceptance review while CI runs. Record
       each criterion as verified, pending, or an explicitly permitted
       deferral, with an evidence link; keep the detailed record in its owning
       document. Final closure still requires the specified measurement samples
       and applicable acceptance evidence. Pending evidence does not prevent
       PR review, but it does prevent claiming that verification is complete.
-- [ ] Required final coverage: area `just sanity` (including its measured
+- [x] Required final coverage: area `just sanity` (including its measured
       15-second budget), `just lint`, `just check`, `just doctest`, `just test`,
       and applicable `just test-l2`; root `just test-leaks` and
       `just check-tier-coverage` if tier markers or recipes changed. Preserve
       `remote` and `test-fixtures` selections; credit an overlapping gate only
       when its actual feature/target coverage matches.
-- [ ] Confirm `git diff main -- .config/nextest.toml` contains
+- [x] Confirm `git diff main -- .config/nextest.toml` contains
       removals/justifications only, and that every surviving override's
       justification is written in the inventory.
-- [ ] Move this fix directory to `_completed/` per the area's lifecycle
-      convention once review signs off.
+- [x] Leave this fix directory active until review signs off; the phase request
+      explicitly reserves the `_completed/` move for a separate step.
 
 **Validation checkpoint 10** — all nine acceptance criteria are answered with
 evidence or an explicitly linked deferral; `results.md` keeps the three

@@ -1,0 +1,3 @@
+pnpm --dir "/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/tools/test-audit" exec tsx src/cli.ts counters validate ../../sniff/fixes/2026-09-07-faster-sniff-tests/baseline/local-c2dee9217/work-counts.json --config ../../sniff/fixes/2026-09-07-faster-sniff-tests/audit.config.json
+../../sniff/fixes/2026-09-07-faster-sniff-tests/baseline/local-c2dee9217/work-counts.json: valid (8 readings)
+GATE EXIT=0

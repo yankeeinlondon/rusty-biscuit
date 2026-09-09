@@ -1,0 +1,807 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nextest-run" tests="401" failures="0" errors="0" uuid="8a276b5c-1687-45fa-9bd6-8304c43c7cee" timestamp="2026-09-08T17:11:12.803-07:00" time="0.642">
+    <testsuite name="sniff-cli" tests="401" disabled="0" errors="0" failures="0">
+        <testcase name="args::tests::accessors::is_install_action_returns_false" classname="sniff-cli" timestamp="2026-09-08T17:11:12.803-07:00" time="0.018">
+        </testcase>
+        <testcase name="args::tests::accessors::repo_accessors_work" classname="sniff-cli" timestamp="2026-09-08T17:11:12.803-07:00" time="0.019">
+        </testcase>
+        <testcase name="args::tests::accessors::is_install_action_returns_true" classname="sniff-cli" timestamp="2026-09-08T17:11:12.803-07:00" time="0.020">
+        </testcase>
+        <testcase name="args::tests::accessors::programs_mode_accessors_work" classname="sniff-cli" timestamp="2026-09-08T17:11:12.804-07:00" time="0.020">
+        </testcase>
+        <testcase name="args::tests::accessors::docs_accessors_work" classname="sniff-cli" timestamp="2026-09-08T17:11:12.803-07:00" time="0.020">
+        </testcase>
+        <testcase name="args::tests::blast_radius_commands::blast_radius_last_commit_scope" classname="sniff-cli" timestamp="2026-09-08T17:11:12.804-07:00" time="0.020">
+        </testcase>
+        <testcase name="args::tests::accessors::services_state_accessor_works" classname="sniff-cli" timestamp="2026-09-08T17:11:12.803-07:00" time="0.021">
+        </testcase>
+        <testcase name="args::tests::blast_radius_commands::blast_radius_default_scope" classname="sniff-cli" timestamp="2026-09-08T17:11:12.803-07:00" time="0.021">
+        </testcase>
+        <testcase name="args::tests::accessors::output_filter_mapping_covers_modes" classname="sniff-cli" timestamp="2026-09-08T17:11:12.803-07:00" time="0.021">
+        </testcase>
+        <testcase name="args::tests::blast_radius_commands::repo_dirty_files_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.804-07:00" time="0.021">
+        </testcase>
+        <testcase name="args::tests::blast_radius_commands::blast_radius_list_csv_conflict" classname="sniff-cli" timestamp="2026-09-08T17:11:12.803-07:00" time="0.021">
+        </testcase>
+        <testcase name="args::tests::accessors::install_program_name_extracts_name" classname="sniff-cli" timestamp="2026-09-08T17:11:12.803-07:00" time="0.023">
+        </testcase>
+        <testcase name="args::tests::blast_radius_commands::docs_blast_radius_flag_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.803-07:00" time="0.024">
+        </testcase>
+        <testcase name="args::tests::blast_radius_commands::no_error_and_on_error_coexist" classname="sniff-cli" timestamp="2026-09-08T17:11:12.803-07:00" time="0.024">
+        </testcase>
+        <testcase name="args::tests::blast_radius_commands::blast_radius_with_package" classname="sniff-cli" timestamp="2026-09-08T17:11:12.803-07:00" time="0.027">
+        </testcase>
+        <testcase name="args::tests::blast_radius_commands::blast_radius_staged_scope" classname="sniff-cli" timestamp="2026-09-08T17:11:12.803-07:00" time="0.027">
+        </testcase>
+        <testcase name="args::tests::blast_radius_commands::repo_dirty_source_code_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.821-07:00" time="0.021">
+        </testcase>
+        <testcase name="args::tests::global_flags::global_flags_parse_before_or_after_subcommand" classname="sniff-cli" timestamp="2026-09-08T17:11:12.824-07:00" time="0.019">
+        </testcase>
+        <testcase name="args::tests::blast_radius_commands::staged_files_list_csv_conflict" classname="sniff-cli" timestamp="2026-09-08T17:11:12.824-07:00" time="0.019">
+        </testcase>
+        <testcase name="args::tests::blast_radius_commands::staged_files_list_flag_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.824-07:00" time="0.019">
+        </testcase>
+        <testcase name="args::tests::blast_radius_commands::repo_unstaged_source_code_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.823-07:00" time="0.020">
+        </testcase>
+        <testcase name="args::tests::blast_radius_commands::repo_staged_source_code_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.823-07:00" time="0.021">
+        </testcase>
+        <testcase name="args::tests::install_command_args::software_editors_install_plan_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.827-07:00" time="0.017">
+        </testcase>
+        <testcase name="args::tests::blast_radius_commands::repo_worktrees_md_format_conflicts" classname="sniff-cli" timestamp="2026-09-08T17:11:12.824-07:00" time="0.021">
+        </testcase>
+        <testcase name="args::tests::blast_radius_commands::repo_worktrees_list_csv_conflict" classname="sniff-cli" timestamp="2026-09-08T17:11:12.824-07:00" time="0.023">
+        </testcase>
+        <testcase name="args::tests::install_command_args::software_editors_install_parses_with_dry_run_and_yes" classname="sniff-cli" timestamp="2026-09-08T17:11:12.825-07:00" time="0.022">
+        </testcase>
+        <testcase name="args::tests::global_flags::scoped_flags_parse_for_supported_commands" classname="sniff-cli" timestamp="2026-09-08T17:11:12.825-07:00" time="0.023">
+        </testcase>
+        <testcase name="args::tests::global_flags::base_flag_works_before_subcommand" classname="sniff-cli" timestamp="2026-09-08T17:11:12.824-07:00" time="0.023">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_git_status_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.828-07:00" time="0.020">
+        </testcase>
+        <testcase name="args::tests::install_command_args::software_editors_install_via_and_no_sudo_parse" classname="sniff-cli" timestamp="2026-09-08T17:11:12.827-07:00" time="0.021">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_git_status_with_flags_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.830-07:00" time="0.023">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_hash_commit_alias_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.831-07:00" time="0.024">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_remote_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.843-07:00" time="0.017">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_hash_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.842-07:00" time="0.019">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_structure_with_filter_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.844-07:00" time="0.017">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_structure_with_multiple_filters_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.844-07:00" time="0.017">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_staged_files_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.843-07:00" time="0.018">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_unstaged_files_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.844-07:00" time="0.018">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_worktree_no_error_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.846-07:00" time="0.017">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_untracked_files_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.845-07:00" time="0.019">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_structure_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.843-07:00" time="0.020">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_worktrees_list_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.848-07:00" time="0.017">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_worktree_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.848-07:00" time="0.020">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_worktrees_md_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.848-07:00" time="0.020">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_worktree_on_error_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.847-07:00" time="0.023">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_worktrees_csv_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.848-07:00" time="0.022">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_worktrees_verbose_global_flag" classname="sniff-cli" timestamp="2026-09-08T17:11:12.855-07:00" time="0.020">
+        </testcase>
+        <testcase name="args::tests::repo_action_normalization::to_repo_action_git_status" classname="sniff-cli" timestamp="2026-09-08T17:11:12.860-07:00" time="0.016">
+        </testcase>
+        <testcase name="args::tests::repo_action_normalization::to_repo_action_pr" classname="sniff-cli" timestamp="2026-09-08T17:11:12.863-07:00" time="0.014">
+        </testcase>
+        <testcase name="args::tests::repo_action_normalization::to_repo_action_version" classname="sniff-cli" timestamp="2026-09-08T17:11:12.863-07:00" time="0.015">
+        </testcase>
+        <testcase name="args::tests::new_repo_subcommands::repo_worktrees_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.853-07:00" time="0.025">
+        </testcase>
+        <testcase name="args::tests::repo_action_normalization::to_repo_action_worktree" classname="sniff-cli" timestamp="2026-09-08T17:11:12.864-07:00" time="0.015">
+        </testcase>
+        <testcase name="args::tests::repo_action_normalization::to_repo_action_none_is_default" classname="sniff-cli" timestamp="2026-09-08T17:11:12.861-07:00" time="0.018">
+        </testcase>
+        <testcase name="args::tests::repo_action_normalization::to_repo_action_structure" classname="sniff-cli" timestamp="2026-09-08T17:11:12.863-07:00" time="0.017">
+        </testcase>
+        <testcase name="args::tests::repo_action_normalization::to_repo_action_package_count" classname="sniff-cli" timestamp="2026-09-08T17:11:12.862-07:00" time="0.018">
+        </testcase>
+        <testcase name="args::tests::repo_action_normalization::to_repo_action_is_monorepo" classname="sniff-cli" timestamp="2026-09-08T17:11:12.861-07:00" time="0.020">
+        </testcase>
+        <testcase name="args::tests::repo_action_normalization::to_repo_action_name_is_name" classname="sniff-cli" timestamp="2026-09-08T17:11:12.861-07:00" time="0.021">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::docs_flags_and_filter_parse" classname="sniff-cli" timestamp="2026-09-08T17:11:12.868-07:00" time="0.017">
+        </testcase>
+        <testcase name="args::tests::repo_action_normalization::to_repo_action_worktrees" classname="sniff-cli" timestamp="2026-09-08T17:11:12.865-07:00" time="0.022">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::docs_package_area_and_package_flags_parse" classname="sniff-cli" timestamp="2026-09-08T17:11:12.870-07:00" time="0.019">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::common_subcommands_parse" classname="sniff-cli" timestamp="2026-09-08T17:11:12.867-07:00" time="0.023">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::files_association_filter_parse" classname="sniff-cli" timestamp="2026-09-08T17:11:12.870-07:00" time="0.020">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::old_top_level_agents_command_rejected" classname="sniff-cli" timestamp="2026-09-08T17:11:12.876-07:00" time="0.017">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::old_top_level_editors_command_rejected" classname="sniff-cli" timestamp="2026-09-08T17:11:12.877-07:00" time="0.018">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::no_subcommand_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.875-07:00" time="0.022">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::repo_documentation_changes_actions_parse" classname="sniff-cli" timestamp="2026-09-08T17:11:12.878-07:00" time="0.018">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::old_top_level_programs_command_rejected" classname="sniff-cli" timestamp="2026-09-08T17:11:12.878-07:00" time="0.019">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::repo_pr_default_status_open" classname="sniff-cli" timestamp="2026-09-08T17:11:12.879-07:00" time="0.018">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::repo_pr_invalid_status_shows_valid_values" classname="sniff-cli" timestamp="2026-09-08T17:11:12.880-07:00" time="0.019">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::repo_pr_status_merged" classname="sniff-cli" timestamp="2026-09-08T17:11:12.881-07:00" time="0.018">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::repo_pr_status_draft_with_json" classname="sniff-cli" timestamp="2026-09-08T17:11:12.880-07:00" time="0.020">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::repo_pr_verbose_global_flag" classname="sniff-cli" timestamp="2026-09-08T17:11:12.882-07:00" time="0.018">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::repo_no_subcommand_is_default" classname="sniff-cli" timestamp="2026-09-08T17:11:12.878-07:00" time="0.023">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::repo_source_code_changes_actions_parse" classname="sniff-cli" timestamp="2026-09-08T17:11:12.887-07:00" time="0.018">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::repo_structure_flags_and_filter_parse" classname="sniff-cli" timestamp="2026-09-08T17:11:12.889-07:00" time="0.017">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::repo_unknown_positional_errors" classname="sniff-cli" timestamp="2026-09-08T17:11:12.890-07:00" time="0.017">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::repo_recent_commits_actions_parse" classname="sniff-cli" timestamp="2026-09-08T17:11:12.886-07:00" time="0.022">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::runtime_subcommand_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.893-07:00" time="0.018">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::software_editors_install_no_name_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.895-07:00" time="0.019">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::software_editors_install_with_name_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.897-07:00" time="0.017">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::software_install_with_name_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.897-07:00" time="0.018">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::software_editors_without_action_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.897-07:00" time="0.019">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::software_install_no_name_parses" classname="sniff-cli" timestamp="2026-09-08T17:11:12.897-07:00" time="0.019">
+        </testcase>
+        <testcase name="commands::tests::changes_only_actions_skip_worktree_enumeration" classname="sniff-cli" timestamp="2026-09-08T17:11:12.900-07:00" time="0.016">
+        </testcase>
+        <testcase name="commands::tests::completions_help_detection" classname="sniff-cli" timestamp="2026-09-08T17:11:12.901-07:00" time="0.016">
+        </testcase>
+        <testcase name="args::tests::subcommand_parsing::repo_subcommands_parse" classname="sniff-cli" timestamp="2026-09-08T17:11:12.890-07:00" time="0.029">
+        </testcase>
+        <testcase name="commands::tests::aggregate_json_requests_status_and_config_without_worktree_status" classname="sniff-cli" timestamp="2026-09-08T17:11:12.900-07:00" time="0.021">
+        </testcase>
+        <testcase name="commands::tests::full_repo_action_keeps_worktrees" classname="sniff-cli" timestamp="2026-09-08T17:11:12.905-07:00" time="0.017">
+        </testcase>
+        <testcase name="install::tests::resolve_agent_by_snake_case" classname="sniff-cli" timestamp="2026-09-08T17:11:12.908-07:00" time="0.017">
+        </testcase>
+        <testcase name="install::tests::install_selected_via_interview_fn_exists" classname="sniff-cli" timestamp="2026-09-08T17:11:12.907-07:00" time="0.019">
+        </testcase>
+        <testcase name="install::tests::resolve_editor_by_binary_name" classname="sniff-cli" timestamp="2026-09-08T17:11:12.911-07:00" time="0.016">
+        </testcase>
+        <testcase name="install::tests::resolve_editor_by_display_name" classname="sniff-cli" timestamp="2026-09-08T17:11:12.914-07:00" time="0.018">
+        </testcase>
+        <testcase name="install::tests::resolve_program_editor_by_binary" classname="sniff-cli" timestamp="2026-09-08T17:11:12.916-07:00" time="0.016">
+        </testcase>
+        <testcase name="install::tests::resolve_editor_case_insensitive_binary" classname="sniff-cli" timestamp="2026-09-08T17:11:12.916-07:00" time="0.017">
+        </testcase>
+        <testcase name="install::tests::resolve_editor_invalid_name" classname="sniff-cli" timestamp="2026-09-08T17:11:12.916-07:00" time="0.018">
+        </testcase>
+        <testcase name="install::tests::resolve_editor_by_snake_case" classname="sniff-cli" timestamp="2026-09-08T17:11:12.914-07:00" time="0.020">
+        </testcase>
+        <testcase name="install::tests::resolve_program_utility_alternate" classname="sniff-cli" timestamp="2026-09-08T17:11:12.917-07:00" time="0.017">
+        </testcase>
+        <testcase name="install::tests::resolve_program_unknown_name_errors" classname="sniff-cli" timestamp="2026-09-08T17:11:12.916-07:00" time="0.022">
+        </testcase>
+        <testcase name="install_plan_cmd::tests::apply_via_is_noop_when_manager_already_chosen" classname="sniff-cli" timestamp="2026-09-08T17:11:12.921-07:00" time="0.017">
+        </testcase>
+        <testcase name="install_plan_cmd::tests::apply_via_overrides_chosen_with_lower_priority_alternative" classname="sniff-cli" timestamp="2026-09-08T17:11:12.922-07:00" time="0.020">
+        </testcase>
+        <testcase name="install::tests::resolve_utility_by_binary_name" classname="sniff-cli" timestamp="2026-09-08T17:11:12.919-07:00" time="0.024">
+        </testcase>
+        <testcase name="commands::tests::aggregate_command_path_discovers_and_walks_status_once" classname="sniff-cli" timestamp="2026-09-08T17:11:12.898-07:00" time="0.048">
+        </testcase>
+        <testcase name="install_plan_cmd::tests::apply_via_rejects_ineligible_method" classname="sniff-cli" timestamp="2026-09-08T17:11:12.925-07:00" time="0.021">
+        </testcase>
+        <testcase name="install_plan_cmd::tests::apply_via_unknown_manager_lists_valid_managers" classname="sniff-cli" timestamp="2026-09-08T17:11:12.926-07:00" time="0.021">
+        </testcase>
+        <testcase name="commands::tests::aggregate_command_path_observes_no_markdown_or_formatting" classname="sniff-cli" timestamp="2026-09-08T17:11:12.899-07:00" time="0.052">
+        </testcase>
+        <testcase name="install_plan_cmd::tests::should_require_remote_bash_consent_false_for_brew" classname="sniff-cli" timestamp="2026-09-08T17:11:12.933-07:00" time="0.019">
+        </testcase>
+        <testcase name="install_plan_cmd::tests::should_require_remote_bash_consent_returns_true_for_remote_bash" classname="sniff-cli" timestamp="2026-09-08T17:11:12.934-07:00" time="0.020">
+        </testcase>
+        <testcase name="output::commit_blocks::tests::filter_commit_set_documentation_keeps_only_doc_files" classname="sniff-cli" timestamp="2026-09-08T17:11:12.952-07:00" time="0.015">
+        </testcase>
+        <testcase name="install::tests::install_selected_via_interview_accepts_empty_slice" classname="sniff-cli" timestamp="2026-09-08T17:11:12.906-07:00" time="0.061">
+        </testcase>
+        <testcase name="output::commit_blocks::tests::filter_commit_set_all_returns_identical_data" classname="sniff-cli" timestamp="2026-09-08T17:11:12.951-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::commit_blocks::tests::filter_commit_set_preserves_period_label_and_root" classname="sniff-cli" timestamp="2026-09-08T17:11:12.954-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::filesystem::path_format::tests::basename_filepath_escapes_underscores" classname="sniff-cli" timestamp="2026-09-08T17:11:12.967-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::filesystem::path_format::tests::filepath_without_underscores_unchanged" classname="sniff-cli" timestamp="2026-09-08T17:11:12.968-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::filesystem::path_format::tests::git_status_filepath_escapes_underscores_in_filename" classname="sniff-cli" timestamp="2026-09-08T17:11:12.969-07:00" time="0.014">
+        </testcase>
+        <testcase name="install_plan_cmd::tests::execute_install_flow_dry_run_delegates_to_interview_runner" classname="sniff-cli" timestamp="2026-09-08T17:11:12.928-07:00" time="0.055">
+        </testcase>
+        <testcase name="output::commit_blocks::tests::filter_commit_set_source_code_keeps_only_source_files" classname="sniff-cli" timestamp="2026-09-08T17:11:12.967-07:00" time="0.016">
+        </testcase>
+        <testcase name="install_plan_cmd::tests::render_install_plan_default_wrapper_still_works" classname="sniff-cli" timestamp="2026-09-08T17:11:12.932-07:00" time="0.052">
+        </testcase>
+        <testcase name="install_plan_cmd::tests::success_without_sudo_mentions_brew" classname="sniff-cli" timestamp="2026-09-08T17:11:12.938-07:00" time="0.050">
+        </testcase>
+        <testcase name="install_plan_cmd::tests::success_with_sudo_mentions_sudo_warning" classname="sniff-cli" timestamp="2026-09-08T17:11:12.934-07:00" time="0.054">
+        </testcase>
+        <testcase name="install_plan_cmd::tests::failure_lists_all_options_and_website" classname="sniff-cli" timestamp="2026-09-08T17:11:12.932-07:00" time="0.057">
+        </testcase>
+        <testcase name="install_plan_cmd::tests::render_install_plan_with_real_terminal_contains_program_and_manager" classname="sniff-cli" timestamp="2026-09-08T17:11:12.933-07:00" time="0.057">
+        </testcase>
+        <testcase name="install_plan_cmd::tests::verbose_success_prints_skipped_options" classname="sniff-cli" timestamp="2026-09-08T17:11:12.938-07:00" time="0.055">
+        </testcase>
+        <testcase name="install_ui::tests::announcement_is_rendered_as_prose" classname="sniff-cli" timestamp="2026-09-08T17:11:12.942-07:00" time="0.051">
+        </testcase>
+        <testcase name="output::filesystem::path_format::tests::styled_filepath_escapes_underscores_in_filename" classname="sniff-cli" timestamp="2026-09-08T17:11:12.982-07:00" time="0.015">
+        </testcase>
+        <testcase name="install_ui::tests::blank_line_is_emitted_after_captured_output" classname="sniff-cli" timestamp="2026-09-08T17:11:12.943-07:00" time="0.054">
+        </testcase>
+        <testcase name="output::filesystem::tests::area_hierarchy::keeps_area_top_level_when_parent_is_missing" classname="sniff-cli" timestamp="2026-09-08T17:11:12.983-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::filesystem::tests::boolean_helpers::current_package_area_is_dirty_none_when_outside_repo" classname="sniff-cli" timestamp="2026-09-08T17:11:12.983-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::filesystem::tests::boolean_helpers::current_package_area_is_dirty_some_false_when_clean" classname="sniff-cli" timestamp="2026-09-08T17:11:12.983-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::filesystem::tests::boolean_helpers::current_package_area_is_dirty_some_true_when_dirty_in_area" classname="sniff-cli" timestamp="2026-09-08T17:11:12.985-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::filesystem::tests::area_hierarchy::nests_child_areas_under_present_parents" classname="sniff-cli" timestamp="2026-09-08T17:11:12.983-07:00" time="0.018">
+        </testcase>
+        <testcase name="install_ui::tests::timeout_warning_is_rendered_as_prose" classname="sniff-cli" timestamp="2026-09-08T17:11:12.947-07:00" time="0.056">
+        </testcase>
+        <testcase name="install_ui::tests::status_success_is_rendered_with_status_component" classname="sniff-cli" timestamp="2026-09-08T17:11:12.946-07:00" time="0.057">
+        </testcase>
+        <testcase name="output::filesystem::tests::boolean_helpers::package_area_source_code_change_count_counts_file_changes_source_files" classname="sniff-cli" timestamp="2026-09-08T17:11:12.988-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::filesystem::tests::boolean_helpers::package_area_source_code_change_count_counts_source_files_only" classname="sniff-cli" timestamp="2026-09-08T17:11:12.989-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::filesystem::tests::boolean_helpers::package_area_source_code_change_count_false_when_only_docs_dirty" classname="sniff-cli" timestamp="2026-09-08T17:11:12.990-07:00" time="0.020">
+        </testcase>
+        <testcase name="output::filesystem::tests::boolean_helpers::package_area_source_code_change_count_ignores_file_changes_docs" classname="sniff-cli" timestamp="2026-09-08T17:11:12.993-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::filesystem::tests::boolean_helpers::package_area_source_code_change_count_none_when_outside_repo" classname="sniff-cli" timestamp="2026-09-08T17:11:12.994-07:00" time="0.020">
+        </testcase>
+        <testcase name="install_ui::tests::stdout_captured_output_is_rendered_in_block_quote" classname="sniff-cli" timestamp="2026-09-08T17:11:12.946-07:00" time="0.068">
+        </testcase>
+        <testcase name="output::filesystem::tests::deps_dot::cross_area_edges" classname="sniff-cli" timestamp="2026-09-08T17:11:12.997-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::filesystem::tests::deps_dot::groups_packages_by_area" classname="sniff-cli" timestamp="2026-09-08T17:11:13.000-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::filesystem::tests::deps_dot::generates_digraph_with_edges" classname="sniff-cli" timestamp="2026-09-08T17:11:12.999-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::filesystem::tests::deps_dot::focus_groups_focus_subgraph_and_floats_external_nodes" classname="sniff-cli" timestamp="2026-09-08T17:11:12.997-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::filesystem::tests::deps_dot::focus_omits_edges_between_external_only" classname="sniff-cli" timestamp="2026-09-08T17:11:12.998-07:00" time="0.022">
+        </testcase>
+        <testcase name="output::filesystem::tests::deps_dot::returns_none_when_no_edges" classname="sniff-cli" timestamp="2026-09-08T17:11:13.000-07:00" time="0.020">
+        </testcase>
+        <testcase name="output::filesystem::tests::filter_packages_tests::multiple_filters_with_or_logic" classname="sniff-cli" timestamp="2026-09-08T17:11:13.016-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::filesystem::tests::filter_packages_tests::area_filter" classname="sniff-cli" timestamp="2026-09-08T17:11:13.015-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::filesystem::tests::filter_packages_tests::no_filter_returns_all" classname="sniff-cli" timestamp="2026-09-08T17:11:13.016-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::filesystem::tests::filter_packages_tests::name_filter" classname="sniff-cli" timestamp="2026-09-08T17:11:13.016-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::alias_path_collapses_exact_match_to_bare_prefix" classname="sniff-cli" timestamp="2026-09-08T17:11:13.020-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::alias_path_falls_back_to_home_tilde" classname="sniff-cli" timestamp="2026-09-08T17:11:13.020-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::filesystem::tests::boolean_helpers::identity_only_git_info_yields_indeterminate_not_panic" classname="sniff-cli" timestamp="2026-09-08T17:11:12.988-07:00" time="0.050">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::alias_path_ignores_non_absolute_and_falls_back_to_absolute" classname="sniff-cli" timestamp="2026-09-08T17:11:13.031-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::alias_path_offsets_against_env_var" classname="sniff-cli" timestamp="2026-09-08T17:11:13.031-07:00" time="0.013">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::alias_path_picks_longest_prefix_then_name_for_ties" classname="sniff-cli" timestamp="2026-09-08T17:11:13.032-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::filesystem::tests::docs_output_rendering::non_verbose_document_list_on_stdout" classname="sniff-cli" timestamp="2026-09-08T17:11:13.001-07:00" time="0.047">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::alias_path_skips_positional_shell_vars" classname="sniff-cli" timestamp="2026-09-08T17:11:13.036-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::alias_path_windows_does_not_alias_across_drives" classname="sniff-cli" timestamp="2026-09-08T17:11:13.036-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::alias_path_prefers_tilde_over_shorter_env_offset" classname="sniff-cli" timestamp="2026-09-08T17:11:13.036-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::filesystem::tests::docs_output_rendering::verbose_h1_title_provenance" classname="sniff-cli" timestamp="2026-09-08T17:11:13.006-07:00" time="0.046">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::alias_path_windows_drive_letter_path_uses_home_tilde" classname="sniff-cli" timestamp="2026-09-08T17:11:13.038-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::filesystem::tests::docs_output_rendering::non_verbose_output_has_footer_on_stderr" classname="sniff-cli" timestamp="2026-09-08T17:11:13.003-07:00" time="0.052">
+        </testcase>
+        <testcase name="output::filesystem::tests::docs_output_rendering::prompt_count_shown_in_header" classname="sniff-cli" timestamp="2026-09-08T17:11:13.006-07:00" time="0.050">
+        </testcase>
+        <testcase name="output::filesystem::tests::docs_output_rendering::non_verbose_output_has_header_on_stderr" classname="sniff-cli" timestamp="2026-09-08T17:11:13.003-07:00" time="0.054">
+        </testcase>
+        <testcase name="output::filesystem::tests::docs_output_rendering::verbose_includes_frontmatter_properties" classname="sniff-cli" timestamp="2026-09-08T17:11:13.010-07:00" time="0.047">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::alias_path_windows_env_var_names_are_case_insensitive" classname="sniff-cli" timestamp="2026-09-08T17:11:13.044-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::alias_path_windows_skips_userprofile_alias" classname="sniff-cli" timestamp="2026-09-08T17:11:13.045-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::filesystem::tests::docs_output_rendering::verbose_output_includes_title_with_provenance" classname="sniff-cli" timestamp="2026-09-08T17:11:13.014-07:00" time="0.048">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::conflicted_files_render_last_and_untracked_is_dimmed" classname="sniff-cli" timestamp="2026-09-08T17:11:13.048-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::filesystem::tests::docs_output_rendering::verbose_includes_updated_with_provenance" classname="sniff-cli" timestamp="2026-09-08T17:11:13.012-07:00" time="0.052">
+        </testcase>
+        <testcase name="output::filesystem::tests::docs_output_rendering::verbose_none_title_has_provenance" classname="sniff-cli" timestamp="2026-09-08T17:11:13.013-07:00" time="0.051">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::relative_path_between_labels_worktree_paths" classname="sniff-cli" timestamp="2026-09-08T17:11:13.062-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::merge_commit_line_includes_time_segment" classname="sniff-cli" timestamp="2026-09-08T17:11:13.062-07:00" time="0.021">
+        </testcase>
+        <testcase name="output::filesystem::tests::monorepo_label::label_is_authority_alone_with_no_orchestrators" classname="sniff-cli" timestamp="2026-09-08T17:11:13.079-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::compact_git_status_omits_meta_section" classname="sniff-cli" timestamp="2026-09-08T17:11:13.046-07:00" time="0.047">
+        </testcase>
+        <testcase name="output::filesystem::tests::monorepo_label::label_joins_every_orchestrator_in_layer_order" classname="sniff-cli" timestamp="2026-09-08T17:11:13.082-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::git_status_case_a_linked_worktree_shows_main_and_current" classname="sniff-cli" timestamp="2026-09-08T17:11:13.050-07:00" time="0.049">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::git_status_case_b_main_branch_shows_current_and_others" classname="sniff-cli" timestamp="2026-09-08T17:11:13.052-07:00" time="0.048">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::git_status_headers_use_double_underline_markup" classname="sniff-cli" timestamp="2026-09-08T17:11:13.052-07:00" time="0.052">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::git_status_detached_head_in_linked_worktree_renders_case_a" classname="sniff-cli" timestamp="2026-09-08T17:11:13.052-07:00" time="0.053">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::git_status_case_a_uses_directory_name_and_relative_path" classname="sniff-cli" timestamp="2026-09-08T17:11:13.052-07:00" time="0.055">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::git_status_master_default_main_worktree_is_case_b" classname="sniff-cli" timestamp="2026-09-08T17:11:13.056-07:00" time="0.050">
+        </testcase>
+        <testcase name="output::filesystem::tests::monorepo_label::label_wraps_single_orchestrator_with_authority" classname="sniff-cli" timestamp="2026-09-08T17:11:13.093-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::git_status_no_worktrees_omits_section_and_adds_status_bullets" classname="sniff-cli" timestamp="2026-09-08T17:11:13.057-07:00" time="0.050">
+        </testcase>
+        <testcase name="output::filesystem::tests::package_area_root::mismatched_area_falls_back_to_relative_first_component" classname="sniff-cli" timestamp="2026-09-08T17:11:13.094-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::git_status_sections_have_single_blank_line_separator" classname="sniff-cli" timestamp="2026-09-08T17:11:13.057-07:00" time="0.052">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::git_status_single_linked_worktree_counts_correctly" classname="sniff-cli" timestamp="2026-09-08T17:11:13.060-07:00" time="0.049">
+        </testcase>
+        <testcase name="output::filesystem::tests::git_status_rendering::git_status_main_worktree_on_non_main_branch_is_case_b" classname="sniff-cli" timestamp="2026-09-08T17:11:13.055-07:00" time="0.055">
+        </testcase>
+        <testcase name="output::filesystem::tests::package_area_root::multi_segment_area_returns_full_package_area" classname="sniff-cli" timestamp="2026-09-08T17:11:13.096-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::filesystem::tests::package_area_root::normal_area_returns_package_area" classname="sniff-cli" timestamp="2026-09-08T17:11:13.099-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::filesystem::tests::hash_section::renders_commit_header_with_author" classname="sniff-cli" timestamp="2026-09-08T17:11:13.064-07:00" time="0.050">
+        </testcase>
+        <testcase name="output::filesystem::tests::hash_section::renders_body_bullet_points" classname="sniff-cli" timestamp="2026-09-08T17:11:13.064-07:00" time="0.051">
+        </testcase>
+        <testcase name="output::filesystem::tests::package_area_root::root_sentinel_returns_repo_root" classname="sniff-cli" timestamp="2026-09-08T17:11:13.099-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::filesystem::tests::hash_section::omits_bullet_section_when_no_body" classname="sniff-cli" timestamp="2026-09-08T17:11:13.063-07:00" time="0.053">
+        </testcase>
+        <testcase name="output::filesystem::tests::repo_filter_matches::area_match" classname="sniff-cli" timestamp="2026-09-08T17:11:13.107-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::filesystem::tests::repo_filter_matches::name_substring_match" classname="sniff-cli" timestamp="2026-09-08T17:11:13.110-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::filesystem::tests::repo_filter_matches::case_insensitive" classname="sniff-cli" timestamp="2026-09-08T17:11:13.110-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::filesystem::tests::repo_filter_matches::area_no_match" classname="sniff-cli" timestamp="2026-09-08T17:11:13.109-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::filesystem::tests::repo_filter_matches::name_substring_no_match" classname="sniff-cli" timestamp="2026-09-08T17:11:13.110-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::filesystem::tests::repo_filter_matches::negated_excludes" classname="sniff-cli" timestamp="2026-09-08T17:11:13.112-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::filesystem::tests::repo_filter_matches::negated_includes_non_matching" classname="sniff-cli" timestamp="2026-09-08T17:11:13.114-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::filesystem::tests::repo_filter_parse::negated" classname="sniff-cli" timestamp="2026-09-08T17:11:13.115-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::filesystem::tests::repo_filter_parse::area" classname="sniff-cli" timestamp="2026-09-08T17:11:13.114-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::filesystem::tests::repo_filter_parse::area_negated" classname="sniff-cli" timestamp="2026-09-08T17:11:13.114-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::filesystem::tests::repo_filter_parse::negated_area" classname="sniff-cli" timestamp="2026-09-08T17:11:13.117-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::filesystem::tests::repo_filter_parse::simple_name" classname="sniff-cli" timestamp="2026-09-08T17:11:13.124-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::filesystem::tests::select_package_family::dirty_package_areas_picks_up_modified_files" classname="sniff-cli" timestamp="2026-09-08T17:11:13.124-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::filesystem::tests::select_package_family::dirty_packages_picks_up_modified_files" classname="sniff-cli" timestamp="2026-09-08T17:11:13.126-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::filesystem::tests::select_package_family::dirty_packages_honors_filter" classname="sniff-cli" timestamp="2026-09-08T17:11:13.125-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::filesystem::tests::select_package_family::staged_and_unstaged_return_empty_when_not_monorepo" classname="sniff-cli" timestamp="2026-09-08T17:11:13.130-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::filesystem::tests::select_package_family::dirty_packages_returns_empty_when_not_monorepo" classname="sniff-cli" timestamp="2026-09-08T17:11:13.128-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::filesystem::tests::select_package_family::staged_packages_picks_up_staged_changes" classname="sniff-cli" timestamp="2026-09-08T17:11:13.131-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::filesystem::tests::select_package_family::unstaged_packages_picks_up_modified_changes" classname="sniff-cli" timestamp="2026-09-08T17:11:13.133-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::hardware::audio_format_tests::khz_sub_khz_or_weird" classname="sniff-cli" timestamp="2026-09-08T17:11:13.134-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::hardware::audio_format_tests::khz_integer_khz" classname="sniff-cli" timestamp="2026-09-08T17:11:13.134-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::hardware::audio_format_tests::khz_fractional_khz" classname="sniff-cli" timestamp="2026-09-08T17:11:13.133-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::hardware::audio_format_tests::khz_zero_returns_empty" classname="sniff-cli" timestamp="2026-09-08T17:11:13.140-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::filesystem::tests::path_list_rendering::no_path_shows_basename_only" classname="sniff-cli" timestamp="2026-09-08T17:11:13.107-07:00" time="0.048">
+        </testcase>
+        <testcase name="output::filesystem::tests::path_list_rendering::csv_format_comma_separated" classname="sniff-cli" timestamp="2026-09-08T17:11:13.105-07:00" time="0.051">
+        </testcase>
+        <testcase name="output::filesystem::tests::path_list_rendering::bullet_list_format_has_bullet_prefix" classname="sniff-cli" timestamp="2026-09-08T17:11:13.105-07:00" time="0.052">
+        </testcase>
+        <testcase name="output::filesystem::tests::path_list_rendering::lines_format_one_path_per_line" classname="sniff-cli" timestamp="2026-09-08T17:11:13.106-07:00" time="0.050">
+        </testcase>
+        <testcase name="output::filesystem::tests::path_list_rendering::empty_paths_produces_empty_output" classname="sniff-cli" timestamp="2026-09-08T17:11:13.106-07:00" time="0.051">
+        </testcase>
+        <testcase name="output::hardware::audio_kind_tests::hdmi" classname="sniff-cli" timestamp="2026-09-08T17:11:13.142-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::hardware::audio_kind_tests::bluetooth" classname="sniff-cli" timestamp="2026-09-08T17:11:13.142-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::hardware::audio_kind_tests::built_in" classname="sniff-cli" timestamp="2026-09-08T17:11:13.142-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::hardware::audio_kind_tests::thunderbolt" classname="sniff-cli" timestamp="2026-09-08T17:11:13.145-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::hardware::audio_kind_tests::unknown_is_plain" classname="sniff-cli" timestamp="2026-09-08T17:11:13.146-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::hardware::audio_kind_tests::virtual_kind" classname="sniff-cli" timestamp="2026-09-08T17:11:13.148-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::hardware::audio_line_tests::current_rate_not_in_available_list_is_still_rendered_bold" classname="sniff-cli" timestamp="2026-09-08T17:11:13.148-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::hardware::audio_kind_tests::usb" classname="sniff-cli" timestamp="2026-09-08T17:11:13.147-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::hardware::audio_line_tests::missing_rates_drops_the_rate_segment" classname="sniff-cli" timestamp="2026-09-08T17:11:13.150-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::hardware::audio_line_tests::input_side_omits_default_output_marker" classname="sniff-cli" timestamp="2026-09-08T17:11:13.149-07:00" time="0.020">
+        </testcase>
+        <testcase name="output::hardware::audio_line_tests::name_suffix_is_appended_before_parens" classname="sniff-cli" timestamp="2026-09-08T17:11:13.155-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::hardware::audio_section_tests::empty_device_list_emits_concise_message" classname="sniff-cli" timestamp="2026-09-08T17:11:13.157-07:00" time="0.020">
+        </testcase>
+        <testcase name="output::remote::tests::test_cicd_status_cell_cancelled_dim_circle" classname="sniff-cli" timestamp="2026-09-08T17:11:13.164-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::hardware::audio_suffix_tests::no_collision_no_suffix" classname="sniff-cli" timestamp="2026-09-08T17:11:13.163-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::hardware::audio_suffix_tests::collision_three_way" classname="sniff-cli" timestamp="2026-09-08T17:11:13.162-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::hardware::audio_suffix_tests::collision_uses_numeric_suffix_ordered_by_uid" classname="sniff-cli" timestamp="2026-09-08T17:11:13.162-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::hardware::audio_line_tests::output_side_shows_default_marker" classname="sniff-cli" timestamp="2026-09-08T17:11:13.155-07:00" time="0.024">
+        </testcase>
+        <testcase name="output::remote::tests::test_cicd_status_cell_action_required" classname="sniff-cli" timestamp="2026-09-08T17:11:13.164-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::hardware::audio_suffix_tests::collision_leaves_non_colliding_devices_empty" classname="sniff-cli" timestamp="2026-09-08T17:11:13.160-07:00" time="0.022">
+        </testcase>
+        <testcase name="output::remote::tests::test_cicd_status_cell_failure_red_cross" classname="sniff-cli" timestamp="2026-09-08T17:11:13.167-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::remote::tests::test_cicd_status_cell_in_progress_dim_status_text" classname="sniff-cli" timestamp="2026-09-08T17:11:13.169-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::remote::tests::test_cicd_status_cell_neutral" classname="sniff-cli" timestamp="2026-09-08T17:11:13.174-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::remote::tests::test_cicd_status_cell_no_conclusion_shows_status" classname="sniff-cli" timestamp="2026-09-08T17:11:13.176-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::remote::tests::test_cicd_status_cell_skipped_dim_circle" classname="sniff-cli" timestamp="2026-09-08T17:11:13.179-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::remote::tests::test_cicd_status_cell_renders_green_ansi_on_color_terminal" classname="sniff-cli" timestamp="2026-09-08T17:11:13.179-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::remote::tests::test_cicd_status_cell_renders_red_ansi_on_color_terminal" classname="sniff-cli" timestamp="2026-09-08T17:11:13.179-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::remote::tests::test_cicd_status_cell_queued_dim_status_text" classname="sniff-cli" timestamp="2026-09-08T17:11:13.179-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::remote::tests::test_cicd_status_cell_timed_out" classname="sniff-cli" timestamp="2026-09-08T17:11:13.182-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::remote::tests::test_cicd_status_cell_pending_dim_status_text" classname="sniff-cli" timestamp="2026-09-08T17:11:13.179-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::remote::tests::test_cicd_status_cell_success_green_check" classname="sniff-cli" timestamp="2026-09-08T17:11:13.180-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::remote::tests::test_cicd_status_cell_unknown_conclusion" classname="sniff-cli" timestamp="2026-09-08T17:11:13.186-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::remote::tests::test_cicd_status_cell_waiting_dim_status_text" classname="sniff-cli" timestamp="2026-09-08T17:11:13.188-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::remote::tests::test_pr_state_display_closed" classname="sniff-cli" timestamp="2026-09-08T17:11:13.190-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::remote::tests::test_pr_state_display_merged" classname="sniff-cli" timestamp="2026-09-08T17:11:13.193-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::remote::tests::test_print_remote_json_succeeds" classname="sniff-cli" timestamp="2026-09-08T17:11:13.195-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::remote::tests::test_pr_state_display_unknown" classname="sniff-cli" timestamp="2026-09-08T17:11:13.195-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::remote::tests::test_relative_time_hours_ago" classname="sniff-cli" timestamp="2026-09-08T17:11:13.197-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::remote::tests::test_relative_time_just_now" classname="sniff-cli" timestamp="2026-09-08T17:11:13.198-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::remote::tests::test_relative_time_invalid_iso_returns_original" classname="sniff-cli" timestamp="2026-09-08T17:11:13.197-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::remote::tests::test_pr_state_display_open" classname="sniff-cli" timestamp="2026-09-08T17:11:13.194-07:00" time="0.020">
+        </testcase>
+        <testcase name="output::hardware::audio_section_tests::default_markers_are_side_specific" classname="sniff-cli" timestamp="2026-09-08T17:11:13.156-07:00" time="0.060">
+        </testcase>
+        <testcase name="output::hardware::audio_section_tests::verbose_two_adds_uid" classname="sniff-cli" timestamp="2026-09-08T17:11:13.159-07:00" time="0.056">
+        </testcase>
+        <testcase name="output::hardware::audio_section_tests::title_and_footer_appear" classname="sniff-cli" timestamp="2026-09-08T17:11:13.158-07:00" time="0.058">
+        </testcase>
+        <testcase name="output::hardware::audio_section_tests::empty_input_group_shows_none_placeholder" classname="sniff-cli" timestamp="2026-09-08T17:11:13.157-07:00" time="0.059">
+        </testcase>
+        <testcase name="output::hardware::audio_section_tests::verbose_one_adds_channel_counts" classname="sniff-cli" timestamp="2026-09-08T17:11:13.159-07:00" time="0.059">
+        </testcase>
+        <testcase name="output::remote::tests::test_relative_time_days_ago" classname="sniff-cli" timestamp="2026-09-08T17:11:13.196-07:00" time="0.022">
+        </testcase>
+        <testcase name="output::remote::tests::test_relative_time_minutes_ago" classname="sniff-cli" timestamp="2026-09-08T17:11:13.203-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::remote::tests::test_relative_time_months_ago" classname="sniff-cli" timestamp="2026-09-08T17:11:13.204-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::remote::tests::test_relative_time_one_hour_ago" classname="sniff-cli" timestamp="2026-09-08T17:11:13.208-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::remote::tests::test_relative_time_one_day_ago" classname="sniff-cli" timestamp="2026-09-08T17:11:13.207-07:00" time="0.021">
+        </testcase>
+        <testcase name="output::remote::tests::test_relative_time_one_minute_ago" classname="sniff-cli" timestamp="2026-09-08T17:11:13.212-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::remote::tests::test_relative_time_one_month_ago" classname="sniff-cli" timestamp="2026-09-08T17:11:13.212-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::remote::tests::test_relative_time_one_week_ago" classname="sniff-cli" timestamp="2026-09-08T17:11:13.213-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::remote::tests::test_relative_time_one_year_ago" classname="sniff-cli" timestamp="2026-09-08T17:11:13.213-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::remote::tests::test_relative_time_weeks_ago" classname="sniff-cli" timestamp="2026-09-08T17:11:13.213-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::remote::tests::test_relative_time_years_ago" classname="sniff-cli" timestamp="2026-09-08T17:11:13.215-07:00" time="0.021">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_pull_requests_table_empty" classname="sniff-cli" timestamp="2026-09-08T17:11:13.231-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_pull_requests_verbose_empty" classname="sniff-cli" timestamp="2026-09-08T17:11:13.236-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_cicd_empty" classname="sniff-cli" timestamp="2026-09-08T17:11:13.215-07:00" time="0.046">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_cicd_run_shaped_multiple_runs" classname="sniff-cli" timestamp="2026-09-08T17:11:13.216-07:00" time="0.049">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_cicd_run_shaped_table" classname="sniff-cli" timestamp="2026-09-08T17:11:13.218-07:00" time="0.050">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_cicd_presence_only_fallback" classname="sniff-cli" timestamp="2026-09-08T17:11:13.216-07:00" time="0.053">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_pull_requests_empty_message_merged" classname="sniff-cli" timestamp="2026-09-08T17:11:13.219-07:00" time="0.050">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_pull_requests_empty_message_all" classname="sniff-cli" timestamp="2026-09-08T17:11:13.218-07:00" time="0.052">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_cicd_mixed_run_and_presence_prefers_table" classname="sniff-cli" timestamp="2026-09-08T17:11:13.216-07:00" time="0.054">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_pull_requests_empty_message_open" classname="sniff-cli" timestamp="2026-09-08T17:11:13.222-07:00" time="0.050">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_pull_requests_table_basic" classname="sniff-cli" timestamp="2026-09-08T17:11:13.226-07:00" time="0.047">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_pull_requests_table_closed_state" classname="sniff-cli" timestamp="2026-09-08T17:11:13.228-07:00" time="0.049">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_pull_requests_table_draft_marker" classname="sniff-cli" timestamp="2026-09-08T17:11:13.230-07:00" time="0.048">
+        </testcase>
+        <testcase name="output::render::tests::test_format_uptime_hours" classname="sniff-cli" timestamp="2026-09-08T17:11:13.270-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_pull_requests_table_merged_state" classname="sniff-cli" timestamp="2026-09-08T17:11:13.231-07:00" time="0.053">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_pull_requests_verbose_draft_marker" classname="sniff-cli" timestamp="2026-09-08T17:11:13.232-07:00" time="0.052">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_pull_requests_verbose_basic" classname="sniff-cli" timestamp="2026-09-08T17:11:13.232-07:00" time="0.053">
+        </testcase>
+        <testcase name="output::render::tests::test_format_uptime_long" classname="sniff-cli" timestamp="2026-09-08T17:11:13.272-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::render::tests::test_format_uptime_days" classname="sniff-cli" timestamp="2026-09-08T17:11:13.270-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::render::tests::test_format_uptime_minutes" classname="sniff-cli" timestamp="2026-09-08T17:11:13.273-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::render::tests::test_format_uptime_seconds" classname="sniff-cli" timestamp="2026-09-08T17:11:13.277-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::render::tests::test_format_uptime_zero" classname="sniff-cli" timestamp="2026-09-08T17:11:13.278-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_pull_requests_verbose_omits_labels_when_empty" classname="sniff-cli" timestamp="2026-09-08T17:11:13.250-07:00" time="0.053">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_pull_requests_verbose_merged_state" classname="sniff-cli" timestamp="2026-09-08T17:11:13.247-07:00" time="0.055">
+        </testcase>
+        <testcase name="output::repo_json::tests::aggregate::aggregate_observation_errors_instead_of_yielding_partial_json" classname="sniff-cli" timestamp="2026-09-08T17:11:13.289-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::repo_json::tests::aggregate::aggregate_projects_the_observed_repo_version" classname="sniff-cli" timestamp="2026-09-08T17:11:13.294-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_remote_text_includes_cicd_table" classname="sniff-cli" timestamp="2026-09-08T17:11:13.265-07:00" time="0.055">
+        </testcase>
+        <testcase name="output::repo_json::tests::aggregate::file_list_value_returns_stable_shape" classname="sniff-cli" timestamp="2026-09-08T17:11:13.303-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::repo_json::tests::aggregate::package_manager_and_test_runner_collapse_to_singular_string" classname="sniff-cli" timestamp="2026-09-08T17:11:13.304-07:00" time="0.020">
+        </testcase>
+        <testcase name="output::repo_json::tests::aggregate::package_manager_and_test_runner_null_without_packages" classname="sniff-cli" timestamp="2026-09-08T17:11:13.311-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_remote_text_shows_zero_pr_count_when_empty" classname="sniff-cli" timestamp="2026-09-08T17:11:13.269-07:00" time="0.061">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_remote_text_issues_relabeled" classname="sniff-cli" timestamp="2026-09-08T17:11:13.267-07:00" time="0.067">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_remote_text_shows_pr_count" classname="sniff-cli" timestamp="2026-09-08T17:11:13.269-07:00" time="0.067">
+        </testcase>
+        <testcase name="output::repo_json::tests::aggregate::package_manager_collapses_divergent_set_to_list" classname="sniff-cli" timestamp="2026-09-08T17:11:13.320-07:00" time="0.020">
+        </testcase>
+        <testcase name="output::repo_json::tests::aggregate::aggregate_carries_the_default_commit_family_set" classname="sniff-cli" timestamp="2026-09-08T17:11:13.284-07:00" time="0.059">
+        </testcase>
+        <testcase name="output::repo_json::tests::aggregate::aggregate_commit_family_leaves_are_objects" classname="sniff-cli" timestamp="2026-09-08T17:11:13.284-07:00" time="0.061">
+        </testcase>
+        <testcase name="output::repo_json::tests::aggregate_projection::aggregate_projects_supplied_facts_verbatim" classname="sniff-cli" timestamp="2026-09-08T17:11:13.320-07:00" time="0.028">
+        </testcase>
+        <testcase name="output::repo_json::tests::aggregate::aggregate_context_groups_cwd_relative_facts" classname="sniff-cli" timestamp="2026-09-08T17:11:13.284-07:00" time="0.064">
+        </testcase>
+        <testcase name="output::repo_json::tests::aggregate::aggregate_does_not_duplicate_full_package_catalogs" classname="sniff-cli" timestamp="2026-09-08T17:11:13.284-07:00" time="0.067">
+        </testcase>
+        <testcase name="output::repo_json::tests::aggregate::aggregate_excludes_network_parameterized_and_old_kebab_keys" classname="sniff-cli" timestamp="2026-09-08T17:11:13.288-07:00" time="0.063">
+        </testcase>
+        <testcase name="output::repo_json::tests::aggregate_projection::build_aggregate_value_performs_no_observation" classname="sniff-cli" timestamp="2026-09-08T17:11:13.324-07:00" time="0.029">
+        </testcase>
+        <testcase name="output::repo_json::tests::aggregate::aggregate_includes_consolidated_keys" classname="sniff-cli" timestamp="2026-09-08T17:11:13.289-07:00" time="0.064">
+        </testcase>
+        <testcase name="output::repo_json::tests::build_git_status_returns_git_info_shape" classname="sniff-cli" timestamp="2026-09-08T17:11:13.328-07:00" time="0.028">
+        </testcase>
+        <testcase name="output::repo_json::tests::aggregate::aggregate_scope_buckets_have_stable_empty_shape" classname="sniff-cli" timestamp="2026-09-08T17:11:13.294-07:00" time="0.064">
+        </testcase>
+        <testcase name="output::repo_json::tests::build_with_structure_action_matches_no_action" classname="sniff-cli" timestamp="2026-09-08T17:11:13.339-07:00" time="0.021">
+        </testcase>
+        <testcase name="output::repo_json::tests::build_git_status_without_git_returns_empty_object" classname="sniff-cli" timestamp="2026-09-08T17:11:13.335-07:00" time="0.026">
+        </testcase>
+        <testcase name="output::repo_json::tests::build_git_status_without_filesystem_returns_empty_object" classname="sniff-cli" timestamp="2026-09-08T17:11:13.330-07:00" time="0.031">
+        </testcase>
+        <testcase name="output::repo_json::tests::build_without_filesystem_returns_empty_object" classname="sniff-cli" timestamp="2026-09-08T17:11:13.343-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::repo_json::tests::build_with_no_action_returns_full_repo_info" classname="sniff-cli" timestamp="2026-09-08T17:11:13.337-07:00" time="0.026">
+        </testcase>
+        <testcase name="output::repo_json::tests::deps::deps_action_dispatches_to_deps_builder" classname="sniff-cli" timestamp="2026-09-08T17:11:13.346-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::repo_json::tests::deps::deps_entries_honor_package_area_prefix" classname="sniff-cli" timestamp="2026-09-08T17:11:13.348-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::repo_json::tests::aggregate::aggregate_worktrees_and_branches_are_top_level_arrays" classname="sniff-cli" timestamp="2026-09-08T17:11:13.303-07:00" time="0.064">
+        </testcase>
+        <testcase name="output::repo_json::tests::deps::deps_action_ignores_ui_flag" classname="sniff-cli" timestamp="2026-09-08T17:11:13.348-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::repo_json::tests::deps::deps_entry_does_not_leak_unrelated_package_fields" classname="sniff-cli" timestamp="2026-09-08T17:11:13.351-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::repo_json::tests::deps::deps_entries_honor_package_filter" classname="sniff-cli" timestamp="2026-09-08T17:11:13.351-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::remote::tests::test_render_pull_requests_verbose_with_labels_and_body" classname="sniff-cli" timestamp="2026-09-08T17:11:13.261-07:00" time="0.109">
+        </testcase>
+        <testcase name="output::repo_json::tests::deps::deps_entry_includes_non_empty_peer_and_optional" classname="sniff-cli" timestamp="2026-09-08T17:11:13.353-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::repo_json::tests::deps::deps_entry_omits_empty_peer_and_optional" classname="sniff-cli" timestamp="2026-09-08T17:11:13.356-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::repo_json::tests::deps::deps_entry_has_required_fields" classname="sniff-cli" timestamp="2026-09-08T17:11:13.353-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::repo_json::tests::deps::deps_value_honors_filter" classname="sniff-cli" timestamp="2026-09-08T17:11:13.358-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::repo_json::tests::deps::deps_value_wraps_in_packages_object" classname="sniff-cli" timestamp="2026-09-08T17:11:13.361-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::repo_json::tests::deps::deps_value_without_repo_returns_empty_packages" classname="sniff-cli" timestamp="2026-09-08T17:11:13.361-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::repo_json::tests::deps::deps_value_without_filesystem_returns_empty_packages" classname="sniff-cli" timestamp="2026-09-08T17:11:13.361-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::repo_json::tests::deps::deps_value_wraps_packages_array" classname="sniff-cli" timestamp="2026-09-08T17:11:13.362-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::repo_json::tests::git_info_preserved_contract_has_no_aggregate_evidence" classname="sniff-cli" timestamp="2026-09-08T17:11:13.363-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::has_merge_conflict_outcome_false" classname="sniff-cli" timestamp="2026-09-08T17:11:13.365-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::has_merge_conflict_outcome_true" classname="sniff-cli" timestamp="2026-09-08T17:11:13.367-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::has_source_code_changes_false_emits_false_and_exit_1" classname="sniff-cli" timestamp="2026-09-08T17:11:13.367-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::is_monorepo_outcome_false_sets_exit_code" classname="sniff-cli" timestamp="2026-09-08T17:11:13.370-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::is_dirty_true_emits_dirty_true_and_exit_0" classname="sniff-cli" timestamp="2026-09-08T17:11:13.369-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::is_dirty_false_emits_dirty_false_and_exit_1" classname="sniff-cli" timestamp="2026-09-08T17:11:13.368-07:00" time="0.020">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::has_source_code_changes_true_emits_true_and_exit_0" classname="sniff-cli" timestamp="2026-09-08T17:11:13.367-07:00" time="0.020">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::is_monorepo_outcome_monorepo_no_error_still_exits_zero" classname="sniff-cli" timestamp="2026-09-08T17:11:13.371-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::is_monorepo_outcome_false_with_no_error_sets_exit_code_zero" classname="sniff-cli" timestamp="2026-09-08T17:11:13.371-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::is_monorepo_outcome_monorepo_omits_empty_orchestrators" classname="sniff-cli" timestamp="2026-09-08T17:11:13.371-07:00" time="0.020">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::is_monorepo_outcome_monorepo_shape" classname="sniff-cli" timestamp="2026-09-08T17:11:13.376-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::name_outcome_wraps_string" classname="sniff-cli" timestamp="2026-09-08T17:11:13.378-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::name_outcome_empty_sets_exit_code_one" classname="sniff-cli" timestamp="2026-09-08T17:11:13.378-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::package_count_outcome_wraps_number" classname="sniff-cli" timestamp="2026-09-08T17:11:13.380-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::package_area_root_present_emits_root_and_no_exit_code" classname="sniff-cli" timestamp="2026-09-08T17:11:13.379-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::package_area_root_absent_emits_empty_root_and_exit_1" classname="sniff-cli" timestamp="2026-09-08T17:11:13.378-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::package_root_absent_emits_empty_root_and_exit_1" classname="sniff-cli" timestamp="2026-09-08T17:11:13.382-07:00" time="0.021">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::package_root_present_emits_root_and_no_exit_code" classname="sniff-cli" timestamp="2026-09-08T17:11:13.383-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::worktrees_value_shapes_entries" classname="sniff-cli" timestamp="2026-09-08T17:11:13.387-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::repo_json::tests::monorepo_topology::structure_value_omits_empty_monorepo_topology" classname="sniff-cli" timestamp="2026-09-08T17:11:13.388-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::repo_json::tests::locators_and_booleans::worktrees_value_detached_head_omits_branch" classname="sniff-cli" timestamp="2026-09-08T17:11:13.386-07:00" time="0.020">
+        </testcase>
+        <testcase name="output::repo_json::tests::monorepo_topology::structure_value_includes_monorepo_topology_when_present" classname="sniff-cli" timestamp="2026-09-08T17:11:13.388-07:00" time="0.022">
+        </testcase>
+        <testcase name="output::repo_json::tests::monorepo_topology::structure_value_package_carries_standard_and_provenance" classname="sniff-cli" timestamp="2026-09-08T17:11:13.389-07:00" time="0.022">
+        </testcase>
+        <testcase name="output::repo_json::tests::package_family::dirty_package_areas_action_returns_scope_kind_names" classname="sniff-cli" timestamp="2026-09-08T17:11:13.389-07:00" time="0.022">
+        </testcase>
+        <testcase name="output::repo_json::tests::package_family::unstaged_package_areas_action_returns_scope_kind_names" classname="sniff-cli" timestamp="2026-09-08T17:11:13.397-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::repo_json::tests::package_family::dirty_packages_action_returns_scope_kind_names" classname="sniff-cli" timestamp="2026-09-08T17:11:13.391-07:00" time="0.022">
+        </testcase>
+        <testcase name="output::repo_json::tests::package_family::staged_package_areas_action_returns_scope_kind_names" classname="sniff-cli" timestamp="2026-09-08T17:11:13.394-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::repo_json::tests::package_family::non_monorepo_returns_empty_names_not_prose_error" classname="sniff-cli" timestamp="2026-09-08T17:11:13.392-07:00" time="0.020">
+        </testcase>
+        <testcase name="output::repo_json::tests::package_family::staged_packages_action_returns_scope_kind_names" classname="sniff-cli" timestamp="2026-09-08T17:11:13.396-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::repo_json::tests::structure::structure_action_with_filter_returns_filtered_value" classname="sniff-cli" timestamp="2026-09-08T17:11:13.398-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::repo_json::tests::package_family::unstaged_packages_action_returns_scope_kind_names" classname="sniff-cli" timestamp="2026-09-08T17:11:13.397-07:00" time="0.020">
+        </testcase>
+        <testcase name="output::repo_json::tests::structure::structure_with_filter_preserves_other_repo_fields" classname="sniff-cli" timestamp="2026-09-08T17:11:13.403-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::repo_json::tests::structure::structure_without_filesystem_returns_empty_object" classname="sniff-cli" timestamp="2026-09-08T17:11:13.405-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::repo_json::tests::structure::structure_no_filter_matches_fallback" classname="sniff-cli" timestamp="2026-09-08T17:11:13.402-07:00" time="0.021">
+        </testcase>
+        <testcase name="output::repo_json::tests::monorepo_topology::aggregate_structure_child_includes_monorepo_topology" classname="sniff-cli" timestamp="2026-09-08T17:11:13.388-07:00" time="0.037">
+        </testcase>
+        <testcase name="output::repo_json::tests::structure::structure_without_repo_returns_empty_object" classname="sniff-cli" timestamp="2026-09-08T17:11:13.406-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::repo_json::tests::structure::structure_with_filter_scopes_packages" classname="sniff-cli" timestamp="2026-09-08T17:11:13.404-07:00" time="0.022">
+        </testcase>
+        <testcase name="output::tests::docs_filter::blast_radius_flag_filters_to_blast_radius_docs" classname="sniff-cli" timestamp="2026-09-08T17:11:13.412-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::tests::attach_performance_to_object_filter_output" classname="sniff-cli" timestamp="2026-09-08T17:11:13.410-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::tests::docs_filter::has_prompt_flag_filters_to_prompted_docs" classname="sniff-cli" timestamp="2026-09-08T17:11:13.415-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::tests::docs_filter::has_prompt_with_positional_filter_intersects" classname="sniff-cli" timestamp="2026-09-08T17:11:13.413-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::tests::docs_filter::blast_radius_flag_with_filter_intersects" classname="sniff-cli" timestamp="2026-09-08T17:11:13.413-07:00" time="0.018">
+        </testcase>
+        <testcase name="output::tests::docs_filter::package_area_filters_by_path_prefix" classname="sniff-cli" timestamp="2026-09-08T17:11:13.416-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::tests::attach_performance_wraps_non_object_output" classname="sniff-cli" timestamp="2026-09-08T17:11:13.412-07:00" time="0.020">
+        </testcase>
+        <testcase name="output::tests::docs_filter::combined_flags_intersect" classname="sniff-cli" timestamp="2026-09-08T17:11:13.413-07:00" time="0.019">
+        </testcase>
+        <testcase name="output::tests::docs_filter::no_flags_returns_all" classname="sniff-cli" timestamp="2026-09-08T17:11:13.415-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::tests::docs_filter::package_area_intersects_with_readme" classname="sniff-cli" timestamp="2026-09-08T17:11:13.417-07:00" time="0.020">
+        </testcase>
+        <testcase name="output::tests::docs_filter::package_area_is_case_insensitive" classname="sniff-cli" timestamp="2026-09-08T17:11:13.421-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::tests::docs_filter::package_area_or_logic_with_multiple_areas" classname="sniff-cli" timestamp="2026-09-08T17:11:13.421-07:00" time="0.016">
+        </testcase>
+        <testcase name="output::tests::docs_filter::package_or_logic_with_multiple_packages" classname="sniff-cli" timestamp="2026-09-08T17:11:13.426-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::tests::docs_filter::package_filters_by_package_name" classname="sniff-cli" timestamp="2026-09-08T17:11:13.425-07:00" time="0.015">
+        </testcase>
+        <testcase name="output::tests::docs_filter::package_excludes_docs_without_package" classname="sniff-cli" timestamp="2026-09-08T17:11:13.423-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::tests::docs_filter::package_is_case_insensitive" classname="sniff-cli" timestamp="2026-09-08T17:11:13.425-07:00" time="0.017">
+        </testcase>
+        <testcase name="output::tests::docs_filter::plan_flag_matches_filename_and_path" classname="sniff-cli" timestamp="2026-09-08T17:11:13.430-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::tests::docs_filter::positional_filter_is_case_insensitive" classname="sniff-cli" timestamp="2026-09-08T17:11:13.430-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::tests::docs_filter::positional_filter_matches_substring" classname="sniff-cli" timestamp="2026-09-08T17:11:13.431-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::tests::docs_filter::readme_flag_filters_readme_files" classname="sniff-cli" timestamp="2026-09-08T17:11:13.432-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::tests::docs_filter::readme_flag_is_case_insensitive" classname="sniff-cli" timestamp="2026-09-08T17:11:13.431-07:00" time="0.014">
+        </testcase>
+        <testcase name="output::tests::docs_filter::src_flag_matches_src_in_path" classname="sniff-cli" timestamp="2026-09-08T17:11:13.432-07:00" time="0.014">
+        </testcase>
+    </testsuite>
+</testsuites>

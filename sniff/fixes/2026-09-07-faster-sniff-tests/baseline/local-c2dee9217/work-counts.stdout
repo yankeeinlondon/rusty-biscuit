@@ -1,0 +1,110 @@
+# Sniff work-count baseline
+
+Fixtures: bench `large_monorepo`, `huge_monorepo` (375 packages), 
+`git_repo_with_dirty_files(100)`.
+
+## staged_filesystem_summary_git_plus_repo
+
+elapsed: 64.1 ms (directional only)
+
+| counter | value |
+|---|---:|
+| `filesystem.io.bytes_read` | 6428 |
+| `filesystem.io.canonicalizations` | 367 |
+| `filesystem.io.file_opens` | 95 |
+| `filesystem.io.metadata_probes` | 654 |
+| `filesystem.io.read_dirs` | 2 |
+| `filesystem.repo.manifest_parses` | 93 |
+| `filesystem.repo.nested_marker_walks` | 1 |
+| `git.repository_discoveries` | 1 |
+| `git.status_walks` | 1 |
+
+## staged_filesystem_full_all_stages
+
+elapsed: 44.4 ms (directional only)
+
+| counter | value |
+|---|---:|
+| `filesystem.docs.documents_parsed` | 182 |
+| `filesystem.file_inventory.classified_exact_filename` | 185 |
+| `filesystem.file_inventory.classified_extension` | 210 |
+| `filesystem.file_inventory.files_accepted` | 395 |
+| `filesystem.file_inventory.files_classified` | 395 |
+| `filesystem.io.bytes_read` | 12013 |
+| `filesystem.io.canonicalizations` | 909 |
+| `filesystem.io.file_opens` | 247 |
+| `filesystem.io.metadata_probes` | 3957 |
+| `filesystem.io.read_dirs` | 211 |
+| `filesystem.repo.manifest_parses` | 93 |
+| `filesystem.repo.package_enrichments` | 90 |
+| `filesystem.repo.root_config_probes` | 2 |
+| `filesystem.walk.entries_visited` | 638 |
+| `filesystem.walk.walks_started` | 1 |
+| `git.blob_loads` | 4 |
+| `git.commit_visits` | 10 |
+| `git.file_diffs` | 2 |
+| `git.ref_walks` | 1 |
+| `git.repository_discoveries` | 1 |
+| `git.status_walks` | 1 |
+
+## repo_structure_huge_375_packages
+
+elapsed: 78.0 ms (directional only)
+
+| counter | value |
+|---|---:|
+| `filesystem.io.bytes_read` | 24068 |
+| `filesystem.io.canonicalizations` | 1257 |
+| `filesystem.io.file_opens` | 355 |
+| `filesystem.io.metadata_probes` | 2174 |
+| `filesystem.io.read_dirs` | 2 |
+| `filesystem.repo.manifest_parses` | 353 |
+| `filesystem.repo.nested_marker_walks` | 1 |
+
+## repo_full_huge_375_packages
+
+elapsed: 121.0 ms (directional only)
+
+| counter | value |
+|---|---:|
+| `filesystem.file_inventory.classified_exact_filename` | 380 |
+| `filesystem.file_inventory.classified_extension` | 3375 |
+| `filesystem.file_inventory.files_accepted` | 3755 |
+| `filesystem.file_inventory.files_classified` | 3755 |
+| `filesystem.io.bytes_read` | 42708 |
+| `filesystem.io.canonicalizations` | 2757 |
+| `filesystem.io.file_opens` | 606 |
+| `filesystem.io.metadata_probes` | 12877 |
+| `filesystem.io.read_dirs` | 701 |
+| `filesystem.repo.manifest_parses` | 353 |
+| `filesystem.repo.package_enrichments` | 300 |
+| `filesystem.repo.root_config_probes` | 2 |
+| `filesystem.walk.entries_visited` | 4685 |
+| `filesystem.walk.walks_started` | 1 |
+
+## git_status_file_changes_100_dirty
+
+elapsed: 6.9 ms (directional only)
+
+| counter | value |
+|---|---:|
+| `git.blob_loads` | 200 |
+| `git.commit_visits` | 1 |
+| `git.file_diffs` | 100 |
+| `git.ref_walks` | 1 |
+| `git.repository_discoveries` | 1 |
+| `git.status_walks` | 1 |
+
+## git_status_unified_diffs_100_dirty
+
+elapsed: 7.2 ms (directional only)
+
+| counter | value |
+|---|---:|
+| `git.blob_loads` | 200 |
+| `git.commit_visits` | 1 |
+| `git.file_diffs` | 100 |
+| `git.ref_walks` | 1 |
+| `git.repository_discoveries` | 1 |
+| `git.status_walks` | 1 |
+

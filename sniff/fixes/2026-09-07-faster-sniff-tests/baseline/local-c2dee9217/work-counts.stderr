@@ -1,0 +1,3 @@
+   Compiling sniff v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/target/sniff-phase1-baseline-c2dee9217/sniff/lib)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 10.06s
+     Running `target/debug/examples/work_counts`

@@ -1,0 +1,20 @@
+{
+  "note": "The five alternating candidate L1 runs, one exact-suite warmup, and four exact-suite load runs give the changed PTY deadline ten representative-load executions. One canonical tmux warmup plus nine canonical tmux load runs give each changed final-frame readiness contract ten executions.",
+  "targets": [
+    {
+      "binary": "sniff-cli::tty",
+      "name": "os_subcommand_runs_in_pty",
+      "contract": "the real CLI emits its OS heading and reaches EOF within the explicit expect deadline while the session owns cleanup"
+    },
+    {
+      "binary": "sniff-cli::level2_cicd_styling",
+      "name": "level2_cicd_status_cells_render_styled_in_tmux",
+      "contract": "bounded polling observes the complete final visible and styled CI/CD frame in a real tmux terminal"
+    },
+    {
+      "binary": "sniff-cli::level2_git_status_styling",
+      "name": "level2_git_status_headers_and_links_render_styled_in_tmux",
+      "contract": "bounded polling observes the complete final visible, styled, linked, and laid-out Git frame in a real tmux terminal"
+    }
+  ]
+}

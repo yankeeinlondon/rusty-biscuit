@@ -1,0 +1,48 @@
+{
+  "note": "Changed cohorts are projected from the full alternating L1 reports. Cohorts overlap where a narrow row explains part of a broader migration; their summed durations must not be added together.",
+  "cohorts": [
+    {
+      "name": "all sniff-cli integration binaries using the shared process fixture",
+      "binaryPrefixes": ["sniff-cli::"]
+    },
+    {
+      "name": "CLI fixture isolation and structural guard",
+      "binaries": [
+        "sniff-cli::cli_process_fixture",
+        "sniff-cli::spawn_site_guard"
+      ]
+    },
+    {
+      "name": "library requested-work and representative fixture changes",
+      "binaries": [
+        "sniff::bench_fixtures",
+        "sniff::benchmark_workloads",
+        "sniff::program_installable"
+      ]
+    },
+    {
+      "name": "library inherited-Git fixture repairs",
+      "binaries": [
+        "sniff::integration",
+        "sniff::merge_conflict_prediction"
+      ]
+    },
+    {
+      "name": "remote provider ownership audit",
+      "binaries": ["sniff::remote_providers"]
+    },
+    {
+      "name": "strengthened embedded equality contracts",
+      "prefixes": [
+        {
+          "binary": "sniff",
+          "prefix": "os::user::tests::equality_is_by_variant_and_value"
+        },
+        {
+          "binary": "sniff",
+          "prefix": "programs::types::tests::test_executable_source_equality"
+        }
+      ]
+    }
+  ]
+}

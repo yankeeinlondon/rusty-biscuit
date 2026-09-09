@@ -1,10 +1,2 @@
-   Compiling hyper-util v0.1.20
-   Compiling biscuit-file v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/biscuit-file/lib)
-   Compiling hyper-rustls v0.27.9
-   Compiling wiremock v0.6.5
-   Compiling schematic-define v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/schematic/define)
-   Compiling reqwest v0.13.2
-   Compiling schematic-definitions v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/schematic/definitions)
-   Compiling schematic-schema v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/schematic/schema)
    Compiling sniff v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/sniff/lib)
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 47.06s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.87s
