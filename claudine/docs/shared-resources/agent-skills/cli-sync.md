@@ -11,7 +11,7 @@ claudine sync
 
 ## Frontmatter Props
 
-- if the `sync` Frontmatter property is set to `false` on an Agent Skill then this skill _not_ be synced however non-synced skills will be called out in the CLI reporting
+- if the `sync` Frontmatter property is set to `false` on an Agent Skill then this skill will _not_ be synced, however, non-synced skills will be called out in the CLI reporting (as having not been synced)
 
 ## User and Repo scoping
 
