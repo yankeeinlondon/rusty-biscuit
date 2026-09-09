@@ -52,16 +52,14 @@ pub(crate) fn run_kimi_wire_session(
     let _ = wiring.live_metrics; // reserved for Phase 4 wiring of stall detection
 
     // Spawn child with stdin/stdout/stderr piped.
-    let mut command = Command::new(config.binary);
+    let mut command =
+        claudine::child_environment::command_with_environment(config.binary, config.env)?;
     command
         .args(config.args)
-        .env_clear()
-        .envs(config.env)
         .current_dir(config.cwd)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    claudine::child_environment::contribute_child_environment(&mut command)?;
 
     #[cfg(unix)]
     {

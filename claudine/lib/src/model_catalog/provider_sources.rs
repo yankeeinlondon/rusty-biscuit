@@ -10,8 +10,6 @@
 use std::collections::HashSet;
 use std::process::Stdio;
 
-use tokio::process::Command;
-
 use crate::provider::{ModelCatalogSource, Provider, provider_info};
 
 /// Expected-offering ids for a provider — the drift-comparison baseline.
@@ -132,13 +130,12 @@ pub(super) async fn fetch_shell_command_models(
     program: &'static str,
     args: &'static [&'static str],
 ) -> Result<Vec<String>, CatalogFetchError> {
-    let mut command = Command::new(program);
+    let mut command = crate::child_environment::tokio_command(program)?;
     command
         .args(args)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    crate::child_environment::contribute_child_environment(&mut command)?;
     let child = command
         .spawn()
         .map_err(|e| {

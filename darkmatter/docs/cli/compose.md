@@ -142,7 +142,7 @@ md compose doc.md --state '{"name":"Alice"}' --set '{"name":"Bob"}' name=Charlie
 
 - If `[INPUT]` is a file path, compose sets source-file context for relative transclusion resolution.
 - If input is stdin (`-` or piped with no input arg), source-file-relative path resolution is not available.
-- All file path arguments support `@`-prefixed file references (resolved from git root).
+- All file path arguments accept the full [file reference grammar](./index.md#file-references) — `@` magic paths search package, package area, repository root, then home; `&` pins the repository root and `^` searches package → package area → repository root.
 
 ### Validation and Errors
 

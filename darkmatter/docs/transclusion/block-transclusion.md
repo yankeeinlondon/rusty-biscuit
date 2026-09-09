@@ -57,11 +57,18 @@ The example showed a relative path used to the foreign file and this is the reco
     - we support this with a leading character of `~` to indicate the home directory
     - transclusion operations which are based on either a single machine or at least the same user (with some assumed standards in how the home folder is organized)
 
-- Repo Root based paths
+- Repo based paths
 
     - When the root document is a part of a git repo it is often natural to refer to documents from the root of this directory
     - This approach is the safest approach to use when wanting to ensure that content references are always a part of the repo
-    - we identify Repo Root file references by a leading `@` character
+    - a leading `&` character pins the reference to the repository root exactly
+    - a leading `^` character is the monorepo-aware variant: it searches the enclosing package root, then the package-area root, then the repository root, and takes the most specific match
+    - both forms require the document to be inside a repository and reject any target which escapes it
+
+- Magic paths
+
+    - a leading `@` character searches a prioritized list of roots: any roots the embedding application registered as prepends, then the package root, the package-area root, the repository root, and the user's home directory, then any registered appends
+    - unlike `&` and `^`, a magic path *can* reach the user's home directory, so it is the right choice for "find it in the usual places" and the wrong choice when repository containment is the point
 
 - ENV based paths
 

@@ -72,11 +72,16 @@ The per-provider modules under `lib/src/provider/<slug>/` split into two halves:
 **Child-process environment guard.** `child_environment` captures one absolute
 process-entry launch directory. Ordinary invocations ignore inherited
 `AGENT_CWD`; `claudine handle` retains an absolute wrapper-supplied value and
-rejects a relative one. Every production std/Tokio child receives the snapshot
-through `contribute_child_environment`, including complete provider environment
-maps. `claudine-cli/tests/spawn_inventory.rs` scans both production source trees
-and byte-compares `docs/providers/spawn-seam-inventory.json`; regenerate with
-the command stored in that artifact after an intentional spawn change.
+rejects a relative one. Production code builds every std/Tokio child through
+`child_environment::command`, `tokio_command`, or `command_with_environment`
+(the provider seam, which replaces the inherited environment with the complete
+sanitized map); each contributes the snapshot before returning. Enforcement is
+compiler-resolved, not a source scan: `std::process::Command::new`,
+`tokio::process::Command::new`, and both `env_clear` methods are
+`disallowed-methods` in `lib/clippy.toml` and `cli/clippy.toml`, allowed by
+default via each crate's `[lints.clippy]` and denied at the crate root under
+`cfg(not(test))`, so tests keep the plain constructors while an ungoverned
+production spawn fails `just lint`.
 
 ## Event Support Matrix
 

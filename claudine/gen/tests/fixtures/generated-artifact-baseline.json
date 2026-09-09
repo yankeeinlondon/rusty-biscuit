@@ -2,7 +2,7 @@
   "algorithm": "xxh64",
   "seed": 0,
   "artifacts": [
-    { "path": "docs/providers/catalog.json", "hash": "8677101503162017941" },
+    { "path": "docs/providers/catalog.json", "hash": "12260637771893196635" },
     { "path": "lib/src/signals/generated.rs", "hash": "6641532667373100434" },
     { "path": "lib/src/model_catalog/families_generated.rs", "hash": "11704988274204864472" },
     { "path": "lib/src/stream/providers/vocabulary.rs", "hash": "537241315263662569" },
@@ -14,7 +14,7 @@
     { "path": "lib/src/provider/kilo/data.rs", "hash": "17544087474510118917" },
     { "path": "lib/src/provider/kimi/data.rs", "hash": "3882671515899400190" },
     { "path": "lib/src/provider/opencode/data.rs", "hash": "10931200895418274740" },
-    { "path": "lib/src/provider/pi/data.rs", "hash": "17982405674418018016" },
+    { "path": "lib/src/provider/pi/data.rs", "hash": "13802176548921371712" },
     { "path": "lib/src/provider/qwen/data.rs", "hash": "13888146271741682622" }
   ]
 }

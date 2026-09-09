@@ -9,6 +9,12 @@ the operating system, the hardware, and more. They are the *inputs* to the
 Today is {{ ctx.today }} and you are working in {{ ctx.current_package }}.
 ```
 
+In composed prompts, `ctx.repo` is the repository name from the launch context,
+including when the prompt lives outside that repository. It does not require a
+reference to `ctx.branch` or another Git variable. `ctx.area` names the current
+package or package area in a monorepo; it is empty at the repository root and
+outside a monorepo. Use a conditional fallback when displaying that scope.
+
 ## What they are used for
 
 During composition Darkmatter captures a snapshot of the host and project into

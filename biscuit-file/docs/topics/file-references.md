@@ -19,8 +19,9 @@ state to get a real path:
 ```rust,no_run
 use biscuit_file::FileReference;
 
-// "@" means: search the well-known roots (git repo root, then HOME, plus
-// any roots you configure). Parsing reads nothing from the environment.
+// "@" means: search the well-known roots (package, package area, git repo
+// root, then HOME, plus any roots you configure). Parsing reads nothing
+// from the environment.
 let spec = FileReference::new("@docs/spec.md")?;
 
 // Resolution probes the filesystem. Some(path) = found; None = clean miss.
@@ -314,7 +315,7 @@ against become traversal *starting points*:
    returned.
 
 ```text
-%@README.md         → search git root, then HOME, recursively for "README.md"
+%@README.md         → search every magic root in order, recursively, for "README.md"
 %./config.toml      → search under the base directory for "config.toml"
 %@docs/spec.md      → find any "spec.md" whose parent path ends with "docs"
 %vault:notes.md     → search all vault roots for "notes.md"

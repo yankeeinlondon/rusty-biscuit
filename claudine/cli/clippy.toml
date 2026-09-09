@@ -1,0 +1,16 @@
+# Clippy stops at the first clippy.toml it finds walking up from the crate
+# manifest, so this file shadows the workspace root's and repeats its setting.
+large-error-threshold = 136
+
+# AGENT_CWD governance (finalized-references D8.7). A child command may only be
+# built through `claudine::child_environment`, whose constructors contribute the
+# captured launch directory; `env_clear` would discard that contribution. The
+# lint is `allow` in Cargo.toml `[lints]` and raised to `deny` by the crate
+# root under `cfg(not(test))`, so production code cannot bypass the helper
+# while unit and integration tests keep the plain constructors.
+disallowed-methods = [
+    { path = "std::process::Command::new", reason = "build children through `claudine::child_environment::command` so AGENT_CWD is contributed" },
+    { path = "tokio::process::Command::new", reason = "build children through `claudine::child_environment::tokio_command` so AGENT_CWD is contributed" },
+    { path = "std::process::Command::env_clear", reason = "use `claudine::child_environment::command_with_environment`; clearing would drop AGENT_CWD" },
+    { path = "tokio::process::Command::env_clear", reason = "use `claudine::child_environment::command_with_environment`; clearing would drop AGENT_CWD" },
+]

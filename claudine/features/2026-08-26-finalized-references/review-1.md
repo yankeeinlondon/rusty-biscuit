@@ -6,9 +6,10 @@ created: 2026-08-27T11:04:56+01:00
 spec: 2026-08-26-finalized-references/spec.md
 log: claudine/features/2026-08-26-finalized-references/log.md
 implemented: true
-implemented_by: codex/default
+implemented_by: claude/default
 description: A **feature** review of `2026-08-26-finalized-references/spec.md`
 feature: 2026-08-26-finalized-references/review-1.md
+next: 2026-08-26-finalized-references/review-2.md
 ---
 
 # Review 1: Finalized References

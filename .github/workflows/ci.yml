@@ -1,6 +1,8 @@
 name: ci
 
-# Dependency-aware CI for pull requests and pushes to main. Changed workspace
+# Dependency-aware CI for pull requests and pushes to main. A main push reuses
+# successful PR validation only with an identical tested tree and integration
+# base; missing evidence falls back to the normal grid. Changed workspace
 # packages are expanded through reverse Cargo dependencies and then fanned out
 # ONE JOB PER PACKAGE, with package policy read from each manifest's
 # `[package.metadata.ci]` and environment capabilities from
@@ -30,8 +32,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  validation:
+    name: Check reusable PR validation
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    outputs:
+      reuse: ${{ steps.reuse.outcome == 'success' && steps.reuse.outputs.reuse || 'false' }}
+      run_id: ${{ steps.reuse.outputs.run_id }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify prior PR validation
+        id: reuse
+        continue-on-error: true
+        timeout-minutes: 1
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/ci/reuse_validation.py check
+
   scope:
     name: Determine affected scope
+    needs: validation
+    # PR/manual runs and failed lookups fall back to normal scope calculation.
+    if: ${{ !cancelled() && needs.validation.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     outputs:
       package_matrix: ${{ steps.scope.outputs.package_matrix }}
@@ -157,6 +183,20 @@ jobs:
           retention-days: 3
           if-no-files-found: error
 
+      - name: Record the tested PR merge
+        id: receipt
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/ci/reuse_validation.py record
+      - name: Upload PR validation receipt
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v6
+        with:
+          name: ${{ steps.receipt.outputs.receipt }}
+          path: ci-validation.txt
+          retention-days: 7
+          overwrite: true
+          if-no-files-found: error
+
   # Bootstrap preflight (D3). Verifies a clean runner can initialize the shared
   # toolchain, discover scope, and pass the canonical-recipe and scope-calc
   # guards on every selected OS BEFORE any package fans out. Matrix breadth
@@ -180,7 +220,7 @@ jobs:
       - name: Set up the pinned Rust toolchain
         run: rustup show
       - name: Install just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
       - name: Install cargo-nextest
         uses: taiki-e/install-action@nextest
       - name: Verify toolchain and required tooling
@@ -203,6 +243,8 @@ jobs:
         run: just check-canonical
       - name: Test affected-scope calculation
         run: python3 scripts/ci/test_affected_scope.py
+      - name: Test PR validation reuse
+        run: python3 scripts/ci/test_reuse_validation.py
       - name: Test runner-loss attribution and retry decision
         run: python3 scripts/ci/test_runner_loss.py
 
@@ -275,6 +317,8 @@ jobs:
       - name: Set up the pinned Rust toolchain
         run: rustup show
       - uses: taiki-e/install-action@nextest
+      - name: Test PR validation reuse
+        run: python3 scripts/ci/test_reuse_validation.py
       - name: Test the scope calculator
         run: python3 scripts/ci/test_affected_scope.py
       # `--no-default-features` deselects the crates the other two bins in
@@ -312,6 +356,7 @@ jobs:
     # each package's `check`/`lint`/`test`/`l2`/`browser` jobs are nested inside
     # `package-ci`, so they are covered transitively.
     needs:
+      - validation
       - scope
       - preflight
       - package-ci
@@ -330,13 +375,29 @@ jobs:
       actions: read
       checks: read
     steps:
+      - name: Reuse successful PR validation
+        if: ${{ needs.validation.result == 'success' && needs.validation.outputs.reuse == 'true' }}
+        shell: bash
+        env:
+          VALIDATED_RUN: ${{ needs.validation.outputs.run_id }}
+        run: |
+          {
+            echo "## CI verdict"
+            echo ""
+            echo "**CLEAR** — this push has the same Git tree and integration base as successful PR validation."
+            echo ""
+            echo "[Original validation]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$VALIDATED_RUN)"
+          } >>"$GITHUB_STEP_SUMMARY"
       - uses: actions/checkout@v5
+        if: ${{ needs.validation.outputs.reuse != 'true' }}
       - name: Set up the pinned Rust toolchain
+        if: ${{ needs.validation.outputs.reuse != 'true' }}
         run: rustup show
       # A verdict computed from an unknown scope is not a verdict, so a broken
       # scope job fails this check outright rather than rendering a vacuous
       # CLEAR over an empty grid.
       - name: Resolve the affected scope
+        if: ${{ needs.validation.outputs.reuse != 'true' }}
         id: verdict-scope
         shell: bash
         env:
@@ -358,6 +419,7 @@ jobs:
       # rollup's policy available even when a high-fan-out run is still making
       # older artifacts visible through that listing.
       - name: Download the resolved package policy
+        if: ${{ needs.validation.outputs.reuse != 'true' }}
         uses: actions/download-artifact@v7
         with:
           name: ci-scope
@@ -368,6 +430,7 @@ jobs:
       # out build archives and diagnostics: only status and JUnit artifacts are
       # inputs to ci-rollup.
       - name: Download current-attempt result and status artifacts
+        if: ${{ needs.validation.outputs.reuse != 'true' }}
         uses: actions/download-artifact@v7
         with:
           pattern: '{junit-*,status-*}'
@@ -379,6 +442,7 @@ jobs:
       # older evidence if the public paginated listing is incomplete while the
       # workflow is active.
       - name: Overlay newest run-wide result and status artifacts
+        if: ${{ needs.validation.outputs.reuse != 'true' }}
         uses: actions/download-artifact@v7
         with:
           pattern: '{junit-*,status-*}'
@@ -394,7 +458,7 @@ jobs:
       # DID upload is never overwritten. `ci-infra-retry.yml` makes the retry
       # decision from the same classification once the run has completed.
       - name: Attribute producers whose runner was lost
-        if: ${{ steps.verdict-scope.outputs.has_scope == 'true' }}
+        if: ${{ needs.validation.outputs.reuse != 'true' && (steps.verdict-scope.outputs.has_scope == 'true') }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -411,13 +475,14 @@ jobs:
       # cargo_metadata, which the other two bins in `scripts/` need and this one
       # does not. Measured: ~8s versus 40s+. Do not drop the flag.
       - name: Build ci-rollup
+        if: ${{ needs.validation.outputs.reuse != 'true' }}
         run: |
           cargo build --release \
             --manifest-path scripts/Cargo.toml \
             --no-default-features --bin ci-rollup
       - name: Roll up results
         id: rollup
-        if: ${{ steps.verdict-scope.outputs.has_scope == 'true' }}
+        if: ${{ needs.validation.outputs.reuse != 'true' && (steps.verdict-scope.outputs.has_scope == 'true') }}
         # The rollup's own exit 2 (a cell fails the summary gate) must not stop
         # the verdict step below from running and explaining WHY. The verdict is
         # what gates.
@@ -438,7 +503,7 @@ jobs:
             --out ci-results.json \
             --run-id '${{ github.run_id }}'
       - name: Upload the machine-readable rollup
-        if: ${{ always() }}
+        if: ${{ needs.validation.outputs.reuse != 'true' && always() }}
         uses: actions/upload-artifact@v6
         with:
           name: ci-results
@@ -448,7 +513,7 @@ jobs:
       # (including a rollup that never wrote `ci-results.json`). Both are
       # non-zero, so this check fails closed.
       - name: Verdict
-        if: ${{ steps.verdict-scope.outputs.has_scope == 'true' }}
+        if: ${{ needs.validation.outputs.reuse != 'true' && (steps.verdict-scope.outputs.has_scope == 'true') }}
         shell: bash
         run: |
           ./scripts/target/release/ci-rollup verdict \
@@ -458,7 +523,7 @@ jobs:
       # so there is nothing to verdict and this check must pass. Stated out loud
       # rather than left as a silently green job.
       - name: No package was scheduled
-        if: ${{ steps.verdict-scope.outputs.has_scope != 'true' }}
+        if: ${{ needs.validation.outputs.reuse != 'true' && (steps.verdict-scope.outputs.has_scope != 'true') }}
         shell: bash
         run: |
           set -euo pipefail
@@ -488,11 +553,12 @@ jobs:
   summary:
     name: Unrolled-up job summary
     needs:
+      - validation
       - scope
       - preflight
       - biscuit-tui-captured-stdout
       - ci-tooling
-    if: always()
+    if: ${{ always() && needs.validation.outputs.reuse != 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

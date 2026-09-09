@@ -36,7 +36,7 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Install just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
 
       # No native step: biscuit-tui declares no `[package.metadata.ci.native]`
       # requirements on any OS. `_ensure-native-libs` now takes literal package

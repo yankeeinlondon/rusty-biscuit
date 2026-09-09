@@ -30,6 +30,108 @@ invocation:
     stdin_support: true
     prompt_arg: "ACP client requests over newline-delimited JSON on stdin/stdout."
     notes: "Starts an Agent Client Protocol server; richer protocol surface, but Claudine's OpenCode wrapper does not currently use it."
+execution_interfaces:
+  - id: "run-json"
+    kind: one_shot_cli
+    launch: 'opencode run --format json --print-logs --log-level INFO -- "<prompt>"'
+    launch_conditions: ["Preconfigure authentication and explicit permission policy"]
+    input_contract: "Initial prompt from argv; non-TTY stdin may supplement input."
+    observation_contract: "NDJSON on stdout plus structured lifecycle diagnostics on stderr."
+    control_capabilities: []
+    feature_preservation: evidenced_partial
+    preserved_features: ["agents", "skills", "commands", "plugins", "project context", "MCP configuration", "session persistence"]
+    documented_exclusions: ["mid-turn bidirectional control"]
+    unattended_obligations: ["Parse both output channels", "Do not infer success from exit code alone"]
+    evidence: ["https://opencode.ai/docs/cli/"]
+    notes: "Ordinary one-shot surface."
+  - id: "http-server"
+    kind: local_server
+    launch: "opencode serve"
+    launch_conditions: ["Use a stable authenticated endpoint", "Retain directory/workspace and native session correlation"]
+    input_contract: "HTTP session/message requests."
+    observation_contract: "HTTP responses, session reads, and SSE event streams."
+    control_capabilities: ["prompt_async", "prompt", "abort"]
+    feature_preservation: unknown
+    preserved_features: []
+    documented_exclusions: []
+    unattended_obligations: ["Correlate later events separately from 204 receipt", "Revalidate session state", "Do not retry ambiguous submissions"]
+    evidence: ["https://opencode.ai/docs/server/", "../steering/opencode.md"]
+    notes: "Proposed managed interface; Claudine activation and complete parity are unresolved."
+  - id: "acp"
+    kind: retained_subprocess
+    launch: "opencode acp"
+    launch_conditions: ["Complete ACP initialization and retain exact session identity"]
+    input_contract: "ACP JSON-RPC over stdin."
+    observation_contract: "ACP responses and notifications on stdout."
+    control_capabilities: ["session/prompt", "session/cancel"]
+    feature_preservation: unknown
+    preserved_features: []
+    documented_exclusions: []
+    unattended_obligations: ["Correlate requests", "Resolve unattended requests explicitly"]
+    evidence: ["https://github.com/anomalyco/opencode/blob/dev/packages/opencode/src/cli/cmd/acp.ts"]
+    notes: "Candidate protocol; selection readiness is unresolved."
+execution_selection:
+  preferred: "run-json"
+  rationale: "It is the currently established wrapper surface; HTTP server offers richer control but needs managed launch, authentication, correlation, and parity verification."
+  readiness_check: "Require parseable stdout and stderr streams and classify terminal state conservatively."
+  fallback: ""
+  fallback_conditions: []
+  replay_policy: "Never retry a submission after an ambiguous HTTP or process boundary."
+  feature_parity: "HTTP and ACP parity with normal agents, skills, commands, plugins, templates, and context is not fully evidenced."
+  notes: "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed."
+unattended_requests:
+  - request: "permission or question"
+    interface: "run-json"
+    observed_behavior: "Permission behavior is configurable; questions fail in the ordinary run evidence."
+    required_response: "Use explicit policy; otherwise fail and surface the unresolved request."
+    timeout_behavior: "Unknown."
+    policy: "Never fabricate approval or a human answer."
+    notes: "Do not add --auto or resource-disabling flags automatically."
+settlement:
+  - interface: "run-json"
+    operation: "one-shot prompt"
+    input_handling: "Prompt is supplied at launch; no distinct acceptance receipt is exposed."
+    turn_scheduling: "step and message events evidence work."
+    acceptance_signal: "first session/message event"
+    turn_terminal_signal: "No explicit terminal success event is evidenced."
+    settled_signal: "process exit after stream drain, interpreted with stdout error and classified stderr evidence"
+    process_lifecycle: "Run is one-shot."
+    notes: "Exit code alone is not reliable."
+  - interface: "http-server"
+    operation: "managed prompt"
+    input_handling: "HTTP 204 acknowledges request handling, not delivery or completion."
+    turn_scheduling: "SSE/session status and message reads evidence later execution."
+    acceptance_signal: "HTTP response"
+    turn_terminal_signal: "session idle or terminal message/error evidence"
+    settled_signal: "correlated session becomes idle after the submitted message reaches terminal state"
+    process_lifecycle: "Server remains alive after session settlement."
+    notes: "No exact operation guard or dedicated full-settlement event is established."
+steering_mechanisms:
+  - mechanism: "http-prompt-async-active"
+    operations: ["managed prompt control"]
+    interface: "http-server"
+    reference: "../steering/opencode.md"
+    notes: "The steering report owns race, correlation, and delivery limitations."
+  - mechanism: "http-prompt-sync-active"
+    operations: ["managed prompt control"]
+    interface: "http-server"
+    reference: "../steering/opencode.md"
+    notes: "The steering report owns race, correlation, and delivery limitations."
+  - mechanism: "http-prompt-async-idle"
+    operations: ["managed prompt control"]
+    interface: "http-server"
+    reference: "../steering/opencode.md"
+    notes: "The steering report owns race, correlation, and delivery limitations."
+  - mechanism: "http-prompt-sync-idle"
+    operations: ["managed prompt control"]
+    interface: "http-server"
+    reference: "../steering/opencode.md"
+    notes: "The steering report owns race, correlation, and delivery limitations."
+  - mechanism: "http-abort-then-prompt"
+    operations: ["managed prompt control"]
+    interface: "http-server"
+    reference: "../steering/opencode.md"
+    notes: "The steering report owns race, correlation, and delivery limitations."
 output_formats:
   - name: "run default"
     cli_value: "default"

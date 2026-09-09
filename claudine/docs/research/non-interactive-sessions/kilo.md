@@ -42,6 +42,98 @@ invocation:
     stdin_support: false
     prompt_arg: "ACP client protocol, not plain prompt stdin."
     notes: "Structured server mode for ACP clients; not the one-shot stdout stream Claudine should use first."
+execution_interfaces:
+  - id: "run-json"
+    kind: one_shot_cli
+    launch: 'kilo run --auto --format json --dir <cwd> "<prompt>"'
+    launch_conditions: ["Caller explicitly selects the permission posture", "Preconfigure authentication"]
+    input_contract: "Prompt words plus optional non-TTY stdin and file attachments."
+    observation_contract: "NDJSON event stream on stdout and diagnostics on stderr."
+    control_capabilities: []
+    feature_preservation: evidenced_partial
+    preserved_features: ["agents", "skills", "commands", "plugins", "project configuration", "session persistence"]
+    documented_exclusions: ["mid-turn bidirectional control"]
+    unattended_obligations: ["Do not infer success from exit code alone", "Preserve stderr"]
+    evidence: ["https://kilo.ai/docs/code-with-ai/platforms/cli"]
+    notes: "Ordinary one-shot interface; --auto remains an explicit caller policy choice."
+  - id: "http-server"
+    kind: local_server
+    launch: "kilo serve --port <port>"
+    launch_conditions: ["Require authentication", "Retain exact directory/session registration and server identity"]
+    input_contract: "Directory-routed HTTP session prompt requests."
+    observation_contract: "HTTP responses plus SSE/session status and history."
+    control_capabilities: ["prompt_async", "idle prompt", "abort"]
+    feature_preservation: unknown
+    preserved_features: []
+    documented_exclusions: []
+    unattended_obligations: ["Observe settlement after abort", "Do not retry ambiguous submission", "Track directory routing"]
+    evidence: ["../steering/kilo.md"]
+    notes: "Proposed managed interface; activation and full feature parity remain unresolved."
+  - id: "acp"
+    kind: retained_subprocess
+    launch: "kilo acp --cwd <dir>"
+    launch_conditions: ["Complete ACP initialization"]
+    input_contract: "ACP protocol."
+    observation_contract: "ACP responses and notifications."
+    control_capabilities: ["session prompt", "session cancel"]
+    feature_preservation: unknown
+    preserved_features: []
+    documented_exclusions: []
+    unattended_obligations: ["Resolve requests through explicit policy"]
+    evidence: ["https://kilo.ai/docs/code-with-ai/platforms/cli"]
+    notes: "Candidate interface; this evidence does not establish readiness."
+execution_selection:
+  preferred: "run-json"
+  rationale: "It is the current wrapper-grade surface; HTTP server is the richer managed candidate but needs lifecycle, auth, and parity work."
+  readiness_check: "Require parseable events and conservative terminal classification."
+  fallback: ""
+  fallback_conditions: []
+  replay_policy: "Never retry an ambiguously acknowledged request."
+  feature_parity: "HTTP and ACP parity for agents, skills, commands, plugins, templates, and project context is unresolved."
+  notes: "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed."
+unattended_requests:
+  - request: "permission or question"
+    interface: "run-json"
+    observed_behavior: "Both are configurable; the ordinary documented invocation uses autonomous mode."
+    required_response: "Require an explicit caller-selected policy or fail."
+    timeout_behavior: "Unknown."
+    policy: "Never silently select --auto or fabricate approval or human input."
+    notes: "Do not disable project configuration or plugins automatically."
+settlement:
+  - interface: "run-json"
+    operation: "one-shot prompt"
+    input_handling: "Prompt is supplied at launch without a distinct acceptance receipt."
+    turn_scheduling: "step_start and content/tool events evidence work."
+    acceptance_signal: "first session event"
+    turn_terminal_signal: "No explicit successful terminal event is evidenced."
+    settled_signal: "process exit after stream drain, interpreted with error events and stderr"
+    process_lifecycle: "Run is one-shot."
+    notes: "Exit code alone is not reliable."
+  - interface: "http-server"
+    operation: "managed prompt_async"
+    input_handling: "HTTP 204 is an initial receipt only."
+    turn_scheduling: "SSE/status/history evidence later execution."
+    acceptance_signal: "HTTP 204"
+    turn_terminal_signal: "session leaves busy state after terminal message/error"
+    settled_signal: "same session is observed idle after the submitted work reaches terminal state"
+    process_lifecycle: "Server remains alive."
+    notes: "No operation ID guard or dedicated full-settlement event is evidenced."
+steering_mechanisms:
+  - mechanism: "http-prompt-async-active"
+    operations: ["managed prompt control"]
+    interface: "http-server"
+    reference: "../steering/kilo.md"
+    notes: "Use exact directory/session guards; cancel and replacement are separate operations."
+  - mechanism: "http-prompt-async-idle"
+    operations: ["managed prompt control"]
+    interface: "http-server"
+    reference: "../steering/kilo.md"
+    notes: "Use exact directory/session guards; cancel and replacement are separate operations."
+  - mechanism: "http-abort-then-prompt"
+    operations: ["managed prompt control"]
+    interface: "http-server"
+    reference: "../steering/kilo.md"
+    notes: "Use exact directory/session guards; cancel and replacement are separate operations."
 output_formats:
   - name: "formatted run output"
     cli_value: "default"

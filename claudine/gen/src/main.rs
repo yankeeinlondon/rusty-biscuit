@@ -78,6 +78,11 @@ enum Command {
         #[command(subcommand)]
         command: AgentErrorsCommand,
     },
+    /// Deterministic relational and coverage checks for steering research.
+    Steering {
+        #[command(subcommand)]
+        command: SteeringCommand,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -93,6 +98,18 @@ enum AgentErrorsCommand {
         /// `docs/research/agent-errors/.findings/<slug>.md`).
         #[arg(long)]
         findings: Option<PathBuf>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum SteeringCommand {
+    /// Validate one provider, or the complete active roster when omitted.
+    Check {
+        /// Provider slug (default: every active research provider).
+        slug: Option<String>,
+        /// Emit the complete machine-readable result as JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -265,6 +282,33 @@ fn run(term: &Terminal, area: Option<PathBuf>, command: Command) -> Result<ExitC
                 }
             }
         }
+        Command::Steering { command } => {
+            let area = resolve_area(area)?;
+            match command {
+                SteeringCommand::Check { slug, json } => {
+                    let results = match slug {
+                        Some(slug) => vec![claudine_gen::check_steering(&area, &slug)?],
+                        None => claudine_gen::check_steering_fleet(&area)?,
+                    };
+                    if json {
+                        println!(
+                            "{}",
+                            serde_json::to_string_pretty(&results)
+                                .expect("steering validation result is serializable")
+                        );
+                    } else {
+                        for result in &results {
+                            print!("{}", report::steering_validation(term, result));
+                        }
+                    }
+                    Ok(if results.iter().all(claudine_gen::SteeringValidation::is_clean) {
+                        ExitCode::SUCCESS
+                    } else {
+                        ExitCode::FAILURE
+                    })
+                }
+            }
+        }
     }
 }
 
@@ -310,6 +354,20 @@ fn run_generate(
             )
         );
         // Fall through to the normal data.rs generate/apply for this slug.
+    }
+    // Older generator fixtures predate steering research. Once an area owns
+    // the topic, every generation must pass its deterministic gate first.
+    if area.join("docs/research/steering").is_dir() {
+        let steering = match slug {
+            Some(slug) => vec![claudine_gen::check_steering(area, slug)?],
+            None => claudine_gen::check_steering_fleet(area)?,
+        };
+        for result in &steering {
+            print!("{}", report::steering_validation(term, result));
+        }
+        if steering.iter().any(|result| !result.is_clean()) {
+            return Ok(ExitCode::FAILURE);
+        }
     }
     let scope = slug_scope(slug);
     let generations = claudine_gen::generate_all(area)?;

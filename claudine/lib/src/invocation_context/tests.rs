@@ -810,6 +810,55 @@ fn repo_area_requirements() -> darkmatter::markdown::compose::ContextRequirement
     )
 }
 
+#[test]
+fn repository_only_context_retains_git_identity() {
+    use darkmatter::markdown::compose::{ContextGroup, ContextRequirements};
+
+    let fixture = TempDir::new().unwrap();
+    init_repo(fixture.path());
+    write_workspace(fixture.path());
+    assert!(Command::new("git")
+        .args(["remote", "add", "origin", "https://example.com/team/fixture-repo.git"])
+        .current_dir(fixture.path())
+        .status()
+        .unwrap()
+        .success());
+    let invocation = InvocationContext::capture_at(fixture.path());
+    let before = invocation.work_snapshot();
+    let requirements = ContextRequirements::for_content(
+        "git commits in the **{{ctx.repo}}** repo has completed; area={{ctx.area}}",
+    );
+    assert!(!requirements.contains(ContextGroup::Git));
+
+    let context = invocation.capture_launch_context(&requirements);
+    assert_eq!(context.get("repo"), Some(&serde_json::json!("fixture-repo")));
+    assert_eq!(context.get("area"), Some(&serde_json::json!("")));
+    assert!(context.diagnostics().is_empty(), "{:?}", context.diagnostics());
+    let after = invocation.work_snapshot();
+    assert_eq!(after.git_root_discoveries, before.git_root_discoveries);
+    assert_eq!(after.topology_probes, before.topology_probes);
+}
+
+#[test]
+fn repository_dependent_groups_receive_complete_evidence() {
+    use darkmatter::markdown::compose::{ContextGroup, ContextRequirements};
+
+    let fixture = TempDir::new().unwrap();
+    init_repo(fixture.path());
+    write_workspace(fixture.path());
+    let invocation = InvocationContext::capture_at(fixture.path());
+    for content in ["{{ctx.staged_files}}", "{{ctx.programming_language}}", "{{ctx.docs_readme}}"] {
+        let requirements = ContextRequirements::for_content(content);
+        assert!(!requirements.contains(ContextGroup::Git));
+        assert!(!requirements.contains(ContextGroup::Repo));
+        assert!(requirements.iter().any(|group| matches!(
+            group, ContextGroup::FileChanges | ContextGroup::Languages | ContextGroup::Documents
+        )));
+        let context = invocation.capture_launch_context(&requirements);
+        assert!(context.diagnostics().is_empty(), "{content}: {:?}", context.diagnostics());
+    }
+}
+
 /// AC2: a document stored in one package area, launched from another, reports
 /// the launch area through the launch-capture seam.
 #[test]

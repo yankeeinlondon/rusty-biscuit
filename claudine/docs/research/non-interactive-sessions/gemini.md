@@ -26,6 +26,71 @@ invocation:
     stdin_support: true
     prompt_arg: "ACP protocol messages, not a prompt string"
     notes: "Starts experimental ACP mode. This is a bidirectional IDE/protocol surface, not the preferred Claudine stream."
+execution_interfaces:
+  - id: "headless-stream-json"
+    kind: one_shot_cli
+    launch: 'gemini --output-format stream-json --prompt "<prompt>"'
+    launch_conditions: ["Preconfigure authentication, trust, and approval behavior"]
+    input_contract: "Initial prompt from --prompt or stdin."
+    observation_contract: "JSONL lifecycle on stdout and diagnostics on stderr."
+    control_capabilities: []
+    feature_preservation: evidenced_partial
+    preserved_features: ["skills", "extensions", "project context", "MCP configuration", "session persistence"]
+    documented_exclusions: ["mid-turn bidirectional control"]
+    unattended_obligations: ["Handle or reject approvals by policy", "Consume through result"]
+    evidence: ["https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/headless.md"]
+    notes: "Ordinary one-shot interface."
+  - id: "acp"
+    kind: retained_subprocess
+    launch: "gemini --experimental-acp"
+    launch_conditions: ["Complete ACP initialization", "Register the exact session", "Confirm installed-version support"]
+    input_contract: "ACP JSON-RPC over stdio."
+    observation_contract: "Correlated ACP responses and session notifications."
+    control_capabilities: ["session/prompt", "session/cancel"]
+    feature_preservation: unknown
+    preserved_features: []
+    documented_exclusions: []
+    unattended_obligations: ["Observe cancellation settlement before replacement", "Do not retry ambiguous requests"]
+    evidence: ["../steering/gemini.md"]
+    notes: "Proposed managed candidate; activation and full feature parity are unresolved."
+execution_selection:
+  preferred: "headless-stream-json"
+  rationale: "It is the established parser-grade wrapper surface; ACP offers managed control but remains a candidate pending readiness and parity verification."
+  readiness_check: "Require an init record and terminal result from stream-json."
+  fallback: ""
+  fallback_conditions: []
+  replay_policy: "Do not replay after prompt acceptance is ambiguous."
+  feature_parity: "ACP resource and extension parity with ordinary headless execution is unknown."
+  notes: "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed."
+unattended_requests:
+  - request: "tool approval or human question"
+    interface: "headless-stream-json"
+    observed_behavior: "Approval behavior is configurable; question behavior is unresolved in existing evidence."
+    required_response: "Apply explicit policy or fail when no supported response channel exists."
+    timeout_behavior: "Unknown."
+    policy: "Never fabricate an approval or human answer."
+    notes: "Preserve skills, extensions, templates, and project context."
+settlement:
+  - interface: "headless-stream-json"
+    operation: "one-shot prompt"
+    input_handling: "Prompt is supplied at launch without a distinct receipt."
+    turn_scheduling: "Model and assistant events evidence work after init."
+    acceptance_signal: "init followed by model activity"
+    turn_terminal_signal: "result"
+    settled_signal: "result with status success or error, followed by process exit"
+    process_lifecycle: "The headless process exits after completion."
+    notes: "If result is absent, stderr and exit status provide fallback failure evidence."
+steering_mechanisms:
+  - mechanism: "acp-idle-prompt"
+    operations: ["idle prompt submission", "cancel then replace"]
+    interface: "acp"
+    reference: "../steering/gemini.md"
+    notes: "The steering report defines the operation and multi-phase cancellation boundary."
+  - mechanism: "acp-cancel-then-prompt"
+    operations: ["idle prompt submission", "cancel then replace"]
+    interface: "acp"
+    reference: "../steering/gemini.md"
+    notes: "The steering report defines the operation and multi-phase cancellation boundary."
 output_formats:
   - name: "text"
     cli_value: "text"

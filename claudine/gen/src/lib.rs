@@ -26,6 +26,7 @@ pub mod report;
 pub mod scaffold;
 pub mod schema_compat;
 pub mod signals;
+pub mod steering_check;
 pub mod vocabulary;
 
 pub use agent_errors_check::{
@@ -53,3 +54,4 @@ pub use vocabulary::{
     VocabularySource, build_vocabulary, check_vocabulary, load_error_vocabulary, vocabulary_path,
 };
 pub use signals::{SIGNAL_SLUGS, build_signals, check_signals, signals_path};
+pub use steering_check::{SteeringValidation, check_fleet as check_steering_fleet, check_provider as check_steering};

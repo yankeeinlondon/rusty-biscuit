@@ -128,7 +128,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install just
-        uses: extractions/setup-just@v3
+        uses: extractions/setup-just@v4
         with:
           just-version: ${{ env.JUST_VERSION }}
       # Every test binary in the archive carries this job's workspace path baked

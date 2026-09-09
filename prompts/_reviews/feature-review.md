@@ -69,6 +69,31 @@ Read both the specification document and then perform a review on the implementa
 - functionality which is light on test coverage (we expect strong unit and integration testing for everything)
 - are there any changes which would make the code more ergonomic, more performant, or both?
 
+## Rulings and Recurring Findings
+
+The owner's decisions bind this review; they are not up for re-litigation:
+
+- If the specification contains a `## Rulings` section, read it before writing
+  any finding. A ruling records an owner decision (who, when) and its closure
+  condition. An item covered by a ruling is **not a finding**: list it under a
+  `## Carried rulings` heading with one line stating the ruling and whether its
+  closure condition has been met. Carried rulings never affect `ready`. If you
+  believe a ruling is unsafe, say so in one sentence under that heading and
+  move on.
+::block when="iteration > 1"
+- Read the previous review at @{{previous}} and the implementation log. If a
+  finding you are about to raise is materially the same as one the previous
+  review raised and the implementer *deferred* rather than fixed, do not raise
+  it again at the same severity. List it under `## Carried rulings` as
+  "recurring, unruled" with the cycles it has appeared in, and recommend that
+  the owner record a ruling. Two consecutive deferrals mean the finding needs a
+  decision, not another cycle.
+::end-block
+- Acceptance criteria are evaluated as written, not as universals you extend.
+  If a criterion cannot be closed by the implementation's chosen mechanism,
+  say that once and propose the mechanism that would close it; do not enumerate
+  further edge cases against the current one.
+
 ## Test Rigor — Level 1 / Level 2 / Level 3
 
 Test count is not test rigor. Phrases like "covered by substantial unit and integration tests" are banned from this review unless you can pair each user-facing requirement with a verification level:

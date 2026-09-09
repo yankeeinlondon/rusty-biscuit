@@ -18,7 +18,7 @@ spec: |-
 design: |-
     {{ file_exists(parent_dir(review) + "/design.md") ? parent_dir(review) + "/spec.md" : null  }}
 # document lifecycle
-init:
+initialize:
     stack:
         - action:
               - stderr: |-

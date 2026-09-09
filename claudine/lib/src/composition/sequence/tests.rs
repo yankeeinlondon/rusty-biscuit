@@ -507,7 +507,7 @@ edition = "2024"
     .unwrap();
     fs::write(package_root.join("lib/src/lib.rs"), "pub fn run() {}\n").unwrap();
 
-    // Same basename at the repository root and the package area. Package
+    // Same basename at the repository root and the package area. Repository-scoped
     // resolution must select the package-area copy, proving the captured area
     // anchor is used rather than a repository-root fallback.
     fs::write(dir.path().join("steps.yaml"), "sequence:\n  - root\n").unwrap();
@@ -522,7 +522,7 @@ edition = "2024"
     assert_eq!(
         resolved.canonicalize().unwrap(),
         target.canonicalize().unwrap(),
-        "package reference must resolve under the captured package area, not the repository root",
+        "a `^` reference must resolve under the captured package area, not the repository root",
     );
 }
 

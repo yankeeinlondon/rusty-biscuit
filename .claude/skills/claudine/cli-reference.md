@@ -1,6 +1,6 @@
 ---
-hash: ef46db3751d8e999-4dc22a4f5d24e468
-last_updated: 2026-09-06
+hash: ef46db3751d8e999-10a14b29d87ac832
+last_updated: 2026-09-08
 ---
 # Claudine CLI Reference
 
@@ -216,6 +216,14 @@ claudine providers
 | `--mapping --json` | Raw mapping JSON pass-through |
 
 **`claudine providers agent-errors check <slug> [--findings <path>]`** runs the deterministic `agent-errors` research gate through the same generator-binary boundary. The command writes an explicit `clean`, `findings`, or `gate_error` outcome report and is safe to reference from a lifecycle shell action; the shell policy continues to blacklist direct `cargo` invocations.
+
+**`claudine providers steering check [slug] [--json]`** forwards to
+`claudine-gen steering check`. Omit the slug to check every active research roster
+provider. The gate validates schema, identity, coverage, evidence references,
+delivery operations, receipt records, and discovery relationships. Findings exit
+nonzero. JSON output supports automation; a clean report does not prove live
+delivery or activate an adapter. Fleet hooks require a build containing this
+command and must fail if it is unavailable.
 
 ---
 

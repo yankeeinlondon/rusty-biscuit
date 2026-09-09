@@ -1,0 +1,49 @@
+{
+  "provider": "pi",
+  "provider_version": "0.84.4",
+  "tested_on": "2026-09-08",
+  "os": "macos",
+  "fixture": "real Pi RPC with deterministic local model and built-in bash tool",
+  "production_activation": false,
+  "results": [
+    {
+      "scenario": "rpc_abort",
+      "pi_exit": null,
+      "observation_window_ms": 750,
+      "provider_cleanup_observed": true,
+      "shell_alive_before_fixture_cleanup": false,
+      "fixture_cleanup_required": false,
+      "shell_alive_after_fixture_cleanup": false,
+      "resource_discovery": {
+        "context": true,
+        "skill": true,
+        "skill_command": true,
+        "template_command": true
+      }
+    },
+    {
+      "scenario": "pi_sigkill",
+      "pi_exit": {
+        "code": null,
+        "signal": "SIGKILL"
+      },
+      "observation_window_ms": 750,
+      "provider_cleanup_observed": false,
+      "shell_alive_before_fixture_cleanup": true,
+      "fixture_cleanup_required": true,
+      "shell_alive_after_fixture_cleanup": false,
+      "resource_discovery": {
+        "context": true,
+        "skill": true,
+        "skill_command": true,
+        "template_command": true
+      }
+    }
+  ],
+  "limitations": [
+    "Executed on macOS only; source inspection indicates separate taskkill.exe behavior on Windows.",
+    "SIGKILL intentionally prevents Pi shutdown handlers; the fixture performs and records any required cleanup afterward.",
+    "Provider cleanup was observed after an exact 750 ms window by checking the marked exec-replaced shell process; additional descendants were not tested.",
+    "The command is self-bounded to 20 seconds even if both provider and fixture cleanup fail."
+  ]
+}

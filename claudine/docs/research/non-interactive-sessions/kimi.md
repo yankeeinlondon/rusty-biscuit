@@ -26,6 +26,107 @@ invocation:
     stdin_support: true
     prompt_arg: "User-role JSONL messages on stdin until EOF."
     notes: "Request/reply print mode, not Wire. Output is JSONL message projection."
+execution_interfaces:
+  - id: "print-stream-json"
+    kind: one_shot_cli
+    launch: "kimi --print -p <prompt> --output-format stream-json"
+    launch_conditions: ["Preconfigure authentication and unattended approval policy"]
+    input_contract: "Prompt from argv, or user-role JSONL on stdin with stream-json input."
+    observation_contract: "JSONL message projection on stdout and diagnostics on stderr."
+    control_capabilities: []
+    feature_preservation: evidenced_partial
+    preserved_features: ["skills", "extensions", "project context", "MCP configuration", "session state"]
+    documented_exclusions: ["Wire JSON-RPC control"]
+    unattended_obligations: ["Preserve stderr and exit status", "Consume the terminal result"]
+    evidence: ["https://moonshotai.github.io/kimi-cli/en/guides/print-mode.html"]
+    notes: "Ordinary one-shot interface and reduced-control fallback candidate."
+  - id: "wire"
+    kind: retained_subprocess
+    launch: "kimi --wire --work-dir <repo> --afk"
+    launch_conditions: ["Preconfigure authentication and unattended approval policy", "Retain stdin/stdout"]
+    input_contract: "JSON-RPC requests over stdio."
+    observation_contract: "Correlated JSON-RPC responses and notifications; stderr/logs carry diagnostics."
+    control_capabilities: ["prompt", "cancel"]
+    feature_preservation: evidenced_partial
+    preserved_features: ["skills", "extensions", "project context", "MCP configuration", "session state"]
+    documented_exclusions: []
+    unattended_obligations: ["Answer supported requests only through explicit policy", "Correlate prompt completion"]
+    evidence: ["https://moonshotai.github.io/kimi-cli/en/guides/wire-mode.html"]
+    notes: "Existing preferred managed subprocess interface."
+  - id: "web-server"
+    kind: local_server
+    launch: "kimi --web"
+    launch_conditions: ["Retain authenticated endpoint and native session identity"]
+    input_contract: "HTTP request API with optional authenticated WebSocket events."
+    observation_contract: "HTTP responses plus WebSocket lifecycle evidence."
+    control_capabilities: ["steer", "submit"]
+    feature_preservation: unknown
+    preserved_features: []
+    documented_exclusions: []
+    unattended_obligations: ["Correlate later lifecycle separately from initial receipt", "Do not retry ambiguous submission"]
+    evidence: ["../steering/kimi.md"]
+    notes: "Candidate managed server surface; activation and full parity remain unresolved."
+  - id: "acp"
+    kind: retained_subprocess
+    launch: "kimi --acp"
+    launch_conditions: ["Complete ACP initialization and retain exact session identity"]
+    input_contract: "ACP JSON-RPC over stdio."
+    observation_contract: "Correlated responses and session notifications."
+    control_capabilities: ["session/prompt", "session/cancel"]
+    feature_preservation: unknown
+    preserved_features: []
+    documented_exclusions: []
+    unattended_obligations: ["Wait for cancellation settlement before replacement"]
+    evidence: ["../steering/kimi.md"]
+    notes: "Alternative candidate managed protocol."
+execution_selection:
+  preferred: "wire"
+  rationale: "Wire already combines retained structured execution and control; web and ACP remain alternate managed candidates."
+  readiness_check: "Require a successful initialize exchange and advertised protocol capability before prompt submission."
+  fallback: "print-stream-json"
+  fallback_conditions: ["Wire launch or initialization fails before prompt submission", "Caller accepts loss of retained control", "Enabled feature profile remains usable in print mode"]
+  replay_policy: "Never replay an ambiguously accepted prompt."
+  feature_parity: "Wire preserves the evidenced normal resource surface; parity of web and ACP remains unknown."
+  notes: "Existing-evidence sol-low contract backfill only; no fresh provider observation was performed."
+unattended_requests:
+  - request: "approval or human question"
+    interface: "wire"
+    observed_behavior: "Requests are configurable and AFK mode affects unattended handling."
+    required_response: "Use explicit caller policy or fail the run."
+    timeout_behavior: "Unknown."
+    policy: "Never fabricate approval or a human answer."
+    notes: "AFK is a declared provider mode, not proof that every request is safely resolved."
+settlement:
+  - interface: "wire"
+    operation: "prompt request"
+    input_handling: "A correlated prompt request initiates the operation."
+    turn_scheduling: "Step notifications evidence model work."
+    acceptance_signal: "successful JSON-RPC handling of prompt"
+    turn_terminal_signal: "prompt result status"
+    settled_signal: "correlated prompt response with status finished, cancelled, or max_steps_reached"
+    process_lifecycle: "Wire remains alive for later requests; teardown is separate."
+    notes: "StepInterrupted and JSON-RPC errors refine failure."
+steering_mechanisms:
+  - mechanism: "web_steer"
+    operations: ["active-turn steering"]
+    interface: "web-server"
+    reference: "../steering/kimi.md"
+    notes: "Initial HTTP receipt and later processing are distinct."
+  - mechanism: "web_submit"
+    operations: ["idle submission"]
+    interface: "web-server"
+    reference: "../steering/kimi.md"
+    notes: "Initial HTTP receipt and later processing are distinct."
+  - mechanism: "acp_cancel_submit"
+    operations: ["cancel then replace"]
+    interface: "acp"
+    reference: "../steering/kimi.md"
+    notes: "Cancellation settlement must precede replacement."
+  - mechanism: "acp_prompt"
+    operations: ["idle prompt submission"]
+    interface: "acp"
+    reference: "../steering/kimi.md"
+    notes: "Use the steering report's acceptance boundary."
 output_formats:
   - name: "Wire"
     cli_value: "--wire"

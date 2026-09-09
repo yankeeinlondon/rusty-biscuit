@@ -335,15 +335,16 @@ impl DetailedResolution {
 /// [`FileReference::complete_partial`] supports.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CompletionEntryForm {
-    /// `@`-prefixed magic path. Roots are the enclosing git root and the
-    /// user's home directory.
+    /// `@`-prefixed magic path. Roots are the configured prepends, the package
+    /// root, the package-area root, the repository root, the user's home
+    /// directory, then the configured appends.
     Magic,
     /// `&`-prefixed path rooted at the repository.
     RepositoryRoot,
     /// `^`-prefixed path searched through package, area, and repository roots.
     RepositoryScoped,
-    /// Bare implicit-relative path. Roots are the enclosing git root and the
-    /// caller-provided base directory (in that order, when distinct).
+    /// Bare implicit-relative path. Roots are the caller-provided base
+    /// directory and the enclosing git root (in that order, when distinct).
     ImplicitRelative,
 }
 

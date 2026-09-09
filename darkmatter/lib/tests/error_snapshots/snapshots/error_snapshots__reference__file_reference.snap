@@ -6,4 +6,4 @@ expression: out
 ┃ 
 ┃ file reference syntax is invalid: unclosed brace
 ┃ 
-┃ Check repository-root (`@/`) or package (`!`) prefix usage.
+┃ Check sigil usage: `@` magic, `&` repository root, `^` repository-scoped.
