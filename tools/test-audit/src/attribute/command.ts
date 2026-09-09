@@ -1,10 +1,11 @@
-import { existsSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 
 import type { Command, CommandIo } from "../command.ts";
 import { EXIT, UsageError } from "../errors.ts";
 import { parseFamilyFile } from "../reconcile/families.ts";
 import { parseArgv, requireString, optionalString, hasFlag, flagAll } from "../args.ts";
 import { loadConfig } from "../config.ts";
+import { aggregate, renderAggregateTable } from "./aggregate.ts";
 import {
   parseAndCheckLogs,
   attribute,
@@ -17,6 +18,7 @@ import {
 } from "./index.ts";
 
 const USAGE = `usage: test-audit attribute <run.log|report.xml>... --config <cfg> [--families <json>] [--by-binary] [--markdown] [--json]
+       test-audit attribute aggregate <run-dir>... --config <cfg> [--families <json>] [--out <json>] [--provenance ci|local] [--headroom <ratio>] [--json]
        test-audit attribute budgets --config <cfg> --runs <manifest.json> [--headroom <ratio>] [--markdown]`;
 
 export const attributeCommand: Command = {
@@ -29,6 +31,9 @@ export const attributeCommand: Command = {
 
     if (subcommand === "budgets") {
       return runBudgets(parsed.positional.slice(1), parsed.flags, io);
+    }
+    if (subcommand === "aggregate") {
+      return runAggregate(parsed.positional.slice(1), parsed.flags, io);
     }
 
     const logPaths = parsed.positional;
@@ -85,6 +90,82 @@ export const attributeCommand: Command = {
     return EXIT.clean;
   },
 };
+
+/**
+ * `attribute aggregate` — join stored CI staging trees to families.
+ *
+ * Writes the same JSON `attribute budgets --runs` reads, so a clean
+ * aggregation followed by a refused derivation is the expected end state until
+ * three green runs per leg exist.
+ */
+function runAggregate(
+  positional: string[],
+  flags: Map<string, string | true>,
+  io: CommandIo
+): number {
+  if (positional.length === 0) {
+    throw new UsageError(`no run directories provided\n${USAGE}`);
+  }
+
+  const parsed = { positional, flags };
+  const configPath = requireString(parsed, "config", USAGE);
+  const config = loadConfig(configPath);
+  const familiesPath = optionalString(parsed, "families") ?? config.familiesPath;
+  const headroom = optionalNonNegative(parsed, "headroom");
+  const provenanceKind = optionalString(parsed, "provenance") ?? "ci";
+  if (provenanceKind !== "ci" && provenanceKind !== "local") {
+    throw new UsageError(`--provenance must be 'ci' or 'local', got ${provenanceKind}`);
+  }
+
+  if (!existsSync(familiesPath) || !statSync(familiesPath).isFile()) {
+    throw new UsageError(`not a readable file: ${familiesPath}`);
+  }
+
+  const families = parseFamilyFile(readFileSync(familiesPath, "utf8")).families;
+  const result = aggregate({
+    runDirs: positional,
+    environments: config.environments,
+    families,
+    provenanceKind,
+    ...(headroom === undefined ? {} : { headroom }),
+  });
+
+  const outPath = optionalString(parsed, "out");
+  const serialized = JSON.stringify(result.budgetInput, null, 2);
+  if (outPath !== undefined) writeFileSync(outPath, `${serialized}\n`, "utf8");
+
+  if (hasFlag(parsed, "json")) {
+    io.out(serialized);
+  } else {
+    io.out(renderAggregateTable(result));
+    if (outPath !== undefined) {
+      io.out("");
+      io.out(`wrote ${outPath}`);
+    }
+  }
+
+  if (result.violations.length > 0) {
+    io.err(`${result.violations.length} violation(s):`);
+    for (const v of result.violations) io.err(`  [${v.kind}] ${v.detail}`);
+    io.err(`GATE EXIT=${EXIT.violations}`);
+    return EXIT.violations;
+  }
+  io.out(`GATE EXIT=${EXIT.clean}`);
+  return EXIT.clean;
+}
+
+function optionalNonNegative(
+  parsed: { positional: string[]; flags: Map<string, string | true> },
+  name: string
+): number | undefined {
+  const raw = optionalString(parsed, name);
+  if (raw === undefined) return undefined;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new UsageError(`--${name} must be a finite number >= 0, got ${raw}`);
+  }
+  return value;
+}
 
 function runBudgets(
   positional: string[],

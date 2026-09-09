@@ -51,16 +51,42 @@ absent routes claiming to execute). Shipped configurations:
 | Command | Purpose | Exit |
 |---|---|---|
 | `config validate\|show --config <cfg>` | Validate or display a configuration | 0 / 2 |
-| `capture --config <cfg> [--only a,b] [--dry-run]` | `cargo nextest list --message-format json` per selection → `<enumeration>/<label>.json`, `.err`, `captures.json` (revision, dirty files, toolchain, platform, command, identity count) | 0 / 1 |
+| `capture --config <cfg> [--only a,b] [--note <text>] [--dry-run]` | `cargo nextest list --message-format json` per selection → `<enumeration>/<label>.json`, `.err`, `captures.json` (revision, dirty files, optional note, toolchain, platform, command, identity count) | 0 / 1 |
 | `fetch --config <cfg> --run <id> [--out <dir>]` | Assemble a CI run's `junit-*`/`status-*` artifacts into per-environment staging trees via `gh` | 0 / 1 (missing artifacts) |
 | `junit <staging-dir> --config <cfg> [--expect <json>] [--baseline <dir>] [--markdown\|--json]` | Gate a staging tree: malformed XML, invalid durations, missing cells/tests, excluded tests that ran, duplicates, failures, manifest disagreement; compare matched/added/removed per environment | 0 / 1 / 2 |
 | `sources --config <cfg> [--json\|--markdown]` | Source-side test population via tree-sitter (attributes, cfg gates, module path, ignore reason, macro forms) plus parse diagnostics | 0 |
 | `reconcile --config <cfg>` | Runner universe from captures × `families.json` × `inventory.md` family index × source scan: total, non-overlapping, every difference declared | 0 / 1 |
 | `attribute <log>... --config <cfg>` / `attribute budgets --runs <json>` | Per-family cost from nextest console logs; budgets refuse local provenance and fewer than three CI runs per leg | 0 / 1 |
+| `attribute aggregate <run-dir>... --config <cfg> [--out <json>] [--provenance ci\|local] [--headroom <ratio>] [--json]` | Join stored JUnit staging trees to families and emit the `perLegFamilySummed` that `attribute budgets --runs` reads | 0 / 1 / 2 |
 | `measure report\|parse\|run` | Local alternating-run report (three costs kept apart, drift bracket, cohorts, ten-execution targets), single-log parse, and the alternating runner (`--plan`) | 0 / 1 |
 | `counters validate\|compare --config <cfg>` | Work-count readings as data; comparisons are rejected across differing compatibility keys or a declared boundary | 0 / 1 |
 
 Exit codes everywhere: 0 clean, 1 violations or malformed evidence, 2 usage.
+
+### From CI artifacts to a budget
+
+`fetch` downloads a run into `<run-id>/<env>/<tier>/<package>.xml` staging
+trees; `junit` gates one tree; `attribute aggregate` joins those trees to
+families and writes the budget input; `attribute budgets` derives — or refuses.
+
+```sh
+just run attribute aggregate baseline/34173378609 --config <cfg> --out budgets.json
+just run attribute budgets --config <cfg> --runs budgets.json
+```
+
+The aggregation is a join, not a second classifier: every `<testcase>` is
+resolved through `reconcile`'s `familiesMatching`, so the two gates cannot
+drift on family membership. One run yields **one sample per family per leg**,
+and only from a leg whose evidence is clean — a red run (non-zero manifest
+`exit_code` or a failed case), a malformed or missing report, a manifest naming
+another environment, or an identity that zero or two families claim
+disqualifies that leg for that run rather than being averaged in. Legs declared
+`pending` are reported pending and counted for nothing. The aggregator never
+decides whether enough evidence exists: `runsPerLeg` is the count of legs that
+actually measured, and `deriveBudgets` keeps every refusal (local provenance,
+fewer than three green runs, a declared leg with no measurements, a family with
+fewer samples than runs). A clean aggregation followed by a refused derivation
+is the expected end state until three green runs per leg exist.
 
 ### Inputs, in order of preference
 
@@ -104,12 +130,31 @@ src/config.ts         zod schema, referential validation, path resolution
 src/capture/ fetch/   listing and CI-artifact acquisition
 src/junit/            parse (fast-xml-parser), manifest, collect, compare, render
 src/reconcile/        listings, families, inventory, sources (tree-sitter), gate
-src/attribute/        family attribution and budgets
+src/attribute/        family attribution, JUnit → family aggregation, budgets
 src/measure/          report, runner
 src/counters/         work-count evidence
 src/nextest-log.ts    the console-log compatibility adapter
 tests/                vitest; *-claudine-compat.test.ts replay the preserved Claudine inputs
+fixtures/claudine-compat/  the era classifier and expectations those replays judge against
 ```
+
+### Compatibility replays read frozen inputs only
+
+`*-claudine-compat.test.ts` prove that this tool reproduces the numbers the
+first-generation Claudine scripts recorded, from the inputs those scripts
+consumed. That is a claim about a fixed past, so both sides are fixed: the
+listings and gate logs stay in the consuming fix directory under a
+revision-named path, and the classifier (`families.json`) and the recorded
+expectations are snapshotted in `fixtures/claudine-compat/`.
+
+They must not read a consuming area's live `families.json`, `inventory.md`,
+`attribution.md`, or top-level `enumeration/`. A replay of frozen evidence
+judged by a moving classifier proves nothing, and it makes any consumer's
+legitimate family rename fail *this* package's suite —
+`tests/claudine-compat-inputs.test.ts` guards exactly that, and
+`fixtures/claudine-compat/README.md` records the incident that motivated it.
+Live-consumer health is what `reconcile` reports when the consumer runs its own
+gate.
 
 The Claudine fix directory keeps thin wrappers (`junit-metrics.ts`,
 `inventory-reconciler.ts`, `attribution.ts`, `measurement.ts`,

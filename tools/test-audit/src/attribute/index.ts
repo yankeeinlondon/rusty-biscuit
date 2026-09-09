@@ -35,7 +35,9 @@ export type AttributionViolationKind =
   | "local-derived-budget"
   | "insufficient-runs"
   | "missing-leg"
-  | "invalid-headroom";
+  | "invalid-headroom"
+  | "missing-artifact"
+  | "provenance-mismatch";
 
 export type AttributionViolation = Violation<AttributionViolationKind>;
 
