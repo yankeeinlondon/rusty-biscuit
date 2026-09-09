@@ -20,7 +20,7 @@ use builder::{
     LARGE_MONOREPO_CHURN_COMMITS, LARGE_MONOREPO_DIRTY_FILES, LARGE_MONOREPO_JS_PKGS,
     LARGE_MONOREPO_RUST_PKGS, LARGE_MONOREPO_TOTAL_COMMITS, SMALL_GIT_REPO_COMMITS,
     SMALL_GIT_REPO_DIRTY_FILES, build_language_mix_tree, build_large_monorepo,
-    build_small_git_repo,
+    build_mixed_monorepo, build_small_git_repo,
 };
 
 fn count_commits(repo: &Repository) -> u32 {
@@ -210,14 +210,13 @@ fn language_mix_tree_is_not_a_git_repo() {
 
 #[test]
 fn fixture_builders_are_idempotent_over_fresh_dirs() {
-    // Two distinct temp dirs should produce the same commit count and
-    // the same package fan-out so successive bench runs compare like
-    // for like.
+    const PACKAGE_COUNT: usize = 10;
+
     let a = TempDir::new().expect("tempdir a");
     let b = TempDir::new().expect("tempdir b");
 
-    let repo_a = build_large_monorepo(a.path());
-    let repo_b = build_large_monorepo(b.path());
+    let repo_a = build_mixed_monorepo(a.path(), PACKAGE_COUNT);
+    let repo_b = build_mixed_monorepo(b.path(), PACKAGE_COUNT);
 
     assert_eq!(count_commits(&repo_a), count_commits(&repo_b));
     assert_eq!(count_dirty_files(&repo_a), count_dirty_files(&repo_b));
@@ -225,7 +224,7 @@ fn fixture_builders_are_idempotent_over_fresh_dirs() {
     let pkgs_a = count_rust_packages(a.path());
     let pkgs_b = count_rust_packages(b.path());
     assert_eq!(pkgs_a, pkgs_b);
-    assert_eq!(pkgs_a, LARGE_MONOREPO_RUST_PKGS);
+    assert_eq!(pkgs_a, PACKAGE_COUNT * 2 / 5);
 }
 
 fn count_rust_packages(root: &Path) -> usize {
