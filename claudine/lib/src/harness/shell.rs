@@ -379,17 +379,16 @@ pub async fn execute_approved_command(
         }
     })?;
 
-    let mut cmd = tokio::process::Command::new(&exe);
-    cmd.args(&command.args);
-    if let Some(dir) = working_dir {
-        cmd.current_dir(dir);
-    }
-    crate::child_environment::contribute_child_environment(&mut cmd).map_err(|error| {
+    let mut cmd = crate::child_environment::tokio_command(&exe).map_err(|error| {
         HarnessError::ShellCommandExecutionFailed {
             detail: format!("failed to prepare '{}': {error}", command.executable),
             source: ShellExecCause::Spawn(std::io::Error::other(error)),
         }
     })?;
+    cmd.args(&command.args);
+    if let Some(dir) = working_dir {
+        cmd.current_dir(dir);
+    }
     cmd.stdout(std::process::Stdio::piped());
     cmd.stderr(std::process::Stdio::piped());
 

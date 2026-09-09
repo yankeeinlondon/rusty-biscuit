@@ -409,11 +409,11 @@ fn mapping_rows(payload: &serde_json::Value) -> Result<Vec<MappingRow>> {
 /// Resolves the `claudine-gen` command (installed binary or the
 /// dev-checkout `cargo run` fallback).
 fn gen_command() -> Result<Command> {
-    let mut command = match resolve_gen_binary() {
-        Some(binary) => Command::new(binary),
+    let command = match resolve_gen_binary() {
+        Some(binary) => claudine::child_environment::command(binary)?,
         None => match repo_root_for_cargo_fallback() {
             Some(root) => {
-                let mut cargo = Command::new("cargo");
+                let mut cargo = claudine::child_environment::command("cargo")?;
                 cargo
                     .args(["run", "-p", "claudine-gen", "--quiet", "--"])
                     .current_dir(root);
@@ -428,7 +428,6 @@ fn gen_command() -> Result<Command> {
             )),
         },
     };
-    claudine::child_environment::contribute_child_environment(&mut command)?;
     Ok(command)
 }
 

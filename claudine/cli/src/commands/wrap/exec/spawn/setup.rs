@@ -81,8 +81,8 @@ pub(super) fn debug_assert_child_env(env: &HashMap<OsString, OsString>) {
 
 /// Build the base child command shared by every spawn mode.
 ///
-/// The environment is applied with `env_clear()` then `envs(env)`, so `env`
-/// must be the **complete** child environment — the only gate for environment
+/// The inherited environment is replaced by `env`, so `env` must be the
+/// **complete** child environment — the only gate for environment
 /// sanitization. Stdio and process-group isolation are configured by the
 /// caller after this returns.
 pub(super) fn base_command(
@@ -91,10 +91,9 @@ pub(super) fn base_command(
     env: &HashMap<OsString, OsString>,
     cwd: &Path,
 ) -> Command {
-    let mut command = Command::new(binary);
-    command.args(args).env_clear().envs(env).current_dir(cwd);
-    claudine::child_environment::contribute_child_environment(&mut command)
+    let mut command = claudine::child_environment::command_with_environment(binary, env)
         .expect("process launch directory was initialized before provider command construction");
+    command.args(args).current_dir(cwd);
     command
 }
 

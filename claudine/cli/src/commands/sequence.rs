@@ -186,14 +186,13 @@ fn expand_shell_source(
             source: SequenceShellCause::Approval(e),
         })?;
 
-    let mut child = std::process::Command::new(&approved.executable);
-    child.args(&approved.args);
-    claudine::child_environment::contribute_child_environment(&mut child).map_err(|e| {
+    let mut child = claudine::child_environment::command(&approved.executable).map_err(|e| {
         CompositionError::SequenceShellFailed {
             command: command.to_string(),
             source: SequenceShellCause::Spawn(std::io::Error::other(e)),
         }
     })?;
+    child.args(&approved.args);
     let output = child
         .output()
         .map_err(|e| CompositionError::SequenceShellFailed {

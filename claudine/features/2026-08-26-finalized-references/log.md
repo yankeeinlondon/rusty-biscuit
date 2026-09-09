@@ -629,3 +629,19 @@ The files changed for the fixed and partially remediated findings are:
 - `claudine/features/2026-08-26-finalized-references/log.md`
 
 No performance measurement was requested or deferred during review cycle 9, so the existing `deferred_perf_measurement` value and `deferred-performance.md` were not changed for this cycle.
+
+## Owner Intervention After Review Cycle 10
+
+> **started at:** 2026-09-08T17:05:00-07:00
+
+- this is not a review-findings implementation; it is Ken's intervention after ten cycles in which the same two findings recurred without closing (AC6 scanner gaps in reviews 2–9, AC10 platform matrix in reviews 1–10)
+- recorded rulings R1 (AC10 Windows/WSL evidence waived pending CI provisioning) and R2 (AC6 enforcement moved from a syntax census to clippy `disallowed-methods`) in a new `## Rulings` section of `spec.md`; amended D8.7, AC6, and the Claudine scope bullet to match; AC10's text is unchanged
+- taught `prompts/_reviews/feature-review.md` to honor a spec's `## Rulings` section (ruled items go under `## Carried rulings` and never affect `ready`), to stop re-raising a finding the previous cycle deferred, and to evaluate acceptance criteria as written rather than as open-ended universals
+- replaced the guard:
+        - `claudine::child_environment` gained `command`, `tokio_command`, and `command_with_environment` (the provider seam's replace-whole-environment form); `contribute_child_environment` is unchanged and still serves the `build_child_env` map
+        - all 17 production spawn seams recorded in the retired census now construct through those functions; the two `env_clear` sites (`wrap/exec/spawn/setup.rs::base_command`, `wrap/exec/wiring/session.rs`) use `command_with_environment`
+        - `claudine/lib/clippy.toml` and `claudine/cli/clippy.toml` disallow `std::process::Command::new`, `tokio::process::Command::new`, and both `env_clear` methods; each crate's `[lints.clippy]` sets the lint to `allow` and the crate root denies it under `cfg(not(test))`, so tests keep the plain constructors
+        - deleted `claudine/cli/tests/spawn_inventory.rs` (3,262 lines) and `claudine/docs/providers/spawn-seam-inventory.json`; the `syn`/`proc-macro2` dev-dependencies stay because `error_guards` uses them
+        - non-vacuity proof: a temporary production function using `use std::process::Command as Aliased; Aliased::new(..)`, `.env_clear()`, and `tokio::process::Command::new(..)` made `cargo clippy -p claudine --lib -- -D warnings` fail with three `use of a disallowed method` errors naming `std::process::Command::new`, `std::process::Command::env_clear`, and `tokio::process::Command::new`; the probe was removed and its absence verified
+        - GitNexus rated `contribute_child_environment` CRITICAL (18 direct callers); every direct caller was edited in this pass and the package-area gates below cover them
+- documentation: `.claude/skills/claudine/architecture.md` and `SKILL.md` describe the lint-based guard instead of the census

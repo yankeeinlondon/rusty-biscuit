@@ -59,6 +59,41 @@ updated directly.
 > owner per responsibility; D7, D8.7, Scope, AC4, and AC6 were tightened to
 > match, and the unverified "existing environment inventory tests" claim was
 > replaced with a concrete guard requirement.
+>
+> **Owner intervention (2026-09-08):** after ten review cycles, the only open
+> items were two findings that recurred every cycle: an AC10 platform row that
+> no builder or CI leg can currently execute, and an AC6 syntax-scanner gap
+> that a stronger reviewer could always extend. Both are now closed by ruling
+> (see "Rulings"): the AC10 native-Windows evidence is waived pending CI
+> provisioning, and AC6's guard is restated as a compiler-resolved lint rather
+> than a source census. D8.7 and AC6 were amended to match.
+
+## Rulings
+
+Rulings are owner decisions that bind every later review. A reviewer lists a
+ruled item under "Carried rulings" and does not raise it as a finding. A ruling
+closes when its stated condition is met; until then it does not affect
+readiness.
+
+- **R1 — AC10 native-Windows and WSL evidence** *(Ken, 2026-08-27 in review-1
+  finding 1; recorded here 2026-09-08)*. The local `build-win` and
+  `build-win-native` builders fail the repository's 50 GiB storage preflight,
+  and `.github/ci/environments.json` records that no Level 2 terminal backend is
+  provisionable on Windows or WSL (policy gap, owner `@yankeeinlondon`, expiry
+  2027-01-31). Ruling: hosted CI's `windows-latest` and WSL2 Level 1 and lint
+  legs stand in for the local Windows rows of AC10, and the Windows/WSL Level 2
+  cells are waived as readiness blockers. AC10's text is deliberately not
+  amended — the gap is temporary and the criterion remains the target. Closure
+  condition: a Windows/WSL Level 2 backend is provisioned in CI, at which point
+  the next review re-evaluates those cells.
+- **R2 — AC6 guard mechanism** *(Ken, 2026-09-08)*. The spawn-seam census in
+  `claudine-cli/tests/spawn_inventory.rs` grew from 411 to 3,262 lines across
+  eight review cycles without the criterion ever closing, because a universal
+  claim ("any construction form") cannot be discharged by a syntax scanner.
+  Ruling: the scanner and its `spawn-seam-inventory.json` artifact are deleted;
+  D8.7 and AC6 now require compiler-resolved enforcement through clippy
+  `disallowed-methods`. Findings about syntactic forms the retired scanner
+  missed are moot. Closure: immediate.
 
 ## Baseline
 
@@ -432,30 +467,26 @@ paths uses `ctx.*` interpolation or derives from a caller-passed parameter
    without making inherited `AGENT_CWD` authoritative for ordinary commands.
    Any CLI route that can spawn a child captures this lightweight launch fact
    at entry even when it does not build a composition `InvocationContext`.
-   The variable is contributed by **one** helper in the `claudine` lib that
-   every child-spawning site calls — today that is at least the provider
-   launch (`claudine-cli` `build_child_env`), hook runners
-   (`dispatch/runner/bash.rs`), `::shell` execution (`harness/shell.rs`,
-   `composition/sequence/task/shell.rs`), and the lifecycle executor — rather
-   than N independent `.env("AGENT_CWD", …)` insertions. Only the provider
-   seam has an environment assertion today (`debug_assert_child_env`); a
-   spawn-seam inventory guard in the style of `dispatch_inventory.rs` must
-   classify every production `std::process::Command` and
-   `tokio::process::Command` construction in `claudine` lib or CLI, including
-   aliased, helper-returned, and inline `status`/`output` forms, and fail when a
-   child can execute without the shared contribution helper. As in the model
-   guard, `#[cfg(test)]` bodies and test-only source files are excluded; clap's
-   unrelated `Command` builder is not a process seam. Here, “production
-   construction” means a construction authored in the two guarded source roots,
-   including one emitted by a `macro_rules!` transcriber authored there under
-   any possible invocation-module bindings. Tokens generated solely by a
-   declarative or procedural macro defined outside those roots are excluded:
-   stable Rust exposes no portable compiler-expanded source inventory, and the
-   external definition is not part of the guarded source. Executable expressions
-   authored as external-macro invocation arguments remain in scope. Every
-   recorded production process seam must be governed — an allowlist may describe
-   an indirect governed path, but may not exempt a spawned child from
-   `AGENT_CWD`.
+   The variable is contributed by **one** module in the `claudine` lib,
+   `child_environment`, whose constructors (`command`, `tokio_command`, and
+   `command_with_environment` for the provider seam that replaces the whole
+   inherited environment) are the only way production code obtains a child
+   command; the map-form `contribute_child_environment` serves
+   `claudine-cli`'s `build_child_env`. Every child-spawning site — the provider
+   launch, hook runners (`dispatch/runner/bash.rs`), `::shell` execution
+   (`harness/shell.rs`, `composition/sequence/task/shell.rs`), the lifecycle
+   executor, and the remaining CLI utilities — goes through those constructors
+   rather than N independent `.env("AGENT_CWD", …)` insertions. Enforcement
+   is compiler-resolved *(amended 2026-09-08, ruling R2)*: `std::process::Command::new`,
+   `tokio::process::Command::new`, and both `env_clear` methods are clippy
+   `disallowed-methods` in the `claudine` lib and CLI crates, allowed by default
+   through each crate's `[lints.clippy]` and denied at the crate root under
+   `cfg(not(test))`. Because clippy resolves paths after macro expansion,
+   aliases, re-exports, local or external macros, helper-returned commands, and
+   `env_clear`-after-contribution are all caught without a source scanner, and
+   unit and integration tests keep the plain constructors. The only
+   `#[allow(clippy::disallowed_methods)]` sites are the constructor statements
+   inside `child_environment` itself; no other exemption is permitted.
 
 This extends the existing eager-`file` normalization so that derivation and
 proxy boundaries cannot strand a value without its anchor. The 2026-08-26
@@ -559,9 +590,9 @@ an explicit-relative spelling such as `./name:part`.
   parameters); convention magic-root registration reviewed against D6;
   sequence/harness/proxy/system-prompt/overlay surfaces consume the correct
   source context and materialized parameter values; one shared
-  child-environment contribution helper carrying `AGENT_CWD`, wired into
+  child-environment module whose constructors carry `AGENT_CWD`, used by
   every spawn seam (providers, hooks, `::shell`, lifecycle executor, sequence
-  shell tasks) plus a spawn-seam inventory guard, per D8.7. The only
+  shell tasks) and enforced by clippy `disallowed-methods`, per D8.7. The only
   remaining biscuit-file ambient call in Claudine
   (`cli/src/commands/providers.rs` → `find_git_root`) is switched to the
   invocation context.
@@ -651,16 +682,15 @@ an explicit-relative spelling such as `./name:part`.
   provider child CWD; an ordinary nested Claudine invocation started with a
   stale inherited value instead publishes its own entry CWD. Missing and
   non-absolute inherited values on `handle` cover the D8.7 fallback/error rule.
-  The spawn-seam inventory guard fails on any production `Command` construction
-  in `claudine` lib or CLI whose child can execute without the shared
-  environment helper, where production construction has D8.7's source-authored
-  boundary for externally generated macro tokens. Local `macro_rules!`
-  transcribers are checked against every scanned module's bindings, including a
-  fixture whose definition module lacks `Command` and whose invocation module
-  imports it. Scanner unit fixtures prove the guard is non-vacuous by presenting
-  each supported construction form with one governed and one deliberately
-  ungoverned seam; proving the guard never requires mutating production source
-  during a test.
+  `just lint` in the `claudine` package area fails on any production use of
+  `std::process::Command::new`, `tokio::process::Command::new`, or either
+  `env_clear` outside `child_environment`'s constructors *(amended
+  2026-09-08, ruling R2)*. Non-vacuity is proven once per change to the lint
+  configuration by adding a temporary ungoverned constructor — an aliased
+  `std` constructor, an `env_clear`, and a Tokio constructor — to production
+  source, observing the lint failure name each disallowed method, and removing
+  it; the implementation log records the observed output. Test targets are
+  exempt by construction, so no production source is mutated by a test.
 - **AC7 — magic conventions preserved.** The skill example
   (`@.claude/skills/.../SKILL.md`: repo first, home fallback) and Claudine's
   prompt-lookup conventions keep working through registered roots. Collision

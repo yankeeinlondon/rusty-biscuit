@@ -2,7 +2,6 @@ use std::sync::LazyLock;
 use std::time::Duration;
 
 use regex::Regex;
-use tokio::process::Command;
 use tracing::{debug, warn};
 
 use crate::actions::bash_executor;
@@ -43,7 +42,7 @@ pub(super) const BASH_ACTION_TIMEOUT: Duration = Duration::from_secs(3);
 ///   multiple arguments unless the config author quoted them in the
 ///   `params` template (e.g., `--message '{{tool_name}}'`).
 /// - No shell metacharacter interpretation occurs because the command
-///   is spawned directly via `Command::new().args()`, not through
+///   is spawned directly with an argument array, not through
 ///   `sh -c`.
 /// - The `shell_escape()` helper in `bash_executor` is intentionally
 ///   not used here — it is for callers that build `sh -c` strings.
@@ -92,11 +91,9 @@ pub(super) async fn execute_bash(command: &str, params: &str, meta: &EventMeta) 
     let action = async {
         match &validated {
             bash_executor::ValidatedCommand::Direct(executable) => {
-                let mut command = Command::new(executable);
+                let mut command = crate::child_environment::tokio_command(executable)
+                    .map_err(std::io::Error::other)?;
                 command.args(&param_args);
-                if let Err(error) = crate::child_environment::contribute_child_environment(&mut command) {
-                    return Err(std::io::Error::other(error));
-                }
                 command.output().await
             }
             bash_executor::ValidatedCommand::Interpreted {
@@ -104,13 +101,11 @@ pub(super) async fn execute_bash(command: &str, params: &str, meta: &EventMeta) 
                 interpreter_args,
                 script,
             } => {
-                let mut cmd = Command::new(interpreter);
+                let mut cmd = crate::child_environment::tokio_command(interpreter)
+                    .map_err(std::io::Error::other)?;
                 cmd.args(interpreter_args);
                 cmd.arg(script);
                 cmd.args(&param_args);
-                if let Err(error) = crate::child_environment::contribute_child_environment(&mut cmd) {
-                    return Err(std::io::Error::other(error));
-                }
                 cmd.output().await
             }
         }
@@ -176,12 +171,11 @@ pub(super) async fn run_command_blocking(
         )));
     }
 
-    let mut cmd = Command::new(command);
+    let mut cmd = crate::child_environment::tokio_command(command)
+        .map_err(std::io::Error::other)?;
     if let Some(args) = args {
         cmd.args(args);
     }
-    crate::child_environment::contribute_child_environment(&mut cmd)
-        .map_err(std::io::Error::other)?;
 
     let output = cmd.output().await?;
     Ok(super::CommandOutput {

@@ -1,4 +1,12 @@
 //! Process-entry launch state contributed to every Claudine child.
+//!
+//! Production code in the `claudine` lib and CLI obtains every child command
+//! through [`command`], [`tokio_command`], or [`command_with_environment`],
+//! and only those. The direct constructors and `env_clear` are
+//! `disallowed-methods` in each crate's `clippy.toml`, denied at the crate
+//! root for non-test builds, so a child cannot be built without the
+//! `AGENT_CWD` contribution and cannot have it cleared afterward. Tests keep
+//! the ordinary `std`/Tokio constructors.
 
 use std::collections::HashMap;
 use std::ffi::{OsStr, OsString};
@@ -168,6 +176,44 @@ pub fn contribute_child_environment(
     Ok(())
 }
 
+/// Build a `std` command for `program` whose child already carries `AGENT_CWD`.
+pub fn command(program: impl AsRef<OsStr>) -> Result<std::process::Command, ChildEnvironmentError> {
+    // The one governed constructor; every other production site is denied.
+    #[allow(clippy::disallowed_methods)]
+    let mut command = std::process::Command::new(program);
+    contribute_child_environment(&mut command)?;
+    Ok(command)
+}
+
+/// Build a Tokio command for `program` whose child already carries `AGENT_CWD`.
+pub fn tokio_command(
+    program: impl AsRef<OsStr>,
+) -> Result<tokio::process::Command, ChildEnvironmentError> {
+    #[allow(clippy::disallowed_methods)]
+    let mut command = tokio::process::Command::new(program);
+    contribute_child_environment(&mut command)?;
+    Ok(command)
+}
+
+/// Build a `std` command whose child sees exactly `env` plus `AGENT_CWD`.
+///
+/// The inherited environment is discarded, so `env` must be the complete
+/// sanitized child environment. `AGENT_CWD` is contributed after the
+/// replacement, so a stale value inside `env` is overwritten.
+pub fn command_with_environment(
+    program: impl AsRef<OsStr>,
+    env: &HashMap<OsString, OsString>,
+) -> Result<std::process::Command, ChildEnvironmentError> {
+    let mut command = command(program)?;
+    // The only production `env_clear`: clearing after the contribution would
+    // drop `AGENT_CWD`, which is why the method is denied everywhere else.
+    #[allow(clippy::disallowed_methods)]
+    command.env_clear();
+    command.envs(env);
+    contribute_child_environment(&mut command)?;
+    Ok(command)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -242,6 +288,28 @@ mod tests {
             contribute_child_environment(&mut env).unwrap();
             assert_eq!(env.get(OsStr::new(AGENT_CWD_ENV)), Some(&expected));
         }
+    }
+
+    #[test]
+    fn replaced_environment_carries_only_the_map_plus_agent_cwd() {
+        let expected = initialize_process_launch_directory(LaunchDirectoryMode::Ordinary)
+            .unwrap()
+            .as_os_str()
+            .to_owned();
+        let env = HashMap::from([
+            (OsString::from("CLAUDINE_PROBE"), OsString::from("kept")),
+            (OsString::from(AGENT_CWD_ENV), OsString::from("stale/value")),
+        ]);
+        let command = command_with_environment("probe", &env).unwrap();
+        let visible: HashMap<_, _> = command
+            .get_envs()
+            .map(|(key, value)| (key.to_owned(), value.map(OsStr::to_owned)))
+            .collect();
+        assert_eq!(visible.get(OsStr::new("CLAUDINE_PROBE")), Some(&Some(OsString::from("kept"))));
+        assert_eq!(visible.get(OsStr::new(AGENT_CWD_ENV)), Some(&Some(expected)));
+        assert!(command.get_program() == "probe");
+        // `env_clear` leaves no inherited variable in the explicit map.
+        assert_eq!(visible.len(), 2);
     }
 
     #[test]
