@@ -1,8 +1,22 @@
 # Steering Running Agent Sessions
 
-Status: Draft — interactive requirements discovery; not ready for implementation.
+Status: Ready for phased implementation; provider activation remains evidence-gated.
 Created: 2026-09-08
 Updated: 2026-09-08
+
+## Implementation Plan Readiness
+
+The implementation plan is [plan.md](plan.md), with phases numbered from Phase 1.
+It is designed to run fully non-interactively. Accepted user decisions remain
+binding; the concrete engineering defaults below close remaining implementation
+choices without reopening those decisions. Each phase specifies work, validation,
+completion conditions, and failure behavior. No phase requires an interactive
+design decision or authorizes bypassing provider policy.
+
+Unverified provider behavior is a verification task with an explicit activation
+blocker, not an unresolved product decision. Missing credentials, binaries, or
+native test hosts leave the affected cases unavailable. Record those limitations
+and continue independent work; never infer success from missing evidence.
 
 ## Purpose
 
@@ -23,7 +37,7 @@ that it can receive a message during an active run.
   IDs for scripts. Never infer an automation target. If delivery requires
   interruption, explicit targeting does not grant permission to interrupt:
   require the interactive choice, or fail with an explanation when interaction
-  is unavailable. Exact command flags and listing format remain to be specified.
+  is unavailable. Use the command forms and listing contract below.
 - Return from `claudine steer` once the provider confirms acceptance. Report
   “queued” when that is all it confirms; claim delivery only with evidence of
   delivery. Do not wait for a later tool boundary, agent response, or completed
@@ -74,23 +88,42 @@ that it can receive a message during an active run.
   `claudine steer`. Configure this in user or repo configuration, with repo values
   overriding user values. An environment variable overrides both at runtime.
   Precedence is environment > repo config > user config > enabled built-in default.
-  Exact key and environment-variable names remain to be specified. CLI flags and
+  Use `steering.automatic.enabled` and `CLAUDINE_AUTO_STEER`. CLI flags and
   task-document frontmatter overrides are not part of this agreed configuration
   surface.
 - Trigger an early repetition warning halfway to the configured repetition stop
-  limit: 15 full repetitions for the default limit of 30. Integer rounding for
-  small or odd limits remains to be specified; a warning
-  must never delay or supersede a hard stop.
+  limit, rounded up: 15 full repetitions for the default limit of 30, or 3 for
+  a limit of 5. Compute the threshold as `ceil(stop_limit / 2)` without integer
+  overflow. A stop limit of 1 has no early warning opportunity. Emit only after
+  the detector establishes repetition and before a hard stop; a warning must
+  never delay or supersede a hard stop, including when one chunk crosses both
+  thresholds.
 - Allow one automatic warning per separate repetition episode, subject to a total
   default cap of three warnings per agent execution. Ordinary conversation turns
   do not reset the allowance. Separate agent executions, including separate tasks
   in a sequence, have independent allowances; the cap is not shared across the
   outer Claudine command or persisted across executions of a resumed conversation.
-  A new episode requires a sustained break in repetition; a single different
-  line or brief wording change does not qualify. The measurable recovery window
-  will be defined using representative detector fixtures. This warning-eligibility
-  rule does not change the existing detector's hard-stop behavior. Reaching the
-  cap does not change detection or termination limits.
+  Count each warning opportunity once, whether it produces a steering attempt
+  or an STDERR notice that steering is unavailable. Failed, refused, timed-out,
+  or ambiguously acknowledged attempts consume that opportunity; provider
+  acceptance or delivery is not required. Do not retry within the same episode
+  or refund its allowance. Once three opportunities have been used, suppress
+  further automatic attempts and unavailable-delivery notices for that execution.
+  When automatic help is disabled, consume no opportunities and emit no such
+  notices. A hard stop that prevents a warning from being issued takes priority
+  and does not create a warning opportunity.
+  A new episode requires a sustained break in repetition: at least
+  `max(8, 2 * previous_cycle_length)` nonblank semantic-output lines without
+  detected repetition. The cycle length is the number of lines in the repeated
+  block associated with the preceding warning. Blank lines do not advance the
+  recovery count; detected repetition resets it. Silence, turn boundaries, and
+  steering acknowledgments do not advance or reset that count. After recovery,
+  another episode must independently reach the warning threshold before earning
+  a warning. Verify this rule with representative detector fixtures, including
+  single-line and multi-line cycles and brief wording changes. This separate
+  warning-eligibility state does not clear detector evidence or change existing
+  hard-stop behavior. Reaching the cap does not change detection or termination
+  limits.
 - Log full steering message text after heuristically replacing potential secrets
   with `*` characters, together with delivery details. Implement secret detection
   as shared, reusable functionality; reuse or consolidate existing heuristics
@@ -320,12 +353,13 @@ are called out explicitly and must not override those decisions.
 | D2 | Does an automatic warning extend the existing stop threshold? | Warn early and preserve all existing stop thresholds and clocks. Warning frequency is a separate decision. | Accepted by user: warn earlier, keep existing limit |
 | D3 | Which delivery mechanisms may count as steering? | Manual steering offers an explained, interactive interruption fallback; automatic warnings require non-interrupting delivery, otherwise warn on STDERR and retain the existing error limit. | Accepted by user |
 | D4 | May production use an undocumented provider protocol? | Allow research-verified mechanisms with version-specific evidence and runtime compatibility checks; incompatible or unverified mechanisms remain unavailable. | Accepted by user: yes, with compatibility checks |
-| D5 | When and how often should automatic warnings fire? | Warn halfway to the configured repetition stop limit (15 of the default 30), once per separate episode, with a default cap of three warnings per agent execution. Require sustained non-repeating output before a new episode. Conversation turns do not reset the cap; separate executions have independent allowances. Recovery-window sizing and integer edge cases remain implementation details to specify and test. | Threshold, per-episode policy, three-warning default, execution boundary, and sustained-recovery rule accepted by user |
-| D6 | What happens without an interactive terminal? | Support explicit session IDs and a listing usable by scripts; never guess a target. Interruption still requires an interactive choice. Exact flags remain open. | Accepted by user: explicit session ID |
-| D7 | Should automatic help be enabled by default and configurable? | Enable by default; environment override > repo config > user config > built-in default. Opt-out is independent of existing guards and manual steering. Exact names remain to be specified. | Default, opt-out, and configuration precedence accepted by user |
+| D5 | When and how often should automatic warnings fire? | Warn halfway to the configured repetition stop limit, rounded up (15 of 30; 3 of 5), once per separate episode, with a default cap of three warnings per agent execution. A limit of 1 has no early warning. Recovery requires `max(8, 2 * previous_cycle_length)` nonblank lines without detected repetition; blank lines do not advance recovery and detected repetition resets it. Conversation turns do not reset the cap; separate executions have independent allowances. | Threshold, rounding up, per-episode policy, three-warning default, execution boundary, and measured recovery rule accepted by user |
+| D6 | What happens without an interactive terminal? | Support explicit session IDs and a listing usable by scripts; never guess a target. Interruption still requires an interactive choice. Use `--session`, `--list`, and `--list --json`. | Accepted by user: explicit session ID |
+| D7 | Should automatic help be enabled by default and configurable? | Enable by default; environment override > repo config > user config > built-in default. Opt-out is independent of existing guards and manual steering. Use `steering.automatic.enabled` and `CLAUDINE_AUTO_STEER`. | Default, opt-out, and configuration precedence accepted by user |
 | D8 | What message content should be retained in logs? | Retain full message text with potential secrets heuristically masked using `*`, plus delivery details. Share reusable detection logic rather than duplicate it for steering. | Accepted by user |
 | D9 | Is a live disposable-session test required before enabling a mechanism? | Require it for every mechanism, documented or undocumented; verify same-conversation delivery and interruption behavior. Untested cases remain unverified and unavailable. | Accepted by user |
 | D10 | Where should prerequisite setup happen? | Explain missing prerequisites in `steer` and offer setup separately; do not turn message delivery into a configuration workflow. | Accepted by user |
+| D11 | What consumes the three-warning allowance? | Each warning opportunity counts once, including an unavailable-delivery notice or a failed send. No same-episode retries or refunds; stop automatic attempts and unavailable-delivery notices after three opportunities per execution. | Accepted by user: each warning opportunity |
 
 ### Pi Final Pilot Findings
 
@@ -440,9 +474,9 @@ interrupting an active session or replaying work after an ambiguous submission.
 Manual steering retains its explicit interactive interruption choice; automatic
 loop warnings retain their non-interrupting-only requirement and existing limit.
 
-## Proposed Session Selection and Delivery Contract
+## Session Selection and Delivery Contract
 
-Proposed command forms for implementation review:
+Command forms:
 
 ```sh
 claudine steer "Recheck the failing test before changing the implementation."
@@ -457,7 +491,7 @@ working directory, state, steering availability, and setup requirements. A
 non-interactive invocation without an explicit target fails with guidance to
 list and choose an ID. Listing does not require a message. Use the normal
 Claudine separation between machine-readable stdout and status/warnings on STDERR.
-These flag names are proposed engineering defaults, not an implemented CLI.
+These command forms are specified for implementation; no CLI behavior is claimed as shipped.
 
 1. Accept a nonempty message and discover current-user sessions locally.
 2. Correlate provider records with live process/session identity. Deduplicate
@@ -465,7 +499,9 @@ These flag names are proposed engineering defaults, not an implemented CLI.
    sufficient identity because the OS can reuse it.
 3. Display provider, session name or short identity, working directory, running
    or idle state when known, and enough distinguishing information for identical
-   projects or parallel agents. Exact column layout remains open.
+   projects or parallel agents. Use Provider, Session, Directory, State, and
+   Steering columns; show the full selectable ID and availability reason in row
+   details. Wrap details on narrow terminals instead of hiding limitations.
 4. Determine availability for the actual session: provider version, OS, launch
    mode, required startup options, reachable channel, and implemented adapter.
    A provider-wide support boolean is insufficient.
@@ -504,7 +540,7 @@ establish how each provider distinguishes those states from ended conversations;
 when state cannot be established reliably, display it as unknown rather than
 guessing that the session is idle or working.
 
-## Proposed Automatic Warning Contract
+## Automatic Warning Contract
 
 Automatic intervention applies where Claudine already observes a live semantic
 stream for an agent execution. Discovering a native session for manual steering
@@ -512,11 +548,10 @@ does not itself attach an output monitor or enable automatic intervention for
 that session. The existing capture-only path cannot promise early repetition
 warnings without new live observations.
 
-Proposed configuration names are `steering.automatic.enabled` in user/repo
+Configuration names are `steering.automatic.enabled` in user/repo
 configuration and `CLAUDINE_AUTO_STEER` for the runtime override. Apply the agreed
 precedence to explicitly supplied values; an absent repo value must not erase a
-user opt-out. Names and malformed-value diagnostics must be reconciled with
-existing configuration conventions before implementation. This setting controls
+user opt-out. Use the parsing and diagnostic rules in the resolved engineering contract below. This setting controls
 automatic help only, including whether an unavailable-delivery warning is emitted.
 
 - Keep content detection pure. Emit a nonterminal warning observation that a
@@ -531,7 +566,7 @@ automatic help only, including whether an unavailable-delivery warning is emitte
   its instructions.
 - Prefer counts and a concise description over echoing arbitrary output into the
   message. Any excerpts must be bounded and clearly identified as observed data.
-- Proposed message: “Claudine has detected repeated output that may indicate a
+- Helper message: “Claudine has detected repeated output that may indicate a
   loop. Please check whether you are making progress toward the user's task.
   If you are repeating the same approach, change your approach or stop and explain
   what is preventing progress. Claudine's existing runaway limits still apply.”
@@ -565,7 +600,7 @@ automatic help only, including whether an unavailable-delivery warning is emitte
   explicit exit-expression behavior are not yet agreed scope. Do not silently
   turn all termination causes into delayed termination.
 
-## Proposed Fleet Research Contract
+## Fleet Research Contract
 
 Research artifacts now exist under `claudine/docs/research/steering/`:
 [`_fleet.md`](../../docs/research/steering/_fleet.md) and
@@ -688,8 +723,8 @@ Repository inspection found reusable starting points:
 Implementation must assess these consumers and factor shared secret recognition
 into an appropriate reusable library boundary. Keep consumer-specific formatting
 and privacy policies separate; do not copy pattern catalogs or silently change
-existing consumers' behavior. Exact API, location, and mask length remain design
-details to settle during implementation impact analysis.
+existing consumers' behavior. Use the shared module and masking policy specified
+in the resolved engineering contract below; run impact analysis before extraction.
 
 Test realistic prose containing tokens, credential assignments, authentication
 headers, and credential-bearing URLs, as well as ordinary text that must remain
@@ -727,11 +762,11 @@ keys are authentication material, never list columns or diagnostic payloads. Kee
 steering local even if Rendezvous knows about paired remote hosts. Revalidate
 ownership and destination identity before using provider-advertised endpoints.
 
-Whether managed-session delivery requires a new Rendezvous operation or an existing
-wrapper-owned channel remains an implementation design question. Resolve it after
-research establishes connection ownership and launch requirements.
+Managed delivery uses a local-only Rendezvous control stream to the wrapper
+that exclusively owns the provider connection. The resolved engineering contract
+below defines ownership, loss handling, and separation from replicated presence.
 
-## Acceptance Criteria to Refine After Research
+## Acceptance Criteria
 
 - A manual send reaches only the selected, revalidated session; canceled selection
   and unavailable rows send nothing.
@@ -917,9 +952,176 @@ verify macOS, Linux, and Windows independently. Report cancellation and remainin
 process cleanup separately, and never signal unrelated sessions. Do not enable
 an interrupting adapter based solely on cooperative in-process tool tests.
 
-Next work is to settle the remaining engineering choices, implement the typed
+Next work follows [the implementation plan](plan.md): implement the typed
 metadata consumer and reviewed adapters, and perform the required disposable
 session tests before activation. Before implementation edits, run the
 repository-required GitNexus impact analysis on affected symbols and report the
 blast radius. Schema and relationship validation establish a usable research
 artifact, not factual certainty or successful runtime delivery.
+
+
+## Resolved Engineering Contract
+
+These are implementation defaults selected from the established requirements and
+repository conventions. They do not represent additional user approvals. Earlier
+pilot descriptions record research history; this contract and the confirmed
+requirements govern implementation.
+
+### CLI and configuration
+
+- Keep `steer "message"`, `steer --session <id> "message"`, `steer --list`, and
+  `steer --list --json`. Also allow `--json` with an explicit-ID send to expose
+  the same typed result. JSON mode never opens a picker or an interruption prompt;
+  an interruption-required send fails without performing either operation.
+- Accept one message argument, preserving its original text. Reject whitespace-only
+  input, NUL, or more than 64 KiB of UTF-8 before dispatch; enforce any smaller
+  verified provider limit as well. Do not truncate or split messages. `--list`
+  conflicts with a message and `--session`; `--` allows dash-prefixed text.
+- List JSON is a versioned object with `schema_version: 1`, `sessions`, and
+  `discovery_errors`. Each session has `id`, `provider`, `name`, `cwd`, `state`,
+  `origins`, `launch_profile`, `provider_version`, `availability`, `reason`, and
+  `setup_requirements`; unknown values are explicit. Availability is
+  `non_interrupting`, `interruption_required`, or `unavailable`. Include the
+  observed time. IDs are opaque and exact; never accept ambiguous short prefixes.
+- Generate a managed UUID per execution, distinct from a resumable conversation
+  ID. Bind it to the wrapper incarnation and the provider conversation generation;
+  invalidate the selectable target on a conversation switch. Native IDs encode
+  provider, process-start identity, and conversation identity unambiguously.
+  Deduplicate only when those identities establish that observations are the same
+  session; merge origins. Do not persist a separate historical selection database.
+- Sort by provider roster order, directory, then full ID. Show unavailable rows
+  and reasons in both terminal and JSON output. Empty listings succeed. Partial
+  discovery returns available observations plus errors; total discovery failure
+  fails. Discovery never starts a provider session.
+- Send results contain request ID, target ID, mechanism, outcome, receipt strength,
+  and separate cancellation/replacement details. Exit 0 requires provider-confirmed
+  accepted, queued, or delivered; exit 1 covers refused, held, unavailable, busy,
+  partial interruption, and uncertain outcomes. Usage/configuration errors use
+  exit 2. User cancellation exits 130. Cancellation after submission cannot recall
+  an accepted message and must not be reported as proof of nondelivery.
+- `steering.automatic.enabled` is an optional boolean in user/repo config;
+  absence inherits. `CLAUDINE_AUTO_STEER` accepts trimmed, case-insensitive
+  `true/false`, `1/0`, `yes/no`, and `on/off`. Empty or malformed values are
+  configuration errors before launching the affected execution. No new CLI,
+  frontmatter, warning-cap, recovery-window, or timeout configuration is added.
+- Preserve the three-opportunity cap and recovery rule already accepted. Blank
+  lines never advance recovery; detector-recognized repetition, including a new
+  repeated block, resets recovery. Freeze the preceding warned block length until
+  recovery completes. Count normalized assistant/reasoning lines only; tool data
+  and control acknowledgments never contribute. Disabled repetition detection
+  produces no repetition-warning opportunities.
+
+### Local control and bounded delivery
+
+- Extend Rendezvous's existing protobuf/local gRPC boundary with an ephemeral
+  managed-control stream, managed-target listing, and steering request routing.
+  The wrapper owns provider stdin/stdout or server connection, correlation, and
+  per-execution ordering. The daemon routes to that owner; it does not interpret
+  provider protocols or start an independent reader of the provider's pipes.
+- Keep control registrations and original message payloads in memory, local to
+  the current host/user. Do not put control commands or payloads into replicated
+  presence registers, durable retry queues, or remote mesh routes. Reuse Sniff
+  stable-user identity and the existing Unix socket/Windows named-pipe protections.
+  Presence reporting remains best effort and is not proof of a control channel.
+- Use the existing daemon startup/connection path when available, with bounded
+  connection attempts. If the daemon is unavailable, do not fail an otherwise
+  valid agent execution: its direct automatic steering still works through the
+  owner, while external managed steering reports the missing local route.
+  Native provider discovery/delivery does not depend on daemon availability.
+  `CLAUDINE_RENDEZVOUS_REPORT` continues to govern presence reporting only.
+- Remove control registrations when their stream disconnects; revalidate process
+  identity and provider target immediately before sends. A reconnect can restore
+  discovery, but never replays unresolved commands. No daemon receipt upgrades
+  a request to provider-accepted or queued. Lost replies after submission remain
+  unknown; expired unsent requests are discarded.
+- Use a 5-second discovery deadline, with at most four provider discovery tasks
+  in flight. A manual send has a 10-second deadline from dispatch to acceptance;
+  an automatic send has 2 seconds. An explicitly consented interruption gets
+  up to 10 seconds to establish cancellation, followed by the manual submission
+  deadline. Human selection time is outside these clocks. Existing hard stops
+  and cancellation always preempt steering work.
+- Bound pending requests to 16 per execution and serialize provider mutations.
+  Reject excess requests as busy; do not evict another user's accepted request.
+  Keep at most one automatic request pending/in flight. Timeouts cover queue wait,
+  transport, and acceptance. These are named internal constants with tests, not
+  additional configuration. Provider event readers continue independently.
+- Never retry a submitted message automatically, including on a new connection or
+  with a repeated correlation ID. A runtime timeout after possible submission
+  is unknown, not refused. Late provider evidence may append a correlated log
+  update but cannot extend the caller's deadline or restart its execution.
+- Coordinate session switches with target checks and submissions. Require a
+  provider atomic target guard or verified exclusive mutation ownership. If an
+  enabled extension can switch outside that coordination and no effective guard
+  exists, the affected profile stays unavailable. Preserve extensions; do not
+  disable them or claim that a wrapper mutex controls independent actions.
+- Manual interruption preserves pending messages by default; do not call queue
+  clearing automatically. Explain that pending messages may affect replacement
+  work. If the provider cannot safely preserve and distinguish this outcome,
+  disable the fallback. After cancellation, revalidate the original conversation;
+  failed replacement remains a partial outcome and never restarts the old work.
+
+### Managed execution and unattended requests
+
+- Prefer a verified usable bidirectional interface for managed non-interactive
+  work, including one-shot executions. Keep native interactive launch behavior
+  unless its separately verified profile establishes parity. Preserve model,
+  permissions, sandbox, extensions, skills, templates, context, and MCP settings.
+- Select a verified fallback only before ambiguous initial submission. Explain
+  lost capabilities on STDERR. If neither preferred nor fallback interface meets
+  the execution settings, fail before sending the task; missing implementation
+  is not a provider limitation.
+- Handle unattended provider requests using the execution's existing permission
+  policy. Never invent approval or accept a confirmation because no human is
+  attached. Answer informational requests mechanically; use a documented
+  deny/cancel response for requests needing unavailable user input. Where no
+  safe response exists, report `input_required` and terminate through the existing
+  execution failure path. Do not leave an unbounded interactive wait or disable
+  extensions. Pi resource trust remains separate from tool/extension approval.
+- Wait for the verified settlement signal, including queued continuations, before
+  closing an owned one-shot execution. Pi uses `agent_settled`, not `agent_end`.
+  An open idle native session remains selectable; a settled one-shot execution
+  that is closing does not become a persistent interactive service.
+- Preserve subprocess ownership through the existing termination layer. Verify
+  Unix process-group and Windows job/process cleanup independently; never kill
+  unrelated processes or equate a dead provider with dead tools. Surviving tools
+  after provider failure are a cleanup failure with a separate diagnostic.
+
+### Reusable redaction and audit
+
+- Add shared secret recognition under `claudine::secrets`, with text-range
+  recognition and structured sensitive-key recognition. Move common recognition
+  from existing consumers instead of copying catalogs. Merge overlapping ranges,
+  preserve UTF-8 boundaries, and mask each recognized span with `****` for
+  steering logs. Existing consumers keep their formatting and additional privacy
+  policies, including email/home-path handling; steering adds no such masking.
+- Use existing local JSONL logging infrastructure with typed steering events.
+  Record full redacted text, opportunity/request IDs, execution and conversation
+  identities, profile/mechanism, timestamps, consent, receipt strength, and each
+  known delivery or partial-failure outcome. Apply redaction before tracing,
+  persistence, or rendering errors that can echo text. Keep credentials out of
+  records. Original text is retained only as needed for in-memory delivery.
+- If audit writing fails, emit a content-free diagnostic and retain honest send
+  results; never resend, interrupt, or fail the agent solely to repair a log.
+  Keep existing retention policy. Late results are append-only updates correlated
+  to the original request, not additional warning opportunities.
+
+### Verification and failure policy
+
+- Reuse revision-3 schema/relationship checks and existing execution metadata.
+  Add deterministic activation validation for exact provider/version/OS/profile,
+  origin, state, operation, adapter revision, and required assertion coverage.
+  A passing expected-loss test alone cannot enable successful delivery. A native
+  fixture is not evidence for the production wrapper; add matching wrapper tests.
+- Investigate each roster provider; reuse shared protocol implementations where
+  justified. Unknown or unsupported cases remain visible with specific reasons.
+  Bound targeted research to two corrective passes per concrete gap using
+  `gpt-5.6-sol` with low reasoning. Preserve existing verification on refresh.
+- Prefer deterministic local-model disposable tests. Missing provider binaries,
+  credentials, external services, or native OS runners leave matching cases
+  explicitly blocked; do not install/configure user providers or alter their
+  approval policy to make a test pass. Run no probes against existing user sessions.
+- A reproducible product regression blocks dependent phases until fixed. Missing
+  external verification blocks the affected activation only, allowing independent
+  implementation and tests to proceed. The final report distinguishes implemented,
+  verified-enabled, unavailable, and externally blocked cases; missing evidence
+  cannot be reported as a completed activation or a passed test.
