@@ -6,7 +6,7 @@ reviewed: true
 reviewed_by: opencode/zai-coding-plan/glm-5.3
 reviewed_on: 2026-09-07
 implemented: true
-review_iterations: 2
+review_iterations: 3
 depends-on: claudine/fixes/_completed/2026-08-01-cli-slow-tests/spec.md
 coordinates_with:
     - claudine/fixes/_completed/2026-08-31-silent-success-and-startup-stall/spec.md

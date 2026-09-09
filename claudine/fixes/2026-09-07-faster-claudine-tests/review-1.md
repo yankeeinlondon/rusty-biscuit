@@ -5,6 +5,8 @@ agent: codex/default
 created: 2026-09-08T21:00:26-07:00
 spec: 2026-09-07-faster-claudine-tests/spec.md
 implemented: true
+implemented_by: claude/opus
+log: claudine/fixes/2026-09-07-faster-claudine-tests/log.md
 description: A **fix** review of `2026-09-07-faster-claudine-tests/spec.md`
 fix: 2026-09-07-faster-claudine-tests/review-1.md
 next: 2026-09-07-faster-claudine-tests/review-2.md

@@ -22,13 +22,77 @@ CI tranche.
 | Claim | Status | Evidence |
 |---|---|---|
 | **Implemented** | **complete** — Phases 2–7 landed every RB1–RB4 item in the plan; Phase 10's two residual edits are import gates only | `plan.md` Phases 2–7 checkpoints; [`log.md`](log.md) §§ Phase 4–7; `git log 9fc5151a0..HEAD -- claudine .config/nextest.toml` |
-| **Verified locally** | **complete for every tier this host can run**; three host conditions recorded as pending, not passing | Phase 10 gate ledger below; Phase 8's 55 measurement runs (all exit 0); Phase 9's `ci-local` 147/147 |
+| **Verified locally** | **L1 and lint green on the current candidate**, minus three identities whose only red input is a *third party's uncommitted edit* to the repository's shipped `prompts/` corpus; L2 stale, three tiers pending on host conditions | § Local verification — current candidate, below |
 | **Verified on CI** | **pending** — baseline 1 of 3 runs per leg, candidate 0 of 3 (no push has happened); no budget exists to compare against | [`baseline/README.md`](baseline/README.md) § Status; [`candidate/README.md`](candidate/README.md) § Handoff |
 
 The three claims are deliberately not collapsed. "Implemented" says the code
 and documents exist and the local gates that can run are green; it does not
 say the performance criteria are met. "Verified on CI" is what the spec's
 RB5 and AC6 actually ask for, and it cannot be claimed from this host.
+
+## Local verification — current candidate
+
+This section describes the tree as it stands **now**, not the historical
+Phase 10 run. Both were green; they are different trees, and only this one is
+the candidate.
+
+**Working-tree state.** Branch `fix/cli-slow-tests` at `fe83e7481`, `main` not
+yet merged, committed HEAD plus all four review-3 findings' edits as listed in
+[`log.md`](log.md) § Implementation of Review Findings #3. The worktree also
+carries uncommitted edits **this fix does not own**: seven modified and three
+untracked files under `prompts/`, written by another session while these gates
+ran (last write 15:08, mid-cycle).
+
+| Gate | Command | Result |
+|---|---|---|
+| Canonical L1, **final**, ambient launch identity present | `claudine/just test --no-fail-fast` with `MODEL=opus` exported | **6901 run: 6897 passed, 4 failed, 9 skipped**, 28.98 s runner elapsed, exit 100 |
+| Canonical L1, mid-cycle, ambient launch identity **present** | the same with `MODEL`, `YOLO`, `INTERACTIVE`, `AGENT_CWD` all exported | **6901 run: 6898 passed, 3 failed, 9 skipped**, 30.3 s, exit 100 |
+| Canonical L1, mid-cycle, ambient launch identity **absent** | the same under `env -u MODEL -u YOLO -u INTERACTIVE -u AGENT_CWD` | **6901 run: 6898 passed, 3 failed, 9 skipped**, 29.1 s, exit 100 — byte-identical failure set |
+| Lint | `claudine/just lint` | **exit 0**, zero warnings |
+| Real-terminal L2 | `claudine/just test-l2` | `claudine-cli` **218 run: 216 passed, 2 failed**; `claudine-gen` **3 passed**, exit 0 — the two failures are the same `prompts/` corpus |
+| Inventory reconciliation | `inventory-reconciler.ts` over captures regenerated at `fe83e7481` | **GATE EXIT=0**, 7,420 runner identities against 7,475 source attributes |
+| The `prompts/`-corpus failures, against committed bytes | `--test shipped_prompt_route_drift --test compose_caller_file_provenance` | **18 run: 18 passed, 0 failed** |
+
+The pre-cycle comparison on the same host is **6898 run, 20 failed, 1 timed
+out, 48.5 s**. Twenty-one red identities became four, and the four that remain
+are the corpus guard described below firing correctly.
+
+The two L1 rows are the point of the fix: the suite now produces the same
+result whether or not the shell that launched it exports a Claudine launch
+identity. Before this cycle it did not — an ambient `MODEL=opus` reddened six
+identities.
+
+**The four remaining failures are not a defect of this branch.** All four read
+the repository's own shipped `prompts/` corpus, and that corpus is dirty in
+this worktree:
+
+| Failing identity | Reads |
+|---|---|
+| `shipped_prompt_route_drift::shipped_implement_prompts_have_not_drifted_from_their_fixture` | `prompts/_implement/implement-plan.md` |
+| `compose_caller_file_provenance::shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target` | the `implement` route |
+| `compose_caller_file_provenance::shipped_implement_router_prefers_an_unimplemented_review_over_the_completed_plan` | the `implement` route |
+| `shipped_prompt_contract::feature_review_cli_preserves_numeric_iteration_and_dependent_paths` | `prompts/_reviews/feature-review.md` |
+
+The drift guard names its own cause precisely: the frontmatter hash of
+`prompts/_implement/implement-plan.md` is unchanged (`62d70fb16a02592c`) while
+its **body** hash moved `56ca8ed9fc5dc007` → `a4e5f2ef36c0395b`. That is the
+test doing its job — telling a human that a shipped prompt drifted from the
+Level-2 fixture derived from it.
+
+Proven without reverting anyone's work: the modified files were snapshotted,
+`HEAD:` bytes were written in their place, both provenance binaries ran
+**18 passed / 0 failed**, and every file was restored with a matching checksum.
+The fixture pin must **not** be refreshed to make them green — that would bake a
+third party's in-progress edit into the corpus. They close when those edits are
+committed or reverted by their owner, who then re-derives the fixture with
+`CLAUDINE_UPDATE_SHIPPED_PROMPT_HASHES=1`.
+
+**Forbidden shortcuts, checked rather than asserted.** `git diff main --
+.config/nextest.toml` is *not* empty, but every non-comment line in it is a
+**deletion** of a per-package `slow-timeout = { period = "30s",
+terminate-after = 3 }` override (branch commit `0af6cbb50`); the diff contains
+no added non-comment line at all. No retry, no tier change, no `#[ignore]`, and
+no disabled or weakened assertion was used anywhere in this cycle.
 
 ## Measurements
 
@@ -182,23 +246,20 @@ protocol cannot legally run here.
   cohort, and `attribution.ts` **rejects a red run by design** — a log whose
   result lines disagree with its `Summary`, or that carries failures, is
   refused rather than averaged in. That refusal is the tool working.
-- This branch's suite is red before any of this cycle's work, in two packages,
-  and none of it is in a file this work unit touched. Verified 2026-09-09 by
-  running the gates rather than by trusting the report:
+- This branch's suite was red before any of this cycle's work, in two packages.
+  Review 3 finding 1 diagnosed and repaired all but three of those identities;
+  the table below is the ledger, superseding the earlier "18 pre-existing
+  failures" reading, which had misattributed several of them.
 
-| Failing identity | Count | Cause |
-|---|---:|---|
-| `claudine-cli::bin/claudine …loop_control::target_launch::tests::*` | 5 | commit `f0aaa4832` |
-| `claudine-cli::propagated_context_fixtures::isolated_fixture_can_opt_in_to_provider_memory_discovery` | 1 | — |
-| `claudine-cli::spawn_inventory::production_spawn_inventory_is_complete_and_governed` | 1 | line-number drift from `f0aaa4832` |
-| `claudine-cli::wrap_sigint::compose_sigint_during_prep_exits_130_with_notice` | 1 | 30 s timeout |
-| `claudine-gen::drift::committed_*` | 5 | archived-baseline break |
-| `claudine-gen::generate_ux::*` | 5 | same |
-
-  `just test-cli --no-fail-fast`: 2523 run, 2515 passed, 7 failed, 1 timed out,
-  9 skipped. `just _test claudine-gen --no-fail-fast`: 155 run, 145 passed,
-  10 failed. Both match the pre-existing baseline exactly, so this cycle
-  introduced no Rust failure.
+| Failing identity | Count | Actual cause | Now |
+|---|---:|---|---|
+| `claudine-cli::bin/claudine …loop_control::target_launch::tests::*` | 5 | ambient `MODEL` out-ranking each fixture's frontmatter, **not** commit `f0aaa4832` | **fixed** — `LaunchRebuildIntent::env_lookup` seam |
+| `claudine-cli::propagated_context_fixtures::isolated_fixture_can_opt_in_to_provider_memory_discovery` | 1 | the same ambient `MODEL` | **fixed** — fixture scrub list |
+| `claudine-cli::spawn_inventory::production_spawn_inventory_is_complete_and_governed` | 1 | line-number drift; the site set, functions and governance are unchanged | **fixed** — census refreshed, five integers moved |
+| `claudine-cli::wrap_sigint::compose_sigint_during_prep_exits_130_with_notice` | 1 | not reproducible in isolation (5 runs, 0.179–0.186 s each) | **passes** in both full-suite runs |
+| `claudine-gen::drift::committed_*` | 5 | **not** the archived baseline (already repointed at `gen/tests/fixtures/`): branch commit `4fb054ed1`'s formatting sweep rewrapped generator-owned sources | **fixed** — regenerated; proven formatting-only |
+| `claudine-gen::generate_ux::*` | 5 | the same, surfacing as "the area is not clean" | **fixed** — same regeneration |
+| `claudine-cli::shipped_prompt_route_drift` + `compose_caller_file_provenance` | 3 | a third party's uncommitted edits to `prompts/` | **open**, not this fix's — see § Local verification |
 
 **Consequence for the numbers in this fix.** Every **Executed** and
 **Summed cost** figure in [`inventory.md`](inventory.md) and every figure in
@@ -208,11 +269,12 @@ labelled as such rather than restated. Six families' identity counts moved
 is now a lower bound on the family rather than a measurement of it. No number
 was extrapolated, scaled, or invented.
 
-**What closes it.** The 18 failures above go green — they are production and
-generated-artifact defects outside this fix's scope, and none is this fix's to
-repair — and then the § 5 protocol is re-run and `attribution.md`,
-`inventory.md`'s two cost columns, and `measurement/` are regenerated
-together. Owner document:
+**What closes it.** Fifteen of the eighteen went green in review 3 finding 1;
+the remaining three are the `prompts/` corpus rows, which need only their
+owner to commit or revert the edits. Once the tree is clean the § 5 protocol
+can be re-run and `attribution.md`, `inventory.md`'s two cost columns, and
+`measurement/` regenerated together — the tool's refusal to average a red run
+no longer blocks it for a reason inside this fix. Owner document:
 [`../_unscheduled/test-suite-residuals/spec.md`](../_unscheduled/test-suite-residuals/spec.md)
 § Residual 8.
 
@@ -384,12 +446,19 @@ re-run when Phase 10's edits invalidated it. Phase 10 changed two
 `claudine-cli` test files (import gates), which invalidates the `claudine-cli`
 L1 suite, the area lint, and the Windows check, and nothing else.
 
+Review 3 finding 1 (2026-09-09) invalidated this ledger's `just test` and
+`just lint` rows again — it changed `claudine` and `claudine-cli` sources,
+`claudine-cli` tests, and thirteen generator-owned files. Both were re-run;
+§ Local verification — current candidate carries the results, and the two rows
+below are retained only as the Phase 10 historical record. The remaining
+credited rows still hold: no rendezvous, bench, or Windows-arm input moved.
+
 | Gate | Where | Result | Run or credited |
 |---|---|---|---|
-| `just test` | `claudine/` | **6873 passed / 9 skipped, exit 0** (35.7 s runner elapsed) | **run**, Phase 10, after the `wrap_basics.rs` edit; `candidate/local-gates/phase10-just-test.log` |
+| `just test` | `claudine/` | **6873 passed / 9 skipped, exit 0** (35.7 s runner elapsed) | **superseded** — Phase 10 historical record; the current candidate's run is in § Local verification |
 | `just test-leaks claudine` | repo root | **7146 passed / 11 skipped, `leak-sweep: no leaked processes detected`, exit 0** (39.8 s runner elapsed, 3 m 08 s wall) | **run**, Phase 10, after both edits; `candidate/local-gates/phase10-test-leaks-claudine.log` |
 | `just check-windows` | `claudine/` | **exit 0, zero warnings** — warm (0.9 s) and cold in a fresh `CARGO_TARGET_DIR` (1 m 28 s), so the count is not a cached-diagnostic artifact | **run**, Phase 10; `phase10-check-windows.log`, `phase10-check-windows-cold.log` |
-| `just lint` | `claudine/` | **exit 0, zero warnings** (5 m 03 s wall, overlapping the cold check) | **run**, Phase 10, after the tests; `phase10-just-lint.log` |
+| `just lint` | `claudine/` | **exit 0, zero warnings** (5 m 03 s wall, overlapping the cold check) | **superseded** — re-run on the current candidate, **exit 0**; see § Local verification |
 | `just doctest` | `claudine/` | **exit 0** — 25 passed / 7 ignored across the four lib crates; `claudine-cli` skipped (no lib target) | **run**, Phase 10; `phase10-just-doctest.log` |
 | `just test-rendezvous` | `claudine/` | 273 passed / 2 skipped, exit 0, ×11 | **credited** from Phase 8 — no rendezvous input changed; also inside the Phase 10 leak sweep's population |
 | `just test-l2` | `claudine/` | 236 of 237 + `claudine-gen` 3 of 3; the host-condition survivor above | **stale** — credited from Phase 9 (2026-09-08), but review-1 finding 1 removed 19 identities from the tier (237 -> 218) and it has not been re-run; owned by the separate review-1 work unit for the WezTerm survivor |

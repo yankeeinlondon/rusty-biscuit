@@ -90,6 +90,19 @@ were already in the union through `cli-terminal`. What changed is the route
 that reaches them — `cli-bare` now lists 4 more binaries and 19 more
 identities, and `terminal-tests` adds correspondingly fewer.
 
+**Review 3 finding 1 (2026-09-09) added three identities**, all in existing
+binaries, so no build target moved:
+
+| Identity | Binary | What it proves |
+|---|---|---|
+| `default_command_drops_the_inherited_launch_identity` | `claudine-cli::cli_process_fixture` | the recording half — six exported launch-identity sentinels do not reach the child |
+| `an_exported_launch_identity_does_not_change_the_result` | `claudine-cli::contamination_probes` | the consequence half — the model the provider stub is launched with is the document's, not the shell's |
+| `the_supplied_environment_outranks_the_targets_frontmatter_model` | `claudine-cli` bin unit tests, `…loop_control::target_launch::tests` | the rebuild's new environment seam feeds the real precedence chain, both of its environment steps |
+
+`just test` therefore moves 6,898 → 6,901 and `claudine-cli` 2,760 → 2,763;
+the captured enumeration at `78b44a96651e` predates them and has not been
+retaken.
+
 **The plan's ≈7,300 estimate was low and its per-package split was stale**
 (it said `lib` 4086 / `cli` 2728 / `rendezvous` 296 / `gen` 159 / `contract` 52
 / `catalog-types` 21). Measured: 4,151 / 2,760 / 275 / 158 / 52 / 21. The
@@ -308,7 +321,7 @@ revisions:
 |---|---:|---:|---|
 | `lib-unit` | 3,833 | 3,835 | two tests added in the library |
 | `cli-l1-fixture` | 282 | 287 | gained `compose_frontmatter_model` |
-| `cli-l1-fixture-selftest` | 14 | 30 | gained `contamination_probes` (8) and 8 builder tests |
+| `cli-l1-fixture-selftest` | 14 | 32 | gained `contamination_probes` (9) and 9 builder tests |
 | `cli-l1-source-scan-guards` | 79 | 73 | `error_guards` 18→8 consolidated, `spawn_site_guard` 15→19 |
 | `cli-l1-raw-context-resources` | 88 | 87 | one `context_command` test removed |
 | `rz-daemon-integration` | 18 | 19 | one `pairing_and_sync` test added |
@@ -337,11 +350,11 @@ a lower bound rather than a measurement. See [`results.md`](results.md)
 | `lib-tts-contract` | `claudine` | 5 | 5 | 0.07 s | satisfactory |
 | `contract-unit` | `claudine-contract` | 48 | 48 | 0.78 s | satisfactory |
 | `contract-real-provider` | `claudine-contract` | 4 | 0 | not run | follow-up: real-tier evidence is pending, see AC6 |
-| `cli-unit` | `claudine-cli` | 1178 | 1173 | 34.08 s | satisfactory |
+| `cli-unit` | `claudine-cli` | 1179 | 1173 | 34.08 s | satisfactory |
 | `cli-unit-child-exec` | `claudine-cli` | 199 | 199 | 7.59 s | satisfactory |
 | `cli-unit-completion-engine` | `claudine-cli` | 322 | 322 | 8.01 s | satisfactory |
 | `cli-l1-fixture` | `claudine-cli` | 287 | 282 | 75.09 s | satisfactory |
-| `cli-l1-fixture-selftest` | `claudine-cli` | 30 | 14 | 2.44 s | remediation in this fix |
+| `cli-l1-fixture-selftest` | `claudine-cli` | 32 | 14 | 2.44 s | remediation in this fix |
 | `cli-l1-completion-ui` | `claudine-cli` | 79 | 79 | 3.16 s | satisfactory |
 | `cli-l1-source-scan-guards` | `claudine-cli` | 73 | 79 | 39.53 s | remediation in this fix |
 | `cli-l1-shipped-corpus` | `claudine-cli` | 6 | 6 | 0.57 s | satisfactory |
@@ -712,7 +725,7 @@ and `cli-unit-child-exec` carve-outs are.
 
 ### `claudine-cli` — in-crate unit tests
 
-#### `cli-unit` — 1,178 identities
+#### `cli-unit` — 1,179 identities
 
 - **Members** — the `claudine-cli` bin suite minus `commands::wrap::exec` and
   `completion`. By module: `commands` 988 (`wrap` 729 after the `exec`
@@ -867,9 +880,9 @@ table.
   `compose_caller_file_provenance.rs` (Phase 1 finding 1) are Phase 5's to
   clear alongside the change that motivates them.
 
-#### `cli-l1-fixture-selftest` — 30 identities
+#### `cli-l1-fixture-selftest` — 32 identities
 
-- **Members** — `cli_process_fixture` (22), `contamination_probes` (8).
+- **Members** — `cli_process_fixture` (23), `contamination_probes` (9).
 - **Purpose** — prove the fixture builder itself: the environment scrub, the
   named escapes (`fake_only_path`, `host_path`, `ambient_context`,
   `inherit_no_env`), and the checkout-containment precondition.
@@ -1142,21 +1155,28 @@ table.
 - **Shared helpers** — `common/pty.rs` (`expectrl::session::OsSession`),
   `common/mod.rs`.
 - **Effects / dependencies** — allocates a PTY (`/dev/ptmx`); spawns `claudine`
-  raw. **Nine `sleep(20 ms)` readiness sites** — five in `common/pty.rs`, two in
-  each `level1_*_pty` binary. Seven `#[serial]` sites in
-  `sequence_overlay_pty`.
+  raw. **Nine `sleep(20 ms)` sites** — five in `common/pty.rs`, two in each
+  `level1_*_pty` binary — every one an `ErrorKind::WouldBlock` /
+  `ErrorKind::TimedOut` backoff *inside* a loop that already observes a
+  condition against a deadline. They are polling cadence, not readiness proof.
+  Seven `#[serial]` sites in `sequence_overlay_pty`.
 - **Timing** — **summed 19.19 s across 11 identities — 1.74 s mean, the most
   expensive L1 family per test in the area.** Max 3.19 s.
 - **Overrides** — CI `claudine-cli-ci-l1` group.
 - **Resource ownership** — a PTY and a child process per case.
-- **Route** — L1 (not L2 — no multiplexer, no `require_level!` gate),
-  `#[cfg(unix)]` on `mod pty;`, so the family does not exist on Windows.
-  `just test-cli`.
+- **Route** — L1 (not L2 — no multiplexer), `#[cfg(unix)]` on `mod pty;`, so
+  the family does not exist on Windows. `just test-cli`.
 - **Cost provenance** — `baseline/local-gates/just-test-cli.log`.
 - **Disposition** — **remediation in this fix** (Phases 5D and 7).
   `common/pty.rs`'s session construction routes through Phase 4's raw-command
-  path so the three binaries inherit the environment policy; the nine readiness
-  sleeps become bounded observation with a deadline.
+  path so the three binaries inherit the environment policy. The nine 20 ms
+  sleeps are **retained and justified**, not replaced: an earlier draft of this
+  row called them readiness sleeps and promised bounded observation, but each
+  already sits inside bounded observation and only sets its poll cadence
+  (review-3 finding 4). Finding 4 also converts this family's 11
+  `require_level!(Level::L1, pty_available(), …)` gates to `expect_level!`, so
+  a selected platform without `/dev/ptmx` fails instead of reporting green;
+  `#![cfg(unix)]` stays the only exclusion.
 
 #### `cli-l1-pty-interactive` — 19 identities
 
@@ -1182,7 +1202,13 @@ was not earned. They are Level 1 and now carry `level1_` names.
 - **Shared helpers** — `common/mod.rs` (`CliProcessFixture`), `common/pty.rs`,
   `common/wrap.rs`.
 - **Effects / dependencies** — a PTY (`/dev/ptmx`) and a `claudine` child built
-  by the fixture builder. No terminal emulator, no multiplexer.
+  by the fixture builder. No terminal emulator, no multiplexer. **One
+  unconditional readiness sleep of the family's own**, distinct from the
+  `common/pty.rs` cadence sleeps counted under `cli-l1-pty`:
+  `level1_provided_partial_file_pty.rs`'s `confirm_and_drain` slept a guessed
+  300 ms before sending `y`, paid by three of the four identities on every run.
+  `level1_dry_run_pty` adds two 20 ms `WouldBlock` backoffs, which are loop
+  cadence inside a deadline rather than readiness proof.
 - **Timing** — summed 54.61 s across 19 identities (2.87 s mean), max 4.71 s
   under the L2 route's parallel self-spawn mode. On the L1 route after the
   migration the same 19 finish in 4.72 s wall (`just test-cli`, 2026-09-09).
@@ -1195,7 +1221,28 @@ was not earned. They are Level 1 and now carry `level1_` names.
 - **Cost provenance** — `baseline/local-gates/just-test-l2.log` for the summed
   figure above (taken while the family was routed L2).
 - **Disposition** — **remediation in this fix** (review-1 finding 1: reclassified L2 -> L1). `common/pty.rs`'s
-  sleeps are counted against `cli-l1-pty`, which owns that helper's row.
+  sleeps are counted against `cli-l1-pty`, which owns that helper's row; the
+  300 ms site above is this row's own and was previously undisclosed.
+  Review-3 finding 4 closes both gaps.
+  **(a) Readiness.** The 300 ms sleep is replaced by `common/pty.rs`'s
+  `wait_for_raw_mode_termios`, which polls `tcgetattr` on the pty master until
+  `ICANON` clears — the child's own `enable_raw_mode()` — on a 2 ms cadence
+  against a 10 s deadline, panicking on expiry. `confirm_one_file`
+  (`cli/src/completion/autocomplete_ui.rs`) emits no byte between flushing the
+  dialog and blocking in `crossterm::event::read()`, so there is no output
+  marker to wait on and the line discipline is the observable final condition.
+  It is sufficient as well as necessary: once raw mode is on, the keystroke
+  queues on the tty whether or not the child has reached its read yet.
+  Measured warm on 2026-09-09, `just test-cli --test
+  level1_provided_partial_file_pty`, five runs each side: the three
+  confirmation identities fall from 0.849–0.871 s to 0.492–0.700 s, ~1.0 s off
+  the family's summed cost, confirming review-3's 900 ms figure as slightly
+  conservative. Re-run 10× against a concurrently executing full `claudine-cli`
+  suite: 300/300 test results passed, no timeout or leak.
+  **(b) Gating.** The family's 19 `require_level!(Level::L1, pty_available(),
+  …)` gates become `expect_level!`, so missing PTY infrastructure on a selected
+  platform fails instead of skipping inside the mandatory suite;
+  `#![cfg(unix)]` remains the only exclusion.
   Review-1 closure criterion 2 (wrapper-summary rendering claim) is closed by
   narrowing, not by new coverage. Every `level2_*` and `level3_*` binary in
   `claudine/cli/tests`, `claudine/lib/tests` and `claudine/gen/tests` was read:
@@ -1848,9 +1895,28 @@ a contract: the scrub runs *before* the defaults, so
 `CLAUDINE_RENDEZVOUS_REPORT` survives its own namespace sweep, and a per-key
 `.env` after `build()` still wins.
 
-- **Disposition** — `common/mod.rs`: **remediation in this fix** (Phase 4).
-  `common/pty.rs`: **remediation in this fix** (Phases 5D and 7). The rest:
-  satisfactory.
+**Review 3 finding 1 widened the scrub from three inherited families to
+four.** Phase 4's list covered `CLAUDINE_*`, `PLAYA_*`, the Git plumbing set,
+and `TERM_WIDTH`/`COLUMNS`/`FORCE_COLOR`. It did not cover the *un-namespaced*
+variables claudine reads from its own environment — `AGENT`, `MODEL`, `YOLO`,
+`INTERACTIVE`, `AGENT_CWD` — nor the eleven provider-specific model variables
+the same precedence chain consults ahead of `MODEL`. `claudine wrap` exports
+the first five into every provider it launches, so a suite run from inside a
+Claudine-wrapped agent session inherited that session's own launch identity,
+and an ambient `MODEL=opus` re-pinned every launch plan the suite built.
+`inherited_scrub_keys` now removes both sets; the provider list is derived from
+`provider_info().model_env_vars` rather than transcribed, so it cannot drift
+from the production read at `lib/src/composition/select.rs:479-486`. The
+ordering contract is unchanged — scrub first, fixture defaults after.
+
+A fixture policy cannot reach a test that reads the environment **in
+process**, which is why the five `…loop_control::target_launch::tests` rows
+needed a production seam instead (`LaunchRebuildIntent::env_lookup`); see
+[`log.md`](log.md) § Implementation of Review Findings #3.
+
+- **Disposition** — `common/mod.rs`: **remediation in this fix** (Phase 4,
+  widened in review 3). `common/pty.rs`: **remediation in this fix**
+  (Phases 5D and 7). The rest: satisfactory.
 
 ## Runner override census
 

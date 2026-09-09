@@ -4,10 +4,11 @@ ready: false
 agent: codex/gpt-5.6-sol
 created: 2026-09-09T12:59:28-07:00
 spec: 2026-09-07-faster-claudine-tests/spec.md
-implemented: false
+implemented: true
 description: A **fix** review of `2026-09-07-faster-claudine-tests/spec.md`
 fix: 2026-09-07-faster-claudine-tests/review-2.md
 previous: 2026-09-07-faster-claudine-tests/review-1.md
+next: 2026-09-07-faster-claudine-tests/review-3.md
 ---
 
 # Review 2 — Faster Claudine Tests

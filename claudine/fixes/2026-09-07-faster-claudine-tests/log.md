@@ -2,6 +2,9 @@
 fix: 2026-09-07-faster-claudine-tests
 phase: 10
 created: 2026-09-07
+implementation_1: "2026-09-09T10:53:47-07:00"
+implementation_3: "2026-09-09T13:39:53-07:00"
+deferred_perf_measurement: true
 ---
 
 # Implementation log
@@ -2554,3 +2557,882 @@ Done by the darkmatter fix's Phase 1A (`darkmatter/fixes/2026-09-07-faster-darkm
         - the review's Closure Criterion 1 ends "regenerate inventory and
           measurement evidence", which C1 deliberately left alone; C4 then showed
           the cost of leaving it, so it is picked up here as its own unit
+        - superseded listings preserved, not overwritten: the 33 files of the
+          `9fc5151a0` bundle were `git mv`'d into `enumeration/9fc5151a0/`, a
+          revision-named subdirectory whose own manifest names its revision. The
+          reconciler's `buildUniverse` scans only top-level `*.json`, so the
+          preservation pattern now depends on that — pinned by a new test,
+          "ignores a revision-named subdirectory of superseded listings"
+        - `test-audit capture` re-ran all 16 selections from the working tree at
+          `78b44a96651e`; all 16 exit 0. Because there is no committed candidate
+          revision, `capture` gained a `--note` flag so `captures.json` states
+          *why* its 60-entry `dirty` list is non-empty — the manifest previously
+          recorded the dirt but never its reason
+        - headline numbers, both revisions stated side by side throughout
+          `inventory.md` rather than silently replaced:
+
+                | | `9fc5151a0` | `78b44a96651e` |
+                |---|---:|---:|
+                | Runner identities | 7,400 | **7,417** |
+                | Build targets | 163 | **165** |
+                | Source attributes | 7,455 | **7,472** |
+                | cfg/feature exclusions | 55 | 55 |
+                | `terminal-tests` adds to `claudine-cli` | 241 / 34 binaries | **222 / 30 binaries** |
+
+        - the +17 decomposes exactly: `contamination_probes` +8,
+          `compose_frontmatter_model` +5, and +4 net inside existing binaries
+          (`cli_process_fixture` 14→22, `spawn_site_guard` 15→19, lib 4,040→4,042,
+          `pairing_and_sync` 3→4, less `error_guards` 18→8 and `context_command`
+          27→26). **The 19 PTY tests moved tier, not count** — they were already in
+          the union via `cli-terminal`; what changed is that `cli-bare` now reaches
+          them, which is the whole point of C1
+        - two new suites assigned rather than left unclaimed:
+          `contamination_probes` → `cli-l1-fixture-selftest` (the consequence-side
+          twin of `cli_process_fixture`) and `compose_frontmatter_model` →
+          `cli-l1-fixture`. Six family counts restated with both revisions. No
+          detector was weakened to reach exit 0
+        - **root cause of the shared package going red:** the compat replays judged
+          *frozen* evidence with a *live* classifier, so any legitimate family
+          rename in any consuming area could turn `tools/test-audit` red. Fixed by
+          era-pinning — `tools/test-audit/fixtures/claudine-compat/` now holds the
+          families and expectations of the era its inputs come from, reached through
+          one `claudine-compat-inputs.ts` module
+        - re-pointing the replays at the regenerated captures was considered and
+          **rejected**: the regenerated evidence does not supersede the old
+          (`just-test.log` was produced at `9fc5151a0`, and reproducing it is
+          exactly what the measurement blocker forbids), and it would have changed
+          the claim from "the new tool reproduces the old scripts' numbers from the
+          old inputs" to "the tool agrees with itself today", which proves nothing
+          about the migration
+        - the property is pinned by a new source guard,
+          `claudine-compat-inputs.test.ts`: a replay that reads `config.familiesPath`,
+          a live `families.json`, `inventory.md`, `attribution.md`, `results.md`, or
+          the live top-level `enumeration/` fails the suite, as does any hard-coded
+          absolute path. **Proved non-vacuous** — 9 hits against HEAD's compat
+          sources, 0 against the current ones
+        - two defects fell out of that guard: `attribute-` and
+          `measure-claudine-compat.test.ts` both hard-coded
+          `/Users/ken/.claudine/worktrees/…`, so the shared suite was unrunnable on
+          any other checkout; and the attribution replay is now materially
+          *stronger*, comparing all 46 family counts exactly where it previously
+          checked two families against a `>= recorded - 5` inequality
+        - two live-tree checks were **removed** from the shared suite rather than
+          weakened — family-index coverage and live-tree exclusion drift are already
+          enforced by `checkInventory` / `checkExclusions`, covered by fixture tests
+          in `reconcile.test.ts`, and reported by the consumer's own `reconcile`
+          gate, which is where live-consumer health belongs
+        - two pieces of document drift repaired while reconciling: the
+          `cli-l1-fixture-selftest` disposition still said the two-surface drift test
+          was owed (it landed, and is named now), and the
+          `cli-l1-source-scan-guards` timing bullet cited
+          `every_code_a_diagnostic_claims_is_a_registered_code`, one of twelve cases
+          Phase 5 consolidated away
+        - **the measurement half is deferred, with a verified blocker rather than an
+          assertion.** `attribute` refuses red runs by construction, and this branch
+          is red from 18 pre-existing failures. The brief's list was re-derived by
+          running both gates rather than trusted, and was accurate in every
+          particular. `Executed` and `Summed cost` therefore stay at `9fc5151a0`
+          values, labelled as such; for the six moved families the cost is stated
+          plainly as a lower bound, not a measurement. Nothing was scaled or invented
+        - recorded as `results.md` § Measurement re-run and as residual 8 in
+          `claudine/fixes/_unscheduled/test-suite-residuals/spec.md`
+        - **note for the scheduler, not acted on:**
+          `spawn_inventory::production_spawn_inventory_is_complete_and_governed` is
+          line-number drift from commit `f0aaa4832` and looks trivially repairable.
+          The other 17 were not diagnosed. A documentation-and-evidence unit must not
+          edit production code, so it was left for a decision
+- work completed for 'C1-followup — regenerate the enumeration captures and reconcile the inventory' at 13:20:40-07:00
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 2 hours and
+31 minutes. During this implementation all 4 review findings were evaluated to
+see if they could be fixed as a part of this implementation cycle: 3 were fixed,
+1 was deferred (see reasons below):
+
+- **C4 — the CI performance contract (review finding 3, closure criterion 4)** is
+  **partially deferred**. Its one implementable half shipped: the JUnit-to-family
+  aggregation now exists as `test-audit attribute aggregate`, it joins the real
+  stored baseline totally (0 unclaimed, 0 double-claimed, all four legs), and it
+  moved `deriveBudgets` from `[missing-leg] declared but carries no measurements`
+  to `[insufficient-runs] 1 green run(s); 3 consecutive are required`. The
+  remaining half cannot be done from this session at all:
+
+        - the branch must first be merged with current `main`, which conflicts in
+          thirteen files
+        - the result must be committed with an OpenPGP signature, and this session
+          is non-interactive — a signed commit would hang on the passphrase rather
+          than fail
+        - it must then be pushed, which has to **recreate** `origin/fix/cli-slow-tests`
+          (GitHub auto-deleted the remote branch when PR #69 merged)
+        - and three consecutive green GitHub Actions runs per leg across
+          `ubuntu-latest`, `macos-latest`, `windows-latest` and `wsl2-ubuntu` must
+          then complete. The stored baseline is 1 of 3; candidates are 0 of 3.
+          No local run substitutes, and the budget gate refuses non-CI provenance
+          by construction, so no number can be invented in the interim
+
+  Budget ratification depends on that evidence and is deferred with it. AC6's
+  *reason* for being pending changed in this cycle; its **status did not**.
+
+- **The local measurement re-run** is deferred for a separate and independently
+  verified reason: `attribute` rejects red runs by design, and this branch
+  currently fails 18 tests that predate this cycle — 5 ×
+  `loop_control::target_launch::tests::*`,
+  `propagated_context_fixtures::isolated_fixture_can_opt_in_to_provider_memory_discovery`,
+  `spawn_inventory::production_spawn_inventory_is_complete_and_governed`
+  (line-number drift from commit `f0aaa4832`), a `wrap_sigint` timeout that
+  reproduces in isolation, and 10 × `claudine-gen::drift` / `generate_ux` (the
+  known archived-baseline break). Re-running the spec's five-alternating-warm-run
+  protocol against a red suite would produce evidence the gate is built to
+  reject. The enumeration half of "regenerate inventory and measurement evidence"
+  was completed instead, and the timing half is recorded as a lower bound rather
+  than restated as a measurement.
+
+Both deferrals are recorded in
+[`deferred-performance-measurement.md`](deferred-performance-measurement.md)
+with their evidence, their blockers, and the finding and review they map back to,
+and `deferred_perf_measurement` is set on this log's frontmatter.
+
+The files changed by this cycle are:
+
+- **Rust** — `claudine/cli/Cargo.toml`, `claudine/cli/tests/spawn_site_guard.rs`,
+  the four renamed PTY binaries (`level1_pty_wrapper_summary.rs`,
+  `level1_schema_prompt_pty.rs`, `level1_provided_partial_file_pty.rs`,
+  `level1_dry_run_pty.rs`), `claudine/cli/tests/sequence_overlay_pty.rs`,
+  `claudine/cli/tests/common/{mod,pty}.rs`, and
+  `biscuit-test-harness/src/{lib,wezterm,kitty}.rs`
+- **Shared tooling** — `tools/test-audit/src/attribute/{aggregate,command,index}.ts`,
+  `tools/test-audit/src/capture/`, `tools/test-audit/tests/` (aggregate suite,
+  compat replays, and the new `claudine-compat-inputs` source guard),
+  `tools/test-audit/fixtures/claudine-compat/`, `tools/test-audit/README.md`
+- **Fix documents** — `inventory.md`, `families.json`, `attribution.md`,
+  `results.md`, `log.md`, the regenerated `enumeration/` (with `9fc5151a0/`
+  preserved beneath it), and this directory's new
+  `deferred-performance-measurement.md`
+- **Owner document** — `claudine/fixes/_unscheduled/test-suite-residuals/spec.md`,
+  residuals 7 and 8
+- **Docs and skills** — `biscuit-test-harness/README.md` and
+  `.claude/skills/biscuit-test-harness/SKILL.md`
+
+Final gate state, all re-verified after the last unit landed:
+
+| Gate | Area | Result |
+|---|---|---|
+| `just test-l2` | `claudine` | 218 passed + 3 passed, **exit 0** — the canonical real-terminal gate the review required |
+| `just test-cli` | `claudine` | 2523 run, 2515 passed, 7 failed, 1 timed out — identical to the pre-cycle baseline, zero added failures |
+| `just lint` | `claudine` | **exit 0** |
+| `just test` / `just lint` | `biscuit-test-harness` | 103 passed, **exit 0** |
+| `just check` | `tools/test-audit` | 208 passed, **exit 0** (was 197 / 3 failed mid-cycle) |
+| `inventory-reconciler.ts` | fix directory | `GATE EXIT=0` |
+| `junit-metrics.ts` | fix directory | `EXIT=0` on the real baseline |
+| `attribution.ts budgets` | fix directory | `GATE EXIT=1` — the intended refusal, unchanged |
+| `git status -- .config/nextest.toml` | repo root | empty — no override, retry, tier change or disabled assertion (AC5, AC7) |
+
+## Implementation of Review Findings #2
+
+> **started at:** 2026-09-09T13:32:07-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/claudine/fixes/2026-09-07-faster-claudine-tests/review-2.md'
+- this is iteration 2 of the review-to-implement cycle
+- orientation checks run before any finding was opened, because review 2 was
+  written against a **working tree that has since moved**:
+        - review 2 was created at `12:59:28-07:00`; commits `43e946940`,
+          `78f5153bf` and `fe83e7481` were authored at `13:27:06`–`13:27:27`,
+          after that snapshot. They carry the tail of the review-1
+          implementation cycle
+        - re-running the two gates review 2 reports as red now gives:
+          `npx tsx inventory-reconciler.ts` → **`GATE EXIT=0`**, and
+          `tools/test-audit just test` → **208 passed, 16 files, exit 0**
+        - the two identities review 2 names as unassigned
+          (`compose_frontmatter_model`, `contamination_probes`) are present in
+          `families.json` at lines 231 and 273, and have been since `3e7484f6f`
+        - so the reconciler half of finding 1 is verified-resolved rather than
+          re-implemented; the remaining halves (propagated-context regression,
+          complete L1 run, `results.md` refresh) are still open and are treated
+          as real work
+- starting the work on 'finding 1 — reconcile inventory + fix propagated-context regression + green canonical L1' at 13:36:41
+
+## Implementation of Review Findings #3
+
+> **started at:** 2026-09-09T13:39:53-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/claudine/fixes/2026-09-07-faster-claudine-tests/review-3.md'
+- this is iteration 3 of the review-to-implement cycle
+- orientation: review 3 was created at `13:26:03-07:00` and re-states review 2's
+  open half after the reconciler/tooling half was verified green
+        - the iteration-2 section above was opened at `13:32:07` and had only
+          reached the first "starting" line before this cycle began; iteration 3
+          therefore owns the same four findings and carries the work forward
+          rather than duplicating it
+        - the working tree at cycle start carries only fix documents (`log.md`,
+          `review-1.md`, `review-2.md`, `spec.md`, the untracked
+          `deferred-performance-measurement.md` and `review-3.md`) plus
+          unrelated `prompts/commit.md` and `sniff/` document edits — no Rust
+          source is dirty
+- starting the work on 'finding 1 — green the canonical Level-1 suite' at 13:47:12
+        - **root cause found before dispatching any work.** The failing identity
+          `propagated_context_fixtures::isolated_fixture_can_opt_in_to_provider_memory_discovery`
+          is not a production regression and not a fixture-input defect. It is an
+          **inherited-environment leak**: this session's shell exports
+          `MODEL=opus` (a Claudine-wrapped agent session sets `MODEL`,
+          `CLAUDINE_INTERACTIVE`, `CLAUDINE_PID`, `CLAUDINE_SESSION_ID`), and the
+          L1 fixture's scrub list covers `CLAUDINE_*`, `PLAYA_*`, Git plumbing and
+          the three width/color keys — but not the bare application variables
+        - reproduction, both directions, on the current tree:
+                - `just test-cli isolated_fixture_can_opt_in_to_provider_memory_discovery`
+                  → **FAIL**, child exits 1 with *"the refreshed document changes
+                  the launch plan, but this invocation did not record the inputs
+                  needed to rebuild one"*
+                - `env -u MODEL cargo nextest run -p claudine-cli -E 'binary(propagated_context_fixtures)'`
+                  → **5 passed, 0 skipped**
+        - the leak also accounts for five of the branch's other standing
+          failures: `cargo nextest run -p claudine-cli -E 'test(target_launch)'`
+          reports **22 passed, 5 failed**, and
+          `rebuild_omits_model_when_target_pins_none` fails with
+          *"no frontmatter model means no MODEL overlay — left: Some(\"opus\"),
+          right: None"*. Those are in-process unit tests, so the fixture policy
+          cannot reach them; they need their own isolation
+        - this reframes finding 1: the review is correct that the suite is red
+          and correct that the claim of local completeness cannot stand, but the
+          repair is **test-environment isolation**, not a production fix. AC3
+          already requires that "representative application-variable …
+          contamination probes cannot alter unrelated test results", so this is
+          in-scope remediation rather than a new obligation
+        - full red inventory captured before any edit — `claudine/just test
+          --no-fail-fast`, exit **100**, `6898 tests run: 6877 passed, 20 failed,
+          1 timed out, 9 skipped`. Three independent root causes, not one:
+                - **the `MODEL` leak** — 5 × `target_launch::tests::*` plus
+                  `propagated_context_fixtures::isolated_fixture_can_opt_in_to_provider_memory_discovery`
+                - **hand-formatted generated sources** — 10 × `claudine-gen`
+                  (5 × `drift`, 5 × `generate_ux`). Branch commit `4fb054ed1`
+                  ("reformat library sources") rustfmt-wrapped the `use` blocks
+                  in `lib/src/provider/*/data.rs` and `lib/src/signals/generated.rs`,
+                  which the generator emits as single lines. `claudine-gen check`
+                  reports `522 more differing lines`, all import wrapping
+                - **a dirty working tree** — 2 × `compose_caller_file_provenance`
+                  and `shipped_prompt_route_drift`, which read the repo's own
+                  `prompts/` corpus. `prompts/commit.md` and five
+                  `prompts/_implement/*.md` are modified in this worktree by the
+                  surrounding session, not by this fix
+                - plus `wrap_sigint::compose_sigint_during_prep_exits_130_with_notice`,
+                  TERMINATING at the 30 s nextest cap
+        - the `claudine-gen::drift` path defect this fix's task brief predicted
+          (baseline under an archived `reviews/` directory) is **already fixed on
+          this branch**: `gen/tests/drift.rs:32` reads
+          `gen/tests/fixtures/generated-artifact-baseline.json`, which is inside
+          the crate and cannot move with a review archival. Nothing to do there
+        - **fix 1 of 2 — the spawned-child half.** `cli/tests/common/mod.rs:620`
+          `inherited_scrub_keys` now also removes the un-namespaced application
+          variables and every provider model variable. Evidence recorded per
+          family in the doc comment: `MODEL` at `lib/src/composition/select.rs:490`,
+          `AGENT`/`Agent` at `cli/src/commands/handle.rs:334-335`, `YOLO` and
+          `INTERACTIVE` at `lib/src/dispatch/wrapper_flags.rs:17,24`, `AGENT_CWD`
+          at `lib/src/child_environment.rs:60`. `PROVIDER` was checked and
+          **excluded** — it is only a clap `value_name`, never an environment
+          read. The provider list is derived from `provider_info().model_env_vars`
+          rather than spelled out, so a provider that gains one is covered
+          without this fixture being told
+        - **fix 2 of 2 — the in-process half.** The five `target_launch` unit
+          tests read the *test process's* own environment through the shared
+          precedence chain, so no fixture policy can reach them, and
+          `std::env::set_var` is unsound with sibling tests in the same nextest
+          process. Threaded an `fn(&str) -> Option<String>` seam instead:
+          `composition::select::resolve_model_with_hints_from` (new, with
+          `ambient_env_lookup` as the production value),
+          `composition::target::resolve_document_model_from`, and a new
+          `LaunchRebuildIntent::env_lookup` field. Production passes
+          `ambient_env_lookup` at both construction sites
+          (`wrapper_stages.rs:486`, `composition/runner.rs:482`), so real runs
+          are byte-identical
+        - `cargo nextest run -p claudine-cli -E 'test(target_launch)'` with
+          `MODEL=opus` still exported → **28 passed** (was 22 passed, 5 failed)
+        - **regression coverage, three new tests, each proven non-vacuous by
+          removing the thing it guards and watching it fail:**
+                - `cli/tests/cli_process_fixture.rs:392`
+                  `default_command_drops_the_inherited_launch_identity` — the
+                  mechanism half. Exports six sentinels and reads back what the
+                  recording provider stub received. Asserted as "carries no
+                  sentinel" rather than "is empty", because claudine legitimately
+                  writes its *own* `AGENT`/`YOLO`/`INTERACTIVE`/`AGENT_CWD` for
+                  the child. Without `UNPREFIXED_APPLICATION_VARS`:
+                  *"an inherited MODEL reached the child as `[sentinel-model]`"*;
+                  without `provider_model_vars()`: *"an inherited CLAUDE_MODEL
+                  reached the child as `[sentinel-provider-model]`"*
+                - `cli/tests/contamination_probes.rs:305`
+                  `an_exported_launch_identity_does_not_change_the_result` — the
+                  consequence half, in the shape that binary's header describes.
+                  Needed a new discriminator (`observed_child_model`): a
+                  `compose` run's stdout, stderr, and exit status are identical
+                  whichever model it resolves, so the probe reads the `MODEL` the
+                  staged goose stub was actually launched with. Without the scrub:
+                  *left `"fixture/leaked-provider-model"`, right
+                  `"fixture/authored-probe-model"`*
+                - `target_launch/tests.rs:286`
+                  `the_supplied_environment_outranks_the_targets_frontmatter_model`
+                  — guards the seam itself. Without it, `no_ambient_env` would be
+                  indistinguishable from a seam that dropped environment
+                  precedence outright, since every other fixture in that file
+                  supplies an empty environment. Asserts both environment steps
+                  (`GOOSE_MODEL` ahead of `MODEL`, `MODEL` ahead of frontmatter)
+                  plus an empty-environment control. With the seam stubbed to
+                  `|_| None`: *left `Some("llamacpp/frontmatter")`, right
+                  `Some("llamacpp/from-generic-env")`*
+        - **claudine-gen — the 10 failures are one cause, and the repair is
+          regeneration, not a test change.** Branch commit `4fb054ed1` ran a
+          formatting sweep over `lib/src` that included generator-owned files;
+          the generator emits single-line `use` blocks and array literals, and
+          rustfmt wrapped them, so `committed != generate(committed inputs)`.
+          `claudine-gen generate --yes` restores convergence:
+          `claudine-gen check` exit **0**, `just test-gen` **155 passed**
+          (was 145 passed / 10 failed)
+        - proved the regeneration is **formatting-only, no semantic change**:
+          rustfmt-normalized `HEAD:<file>` and the regenerated `<file>` for all
+          13 touched files, concatenated, `diff` → **exit 0, zero lines**. The
+          affected set is `lib/src/provider/{antigravity,claude,codex,gemini,goose,kilo,kimi,opencode,pi,qwen}/data.rs`,
+          `lib/src/signals/generated.rs`, `lib/src/model_catalog/families_generated.rs`,
+          and `lib/src/stream/providers/vocabulary.rs`
+                - **standing hazard for Ken, not fixed here:** nothing stops the
+                  next repo-wide `cargo fmt` from re-breaking this. The durable
+                  options are a `#[rustfmt::skip]`/ignore for generator-owned
+                  paths or teaching the generator to emit rustfmt-stable output.
+                  Out of scope for a test-performance fix
+        - **`spawn_inventory::production_spawn_inventory_is_complete_and_governed`**
+          — pure line-number drift, exactly as review-2 said. The site *set*,
+          the functions, the command kinds, and the `governed_by` values are all
+          identical; five `"line"` values moved (579→581, 601→603, 373→370,
+          376→373, 188→189). The guard is line-number-sensitive by design — it
+          is a census with a documented regenerate command — so refreshing it
+          loses no detection power. `CLAUDINE_UPDATE_SPAWN_INVENTORY=1 …` →
+          **2 passed**, and the only diff is those five integers in
+          `docs/providers/spawn-seam-inventory.json`
+        - **`wrap_sigint::compose_sigint_during_prep_exits_130_with_notice`** —
+          does **not** reproduce in isolation on this tree, contrary to the
+          earlier log entry. Five consecutive isolated runs:
+          `1 passed` in **0.179 s, 0.180 s, 0.180 s, 0.179 s, 0.186 s**. A
+          167× gap between 0.18 s and the 30 s cap is not load contention;
+          carried into the full-suite gate below to see whether it survives the
+          `MODEL` scrub
+        - **`shipped_prompt_route_drift` and `compose_caller_file_provenance`
+          (2 failures) are not this branch's.** They read the repository's own
+          shipped `prompts/` corpus, and this worktree has *uncommitted*
+          modifications to `prompts/commit.md` and five
+          `prompts/_implement/*.md` — written by the surrounding session during
+          this very run (`prompts/_implement/*` were clean at 13:42 and dirty by
+          13:55). Proof, without reverting anyone's work: snapshotted the six
+          working-tree files, wrote `HEAD:` bytes in their place, ran both
+          binaries → **18 passed, 0 failed**, then restored all six and
+          confirmed every `shasum` matched the snapshot. The pin must **not** be
+          refreshed: that would bake a third party's in-progress edit into the
+          fixture
+        - **gates, both directions.** The point of the fix is that the suite is
+          immune to an ambient launch identity, so it was run with the
+          identity present *and* absent:
+                - `claudine/just test --no-fail-fast` with `MODEL=opus`,
+                  `YOLO=true`, `INTERACTIVE=false`, `AGENT_CWD` exported →
+                  **6901 run: 6898 passed, 3 failed, 9 skipped**, 30.3 s runner
+                  elapsed, exit 100
+                - the same under
+                  `env -u MODEL -u YOLO -u INTERACTIVE -u AGENT_CWD` →
+                  **6901 run: 6898 passed, 3 failed, 9 skipped**, 29.1 s, exit
+                  100 — the **same three identities**, so the dependency was
+                  removed rather than inverted
+                - `claudine/just lint` → **exit 0**, zero warnings
+                - the three survivors are the shipped-`prompts/` rows proven
+                  above to be a dirty-working-tree condition; against committed
+                  bytes those two binaries are **18 passed, 0 failed**
+                - for comparison, the pre-fix baseline on the same host was
+                  6898 run / 20 failed / 1 timed out, 48.5 s
+        - **forbidden shortcuts, checked rather than asserted.**
+          `git diff main -- .config/nextest.toml` is *not* empty, but every
+          non-comment line in it is a **deletion** of a per-package
+          `slow-timeout = { period = "30s", terminate-after = 3 }` override
+          (branch commit `0af6cbb50`) — `git diff main -- .config/nextest.toml |
+          grep -E '^\+' | grep -vE '^\+\s*#|^\+\+\+'` returns **nothing**. No
+          retry, no tier change, no `#[ignore]`, no weakened assertion
+        - documents refreshed: `results.md` gained a
+          "Local verification — current candidate" section describing *this*
+          tree with both gate directions, the Phase 10 `just test` / `just lint`
+          rows are marked **superseded** rather than deleted, and the stale
+          "18 pre-existing failures" table is replaced by a ledger that corrects
+          three misattributed causes. `inventory.md` records the three new
+          identities and the widening of the fixture scrub from three inherited
+          families to four
+        - **not fixed, reported instead:** (a) the three `prompts/` corpus rows,
+          which need their owner to commit or revert; (b) nothing prevents the
+          next repo-wide `cargo fmt` from re-breaking the generator-owned files
+          the way `4fb054ed1` did
+- work completed for 'finding 1 — green the canonical Level-1 suite' at 14:08:13
+- starting the work on 'finding 2 — aggregator provenance and manifest cardinality' at 14:12:40
+        - the finding has two separable halves and they have different fates in
+          this cycle:
+                - **implementable now** — closure criterion 4: immutable
+                  CI/source provenance stamped into staged artifacts, ordered
+                  consecutive-run validation, and exact one-to-one manifest-cell
+                  matching with duplicate and unexpected cells rejected. All of
+                  that is source work in `tools/test-audit` and `just/devops.just`
+                - **not implementable in this session** — closure criterion 5:
+                  three consecutive baseline and candidate CI runs on Linux,
+                  macOS, Windows and WSL2. That requires pushing the branch and
+                  operator-side CI, which this non-interactive session cannot do;
+                  it is carried as a deferral with a linked owner document
+        - so the aggregator is being hardened *now* so that when the runs are
+          collected they cannot be satisfied by arbitrary staging directories —
+          which is precisely the defect the review names
+- starting implementation of aggregator provenance and manifest cardinality at 14:10:40
+        - **defect A:** no immutable source/CI provenance — three arbitrary directories can be stamped `ci` and satisfy `runsPerLeg`
+        - **defect B:** manifest cardinality is not one-to-one — duplicate `(tier, package)` and unexpected extra cells are silently ignored
+        - **fix approach:**
+                - extend staging with a `provenance.json` sibling to `manifest.jsonl` containing `GITHUB_SHA`, `GITHUB_RUN_ID`, `GITHUB_RUN_NUMBER`, `GITHUB_RUN_ATTEMPT`, `GITHUB_REF`, `GITHUB_EVENT_NAME`, `GITHUB_WORKFLOW` when available (CI), absent when not (local)
+                - `aggregate()` derives provenance kind from stamped data instead of trusting caller
+                - validate all samples share one source revision and are ordered consecutive runs
+                - enforce exact one-to-one manifest-cell matching
+        - **implementation complete:**
+                - created `tools/test-audit/src/junit/provenance.ts` with `CiProvenance` interface and `parseProvenance()` validator
+                - extended `just/devops.just` `_stage_junit` recipe to write `provenance.json` once per staging tree when `GITHUB_SHA` is present
+                - updated `tools/test-audit/src/attribute/aggregate.ts`:
+                        - `readLeg()` now reads `provenance.json` and validates manifest cardinality (duplicate cells, unexpected cells)
+                        - `aggregate()` derives provenance kind from stamped data (ci only when all samples have provenance, same SHA, consecutive runs)
+                        - validates all samples share one source revision
+                        - validates run numbers are consecutive within workflow/ref
+                        - removed caller-supplied `provenanceKind` parameter (now derived)
+                - added 4 new violation kinds: `mixed-source-revisions`, `non-consecutive-runs`, `duplicate-manifest-cell`, `unexpected-manifest-cell`
+                - updated `tools/test-audit/src/attribute/command.ts` to remove --provenance flag (now derived)
+                - updated `tools/test-audit/README.md` to document provenance contract and manifest cardinality enforcement
+                - updated `just/devops.just` block comment to document provenance.json schema
+        - **tests:** added 10 new tests covering:
+                - provenance derivation ('ci' vs 'local' based on presence of provenance.json)
+                - mixed source revision rejection
+                - non-consecutive run number rejection  
+                - consecutive run acceptance
+                - malformed provenance.json rejection
+                - duplicate manifest cell rejection
+                - unexpected manifest cell rejection
+                - updated existing tests to add CI provenance where budget derivation is being tested
+        - **verification:**
+                - `just check` in tools/test-audit: **218 passed** (up from 208 — 10 new tests added)
+                - `inventory-reconciler.ts`: **EXIT=1** with 3 pre-existing undeclared-exclusion violations (unrelated to this change)
+                - `attribution.ts budgets`: **EXIT=1** refusing with missing-leg violations as expected (no measurements collected yet)
+        - **non-vacuity proof deferred:** criterion 5 (three consecutive CI runs) requires operator push and is out of scope for this non-interactive session
+- work completed for 'finding 2 — aggregator provenance and manifest cardinality' at 14:20:47
+- starting the work on 'finding 3 — tmux and Terminal.app shell-startup isolation' at 14:24:05
+        - the machinery the finding asks for already exists and is tested:
+          `biscuit-test-harness/src/lib.rs:418` `interactive_rc_suppression_flags`
+          and `:433` `login_shell_script` build the two-stage
+          login-then-rc-suppressed-interactive invocation, with four unit tests
+          at `:947`–`:997`
+        - WezTerm and Kitty adopt it; `tmux.rs:48` and `tmux.rs:341` still spell
+          a bare `format!("{} -l", shell)`, and `apple_terminal.rs` is in the same
+          state. `README.md:129-130` records that gap explicitly
+        - so this is adoption of an existing tested policy by two more backends,
+          not new design — and tmux is the portable Level-2 backend CI uses,
+          which is why the review rates it high
+        - **implementation:** one shared policy, three spellings of the same
+          invocation, so no backend can drift from it
+                - `biscuit-test-harness/src/lib.rs:474` `login_shell_argv` — the
+                  canonical `[shell, -l, -c, script, shell]`; `configure_login_shell`
+                  (WezTerm, Kitty) now just appends it
+                - `lib.rs:490` `login_shell_command_line` — the same invocation as
+                  one POSIX line (`exec <shell> -l -c '<script>' <shell>`), for
+                  backends whose only channel into the pane is text
+                - `lib.rs:500` `single_quoted` — POSIX `'\''` escaping for that line
+        - **tmux (`src/tmux.rs`):** both spawn sites now go through one
+          `new_session_args` (`:67`); `spawn_shell_session_with_env:48` and
+          `TmuxHarness::spawn_shell:376` build their tmux argv from it
+                - **quoting:** tmux takes the pane command as trailing argv words and
+                  `exec`s them directly — verified on tmux 3.7b with a probe session —
+                  so the argv is passed word-by-word and nothing is re-parsed. A single
+                  `"<shell> -l"` string would go through tmux's own command-string
+                  splitter first; a unit test now rejects any pre-joined argument
+                - **environment:** `-e` replaces `Command::env` for the pane's
+                  variables. Probed and confirmed: a variable set on the `tmux` *client*
+                  reaches the pane only when that client also starts the server — with a
+                  server already running it is silently dropped. That is why
+                  `BISCUIT_TEST_BIN_DIR` (which the shared script needs for its `PATH`
+                  prepend) and the caller-supplied env now travel by `-e`
+                - the old `cmd.env("PATH", bin_dir:$PATH)` is gone: it prepended
+                  *before* the login profile ran, so `/etc/profile`'s `path_helper`
+                  could reorder it. The shared script prepends after
+        - **Terminal.app (`src/apple_terminal.rs:971`):** the `do script` line is now
+          `BISCUIT_TEST_BIN_DIR='…' FORCE_COLOR=1 … exec bash -l -c '<script>' bash`
+                - **quoting:** two layers. The `-c` script is POSIX single-quoted by
+                  `login_shell_command_line`, then the whole line goes through the
+                  existing `applescript_escape` (which turns the script's `"` into
+                  `\"`). A unit test asserts the composed *and escaped* string
+                - the `PATH='dir':$PATH` prefix was replaced by
+                  `BISCUIT_TEST_BIN_DIR='dir'` for the same profile-ordering reason
+                - residual, now documented rather than silent: macOS starts the
+                  window's own login shell before AppleScript can speak, and `do
+                  script` is delivered to *that* shell. The harness's line `exec`s it
+                  away, so the shell it drives is the rc-suppressed one
+        - **tests added**
+                - `lib.rs:1027` the argv and command-line spellings must carry the
+                  identical script; `:1047` the script is single-quoted; `:1056` the
+                  quoting escapes embedded quotes
+                - `tmux.rs:508` the argv tail is the two-stage invocation and no
+                  argument is a pre-joined `<shell> -l`; `:519` `-e` carries the bin
+                  dir and the caller env, and a bin dir switches on the script's PATH
+                  prepend; `:535` no `-e` when there is nothing to set
+                - `apple_terminal.rs:1332` the composed `do script` payload survives
+                  both quoting layers (the script's `"` arrive as `\"`, no newline)
+                - `biscuit-test-harness/tests/level2_tmux_shell_startup.rs` — the
+                  end-to-end case: a temporary `HOME` whose `.bash_profile` sources a
+                  `.bashrc` that echoes a sentinel and sets `PS1`, both guarded on
+                  `$-` containing `i` (which is how real prompt hooks guard
+                  themselves). Detached session, so no window and no focus. Asserts
+                  the pane reached a prompt, that neither the sentinel nor the rc
+                  prompt is in the frame, and that the pane's *own process* is the
+                  `--norc` interactive shell (read back via `#{pane_pid}` + `ps`)
+        - **non-vacuity:** reverting only `new_session_args`'s tail to
+          `format!("{} -l", detect_shell())` fails the test at the sentinel
+          assertion — pane shows `BISCUIT_RC_SENTINEL_LOADED` then
+          `BISCUIT_RC_PROMPT$`. Restored, test green again
+        - **`test-l2` wired for `biscuit-test-harness`:** the recipe was a
+          "not applicable" stub. A `level2_` test behind a stub recipe is what
+          `just check-tier-coverage` fails on, and the stub's stated reason
+          ("its own tests exercise backend selection in-process") is no longer
+          true of the whole crate
+        - **two host contaminations found while running L2, neither caused by this
+          change, both worth recording**
+                - the tmux **server** outlives every run and hands its own
+                  environment to every pane. The server here had been started with
+                  `MODEL=opus`/`AGENT=claude` in scope, which fails
+                  `level2_lifecycle_equivalence_ac9_context_facets_match_direct_run`
+                  (`ctx.model=opus` instead of the target's frontmatter model). `-e`
+                  cannot fix that — it only adds variables. A cold server
+                  (`tmux kill-server`) plus `env -u MODEL -u AGENT` clears it; this
+                  is the known `MODEL` leak, now with the mechanism identified
+                - `level2_shipped_implement_plan_{supplied,unset}_commit_message_*`
+                  fail on `TransclusionError: File not found: ../_no_formatting.md`.
+                  Verified pre-existing: both fail identically with
+                  `biscuit-test-harness/src/tmux.rs` restored to `HEAD`
+        - **verification**
+                - `biscuit-test-harness`: `just lint` **exit 0**; `just test`
+                  **110 passed, 1 skipped, exit 0**; `just test-l2` **1 passed,
+                  110 skipped, exit 0**
+                - `claudine` `just test-l2`, cold tmux server, `env -u MODEL -u AGENT`:
+                  `claudine-cli` **218 run, 216 passed, 2 failed** (the two
+                  pre-existing transclusion failures above), exit 100;
+                  `claudine-gen` **3 run, 3 passed**, exit 0
+                - `worktree` `just test-l2` **5/5 passed** as a smoke check of the
+                  PATH-via-`-e` path (those tests invoke the CLI by bare name inside
+                  the pane, which is exactly what the removed client-`PATH` env used
+                  to serve)
+        - **backends deliberately not run on this host, not counted as evidence**
+                - **Terminal.app** — spawning opens a visible window. Its change is
+                  covered only by the composition unit test and by review of the
+                  `do script` payload
+                - **WezTerm / Kitty** — `available()` is false unless the suite is
+                  launched from inside them, and cold-starting either would open a
+                  GUI window. Their code path is unchanged apart from
+                  `configure_login_shell` now delegating to `login_shell_argv`,
+                  which the lib tests pin
+                - both L2 runs above were taken in parallel self-spawn mode
+                  (`BISCUIT_L2_THREADS`) precisely so `_test_l2`'s broker would not
+                  spawn an Apple Terminal window; claudine-cli runs that way
+                  canonically, claudine-gen normally runs the serial broker path
+- work completed for 'finding 3 — tmux and Terminal.app shell-startup isolation' at 14:46:12
+- starting the work on 'finding 4 — Level-1 PTY false-green skips and the fixed readiness sleep' at 14:47:30
+        - **defect A — Level-1 PTY gates could skip** (`review-3.md:109-129`,
+          closure criterion 2)
+                - added a shared mandatory-tier gate to `tools/test-toolkit`
+                  rather than hand-writing a panic at each of the 32 call sites:
+                  `evaluate_required()` (`tools/test-toolkit/src/lib.rs:229-245`) reuses
+                  `evaluate_harness` and rewrites only the
+                  *harness-unavailable* `Skip` into a `Panic` that still names
+                  the missing requirement; `expect_level!`
+                  (`tools/test-toolkit/src/lib.rs:358-378`) is the `require_level!`-shaped macro
+                  over it
+                - an operator-selected exclusion (`BISCUIT_TEST_LEVEL`,
+                  `RUN_LEVEL3`) still skips — that is a deliberate range choice,
+                  not absent infrastructure
+                - factored the evidence write both macros share into
+                  `record_gate()`
+                  (`tools/test-toolkit/src/lib.rs:262`) so the two gate styles cannot drift in what
+                  they record
+                - converted every `require_level!(Level::L1, pty_available(),
+                  "PTY (/dev/ptmx)")` site to `expect_level!` — 32 sites across
+                  7 binaries: `level1_schema_prompt_pty.rs` (11),
+                  `sequence_overlay_pty.rs` (7),
+                  `level1_provided_partial_file_pty.rs` (4),
+                  `level1_dry_run_pty.rs` (2), `level1_pty_wrapper_summary.rs`
+                  (2), `level1_compose_autocomplete_failure_pty.rs` (2),
+                  `level1_inline_compose_mismatch_pty.rs` (2). No L2/L3
+                  `require_level!` site was touched
+                - `sequence_overlay_pty.rs` was not named in the review but is
+                  the same class (L1, `#![cfg(unix)]`, `pty_available()`), so it
+                  was converted too; `rg` now finds no
+                  `require_level!(Level::L1` anywhere in the workspace
+                - `#![cfg(unix)]` is preserved in all 7 files — compile-time
+                  platform exclusion is the valid mechanism and remains the only
+                  one
+                - refreshed the stale gating paragraph in all 6 module doc
+                  comments that documented the old skip behavior
+        - **defect B — fixed 300 ms readiness sleep**
+                - `confirm_one_file` (`cli/src/completion/autocomplete_ui.rs:123`)
+                  flushes the dialog, calls `crossterm::enable_raw_mode()`, then
+                  blocks in `crossterm::event::read()`. It emits **no** byte
+                  between the dialog text and the read, so there is no output
+                  marker to wait on — `wait_for_raw_mode`'s
+                  `KBD_ENHANCEMENT_PUSH` comes from biscuit-tui's
+                  `prepare_terminal`, which this path does not use
+                - the observable final condition is the line discipline itself.
+                  `tcgetattr` on the pty **master** reports the pty's termios on
+                  Linux and macOS alike (the mechanism
+                  `ptyprocess::PtyProcess::get_echo` already relies on), and
+                  crossterm's raw mode clears `ICANON`
+                - added `wait_for_raw_mode_termios()`
+                  (`claudine/cli/tests/common/pty.rs:358`): bounded poll (2 ms
+                  cadence, 10 s deadline, panic on expiry) for `ICANON` clear;
+                  `level1_provided_partial_file_pty.rs:141` calls it instead of
+                  sleeping
+                - the condition is sufficient, not merely necessary: once
+                  `ICANON` is clear the keystroke is safe to send whether or not
+                  the child has reached its `read` yet, because the byte queues
+                  on the tty in raw mode. Sending *before* the flip is what
+                  raced — the byte lands in the canonical line buffer and its
+                  survival across the mode change is kernel-specific
+                - swept the rest of the L1 PTY cohort for the same class
+                  (`rg -n "thread::sleep" claudine/cli/tests`): every other L1
+                  PTY sleep is a 20 ms `WouldBlock`/`TimedOut` backoff inside an
+                  already-bounded read loop (`common/pty.rs` ×5,
+                  `level1_dry_run_pty.rs` ×2,
+                  `level1_compose_autocomplete_failure_pty.rs` ×2,
+                  `level1_inline_compose_mismatch_pty.rs` ×2) — polling cadence,
+                  not readiness proof, left alone. The remaining sleeps are in
+                  `wrap_ctrl_c_windows.rs`, `sequence_ctrl_c_windows.rs`,
+                  `wrap_sigint.rs`, and `completion_perf.rs`, which are signal /
+                  timeout contracts outside this cohort
+        - **defect C — inventory disclosure** (`inventory.md`)
+                - `cli-l1-pty` row: the nine 20 ms sites are re-described as
+                  `WouldBlock`/`TimedOut` cadence inside already-bounded loops
+                  and their disposition changed from "become bounded
+                  observation" (they already were) to **retained and
+                  justified**; the false "no `require_level!` gate" claim on the
+                  Route line is removed; the 11 gates' conversion to
+                  `expect_level!` is recorded
+                - `cli-l1-pty-interactive` row: the 300 ms site is now disclosed
+                  as **this row's own**, distinct from the `common/pty.rs`
+                  cadence sleeps assigned to `cli-l1-pty`, together with its
+                  replacement, the measured before/after, the 10x-under-load
+                  result, and the 19 gates' conversion
+        - **drift maintenance** (behavior change obliges a doc pass)
+                - `tools/test-toolkit/README.md`: new `expect_level!` section
+                - `.claude/skills/rust-testing/SKILL.md`: "Gating Tests" now
+                  states that L1 uses `expect_level!`, with the claudine PTY
+                  cohort as the worked example; frontmatter description and the
+                  key-crates table updated; `md hash --save` re-run
+        - **verification**
+                - **10x under representative suite load** — the 30 identities of
+                  the seven changed binaries, run ten consecutive times while a
+                  full `just test-cli --no-fail-fast` (2,526 tests) executed
+                  concurrently and repeatedly in the background:
+                  **10/10 iterations green, 300/300 test results passed**, zero
+                  FAIL / TIMEOUT / LEAK. Loaded per-iteration wall 4.84-5.77 s.
+                  The three confirmation identities ranged 0.498-2.604 s loaded
+                  (median ~1.1 s). The single `SLOW [> 5.000s]` marker is
+                  `level1_dry_run_pty::level1_pty_dry_run_approval_prompt_matches_normal_mode`,
+                  a pre-existing 4.7 s identity that crosses the threshold under
+                  contention; it stays well inside the default 5 s x 6
+                  slow-timeout and no override was added
+                - **before/after, three confirmation identities** — warm,
+                  `just test-cli --test level1_provided_partial_file_pty`, five
+                  runs each side, sleep temporarily reinstated to take the
+                  "before". Before **0.849-0.871 s** each; after
+                  **0.492-0.700 s** each. Delta ~0.336 s per identity, ~1.0 s
+                  across the three, so review-3's 900 ms figure is confirmed and
+                  slightly conservative. Binary wall fell 0.865 s -> ~0.53 s
+                - **non-vacuity of the hard failure** — `pty_available()` was
+                  temporarily forced to `return false`. Every gated test then
+                  **failed** instead of skipping (e.g. `level1_dry_run_pty` +
+                  `level1_pty_wrapper_summary`: `4 tests run: 0 passed, 4
+                  failed, 0 skipped`) with the requirement preserved in the
+                  message: `level 1 requires PTY (/dev/ptmx), which is
+                  unavailable on this platform. This tier has no
+                  optional-harness contract: ...`. The forcing edit was reverted
+                  and the cohort re-run green (**30/30**)
+                - the counterfactual is pinned in unit tests, not just by that
+                  manual forcing: `evaluate_required_panics_when_harness_unavailable_without_any_env`
+                  asserts `evaluate_level` **skips** and `evaluate_required`
+                  **panics** on identical inputs, and
+                  `expect_level_panics_where_require_level_would_have_skipped`
+                  does the same at the macro level
+                - `test-toolkit`: `cargo clippy --all-targets --all-features -D
+                  warnings` **exit 0**; `cargo nextest run -p test-toolkit
+                  --no-fail-fast` **128 run, 127 passed, 1 failed, 2 skipped**.
+                  The one failure is
+                  `ci_workflow_contracts::ci_tooling_changes_schedule_the_tooling_leg`,
+                  pre-existing and unrelated: it string-matches a one-line
+                  `CI_TOOLING_PREFIXES = ("scripts/", ".github/ci/")` in
+                  `scripts/ci/affected_scope.py`, which is written across
+                  several lines there. Both files are git-clean
+                - `claudine` `just lint`: **exit 0**
+                - `claudine` `just test --no-fail-fast`: **6,901 tests run,
+                  6,897 passed, 4 failed, 9 skipped, 32.0 s, exit 100**. All
+                  four failures read the repo's `prompts/` corpus, which is
+                  dirty in this worktree from another session
+                  (`git status prompts/` shows seven modified and three
+                  untracked files):
+                  `compose_caller_file_provenance` x2,
+                  `shipped_prompt_route_drift::shipped_implement_prompts_have_not_drifted_from_their_fixture`,
+                  and `shipped_prompt_contract::feature_review_cli_preserves_numeric_iteration_and_dependent_paths`
+                  (`copy_shipped_prompts` -> `CompositionError: invalid
+                  lifecycle action` from `prompts/_reviews/feature-review.md`).
+                  The fourth is the same class as the three review-3 named; the
+                  corpus pin was **not** refreshed
+                - `inventory-reconciler.ts` exits 1 on three
+                  `undeclared-exclusion` violations, none of them from this
+                  finding:
+                  `contamination_probes::an_exported_launch_identity_does_not_change_the_result`,
+                  `cli_process_fixture::default_command_drops_the_inherited_launch_identity`,
+                  and
+                  `target_launch::tests::the_supplied_environment_outranks_the_targets_frontmatter_model`
+                  — all added by the earlier fixture-isolation work this cycle.
+                  `cargo nextest list -p claudine-cli` *does* list them, so the
+                  stored enumeration snapshot is stale and needs a capture
+                  refresh under finding 1's remeasurement, which owns that
+                  artifact. No PTY identity appears in the violations
+        - **not done / deliberately out of scope**
+                - no L2 or L3 `require_level!` site was touched: optional-harness
+                  skipping is the correct contract at those tiers
+                - the other `require_level!` L1-adjacent gates elsewhere in the
+                  workspace: `rg` finds none — claudine's PTY cohort was the only
+                  `Level::L1` gate in the repository
+- addendum for 'finding 4' — non-vacuity of the readiness *observation* (as
+  distinct from the gate), measured with temporary instrumentation that was
+  removed afterwards
+        - the probe genuinely discriminates: `tty_is_canonical` reports
+          **`true` immediately after `Session::spawn`** and **`false`** by the
+          time `confirm_and_drain` is entered, so it is reading the pty's live
+          line discipline through the master fd, not a constant
+        - the wait therefore returns on its **first** probe (7-14 µs across the
+          three identities). The child's `tcsetattr` follows its dialog flush
+          immediately, while the caller needs a full read round-trip to see
+          that dialog, so the flip has always already happened. The 300 ms was
+          dead time on every observed path, and the new loop is the bound that
+          keeps the send correct if the ordering ever slips — recorded in
+          `wait_for_raw_mode_termios`'s docs so a future reader does not delete
+          a loop that "never waits"
+        - re-ran the gates after removing the instrumentation: cohort **30/30
+          passed**; `claudine` `just lint` **exit 0**; `claudine` `just test
+          --no-fail-fast` **6,901 run, 6,897 passed, 4 failed, 9 skipped,
+          24.5 s, exit 100** — same four `prompts/`-corpus failures
+- work completed for 'finding 4 — Level-1 PTY false-green skips and the fixed readiness sleep' at 15:11:14
+- orchestrator wrap-up at 15:32:30, after the four finding units completed
+        - regenerated the enumeration captures at `fe83e7481` with
+          `test-audit capture --config audit.config.json`: all 16 selections
+          exit 0, `cli-bare` at 2,535 identities → the three new isolation tests
+          are now in the runner universe
+        - that left two `inventory-drift` violations rather than the three
+          `undeclared-exclusion` ones — `cli-unit` 1178→1179 and
+          `cli-l1-fixture-selftest` 30→32 — so `inventory.md`'s family counts,
+          movement table and per-family sections were corrected to match
+        - `npx tsx inventory-reconciler.ts` → **`GATE EXIT=0`**, 7,420 runner
+          identities against 7,475 source attributes
+        - final canonical gate, `claudine/just test --no-fail-fast`, ambient
+          `MODEL=opus` deliberately left in scope: **6901 run, 6897 passed,
+          4 failed, 9 skipped, 28.98 s, exit 100**
+        - the four survivors are one defect belonging to somebody else. All four
+          read the repository's shipped `prompts/` corpus, which another session
+          has been editing throughout this cycle (7 modified + 3 untracked, last
+          write 15:08). The drift guard names its own cause exactly: the
+          frontmatter hash of `prompts/_implement/implement-plan.md` is unchanged
+          at `62d70fb16a02592c` while its body hash moved
+          `56ca8ed9fc5dc007` → `a4e5f2ef36c0395b`. That is the test working, not
+          failing — and refreshing the pin would bake a third party's
+          in-progress edit into the Level-2 fixture, so it was not touched
+        - for scale: the same gate on the same host before this cycle was
+          **6898 run, 20 failed, 1 timed out, 48.5 s**
+
+### Successful Completion
+
+The implementation of review cycle 3 has completed successfully in 1 hour and
+53 minutes. During this implementation all 4 review findings were evaluated to
+see if they could be fixed as a part of this implementation cycle: 3 were fixed,
+1 was deferred (see reasons below):
+
+- **Finding 2 — required CI runs and budgets (deferred, evidence half only).**
+  The finding has two separable halves and they had different fates. Closure
+  Criterion **4** — immutable CI/source provenance and exact manifest
+  cardinality — **was implemented**: staging now writes a `provenance.json` per
+  tree, `aggregate()` derives the provenance kind from that stamp instead of
+  trusting a caller-supplied `--provenance` flag (which is gone), mixed source
+  revisions and non-consecutive run numbers raise typed violations, and manifest
+  cells must match one-to-one. Closure Criterion **5** — three consecutive
+  baseline and candidate CI runs on Linux, macOS, Windows and WSL2, and the
+  budgets derived from them — **is deferred**, unchanged at baseline 1 of 3 and
+  candidate 0 of 3. It requires merging `main` (13 conflicts), an OpenPGP-signed
+  commit, recreating a remote branch GitHub auto-deleted, and operator-side CI
+  runs. A signed commit blocks on `pinentry` in a non-interactive session and
+  bypassing with `--no-gpg-sign` is forbidden by `CLAUDE.md`, so no part of that
+  chain is reachable from here. This is **not** a CPU-load artifact; it is
+  structural.
+
+Two findings were fixed but carry a narrower residual that could not be closed
+here, and each is recorded with evidence and a linked owner rather than being
+folded into the count above:
+
+- **Finding 1 — the canonical Level-1 suite.** Fixed: 21 red identities became
+  4, and the 4 that remain are the shipped-`prompts/` guard firing on another
+  session's uncommitted edits, proven by restoring `HEAD:` bytes and getting
+  18 passed / 0 failed. The finding's final clause — "refresh the measurement
+  artifacts from that final candidate" — is deferred. Its previously recorded
+  blocker (18 pre-existing failures, and `attribute` rejects a red run) is
+  **gone**; the blockers now are that `spec.md` § 5 alternates warm runs
+  *between two revisions* and this session cannot produce a committed candidate,
+  and that a tree a third party is writing mid-run is not a revision anything
+  can be attributed to. The enumeration half *was* refreshed.
+- **Finding 3 — tmux and Terminal.app shell startup.** Fixed: both backends now
+  build the same two-stage login-plus-rc-suppressed invocation from one shared
+  implementation, and the tmux half is proven end-to-end and non-vacuously by a
+  new sentinel test. Terminal.app, WezTerm and Kitty carry **no execution
+  evidence**, because spawning any of them opens a visible window on this host
+  and the monorepo prohibits an L2/L3 test taking focus. Per the review's own
+  instruction, those skipped GUI backends are **not** reported as passing.
+
+All three deferrals are recorded in
+[`deferred-performance-measurement.md`](deferred-performance-measurement.md)
+with their evidence, their blockers and the finding and review they map back to,
+and `deferred_perf_measurement` remains set on this log's frontmatter. Their
+linked owners are residuals 7, 8 and the new residual 9 in
+[`../_unscheduled/test-suite-residuals/spec.md`](../_unscheduled/test-suite-residuals/spec.md).
+
+The files changed by this cycle are:
+
+- **Rust — production** — `claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs`
+  and `.../target_launch/tests.rs`, `claudine/cli/src/commands/wrap/select.rs`,
+  `.../wrapper_stages.rs`, `claudine/cli/src/commands/compose/… runner.rs`,
+  `claudine/cli/src/commands/wrap/target.rs` (an `fn(&str) -> Option<String>`
+  environment seam; production passes `ambient_env_lookup`, so real runs are
+  unchanged), plus the regenerated generator-owned sources under
+  `claudine/lib/src/provider/*/data.rs` and siblings
+- **Rust — tests and harness** — `claudine/cli/tests/common/{mod,pty}.rs`,
+  `claudine/cli/tests/{cli_process_fixture,contamination_probes,spawn_inventory}.rs`,
+  the seven L1 PTY binaries converted to `expect_level!`,
+  `claudine/gen/tests/drift.rs`, `tools/test-toolkit/src/lib.rs`
+  (`evaluate_required`, `expect_level!`, `record_gate`),
+  `biscuit-test-harness/src/{lib,tmux,apple_terminal}.rs` and its new
+  `tests/level2_tmux_shell_startup.rs`
+- **Shared tooling** — `tools/test-audit/src/junit/provenance.ts` (new),
+  `tools/test-audit/src/attribute/{aggregate,command,index}.ts`,
+  `tools/test-audit/tests/aggregate.test.ts`, `just/devops.just`
+- **Fix documents** — `inventory.md`, `results.md`, `log.md`, the regenerated
+  `enumeration/`, and `deferred-performance-measurement.md`
+- **Owner document** — `claudine/fixes/_unscheduled/test-suite-residuals/spec.md`,
+  residual 8 rewritten and residual 9 added
+- **Docs and skills** — `biscuit-test-harness/README.md`,
+  `tools/test-audit/README.md`, `tools/test-toolkit/README.md`,
+  `.claude/skills/biscuit-test-harness/SKILL.md`,
+  `.claude/skills/rust-testing/SKILL.md`
+
+Final gate state:
+
+| Gate | Area | Result |
+|---|---|---|
+| `just test --no-fail-fast` | `claudine` | **6901 run, 6897 passed, 4 failed**, 9 skipped, 28.98 s — was 20 failed + 1 timed out |
+| `just lint` | `claudine` | **exit 0** |
+| `just test-l2` | `claudine` | `claudine-cli` 218 run, 216 passed; `claudine-gen` 3 passed |
+| `just test` / `just test-l2` / `just lint` | `biscuit-test-harness` | 110 passed + 1 passed, **exit 0** |
+| `just check` | `tools/test-audit` | **218 passed**, exit 0 — was 208 |
+| `inventory-reconciler.ts` | fix directory | **`GATE EXIT=0`**, 7,420 identities |
+| `attribution.ts budgets` | fix directory | **`GATE EXIT=1`** — the intended refusal, now naming missing evidence rather than a missing join |
+| `git diff main -- .config/nextest.toml` | repo root | no added non-comment line; every change is a **deletion** of a `slow-timeout` override (AC5, AC7) |

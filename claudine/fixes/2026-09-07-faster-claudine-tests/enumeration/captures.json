@@ -1,73 +1,92 @@
 {
   "toolVersion": "@rusty-biscuit/test-audit@0.1.0",
-  "revision": "78b44a96651e33b0eb7cb2f82a96255853cc2998",
+  "revision": "fe83e74811df587c44a0bc7231c63d01fb2eeedb",
   "dirty": [
     "M .claude/skills/biscuit-test-harness/SKILL.md",
-    " M .claude/skills/darkmatter/SKILL.md",
+    " M .claude/skills/rust-testing/SKILL.md",
     " M biscuit-test-harness/README.md",
-    " M biscuit-test-harness/src/kitty.rs",
+    " M biscuit-test-harness/justfile",
+    " M biscuit-test-harness/src/apple_terminal.rs",
     " M biscuit-test-harness/src/lib.rs",
-    " M biscuit-test-harness/src/wezterm.rs",
-    " M claudine/cli/Cargo.toml",
+    " M biscuit-test-harness/src/tmux.rs",
+    " M claudine/cli/src/commands/wrap/composition/mod.rs",
+    " M claudine/cli/src/commands/wrap/composition/runner.rs",
+    " M claudine/cli/src/commands/wrap/composition/target.rs",
+    " M claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch.rs",
+    " M claudine/cli/src/commands/wrap/harness_orch/loop_control/target_launch/tests.rs",
+    " M claudine/cli/src/commands/wrap/wrapper_stages.rs",
+    " M claudine/cli/tests/cli_process_fixture.rs",
     " M claudine/cli/tests/common/mod.rs",
     " M claudine/cli/tests/common/pty.rs",
+    " M claudine/cli/tests/contamination_probes.rs",
+    " M claudine/cli/tests/level1_compose_autocomplete_failure_pty.rs",
+    " M claudine/cli/tests/level1_dry_run_pty.rs",
+    " M claudine/cli/tests/level1_inline_compose_mismatch_pty.rs",
+    " M claudine/cli/tests/level1_provided_partial_file_pty.rs",
+    " M claudine/cli/tests/level1_pty_wrapper_summary.rs",
+    " M claudine/cli/tests/level1_schema_prompt_pty.rs",
     " M claudine/cli/tests/sequence_overlay_pty.rs",
-    " M claudine/cli/tests/spawn_site_guard.rs",
-    " M claudine/fixes/2026-09-07-faster-claudine-tests/attribution.md",
-    " M claudine/fixes/2026-09-07-faster-claudine-tests/attribution/budgets-pending.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/captures.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/captures.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/catalog-types-bare.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/catalog-types-bare.err",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/catalog-types-bare.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/catalog-types-bare.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-all.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-all.err",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-all.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-all.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-bare.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-bare.err",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-bare.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-bare.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-ci.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-ci.err",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-ci.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-ci.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-daemon.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-daemon.err",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-daemon.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-daemon.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-real.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-real.err",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-real.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-real.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-terminal.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-terminal.err",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-terminal.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-terminal.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/contract-bare.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/contract-bare.err",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/contract-bare.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/contract-bare.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/contract-real.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/contract-real.err",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/contract-real.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/contract-real.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/gen-bare.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/gen-bare.err",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/gen-bare.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/gen-bare.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/gen-terminal.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/gen-terminal.err",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/gen-terminal.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/gen-terminal.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/lib-bare.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/lib-bare.err",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/lib-bare.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/lib-bare.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/rz-client-bare.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/rz-client-bare.err",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/rz-client-bare.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/rz-client-bare.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/rz-core-bare.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/rz-core-bare.err",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/rz-core-bare.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/rz-core-bare.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/rz-core-testsupport.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/rz-core-testsupport.err",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/rz-core-testsupport.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/rz-core-testsupport.json",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/rz-daemon-bare.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/rz-daemon-bare.err",
-    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/rz-daemon-bare.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/rz-daemon-bare.json",
-    " M claudine/fixes/2026-09-07-faster-claudine-tests/families.json",
+    " M claudine/docs/providers/spawn-seam-inventory.json",
     " M claudine/fixes/2026-09-07-faster-claudine-tests/inventory.md",
     " M claudine/fixes/2026-09-07-faster-claudine-tests/log.md",
     " M claudine/fixes/2026-09-07-faster-claudine-tests/results.md",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/review-1.md",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/review-2.md",
     " M claudine/fixes/2026-09-07-faster-claudine-tests/spec.md",
-    " M claudine/fixes/_unscheduled/test-suite-residuals/spec.md",
-    " M darkmatter/fixes/2026-09-07-faster-darkmatter-tests/review-2.md",
+    " M claudine/lib/src/composition/mod.rs",
+    " M claudine/lib/src/composition/select.rs",
+    " M claudine/lib/src/model_catalog/families_generated.rs",
+    " M claudine/lib/src/provider/antigravity/data.rs",
+    " M claudine/lib/src/provider/claude/data.rs",
+    " M claudine/lib/src/provider/codex/data.rs",
+    " M claudine/lib/src/provider/gemini/data.rs",
+    " M claudine/lib/src/provider/goose/data.rs",
+    " M claudine/lib/src/provider/kilo/data.rs",
+    " M claudine/lib/src/provider/kimi/data.rs",
+    " M claudine/lib/src/provider/opencode/data.rs",
+    " M claudine/lib/src/provider/pi/data.rs",
+    " M claudine/lib/src/provider/qwen/data.rs",
+    " M claudine/lib/src/signals/generated.rs",
+    " M claudine/lib/src/stream/providers/vocabulary.rs",
+    " M just/devops.just",
+    " M prompts/_implement/implement-plan.md",
+    " M prompts/_implement/implement-review-findings-plan.md",
+    " M prompts/_implement/implement-review.md",
+    " M prompts/_implement/implement-suggestions.md",
+    " M prompts/_implement/review-findings-plan.md",
+    " M prompts/_reviews/feature-review.md",
+    " M prompts/commit.md",
+    " M sniff/cli/tests/cli.rs",
+    " M sniff/cli/tests/cli_process_fixture.rs",
+    " M sniff/cli/tests/common/mod.rs",
+    " M sniff/cli/tests/install_interview_cli.rs",
+    " M sniff/cli/tests/spawn_site_guard.rs",
+    " M sniff/fixes/2026-09-07-faster-sniff-tests/log.md",
+    " M sniff/fixes/2026-09-07-faster-sniff-tests/spec.md",
     " M tools/test-audit/README.md",
+    " M tools/test-audit/src/attribute/aggregate.ts",
     " M tools/test-audit/src/attribute/command.ts",
     " M tools/test-audit/src/attribute/index.ts",
-    " M tools/test-audit/src/capture/command.ts",
-    "?? tools/test-audit/src/attribute/aggregate.ts",
-    "?? tools/test-audit/tests/aggregate-claudine-compat.test.ts",
-    "?? tools/test-audit/tests/aggregate.test.ts"
+    " M tools/test-audit/tests/aggregate-claudine-compat.test.ts",
+    " M tools/test-audit/tests/aggregate.test.ts",
+    " M tools/test-toolkit/README.md",
+    " M tools/test-toolkit/src/lib.rs",
+    " M tools/test-toolkit/tests/backend_requirements.rs",
+    "?? biscuit-test-harness/tests/level2_tmux_shell_startup.rs",
+    "?? claudine/fixes/2026-09-07-faster-claudine-tests/deferred-performance-measurement.md",
+    "?? claudine/fixes/2026-09-07-faster-claudine-tests/review-3.md",
+    "?? darkmatter/features/2026-09-09-more-context/",
+    "?? prompts/_no_formatting.md",
+    "?? prompts/_os.md",
+    "?? prompts/_ready.md",
+    "?? sniff/fixes/2026-09-07-faster-sniff-tests/review-1.md",
+    "?? tools/test-audit/src/junit/provenance.ts"
   ],
-  "note": "Captured from the WORKING TREE, not a committed revision: this cycle renamed four expectrl binaries level2_* -> level1_* and moved their 19 tests into the L1 fixture and guard contract, and there is no committed candidate revision to capture at. The 'dirty' list above is the uncommitted delta these listings include. The superseded listings for revision 9fc5151a0 are preserved verbatim under enumeration/9fc5151a0/.",
+  "note": "review-3 iteration: post finding-1/3/4 test population",
   "toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
   "nextest": "cargo-nextest 0.9.136 (1d5bf1ec9 2026-05-16)",
   "platform": "arm64-darwin (Darwin 27.0.0)",
-  "capturedAt": "2026-09-09T19:54:03.766Z",
+  "capturedAt": "2026-09-09T22:12:21.879Z",
   "captures": [
     {
       "label": "catalog-types-bare",
@@ -77,7 +96,7 @@
       "features": [],
       "command": "cargo nextest list --message-format json -p claudine-catalog-types",
       "exitCode": 0,
-      "seconds": 2.4,
+      "seconds": 54.3,
       "identities": 21
     },
     {
@@ -92,8 +111,8 @@
       ],
       "command": "cargo nextest list --message-format json -p claudine-cli --features daemon-tests,terminal-tests,real-tests",
       "exitCode": 0,
-      "seconds": 61.8,
-      "identities": 2760
+      "seconds": 116.1,
+      "identities": 2763
     },
     {
       "label": "cli-bare",
@@ -103,8 +122,8 @@
       "features": [],
       "command": "cargo nextest list --message-format json -p claudine-cli",
       "exitCode": 0,
-      "seconds": 33.5,
-      "identities": 2532
+      "seconds": 1.5,
+      "identities": 2535
     },
     {
       "label": "cli-ci",
@@ -117,8 +136,8 @@
       ],
       "command": "cargo nextest list --message-format json -p claudine-cli --features daemon-tests,terminal-tests",
       "exitCode": 0,
-      "seconds": 77.3,
-      "identities": 2759
+      "seconds": 104.6,
+      "identities": 2762
     },
     {
       "label": "cli-daemon",
@@ -130,8 +149,8 @@
       ],
       "command": "cargo nextest list --message-format json -p claudine-cli --features daemon-tests",
       "exitCode": 0,
-      "seconds": 130.2,
-      "identities": 2537
+      "seconds": 162.8,
+      "identities": 2540
     },
     {
       "label": "cli-real",
@@ -143,8 +162,8 @@
       ],
       "command": "cargo nextest list --message-format json -p claudine-cli --features real-tests",
       "exitCode": 0,
-      "seconds": 84.7,
-      "identities": 2533
+      "seconds": 57.9,
+      "identities": 2536
     },
     {
       "label": "cli-terminal",
@@ -156,8 +175,8 @@
       ],
       "command": "cargo nextest list --message-format json -p claudine-cli --features terminal-tests",
       "exitCode": 0,
-      "seconds": 1.6,
-      "identities": 2754
+      "seconds": 95.8,
+      "identities": 2757
     },
     {
       "label": "contract-bare",
@@ -167,7 +186,7 @@
       "features": [],
       "command": "cargo nextest list --message-format json -p claudine-contract",
       "exitCode": 0,
-      "seconds": 28.2,
+      "seconds": 28.8,
       "identities": 48
     },
     {
@@ -180,7 +199,7 @@
       ],
       "command": "cargo nextest list --message-format json -p claudine-contract --features real-tests",
       "exitCode": 0,
-      "seconds": 2.7,
+      "seconds": 2.8,
       "identities": 52
     },
     {
@@ -191,7 +210,7 @@
       "features": [],
       "command": "cargo nextest list --message-format json -p claudine-gen",
       "exitCode": 0,
-      "seconds": 6.6,
+      "seconds": 52.8,
       "identities": 155
     },
     {
@@ -204,7 +223,7 @@
       ],
       "command": "cargo nextest list --message-format json -p claudine-gen --features terminal-tests",
       "exitCode": 0,
-      "seconds": 0.9,
+      "seconds": 33.7,
       "identities": 158
     },
     {
@@ -215,7 +234,7 @@
       "features": [],
       "command": "cargo nextest list --message-format json -p claudine",
       "exitCode": 0,
-      "seconds": 83.9,
+      "seconds": 81,
       "identities": 4151
     },
     {
@@ -226,7 +245,7 @@
       "features": [],
       "command": "cargo nextest list --message-format json -p rendezvous-client",
       "exitCode": 0,
-      "seconds": 4.1,
+      "seconds": 3.6,
       "identities": 21
     },
     {
@@ -237,7 +256,7 @@
       "features": [],
       "command": "cargo nextest list --message-format json -p rendezvous-core",
       "exitCode": 0,
-      "seconds": 57.7,
+      "seconds": 62.2,
       "identities": 82
     },
     {
@@ -250,7 +269,7 @@
       ],
       "command": "cargo nextest list --message-format json -p rendezvous-core --features test-support",
       "exitCode": 0,
-      "seconds": 2.4,
+      "seconds": 14.8,
       "identities": 82
     },
     {
@@ -261,7 +280,7 @@
       "features": [],
       "command": "cargo nextest list --message-format json -p rendezvous-daemon",
       "exitCode": 0,
-      "seconds": 67.3,
+      "seconds": 64.1,
       "identities": 172
     }
   ]

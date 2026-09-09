@@ -12,18 +12,20 @@ packages:
 
 # Test-suite residuals deferred by the 2026-09-07 faster-tests fix
 
-Eight findings the
+Nine findings the
 [faster-claudine-tests fix](../../2026-09-07-faster-claudine-tests/results.md)
 surfaced and could not close inside its scope. Each carries the evidence it
 was found with, the reason it was deferred, and what closing it looks like.
 None is a fixture migration: the L1 spawn allow-list is empty and that clause
 of the fix's acceptance criteria is not what any of these defers.
 
-Two have moved since. Residual 7's tooling half shipped on 2026-09-09 and its
+Three have moved since. Residual 7's tooling half shipped on 2026-09-09 and its
 evidence half remains open; it is rewritten in place rather than split, so the
 entry still reads as one deferral. Residual 8 was added on 2026-09-09 when
 review 1's closure criterion 1 was worked: its inventory half closed and its
-measurement half could not.
+measurement half could not — and on the same day, review 3's cycle repaired
+fifteen of the eighteen failures it named, so its blocker was rewritten rather
+than removed. Residual 9 was added by that cycle.
 
 ## 1. Four zero-byte bench entry points
 
@@ -185,6 +187,61 @@ measurement half could not.
   This entry deliberately does not repair any of them — a documentation and
   evidence work unit must not edit production code — and takes no position on
   whether they belong here or in their own fix.
-- **Closes when:** the eighteen are green, the § 5 protocol is re-run, and
-  `attribution.md`, `inventory.md`'s **Executed** / **Summed cost** columns and
-  `measurement/` are regenerated together from that run.
+- **Update, 2026-09-09 (review-3 iteration 3): fifteen of the eighteen are
+  repaired and the blocker is now a different one.** Six were an inherited
+  launch identity (`MODEL`/`AGENT`/`YOLO`/`INTERACTIVE`/`AGENT_CWD`) leaking
+  from a Claudine-wrapped shell past the L1 fixture scrub; ten were
+  generator-owned sources that branch commit `4fb054ed1`'s formatting sweep had
+  rewritten, restored byte-for-byte by `claudine-gen generate --yes`; one was
+  the `spawn_inventory` line drift, refreshed. `wrap_sigint` does not reproduce
+  in isolation across five runs. The canonical L1 suite is now
+  **6901 run, 6897 passed, 4 failed** — down from 20 failed + 1 timed out — and
+  the four survivors are the shipped-`prompts/` drift guard firing on another
+  session's uncommitted edits. The measurement is still deferred, but now
+  because the § 5 protocol alternates **between two revisions** and this
+  session cannot produce a committed candidate (OpenPGP signing blocks
+  non-interactively), and because a tree a third party is writing during the
+  run is not a revision anything can be attributed to.
+- **Closes when:** the shipped-`prompts/` edits are committed or reverted by
+  their owner and the Level-2 fixture re-derived, a signed candidate commit
+  exists, the § 5 protocol is re-run, and `attribution.md`, `inventory.md`'s
+  **Executed** / **Summed cost** columns and `measurement/` are regenerated
+  together from that run.
+
+## 9. Level-2 GUI backends carry no execution evidence for the shell-isolation change
+
+- **Evidence (2026-09-09, review-3 iteration 3):** tmux and Terminal.app were
+  migrated onto the same two-stage login-plus-rc-suppressed shell invocation
+  WezTerm and Kitty already used, from one shared implementation in
+  `biscuit-test-harness/src/lib.rs` (`login_shell_argv`,
+  `login_shell_command_line`, `single_quoted`). The tmux half is proven
+  end-to-end by `biscuit-test-harness/tests/level2_tmux_shell_startup.rs`,
+  which plants a sentinel in a temporary `HOME`'s interactive rc and asserts it
+  never reaches the pane; reverting the change makes the sentinel appear, so the
+  test is non-vacuous. `biscuit-test-harness/just test-l2` passes 1, and
+  `claudine/just test-l2` reports 216/218 + 3/3 with both failures attributable
+  to the same uncommitted `prompts/` corpus as residual 8.
+- **Why it is deferred, not skipped:** Terminal.app cannot be spawned on this
+  host without a **visible window taking focus**, which the monorepo's testing
+  rules prohibit outright; WezTerm and Kitty report `available() == false`
+  unless the suite runs inside them, and cold-starting either opens a GUI window
+  too. Their changed code path is covered by composition unit tests — including
+  one asserting the doubly-escaped AppleScript `do script` payload — but a unit
+  test on a composed string is not execution evidence, and review 3 states
+  plainly that skipped GUI backends must not be reported as passing.
+- **A second, smaller gap in the same cycle:** `claudine-gen`'s L2 leg
+  canonically runs the serial broker path. Both L2 runs used parallel
+  self-spawn mode (`BISCUIT_L2_THREADS`) specifically so the broker would not
+  open an Apple Terminal window, so that half deviated from the canonical
+  recipe.
+- **A host contamination worth recording for whoever picks this up:** the tmux
+  **server** outlives every run and hands its own environment to every pane. A
+  server started while `MODEL=opus` was in scope fails
+  `level2_lifecycle_equivalence_ac9_context_facets_match_direct_run`, and
+  tmux's `-e` flag cannot fix it — only a cold server can. This is the same
+  inherited-launch-identity class as residual 8's first six failures, at a layer
+  the L1 fixture policy does not reach.
+- **Closes when:** an operator runs `claudine/just test-l2` and
+  `biscuit-test-harness/just test-l2` on a host where a foreground window is
+  acceptable, with a cold tmux server, or CI does — which is the same push
+  residual 7 is waiting on.
