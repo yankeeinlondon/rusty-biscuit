@@ -76,6 +76,8 @@ BISCUIT_L3_TAKE_FOCUS=1 BISCUIT_TEST_LEVEL_REQUIRED=3 just test-l3
 Retain stderr and the four per-test outcomes so an unavailable harness cannot
 be mistaken for a pass.
 
+DECISION: this test will be done manually by Ken; exclude this from your production readiness
+
 ### Medium — Required hosted performance acceptance remains deferred
 
 The specification requires three consecutive candidate runs per configured CI
@@ -91,6 +93,8 @@ use this finding to determine `ready`; the evidence remains a specification gap
 and should be completed through the sequence in
 `deferred-performance-measurement.md` before the fix is archived as fully
 verified.
+
+DECISION: this should not block production readiness and will be done external to the review/fix cycle we're in
 
 ## Prior Review Closure
 
