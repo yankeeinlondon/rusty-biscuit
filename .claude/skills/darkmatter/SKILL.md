@@ -176,6 +176,16 @@ changes require both a passive shipped-artifact corpus test and an end-to-end
 test through the normal invocation path. Persisted values require a repeated
 read/write/read round trip.
 
+Deterministic `md` integration tests must launch through
+`cli/tests/common/fixture.rs`'s `CliProcessFixture`. Its builder pins
+fixture-owned CWD/home/config/cache/temp, scrubs Git/application/rendering
+inputs, and supplies a portable minimal PATH. Use its named `host_path`,
+`fake_only_path`, `ambient_context`, or `inherit_no_env` policy before
+`build()` when the tested behavior requires an escape. Do not hand-build an
+`md` command or undo isolation afterward; `cli/tests/spawn_site_guard.rs`
+rejects raw spawns, post-build CWD/PATH/environment escapes, and stale
+exemptions.
+
 The ordinary local L1 recipe excludes `slow_` tests and leaves the internal
 `terminal-tests` / `browser-tests` build features disabled. Tier recipes enable
 their required targets; CI enables both features when constructing all-tier

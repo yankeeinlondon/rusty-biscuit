@@ -284,6 +284,22 @@ jobs:
           cargo nextest run \
             --manifest-path scripts/Cargo.toml \
             --no-default-features --bin ci-rollup
+      # The shared test-suite audit tool (`tools/test-audit`) is TypeScript and
+      # resolves through the root pnpm workspace; its typecheck and vitest suite
+      # are the only automated checks it has. Ordinary Rust test legs never
+      # provision Node for it — only this tooling leg does.
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Check the test-audit tool
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm --dir tools/test-audit check
 
   # THE single required branch-protection check (plan 1.3).
   #

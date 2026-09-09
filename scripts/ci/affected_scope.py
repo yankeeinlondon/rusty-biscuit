@@ -52,8 +52,17 @@ LOCKFILE_PATH = "Cargo.lock"
 # exercise something: `ci.yml` runs the rollup and scope test suites on the
 # `ci_tooling` flag. (`scripts/ci/affected_scope.py` and
 # `.github/ci/environments.json` are additionally GLOBAL_PATHS, since every
-# package's scope depends on them.)
-CI_TOOLING_PREFIXES = ("scripts/", ".github/ci/")
+# package's scope depends on them.) The shared test-suite audit tool
+# (`tools/test-audit/`, a pnpm workspace member) and the root pnpm workspace
+# files it resolves through are tooling for the same reason: no Cargo package
+# selects them, and `ci.yml` runs their typecheck and vitest suite on this flag.
+CI_TOOLING_PREFIXES = (
+    "scripts/",
+    ".github/ci/",
+    "tools/test-audit/",
+    "pnpm-lock.yaml",
+    "pnpm-workspace.yaml",
+)
 
 # Bootstrap-preflight breadth (D3). A global CI/tooling change validates every
 # runner OS before fan-out; a package-local change validates only the scope host

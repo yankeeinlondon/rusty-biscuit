@@ -1,10 +1,14 @@
 ---
-hash: ef46db3751d8e999-71933c40e83cafd2
-last_updated: 2026-09-07
+hash: ef46db3751d8e999-d508891188c5e8b0
+last_updated: 2026-09-08
 ---
 # Claudine Change Timeline
 
 Condensed history of significant Claudine features and refactors, newest first. Each entry names the feature/fix slug and the durable takeaway; deep references live in the linked docs. For current behavior always trust [architecture.md](architecture.md), [cli-reference.md](cli-reference.md), and the repo `docs/topics/*` — this file is historical context, not a spec.
+
+## 2026-09
+
+- **2026-09-08 — `frontmatter-matters`**: A document's frontmatter `model:` now always reaches the provider launch. Since the provider-metadata Phase F "staged demotion" (2026-07-06) made the compiled `expected_offerings` the validation baseline, `resolve_model_with_env` silently dropped any frontmatter model the baseline did not carry — for OpenCode that is every user-configured provider (`minimax/…`, `zai-coding-plan/…`), because the baseline is the 50 `opencode/*` aggregator ids — and the run fell through to the OpenCode-only `apply_opencode_model_resolution`, which read the legacy `~/.config/opencode/config.json`, exported that stale value as `MODEL`, and pushed no flag, so OpenCode ran its own default while `--dry-run` (which bypassed the catalog) claimed the document's model. Three changes, one rule: **one model path for every provider**. (1) The library chain forwards a frontmatter model unconditionally; the catalog only orders list hints. (2) One CLI helper, `wrap/composition/target.rs::resolve_document_model`, replaces seven hand-rolled resolution sites (eager/live/execute-time compose, sequence review and dry-run, the retry/resume rebuild); it owns the refresh gate and emits one `[model]` warning for a frontmatter model outside the provider's expected offerings (`--silent` suppresses; the rebuild never repeats it), and dry-run resolves with the compiled baseline so its `Model` row is the launch model. (3) The shared prep stage `exec_prep::resolve_model_and_validate` is provider-neutral: an explicit model goes through `profile.apply_model` for everyone; a provider whose catalog sets `model_required_in_non_tty` and has none gets the catalog's `model_env_vars` then the new `WrapperProfile::configured_default_model` hook (OpenCode reads `opencode.jsonc` / `opencode.json` / legacy `config.json`, JSONC-tolerant); `OpenCodeModelSource`/`OpenCodeEnvSnapshot` became the provider-neutral `ModelSource`. Frontmatter `yolo:` was deliberately left out for the permissions spec. See [Composition — Frontmatter `agent` and `model`](composition.md#frontmatter-agent-and-model) and the spec.
 
 ## 2026-08
 

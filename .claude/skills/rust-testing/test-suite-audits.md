@@ -44,6 +44,12 @@ profile, concurrency, and fixture inputs. Record revision, dirty changes,
 platform, cache state, and run commands. Measure cold builds separately using
 isolated build directories rather than clearing the developer's working cache.
 Use the full relevant suite to exercise contention after targeted diagnosis.
+Warm with the exact recipe you will time: each recipe unifies features for
+its own package selection, so a raw `nextest run --no-run` over a wider set
+does not produce the artifacts a narrower recipe builds. Report both the
+whole-series drift bracket (max − min per revision) and the paired ratio of
+each alternating pair; when the host drifts by more than the effect, only the
+paired reading survives, and say which rule each number came from.
 
 For CI, retain per-package/tier/environment artifacts and run identities.
 Compare each environment against its own compatible baseline and report a
@@ -56,12 +62,26 @@ Prefer deterministic work-count assertions for eliminated discovery, requests,
 or repeated scans. Preserve representative real-boundary tests and measure
 product startup on representative repositories separately: removing accidental
 checkout discovery from fixtures does not fix the product's discovery cost.
+Where no counter exists, an lldb breakpoint hit count on the suite's own test
+binary is one without instrumentation or root: resolve the binary through the
+recipe's package selection so feature unification names the same artifact,
+and count only the function's *entry* location — a regex breakpoint also
+lands on every closure the function instantiates and inflates the aggregate
+several-fold. A `PATH` shim that logs its working directory is the equivalent
+for "which directory did the child launch from".
 
-If a reporting script becomes a gate, require it to reject malformed reports,
+The shared `tools/test-audit` package is that reporting script for every
+area ([test-audit-tooling.md](test-audit-tooling.md)); do not write another
+one inside a fix directory. If a reporting script becomes a gate, require it to reject malformed reports,
 missing expected artifacts/tests, duplicate identities, invalid durations, and
 failed runs. A report that prints a miss but exits successfully is not a gate.
 Account explicitly for platform exclusions rather than requiring identical
-cross-platform test counts.
+cross-platform test counts: declare them per environment, report an excluded
+test's absence apart from violations, and fail when an excluded test *does*
+run on that leg, so the list cannot outlive the `cfg` that justified it.
+Sampling one commit more than once on `main` needs `gh run rerun <id>`; every
+later push is a different source state, and a `main` concurrency group that
+cancels in-flight runs makes that an operator call rather than a script's.
 
 ## Remediation and closure
 

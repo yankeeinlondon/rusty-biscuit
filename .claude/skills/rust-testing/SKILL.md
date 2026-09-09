@@ -5,8 +5,8 @@ description: |-
   test design, fixture isolation, `require_level!` gating, nextest filtersets,
   suite audits, and fuzzing. Load this
   before writing or reviewing tests in the rusty-biscuit workspace.
-hash: 7055b0e89017847d-124880c5260474d4
-last_updated: 2026-09-07
+hash: 7055b0e89017847d-f6070688a5c714d7
+last_updated: 2026-09-08
 ---
 # Rust Testing — Rusty Biscuit Monorepo
 
@@ -70,7 +70,12 @@ pending on CI; distinguish implementation completion from verification.
 
 For a requested comprehensive test audit or test-performance specification,
 read [test-suite-audits.md](test-suite-audits.md). Ordinary feature work does
-not require a suite-wide audit.
+not require a suite-wide audit. The tooling those audits run on (listing
+captures, CI JUnit gates, inventory reconciliation, cost attribution,
+alternating-run measurement, and work-count comparison) is the shared
+`tools/test-audit` package, driven by a per-area `audit.config.json`; see
+[test-audit-tooling.md](test-audit-tooling.md) for install, commands,
+configuration, and how to read its numbers.
 
 ## Decision Tree: "What tier should my test live in?"
 
@@ -131,6 +136,19 @@ Symptoms that you have mis-tiered an OS-specific test:
 - it is `#[ignore]`d with a reason that names a *platform* rather than a
   *resource*;
 - a tier prefix and a `#[cfg]` gate encode the same fact twice.
+
+**Compile the other platform's arms locally.** An area's `just check-windows`
+runs `cargo check -p <crates> --tests --target x86_64-pc-windows-gnu`
+(mingw, with `-Wa,-mbig-obj`; `rustup target add x86_64-pc-windows-gnu`
+first). Use that target, not `x86_64-pc-windows-msvc`: on a macOS host the
+MSVC check dies inside `aws-lc-sys` for want of Windows SDK headers, which is
+how one fix concluded its `#[cfg(windows)]` arms were uncompilable off CI.
+Compiling is not running — `windows-latest` stays the runtime authority — but
+a typo in a Windows arm becomes a local error instead of a CI surprise, and
+an import used only inside `#[cfg(unix)]` cases shows up as
+`unused_imports` here and nowhere else (gate the import too). A warm re-run
+re-emits cached warnings only for what it re-checks; when the warning count
+is the evidence, check into a fresh `CARGO_TARGET_DIR`.
 
 ## Test Levels
 
@@ -265,7 +283,10 @@ Before running any final build, test, or lint gate:
    packages, use `just ci-local` at the root (`--lint-only` first: the
    no-features clippy build is where incomplete feature gating surfaces;
    `--dry-run` prints the scope). The pre-push hook runs `just lint` for the
-   changed areas before `just test` for the same reason.
+   changed areas before `just test` for the same reason. A non-comment change
+   to a global path such as `.config/nextest.toml` selects the **whole**
+   workspace in `ci-local` and CI alike (73 packages, ~45 minutes locally on
+   2026-09-08); budget for it before touching runner configuration.
 4. Report the selected scope and commands with the gate results.
 
 For durable native CI, declare package policy in the package's own
@@ -418,6 +439,14 @@ An area that sets `BISCUIT_TEST_FILTER` carries its own copy of these
 expressions and must anchor them too — `_tier_filter` cannot reach inside an
 override.
 
+**Narrowing a recipe to one test binary** is `--test <stem>` through the
+recipe's `*args` (`just test-cli --test context_command`): it leaves the
+tier filterset alone. `-E 'binary(x)'` does not survive the recipes' two-layer
+argument interpolation, and `BISCUIT_TEST_FILTER` replaces the tier expression
+outright. Where a public `test-l2` fans out to a second package (claudine's
+also runs `claudine-gen`), narrow by calling the shared recipe directly:
+`just _test_l2 <pkg> --features terminal-tests --test <stem>`.
+
 ## Leaked Process Detection
 
 Two complementary layers catch tests that spawn child processes and fail to
@@ -474,10 +503,10 @@ reference implementation:
 
 | Piece | Where | Contract |
 |---|---|---|
-| Fixture | `claudine/cli/tests/common/mod.rs` — `CliProcessFixture` | Temp `cwd`/`home`/`bin`; `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA` → fixture home, `HOMEDRIVE`/`HOMEPATH`/`XDG_CONFIG_HOME` removed |
+| Fixture | `claudine/cli/tests/common/mod.rs` and `darkmatter/cli/tests/common/fixture.rs` — `CliProcessFixture` | Per-test temp `cwd`/`home`/`bin` plus area-owned config/cache/temp policy; platform home variables point inside the fixture |
 | Builder | `CliProcessFixture::command()` / `command_builder()` | The one supported spawn. `current_dir` pinned to the fixture `cwd` |
 | Raw surface | `command_std()` / `command_builder()…build_std()` | The same policy on a `std::process::Command`, for a test that has to keep the child — a signal, a deadline, a streaming read, an `expectrl` session |
-| Guard | `claudine/cli/tests/spawn_site_guard.rs` | Source scan; a raw `Command::cargo_bin("<bin>")` outside the builder fails the suite |
+| Guard | each area's `cli/tests/spawn_site_guard.rs` | Source scan; a raw `Command::cargo_bin("<bin>")`, isolation escape, or stale exemption fails the suite |
 
 **Two command surfaces, one policy.** `assert_cmd::Command` has no `spawn`, so a
 live-child test needs a `std::process::Command` — and hand-building one
@@ -641,6 +670,7 @@ Open the topic file when the task matches:
 | Performance testing tool choice (Criterion vs Divan)                 | `performance-testing.md`                |
 | Criterion benchmarking (getting started → deep dive → Bencher)       | `criterion.md`                          |
 | Nextest details                                                      | `nextest.md`                            |
+| Audit tooling (`tools/test-audit`: capture, fetch, junit, reconcile, attribute, measure, counters) | `test-audit-tooling.md`               |
 
 ## Resources
 
