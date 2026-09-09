@@ -1,0 +1,99 @@
+{
+  "version": 1,
+  "area": "darkmatter",
+  "root": "../../..",
+  "evidenceDir": ".",
+  "notes": [
+    "Configuration for the shared `test-audit` tool (tools/test-audit). Paths are relative to this file.",
+    "Local L1 (`just test`) excludes `slow_`; the CI-selected L1 sets BISCUIT_L1_INCLUDE_SLOW=1 (l1-include-slow = true on all four packages). The two are separate cohorts.",
+    "Phase 7 enables effects-instrumentation on the darkmatter and dmls package specs in canonical L1. The shared selection feature arrays below describe enumeration captures and cannot express per-package feature flags in one Cargo invocation.",
+    "The Zed WASM extension (dmls/zed-dmls) is workspace-excluded; its routes are `just check-zed` and `just zed-verify` (CI: _package-ci.yml:519), not `just test`.",
+    "dmls/vscode-dmls ships no in-repo automated tests; `install-vscode-package` is a manual packaging check, not coverage."
+  ],
+  "packages": [
+    { "name": "darkmatter", "path": "darkmatter/lib", "sourceRoots": ["darkmatter/lib/src", "darkmatter/lib/tests", "darkmatter/lib/benches"] },
+    { "name": "darkmatter-cli", "path": "darkmatter/cli", "sourceRoots": ["darkmatter/cli/src", "darkmatter/cli/tests"] },
+    { "name": "dmls", "path": "darkmatter/dmls", "sourceRoots": ["darkmatter/dmls/src", "darkmatter/dmls/tests"] },
+    { "name": "zed-dmls-cli", "path": "darkmatter/dmls/zed-dmls-cli", "sourceRoots": ["darkmatter/dmls/zed-dmls-cli/src", "darkmatter/dmls/zed-dmls-cli/tests"] }
+  ],
+  "routes": [
+    { "id": "sanity", "kind": "nextest", "command": "just sanity", "executes": true, "note": "_sanity_all over the four packages; lib + bins, !slow" },
+    { "id": "test-local", "kind": "nextest", "command": "just test", "executes": true, "note": "_test_local_all: one nextest invocation over the four packages, L1 filter excludes slow_" },
+    { "id": "test-ci", "kind": "nextest", "command": "NEXTEST_PROFILE=ci just test", "ci": "_package-ci.yml test job (per package)", "executes": true, "note": "_test_all per package with BISCUIT_L1_INCLUDE_SLOW=1; JUnit staged per package" },
+    { "id": "test-l2", "kind": "nextest", "command": "just test-l2", "ci": "_package-ci.yml l2 job (tmux-hostable legs only)", "executes": true },
+    { "id": "test-l3", "kind": "nextest", "command": "RUN_LEVEL3=1 just test-l3", "executes": true, "note": "opt-in; never in CI" },
+    { "id": "test-browser", "kind": "nextest", "command": "just test-browser", "ci": "_package-ci.yml browser job (ubuntu-latest)", "executes": true },
+    { "id": "test-real", "kind": "absent", "command": "just test-real", "executes": false, "note": "declared no-op for darkmatter" },
+    { "id": "doctest", "kind": "doctest", "command": "just doctest", "executes": true, "note": "lib + cli" },
+    { "id": "bench", "kind": "bench", "command": "just bench", "executes": false, "note": "16 [[bench]] targets in darkmatter/lib; criterion, not a test route" },
+    { "id": "bench-dmls", "kind": "bench", "command": "just bench-dmls", "executes": false, "note": "generates a synthetic corpus under ../target/dmls-bench/" },
+    { "id": "fuzz", "kind": "fuzz", "command": "just fuzz", "ci": "fuzz-nightly.yml", "executes": false, "note": "darkmatter/lib/fuzz markdown_parser target; nightly only" },
+    { "id": "check-zed", "kind": "cargo-check", "command": "just check-zed", "executes": false, "note": "cargo check --target wasm32-wasip2 of the workspace-excluded zed-dmls extension" },
+    { "id": "zed-verify", "kind": "script", "command": "just zed-verify", "ci": "_package-ci.yml:519 (dmls runner-tool zed-extension)", "executes": false, "note": "package + manifest/archive assertions; not a test suite" },
+    { "id": "vscode-dmls", "kind": "absent", "command": "just install-vscode-package", "executes": false, "note": "no in-repo automated tests; manual packaging check only" },
+    { "id": "effects-instrumentation", "kind": "manual", "command": "cargo nextest list -p darkmatter --features effects-instrumentation", "executes": false, "note": "dedicated listing route for the feature; canonical L1 also enables the counters on the darkmatter and dmls package specs" }
+  ],
+  "selections": [
+    { "label": "l1-local-all", "packages": ["darkmatter", "darkmatter-cli", "dmls", "zed-dmls-cli"], "features": [], "routes": ["test-local"], "note": "the one-scheduler local invocation; feature unification differs from per-package captures" },
+    { "label": "lib-bare", "packages": ["darkmatter"], "features": [], "routes": ["sanity", "test-ci", "doctest"] },
+    { "label": "cli-bare", "packages": ["darkmatter-cli"], "features": [], "routes": ["sanity", "test-ci", "test-l3", "doctest"] },
+    { "label": "dmls-bare", "packages": ["dmls"], "features": [], "routes": ["sanity", "test-ci"] },
+    { "label": "zed-cli-bare", "packages": ["zed-dmls-cli"], "features": [], "routes": ["sanity", "test-ci"] },
+    { "label": "lib-terminal", "packages": ["darkmatter"], "features": ["terminal-tests"], "routes": ["test-l2"] },
+    { "label": "cli-terminal", "packages": ["darkmatter-cli"], "features": ["terminal-tests"], "routes": ["test-l2"] },
+    { "label": "dmls-terminal", "packages": ["dmls"], "features": ["terminal-tests"], "routes": ["test-l2"] },
+    { "label": "lib-browser", "packages": ["darkmatter"], "features": ["browser-tests"], "routes": ["test-browser"] },
+    { "label": "lib-terminal-browser", "packages": ["darkmatter"], "features": ["terminal-tests", "browser-tests"], "routes": ["test-l3"], "note": "also the CI feature contract for the darkmatter package (features = [terminal-tests, browser-tests])" },
+    { "label": "lib-effects", "packages": ["darkmatter"], "features": ["effects-instrumentation"], "routes": ["effects-instrumentation"] }
+  ],
+  "cohorts": [
+    { "id": "sanity", "description": "fast confidence subset: lib + bins, no slow_, per package", "population": "local", "recipe": "just sanity", "selections": ["lib-bare", "cli-bare", "dmls-bare", "zed-cli-bare"], "filter": "!(level2_|level3_|browser_|real_|slow_) over --lib --bins", "tiers": ["sanity"] },
+    { "id": "l1-local", "description": "local-default L1: one nextest invocation over the four packages, slow_ excluded", "population": "local", "recipe": "just test", "selections": ["l1-local-all"], "filter": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/) + test(/(^|::)slow_/))", "tiers": ["L1"] },
+    { "id": "l1-local-include-slow", "description": "local L1 with the CI slow selection (BISCUIT_L1_INCLUDE_SLOW=1) — same profile and scheduler as l1-local; the population delta is the slow_ tests", "population": "local", "recipe": "BISCUIT_L1_INCLUDE_SLOW=1 just test", "env": { "BISCUIT_L1_INCLUDE_SLOW": "1" }, "selections": ["l1-local-all"], "filter": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/))", "tiers": ["L1"] },
+    { "id": "l1-ci", "description": "CI-selected L1: per-package nextest runs under the ci profile with slow_ retained, JUnit staged per package", "population": "ci", "recipe": "NEXTEST_PROFILE=ci just test", "env": { "BISCUIT_L1_INCLUDE_SLOW": "1", "NEXTEST_PROFILE": "ci" }, "selections": ["lib-terminal-browser", "cli-terminal", "dmls-terminal", "zed-cli-bare"], "filter": "!(test(/(^|::)level2_/) + test(/(^|::)level3_/) + test(/(^|::)browser_/) + test(/(^|::)real_/))", "tiers": ["L1"], "note": "CI builds each package with its declared [package.metadata.ci.tests] features, so the L1 population is listed under those selections" },
+    { "id": "l2", "description": "real-terminal tier: lib (wezterm), cli (tmux, wezterm), dmls (tmux)", "population": "local", "recipe": "just test-l2", "selections": ["lib-terminal", "cli-terminal", "dmls-terminal"], "filter": "test(/(^|::)level2_/)", "tiers": ["L2"] },
+    { "id": "browser", "description": "headless-browser tier, lib only", "population": "local", "recipe": "just test-browser", "selections": ["lib-browser"], "filter": "test(/(^|::)browser_/)", "tiers": ["browser"] },
+    { "id": "l3", "description": "OS-input tier, opt-in", "population": "local", "recipe": "RUN_LEVEL3=1 just test-l3", "selections": ["lib-terminal-browser", "cli-bare"], "filter": "test(/(^|::)level3_/)", "tiers": ["L3"] }
+  ],
+  "environments": [
+    { "name": "ubuntu-latest", "kind": "native", "os": "linux", "workflow": "_package-ci.yml",
+      "cells": [
+        { "tier": "L1", "package": "darkmatter" }, { "tier": "L1", "package": "darkmatter-cli" }, { "tier": "L1", "package": "dmls" }, { "tier": "L1", "package": "zed-dmls-cli" },
+        { "tier": "L2", "package": "darkmatter-cli" }, { "tier": "L2", "package": "dmls" },
+        { "tier": "browser", "package": "darkmatter" }
+      ] },
+    { "name": "macos-latest", "kind": "native", "os": "macos", "workflow": "_package-ci.yml",
+      "cells": [
+        { "tier": "L1", "package": "darkmatter" }, { "tier": "L1", "package": "darkmatter-cli" }, { "tier": "L1", "package": "dmls" }, { "tier": "L1", "package": "zed-dmls-cli" },
+        { "tier": "L2", "package": "darkmatter-cli" }, { "tier": "L2", "package": "dmls" }
+      ] },
+    { "name": "windows-latest", "kind": "native", "os": "windows", "workflow": "_package-ci.yml",
+      "cells": [
+        { "tier": "L1", "package": "darkmatter" }, { "tier": "L1", "package": "darkmatter-cli" }, { "tier": "L1", "package": "dmls" }, { "tier": "L1", "package": "zed-dmls-cli" }
+      ] },
+    { "name": "wsl2-ubuntu", "kind": "wsl", "os": "linux", "workflow": "_wsl-ci.yml",
+      "cells": [
+        { "tier": "L1", "package": "darkmatter" }, { "tier": "L1", "package": "darkmatter-cli" }, { "tier": "L1", "package": "dmls" }, { "tier": "L1", "package": "zed-dmls-cli" }
+      ] }
+  ],
+  "families": "families.json",
+  "inventory": "inventory.md",
+  "enumeration": "enumeration",
+  "sourceScan": { "exclude": ["/fixtures/", "/snapshots/", "/example-docs/"] },
+  "junit": {
+    "requiredTests": [],
+    "platformExclusions": {},
+    "timeoutFloors": {},
+    "enforceTimeoutFloors": false
+  },
+  "counters": {
+    "signals": [
+      { "id": "discovery", "description": "repository/host discovery walks performed by ComposeContext capture and file-resolution context", "coverage": "pending", "source": "no stable counter yet; Phase 7/8 candidate: lldb entry-hit count on capture_file_resolution_context / GitRepo::discover" },
+      { "id": "composition", "description": "compose pipeline executions (parse + expand + interpolate) per test", "coverage": "pending", "source": "no stable counter yet; Phase 7/8 candidate" },
+      { "id": "effects", "description": "effect verbs executed (shell, write, remote fetch, ...) during a compose", "coverage": "instrumented", "source": "darkmatter lib feature effects-instrumentation (process-wide effect counters in src/effects/)" },
+      { "id": "http-requests", "description": "requests received by the test-owned HTTP fixture", "coverage": "fixture", "source": "cli/tests/common/mod.rs mock_http_server request_count(); lib/tests/effects_integration.rs request counter" }
+    ],
+    "compatibilityKeys": ["signal", "environment", "platformKind", "requestShape", "counterVersion", "phase"],
+    "boundaries": []
+  }
+}

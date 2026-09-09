@@ -1,0 +1,37 @@
+{
+  "families": [
+    {
+      "id": "lib-browser",
+      "package": "darkmatter",
+      "count": 42,
+      "summed": 37.255,
+      "mean": 0.8870238095238095,
+      "max": 8.947,
+      "min": 0.504,
+      "slowest": {
+        "name": "darkmatter::browser_render browser_code_block_background_computes_in_browser",
+        "seconds": 8.947
+      },
+      "share": 0.9181535883280756
+    },
+    {
+      "id": "lib-browser-prefixed-inprocess",
+      "package": "darkmatter",
+      "count": 44,
+      "summed": 3.321000000000001,
+      "mean": 0.07547727272727275,
+      "max": 0.188,
+      "min": 0.013,
+      "slowest": {
+        "name": "darkmatter markdown::render_tree::code_renderer::tests::browser_mermaid_returns_svg_or_none_never_silent_code_block",
+        "seconds": 0.188
+      },
+      "share": 0.0818464116719243
+    }
+  ],
+  "summed": 40.57600000000001,
+  "elapsed": 40.612,
+  "count": 86,
+  "violations": []
+}
+GATE EXIT=0

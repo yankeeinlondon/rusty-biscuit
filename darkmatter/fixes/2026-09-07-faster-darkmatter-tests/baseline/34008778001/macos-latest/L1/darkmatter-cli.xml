@@ -1,0 +1,750 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nextest-run" tests="665" skipped="0" failures="0" errors="0" uuid="7d059f89-31cd-4bf4-b137-8c71c1db3e22" timestamp="2026-09-06T04:42:00.206+00:00" time="47.749">
+    <testsuite name="darkmatter-cli" tests="137" skipped="0" errors="0" failures="0">
+        <testcase name="approval::tests::prompt_accepts_valid_choice" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.213+00:00" time="0.038"/>
+        <testcase name="approval::tests::prompt_lists_chain_executables_for_chain_request" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.213+00:00" time="0.040"/>
+        <testcase name="approval::tests::all_five_choices_produce_correct_decisions" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.213+00:00" time="0.041"/>
+        <testcase name="approval::tests::prompt_shows_source_and_command" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.257+00:00" time="0.026"/>
+        <testcase name="approval::tests::prompt_retries_after_invalid_choice" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.257+00:00" time="0.026"/>
+        <testcase name="approval::tests::prompt_shows_stdin_source" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.257+00:00" time="0.027"/>
+        <testcase name="approval::tests::prompt_shows_url_source" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.283+00:00" time="0.019"/>
+        <testcase name="args::cli::tests::clean_fixed_width_conflicts_with_ignore_incidental_newlines" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.283+00:00" time="0.019"/>
+        <testcase name="args::cli::tests::clean_fixed_width_flag_parses" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.283+00:00" time="0.020"/>
+        <testcase name="args::cli::tests::clean_ignore_incidental_newlines_flag_parses" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.302+00:00" time="0.026"/>
+        <testcase name="args::cli::tests::cli_fill_flags_parse" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.303+00:00" time="0.025"/>
+        <testcase name="args::cli::tests::cli_alignment_flags_parse" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.303+00:00" time="0.028"/>
+        <testcase name="args::cli::tests::cli_line_numbers_omitted_is_none" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.331+00:00" time="0.025"/>
+        <testcase name="args::cli::tests::cli_line_numbers_false_parses" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.328+00:00" time="0.028"/>
+        <testcase name="args::cli::tests::cli_line_numbers_bare_flag_parses_as_true" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.328+00:00" time="0.030"/>
+        <testcase name="args::cli::tests::cli_line_numbers_true_parses" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.356+00:00" time="0.022"/>
+        <testcase name="args::cli::tests::cli_margin_flags_parse_correctly" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.356+00:00" time="0.022"/>
+        <testcase name="args::cli::tests::cli_padding_flags_parse_correctly" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.358+00:00" time="0.021"/>
+        <testcase name="args::cli::tests::cli_page_bg_flag_parses" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.378+00:00" time="0.026"/>
+        <testcase name="args::cli::tests::compose_allow_shell_timeout_flag_parses" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.379+00:00" time="0.025"/>
+        <testcase name="args::cli::tests::compose_allow_shell_timeout_defaults_false" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.378+00:00" time="0.026"/>
+        <testcase name="args::cli::tests::compose_args_captures_positional_tokens" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.403+00:00" time="0.038"/>
+        <testcase name="args::cli::tests::compose_args_empty_when_no_positionals" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.404+00:00" time="0.039"/>
+        <testcase name="args::cli::tests::compose_baseline_schema_flag_parses" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.405+00:00" time="0.039"/>
+        <testcase name="args::cli::tests::compose_perf_flag_sets_true" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.443+00:00" time="0.021"/>
+        <testcase name="args::cli::tests::compose_baseline_schema_flags_conflict" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.441+00:00" time="0.023"/>
+        <testcase name="args::cli::tests::compose_no_baseline_schema_flag_parses" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.443+00:00" time="0.022"/>
+        <testcase name="args::cli::tests::compose_without_perf_defaults_false" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.465+00:00" time="0.026"/>
+        <testcase name="args::cli::tests::compose_timeout_flag_parses" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.464+00:00" time="0.028"/>
+        <testcase name="args::cli::tests::compose_timeout_defaults_to_none" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.464+00:00" time="0.028"/>
+        <testcase name="args::cli::tests::debug_flag_absent_is_none" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.492+00:00" time="0.044"/>
+        <testcase name="args::cli::tests::render_code_block_flag_defaults_to_inverse" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.492+00:00" time="0.045"/>
+        <testcase name="args::cli::tests::debug_flag_parses_level" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.492+00:00" time="0.046"/>
+        <testcase name="args::cli::tests::schema_about_parses_as_schema_target" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.539+00:00" time="0.048"/>
+        <testcase name="args::cli::tests::render_code_block_flag_parses_dark" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.535+00:00" time="0.052"/>
+        <testcase name="args::cli::tests::schema_about_accepts_code_block_flag" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.537+00:00" time="0.051"/>
+        <testcase name="args::completion::tests::complete_fixed_width_values_lists_common_widths" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.587+00:00" time="0.035"/>
+        <testcase name="args::completion::tests::complete_indent_values_lists_valid_widths" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.587+00:00" time="0.034"/>
+        <testcase name="args::completion::tests::complete_markdown_files_from_supports_nested_paths" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.588+00:00" time="0.037"/>
+        <testcase name="args::completion::tests::complete_theme_names_lists_all_themes" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.622+00:00" time="0.045"/>
+        <testcase name="args::completion::tests::compose_arg_completion_suggests_files_for_non_setter_tokens" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.626+00:00" time="0.041"/>
+        <testcase name="args::completion::tests::compose_arg_completion_skips_file_suggestions_for_setters" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.622+00:00" time="0.046"/>
+        <testcase name="args::parsers::tests::page_bg_color_hex_three" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.667+00:00" time="0.020"/>
+        <testcase name="args::parsers::tests::page_bg_color_rejects_invalid" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.667+00:00" time="0.022"/>
+        <testcase name="args::parsers::tests::page_bg_color_hex_six" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.667+00:00" time="0.024"/>
+        <testcase name="args::parsers::tests::page_bg_color_tailwind" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.691+00:00" time="0.025"/>
+        <testcase name="args::parsers::tests::page_bg_color_special_keywords" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.689+00:00" time="0.029"/>
+        <testcase name="args::parsers::tests::page_bg_color_rgb_triple" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.687+00:00" time="0.032"/>
+        <testcase name="args::parsers::tests::parse_bool_str_accepts_truthy_values" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.718+00:00" time="0.019"/>
+        <testcase name="args::parsers::tests::parse_bool_str_rejects_invalid" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.720+00:00" time="0.018"/>
+        <testcase name="args::parsers::tests::parse_bool_str_accepts_falsy_values" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.716+00:00" time="0.021"/>
+        <testcase name="args::parsers::tests::parse_cli_fill_pad_fixed" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.737+00:00" time="0.023"/>
+        <testcase name="args::parsers::tests::parse_cli_fill_indent_max_explicit" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.737+00:00" time="0.024"/>
+        <testcase name="args::parsers::tests::parse_cli_fill_full" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.737+00:00" time="0.025"/>
+        <testcase name="args::parsers::tests::parse_cli_fill_pad_percent" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.761+00:00" time="0.021"/>
+        <testcase name="args::parsers::tests::parse_cli_fill_rejects_malformed" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.762+00:00" time="0.023"/>
+        <testcase name="args::parsers::tests::parse_cli_fill_rejects_negative" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.763+00:00" time="0.024"/>
+        <testcase name="args::parsers::tests::parse_cli_length_fixed" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.787+00:00" time="0.021"/>
+        <testcase name="args::parsers::tests::parse_cli_fill_rejects_unknown_kind" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.785+00:00" time="0.022"/>
+        <testcase name="args::parsers::tests::parse_cli_fill_rejects_percent_over_100" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.781+00:00" time="0.027"/>
+        <testcase name="args::parsers::tests::parse_cli_length_rejects_out_of_range_percent" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.808+00:00" time="0.024"/>
+        <testcase name="args::parsers::tests::parse_fixed_width_accepts_valid_values" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.808+00:00" time="0.024"/>
+        <testcase name="args::parsers::tests::parse_cli_length_percent" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.808+00:00" time="0.031"/>
+        <testcase name="args::parsers::tests::parse_fixed_width_rejects_invalid_values" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.831+00:00" time="0.025"/>
+        <testcase name="args::parsers::tests::parse_indent_size_rejects_invalid" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.839+00:00" time="0.023"/>
+        <testcase name="args::parsers::tests::parse_indent_size_accepts_valid_values" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.833+00:00" time="0.029"/>
+        <testcase name="args::parsers::tests::parse_max_width_rejects_zero" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.861+00:00" time="0.022"/>
+        <testcase name="args::parsers::tests::parse_max_width_rejects_negative" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.861+00:00" time="0.022"/>
+        <testcase name="args::parsers::tests::parse_max_width_accepts_positive" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.856+00:00" time="0.037"/>
+        <testcase name="commands::code_block::tests::code_block_markdown_empty_language_with_metadata" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.884+00:00" time="0.035"/>
+        <testcase name="args::parsers::tests::reject_width_flag_always_errors" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.884+00:00" time="0.036"/>
+        <testcase name="commands::code_block::tests::code_block_markdown_escapes_embedded_fences" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.893+00:00" time="0.034"/>
+        <testcase name="commands::code_block::tests::code_block_markdown_highlight_ranges" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.919+00:00" time="0.028"/>
+        <testcase name="commands::code_block::tests::code_block_markdown_language_only" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.919+00:00" time="0.029"/>
+        <testcase name="commands::code_block::tests::code_block_markdown_line_numbering" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.928+00:00" time="0.031"/>
+        <testcase name="commands::code_block::tests::code_block_markdown_quoted_title_with_double_quote" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.947+00:00" time="0.022"/>
+        <testcase name="commands::code_block::tests::code_block_markdown_show_artifact_matches_stdout" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.948+00:00" time="0.021"/>
+        <testcase name="commands::code_block::tests::parse_highlight_spec_rejects_inverted_range" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.959+00:00" time="0.026"/>
+        <testcase name="commands::compose::tests::format_compose_perf_report_contains_sections" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.969+00:00" time="0.034"/>
+        <testcase name="commands::compose::tests::format_compose_perf_report_without_pipeline" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.969+00:00" time="0.037"/>
+        <testcase name="commands::compose::tests::format_duration_microseconds" classname="darkmatter-cli" timestamp="2026-09-06T04:42:00.985+00:00" time="0.027"/>
+        <testcase name="commands::compose::tests::format_duration_milliseconds" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.003+00:00" time="0.023"/>
+        <testcase name="commands::compose::tests::format_duration_seconds" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.006+00:00" time="0.030"/>
+        <testcase name="commands::compose::tests::parse_compose_positionals_empty_args_have_no_input_or_setters" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.012+00:00" time="0.025"/>
+        <testcase name="commands::compose::tests::parse_compose_positionals_invalid_empty_key_surfaces_error" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.027+00:00" time="0.031"/>
+        <testcase name="commands::compose::tests::parse_compose_positionals_treats_numeric_leading_key_as_input" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.038+00:00" time="0.022"/>
+        <testcase name="commands::compose::tests::parse_compose_positionals_setter_only_args_keep_input_empty" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.037+00:00" time="0.025"/>
+        <testcase name="commands::compose::tests::parse_compose_setter_rejects_empty_key" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.060+00:00" time="0.029"/>
+        <testcase name="commands::compose::tests::parse_compose_setter_rejects_numeric_leading_key_as_non_setter" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.062+00:00" time="0.028"/>
+        <testcase name="commands::compose::tests::parse_compose_setter_accepts_hyphenated_and_private_keys" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.058+00:00" time="0.032"/>
+        <testcase name="commands::compose::tests::parse_shorthand_value_parses_primitives_and_falls_back_to_string" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.089+00:00" time="0.030"/>
+        <testcase name="commands::compose::tests::parse_compose_setter_treats_path_like_keys_as_input_candidates" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.089+00:00" time="0.031"/>
+        <testcase name="commands::schema::about::tests::context_catalog_renders_migrated_variables_with_types" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.090+00:00" time="0.043"/>
+        <testcase name="commands::schema::about::tests::context_variables_doc_matches_generated_catalog" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.119+00:00" time="0.026"/>
+        <testcase name="commands::schema::about::tests::schema_about_markdown_options_use_detected_terminal_mode" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.145+00:00" time="0.020"/>
+        <testcase name="commands::schema::assignment::tests::applies_nested_assignment_creating_object" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.166+00:00" time="0.036"/>
+        <testcase name="commands::schema::about::tests::expression_function_signatures_render_typed_list_formatters" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.120+00:00" time="0.090"/>
+        <testcase name="commands::schema::assignment::tests::applies_nested_assignment_merging_object" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.202+00:00" time="0.033"/>
+        <testcase name="commands::schema::assignment::tests::applies_nested_overwrites_non_object_parent" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.210+00:00" time="0.035"/>
+        <testcase name="commands::schema::assignment::tests::applies_top_level_assignment" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.235+00:00" time="0.039"/>
+        <testcase name="commands::schema::assignment::tests::bare_filename_no_equals_treated_as_file" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.246+00:00" time="0.034"/>
+        <testcase name="commands::schema::assignment::tests::coerces_to_string_when_union_contains_string_arm" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.274+00:00" time="0.055"/>
+        <testcase name="commands::schema::assignment::tests::coerces_yaml_boolean_to_string_when_schema_says_string" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.280+00:00" time="0.064"/>
+        <testcase name="commands::schema::assignment::tests::deep_nested_path" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.344+00:00" time="0.058"/>
+        <testcase name="commands::schema::assignment::tests::coerces_yaml_number_to_string_when_schema_says_string" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.329+00:00" time="0.088"/>
+        <testcase name="commands::schema::assignment::tests::empty_lhs_treated_as_file" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.403+00:00" time="0.028"/>
+        <testcase name="commands::schema::assignment::tests::empty_rhs_is_empty_string" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.417+00:00" time="0.028"/>
+        <testcase name="commands::schema::assignment::tests::invalid_identifier_lhs_treated_as_file" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.431+00:00" time="0.026"/>
+        <testcase name="commands::schema::assignment::tests::keeps_boolean_for_boolean_schema" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.446+00:00" time="0.041"/>
+        <testcase name="commands::schema::assignment::tests::keeps_boolean_for_boolish_schema" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.457+00:00" time="0.045"/>
+        <testcase name="commands::schema::assignment::tests::keeps_number_for_number_schema" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.487+00:00" time="0.036"/>
+        <testcase name="commands::schema::about::tests::schema_about_markdown_code_uses_inverted_theme_for_both_terminal_modes" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.133+00:00" time="0.411"/>
+        <testcase name="commands::schema::assignment::tests::keeps_yaml_string_as_is_when_schema_says_string" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.502+00:00" time="0.042"/>
+        <testcase name="commands::schema::assignment::tests::keeps_yaml_value_for_array_schema" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.523+00:00" time="0.032"/>
+        <testcase name="commands::schema::assignment::tests::nested_path" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.555+00:00" time="0.015"/>
+        <testcase name="commands::schema::assignment::tests::keeps_yaml_value_for_nested_path" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.544+00:00" time="0.027"/>
+        <testcase name="commands::schema::assignment::tests::keeps_yaml_value_for_unknown_property" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.545+00:00" time="0.027"/>
+        <testcase name="commands::schema::assignment::tests::parses_float_value" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.571+00:00" time="0.019"/>
+        <testcase name="commands::schema::assignment::tests::parses_flow_mapping" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.572+00:00" time="0.018"/>
+        <testcase name="commands::schema::assignment::tests::parses_boolean_value" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.570+00:00" time="0.025"/>
+        <testcase name="commands::schema::assignment::tests::parses_flow_sequence" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.590+00:00" time="0.025"/>
+        <testcase name="commands::schema::assignment::tests::parses_integer_value" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.590+00:00" time="0.029"/>
+        <testcase name="commands::schema::assignment::tests::parses_string_value" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.595+00:00" time="0.025"/>
+        <testcase name="commands::schema::assignment::tests::paths_with_slash_treated_as_file" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.615+00:00" time="0.024"/>
+        <testcase name="render::tests::parse_bool_env_rejects_unknown_values" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.620+00:00" time="0.021"/>
+        <testcase name="render::tests::non_strict_style_applies_sub_spec_7_key_silently" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.619+00:00" time="0.024"/>
+        <testcase name="render::tests::parse_bool_env_supports_falsy_values" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.639+00:00" time="0.018"/>
+        <testcase name="render::tests::parse_bool_env_supports_truthy_values" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.641+00:00" time="0.017"/>
+        <testcase name="render::tests::strict_style_flag_defaults_false" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.643+00:00" time="0.026"/>
+        <testcase name="render::tests::strict_style_flag_parses" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.657+00:00" time="0.027"/>
+        <testcase name="render::tests::strict_style_succeeds_on_schema_clean_sub_spec_7_key" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.658+00:00" time="0.031"/>
+        <testcase name="style_claims::tests::alignment_flags_are_captured" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.669+00:00" time="0.030"/>
+        <testcase name="style_claims::tests::code_theme_flag_is_captured" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.684+00:00" time="0.024"/>
+        <testcase name="style_claims::tests::margin_and_padding_flags_are_captured" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.700+00:00" time="0.017"/>
+        <testcase name="style_claims::tests::fill_flags_are_captured" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.689+00:00" time="0.028"/>
+        <testcase name="style_claims::tests::no_layout_flags_produces_empty_claims" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.708+00:00" time="0.018"/>
+        <testcase name="style_claims::tests::page_background_and_color_are_captured" classname="darkmatter-cli" timestamp="2026-09-06T04:42:01.717+00:00" time="0.016"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::clean" tests="29" skipped="0" errors="0" failures="0">
+        <testcase name="test_clean_save_rejects_stdin" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:01.726+00:00" time="0.177"/>
+        <testcase name="test_clean_subcommand_compact_preserves_ten_digit_prose_boundary" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:01.733+00:00" time="0.251"/>
+        <testcase name="test_clean_subcommand_file" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:01.903+00:00" time="0.081"/>
+        <testcase name="test_clean_subcommand_fixed_width_keeps_reference_definitions_intact" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:01.984+00:00" time="0.074"/>
+        <testcase name="test_clean_subcommand_fixed_width_reflows_to_target_width" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:01.984+00:00" time="0.074"/>
+        <testcase name="test_clean_line_width_modes_preserve_mixed_document_structure" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:01.717+00:00" time="0.376"/>
+        <testcase name="test_clean_subcommand_fixed_width_treats_nine_digit_ordinal_as_an_ordered_marker" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:02.058+00:00" time="0.114"/>
+        <testcase name="test_clean_subcommand_fixed_width_treats_ten_digit_ordinal_as_prose" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:02.059+00:00" time="0.113"/>
+        <testcase name="test_clean_subcommand_ignore_incidental_newlines_preserves_source_wrapping" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:02.093+00:00" time="0.133"/>
+        <testcase name="test_clean_subcommand_indent" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:02.172+00:00" time="0.142"/>
+        <testcase name="test_clean_subcommand_indent_eight_preserves_structure" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:02.172+00:00" time="0.290"/>
+        <testcase name="test_clean_subcommand_list_modes_match_library_contract" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:02.314+00:00" time="0.282"/>
+        <testcase name="test_clean_subcommand_indent_eight_uses_exact_nested_columns" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:02.226+00:00" time="0.707"/>
+        <testcase name="test_clean_subcommand_preserves_additional_paragraphs_inside_blockquoted_items" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:02.462+00:00" time="0.528"/>
+        <testcase name="test_clean_subcommand_preserves_nested_child_after_additional_item_paragraph" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:02.933+00:00" time="0.335"/>
+        <testcase name="test_clean_subcommand_preserves_markers_in_protected_bodies" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:02.596+00:00" time="0.827"/>
+        <testcase name="test_clean_subcommand_rejects_fixed_width_with_ignore_incidental_newlines" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:03.423+00:00" time="0.048"/>
+        <testcase name="test_clean_subcommand_rejects_invalid_indent" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:03.471+00:00" time="0.030"/>
+        <testcase name="test_clean_subcommand_save_fixed_width_reports_delta" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:03.501+00:00" time="0.085"/>
+        <testcase name="test_clean_subcommand_save_in_place_reports_delta" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:03.586+00:00" time="0.111"/>
+        <testcase name="test_clean_subcommand_save_preserve_mode_is_idempotent_for_authored_list_soft_breaks" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:03.698+00:00" time="0.150"/>
+        <testcase name="test_clean_subcommand_preserves_nested_lists_inside_blockquotes" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:02.990+00:00" time="0.911"/>
+        <testcase name="test_clean_subcommand_save_verbose_after_subcommand_shows_visual_diff" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:03.901+00:00" time="0.093"/>
+        <testcase name="test_clean_subcommand_save_reflows_list_and_is_stable_on_repeated_read" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:03.848+00:00" time="0.165"/>
+        <testcase name="test_clean_subcommand_save_verbose_reports_fixed_width_visual_delta" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:03.994+00:00" time="0.080"/>
+        <testcase name="test_clean_subcommand_stdin" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:04.013+00:00" time="0.092"/>
+        <testcase name="test_clean_subcommand_strips_incidental_newlines_by_default" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:04.074+00:00" time="0.067"/>
+        <testcase name="test_save_shorthand_cleans_in_place_and_reports_delta" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:04.105+00:00" time="0.083"/>
+        <testcase name="test_clean_subcommand_preserves_quoted_marker_looking_indented_code" classname="darkmatter-cli::clean" timestamp="2026-09-06T04:42:03.269+00:00" time="1.149"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::clean_frontmatter" tests="31" skipped="0" errors="0" failures="0">
+        <testcase name="test_clean_applies_body_cleanup_alongside_frontmatter_repair" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:04.141+00:00" time="0.234"/>
+        <testcase name="test_clean_clean_document_writes_nothing_to_stderr" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:04.188+00:00" time="0.203"/>
+        <testcase name="test_clean_empty_frontmatter_succeeds" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:04.391+00:00" time="0.101"/>
+        <testcase name="test_clean_does_not_suggest_repairs_it_applied" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:04.375+00:00" time="0.178"/>
+        <testcase name="test_clean_fenced_yaml_body_block_produces_no_diagnostics" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:04.418+00:00" time="0.169"/>
+        <testcase name="test_clean_file_repairs_bom_frontmatter" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:04.554+00:00" time="0.167"/>
+        <testcase name="test_clean_file_repairs_lone_cr_frontmatter" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:04.587+00:00" time="0.158"/>
+        <testcase name="test_clean_ignores_yaml_in_fenced_body_blocks" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:04.721+00:00" time="0.123"/>
+        <testcase name="test_clean_implicit_stdin_repairs_reserved_indicator_scalar" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:04.746+00:00" time="0.121"/>
+        <testcase name="test_clean_file_preserves_trimmed_delimiters_and_their_line_endings" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:04.493+00:00" time="0.396"/>
+        <testcase name="test_clean_leaves_fenced_yaml_body_block_byte_identical" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:04.866+00:00" time="0.130"/>
+        <testcase name="test_clean_leaves_unconstrained_ambiguous_scalar_byte_identical" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:04.889+00:00" time="0.126"/>
+        <testcase name="test_clean_no_frontmatter_is_unchanged" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:04.996+00:00" time="0.073"/>
+        <testcase name="test_clean_preserves_untouched_frontmatter_ranges" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:05.069+00:00" time="0.128"/>
+        <testcase name="test_clean_output_is_idempotent" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:05.015+00:00" time="0.237"/>
+        <testcase name="test_clean_repairs_reserved_indicator_scalar" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:05.197+00:00" time="0.126"/>
+        <testcase name="test_clean_reports_each_suggestion_once_across_both_syntax_passes" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:05.252+00:00" time="0.153"/>
+        <testcase name="test_clean_save_omits_repair_notice_for_valid_frontmatter" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:05.324+00:00" time="0.144"/>
+        <testcase name="test_clean_save_repairs_bom_frontmatter" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:05.467+00:00" time="0.156"/>
+        <testcase name="test_clean_save_repairs_lone_cr_frontmatter" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:05.624+00:00" time="0.169"/>
+        <testcase name="test_clean_save_preserves_trimmed_delimiters_and_their_line_endings" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:05.405+00:00" time="0.416"/>
+        <testcase name="test_clean_save_repairs_reserved_indicator_scalar" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:05.793+00:00" time="0.140"/>
+        <testcase name="test_clean_save_reports_frontmatter_repair_rather_than_no_changes" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:05.822+00:00" time="0.123"/>
+        <testcase name="test_clean_stdin_repairs_bom_frontmatter" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:05.945+00:00" time="0.149"/>
+        <testcase name="test_clean_stdin_repairs_lone_cr_frontmatter" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:06.094+00:00" time="0.135"/>
+        <testcase name="test_clean_is_idempotent_across_fixture_classes" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:04.845+00:00" time="1.396"/>
+        <testcase name="test_clean_stdin_preserves_trimmed_delimiters_and_their_line_endings" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:05.933+00:00" time="0.365"/>
+        <testcase name="test_clean_stdin_repairs_reserved_indicator_scalar" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:06.229+00:00" time="0.102"/>
+        <testcase name="test_clean_suggestions_go_to_stderr_with_exit_zero" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:06.241+00:00" time="0.120"/>
+        <testcase name="test_clean_unrepairable_stdin_exits_one_with_error_on_stderr" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:06.298+00:00" time="0.094"/>
+        <testcase name="test_clean_unrepairable_yaml_exits_one_and_leaves_file_untouched" classname="darkmatter-cli::clean_frontmatter" timestamp="2026-09-06T04:42:06.331+00:00" time="0.141"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::clean_json" tests="20" skipped="0" errors="0" failures="0">
+        <testcase name="test_json_bom_repair_is_audited_in_document_coordinates" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.362+00:00" time="0.070"/>
+        <testcase name="test_json_changed_reports_body_only_cleanup" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.392+00:00" time="0.067"/>
+        <testcase name="test_json_combines_syntax_and_schema_diagnostics" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.431+00:00" time="0.073"/>
+        <testcase name="test_json_empty_frontmatter_is_present_with_empty_span" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.504+00:00" time="0.032"/>
+        <testcase name="test_json_diagnostic_shape_is_fully_pinned" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.472+00:00" time="0.074"/>
+        <testcase name="test_json_envelope_has_exactly_the_documented_top_level_fields" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.536+00:00" time="0.071"/>
+        <testcase name="test_json_no_frontmatter_envelope_is_null_and_empty" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.607+00:00" time="0.033"/>
+        <testcase name="test_json_delimiter_bytes_are_untouched_and_line_ending_repairs_are_audited" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.459+00:00" time="0.197"/>
+        <testcase name="test_json_multi_diagnostic_ordering_is_deterministic" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.547+00:00" time="0.123"/>
+        <testcase name="test_json_report_only_diagnostic_has_empty_repairs_array" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.641+00:00" time="0.069"/>
+        <testcase name="test_json_schema_span_uses_authored_crlf_coordinates" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.656+00:00" time="0.065"/>
+        <testcase name="test_json_schema_span_uses_authored_lone_cr_coordinates" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.670+00:00" time="0.056"/>
+        <testcase name="test_json_span_columns_are_byte_indexed" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.709+00:00" time="0.077"/>
+        <testcase name="test_json_spans_are_projected_into_document_coordinates" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.722+00:00" time="0.078"/>
+        <testcase name="test_json_stacked_syntax_and_schema_spans_index_authored_lexemes" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.726+00:00" time="0.075"/>
+        <testcase name="test_json_unrepairable_frontmatter_exits_one_with_envelope" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.801+00:00" time="0.023"/>
+        <testcase name="test_json_stdin_reports_null_path" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.786+00:00" time="0.062"/>
+        <testcase name="test_json_suppresses_document_and_human_rendering_on_stdout" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.800+00:00" time="0.068"/>
+        <testcase name="test_json_with_save_suppresses_delta_report" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.824+00:00" time="0.067"/>
+        <testcase name="test_json_with_save_writes_file_and_prints_envelope" classname="darkmatter-cli::clean_json" timestamp="2026-09-06T04:42:06.849+00:00" time="0.079"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::clean_schema" tests="17" skipped="0" errors="0" failures="0">
+        <testcase name="test_absent_and_empty_frontmatter_perform_no_schema_work" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:06.868+00:00" time="0.179"/>
+        <testcase name="test_absent_frontmatter_never_resolves_the_schema_override" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:06.891+00:00" time="0.160"/>
+        <testcase name="test_baseline_schema_flags_conflict" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:07.047+00:00" time="0.025"/>
+        <testcase name="test_baseline_schema_flag_drives_schema_proven_quoting" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:06.928+00:00" time="0.218"/>
+        <testcase name="test_document_inline_schema_drives_quoting" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:07.072+00:00" time="0.127"/>
+        <testcase name="test_default_baseline_is_active_and_no_baseline_schema_disables_it" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:07.052+00:00" time="0.161"/>
+        <testcase name="test_document_root_union_schema_drives_quoting" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:07.145+00:00" time="0.142"/>
+        <testcase name="test_document_schema_file_reference_drives_quoting" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:07.199+00:00" time="0.122"/>
+        <testcase name="test_matching_trigger_schema_drives_quoting" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:07.213+00:00" time="0.124"/>
+        <testcase name="test_no_baseline_schema_suppresses_quoting" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:07.288+00:00" time="0.135"/>
+        <testcase name="test_nonmatching_trigger_schema_is_inert" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:07.337+00:00" time="0.117"/>
+        <testcase name="test_no_trigger_schemas_disables_discovery" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:07.321+00:00" time="0.193"/>
+        <testcase name="test_save_shorthand_uses_default_schema_state_and_repairs" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:07.423+00:00" time="0.114"/>
+        <testcase name="test_schema_flag_replaces_document_schema_layer" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:07.455+00:00" time="0.205"/>
+        <testcase name="test_schema_flag_supplies_schema_to_document_without_one" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:07.514+00:00" time="0.212"/>
+        <testcase name="test_stdin_does_not_discover_repository_trigger_schemas" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:07.537+00:00" time="0.198"/>
+        <testcase name="test_stdin_honors_schema_flag" classname="darkmatter-cli::clean_schema" timestamp="2026-09-06T04:42:07.660+00:00" time="0.109"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::code_block" tests="30" skipped="0" errors="0" failures="0">
+        <testcase name="code_block_content_flag_treats_input_as_literal" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:07.735+00:00" time="0.069"/>
+        <testcase name="code_block_explicit_file_flag_treats_input_as_path" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:07.769+00:00" time="0.048"/>
+        <testcase name="code_block_code_theme_env_changes_html_output_without_flag" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:07.726+00:00" time="0.150"/>
+        <testcase name="code_block_falls_back_to_literal_when_path_does_not_exist" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:07.804+00:00" time="0.080"/>
+        <testcase name="code_block_file_flag_reads_existing_file" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:07.817+00:00" time="0.077"/>
+        <testcase name="code_block_help_lists_all_options" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:07.877+00:00" time="0.018"/>
+        <testcase name="code_block_highlight_invalid_range_errors" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:07.885+00:00" time="0.063"/>
+        <testcase name="code_block_highlight_inverted_range_errors" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:07.894+00:00" time="0.066"/>
+        <testcase name="code_block_highlight_non_numeric_errors" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:07.895+00:00" time="0.068"/>
+        <testcase name="code_block_html_output_emits_pre_code_class" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:07.960+00:00" time="0.095"/>
+        <testcase name="code_block_html_output_escapes_special_chars" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:07.963+00:00" time="0.101"/>
+        <testcase name="code_block_highlight_range_changes_panel_background" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:07.948+00:00" time="0.178"/>
+        <testcase name="code_block_language_alias_resolves" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.064+00:00" time="0.082"/>
+        <testcase name="code_block_markdown_output_emits_fence_with_language" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.146+00:00" time="0.020"/>
+        <testcase name="code_block_markdown_output_preserves_highlight" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.166+00:00" time="0.021"/>
+        <testcase name="code_block_line_numbering_renders_gutter" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.127+00:00" time="0.078"/>
+        <testcase name="code_block_html_output_matches_fenced_markdown_fence" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.055+00:00" time="0.151"/>
+        <testcase name="code_block_markdown_output_preserves_title_and_line_numbering" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.187+00:00" time="0.026"/>
+        <testcase name="code_block_renders_literal_content_with_language_flag" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.207+00:00" time="0.086"/>
+        <testcase name="code_block_renders_file_inferred_from_extension" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.205+00:00" time="0.092"/>
+        <testcase name="code_block_renders_rust_file_with_explicit_language" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.213+00:00" time="0.090"/>
+        <testcase name="code_block_subcommand_appears_in_top_level_help" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.292+00:00" time="0.028"/>
+        <testcase name="code_block_terminal_output_contains_ansi" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.298+00:00" time="0.078"/>
+        <testcase name="code_block_theme_env_changes_terminal_output_without_flag" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.303+00:00" time="0.145"/>
+        <testcase name="code_block_theme_flag_wins_over_theme_env" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.321+00:00" time="0.140"/>
+        <testcase name="code_block_theme_override_changes_html_output" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.376+00:00" time="0.175"/>
+        <testcase name="code_block_title_appears_in_header_row" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.461+00:00" time="0.099"/>
+        <testcase name="code_block_theme_override_changes_terminal_output" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.448+00:00" time="0.152"/>
+        <testcase name="code_block_unknown_language_renders_as_text" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.551+00:00" time="0.065"/>
+        <testcase name="code_block_yml_alias_resolves_to_yaml" classname="darkmatter-cli::code_block" timestamp="2026-09-06T04:42:08.560+00:00" time="0.077"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::compose_base_schema" tests="9" skipped="0" errors="0" failures="0">
+        <testcase name="compose_custom_baseline_schema_overrides_default_baseline" classname="darkmatter-cli::compose_base_schema" timestamp="2026-09-06T04:42:08.600+00:00" time="0.550"/>
+        <testcase name="compose_default_baseline_rejects_custom_ctx_keys" classname="darkmatter-cli::compose_base_schema" timestamp="2026-09-06T04:42:08.616+00:00" time="0.583"/>
+        <testcase name="compose_document_schema_precedence_is_preserved" classname="darkmatter-cli::compose_base_schema" timestamp="2026-09-06T04:42:08.637+00:00" time="0.575"/>
+        <testcase name="compose_no_baseline_schema_disables_default_baseline" classname="darkmatter-cli::compose_base_schema" timestamp="2026-09-06T04:42:09.212+00:00" time="0.462"/>
+        <testcase name="compose_explicit_baseline_schema_wins_over_no_baseline_schema_env" classname="darkmatter-cli::compose_base_schema" timestamp="2026-09-06T04:42:09.150+00:00" time="0.536"/>
+        <testcase name="compose_generated_ctx_reference_succeeds_without_authored_ctx" classname="darkmatter-cli::compose_base_schema" timestamp="2026-09-06T04:42:09.199+00:00" time="0.711"/>
+        <testcase name="compose_no_baseline_schema_env_disables_default_baseline" classname="darkmatter-cli::compose_base_schema" timestamp="2026-09-06T04:42:09.673+00:00" time="0.570"/>
+        <testcase name="compose_unknown_frontmatter_keys_remain_allowed" classname="darkmatter-cli::compose_base_schema" timestamp="2026-09-06T04:42:09.686+00:00" time="0.701"/>
+        <testcase name="compose_uses_darkmatter_base_schema_by_default" classname="darkmatter-cli::compose_base_schema" timestamp="2026-09-06T04:42:09.910+00:00" time="0.555"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::compose_basic" tests="8" skipped="0" errors="0" failures="0">
+        <testcase name="test_compose_frontmatter_flag_emits_single_block_with_nested_quotes" classname="darkmatter-cli::compose_basic" timestamp="2026-09-06T04:42:10.387+00:00" time="0.132"/>
+        <testcase name="test_compose_basic" classname="darkmatter-cli::compose_basic" timestamp="2026-09-06T04:42:10.243+00:00" time="1.173"/>
+        <testcase name="test_compose_runs_frontmatter_shell_with_nested_quotes" classname="darkmatter-cli::compose_basic" timestamp="2026-09-06T04:42:11.416+00:00" time="0.136"/>
+        <testcase name="test_compose_markdown_plus_renders_disclosure_as_details" classname="darkmatter-cli::compose_basic" timestamp="2026-09-06T04:42:10.465+00:00" time="1.155"/>
+        <testcase name="test_compose_output_html" classname="darkmatter-cli::compose_basic" timestamp="2026-09-06T04:42:10.519+00:00" time="1.149"/>
+        <testcase name="test_compose_strips_frontmatter_when_values_contain_shell_substitution" classname="darkmatter-cli::compose_basic" timestamp="2026-09-06T04:42:11.620+00:00" time="0.138"/>
+        <testcase name="test_compose_strips_frontmatter" classname="darkmatter-cli::compose_basic" timestamp="2026-09-06T04:42:11.553+00:00" time="1.778"/>
+        <testcase name="test_compose_with_state" classname="darkmatter-cli::compose_basic" timestamp="2026-09-06T04:42:11.668+00:00" time="1.894"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::compose_interpolation" tests="7" skipped="0" errors="0" failures="0">
+        <testcase name="test_compose_frontmatter_double_pipe_fallback" classname="darkmatter-cli::compose_interpolation" timestamp="2026-09-06T04:42:11.758+00:00" time="1.871"/>
+        <testcase name="test_compose_frontmatter_double_pipe_with_set_value" classname="darkmatter-cli::compose_interpolation" timestamp="2026-09-06T04:42:13.331+00:00" time="0.560"/>
+        <testcase name="test_compose_frontmatter_interpolation_basic" classname="darkmatter-cli::compose_interpolation" timestamp="2026-09-06T04:42:13.562+00:00" time="1.192"/>
+        <testcase name="test_compose_frontmatter_interpolation_ctx_in_frontmatter_only" classname="darkmatter-cli::compose_interpolation" timestamp="2026-09-06T04:42:13.629+00:00" time="1.197"/>
+        <testcase name="test_compose_frontmatter_interpolation_nested_state" classname="darkmatter-cli::compose_interpolation" timestamp="2026-09-06T04:42:13.891+00:00" time="1.157"/>
+        <testcase name="test_compose_frontmatter_nested_quotes_in_interpolation" classname="darkmatter-cli::compose_interpolation" timestamp="2026-09-06T04:42:14.754+00:00" time="0.446"/>
+        <testcase name="test_compose_invalid_file_reference_reports_cause_not_mechanism" classname="darkmatter-cli::compose_interpolation" timestamp="2026-09-06T04:42:14.826+00:00" time="0.437"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::compose_page_blocks" tests="2" skipped="0" errors="0" failures="0">
+        <testcase name="test_compose_motivating_spec_ternary_absent_when_spec_missing" classname="darkmatter-cli::compose_page_blocks" timestamp="2026-09-06T04:42:15.263+00:00" time="0.191"/>
+        <testcase name="test_compose_motivating_spec_ternary_resolves_when_spec_present" classname="darkmatter-cli::compose_page_blocks" timestamp="2026-09-06T04:42:15.454+00:00" time="0.179"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::compose_layout" tests="2" skipped="0" errors="0" failures="0">
+        <testcase name="test_compose_compact" classname="darkmatter-cli::compose_layout" timestamp="2026-09-06T04:42:15.048+00:00" time="1.239"/>
+        <testcase name="test_compose_loose" classname="darkmatter-cli::compose_layout" timestamp="2026-09-06T04:42:15.200+00:00" time="1.281"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::compose_perf" tests="2" skipped="0" errors="0" failures="0">
+        <testcase name="test_compose_perf_emits_report_to_stderr" classname="darkmatter-cli::compose_perf" timestamp="2026-09-06T04:42:15.633+00:00" time="1.232"/>
+        <testcase name="test_compose_without_perf_no_report_on_stderr" classname="darkmatter-cli::compose_perf" timestamp="2026-09-06T04:42:16.287+00:00" time="1.252"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::compose_refs_and_missing" tests="5" skipped="0" errors="0" failures="0">
+        <testcase name="test_block_rendering_transclusion_cycle_non_tty" classname="darkmatter-cli::compose_refs_and_missing" timestamp="2026-09-06T04:42:16.481+00:00" time="0.630"/>
+        <testcase name="test_block_rendering_transclusion_cycle_tty" classname="darkmatter-cli::compose_refs_and_missing" timestamp="2026-09-06T04:42:16.866+00:00" time="0.614"/>
+        <testcase name="test_compose_scalar_ctx_without_allow_override_fails" classname="darkmatter-cli::compose_refs_and_missing" timestamp="2026-09-06T04:42:17.539+00:00" time="0.798"/>
+        <testcase name="test_compose_object_ctx_collision_emits_warning" classname="darkmatter-cli::compose_refs_and_missing" timestamp="2026-09-06T04:42:17.111+00:00" time="1.231"/>
+        <testcase name="test_compose_scalar_ctx_with_allow_override_succeeds" classname="darkmatter-cli::compose_refs_and_missing" timestamp="2026-09-06T04:42:17.480+00:00" time="1.335"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::compose_remote_caching" tests="10" skipped="0" errors="0" failures="0">
+        <testcase name="test_compose_invalid_remote_freshness_fails_fast" classname="darkmatter-cli::compose_remote_caching" timestamp="2026-09-06T04:42:18.337+00:00" time="0.036"/>
+        <testcase name="test_compose_preserves_rendered_remote_links" classname="darkmatter-cli::compose_remote_caching" timestamp="2026-09-06T04:42:18.342+00:00" time="1.306"/>
+        <testcase name="test_compose_remote_deny_all_fails_without_request" classname="darkmatter-cli::compose_remote_caching" timestamp="2026-09-06T04:42:18.815+00:00" time="0.874"/>
+        <testcase name="test_compose_remote_allowed_host_fetches_url" classname="darkmatter-cli::compose_remote_caching" timestamp="2026-09-06T04:42:18.372+00:00" time="1.718"/>
+        <testcase name="test_compose_remote_epilogue_deny_all_fails_without_request" classname="darkmatter-cli::compose_remote_caching" timestamp="2026-09-06T04:42:19.648+00:00" time="0.694"/>
+        <testcase name="test_compose_remote_expression_function_denied_host_reads_false" classname="darkmatter-cli::compose_remote_caching" timestamp="2026-09-06T04:42:19.690+00:00" time="1.050"/>
+        <testcase name="test_compose_remote_expression_function_reads_url" classname="darkmatter-cli::compose_remote_caching" timestamp="2026-09-06T04:42:20.091+00:00" time="1.218"/>
+        <testcase name="test_compose_remote_prologue_allowed_host_fetches_url" classname="darkmatter-cli::compose_remote_caching" timestamp="2026-09-06T04:42:20.740+00:00" time="1.729"/>
+        <testcase name="test_compose_remote_fallback_serves_stale_cache_on_failure" classname="darkmatter-cli::compose_remote_caching" timestamp="2026-09-06T04:42:20.342+00:00" time="3.326"/>
+        <testcase name="test_compose_remote_refresh_revalidates_cached_url" classname="darkmatter-cli::compose_remote_caching" timestamp="2026-09-06T04:42:21.309+00:00" time="3.483"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::compose_schema" tests="21" skipped="0" errors="0" failures="0">
+        <testcase name="compose_and_schema_validate_agree_on_same_document" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:22.469+00:00" time="1.073"/>
+        <testcase name="compose_block_includes_source_path" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:23.542+00:00" time="0.548"/>
+        <testcase name="compose_fails_fast_with_schema_block_before_shell_expansion" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:23.669+00:00" time="0.524"/>
+        <testcase name="compose_frontmatter_caller_value_wins_over_optional_materialization" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:24.090+00:00" time="0.609"/>
+        <testcase name="compose_frontmatter_materializes_optional_parameters_as_ordered_nulls" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:24.699+00:00" time="0.507"/>
+        <testcase name="compose_frontmatter_materialized_null_is_stable_after_write_and_recompose" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:24.192+00:00" time="1.051"/>
+        <testcase name="compose_frontmatter_serializes_boolish_normalization" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:24.792+00:00" time="0.501"/>
+        <testcase name="compose_frontmatter_serializes_numberlike_normalization" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:25.207+00:00" time="0.472"/>
+        <testcase name="compose_frontmatter_serializes_real_boolean" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:25.243+00:00" time="0.483"/>
+        <testcase name="compose_frontmatter_serializes_real_number" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:25.293+00:00" time="0.464"/>
+        <testcase name="compose_frontmatter_serializes_string_reverse_coercion" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:25.726+00:00" time="0.515"/>
+        <testcase name="compose_frontmatter_serializes_typed_array" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:25.758+00:00" time="0.504"/>
+        <testcase name="compose_with_required_property_supplied_succeeds" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:26.261+00:00" time="0.148"/>
+        <testcase name="compose_renders_summary_for_schema_preparation_failure" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:26.242+00:00" time="0.412"/>
+        <testcase name="compose_without_an_effective_schema_does_not_synthesize_frontmatter" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:26.410+00:00" time="0.381"/>
+        <testcase name="first_frontmatter_interpolation_precedes_optional_materialization" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:26.653+00:00" time="0.557"/>
+        <testcase name="compose_frontmatter_serializes_root_union_write_back" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:25.679+00:00" time="1.756"/>
+        <testcase name="shipped_plan_prompt_anchors_caller_file_from_package_area" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:27.435+00:00" time="1.110"/>
+        <testcase name="optional_null_and_supplied_empty_string_remain_distinct_in_body_expressions" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:27.210+00:00" time="1.919"/>
+        <testcase name="shipped_plan_prompt_anchors_caller_file_from_repository_root" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:28.546+00:00" time="0.682"/>
+        <testcase name="materialized_optional_parameter_is_known_to_strict_subtree_compose" classname="darkmatter-cli::compose_schema" timestamp="2026-09-06T04:42:26.791+00:00" time="6.393"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::compose_schema_file_rewrite" tests="3" skipped="0" errors="0" failures="0">
+        <testcase name="compose_frontmatter_shows_resolved_repo_relative_spec" classname="darkmatter-cli::compose_schema_file_rewrite" timestamp="2026-09-06T04:42:29.130+00:00" time="0.763"/>
+        <testcase name="review_feature_fixture_dirname_and_review_file_agree_after_rewrite" classname="darkmatter-cli::compose_schema_file_rewrite" timestamp="2026-09-06T04:42:29.893+00:00" time="0.768"/>
+        <testcase name="compose_write_back_persists_rewritten_value_as_fixpoint" classname="darkmatter-cli::compose_schema_file_rewrite" timestamp="2026-09-06T04:42:29.228+00:00" time="1.472"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::compose_shell" tests="8" skipped="0" errors="0" failures="0">
+        <testcase name="test_compose_file_unapproved_command_fails_with_guidance" classname="darkmatter-cli::compose_shell" timestamp="2026-09-06T04:42:30.701+00:00" time="0.171"/>
+        <testcase name="test_compose_shell_reports_discovered_commands_without_executing" classname="darkmatter-cli::compose_shell" timestamp="2026-09-06T04:42:30.872+00:00" time="0.491"/>
+        <testcase name="test_compose_stdin_unapproved_command_fails_with_guidance" classname="darkmatter-cli::compose_shell" timestamp="2026-09-06T04:42:31.363+00:00" time="0.111"/>
+        <testcase name="test_compose_allow_shell_timeout_emits_warning" classname="darkmatter-cli::compose_shell" timestamp="2026-09-06T04:42:30.661+00:00" time="1.817"/>
+        <testcase name="test_compose_timeout_flag_fails_timed_out_shell" classname="darkmatter-cli::compose_shell" timestamp="2026-09-06T04:42:31.474+00:00" time="1.718"/>
+        <testcase name="test_compose_with_blacklisted_command_fails" classname="darkmatter-cli::compose_shell" timestamp="2026-09-06T04:42:32.478+00:00" time="0.863"/>
+        <testcase name="test_compose_with_whitelisted_command_succeeds" classname="darkmatter-cli::compose_shell" timestamp="2026-09-06T04:42:33.192+00:00" time="0.528"/>
+        <testcase name="test_compose_with_nonexistent_command_fails" classname="darkmatter-cli::compose_shell" timestamp="2026-09-06T04:42:33.185+00:00" time="0.712"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::compose_state_set" tests="26" skipped="0" errors="0" failures="0">
+        <testcase name="test_compose_invalid_state" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:33.341+00:00" time="0.417"/>
+        <testcase name="test_compose_set_and_state_combined" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:33.720+00:00" time="0.460"/>
+        <testcase name="test_compose_set_invalid_json" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:33.758+00:00" time="0.449"/>
+        <testcase name="test_compose_set_requires_json_object" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:33.896+00:00" time="0.407"/>
+        <testcase name="test_compose_shorthand_basic_file_input" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:34.181+00:00" time="0.523"/>
+        <testcase name="test_compose_shorthand_basic_stdin" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:34.208+00:00" time="0.502"/>
+        <testcase name="test_compose_shorthand_empty_key_errors" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:34.704+00:00" time="0.063"/>
+        <testcase name="test_compose_shorthand_duplicate_keys_last_write_wins" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:34.303+00:00" time="0.493"/>
+        <testcase name="test_compose_shorthand_multiple_non_setter_tokens_error" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:34.797+00:00" time="0.063"/>
+        <testcase name="test_compose_shorthand_empty_value" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:34.710+00:00" time="0.501"/>
+        <testcase name="test_compose_shorthand_json5_value" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:34.767+00:00" time="0.511"/>
+        <testcase name="test_compose_shorthand_multiple_setters_mixed_types" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:34.860+00:00" time="0.472"/>
+        <testcase name="test_compose_shorthand_path_escape_hatch" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:35.332+00:00" time="0.121"/>
+        <testcase name="test_compose_shorthand_numeric_leading_key_is_treated_as_input_path" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:35.210+00:00" time="0.392"/>
+        <testcase name="test_compose_shorthand_participates_in_validation" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:35.278+00:00" time="0.545"/>
+        <testcase name="test_compose_shorthand_setter_before_file_input" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:35.453+00:00" time="0.452"/>
+        <testcase name="test_compose_shorthand_wins_over_set" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:35.603+00:00" time="0.445"/>
+        <testcase name="test_compose_shorthand_wins_over_state" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:35.823+00:00" time="0.485"/>
+        <testcase name="test_compose_state_requires_json_object" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:35.904+00:00" time="0.428"/>
+        <testcase name="test_compose_with_set_adds_missing_keys" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:36.047+00:00" time="0.432"/>
+        <testcase name="test_compose_with_set_overwrites_frontmatter" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:36.308+00:00" time="0.419"/>
+        <testcase name="test_set_overlay_child_interpolation" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:36.333+00:00" time="0.515"/>
+        <testcase name="test_set_overlay_permissive_invalid_warns" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:36.479+00:00" time="0.555"/>
+        <testcase name="test_set_overlay_permissive_reassigned_warns_and_rightmost_wins" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:36.727+00:00" time="0.546"/>
+        <testcase name="test_set_overlay_strict_rejects_invalid" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:36.847+00:00" time="0.519"/>
+        <testcase name="test_set_overlay_strict_rejects_reassigned" classname="darkmatter-cli::compose_state_set" timestamp="2026-09-06T04:42:37.034+00:00" time="0.507"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::compose_transclusion" tests="7" skipped="0" errors="0" failures="0">
+        <testcase name="compose_with_the_shipped_baseline_renders_ctx_cwd_from_the_launch_directory" classname="darkmatter-cli::compose_transclusion" timestamp="2026-09-06T04:42:37.541+00:00" time="0.125"/>
+        <testcase name="test_compose_env_var_substitution_one_warning" classname="darkmatter-cli::compose_transclusion" timestamp="2026-09-06T04:42:37.666+00:00" time="0.505"/>
+        <testcase name="test_compose_html_spaced_attributes" classname="darkmatter-cli::compose_transclusion" timestamp="2026-09-06T04:42:37.770+00:00" time="0.479"/>
+        <testcase name="test_compose_link_relative_same_repo" classname="darkmatter-cli::compose_transclusion" timestamp="2026-09-06T04:42:37.860+00:00" time="0.457"/>
+        <testcase name="test_compose_link_transcluded_child" classname="darkmatter-cli::compose_transclusion" timestamp="2026-09-06T04:42:38.171+00:00" time="0.573"/>
+        <testcase name="test_compose_set_variables_available_during_validation" classname="darkmatter-cli::compose_transclusion" timestamp="2026-09-06T04:42:38.249+00:00" time="0.591"/>
+        <testcase name="test_compose_state_variables_available_during_validation" classname="darkmatter-cli::compose_transclusion" timestamp="2026-09-06T04:42:38.317+00:00" time="0.582"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::compose_terminal_detection" tests="2" skipped="0" errors="0" failures="0">
+        <testcase name="compose_redirected_does_not_spawn_appearance_defaults" classname="darkmatter-cli::compose_terminal_detection" timestamp="2026-09-06T04:42:37.273+00:00" time="0.496"/>
+        <testcase name="compose_verbose_perf_performs_single_terminal_detection" classname="darkmatter-cli::compose_terminal_detection" timestamp="2026-09-06T04:42:37.366+00:00" time="0.494"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::delta" tests="16" skipped="0" errors="0" failures="0">
+        <testcase name="delta_golden_code_block_language_changed" classname="darkmatter-cli::delta" timestamp="2026-09-06T04:42:38.743+00:00" time="0.089"/>
+        <testcase name="delta_golden_code_block_modified" classname="darkmatter-cli::delta" timestamp="2026-09-06T04:42:38.832+00:00" time="0.060"/>
+        <testcase name="delta_golden_frontmatter_change" classname="darkmatter-cli::delta" timestamp="2026-09-06T04:42:38.840+00:00" time="0.064"/>
+        <testcase name="delta_golden_frontmatter_scalar_type_change" classname="darkmatter-cli::delta" timestamp="2026-09-06T04:42:38.892+00:00" time="0.060"/>
+        <testcase name="delta_golden_moved_section" classname="darkmatter-cli::delta" timestamp="2026-09-06T04:42:38.900+00:00" time="0.053"/>
+        <testcase name="delta_golden_no_change" classname="darkmatter-cli::delta" timestamp="2026-09-06T04:42:38.904+00:00" time="0.059"/>
+        <testcase name="delta_golden_preamble_change" classname="darkmatter-cli::delta" timestamp="2026-09-06T04:42:38.953+00:00" time="0.065"/>
+        <testcase name="delta_golden_section_added" classname="darkmatter-cli::delta" timestamp="2026-09-06T04:42:38.953+00:00" time="0.065"/>
+        <testcase name="delta_golden_section_modified" classname="darkmatter-cli::delta" timestamp="2026-09-06T04:42:38.963+00:00" time="0.066"/>
+        <testcase name="delta_golden_verbose_content_only_no_frontmatter_block" classname="darkmatter-cli::delta" timestamp="2026-09-06T04:42:39.018+00:00" time="0.066"/>
+        <testcase name="delta_golden_section_removed" classname="darkmatter-cli::delta" timestamp="2026-09-06T04:42:39.018+00:00" time="0.066"/>
+        <testcase name="delta_golden_verbose_frontmatter_and_content" classname="darkmatter-cli::delta" timestamp="2026-09-06T04:42:39.029+00:00" time="0.065"/>
+        <testcase name="test_delta_subcommand_json_output" classname="darkmatter-cli::delta" timestamp="2026-09-06T04:42:39.094+00:00" time="0.027"/>
+        <testcase name="delta_golden_whitespace_only" classname="darkmatter-cli::delta" timestamp="2026-09-06T04:42:39.084+00:00" time="0.067"/>
+        <testcase name="delta_golden_verbose_no_change" classname="darkmatter-cli::delta" timestamp="2026-09-06T04:42:39.084+00:00" time="0.067"/>
+        <testcase name="test_delta_subcommand_output" classname="darkmatter-cli::delta" timestamp="2026-09-06T04:42:39.120+00:00" time="0.084"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::get_set_rm" tests="31" skipped="0" errors="0" failures="0">
+        <testcase name="test_get_compact_array" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.151+00:00" time="0.036"/>
+        <testcase name="test_get_compact_object" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.151+00:00" time="0.037"/>
+        <testcase name="test_get_from_file" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.188+00:00" time="0.028"/>
+        <testcase name="test_get_compact_scalar_unchanged" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.186+00:00" time="0.029"/>
+        <testcase name="test_get_json5_output" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.204+00:00" time="0.029"/>
+        <testcase name="test_get_missing_property_returns_empty_string" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.215+00:00" time="0.027"/>
+        <testcase name="test_get_multiple_properties_returns_object" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.233+00:00" time="0.029"/>
+        <testcase name="test_get_multiple_with_missing_includes_empty_string" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.243+00:00" time="0.027"/>
+        <testcase name="test_get_no_frontmatter_returns_empty_string" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.262+00:00" time="0.024"/>
+        <testcase name="test_get_raw_array_one_per_line" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.270+00:00" time="0.024"/>
+        <testcase name="test_get_malformed_frontmatter_renders_status_block_with_offending_line" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.215+00:00" time="0.088"/>
+        <testcase name="test_get_raw_null_returns_empty" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.286+00:00" time="0.027"/>
+        <testcase name="test_get_raw_number" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.294+00:00" time="0.026"/>
+        <testcase name="test_get_raw_object_key_value_lines" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.304+00:00" time="0.024"/>
+        <testcase name="test_get_raw_string_unquoted" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.313+00:00" time="0.025"/>
+        <testcase name="test_get_requires_at_least_one_prop" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.319+00:00" time="0.025"/>
+        <testcase name="test_get_single_property_array" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.328+00:00" time="0.026"/>
+        <testcase name="test_get_single_property_number" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.338+00:00" time="0.026"/>
+        <testcase name="test_get_single_property_string" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.345+00:00" time="0.027"/>
+        <testcase name="test_get_tab_indented_frontmatter_property_is_populated" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.354+00:00" time="0.027"/>
+        <testcase name="test_get_toml_output" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.364+00:00" time="0.026"/>
+        <testcase name="test_get_yaml_output" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.372+00:00" time="0.026"/>
+        <testcase name="test_set_adds_new_property_via_stdin" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.381+00:00" time="0.026"/>
+        <testcase name="test_set_boolean_value" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.390+00:00" time="0.029"/>
+        <testcase name="test_set_creates_frontmatter_when_none_exists" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.398+00:00" time="0.030"/>
+        <testcase name="test_set_json_array_value" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.407+00:00" time="0.034"/>
+        <testcase name="test_set_numeric_value" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.419+00:00" time="0.033"/>
+        <testcase name="test_set_preserves_body_content" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.428+00:00" time="0.033"/>
+        <testcase name="test_set_string_value_via_stdin" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.441+00:00" time="0.033"/>
+        <testcase name="test_set_updates_file_in_place" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.453+00:00" time="0.031"/>
+        <testcase name="test_set_without_save_does_not_mutate_file" classname="darkmatter-cli::get_set_rm" timestamp="2026-09-06T04:42:39.461+00:00" time="0.029"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::graph" tests="14" skipped="0" errors="0" failures="0">
+        <testcase name="graph_json_follow_baseline" classname="darkmatter-cli::graph" timestamp="2026-09-06T04:42:39.474+00:00" time="0.036"/>
+        <testcase name="graph_json_local_baseline" classname="darkmatter-cli::graph" timestamp="2026-09-06T04:42:39.483+00:00" time="0.033"/>
+        <testcase name="graph_json_validate_baseline" classname="darkmatter-cli::graph" timestamp="2026-09-06T04:42:39.491+00:00" time="0.030"/>
+        <testcase name="test_graph_file_not_found" classname="darkmatter-cli::graph" timestamp="2026-09-06T04:42:39.517+00:00" time="0.077"/>
+        <testcase name="test_graph_follow" classname="darkmatter-cli::graph" timestamp="2026-09-06T04:42:39.520+00:00" time="0.074"/>
+        <testcase name="test_graph_basic" classname="darkmatter-cli::graph" timestamp="2026-09-06T04:42:39.511+00:00" time="0.084"/>
+        <testcase name="test_graph_follow_epilogue" classname="darkmatter-cli::graph" timestamp="2026-09-06T04:42:39.594+00:00" time="0.069"/>
+        <testcase name="test_graph_follow_multiple_prologues" classname="darkmatter-cli::graph" timestamp="2026-09-06T04:42:39.594+00:00" time="0.069"/>
+        <testcase name="test_graph_follow_toc_linking" classname="darkmatter-cli::graph" timestamp="2026-09-06T04:42:39.594+00:00" time="0.069"/>
+        <testcase name="test_graph_help" classname="darkmatter-cli::graph" timestamp="2026-09-06T04:42:39.663+00:00" time="0.026"/>
+        <testcase name="test_graph_json_output" classname="darkmatter-cli::graph" timestamp="2026-09-06T04:42:39.663+00:00" time="0.029"/>
+        <testcase name="test_graph_follow_validate_child_broken_link" classname="darkmatter-cli::graph" timestamp="2026-09-06T04:42:39.663+00:00" time="0.066"/>
+        <testcase name="test_graph_validate_invalid" classname="darkmatter-cli::graph" timestamp="2026-09-06T04:42:39.689+00:00" time="0.061"/>
+        <testcase name="test_graph_validate_valid" classname="darkmatter-cli::graph" timestamp="2026-09-06T04:42:39.693+00:00" time="0.067"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::hash" tests="10" skipped="0" errors="0" failures="0">
+        <testcase name="test_hash_body_only" classname="darkmatter-cli::hash" timestamp="2026-09-06T04:42:39.730+00:00" time="0.043"/>
+        <testcase name="test_hash_body_whitespace_insensitive" classname="darkmatter-cli::hash" timestamp="2026-09-06T04:42:39.750+00:00" time="0.036"/>
+        <testcase name="test_hash_default_outputs_two_hashes" classname="darkmatter-cli::hash" timestamp="2026-09-06T04:42:39.760+00:00" time="0.026"/>
+        <testcase name="test_hash_deterministic" classname="darkmatter-cli::hash" timestamp="2026-09-06T04:42:39.773+00:00" time="0.038"/>
+        <testcase name="test_hash_frontmatter_only" classname="darkmatter-cli::hash" timestamp="2026-09-06T04:42:39.786+00:00" time="0.025"/>
+        <testcase name="test_hash_from_file" classname="darkmatter-cli::hash" timestamp="2026-09-06T04:42:39.786+00:00" time="0.026"/>
+        <testcase name="test_hash_no_frontmatter" classname="darkmatter-cli::hash" timestamp="2026-09-06T04:42:39.812+00:00" time="0.028"/>
+        <testcase name="test_hash_strict_frontmatter_differs_from_normalized" classname="darkmatter-cli::hash" timestamp="2026-09-06T04:42:39.812+00:00" time="0.053"/>
+        <testcase name="test_hash_frontmatter_reordering" classname="darkmatter-cli::hash" timestamp="2026-09-06T04:42:39.811+00:00" time="0.070"/>
+        <testcase name="test_hash_strict_whitespace_sensitive" classname="darkmatter-cli::hash" timestamp="2026-09-06T04:42:39.839+00:00" time="0.104"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::hash_directory" tests="15" skipped="0" errors="0" failures="0">
+        <testcase name="test_hash_directory_default" classname="darkmatter-cli::hash_directory" timestamp="2026-09-06T04:42:39.881+00:00" time="0.086"/>
+        <testcase name="test_hash_directory_body_only" classname="darkmatter-cli::hash_directory" timestamp="2026-09-06T04:42:39.865+00:00" time="0.103"/>
+        <testcase name="test_hash_directory_frontmatter_only" classname="darkmatter-cli::hash_directory" timestamp="2026-09-06T04:42:39.968+00:00" time="0.027"/>
+        <testcase name="test_hash_directory_deterministic" classname="darkmatter-cli::hash_directory" timestamp="2026-09-06T04:42:39.944+00:00" time="0.057"/>
+        <testcase name="test_hash_directory_differs_from_single_file" classname="darkmatter-cli::hash_directory" timestamp="2026-09-06T04:42:39.967+00:00" time="0.038"/>
+        <testcase name="test_hash_directory_honors_ignore_properties" classname="darkmatter-cli::hash_directory" timestamp="2026-09-06T04:42:39.995+00:00" time="0.040"/>
+        <testcase name="test_hash_directory_ignores_non_markdown" classname="darkmatter-cli::hash_directory" timestamp="2026-09-06T04:42:40.006+00:00" time="0.031"/>
+        <testcase name="test_hash_directory_ignores_managed_keys" classname="darkmatter-cli::hash_directory" timestamp="2026-09-06T04:42:40.000+00:00" time="0.046"/>
+        <testcase name="test_hash_directory_includes_vendored_dirs" classname="darkmatter-cli::hash_directory" timestamp="2026-09-06T04:42:40.035+00:00" time="0.042"/>
+        <testcase name="test_hash_directory_rejects_save" classname="darkmatter-cli::hash_directory" timestamp="2026-09-06T04:42:40.046+00:00" time="0.062"/>
+        <testcase name="test_hash_directory_malformed_frontmatter_exits_one" classname="darkmatter-cli::hash_directory" timestamp="2026-09-06T04:42:40.036+00:00" time="0.078"/>
+        <testcase name="test_hash_directory_rejects_structured_kind" classname="darkmatter-cli::hash_directory" timestamp="2026-09-06T04:42:40.078+00:00" time="0.065"/>
+        <testcase name="test_hash_directory_skips_hidden_dirs" classname="darkmatter-cli::hash_directory" timestamp="2026-09-06T04:42:40.109+00:00" time="0.044"/>
+        <testcase name="test_hash_directory_strict" classname="darkmatter-cli::hash_directory" timestamp="2026-09-06T04:42:40.115+00:00" time="0.044"/>
+        <testcase name="test_hash_directory_vendored_membership_matches_plain_dir" classname="darkmatter-cli::hash_directory" timestamp="2026-09-06T04:42:40.143+00:00" time="0.040"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::hash_kind_save_diff" tests="22" skipped="0" errors="0" failures="0">
+        <testcase name="test_hash_diff_detailed_bad_section_level_exits_one" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.159+00:00" time="0.027"/>
+        <testcase name="test_hash_diff_changed_exits_two" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.153+00:00" time="0.043"/>
+        <testcase name="test_hash_diff_no_stored_hash_exits_two" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.186+00:00" time="0.025"/>
+        <testcase name="test_hash_diff_malformed_stored_hash_exits_one" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.183+00:00" time="0.029"/>
+        <testcase name="test_hash_env_property_override" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.211+00:00" time="0.024"/>
+        <testcase name="test_hash_diff_unchanged_exits_zero" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.195+00:00" time="0.040"/>
+        <testcase name="test_hash_ignore_properties_excludes_key" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.212+00:00" time="0.035"/>
+        <testcase name="test_hash_kind_conflicts_with_body" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.235+00:00" time="0.024"/>
+        <testcase name="test_hash_kind_detailed_outputs_nested_yaml" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.236+00:00" time="0.024"/>
+        <testcase name="test_hash_kind_fm_matches_frontmatter_flag" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.246+00:00" time="0.039"/>
+        <testcase name="test_hash_kind_structured_strict_outputs_four_parts" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.260+00:00" time="0.036"/>
+        <testcase name="test_hash_kind_structured_outputs_four_parts" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.259+00:00" time="0.036"/>
+        <testcase name="test_hash_save_and_diff_conflict" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.295+00:00" time="0.026"/>
+        <testcase name="test_hash_save_detailed_value_preserves_authored_neighbors" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.296+00:00" time="0.041"/>
+        <testcase name="test_hash_save_failure_does_not_modify_flow_mapping" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.322+00:00" time="0.028"/>
+        <testcase name="test_hash_kind_structured_strict_respects_key_order" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.285+00:00" time="0.066"/>
+        <testcase name="test_hash_save_flow_root_no_write_matrix_covers_newlines" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.337+00:00" time="0.047"/>
+        <testcase name="test_hash_save_honors_quoted_custom_property" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.350+00:00" time="0.040"/>
+        <testcase name="test_hash_save_preserves_raw_frontmatter_and_is_idempotent" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.383+00:00" time="0.054"/>
+        <testcase name="test_hash_save_requires_file_not_stdin" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.391+00:00" time="0.074"/>
+        <testcase name="test_hash_save_writes_baseline_and_exits_zero" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.437+00:00" time="0.034"/>
+        <testcase name="test_hash_save_preservation_matrix_covers_representations_and_newlines" classname="darkmatter-cli::hash_kind_save_diff" timestamp="2026-09-06T04:42:40.351+00:00" time="0.285"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::help" tests="8" skipped="0" errors="0" failures="0">
+        <testcase name="test_completions_bash" classname="darkmatter-cli::help" timestamp="2026-09-06T04:42:40.464+00:00" time="0.028"/>
+        <testcase name="test_completions_fish" classname="darkmatter-cli::help" timestamp="2026-09-06T04:42:40.471+00:00" time="0.027"/>
+        <testcase name="test_completions_zsh" classname="darkmatter-cli::help" timestamp="2026-09-06T04:42:40.493+00:00" time="0.025"/>
+        <testcase name="test_help_flag" classname="darkmatter-cli::help" timestamp="2026-09-06T04:42:40.498+00:00" time="0.028"/>
+        <testcase name="test_list_themes" classname="darkmatter-cli::help" timestamp="2026-09-06T04:42:40.518+00:00" time="0.023"/>
+        <testcase name="test_subcommand_rejects_render_options" classname="darkmatter-cli::help" timestamp="2026-09-06T04:42:40.541+00:00" time="0.067"/>
+        <testcase name="test_version_flag" classname="darkmatter-cli::help" timestamp="2026-09-06T04:42:40.608+00:00" time="0.022"/>
+        <testcase name="test_removed_flags_are_rejected" classname="darkmatter-cli::help" timestamp="2026-09-06T04:42:40.526+00:00" time="0.142"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::layout_alignment" tests="10" skipped="0" errors="0" failures="0">
+        <testcase name="layout_resolved_align_lists_broadcast_then_granular_override" classname="darkmatter-cli::layout_alignment" timestamp="2026-09-06T04:42:40.636+00:00" time="0.032"/>
+        <testcase name="layout_parsed_line_numbers_flag_values" classname="darkmatter-cli::layout_alignment" timestamp="2026-09-06T04:42:40.630+00:00" time="0.040"/>
+        <testcase name="layout_resolved_fill_global_then_component_specific" classname="darkmatter-cli::layout_alignment" timestamp="2026-09-06T04:42:40.668+00:00" time="0.013"/>
+        <testcase name="layout_resolved_alignment_global_then_component_specific" classname="darkmatter-cli::layout_alignment" timestamp="2026-09-06T04:42:40.668+00:00" time="0.014"/>
+        <testcase name="layout_resolved_fill_lists_broadcast_then_granular_override" classname="darkmatter-cli::layout_alignment" timestamp="2026-09-06T04:42:40.670+00:00" time="0.012"/>
+        <testcase name="layout_resolved_max_width" classname="darkmatter-cli::layout_alignment" timestamp="2026-09-06T04:42:40.682+00:00" time="0.012"/>
+        <testcase name="layout_resolved_margin_shorthand_then_top_override" classname="darkmatter-cli::layout_alignment" timestamp="2026-09-06T04:42:40.682+00:00" time="0.012"/>
+        <testcase name="layout_resolved_margin_axis_then_side" classname="darkmatter-cli::layout_alignment" timestamp="2026-09-06T04:42:40.682+00:00" time="0.012"/>
+        <testcase name="layout_resolved_mt_alone_does_not_set_other_sides" classname="darkmatter-cli::layout_alignment" timestamp="2026-09-06T04:42:40.694+00:00" time="0.012"/>
+        <testcase name="layout_resolved_padding_axis_then_side" classname="darkmatter-cli::layout_alignment" timestamp="2026-09-06T04:42:40.694+00:00" time="0.012"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::layout_fill" tests="18" skipped="0" errors="0" failures="0">
+        <testcase name="cli_global_fill_overrides_frontmatter_table_max_width" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.706+00:00" time="0.066"/>
+        <testcase name="cli_align_tables_overrides_frontmatter_table_alignment" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.706+00:00" time="0.066"/>
+        <testcase name="component_overrides_component_specific_alignment_claims_one_bucket" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.772+00:00" time="0.015"/>
+        <testcase name="component_overrides_component_specific_fill_claims_one_bucket" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.772+00:00" time="0.015"/>
+        <testcase name="component_overrides_global_alignment_claims_every_bucket" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.788+00:00" time="0.014"/>
+        <testcase name="component_overrides_global_fill_claims_every_bucket" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.788+00:00" time="0.014"/>
+        <testcase name="frontmatter_block_quote_max_width_reaches_page" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.802+00:00" time="0.013"/>
+        <testcase name="frontmatter_images_alignment_and_fill_reach_page" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.802+00:00" time="0.013"/>
+        <testcase name="frontmatter_table_alignment_reaches_page_when_no_cli_flag" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.815+00:00" time="0.016"/>
+        <testcase name="frontmatter_table_max_width_reaches_page_when_no_cli_flag" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.815+00:00" time="0.016"/>
+        <testcase name="block_quote_max_width_caps_terminal_render_wrap_width" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.694+00:00" time="0.144"/>
+        <testcase name="no_style_frontmatter_leaves_cli_layout_state_intact" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.831+00:00" time="0.017"/>
+        <testcase name="style_fixture_renders_with_align_tables_override" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.838+00:00" time="0.032"/>
+        <testcase name="style_fixture_renders_html_with_fill_override" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.831+00:00" time="0.080"/>
+        <testcase name="style_frontmatter_html_emits_component_layout_css" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.849+00:00" time="0.073"/>
+        <testcase name="style_prop_fixture_resolves_to_expected_page_margins" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.912+00:00" time="0.018"/>
+        <testcase name="style_prop_fixture_resolves_to_expected_table_layout" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.921+00:00" time="0.015"/>
+        <testcase name="style_prop_fixture_html_emits_table_layout_css" classname="darkmatter-cli::layout_fill" timestamp="2026-09-06T04:42:40.869+00:00" time="0.071"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::layout_flags" tests="29" skipped="0" errors="0" failures="0">
+        <testcase name="layout_align_component_overrides_global" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:40.929+00:00" time="0.028"/>
+        <testcase name="layout_combined_margin_padding_bg" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:40.940+00:00" time="0.027"/>
+        <testcase name="layout_fill_component_specific_accepted" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:40.957+00:00" time="0.029"/>
+        <testcase name="layout_alignment_global_accepted" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:40.936+00:00" time="0.051"/>
+        <testcase name="layout_fill_full_accepted" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:40.968+00:00" time="0.026"/>
+        <testcase name="layout_fill_negative_rejected" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:40.986+00:00" time="0.022"/>
+        <testcase name="layout_fill_pad_fixed_accepted" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:40.994+00:00" time="0.026"/>
+        <testcase name="layout_fill_indent_max_explicit_accepted" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:40.986+00:00" time="0.044"/>
+        <testcase name="layout_fill_pad_percent_accepted" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.009+00:00" time="0.024"/>
+        <testcase name="layout_fill_percent_over_100_rejected" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.020+00:00" time="0.022"/>
+        <testcase name="layout_fill_unknown_kind_rejected" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.030+00:00" time="0.023"/>
+        <testcase name="layout_line_numbers_false_accepted" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.033+00:00" time="0.023"/>
+        <testcase name="layout_line_numbers_flag_accepted" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.042+00:00" time="0.023"/>
+        <testcase name="layout_line_numbers_true_accepted" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.053+00:00" time="0.024"/>
+        <testcase name="layout_margin_negative_rejected" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.065+00:00" time="0.024"/>
+        <testcase name="layout_margin_shorthand_overrides_axis_and_side" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.077+00:00" time="0.033"/>
+        <testcase name="layout_max_width_positive_accepted" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.089+00:00" time="0.029"/>
+        <testcase name="layout_max_width_zero_rejected" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.110+00:00" time="0.032"/>
+        <testcase name="layout_no_flags_preserves_existing_behavior" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.119+00:00" time="0.031"/>
+        <testcase name="layout_padding_shorthand_overrides_axis_and_side" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.142+00:00" time="0.023"/>
+        <testcase name="layout_page_background_alias_works" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.150+00:00" time="0.023"/>
+        <testcase name="layout_margin_aliases_work" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.056+00:00" time="0.118"/>
+        <testcase name="layout_page_bg_accepted" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.165+00:00" time="0.050"/>
+        <testcase name="layout_page_bg_color_hex_accepted" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.173+00:00" time="0.055"/>
+        <testcase name="layout_page_bg_color_invalid_rejected" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.175+00:00" time="0.065"/>
+        <testcase name="layout_page_bg_color_rgb_triple_accepted" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.215+00:00" time="0.030"/>
+        <testcase name="layout_page_bg_color_tailwind_accepted" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.240+00:00" time="0.022"/>
+        <testcase name="layout_width_flag_rejected" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.245+00:00" time="0.020"/>
+        <testcase name="layout_page_bg_color_special_keyword_accepted" classname="darkmatter-cli::layout_flags" timestamp="2026-09-06T04:42:41.228+00:00" time="0.045"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::layout_style_frontmatter" tests="8" skipped="0" errors="0" failures="0">
+        <testcase name="style_cli_margin_overrides_frontmatter" classname="darkmatter-cli::layout_style_frontmatter" timestamp="2026-09-06T04:42:41.262+00:00" time="0.024"/>
+        <testcase name="style_fixture_cli_pipe_smoke_passes" classname="darkmatter-cli::layout_style_frontmatter" timestamp="2026-09-06T04:42:41.265+00:00" time="0.025"/>
+        <testcase name="style_fixture_strict_style_passes_on_schema_clean_doc" classname="darkmatter-cli::layout_style_frontmatter" timestamp="2026-09-06T04:42:41.290+00:00" time="0.024"/>
+        <testcase name="style_fixture_html_document_has_non_empty_ordered_head" classname="darkmatter-cli::layout_style_frontmatter" timestamp="2026-09-06T04:42:41.273+00:00" time="0.074"/>
+        <testcase name="style_fixture_renders_html_successfully" classname="darkmatter-cli::layout_style_frontmatter" timestamp="2026-09-06T04:42:41.286+00:00" time="0.075"/>
+        <testcase name="style_non_strict_renders_with_unknown_key" classname="darkmatter-cli::layout_style_frontmatter" timestamp="2026-09-06T04:42:41.314+00:00" time="0.073"/>
+        <testcase name="style_strict_style_fails_on_deprecated_key" classname="darkmatter-cli::layout_style_frontmatter" timestamp="2026-09-06T04:42:41.347+00:00" time="0.061"/>
+        <testcase name="style_strict_style_fails_on_unknown_key" classname="darkmatter-cli::layout_style_frontmatter" timestamp="2026-09-06T04:42:41.361+00:00" time="0.078"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::level2_harness_integrity" tests="4" skipped="0" errors="0" failures="0">
+        <testcase name="assert_shim_resolves_to_built_accepts_valid_link" classname="darkmatter-cli::level2_harness_integrity" timestamp="2026-09-06T04:42:41.387+00:00" time="0.016"/>
+        <testcase name="md_shim_path_is_absolute_temp_dir_link" classname="darkmatter-cli::level2_harness_integrity" timestamp="2026-09-06T04:42:41.407+00:00" time="0.015"/>
+        <testcase name="md_shim_resolves_to_cargo_built_binary" classname="darkmatter-cli::level2_harness_integrity" timestamp="2026-09-06T04:42:41.422+00:00" time="0.022"/>
+        <testcase name="assert_shim_resolves_to_built_rejects_foreign_link" classname="darkmatter-cli::level2_harness_integrity" timestamp="2026-09-06T04:42:41.403+00:00" time="0.099"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::render_basic" tests="17" skipped="0" errors="0" failures="0">
+        <testcase name="render_rejects_invalid_code_block_value" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:41.444+00:00" time="0.041"/>
+        <testcase name="render_accepts_code_block_flag" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:41.439+00:00" time="0.086"/>
+        <testcase name="test_file_not_found" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:41.525+00:00" time="0.061"/>
+        <testcase name="test_file_rendering" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:41.587+00:00" time="0.025"/>
+        <testcase name="test_line_numbers_html_output" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:41.611+00:00" time="0.073"/>
+        <testcase name="test_output_html" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:41.684+00:00" time="0.064"/>
+        <testcase name="test_output_html_alias_browser" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:41.749+00:00" time="0.065"/>
+        <testcase name="test_output_json_alias_ast" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:41.814+00:00" time="0.023"/>
+        <testcase name="test_output_markdown_alias_text" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:41.838+00:00" time="0.023"/>
+        <testcase name="test_output_markdown_plus_renders_disclosure_as_html_details" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:41.861+00:00" time="0.024"/>
+        <testcase name="test_render_default_backward_compat" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:41.884+00:00" time="0.023"/>
+        <testcase name="test_render_explicit" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:41.908+00:00" time="0.022"/>
+        <testcase name="test_render_explicit_with_output" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:41.930+00:00" time="0.068"/>
+        <testcase name="test_show_option_with_markdown_output" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:41.998+00:00" time="0.027"/>
+        <testcase name="test_block_rendering_transclusion_cycle_tty" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:41.502+00:00" time="0.531"/>
+        <testcase name="test_block_rendering_transclusion_cycle_non_tty" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:41.486+00:00" time="0.549"/>
+        <testcase name="test_stdin_rendering_auto_non_tty_outputs_markdown" classname="darkmatter-cli::render_basic" timestamp="2026-09-06T04:42:42.026+00:00" time="0.026"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::rm" tests="8" skipped="0" errors="0" failures="0">
+        <testcase name="test_rm_preserves_body_content" classname="darkmatter-cli::rm" timestamp="2026-09-06T04:42:42.052+00:00" time="0.025"/>
+        <testcase name="test_rm_partial_nonexistent_fails" classname="darkmatter-cli::rm" timestamp="2026-09-06T04:42:42.035+00:00" time="0.059"/>
+        <testcase name="test_rm_nonexistent_key_fails" classname="darkmatter-cli::rm" timestamp="2026-09-06T04:42:42.033+00:00" time="0.063"/>
+        <testcase name="test_rm_removes_multiple_properties" classname="darkmatter-cli::rm" timestamp="2026-09-06T04:42:42.077+00:00" time="0.027"/>
+        <testcase name="test_rm_requires_at_least_one_prop" classname="darkmatter-cli::rm" timestamp="2026-09-06T04:42:42.096+00:00" time="0.023"/>
+        <testcase name="test_rm_removes_single_property" classname="darkmatter-cli::rm" timestamp="2026-09-06T04:42:42.094+00:00" time="0.025"/>
+        <testcase name="test_rm_with_json_output" classname="darkmatter-cli::rm" timestamp="2026-09-06T04:42:42.104+00:00" time="0.023"/>
+        <testcase name="test_rm_with_verbose_output" classname="darkmatter-cli::rm" timestamp="2026-09-06T04:42:42.119+00:00" time="0.058"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::schema_about" tests="14" skipped="0" errors="0" failures="0">
+        <testcase name="schema_about_accepts_code_block_flag" classname="darkmatter-cli::schema_about" timestamp="2026-09-06T04:42:42.120+00:00" time="0.472"/>
+        <testcase name="schema_about_describes_semantic_meta_types" classname="darkmatter-cli::schema_about" timestamp="2026-09-06T04:42:42.177+00:00" time="0.518"/>
+        <testcase name="schema_about_code_block_dark_and_light_differ" classname="darkmatter-cli::schema_about" timestamp="2026-09-06T04:42:42.128+00:00" time="0.898"/>
+        <testcase name="schema_about_emits_table_stripes_when_color_is_enabled" classname="darkmatter-cli::schema_about" timestamp="2026-09-06T04:42:42.592+00:00" time="0.445"/>
+        <testcase name="schema_about_exits_zero" classname="darkmatter-cli::schema_about" timestamp="2026-09-06T04:42:42.695+00:00" time="0.438"/>
+        <testcase name="schema_about_lists_every_supported_type_keyword" classname="darkmatter-cli::schema_about" timestamp="2026-09-06T04:42:43.037+00:00" time="0.471"/>
+        <testcase name="schema_about_mentions_inline_object_rules" classname="darkmatter-cli::schema_about" timestamp="2026-09-06T04:42:43.133+00:00" time="0.880"/>
+        <testcase name="schema_about_prints_simplified_schema_reference" classname="darkmatter-cli::schema_about" timestamp="2026-09-06T04:42:43.508+00:00" time="0.528"/>
+        <testcase name="schema_about_rejects_invalid_code_block_value" classname="darkmatter-cli::schema_about" timestamp="2026-09-06T04:42:44.013+00:00" time="0.027"/>
+        <testcase name="schema_about_is_documentation_only" classname="darkmatter-cli::schema_about" timestamp="2026-09-06T04:42:43.026+00:00" time="1.065"/>
+        <testcase name="schema_about_uses_readable_terminal_components" classname="darkmatter-cli::schema_about" timestamp="2026-09-06T04:42:44.037+00:00" time="0.505"/>
+        <testcase name="schema_about_verbose_prints_advanced_sections_as_readable_lists" classname="darkmatter-cli::schema_about" timestamp="2026-09-06T04:42:44.040+00:00" time="0.800"/>
+        <testcase name="schema_about_verbose_prints_context_and_expression_sections" classname="darkmatter-cli::schema_about" timestamp="2026-09-06T04:42:44.091+00:00" time="0.789"/>
+        <testcase name="verbose_schema_about_projects_shipped_git_context_descriptors" classname="darkmatter-cli::schema_about" timestamp="2026-09-06T04:42:44.541+00:00" time="0.723"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::schema_detect" tests="5" skipped="0" errors="0" failures="0">
+        <testcase name="schema_detect_json_emits_json_schema" classname="darkmatter-cli::schema_detect" timestamp="2026-09-06T04:42:44.840+00:00" time="0.073"/>
+        <testcase name="schema_detect_merge_promotes_required" classname="darkmatter-cli::schema_detect" timestamp="2026-09-06T04:42:44.880+00:00" time="0.070"/>
+        <testcase name="schema_detect_no_merge_emits_per_file_headers" classname="darkmatter-cli::schema_detect" timestamp="2026-09-06T04:42:44.914+00:00" time="0.070"/>
+        <testcase name="schema_detect_unparseable_frontmatter_exits_3" classname="darkmatter-cli::schema_detect" timestamp="2026-09-06T04:42:44.950+00:00" time="0.057"/>
+        <testcase name="schema_detect_yaml_emits_simplified_schema" classname="darkmatter-cli::schema_detect" timestamp="2026-09-06T04:42:44.984+00:00" time="0.069"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::schema_triggers" tests="7" skipped="0" errors="0" failures="0">
+        <testcase name="compose_re_resolves_trigger_after_shell_value_becomes_concrete" classname="darkmatter-cli::schema_triggers" timestamp="2026-09-06T04:42:45.053+00:00" time="0.557"/>
+        <testcase name="schema_validate_honors_triggers_and_raw_mode" classname="darkmatter-cli::schema_triggers" timestamp="2026-09-06T04:42:45.610+00:00" time="0.130"/>
+        <testcase name="schema_validate_re_resolves_after_assignments" classname="darkmatter-cli::schema_triggers" timestamp="2026-09-06T04:42:45.739+00:00" time="0.074"/>
+        <testcase name="sibling_only_bare_reference_suggests_explicit_relative_path" classname="darkmatter-cli::schema_triggers" timestamp="2026-09-06T04:42:45.814+00:00" time="0.072"/>
+        <testcase name="triggers_command_prints_shared_trace" classname="darkmatter-cli::schema_triggers" timestamp="2026-09-06T04:42:45.886+00:00" time="0.073"/>
+        <testcase name="compose_honors_triggers_and_raw_mode" classname="darkmatter-cli::schema_triggers" timestamp="2026-09-06T04:42:45.007+00:00" time="1.050"/>
+        <testcase name="dialect_family_has_identical_compose_validate_and_trace_activation" classname="darkmatter-cli::schema_triggers" timestamp="2026-09-06T04:42:45.264+00:00" time="2.435"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::schema_validate" tests="36" skipped="0" errors="0" failures="0">
+        <testcase name="schema_validate_assignment_applies_to_multiple_files" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:45.959+00:00" time="0.085"/>
+        <testcase name="schema_validate_assignment_failing_value_still_exits_1" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.057+00:00" time="0.062"/>
+        <testcase name="schema_validate_assignment_keeps_boolean_for_boolean_typed_property" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.119+00:00" time="0.064"/>
+        <testcase name="schema_validate_assignment_coerces_to_string_for_string_typed_property" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.045+00:00" time="0.178"/>
+        <testcase name="schema_validate_assignment_nested_dot_notation" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.183+00:00" time="0.084"/>
+        <testcase name="schema_validate_assignment_parses_flow_sequence" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.267+00:00" time="0.073"/>
+        <testcase name="schema_validate_assignment_overrides_existing_value" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.223+00:00" time="0.127"/>
+        <testcase name="schema_validate_assignment_parses_yaml_scalar_types" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.340+00:00" time="0.070"/>
+        <testcase name="schema_validate_assignment_satisfies_required_property" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.350+00:00" time="0.069"/>
+        <testcase name="schema_validate_baseline_from_env_var" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.419+00:00" time="0.072"/>
+        <testcase name="schema_validate_bad_baseline_exits_2" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.410+00:00" time="0.096"/>
+        <testcase name="schema_validate_baseline_from_flag" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.491+00:00" time="0.078"/>
+        <testcase name="schema_validate_failing_returns_exit_1" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.506+00:00" time="0.072"/>
+        <testcase name="schema_validate_invalid_assignment_yaml_returns_usage_error" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.569+00:00" time="0.057"/>
+        <testcase name="schema_validate_json_carries_description_field" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.579+00:00" time="0.068"/>
+        <testcase name="schema_validate_json_description_is_null_when_absent" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.626+00:00" time="0.064"/>
+        <testcase name="schema_validate_json_format_emits_ndjson" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.647+00:00" time="0.065"/>
+        <testcase name="schema_validate_json_format_reports_problems" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.690+00:00" time="0.060"/>
+        <testcase name="schema_validate_json_reports_arm_index_for_root_union" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.712+00:00" time="0.061"/>
+        <testcase name="schema_validate_json_reports_structured_bare_sidecar_advisory" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.750+00:00" time="0.069"/>
+        <testcase name="schema_validate_multiple_files_aggregates_failure" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.773+00:00" time="0.065"/>
+        <testcase name="schema_validate_no_schema_no_baseline_is_vacuous_success" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.820+00:00" time="0.053"/>
+        <testcase name="schema_validate_path_with_equals_disambiguated_by_dot_slash" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.838+00:00" time="0.064"/>
+        <testcase name="schema_validate_pretty_does_not_render_root_label_as_markup" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.873+00:00" time="0.068"/>
+        <testcase name="schema_validate_pretty_omits_sub_line_when_no_description" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.903+00:00" time="0.062"/>
+        <testcase name="schema_validate_pretty_prefixes_root_union_problems_with_arm_index" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.941+00:00" time="0.066"/>
+        <testcase name="schema_validate_pretty_reports_bare_sidecar_advisory_without_failing" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:46.965+00:00" time="0.069"/>
+        <testcase name="schema_validate_pretty_reports_line_for_type_mismatch" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:47.007+00:00" time="0.072"/>
+        <testcase name="schema_validate_pretty_reports_source_line_for_problem" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:47.033+00:00" time="0.070"/>
+        <testcase name="schema_validate_pretty_surfaces_property_description" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:47.079+00:00" time="0.073"/>
+        <testcase name="schema_validate_quiet_suppresses_bare_sidecar_advisory" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:47.103+00:00" time="0.073"/>
+        <testcase name="schema_validate_quiet_suppresses_success_lines" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:47.153+00:00" time="0.069"/>
+        <testcase name="schema_validate_unparseable_frontmatter_exits_3" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:47.176+00:00" time="0.056"/>
+        <testcase name="schema_validate_unresolved_document_schema_exits_2" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:47.221+00:00" time="0.059"/>
+        <testcase name="schema_validate_unresolved_document_schema_outranks_validation_failure" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:47.233+00:00" time="0.068"/>
+        <testcase name="schema_validate_valid_inline_succeeds" classname="darkmatter-cli::schema_validate" timestamp="2026-09-06T04:42:47.280+00:00" time="0.066"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::schema_validate_baseline" tests="2" skipped="0" errors="0" failures="0">
+        <testcase name="schema_validate_legacy_json_output_is_byte_identical" classname="darkmatter-cli::schema_validate_baseline" timestamp="2026-09-06T04:42:47.301+00:00" time="0.462"/>
+        <testcase name="schema_validate_legacy_pretty_output_is_byte_identical" classname="darkmatter-cli::schema_validate_baseline" timestamp="2026-09-06T04:42:47.346+00:00" time="0.474"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::toc" tests="3" skipped="0" errors="0" failures="0">
+        <testcase name="test_toc_subcommand_ignores_tab_indented_frontmatter" classname="darkmatter-cli::toc" timestamp="2026-09-06T04:42:47.699+00:00" time="0.066"/>
+        <testcase name="test_toc_subcommand_json_output" classname="darkmatter-cli::toc" timestamp="2026-09-06T04:42:47.763+00:00" time="0.023"/>
+        <testcase name="test_toc_subcommand_output" classname="darkmatter-cli::toc" timestamp="2026-09-06T04:42:47.766+00:00" time="0.052"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::validate_refs" tests="12" skipped="0" errors="0" failures="0">
+        <testcase name="validate_refs_graph_dot" classname="darkmatter-cli::validate_refs" timestamp="2026-09-06T04:42:47.786+00:00" time="0.030"/>
+        <testcase name="validate_refs_graph_mermaid" classname="darkmatter-cli::validate_refs" timestamp="2026-09-06T04:42:47.817+00:00" time="0.027"/>
+        <testcase name="validate_refs_json_datauri_baseline" classname="darkmatter-cli::validate_refs" timestamp="2026-09-06T04:42:47.818+00:00" time="0.027"/>
+        <testcase name="validate_refs_json_inline_baseline" classname="darkmatter-cli::validate_refs" timestamp="2026-09-06T04:42:47.844+00:00" time="0.026"/>
+        <testcase name="validate_refs_json_fragment_baseline" classname="darkmatter-cli::validate_refs" timestamp="2026-09-06T04:42:47.844+00:00" time="0.027"/>
+        <testcase name="validate_refs_json_errors_baseline" classname="darkmatter-cli::validate_refs" timestamp="2026-09-06T04:42:47.820+00:00" time="0.051"/>
+        <testcase name="validate_refs_json_output" classname="darkmatter-cli::validate_refs" timestamp="2026-09-06T04:42:47.871+00:00" time="0.025"/>
+        <testcase name="validate_refs_json_remote_baseline" classname="darkmatter-cli::validate_refs" timestamp="2026-09-06T04:42:47.871+00:00" time="0.025"/>
+        <testcase name="validate_refs_text_output" classname="darkmatter-cli::validate_refs" timestamp="2026-09-06T04:42:47.896+00:00" time="0.026"/>
+        <testcase name="validate_refs_json_local_baseline" classname="darkmatter-cli::validate_refs" timestamp="2026-09-06T04:42:47.871+00:00" time="0.058"/>
+        <testcase name="validate_refs_with_fragments" classname="darkmatter-cli::validate_refs" timestamp="2026-09-06T04:42:47.923+00:00" time="0.028"/>
+        <testcase name="validate_refs_nonzero_exit_on_errors" classname="darkmatter-cli::validate_refs" timestamp="2026-09-06T04:42:47.896+00:00" time="0.059"/>
+    </testsuite>
+</testsuites>

@@ -6,6 +6,7 @@ reviewed: true
 reviewed_by: opencode/zai-coding-plan/glm-5.3
 reviewed_on: 2026-09-07
 implemented: false
+review_iterations: 1
 packages:
     - darkmatter
     - darkmatter-cli
@@ -243,4 +244,3 @@ follow-up prevents the duplication from becoming silently permanent.
 - Which DMLS/extension checks are reachable from existing recipes?
 - Which repeated corpus/setup operations can be consolidated without reducing
   diagnostic quality or representative integration coverage?
-

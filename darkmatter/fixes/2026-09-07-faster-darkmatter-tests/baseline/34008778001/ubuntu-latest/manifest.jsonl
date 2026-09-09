@@ -1,0 +1,7 @@
+{"tier":"L1","package":"darkmatter","xml":"L1/darkmatter.xml","exit_code":0,"environment":"ubuntu-latest","duration_s":446,"report_present":true}
+{"tier":"L1","package":"darkmatter-cli","xml":"L1/darkmatter-cli.xml","exit_code":0,"environment":"ubuntu-latest","duration_s":284,"report_present":true}
+{"tier":"L1","package":"dmls","xml":"L1/dmls.xml","exit_code":0,"environment":"ubuntu-latest","duration_s":229,"report_present":true}
+{"tier":"L1","package":"zed-dmls-cli","xml":"L1/zed-dmls-cli.xml","exit_code":0,"environment":"ubuntu-latest","duration_s":157,"report_present":true}
+{"tier":"L2","package":"darkmatter-cli","xml":"L2/darkmatter-cli.xml","exit_code":0,"environment":"ubuntu-latest","duration_s":235,"report_present":true}
+{"tier":"L2","package":"dmls","xml":"L2/dmls.xml","exit_code":0,"environment":"ubuntu-latest","duration_s":166,"report_present":true}
+{"tier":"browser","package":"darkmatter","xml":"browser/darkmatter.xml","exit_code":0,"environment":"ubuntu-latest","duration_s":318,"report_present":true}

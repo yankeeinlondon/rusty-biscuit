@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nextest-run" tests="26" skipped="0" failures="0" errors="0" uuid="677588be-84ed-4ef0-805d-4670e87db336" timestamp="2026-09-06T05:02:43.234+00:00" time="2.200">
+    <testsuite name="zed-dmls-cli" tests="19" skipped="0" errors="0" failures="0">
+        <testcase name="tests::bounded_log_tail_tolerates_a_split_utf8_codepoint" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.235+00:00" time="0.023"/>
+        <testcase name="tests::broken_registration_ignores_log_errors_about_other_extensions" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.236+00:00" time="0.035"/>
+        <testcase name="tests::binary_version_output_must_match_exactly" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.235+00:00" time="0.037"/>
+        <testcase name="tests::compiled_dmls_version_matches_dmls_package_metadata" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.258+00:00" time="0.040"/>
+        <testcase name="tests::conditional_doctor_only_runs_when_zed_state_exists" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.271+00:00" time="0.028"/>
+        <testcase name="tests::doctor_distinguishes_missing_manifest_wrong_id_and_wrong_folder_log" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.272+00:00" time="0.033"/>
+        <testcase name="tests::activation_failure_rolls_back_and_cleans_siblings" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.235+00:00" time="0.070"/>
+        <testcase name="tests::doctor_reports_dangling_registration_target" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.298+00:00" time="0.041"/>
+        <testcase name="tests::doctor_reports_missing_binary_and_registration" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.299+00:00" time="0.049"/>
+        <testcase name="tests::incompatible_binary_is_a_failure" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.306+00:00" time="0.056"/>
+        <testcase name="tests::healthy_registration_says_nothing_about_the_log" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.306+00:00" time="0.084"/>
+        <testcase name="tests::invalid_manifest_does_not_mutate_existing_stage" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.340+00:00" time="0.059"/>
+        <testcase name="tests::linux_directory_discovery_prefers_flatpak_xdg_data_home_for_zed" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.362+00:00" time="0.069"/>
+        <testcase name="tests::junction_registration_survives_source_worktree_removal_on_windows" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.348+00:00" time="0.083"/>
+        <testcase name="tests::linux_directory_discovery_uses_ordinary_xdg_roots" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.390+00:00" time="0.060"/>
+        <testcase name="tests::platform_paths_use_native_data_roots_and_overrides" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.399+00:00" time="0.052"/>
+        <testcase name="tests::staging_leaves_a_real_directory_registration_alone" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.431+00:00" time="0.109"/>
+        <testcase name="tests::staging_registers_the_stable_copy_when_zed_is_present" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.451+00:00" time="0.098"/>
+        <testcase name="tests::staging_is_allowlisted_repeatable_and_removes_stale_files" classname="zed-dmls-cli" timestamp="2026-09-06T05:02:43.430+00:00" time="0.119"/>
+    </testsuite>
+    <testsuite name="zed-dmls-cli::cli" tests="6" skipped="0" errors="0" failures="0">
+        <testcase name="conditional_doctor_is_silent_when_zed_is_absent" classname="zed-dmls-cli::cli" timestamp="2026-09-06T05:02:43.451+00:00" time="0.054"/>
+        <testcase name="doctor_is_hermetic_with_path_overrides_and_plain_output" classname="zed-dmls-cli::cli" timestamp="2026-09-06T05:02:43.541+00:00" time="0.085"/>
+        <testcase name="missing_command_uses_clap_exit_two" classname="zed-dmls-cli::cli" timestamp="2026-09-06T05:02:43.549+00:00" time="0.084"/>
+        <testcase name="conditional_stage_is_silent_when_zed_is_absent" classname="zed-dmls-cli::cli" timestamp="2026-09-06T05:02:43.505+00:00" time="1.913"/>
+        <testcase name="stage_returns_three_when_manual_registration_remains" classname="zed-dmls-cli::cli" timestamp="2026-09-06T05:02:43.626+00:00" time="1.802"/>
+        <testcase name="stage_registers_and_returns_zero_when_zed_is_present" classname="zed-dmls-cli::cli" timestamp="2026-09-06T05:02:43.549+00:00" time="1.885"/>
+    </testsuite>
+    <testsuite name="zed-dmls-cli::bin/zed-dmls" tests="1" skipped="0" errors="0" failures="0">
+        <testcase name="tests::parses_global_overrides_before_or_after_subcommand" classname="zed-dmls-cli::bin/zed-dmls" timestamp="2026-09-06T05:02:43.633+00:00" time="0.117"/>
+    </testsuite>
+</testsuites>

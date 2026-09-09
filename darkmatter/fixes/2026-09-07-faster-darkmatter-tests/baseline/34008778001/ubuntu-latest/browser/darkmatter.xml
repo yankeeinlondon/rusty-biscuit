@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nextest-run" tests="86" skipped="0" failures="0" errors="0" uuid="a3731451-26c3-42ed-b4d6-e6687ef4d4c9" timestamp="2026-09-06T05:04:16.641+00:00" time="40.612">
+    <testsuite name="darkmatter" tests="42" skipped="0" errors="0" failures="0">
+        <testcase name="layout::page::tests::browser_captured_light_terminal_wins_over_dark_default" classname="darkmatter" timestamp="2026-09-06T05:04:16.664+00:00" time="0.086"/>
+        <testcase name="layout::page::tests::browser_code_block_honors_code_block_mode" classname="darkmatter" timestamp="2026-09-06T05:04:16.750+00:00" time="0.086"/>
+        <testcase name="layout::page::tests::browser_code_markup_contrasts_with_panel_background" classname="darkmatter" timestamp="2026-09-06T05:04:16.836+00:00" time="0.085"/>
+        <testcase name="layout::page::tests::browser_code_markup_theme_follows_page_mode" classname="darkmatter" timestamp="2026-09-06T05:04:16.922+00:00" time="0.098"/>
+        <testcase name="layout::page::tests::browser_code_panel_inverts_against_terminal_not_option_in_transparent_default" classname="darkmatter" timestamp="2026-09-06T05:04:17.019+00:00" time="0.085"/>
+        <testcase name="layout::page::tests::browser_code_panel_separates_from_page_surface_in_dark_terminal" classname="darkmatter" timestamp="2026-09-06T05:04:17.104+00:00" time="0.085"/>
+        <testcase name="layout::page::tests::browser_code_panel_separates_from_page_surface_in_light_terminal" classname="darkmatter" timestamp="2026-09-06T05:04:17.189+00:00" time="0.085"/>
+        <testcase name="layout::page::tests::browser_component_color_emits_per_component_css" classname="darkmatter" timestamp="2026-09-06T05:04:17.274+00:00" time="0.072"/>
+        <testcase name="layout::page::tests::browser_component_opacity_preserved_as_rgba" classname="darkmatter" timestamp="2026-09-06T05:04:17.346+00:00" time="0.072"/>
+        <testcase name="layout::page::tests::browser_css_special_colors_passthrough" classname="darkmatter" timestamp="2026-09-06T05:04:17.418+00:00" time="0.072"/>
+        <testcase name="layout::page::tests::browser_default_fallback_mode_is_dark" classname="darkmatter" timestamp="2026-09-06T05:04:17.490+00:00" time="0.085"/>
+        <testcase name="layout::page::tests::browser_hr_bg_color_targets_rendered_element" classname="darkmatter" timestamp="2026-09-06T05:04:17.575+00:00" time="0.072"/>
+        <testcase name="layout::page::tests::browser_hr_color_emits_rule_for_svg_target" classname="darkmatter" timestamp="2026-09-06T05:04:17.647+00:00" time="0.072"/>
+        <testcase name="layout::page::tests::browser_list_selectors_emit_separate_rules_with_colors" classname="darkmatter" timestamp="2026-09-06T05:04:17.720+00:00" time="0.072"/>
+        <testcase name="layout::page::tests::browser_opacity_preserved_as_rgba" classname="darkmatter" timestamp="2026-09-06T05:04:17.792+00:00" time="0.071"/>
+        <testcase name="layout::page::tests::browser_page_bg_color_overrides_page_background_css" classname="darkmatter" timestamp="2026-09-06T05:04:17.863+00:00" time="0.072"/>
+        <testcase name="layout::page::tests::browser_page_color_emits_inheriting_root_div" classname="darkmatter" timestamp="2026-09-06T05:04:17.935+00:00" time="0.072"/>
+        <testcase name="layout::page::tests::browser_render_authored_side_margins_suppress_centering" classname="darkmatter" timestamp="2026-09-06T05:04:18.008+00:00" time="0.072"/>
+        <testcase name="layout::page::tests::browser_render_error_for_margins_exceed_width" classname="darkmatter" timestamp="2026-09-06T05:04:18.080+00:00" time="0.013"/>
+        <testcase name="layout::page::tests::browser_render_error_for_max_width_zero" classname="darkmatter" timestamp="2026-09-06T05:04:18.093+00:00" time="0.013"/>
+        <testcase name="layout::page::tests::browser_render_with_margin_padding_bg_wraps" classname="darkmatter" timestamp="2026-09-06T05:04:18.107+00:00" time="0.072"/>
+        <testcase name="layout::page::tests::browser_render_with_max_width" classname="darkmatter" timestamp="2026-09-06T05:04:18.179+00:00" time="0.072"/>
+        <testcase name="layout::page::tests::browser_render_with_pronounced_bg" classname="darkmatter" timestamp="2026-09-06T05:04:18.251+00:00" time="0.072"/>
+        <testcase name="layout::page::tests::browser_render_with_unmatched_alignment_policy_adds_no_wrapper" classname="darkmatter" timestamp="2026-09-06T05:04:18.322+00:00" time="0.072"/>
+        <testcase name="layout::page::tests::browser_render_with_unmatched_fill_policy_adds_no_wrapper" classname="darkmatter" timestamp="2026-09-06T05:04:18.395+00:00" time="0.072"/>
+        <testcase name="layout::page::tests::browser_selectors_split_for_lists" classname="darkmatter" timestamp="2026-09-06T05:04:18.467+00:00" time="0.072"/>
+        <testcase name="layout::page::tests::browser_ul_left_margin_css" classname="darkmatter" timestamp="2026-09-06T05:04:18.539+00:00" time="0.072"/>
+        <testcase name="layout::page::tests::browser_unmatched_component_policy_matches_no_policy" classname="darkmatter" timestamp="2026-09-06T05:04:18.612+00:00" time="0.073"/>
+        <testcase name="markdown::code_block::tests::browser_emits_rust_language_class" classname="darkmatter" timestamp="2026-09-06T05:04:18.685+00:00" time="0.084"/>
+        <testcase name="markdown::code_block::tests::browser_honors_code_theme_env_when_no_override" classname="darkmatter" timestamp="2026-09-06T05:04:18.768+00:00" time="0.086"/>
+        <testcase name="markdown::code_block::tests::browser_honors_theme_env_when_no_override" classname="darkmatter" timestamp="2026-09-06T05:04:18.854+00:00" time="0.087"/>
+        <testcase name="markdown::code_block::tests::browser_override_wins_over_theme_env" classname="darkmatter" timestamp="2026-09-06T05:04:18.943+00:00" time="0.085"/>
+        <testcase name="markdown::render_tree::code_renderer::tests::browser_code_does_not_promote_mermaid" classname="darkmatter" timestamp="2026-09-06T05:04:19.028+00:00" time="0.078"/>
+        <testcase name="markdown::render_tree::code_renderer::tests::browser_code_emits_language_class" classname="darkmatter" timestamp="2026-09-06T05:04:19.107+00:00" time="0.081"/>
+        <testcase name="markdown::render_tree::code_renderer::tests::browser_code_emits_title_and_line_numbers_from_meta" classname="darkmatter" timestamp="2026-09-06T05:04:19.187+00:00" time="0.087"/>
+        <testcase name="markdown::render_tree::code_renderer::tests::browser_code_inverts_theme_for_page_contrast" classname="darkmatter" timestamp="2026-09-06T05:04:19.275+00:00" time="0.085"/>
+        <testcase name="markdown::render_tree::code_renderer::tests::browser_mermaid_returns_svg_or_none_never_silent_code_block" classname="darkmatter" timestamp="2026-09-06T05:04:19.360+00:00" time="0.188"/>
+        <testcase name="markdown::render_tree::code_renderer::tests::browser_render_resolves_code_surface_once_per_render" classname="darkmatter" timestamp="2026-09-06T05:04:19.548+00:00" time="0.090"/>
+        <testcase name="markdown::render_tree::entrypoints::tests::browser_options_mapping_defaults_raw_html_to_escape" classname="darkmatter" timestamp="2026-09-06T05:04:19.638+00:00" time="0.072"/>
+        <testcase name="markdown::render_tree::entrypoints::tests::browser_options_mapping_lowers_hr_css_variables_without_styles" classname="darkmatter" timestamp="2026-09-06T05:04:19.710+00:00" time="0.013"/>
+        <testcase name="markdown::render_tree::entrypoints::tests::browser_options_mapping_maps_mermaid_image_to_static_svg" classname="darkmatter" timestamp="2026-09-06T05:04:19.723+00:00" time="0.071"/>
+        <testcase name="markdown::render_tree::entrypoints::tests::browser_options_mapping_maps_mermaid_off_to_code" classname="darkmatter" timestamp="2026-09-06T05:04:19.795+00:00" time="0.071"/>
+    </testsuite>
+    <testsuite name="darkmatter::browser_render" tests="42" skipped="0" errors="0" failures="0">
+        <testcase name="browser_code_block_background_computes_in_browser" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:19.866+00:00" time="8.947"/>
+        <testcase name="browser_component_blockquote_bg_opacity_computes_rgba" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:28.813+00:00" time="0.553"/>
+        <testcase name="browser_component_table_color_computes_rgb" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:29.366+00:00" time="0.566"/>
+        <testcase name="browser_component_table_width_percent_resolves_against_container" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:29.931+00:00" time="0.951"/>
+        <testcase name="browser_decorated_standalone_document_head_body_placement" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:30.883+00:00" time="0.585"/>
+        <testcase name="browser_disclosure_click_reveals_body" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:31.468+00:00" time="0.580"/>
+        <testcase name="browser_feature_free_fragment_has_no_nested_document_scaffold" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:32.048+00:00" time="0.590"/>
+        <testcase name="browser_hr_alignment_positions_narrow_rule" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:32.638+00:00" time="1.618"/>
+        <testcase name="browser_hr_hostile_attrs_inject_no_nodes" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:34.256+00:00" time="0.736"/>
+        <testcase name="browser_hr_waves_svg_computes_in_browser" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:34.993+00:00" time="0.832"/>
+        <testcase name="browser_list_left_margin_computes" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:35.825+00:00" time="0.558"/>
+        <testcase name="browser_local_image_per_node_css_overrides_frontmatter" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:36.383+00:00" time="0.690"/>
+        <testcase name="browser_mermaid_body_wrapper_is_direct_child_of_body" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:37.073+00:00" time="0.571"/>
+        <testcase name="browser_mermaid_dedup_renders_both_diagrams_once" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:37.644+00:00" time="0.550"/>
+        <testcase name="browser_mermaid_interactive_renders_svg_in_live_dom" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:38.194+00:00" time="0.531"/>
+        <testcase name="browser_mermaid_primary_failure_falls_back_to_unpkg" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:38.725+00:00" time="0.565"/>
+        <testcase name="browser_mermaid_real_engine_renders_and_themes" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:39.291+00:00" time="1.043"/>
+        <testcase name="browser_mermaid_static_svg_computes_in_browser" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:40.334+00:00" time="0.594"/>
+        <testcase name="browser_mermaid_theme_variables_differ_by_color_mode" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:40.929+00:00" time="0.750"/>
+        <testcase name="browser_mermaid_total_failure_keeps_readable_source" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:41.679+00:00" time="0.570"/>
+        <testcase name="browser_mermaid_tree_path_static_svg_computes_in_browser" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:42.249+00:00" time="0.504"/>
+        <testcase name="browser_nested_disclosure_toggles_independently" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:42.753+00:00" time="0.577"/>
+        <testcase name="browser_page_code_block_mode_same_vs_inverse_computes" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:43.330+00:00" time="0.950"/>
+        <testcase name="browser_page_code_block_theme_follows_captured_terminal_mode" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:44.279+00:00" time="0.990"/>
+        <testcase name="browser_page_color_inherits_to_descendants" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:45.270+00:00" time="0.643"/>
+        <testcase name="browser_page_color_not_copied_onto_component" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:45.913+00:00" time="0.573"/>
+        <testcase name="browser_page_max_width_centers_frame" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:46.486+00:00" time="0.796"/>
+        <testcase name="browser_page_max_width_percent_computes_against_viewport" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:47.282+00:00" time="0.572"/>
+        <testcase name="browser_popover_color_modes_differ" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:47.854+00:00" time="0.685"/>
+        <testcase name="browser_popover_enter_activates_link" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:48.539+00:00" time="0.626"/>
+        <testcase name="browser_popover_long_prompt_wraps_within_viewport" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:49.165+00:00" time="0.567"/>
+        <testcase name="browser_popover_pointer_hover_reveals_prompt" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:49.732+00:00" time="0.703"/>
+        <testcase name="browser_popover_reduced_motion_suppresses_transition" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:50.435+00:00" time="0.701"/>
+        <testcase name="browser_popover_shift_tab_leaves_anchor" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:51.135+00:00" time="0.651"/>
+        <testcase name="browser_popover_stays_within_viewport_left_edge" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:51.787+00:00" time="0.571"/>
+        <testcase name="browser_popover_stays_within_viewport_right_edge" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:52.358+00:00" time="0.579"/>
+        <testcase name="browser_popover_tab_reaches_anchor" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:52.937+00:00" time="0.573"/>
+        <testcase name="browser_prompted_link_popover_reveals_on_focus" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:53.510+00:00" time="0.607"/>
+        <testcase name="browser_sanitized_mermaid_svg_injects_no_active_markup" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:54.117+00:00" time="0.854"/>
+        <testcase name="browser_sanitized_mermaid_svg_strips_external_css_references" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:54.972+00:00" time="0.586"/>
+        <testcase name="browser_table_center_alignment_computes_equal_margins" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:55.558+00:00" time="0.778"/>
+        <testcase name="browser_translucent_page_background_painted_only_by_frame" classname="darkmatter::browser_render" timestamp="2026-09-06T05:04:56.336+00:00" time="0.789"/>
+    </testsuite>
+    <testsuite name="darkmatter::disclosure_render_targets" tests="2" skipped="0" errors="0" failures="0">
+        <testcase name="browser_target_renders_nested_disclosures" classname="darkmatter::disclosure_render_targets" timestamp="2026-09-06T05:04:57.125+00:00" time="0.063"/>
+        <testcase name="browser_target_uses_native_details_summary" classname="darkmatter::disclosure_render_targets" timestamp="2026-09-06T05:04:57.189+00:00" time="0.063"/>
+    </testsuite>
+</testsuites>

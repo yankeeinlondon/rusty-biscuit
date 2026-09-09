@@ -1,0 +1,46 @@
+{
+  "note": "Changed cohorts are projected from the full alternating L1 reports. Cohorts may overlap when a narrower row explains a broader package-level result; summed durations are never added across rows.",
+  "cohorts": [
+    {
+      "name": "all darkmatter-cli integration binaries (shared deterministic fixture)",
+      "binaryPrefixes": ["darkmatter-cli::"]
+    },
+    {
+      "name": "CLI fixture guards and contamination regressions",
+      "binaries": [
+        "darkmatter-cli::md_process_fixture",
+        "darkmatter-cli::spawn_site_guard"
+      ]
+    },
+    {
+      "name": "CLI loopback HTTP ownership and caching",
+      "binaries": ["darkmatter-cli::compose_remote_caching"]
+    },
+    {
+      "name": "DMLS protocol, process ownership, and passive effects",
+      "binaries": [
+        "dmls::lsp_session",
+        "dmls::stdio_subprocess",
+        "dmls::no_side_effects"
+      ]
+    },
+    {
+      "name": "passive schema representation and shipped-artifact proofs",
+      "binaries": [
+        "darkmatter::meta_schema_phase4",
+        "darkmatter::schemas_literal_expression"
+      ]
+    },
+    {
+      "name": "explicit versus ambient composition context",
+      "binaries": [
+        "darkmatter::ambient_ctx_capture",
+        "darkmatter::context_provider_matrix"
+      ]
+    },
+    {
+      "name": "zed-dmls CLI fixture",
+      "binaries": ["zed-dmls-cli::cli"]
+    }
+  ]
+}

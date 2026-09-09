@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites name="nextest-run" tests="69" skipped="0" failures="0" errors="0" uuid="d5662abf-9123-493b-b6ec-e817d4b09c2d" timestamp="2026-09-06T05:11:08.713+00:00" time="13.240">
+    <testsuite name="darkmatter-cli::level2_code_block_styling" tests="10" skipped="0" errors="0" failures="0">
+        <testcase name="level2_align_code_block_center_indents_more_than_left" classname="darkmatter-cli::level2_code_block_styling" timestamp="2026-09-06T05:11:08.720+00:00" time="2.473"/>
+        <testcase name="level2_cli_code_theme_overrides_style_page_code_theme" classname="darkmatter-cli::level2_code_block_styling" timestamp="2026-09-06T05:11:11.198+00:00" time="0.017"/>
+        <testcase name="level2_code_block_clears_inherited_dim_before_theme_colors" classname="darkmatter-cli::level2_code_block_styling" timestamp="2026-09-06T05:11:11.214+00:00" time="1.170"/>
+        <testcase name="level2_code_block_fill_pad_adds_left_indent" classname="darkmatter-cli::level2_code_block_styling" timestamp="2026-09-06T05:11:12.385+00:00" time="0.013"/>
+        <testcase name="level2_code_block_inverts_to_light_in_dark_terminal" classname="darkmatter-cli::level2_code_block_styling" timestamp="2026-09-06T05:11:12.398+00:00" time="1.321"/>
+        <testcase name="level2_code_block_max_fill_constrains_body_width" classname="darkmatter-cli::level2_code_block_styling" timestamp="2026-09-06T05:11:13.719+00:00" time="0.024"/>
+        <testcase name="level2_code_block_respects_right_margin" classname="darkmatter-cli::level2_code_block_styling" timestamp="2026-09-06T05:11:13.742+00:00" time="0.010"/>
+        <testcase name="level2_default_code_block_inverts_background_and_foreground" classname="darkmatter-cli::level2_code_block_styling" timestamp="2026-09-06T05:11:13.752+00:00" time="1.136"/>
+        <testcase name="level2_no_trailing_blank_offset_after_code" classname="darkmatter-cli::level2_code_block_styling" timestamp="2026-09-06T05:11:14.889+00:00" time="0.024"/>
+        <testcase name="level2_style_page_code_theme_changes_terminal_rendering" classname="darkmatter-cli::level2_code_block_styling" timestamp="2026-09-06T05:11:14.913+00:00" time="0.015"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::level2_disclosure_blocks" tests="4" skipped="0" errors="0" failures="0">
+        <testcase name="level2_disclosure_body_renders_as_dim_italic_block_quote" classname="darkmatter-cli::level2_disclosure_blocks" timestamp="2026-09-06T05:11:14.928+00:00" time="0.014"/>
+        <testcase name="level2_disclosure_honors_frontmatter_style_color_width_alignment" classname="darkmatter-cli::level2_disclosure_blocks" timestamp="2026-09-06T05:11:14.942+00:00" time="0.013"/>
+        <testcase name="level2_disclosure_honors_inline_opener_color_and_width" classname="darkmatter-cli::level2_disclosure_blocks" timestamp="2026-09-06T05:11:14.956+00:00" time="0.013"/>
+        <testcase name="level2_disclosure_inline_width_overrides_frontmatter_max_width" classname="darkmatter-cli::level2_disclosure_blocks" timestamp="2026-09-06T05:11:14.969+00:00" time="0.013"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::level2_errors" tests="8" skipped="0" errors="0" failures="0">
+        <testcase name="level2_error_excerpt_contains_gutter_and_dimming" classname="darkmatter-cli::level2_errors" timestamp="2026-09-06T05:11:14.983+00:00" time="0.015"/>
+        <testcase name="level2_error_header_contains_osc8_hyperlink" classname="darkmatter-cli::level2_errors" timestamp="2026-09-06T05:11:14.998+00:00" time="0.014"/>
+        <testcase name="level2_invalid_file_reference_renders_did_you_mean_suggestion" classname="darkmatter-cli::level2_errors" timestamp="2026-09-06T05:11:15.012+00:00" time="0.012"/>
+        <testcase name="level2_invalid_file_reference_renders_headline_excerpt_and_osc8_link" classname="darkmatter-cli::level2_errors" timestamp="2026-09-06T05:11:15.026+00:00" time="0.017"/>
+        <testcase name="level2_invalid_file_reference_with_schema_reports_file_path" classname="darkmatter-cli::level2_errors" timestamp="2026-09-06T05:11:15.043+00:00" time="0.014"/>
+        <testcase name="level2_schema_validation_block_renders_per_problem_description" classname="darkmatter-cli::level2_errors" timestamp="2026-09-06T05:11:15.058+00:00" time="0.015"/>
+        <testcase name="level2_schema_validation_block_renders_styled_link_and_bullet" classname="darkmatter-cli::level2_errors" timestamp="2026-09-06T05:11:15.072+00:00" time="0.015"/>
+        <testcase name="level2_stale_directory_reference_renders_did_you_mean_suggestion" classname="darkmatter-cli::level2_errors" timestamp="2026-09-06T05:11:15.087+00:00" time="0.018"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::level2_frontmatter_images" tests="11" skipped="0" errors="0" failures="0">
+        <testcase name="level2_hyperlink_color_applies_inside_table" classname="darkmatter-cli::level2_frontmatter_images" timestamp="2026-09-06T05:11:15.105+00:00" time="0.019"/>
+        <testcase name="level2_image_fallback_text_respects_alignment" classname="darkmatter-cli::level2_frontmatter_images" timestamp="2026-09-06T05:11:15.124+00:00" time="0.019"/>
+        <testcase name="level2_local_hyperlink_color_differs_from_remote_in_terminal" classname="darkmatter-cli::level2_frontmatter_images" timestamp="2026-09-06T05:11:15.143+00:00" time="0.020"/>
+        <testcase name="level2_style_frontmatter_images_alignment_indents_fallback_text" classname="darkmatter-cli::level2_frontmatter_images" timestamp="2026-09-06T05:11:15.163+00:00" time="0.023"/>
+        <testcase name="level2_style_hyperlinks_exact_width_truncates_label_in_terminal" classname="darkmatter-cli::level2_frontmatter_images" timestamp="2026-09-06T05:11:15.187+00:00" time="0.021"/>
+        <testcase name="level2_style_hyperlinks_truncation_does_not_bleed_color_in_terminal" classname="darkmatter-cli::level2_frontmatter_images" timestamp="2026-09-06T05:11:15.207+00:00" time="0.016"/>
+        <testcase name="level2_style_hyperlinks_width_pads_label_in_terminal" classname="darkmatter-cli::level2_frontmatter_images" timestamp="2026-09-06T05:11:15.223+00:00" time="0.018"/>
+        <testcase name="level2_style_images_exact_width_truncates_long_alt_in_terminal" classname="darkmatter-cli::level2_frontmatter_images" timestamp="2026-09-06T05:11:15.241+00:00" time="0.011"/>
+        <testcase name="level2_style_images_local_style_colors_fallback_in_terminal" classname="darkmatter-cli::level2_frontmatter_images" timestamp="2026-09-06T05:11:15.252+00:00" time="0.013"/>
+        <testcase name="level2_style_images_local_style_width_alignment_in_terminal" classname="darkmatter-cli::level2_frontmatter_images" timestamp="2026-09-06T05:11:15.265+00:00" time="0.012"/>
+        <testcase name="level2_style_images_truncation_does_not_bleed_color_in_terminal" classname="darkmatter-cli::level2_frontmatter_images" timestamp="2026-09-06T05:11:15.277+00:00" time="0.013"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::level2_frontmatter_tables" tests="8" skipped="0" errors="0" failures="0">
+        <testcase name="level2_blockquote_center_alignment_indents_more_than_left" classname="darkmatter-cli::level2_frontmatter_tables" timestamp="2026-09-06T05:11:15.290+00:00" time="0.015"/>
+        <testcase name="level2_blockquote_indent_fill_caps_wrap_width" classname="darkmatter-cli::level2_frontmatter_tables" timestamp="2026-09-06T05:11:15.305+00:00" time="0.013"/>
+        <testcase name="level2_style_fixture_applies_top_and_left_margins_in_real_terminal" classname="darkmatter-cli::level2_frontmatter_tables" timestamp="2026-09-06T05:11:15.318+00:00" time="0.012"/>
+        <testcase name="level2_style_frontmatter_block_quote_max_width_caps_wrap_width" classname="darkmatter-cli::level2_frontmatter_tables" timestamp="2026-09-06T05:11:15.330+00:00" time="0.011"/>
+        <testcase name="level2_style_frontmatter_table_max_width_caps_visible_row" classname="darkmatter-cli::level2_frontmatter_tables" timestamp="2026-09-06T05:11:15.342+00:00" time="0.010"/>
+        <testcase name="level2_style_frontmatter_table_right_alignment_pushes_row_to_right_edge" classname="darkmatter-cli::level2_frontmatter_tables" timestamp="2026-09-06T05:11:15.353+00:00" time="0.011"/>
+        <testcase name="level2_table_center_alignment_indents_more_than_left" classname="darkmatter-cli::level2_frontmatter_tables" timestamp="2026-09-06T05:11:15.364+00:00" time="0.012"/>
+        <testcase name="level2_table_max_fill_constrains_visible_width" classname="darkmatter-cli::level2_frontmatter_tables" timestamp="2026-09-06T05:11:15.375+00:00" time="0.012"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::level2_horizontal_rules" tests="6" skipped="0" errors="0" failures="0">
+        <testcase name="level2_style_hr_alignment_center_offsets_rule_from_left_in_real_terminal" classname="darkmatter-cli::level2_horizontal_rules" timestamp="2026-09-06T05:11:15.387+00:00" time="0.011"/>
+        <testcase name="level2_style_hr_bg_color_emits_background_sgr_in_real_terminal" classname="darkmatter-cli::level2_horizontal_rules" timestamp="2026-09-06T05:11:15.398+00:00" time="0.010"/>
+        <testcase name="level2_style_hr_color_emits_sgr_in_real_terminal" classname="darkmatter-cli::level2_horizontal_rules" timestamp="2026-09-06T05:11:15.409+00:00" time="0.011"/>
+        <testcase name="level2_style_hr_kind_waves_renders_in_real_terminal" classname="darkmatter-cli::level2_horizontal_rules" timestamp="2026-09-06T05:11:15.420+00:00" time="0.010"/>
+        <testcase name="level2_style_hr_weight_thick_differs_from_thin_in_real_terminal" classname="darkmatter-cli::level2_horizontal_rules" timestamp="2026-09-06T05:11:15.430+00:00" time="0.010"/>
+        <testcase name="level2_style_hr_width_caps_visible_columns_in_real_terminal" classname="darkmatter-cli::level2_horizontal_rules" timestamp="2026-09-06T05:11:15.440+00:00" time="0.010"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::level2_layout_dimensions" tests="8" skipped="0" errors="0" failures="0">
+        <testcase name="level2_color_depth_none_preserves_visible_layout" classname="darkmatter-cli::level2_layout_dimensions" timestamp="2026-09-06T05:11:15.451+00:00" time="0.012"/>
+        <testcase name="level2_end_to_end_layout_dimensions" classname="darkmatter-cli::level2_layout_dimensions" timestamp="2026-09-06T05:11:15.463+00:00" time="0.010"/>
+        <testcase name="level2_line_numbers_false_omits_gutter" classname="darkmatter-cli::level2_layout_dimensions" timestamp="2026-09-06T05:11:15.473+00:00" time="0.011"/>
+        <testcase name="level2_line_numbers_true_renders_gutter" classname="darkmatter-cli::level2_layout_dimensions" timestamp="2026-09-06T05:11:15.484+00:00" time="0.010"/>
+        <testcase name="level2_margin_renders_blank_top_rows" classname="darkmatter-cli::level2_layout_dimensions" timestamp="2026-09-06T05:11:15.494+00:00" time="0.012"/>
+        <testcase name="level2_max_width_caps_visible_content_columns" classname="darkmatter-cli::level2_layout_dimensions" timestamp="2026-09-06T05:11:15.506+00:00" time="0.013"/>
+        <testcase name="level2_page_bg_pronounced_emits_bg_sgr" classname="darkmatter-cli::level2_layout_dimensions" timestamp="2026-09-06T05:11:15.519+00:00" time="0.011"/>
+        <testcase name="level2_page_bg_subtle_emits_bg_sgr" classname="darkmatter-cli::level2_layout_dimensions" timestamp="2026-09-06T05:11:15.530+00:00" time="0.011"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::level2_ordered_lists" tests="10" skipped="0" errors="0" failures="0">
+        <testcase name="level2_cli_align_lists_broadcast_indents_in_real_terminal" classname="darkmatter-cli::level2_ordered_lists" timestamp="2026-09-06T05:11:15.541+00:00" time="0.012"/>
+        <testcase name="level2_cli_align_ul_granular_indents_only_ul_in_real_terminal" classname="darkmatter-cli::level2_ordered_lists" timestamp="2026-09-06T05:11:15.554+00:00" time="0.010"/>
+        <testcase name="level2_list_center_alignment_indents_more_than_left" classname="darkmatter-cli::level2_ordered_lists" timestamp="2026-09-06T05:11:15.564+00:00" time="0.010"/>
+        <testcase name="level2_list_max_fill_caps_wrap_width" classname="darkmatter-cli::level2_ordered_lists" timestamp="2026-09-06T05:11:15.573+00:00" time="0.014"/>
+        <testcase name="level2_style_li_alignment_right_aligns_body_in_real_terminal" classname="darkmatter-cli::level2_ordered_lists" timestamp="2026-09-06T05:11:15.588+00:00" time="0.009"/>
+        <testcase name="level2_style_ol_alignment_right_indents_more_than_left_in_real_terminal" classname="darkmatter-cli::level2_ordered_lists" timestamp="2026-09-06T05:11:15.597+00:00" time="0.010"/>
+        <testcase name="level2_style_ul_left_margin_offsets_bullet_in_real_terminal" classname="darkmatter-cli::level2_ordered_lists" timestamp="2026-09-06T05:11:15.607+00:00" time="0.010"/>
+        <testcase name="level2_style_ul_left_margin_plus_max_width_stack_in_real_terminal" classname="darkmatter-cli::level2_ordered_lists" timestamp="2026-09-06T05:11:15.618+00:00" time="0.011"/>
+        <testcase name="level2_style_ul_max_width_caps_wrap_width_in_real_terminal" classname="darkmatter-cli::level2_ordered_lists" timestamp="2026-09-06T05:11:15.629+00:00" time="0.010"/>
+        <testcase name="level2_ul_color_inherits_into_li_body" classname="darkmatter-cli::level2_ordered_lists" timestamp="2026-09-06T05:11:15.639+00:00" time="0.011"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::level2_schema_about" tests="3" skipped="0" errors="0" failures="0">
+        <testcase name="level2_schema_about_constraint_table_renders_striped_row" classname="darkmatter-cli::level2_schema_about" timestamp="2026-09-06T05:11:15.650+00:00" time="2.191"/>
+        <testcase name="level2_schema_about_dark_terminal_uses_light_code_theme" classname="darkmatter-cli::level2_schema_about" timestamp="2026-09-06T05:11:17.841+00:00" time="1.886"/>
+        <testcase name="level2_schema_about_light_terminal_uses_dark_code_theme" classname="darkmatter-cli::level2_schema_about" timestamp="2026-09-06T05:11:19.727+00:00" time="2.213"/>
+    </testsuite>
+    <testsuite name="darkmatter-cli::level2_schema_validate" tests="1" skipped="0" errors="0" failures="0">
+        <testcase name="level2_schema_validate_pretty_renders_dimmed_description_sub_line" classname="darkmatter-cli::level2_schema_validate" timestamp="2026-09-06T05:11:21.941+00:00" time="0.011"/>
+    </testsuite>
+</testsuites>

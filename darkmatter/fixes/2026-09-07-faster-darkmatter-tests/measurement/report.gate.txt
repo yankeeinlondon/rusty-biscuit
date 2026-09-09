@@ -1,0 +1,2 @@
+pnpm --dir "/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/tools/test-audit" exec tsx src/cli.ts measure report --config ../../darkmatter/fixes/2026-09-07-faster-darkmatter-tests/audit.config.json --manifest ../../darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/runs.jsonl --cohorts ../../darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/cohorts.json --targets ../../darkmatter/fixes/2026-09-07-faster-darkmatter-tests/measurement/targets.json --markdown
+GATE EXIT=0

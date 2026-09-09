@@ -1,0 +1,28 @@
+{
+  "toolVersion": "@rusty-biscuit/test-audit@0.1.0",
+  "run": "34008778001",
+  "repo": "yankeeinlondon/rusty-biscuit",
+  "fetchedAt": "2026-09-08T16:08:23.059Z",
+  "environments": {
+    "ubuntu-latest": {
+      "cells": 7,
+      "reports": 7,
+      "missing": []
+    },
+    "macos-latest": {
+      "cells": 6,
+      "reports": 6,
+      "missing": []
+    },
+    "windows-latest": {
+      "cells": 4,
+      "reports": 4,
+      "missing": []
+    },
+    "wsl2-ubuntu": {
+      "cells": 4,
+      "reports": 4,
+      "missing": []
+    }
+  }
+}
