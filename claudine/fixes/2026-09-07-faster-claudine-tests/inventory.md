@@ -2,7 +2,8 @@
 fix: 2026-09-07-faster-claudine-tests
 phase: 2
 created: 2026-09-08
-revision: 9fc5151a0df52acb63c5458b1564aa9c01bfe9b1
+revision: 78b44a96651e33b0eb7cb2f82a96255853cc2998 (+ uncommitted working tree)
+supersedes-revision: 9fc5151a0df52acb63c5458b1564aa9c01bfe9b1
 host: aarch64-apple-darwin (Darwin 27.0.0), 16 cores
 toolchain: rustc 1.97.1 (8bab26f4f 2026-07-14)
 nextest: cargo-nextest 0.9.136
@@ -18,6 +19,17 @@ Every number here is mechanical. The runner population comes from sixteen
 [`enumeration/`](enumeration/); the source population comes from an attribute
 scan of the same tree; the cost figures come from Phase 1's verbatim gate logs
 under [`baseline/local-gates/`](baseline/local-gates/). Nothing was estimated.
+
+> **Two revisions, both stated.** The identity counts were first taken at
+> `9fc5151a0`. Review 1's finding 1 then moved nineteen PTY tests from L2 to
+> L1, and this fix's own Phases 4–7 added tests, so the captures were retaken
+> from the working tree at `78b44a96651e` — no committed candidate revision
+> exists yet, and `enumeration/captures.json` records both that fact and the
+> uncommitted delta it includes. The superseded listings are kept verbatim
+> under [`enumeration/9fc5151a0/`](enumeration/9fc5151a0/); they are what the
+> **Executed** and **Summed cost** columns below were measured against, and
+> those two columns are *not* restated here. Re-measurement is deferred with a
+> named blocker — see [`results.md`](results.md) § Measurement re-run.
 
 > **Local numbers are attribution only.** They set no target. Ratified budgets
 > land in [Budgets](#budgets), beside the baseline table, once Phase 1's CI
@@ -44,64 +56,89 @@ runner never lists that no exclusion explains, and a stale exclusion. It exits
 
 ## Population
 
-| Package | Runner identities | Source attributes | Δ (platform-gated) |
-|---|---:|---:|---:|
-| `claudine` | 4,149 | 4,167 | 18 |
-| `claudine-catalog-types` | 21 | 21 | 0 |
-| `claudine-cli` | 2,746 | 2,761 | 15 |
-| `claudine-contract` | 52 | 52 | 0 |
-| `claudine-gen` | 158 | 158 | 0 |
-| `rendezvous-client` | 21 | 24 | 3 |
-| `rendezvous-core` | 82 | 88 | 6 |
-| `rendezvous-daemon` | 171 | 184 | 13 |
-| **total** | **7,400** | **7,455** | **55** |
+| Package | Runner identities | Source attributes | Δ (platform-gated) | Runner at `9fc5151a0` |
+|---|---:|---:|---:|---:|
+| `claudine` | 4,151 | 4,169 | 18 | 4,149 |
+| `claudine-catalog-types` | 21 | 21 | 0 | 21 |
+| `claudine-cli` | 2,760 | 2,775 | 15 | 2,746 |
+| `claudine-contract` | 52 | 52 | 0 | 52 |
+| `claudine-gen` | 158 | 158 | 0 | 158 |
+| `rendezvous-client` | 21 | 24 | 3 | 21 |
+| `rendezvous-core` | 82 | 88 | 6 | 82 |
+| `rendezvous-daemon` | 172 | 185 | 13 | 171 |
+| **total** | **7,417** | **7,472** | **55** | **7,400** |
 
-7,400 identities across 163 build targets, under the union of every feature
+7,417 identities across 165 build targets, under the union of every feature
 selection CI or a canonical recipe uses. The 55-identity delta is entirely
 `cfg(windows)` / `cfg(target_os = "linux")` code that this macOS host cannot
 enumerate; each one is listed in
 [cfg/feature exclusions](#cfgfeature-exclusions) with its gate and its actual
-execution route.
+execution route. The exclusion list is unchanged from `9fc5151a0`: the 17 new
+identities are all host-enumerable, so the platform-gated delta stayed at 55.
+
+**What moved between the two revisions.** 7,400 → 7,417 runner identities,
+163 → 165 build targets, 7,455 → 7,472 source attributes, all in three places:
+
+| Source of the change | Identities | Build targets |
+|---|---:|---:|
+| `claudine-cli::contamination_probes` — AC3's isolation probes (Phase 4) | +8 | +1 |
+| `claudine-cli::compose_frontmatter_model` — commit `f0aaa4832` | +5 | +1 |
+| net change inside existing binaries: `cli_process_fixture` 14→22, `spawn_site_guard` 15→19, `claudine` lib 4,040→4,042, `pairing_and_sync` 3→4, `error_guards` 18→8, `context_command` 27→26 | +4 | 0 |
+
+The nineteen PTY tests review 1 reclassified moved *tier*, not *count*: they
+were already in the union through `cli-terminal`. What changed is the route
+that reaches them — `cli-bare` now lists 4 more binaries and 19 more
+identities, and `terminal-tests` adds correspondingly fewer.
 
 **The plan's ≈7,300 estimate was low and its per-package split was stale**
 (it said `lib` 4086 / `cli` 2728 / `rendezvous` 296 / `gen` 159 / `contract` 52
-/ `catalog-types` 21). Measured: 4,149 / 2,746 / 274 / 158 / 52 / 21. The
+/ `catalog-types` 21). Measured: 4,151 / 2,760 / 275 / 158 / 52 / 21. The
 grounding fact is superseded by the captures.
 
 ### Enumeration substrate
 
-Every capture records the command, revision, toolchain, nextest version, and
-platform in [`enumeration/captures.json`](enumeration/captures.json); each
-run's stderr sits beside its JSON as `<label>.err`. The reconciler rejects a
-JSON file in that directory that the manifest does not declare, and a declared
-capture whose file is missing, so the substrate cannot silently drift.
+Every capture records the command, revision, working-tree dirty list,
+provenance note, toolchain, nextest version, and platform in
+[`enumeration/captures.json`](enumeration/captures.json); each run's stderr
+sits beside its JSON as `<label>.err`. The reconciler rejects a JSON file in
+that directory that the manifest does not declare, and a declared capture whose
+file is missing, so the substrate cannot silently drift.
 
-| Capture | Package | Features | Suites | Identities |
-|---|---|---|---:|---:|
-| `catalog-types-bare` | `claudine-catalog-types` | — | 1 | 21 |
-| `lib-bare` | `claudine` | — | 14 | 4,149 |
-| `contract-bare` | `claudine-contract` | — | 1 | 48 |
-| `contract-real` | `claudine-contract` | `real-tests` | 2 | 52 |
-| `cli-bare` | `claudine-cli` | — | 89 | 2,499 |
-| `cli-daemon` | `claudine-cli` | `daemon-tests` | 89 | 2,504 |
-| `cli-terminal` | `claudine-cli` | `terminal-tests` | 123 | 2,740 |
-| `cli-real` | `claudine-cli` | `real-tests` | 90 | 2,500 |
-| `cli-ci` | `claudine-cli` | `daemon-tests,terminal-tests` | 123 | 2,745 |
-| `cli-all` | `claudine-cli` | all three | 124 | 2,746 |
-| `gen-bare` | `claudine-gen` | — | 11 | 155 |
-| `gen-terminal` | `claudine-gen` | `terminal-tests` | 12 | 158 |
-| `rz-core-bare` | `rendezvous-core` | — | 1 | 82 |
-| `rz-core-testsupport` | `rendezvous-core` | `test-support` | 1 | 82 |
-| `rz-daemon-bare` | `rendezvous-daemon` | — | 5 | 171 |
-| `rz-client-bare` | `rendezvous-client` | — | 4 | 21 |
+The sixteen superseded listings for `9fc5151a0` are preserved unmodified in
+[`enumeration/9fc5151a0/`](enumeration/9fc5151a0/), manifest included, so the
+numbers this document previously recorded remain reproducible from the evidence
+they were derived from. The reconciler reads only the top-level listings; a
+revision-named subdirectory is inert to it.
+
+| Capture | Package | Features | Suites | Identities | Identities at `9fc5151a0` |
+|---|---|---|---:|---:|---:|
+| `catalog-types-bare` | `claudine-catalog-types` | — | 1 | 21 | 21 |
+| `lib-bare` | `claudine` | — | 14 | 4,151 | 4,149 |
+| `contract-bare` | `claudine-contract` | — | 1 | 48 | 48 |
+| `contract-real` | `claudine-contract` | `real-tests` | 2 | 52 | 52 |
+| `cli-bare` | `claudine-cli` | — | 95 | 2,532 | 2,499 |
+| `cli-daemon` | `claudine-cli` | `daemon-tests` | 95 | 2,537 | 2,504 |
+| `cli-terminal` | `claudine-cli` | `terminal-tests` | 125 | 2,754 | 2,740 |
+| `cli-real` | `claudine-cli` | `real-tests` | 96 | 2,533 | 2,500 |
+| `cli-ci` | `claudine-cli` | `daemon-tests,terminal-tests` | 125 | 2,759 | 2,745 |
+| `cli-all` | `claudine-cli` | all three | 126 | 2,760 | 2,746 |
+| `gen-bare` | `claudine-gen` | — | 11 | 155 | 155 |
+| `gen-terminal` | `claudine-gen` | `terminal-tests` | 12 | 158 | 158 |
+| `rz-core-bare` | `rendezvous-core` | — | 1 | 82 | 82 |
+| `rz-core-testsupport` | `rendezvous-core` | `test-support` | 1 | 82 | 82 |
+| `rz-daemon-bare` | `rendezvous-daemon` | — | 5 | 172 | 171 |
+| `rz-client-bare` | `rendezvous-client` | — | 4 | 21 | 21 |
 
 Feature deltas worth naming:
 
 - `daemon-tests` adds **5** identities to `claudine-cli` and pulls bundled
   DuckDB into the build graph. Five tests is the entire visible return on the
   heaviest optional dependency in the area.
-- `terminal-tests` adds **241** identities to `claudine-cli` (34 L2/L3 binaries)
-  and **3** to `claudine-gen`.
+- `terminal-tests` adds **222** identities to `claudine-cli` (30 L2/L3 binaries)
+  and **3** to `claudine-gen`. It was 241 across 34 binaries at `9fc5151a0`;
+  the four `expectrl` binaries review 1 reclassified dropped their
+  `required-features = ["terminal-tests"]`, so their 19 identities now list on
+  the bare L1 route instead.
 - `real-tests` adds **1** identity to `claudine-cli` and **4** to
   `claudine-contract`.
 - `rendezvous-core`'s `test-support` adds **0** identities. It exists for
@@ -228,17 +265,65 @@ run per leg (`34173378609`) — but one is not three, and nothing yet joins a
 JUnit identity to a family (`attribution.ts` reads nextest logs, not the CI
 XML). Both remain open; neither is closed by a local number.
 
+**2026-09-09: the join now exists; the numbers still do not.** The missing half
+of the procedure is built —
+`test-audit attribute aggregate` (`tools/test-audit/src/attribute/aggregate.ts`,
+reachable through this directory's wrapper) walks the stored
+`<run-id>/<env>/<tier>/<package>.xml` staging trees and emits
+`perLegFamilySummed` in exactly the shape `deriveBudgets` reads, resolving every
+`<testcase>` through the reconciler's own `familiesMatching` rather than a
+second classifier:
+
+```bash
+npx tsx attribution.ts aggregate baseline/34173378609 --out /tmp/agg.json
+# GATE EXIT=0 — 18 families on each Unix leg, 15 on windows-latest,
+#               summed duration identical to the § CI baseline table
+npx tsx attribution.ts budgets --runs /tmp/agg.json
+# 4 violation(s):
+#   [insufficient-runs] ubuntu-latest: 1 green run(s); 3 consecutive are required
+#   … macos-latest … windows-latest … wsl2-ubuntu
+# GATE EXIT=1
+```
+
+So the refusal moved from `missing-leg` ("nothing joins XML to families") to
+`insufficient-runs` ("one run is not three"). That is the whole change: the
+*procedure* is complete and reproducible, and the *numbers* are still refused
+for want of two more consecutive green `main` runs per leg. No table lands here
+until they exist. `attribution/budgets-pending.json` is deliberately left at
+`runsPerLeg` 1 with an empty `perLegFamilySummed` — the aggregator's output is
+what will replace it, and raising either by hand would be fabricating evidence.
+
 ## Family index
 
-Fifty families cover all 7,400 identities exactly once. The reconciler proves
-it: `assigned == universe.identities.size`, no identity matched twice, no
-family matched nothing. Counts in this table are checked against the captures
-by the gate, so a stale number here fails the run.
+Fifty families cover all 7,417 identities exactly once (7,400 at `9fc5151a0`).
+The reconciler proves it: `assigned == universe.identities.size`, no identity
+matched twice, no family matched nothing. Counts in this table are checked
+against the captures by the gate, so a stale number here fails the run.
+
+The **Identities** column tracks the current captures and is the one the gate
+checks, so it carries no annotation. Six families moved between the two
+revisions:
+
+| Family | At `9fc5151a0` | Now | What moved |
+|---|---:|---:|---|
+| `lib-unit` | 3,833 | 3,835 | two tests added in the library |
+| `cli-l1-fixture` | 282 | 287 | gained `compose_frontmatter_model` |
+| `cli-l1-fixture-selftest` | 14 | 30 | gained `contamination_probes` (8) and 8 builder tests |
+| `cli-l1-source-scan-guards` | 79 | 73 | `error_guards` 18→8 consolidated, `spawn_site_guard` 15→19 |
+| `cli-l1-raw-context-resources` | 88 | 87 | one `context_command` test removed |
+| `rz-daemon-integration` | 18 | 19 | one `pairing_and_sync` test added |
+
+**Executed** and **Summed cost** were measured at `9fc5151a0` and are left at
+those values throughout this document: the five-run protocol that would restate
+them cannot run against this branch's pre-existing red suite, and inventing a
+number is worse than a dated one. For those six families the cost column is now
+a lower bound rather than a measurement. See [`results.md`](results.md)
+§ Measurement re-run for the named blocker.
 
 | Family | Package | Identities | Executed | Summed cost | Disposition |
 |---|---|---:|---:|---:|---|
 | `catalog-types-unit` | `claudine-catalog-types` | 21 | 21 | 0.29 s | satisfactory |
-| `lib-unit` | `claudine` | 3833 | 3833 | 196.58 s | satisfactory |
+| `lib-unit` | `claudine` | 3835 | 3833 | 196.58 s | satisfactory |
 | `lib-unit-task-shell` | `claudine` | 106 | 106 | 58.14 s | remediation in this fix |
 | `lib-unit-atomic-config` | `claudine` | 5 | 5 | 1.55 s | satisfactory |
 | `lib-unit-model-catalog` | `claudine` | 71 | 71 | 2.66 s | remediation in this fix |
@@ -255,22 +340,22 @@ by the gate, so a stale number here fails the run.
 | `cli-unit` | `claudine-cli` | 1178 | 1173 | 34.08 s | satisfactory |
 | `cli-unit-child-exec` | `claudine-cli` | 199 | 199 | 7.59 s | satisfactory |
 | `cli-unit-completion-engine` | `claudine-cli` | 322 | 322 | 8.01 s | satisfactory |
-| `cli-l1-fixture` | `claudine-cli` | 282 | 282 | 75.09 s | satisfactory |
-| `cli-l1-fixture-selftest` | `claudine-cli` | 14 | 14 | 2.44 s | remediation in this fix |
+| `cli-l1-fixture` | `claudine-cli` | 287 | 282 | 75.09 s | satisfactory |
+| `cli-l1-fixture-selftest` | `claudine-cli` | 30 | 14 | 2.44 s | remediation in this fix |
 | `cli-l1-completion-ui` | `claudine-cli` | 79 | 79 | 3.16 s | satisfactory |
-| `cli-l1-source-scan-guards` | `claudine-cli` | 79 | 79 | 39.53 s | remediation in this fix |
+| `cli-l1-source-scan-guards` | `claudine-cli` | 73 | 79 | 39.53 s | remediation in this fix |
 | `cli-l1-shipped-corpus` | `claudine-cli` | 6 | 6 | 0.57 s | satisfactory |
 | `cli-l1-md-fixture` | `claudine-cli` | 1 | 1 | 0.30 s | satisfactory |
 | `cli-l1-perf-budget` | `claudine-cli` | 16 | 12 | 2.34 s | remediation in this fix |
 | `cli-l1-raw-compose` | `claudine-cli` | 69 | 69 | 14.86 s | remediation in this fix |
 | `cli-l1-raw-sequence-loop` | `claudine-cli` | 154 | 154 | 34.76 s | remediation in this fix |
-| `cli-l1-raw-context-resources` | `claudine-cli` | 88 | 83 | 29.07 s | remediation in this fix |
+| `cli-l1-raw-context-resources` | `claudine-cli` | 87 | 83 | 29.07 s | remediation in this fix |
 | `cli-l1-pty` | `claudine-cli` | 11 | 11 | 19.19 s | remediation in this fix |
+| `cli-l1-pty-interactive` | `claudine-cli` | 19 | 19 | 54.61 s | remediation in this fix: review-1 finding 1 reclassified it L2 -> L1 |
 | `cli-l1-live-child` | `claudine-cli` | 1 | 0 | not run | remediation in this fix |
 | `cli-l2-lifecycle` | `claudine-cli` | 114 | 114 | 200.35 s | remediation in this fix |
 | `cli-l2-render-capture` | `claudine-cli` | 74 | 74 | 188.12 s | remediation in this fix |
 | `cli-l2-autocomplete` | `claudine-cli` | 27 | 27 | 44.68 s | satisfactory |
-| `cli-l2-pty` | `claudine-cli` | 19 | 19 | 54.61 s | satisfactory |
 | `cli-l2-ctrl-c` | `claudine-cli` | 3 | 3 | 6.90 s | satisfactory |
 | `cli-l3-keyboard` | `claudine-cli` | 4 | 0 | not run | follow-up: L3 needs an operator-attended host, see AC6 |
 | `cli-real-provider` | `claudine-cli` | 1 | 0 | not run | follow-up: real-tier evidence is pending, see AC6 |
@@ -284,7 +369,7 @@ by the gate, so a stale number here fails the run.
 | `gen-l2-report` | `claudine-gen` | 3 | 3 | 2.75 s | satisfactory |
 | `rz-core-unit` | `rendezvous-core` | 82 | 82 | 0.91 s | satisfactory |
 | `rz-daemon-unit` | `rendezvous-daemon` | 153 | 153 | 107.75 s | remediation in this fix |
-| `rz-daemon-integration` | `rendezvous-daemon` | 18 | 16 | 25.46 s | remediation in this fix |
+| `rz-daemon-integration` | `rendezvous-daemon` | 19 | 16 | 25.46 s | remediation in this fix |
 | `rz-client-unit` | `rendezvous-client` | 14 | 14 | 0.18 s | satisfactory |
 | `rz-client-integration` | `rendezvous-client` | 7 | 7 | 4.21 s | satisfactory |
 
@@ -329,12 +414,12 @@ and `cli-unit-child-exec` carve-outs are.
 
 ### `claudine` (library)
 
-#### `lib-unit` — 3,833 identities
+#### `lib-unit` — 3,835 identities
 
 - **Members** — the `claudine` lib suite minus the four carve-outs and the
   override target below. By top-level module:
   `composition` 1,171 (after the 106-test `sequence::task` carve-out),
-  `stream` 811, `dispatch` 209, `config` 199, `render` 160, `linking` 182,
+  `stream` 810, `dispatch` 209, `config` 199, `render` 162, `linking` 183,
   `protect` 127, `harness` 112, `permissions` 98, `diagnostics` 84,
   `messaging` 81, `signals` 79, `mcp` 76, `runaway` 74, `provider` 72,
   `hook_adapters` 68, `system_prompt` 58, `events` 41, `actions` 34,
@@ -736,11 +821,12 @@ totals were the predecessor's historical numbers, and its own table summed to
 173 rather than the 170 it claimed. Phase 5 must re-read the artifact, not the
 table.
 
-#### `cli-l1-fixture` — 282 identities
+#### `cli-l1-fixture` — 287 identities
 
-- **Members** (32 binaries) — `agent_cwd` 4, `argv_normalization` 14,
+- **Members** (33 binaries) — `agent_cwd` 4, `argv_normalization` 14,
   `characterization_error_routes` 8, `command_routing` 8,
-  `compose_caller_file_provenance` 15, `compose_header_first` 5,
+  `compose_caller_file_provenance` 15, `compose_frontmatter_model` 5,
+  `compose_header_first` 5,
   `contextual_errors` 4, `ctx_launch_anchor` 8, `detached_audio` 1,
   `handle_repo_config` 2, `hooks_cli` 8, `inline_compose_sequence_mismatch` 17,
   `mcp_cli` 17, `prompt_reporting` 12, `propagated_context_fixtures` 5,
@@ -781,28 +867,37 @@ table.
   `compose_caller_file_provenance.rs` (Phase 1 finding 1) are Phase 5's to
   clear alongside the change that motivates them.
 
-#### `cli-l1-fixture-selftest` — 14 identities
+#### `cli-l1-fixture-selftest` — 30 identities
 
-- **Member** — `cli_process_fixture` (14).
+- **Members** — `cli_process_fixture` (22), `contamination_probes` (8).
 - **Purpose** — prove the fixture builder itself: the environment scrub, the
   named escapes (`fake_only_path`, `host_path`, `ambient_context`,
   `inherit_no_env`), and the checkout-containment precondition.
+  `cli_process_fixture` proves the mechanism against a recording stub;
+  `contamination_probes` (AC3) proves the consequence, by exporting each
+  scrubbed family in the parent and asserting an ordinary `claudine compose`
+  run still produces the same observable result.
 - **Assertion quality** — strong, and load-bearing: this is the only place the
   builder's contract is asserted rather than assumed.
   `ambient_context_escape_pins_the_cwd_to_a_test_built_repository` distinguishes
   a fixture that leaked the developer's CWD.
 - **Shared helpers** — `common/mod.rs`, `common/wrap.rs`.
 - **Effects / dependencies** — spawns `claudine` and a recording stub.
-- **Timing** — summed 2.44 s, max 0.26 s.
+- **Timing** — summed 2.44 s, max 0.26 s, measured at `9fc5151a0` over the
+  then-14 identities.
 - **Overrides** — CI `claudine-cli-ci-l1` group.
 - **Resource ownership** — child processes and temporary fixture roots.
 - **Route** — L1, no features, all platforms; `just test-cli`.
 - **Cost provenance** — `baseline/local-gates/just-test.log`.
-- **Disposition** — **remediation in this fix** (Phase 4). When the builder
-  gains a `std::process::Command` surface, this family must gain the drift test
-  that proves the two surfaces produce the same effective environment,
-  including the Windows arm via `cfg!(windows)` so both arms compile
-  everywhere. Without that addition the new surface is unasserted.
+- **Disposition** — **remediation in this fix** (Phase 4), **done**. The
+  builder gained its `std::process::Command` surface and this family gained the
+  drift tests that prove the two surfaces produce the same effective
+  environment — `both_command_surfaces_hand_the_child_the_same_environment`,
+  `both_command_surfaces_clear_the_environment_the_same_way`, and the two that
+  assert a policy identically *wrong* on both would still fail
+  (`..._disable_rendezvous_reporting_over_an_enabled_parent`,
+  `..._keep_audio_out_of_the_developers_machine`) — plus the raw surface's
+  escape and containment arms. The Windows arm compiles via `cfg!(windows)`.
 
 #### `cli-l1-completion-ui` — 79 identities
 
@@ -822,11 +917,17 @@ table.
 - **Cost provenance** — `baseline/local-gates/just-test.log`.
 - **Disposition** — satisfactory.
 
-#### `cli-l1-source-scan-guards` — 79 identities
+#### `cli-l1-source-scan-guards` — 73 identities
 
-- **Members** — `error_guards` 18, `spawn_site_guard` 15, `dispatch_inventory` 12,
-  `composition_seams` 19, `test_placement` 9, `spawn_inventory` 2,
-  `run_harness_loop_call_sites` 2, `diagnostic_discovery` 2.
+- **Members** — `composition_seams` 19, `spawn_site_guard` 19,
+  `dispatch_inventory` 12, `test_placement` 9, `error_guards` 8,
+  `spawn_inventory` 2, `run_harness_loop_call_sites` 2,
+  `diagnostic_discovery` 2. `error_guards` was 18 at `9fc5151a0`: Phase 5's
+  consolidation replaced twelve per-guard cases that each re-parsed the corpus
+  in its own process with two that parse it once
+  (`production_sources_pass_every_scan_backed_guard` plus a named-failure arm).
+  `spawn_site_guard` gained four detector tests when review 1's finding 1 made
+  it classify by resource instead of filename.
 - **Purpose** — structural guards over `lib/src`, `cli/src` and `cli/tests`:
   typed errors must not collapse to prose, dispatch must stay inventoried,
   spawns must go through the fixture, tests must sit in the declared place.
@@ -838,9 +939,12 @@ table.
 - **Effects / dependencies** — read the checkout's own sources. `error_guards`
   parses them with `syn` rather than grepping, which is why it costs what it
   costs; it spawns no subprocess.
-- **Timing** — **summed 39.53 s across 79 identities — 500 ms mean, ten times
-  the `lib-unit` mean.** `error_guards` alone is 34.01 s over 18 cases, max
-  3.21 s (`every_code_a_diagnostic_claims_is_a_registered_code`).
+- **Timing** (measured at `9fc5151a0`, before the consolidation below) —
+  **summed 39.53 s across the then-79 identities — 500 ms mean, ten times the
+  `lib-unit` mean.** `error_guards` alone was 34.01 s over 18 cases, max 3.21 s
+  (`every_code_a_diagnostic_claims_is_a_registered_code`, one of the twelve
+  cases Phase 5 folded into a single corpus parse). The post-consolidation cost
+  is not restated here — see [`results.md`](results.md) § Measurement re-run.
   `spawn_inventory` is 1.91 s over 2. Nextest gives each case its own process,
   so a process-local cache shares nothing: **the corpus is re-scanned once per
   case**, and the 18 `error_guards` cases each pay a full parse.
@@ -988,9 +1092,9 @@ table.
   need (`host_path()` where a real tool is the subject, `fake_only_path()`
   where absence is the assertion, the default otherwise) — not carried across.
 
-#### `cli-l1-raw-context-resources` — 88 identities, 83 executed (Phase 5C)
+#### `cli-l1-raw-context-resources` — 87 identities, 83 executed (Phase 5C)
 
-- **Members** — `context_command` 27 (minus the override target → 26),
+- **Members** — `context_command` 26 (minus the override target → 25),
   `skills_integration` 22, `completion_contract` 10, `completion_perf` 9,
   `errors_command` 5, `effective_diagnostic_render` 5,
   `completion_resolution_round_trip` 2, `handle_deadline` 2, `shipped_prompts` 2,
@@ -1053,6 +1157,68 @@ table.
   `common/pty.rs`'s session construction routes through Phase 4's raw-command
   path so the three binaries inherit the environment policy; the nine readiness
   sleeps become bounded observation with a deadline.
+
+#### `cli-l1-pty-interactive` — 19 identities
+
+Recorded here as `cli-l2-pty` until review-1 finding 1. The tier claim was
+wrong: none of these binaries creates a terminal-emulator session, so the
+"PTY plus a terminal session" resource below was never owned and the L2 route
+was not earned. They are Level 1 and now carry `level1_` names.
+
+- **Members** — `level1_schema_prompt_pty` 11,
+  `level1_provided_partial_file_pty` 4, `level1_dry_run_pty` 2,
+  `level1_pty_wrapper_summary` 2.
+- **Purpose** — prove interactive prompt collection over a PTY, including the
+  dry-run approval prompt's parity with normal mode, and — for
+  `level1_pty_wrapper_summary` — that the wrapper's pre-delegation summary
+  reaches an interactive terminal, as text, before the wrapped child's output.
+- **Assertion quality** — strong; parity assertions distinguish a divergence
+  between the two prompt paths. The claims are textual: `expectrl` matches
+  substrings in a byte stream, so no assertion in this family sees glyph width,
+  SGR styling, or layout. `level1_pty_wrapper_summary` was named and described
+  as proving the badge row was "visible as rendered terminal UI"; that claim is
+  withdrawn (review-1 finding 2), and no L2 capture replaces it — see the row's
+  disposition.
+- **Shared helpers** — `common/mod.rs` (`CliProcessFixture`), `common/pty.rs`,
+  `common/wrap.rs`.
+- **Effects / dependencies** — a PTY (`/dev/ptmx`) and a `claudine` child built
+  by the fixture builder. No terminal emulator, no multiplexer.
+- **Timing** — summed 54.61 s across 19 identities (2.87 s mean), max 4.71 s
+  under the L2 route's parallel self-spawn mode. On the L1 route after the
+  migration the same 19 finish in 4.72 s wall (`just test-cli`, 2026-09-09).
+- **Overrides** — none. The `package(claudine-cli) & test(/level2_/)` blanket no
+  longer selects them; they inherit the default 5 s × 6 slow-timeout and the CI
+  `claudine-cli-ci-l1` group like every other CLI L1 identity.
+- **Resource ownership** — a PTY and a child process per test.
+- **Route** — L1, unix, no feature gate; `just test` / `just test-cli`. Was L2
+  behind `terminal-tests` and `just test-l2`.
+- **Cost provenance** — `baseline/local-gates/just-test-l2.log` for the summed
+  figure above (taken while the family was routed L2).
+- **Disposition** — **remediation in this fix** (review-1 finding 1: reclassified L2 -> L1). `common/pty.rs`'s
+  sleeps are counted against `cli-l1-pty`, which owns that helper's row.
+  Review-1 closure criterion 2 (wrapper-summary rendering claim) is closed by
+  narrowing, not by new coverage. Every `level2_*` and `level3_*` binary in
+  `claudine/cli/tests`, `claudine/lib/tests` and `claudine/gen/tests` was read:
+  none asserts the header row that `output::log_wrapper_header` emits. The two
+  that come closest still do not — `level2_perf_capture` runs
+  `compose --goose --perf --dry-run --yolo` under `FORCE_COLOR=1`, so the row
+  is printed, but its own comment records that the headline scrolls out of the
+  viewport and every assertion is on the perf tree; `level2_stalled_generation_capture`
+  is the only L2 test on the bare wrap path (`claudine opencode '<prompt>'`)
+  and asserts only the `Agent Error` block. `level2_dry_run_metadata_capture`
+  asserts a red `YOLO` cell in the `--dry-run` *metadata table*, a different
+  surface, and both `level2_wrap_ctrl_c_*` binaries run `compose --opencode`
+  under `NO_COLOR=1` for a shell sentinel. The badge constants in
+  `claudine/lib/src/badges.rs` are `Prose` output, and that renderer's SGR
+  emission is proven in a real emulator by
+  `biscuit-terminal-cli::level2_prose_styling`
+  (`level2_prose_rich_styling_emits_sgr_in_wezterm` / `…_in_kitty` decode bold,
+  italic and fg/bg RGB from the terminal's own capture) — component-level
+  evidence for the primitive, not for this row's composition, spacing, glyph
+  width, or truncation at pane width. A dedicated L2 capture of the header was
+  not added: the review permits narrowing, and ~2 s of L2 cost for an unproven
+  regression risk is against Rule 2 in a test-performance fix. Recorded as a
+  gap, not as coverage.
 
 #### `cli-l1-live-child` — 1 identity, 0 executed
 
@@ -1171,25 +1337,6 @@ table.
 - **Route** — L2, `terminal-tests`; `just test-l2`.
 - **Cost provenance** — `baseline/local-gates/just-test-l2.log`.
 - **Disposition** — satisfactory.
-
-#### `cli-l2-pty` — 19 identities
-
-- **Members** — `level2_schema_prompt_pty` 11,
-  `level2_provided_partial_file_pty` 4, `level2_dry_run_pty` 2,
-  `level2_pty_tests` 2.
-- **Purpose** — prove interactive prompt collection over a PTY inside a real
-  terminal, including the dry-run approval prompt's parity with normal mode.
-- **Assertion quality** — strong; parity assertions distinguish a divergence
-  between the two prompt paths.
-- **Shared helpers** — `common/pty.rs`, `common/wrap.rs`, `biscuit-test-harness`.
-- **Effects / dependencies** — a PTY plus a terminal session.
-- **Timing** — summed 54.61 s across 19 identities (2.87 s mean), max 4.71 s.
-- **Overrides** — the L2 blanket; CI `retries = 0`.
-- **Resource ownership** — a PTY and a terminal session per test.
-- **Route** — L2, `terminal-tests`, unix; `just test-l2`.
-- **Cost provenance** — `baseline/local-gates/just-test-l2.log`.
-- **Disposition** — satisfactory. `common/pty.rs`'s sleeps are counted against
-  `cli-l1-pty`, which owns that helper's row.
 
 #### `cli-l2-ctrl-c` — 3 identities
 
@@ -1472,9 +1619,9 @@ of `just test-rendezvous`, logged at
   attributes it; Phase 7 owns the isolated-endpoint and cleanup requirements
   the spec names for daemon/session/IPC tests.
 
-#### `rz-daemon-integration` — 18 identities, 16 executed
+#### `rz-daemon-integration` — 19 identities, 16 executed
 
-- **Members** — `phase6_integration` 12, `pairing_and_sync` 3,
+- **Members** — `phase6_integration` 12, `pairing_and_sync` 4,
   `peer_discovery` 3.
 - **Purpose** — prove multi-node pairing, mesh convergence, and peer discovery
   across real daemons.
@@ -2000,26 +2147,28 @@ should not move.
 
 ## Reconciler output
 
-Run at revision `9fc5151a0`, `2026-09-08`:
+Run from the working tree at `78b44a96651e`, `2026-09-09`:
 
 ```text
 | Package | Runner identities | Source attributes |
 |---|---:|---:|
-| `claudine` | 4149 | 4167 |
+| `claudine` | 4151 | 4169 |
 | `claudine-catalog-types` | 21 | 21 |
-| `claudine-cli` | 2746 | 2761 |
+| `claudine-cli` | 2760 | 2775 |
 | `claudine-contract` | 52 | 52 |
 | `claudine-gen` | 158 | 158 |
 | `rendezvous-client` | 21 | 24 |
 | `rendezvous-core` | 82 | 88 |
-| `rendezvous-daemon` | 171 | 184 |
-| **total** | **7400** | **7455** |
+| `rendezvous-daemon` | 172 | 185 |
+| **total** | **7417** | **7472** |
 
 cfg/feature exclusions (source-defined, runner never lists): 55
-build targets listing no test: claudine-cli::sequence_ctrl_c_windows,
-  claudine-cli::wrap_ctrl_c_windows, claudine-cli::level3_linux_sequence_ctrl_c,
-  claudine-cli::level3_windows_sequence_ctrl_c, claudine-gen::bin/claudine-gen,
-  rendezvous-daemon::bin/rendezvous-daemon,
+source diagnostics (142): tree-sitter-rust 0.24 grammar gaps (`&raw`, `raw` as
+  an identifier, `unsafe extern`); each is a local ERROR node that loses no test
+build targets listing no test: claudine-cli::level3_linux_sequence_ctrl_c,
+  claudine-cli::level3_windows_sequence_ctrl_c,
+  claudine-cli::sequence_ctrl_c_windows, claudine-cli::wrap_ctrl_c_windows,
+  claudine-gen::bin/claudine-gen, rendezvous-daemon::bin/rendezvous-daemon,
   rendezvous-client::bin/rendezvous-test-client
 GATE EXIT=0
 ```
@@ -2027,12 +2176,17 @@ GATE EXIT=0
 Zero identities unassigned, zero double-assigned, zero stale families, zero
 inventory drift, zero undeclared or stale exclusions.
 
+The run at `9fc5151a0` that this replaces reported the same shape over
+7,400 / 7,455 identities, 163 build targets, and the same 55 exclusions and
+7 empty targets. Its inputs are preserved under
+[`enumeration/9fc5151a0/`](enumeration/9fc5151a0/).
+
 ## Validation checkpoint 2
 
 | Requirement | Status |
 |---|---|
 | The reconciler exits 0 | **done** — output above, reproducible with the command at the top |
-| Inventory covers all eight packages | **done** — 7,400 identities, 163 build targets |
+| Inventory covers all eight packages | **done** — 7,417 identities, 165 build targets (7,400 / 163 at `9fc5151a0`) |
 | …all tiers | **done** — L1, L2, L3 and real each have families; L3 and real are named *pending* rather than assumed |
 | …doctests | **done** — 32, with the ignored and compile-fail splits |
 | …benches | **done** — and four of the five entry points turned out to be empty files |

@@ -145,15 +145,76 @@ against a 0.81 s median, passed).
 
 ### Budgets
 
-**None derived, by construction.** `attribution.ts deriveBudgets` refuses
-(`missing-leg`) while any leg has fewer than three consecutive green baseline
-runs, and nothing yet joins a JUnit identity to a family
-(`perLegFamilySummed` is empty). The ratification procedure is fixed in
-`inventory.md` § Budgets — `observedMax × 1.25` per leg and family, legs never
-merged, a miss reported with its cause and never closed by adjusting the
-budget. No universal speedup percentage is offered; the local paired ratio is
-a prior for the `claudine-cli` `max-threads = 1` leg's summed column and
+**None derived, by construction.** `deriveBudgets` refuses while any leg has
+fewer than three consecutive green baseline runs. The ratification procedure is
+fixed in `inventory.md` § Budgets — `observedMax × 1.25` per leg and family,
+legs never merged, a miss reported with its cause and never closed by adjusting
+the budget. No universal speedup percentage is offered; the local paired ratio
+is a prior for the `claudine-cli` `max-threads = 1` leg's summed column and
 nothing more.
+
+**Update 2026-09-09 — one of the two causes is closed.** The JUnit → family
+join now exists (`attribution.ts aggregate`, shared implementation in
+`tools/test-audit/src/attribute/aggregate.ts`), so `perLegFamilySummed` is no
+longer empty for want of tooling: run against `baseline/34173378609/` it exits 0
+with 18 families on each Unix leg and 15 on `windows-latest`, reproducing the
+summed-duration column in § CI baseline above. Feeding that output to
+`deriveBudgets` still refuses, now with `insufficient-runs`
+(`1 green run(s); 3 consecutive are required`) rather than `missing-leg`. The
+remaining cause is evidence, not code: two more consecutive green `main` runs
+per leg, plus the candidate tranche. `attribution/budgets-pending.json` is left
+at `runsPerLeg` 1 with an empty `perLegFamilySummed` on purpose.
+
+## Measurement re-run — deferred, with the blocker named
+
+Review 1's closure criterion 1 ends "regenerate inventory and measurement
+evidence". The **inventory** half is done: the sixteen listings were retaken
+from the working tree at `78b44a96651e`, the superseded `9fc5151a0` listings
+are preserved under
+[`enumeration/9fc5151a0/`](enumeration/9fc5151a0/), and
+`inventory-reconciler.ts` is back to `GATE EXIT=0` over 7,417 identities
+(7,400 before). See [`inventory.md`](inventory.md) § Population.
+
+The **measurement** half is deferred. It is not skipped for convenience: the
+protocol cannot legally run here.
+
+- The protocol is [`spec.md`](spec.md) § 5's five alternating warm runs per
+  cohort, and `attribution.ts` **rejects a red run by design** — a log whose
+  result lines disagree with its `Summary`, or that carries failures, is
+  refused rather than averaged in. That refusal is the tool working.
+- This branch's suite is red before any of this cycle's work, in two packages,
+  and none of it is in a file this work unit touched. Verified 2026-09-09 by
+  running the gates rather than by trusting the report:
+
+| Failing identity | Count | Cause |
+|---|---:|---|
+| `claudine-cli::bin/claudine …loop_control::target_launch::tests::*` | 5 | commit `f0aaa4832` |
+| `claudine-cli::propagated_context_fixtures::isolated_fixture_can_opt_in_to_provider_memory_discovery` | 1 | — |
+| `claudine-cli::spawn_inventory::production_spawn_inventory_is_complete_and_governed` | 1 | line-number drift from `f0aaa4832` |
+| `claudine-cli::wrap_sigint::compose_sigint_during_prep_exits_130_with_notice` | 1 | 30 s timeout |
+| `claudine-gen::drift::committed_*` | 5 | archived-baseline break |
+| `claudine-gen::generate_ux::*` | 5 | same |
+
+  `just test-cli --no-fail-fast`: 2523 run, 2515 passed, 7 failed, 1 timed out,
+  9 skipped. `just _test claudine-gen --no-fail-fast`: 155 run, 145 passed,
+  10 failed. Both match the pre-existing baseline exactly, so this cycle
+  introduced no Rust failure.
+
+**Consequence for the numbers in this fix.** Every **Executed** and
+**Summed cost** figure in [`inventory.md`](inventory.md) and every figure in
+[`attribution.md`](attribution.md) remains the `9fc5151a0` measurement, and is
+labelled as such rather than restated. Six families' identity counts moved
+(`inventory.md` § Family index lists them), so for those six the recorded cost
+is now a lower bound on the family rather than a measurement of it. No number
+was extrapolated, scaled, or invented.
+
+**What closes it.** The 18 failures above go green — they are production and
+generated-artifact defects outside this fix's scope, and none is this fix's to
+repair — and then the § 5 protocol is re-run and `attribution.md`,
+`inventory.md`'s two cost columns, and `measurement/` are regenerated
+together. Owner document:
+[`../_unscheduled/test-suite-residuals/spec.md`](../_unscheduled/test-suite-residuals/spec.md)
+§ Residual 8.
 
 ## Coverage changes
 
@@ -209,8 +270,35 @@ rename (`wrap_sigint::compose_sigint_during_prep_exits_130_with_notice`,
 `rendezvous-daemon::peer_discovery`'s two `real_*` mDNS identities gained
 their first route (`just test-real` inside `claudine/rendezvous`);
 `test-real` in `claudine/` moved from `cargo test` onto nextest; the four
-`level2_*` PTY binaries and `sequence_overlay_pty` now run concurrently. No
-test moved to a higher tier and none was `#[ignore]`d.
+PTY binaries and `sequence_overlay_pty` now run concurrently. Review-1
+finding 1 then moved those four binaries and their 19 identities from L2 to
+L1: they open `/dev/ptmx` and create no emulator session, so the tier claim
+was wrong. They are now `level1_dry_run_pty`, `level1_provided_partial_file_pty`,
+`level1_pty_wrapper_summary` and `level1_schema_prompt_pty`, carry no
+`terminal-tests` gate, and run in `just test` / `just test-cli` (19 of 19,
+4.72 s, 2026-09-09). No test moved to a *higher* tier and none was
+`#[ignore]`d.
+
+**Narrowed claims** (review-1 closure criterion 2). One identity was renamed
+because its name asserted more than its assertions could reach:
+`level1_pty_wrapper_summary::level1_pty_wrapper_summary_shows_badges` →
+`…::level1_pty_wrapper_summary_text_precedes_child_output`. Every assertion is
+unchanged — the same five `expect` calls in the same order — so this is a
+statement change, not a coverage change; the test count is unaffected. The old
+name and the review's requirement row read as a rendering claim ("badges are
+visible as rendered terminal UI"), which an `expectrl` substring match over a
+raw `/dev/ptmx` stream cannot establish. **Replacement coverage: none, by
+decision.** No `level2_*` binary in `claudine/cli/tests` asserts the wrapper
+header row's rendered form (`level2_perf_capture` puts the header on screen but
+asserts only the perf tree; `level2_dry_run_metadata_capture` asserts the
+`--dry-run` metadata table's `YOLO` cell, a different surface). The badge
+constants are `Prose` output, and `biscuit-terminal-cli::level2_prose_styling`
+proves that renderer emits bold and fg/bg RGB in real WezTerm and Kitty
+sessions — evidence for the primitive, not for this row's composition, order,
+or width. Adding an L2 capture was rejected under Rule 2 for a
+test-performance fix; the gap is recorded in `inventory.md`
+(`cli-l1-pty-interactive` § Disposition) and in the binary's module docs, which
+now state what the assertions do and do not establish.
 
 **Runner overrides**: eight `.config/nextest.toml` blocks removed with the
 cost each hid (`inventory.md` § Phase 6 disposition); none added. Against
@@ -236,13 +324,18 @@ criteria for each are in
    cost lever and needs the candidate CI evidence before it can be relaxed.
 7. Budget derivation needs a JUnit → family aggregator before three runs per
    leg can produce `perLegFamilySummed`.
+8. The local cost measurement cannot be re-run while eighteen pre-existing
+   failures in `claudine-cli` and `claudine-gen` keep every suite run red;
+   § Measurement re-run above names each one.
 
 None of these is generic fixture migration; the spawn allow-list is empty
 (AC4's "cannot be deferred" clause is satisfied).
 
 **Host conditions, recorded as pending rather than passing**:
 
-- `just test-l2`: 236 of 237 on every run since Phase 4; the survivor is
+- `just test-l2`: 236 of 237 on every run since Phase 4 — 237 while the 19
+  PTY identities were still routed here; the tier is 218 after review-1
+  finding 1 reclassified them, and has not been re-run since. The survivor is
   `level2_initialize_proxy_block_auto_detects_osc8_in_wezterm`, where Atuin's
   first-run prompt sits in the spawned WezTerm pane and swallows the exit
   marker. Not in any file this fix touched.
@@ -277,11 +370,11 @@ None of these is generic fixture migration; the spawn allow-list is empty
 | # | Criterion | Status | Evidence |
 |---|---|---|---|
 | AC1 | Every discovered test/family has a reviewed disposition and a reconciled platform/feature/tier route; none omitted by timing threshold | **verified** | `inventory-reconciler.ts` exit 0 at `9fc5151a0`: 7400 identities / 163 targets, 0 unassigned, 0 double-assigned, 0 stale families; 55 cfg exclusions listed apart; output reproduced in `inventory.md` § Reconciler output |
-| AC2 | Zero generic residual spawn exemptions; live-child and ordinary paths share the policy; negative guard tests and Windows proof | **verified** | `SPAWN_ALLOWLIST` empty, gate artifact `files:0 sites:0 governed_files:90`; one `ChildEnvironment` feeds `build`, `build_std`, `apply_policy_to`, drift-tested by `both_command_surfaces_hand_the_child_the_same_environment`; seven neuter transcripts (`log.md` § Phase 4); `just check-windows` exit 0 with zero warnings (Phase 10); the two Windows console-control tests ran green on `windows-latest` in run `34173378609` |
+| AC2 | Zero generic residual spawn exemptions; live-child and ordinary paths share the policy; negative guard tests and Windows proof | **verified** | `SPAWN_ALLOWLIST` empty, gate artifact `files:0 sites:0 governed_files:95` (90 before review-1 finding 1; the guard now classifies by the resource a file owns rather than by its name, so the four PTY binaries joined the governed population instead of escaping it on a `level2_` prefix); one `ChildEnvironment` feeds `build`, `build_std`, `apply_policy_to`, drift-tested by `both_command_surfaces_hand_the_child_the_same_environment`; seven neuter transcripts (`log.md` § Phase 4); `just check-windows` exit 0 with zero warnings (Phase 10); the two Windows console-control tests ran green on `windows-latest` in run `34173378609` |
 | AC3 | Inherited-width failures covered; contamination probes cannot alter unrelated results; probes use disposable state | **verified** | `COLUMNS=44` transcripts before/after in `log.md` § Phase 5; eight probes in `contamination_probes.rs`, four neuters each firing exactly the expected probes; the one checkout-adjacent probe uses a directory under gitignored `target/` and removes it on both paths |
 | AC4 | Shared-setup, cleanup, assertion and reachability findings resolved; deferrals evidenced and linked; generic fixture migration not deferred | **verified** | four unreachable identities now run; `test-real` on nextest; five metadata blocks declared; seven assertion repairs; leak sweep clean; deferrals 1–7 above with owner document; spawn allow-list empty |
 | AC5 | Every pre-existing override justified in the inventory or removed with the cost it hid; none added | **verified** | `inventory.md` § Runner override census and § Phase 6 disposition; `git diff main -- .config/nextest.toml`: 41 deletions, 16 comment-only insertions, 0 non-comment insertions |
-| AC6 | Local gates pass; `just check-windows` recorded; platform limitations explicit; budgets have compatible CI evidence | **partially verified — CI half pending** | gate ledger below (all local gates green or recorded pending with cause); `check-windows` exit 0; exclusions declared per leg; **no budget exists and no candidate CI run exists** — see § Budgets |
+| AC6 | Local gates pass; `just check-windows` recorded; platform limitations explicit; budgets have compatible CI evidence | **partially verified — CI half pending** | gate ledger below (all local gates green or recorded pending with cause); `check-windows` exit 0; exclusions declared per leg; **no budget exists and no candidate CI run exists** — see § Budgets. The aggregation tooling shipped 2026-09-09 and the refusal narrowed to `insufficient-runs`, which changes the *reason* AC6 is pending, not its status |
 | AC7 | `results.md` complete; docs and skills updated only where workflow or architecture changed | **verified** | this document; skill edits limited to the cross-compile route, the measurement workflow, the rendezvous/builder surfaces Phases 5–7 already repaired, and one falsified Windows claim in `signal-handling.md` (`log.md` § Phase 10) |
 
 ## Gate ledger — Phase 10 reconciliation
@@ -299,7 +392,7 @@ L1 suite, the area lint, and the Windows check, and nothing else.
 | `just lint` | `claudine/` | **exit 0, zero warnings** (5 m 03 s wall, overlapping the cold check) | **run**, Phase 10, after the tests; `phase10-just-lint.log` |
 | `just doctest` | `claudine/` | **exit 0** — 25 passed / 7 ignored across the four lib crates; `claudine-cli` skipped (no lib target) | **run**, Phase 10; `phase10-just-doctest.log` |
 | `just test-rendezvous` | `claudine/` | 273 passed / 2 skipped, exit 0, ×11 | **credited** from Phase 8 — no rendezvous input changed; also inside the Phase 10 leak sweep's population |
-| `just test-l2` | `claudine/` | 236 of 237 + `claudine-gen` 3 of 3; the host-condition survivor above | **credited** from Phase 9 (2026-09-08, same source state); no L2 input changed |
+| `just test-l2` | `claudine/` | 236 of 237 + `claudine-gen` 3 of 3; the host-condition survivor above | **stale** — credited from Phase 9 (2026-09-08), but review-1 finding 1 removed 19 identities from the tier (237 -> 218) and it has not been re-run; owned by the separate review-1 work unit for the WezTerm survivor |
 | `just bench` | `claudine/` | exit 0 (`BENCH_YES=1`) | **credited** from Phase 6 — no bench input changed |
 | `just ci-local` | repo root | 147 of 147, 73 packages, exit 0 | **credited** from Phase 9; the same tree minus two import gates |
 | `just test-l3` | `claudine/` | — | **pending**, focus-stealing tier not run from a non-interactive session |
@@ -321,8 +414,9 @@ All operator actions; none can be taken from this session.
    the recipe in `candidate/README.md`, failures included.
 3. Either `gh run rerun 34173378609` twice for the two missing baseline samples
    at `444213eb5`, or accept a baseline of one run at that source state.
-4. Write the JUnit → family aggregator (residual 7), fill
-   `attribution/budgets-pending.json`'s `perLegFamilySummed`, raise
-   `runsPerLeg` to 3, and let `deriveBudgets` produce the table beside the
-   baseline in `inventory.md` § Budgets. Then compare, and report every miss
-   with its cause.
+4. ~~Write the JUnit → family aggregator (residual 7)~~ — **done 2026-09-09**,
+   `attribution.ts aggregate`. What remains: point it at the three collected
+   runs per leg, replace `attribution/budgets-pending.json` with its output
+   (which carries the real `runsPerLeg`), and let `deriveBudgets` produce the
+   table beside the baseline in `inventory.md` § Budgets. Then compare, and
+   report every miss with its cause.

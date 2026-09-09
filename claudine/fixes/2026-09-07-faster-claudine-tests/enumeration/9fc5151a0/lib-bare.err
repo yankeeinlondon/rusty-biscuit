@@ -1,0 +1,4 @@
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.40s
+real 0.97
+user 0.68
+sys 0.45

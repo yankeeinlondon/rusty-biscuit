@@ -62,10 +62,20 @@
 //!
 //! ## What each gate governs
 //!
-//! `level2_*`, `level3_*`, and `real_*` files are out of both scans. They drive
-//! real terminals, real providers, and real host tooling on purpose, so the
-//! hermetic default is the wrong contract for them. `common/` is excluded
-//! because that is where the builder — and `augmented_path` itself — lives.
+//! A file leaves both scans only by **owning a resource outside the L1
+//! contract**, which [`exemption`] reads out of its source rather than out of
+//! its name: a real terminal-emulator session
+//! ([`EMULATOR_SESSION_APIS`]), or the opt-in [`REAL_TIER_PREFIX`] tier that
+//! drives an installed provider. `common/` is excluded because that is where the
+//! builder — and `augmented_path` itself — lives.
+//!
+//! Opening a pseudo-terminal is **not** such a resource. A file that names
+//! itself `level2_*` and drives `expectrl` is an ordinary L1 test and stays
+//! governed — the earlier filename rule made that name alone an exemption, and
+//! nineteen PTY tests sat outside this guard on it.
+//! `a_terminal_tier_name_must_match_the_resource_the_file_owns` now fails a file
+//! whose tier prefix claims an emulator its source never constructs, so a stale
+//! tier label is a suite failure rather than a silent exemption.
 //!
 //! The isolation gate narrows that population twice more:
 //!
@@ -166,8 +176,29 @@ const FORM_ENV_CLEAR: &str = ".env_clear()";
 /// A direct reach for `common::augmented_path`, bypassing `host_path()`.
 const FORM_AUGMENTED_PATH: &str = "augmented_path";
 
-/// File-name prefixes whose spawn contract is deliberately not hermetic.
-const EXCLUDED_PREFIXES: &[&str] = &["level2_", "level3_", "real_"];
+/// `biscuit-test-harness` names that stand up a real terminal-emulator session.
+///
+/// Constructing one moves ownership of the child's environment to the emulator:
+/// the pane runs a login shell, the harness sends a command line into it, and
+/// the fixture's `PATH`/`HOME`/`current_dir` policy cannot reach across that
+/// boundary. That is the resource an L1 test may not own, and naming one of
+/// these in executable code is what proves a file owns it.
+const EMULATOR_SESSION_APIS: &[&str] = &[
+    "TmuxHarness",
+    "WezTermHarness",
+    "KittyHarness",
+    "AppleTerminalHarness",
+    "shared_or_spawn",
+];
+
+/// The one tier whose resource has no source-visible constructor.
+///
+/// A `real_` test drives an installed, authenticated provider CLI and bills a
+/// real account for it. Cargo gates those binaries behind
+/// `required-features = ["real-tests"]` and each skips unless
+/// `CLAUDINE_CONTRACT_REAL=1`, so the prefix names a *declared tier* rather than
+/// standing in for a resource this scan could have found.
+const REAL_TIER_PREFIX: &str = "real_";
 
 /// One flagged site: a raw spawn, or a post-`build()` isolation escape.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -393,20 +424,64 @@ fn relative(root: &Path, path: &Path) -> String {
         .join("/")
 }
 
+/// The [`EMULATOR_SESSION_APIS`] name `source` uses as executable code, if any.
+///
+/// Sanitized, so a file that only *names* a harness — this guard's own docs,
+/// `test_placement.rs`'s assertion messages — does not acquire an exemption
+/// from prose.
+fn emulator_session_api(source: &str) -> Option<&'static str> {
+    let code = sanitize(source);
+    let mut index = 0;
+    while index < code.len() {
+        match identifier_at(&code, index) {
+            Some((name, end)) => {
+                if let Some(api) = EMULATOR_SESSION_APIS
+                    .iter()
+                    .find(|api| api.as_bytes() == name)
+                {
+                    return Some(api);
+                }
+                index = end;
+            }
+            None => index += 1,
+        }
+    }
+    None
+}
+
+/// Why a file sits outside the L1 spawn contract, when it does.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Exemption {
+    /// Stands up a real terminal-emulator session, which owns the child's
+    /// environment in the fixture's place.
+    EmulatorSession(&'static str),
+    /// Drives an installed provider under the opt-in `real_` tier.
+    RealProviderTier,
+}
+
+/// The resource outside the L1 contract that `relative`/`source` owns, if any.
+///
+/// Opening a pseudo-terminal is deliberately **not** one. `/dev/ptmx` is
+/// ordinary process plumbing the test manufactures every byte for, so an
+/// `expectrl` test is Level 1 and stays governed however it is named. Nineteen
+/// such tests escaped this guard for as long as it classified by filename — a
+/// file only had to be *called* `level2_*` — which is the blind spot review-1 of
+/// `claudine/fixes/2026-09-07-faster-claudine-tests` demonstrated.
+fn exemption(relative: &str, source: &str) -> Option<Exemption> {
+    let name = relative.rsplit('/').next()?;
+    if name.starts_with(REAL_TIER_PREFIX) {
+        return Some(Exemption::RealProviderTier);
+    }
+    emulator_session_api(source).map(Exemption::EmulatorSession)
+}
+
 /// Whether `relative` is outside this guard's contract.
 ///
-/// Kept a pure function of the relative path so the tier-naming rules are
-/// testable without a filesystem.
-fn excluded(relative: &str) -> bool {
-    if relative.starts_with("common/") {
-        return true;
-    }
-    let Some(name) = relative.rsplit('/').next() else {
-        return true;
-    };
-    EXCLUDED_PREFIXES
-        .iter()
-        .any(|prefix| name.starts_with(prefix))
+/// Kept a pure function of the relative path and the source so the
+/// classification is testable without a filesystem.
+fn excluded(relative: &str, source: &str) -> bool {
+    // Where the builder — and `augmented_path` itself — lives.
+    relative.starts_with("common/") || exemption(relative, source).is_some()
 }
 
 fn collect_rust_files(directory: &Path, files: &mut Vec<PathBuf>) -> std::io::Result<()> {
@@ -422,8 +497,8 @@ fn collect_rust_files(directory: &Path, files: &mut Vec<PathBuf>) -> std::io::Re
 }
 
 /// Whether a file is in the spawn gate's population.
-fn governs_spawn(relative: &str, _source: &str) -> bool {
-    !excluded(relative)
+fn governs_spawn(relative: &str, source: &str) -> bool {
+    !excluded(relative, source)
 }
 
 /// Whether `relative` is named by `allowlist`.
@@ -440,7 +515,9 @@ fn listed(relative: &str, allowlist: &[AllowEntry]) -> bool {
 /// list can only say "no file is exempt", which is the same thing a broken
 /// predicate says.
 fn governs_isolation_against(relative: &str, source: &str, spawn_allowlist: &[AllowEntry]) -> bool {
-    !excluded(relative) && !listed(relative, spawn_allowlist) && obtains_a_fixture_command(source)
+    !excluded(relative, source)
+        && !listed(relative, spawn_allowlist)
+        && obtains_a_fixture_command(source)
 }
 
 fn governs_isolation(relative: &str, source: &str) -> bool {
@@ -951,8 +1028,14 @@ fn deleting_a_spawn_entry_is_what_widens_the_isolation_population() {
     // A file holding no fixture command stays out either way — it has no
     // builder isolation to undo.
     assert!(!governs_isolation_against("not_yet_migrated.rs", "fn main() {}\n", AFTER));
-    // And the tier exclusions still win over both.
-    assert!(!governs_isolation_against("level2_context_capture.rs", migrated, AFTER));
+    // And the resource exemption still wins over both: a file that stands up a
+    // tmux session is out however many fixture commands it also builds.
+    let emulator = format!("{migrated}let mut harness = TmuxHarness::new();\n");
+    assert!(!governs_isolation_against(
+        "level2_context_capture.rs",
+        &emulator,
+        AFTER
+    ));
     // The live gate delegates to exactly this predicate.
     assert_eq!(
         governs_isolation("not_yet_migrated.rs", migrated),
@@ -1047,16 +1130,103 @@ fn a_file_that_never_builds_a_fixture_command_is_outside_the_isolation_gate() {
 }
 
 #[test]
-fn tier_naming_decides_what_the_guard_governs() {
-    assert!(excluded("level2_perf_capture.rs"));
-    assert!(excluded("level3_wrap_ctrl_c.rs"));
-    assert!(excluded("real_opencode_yolo_subagent.rs"));
-    assert!(excluded("common/mod.rs"));
-    assert!(excluded("common/wrap.rs"));
-    // `level1_*` files are ordinary L1 binaries and stay governed.
-    assert!(!excluded("level1_structured_error_message.rs"));
-    assert!(!excluded("wrap_basics.rs"));
-    assert!(!excluded("sequence_overlay_pty.rs"));
+fn the_resource_a_file_owns_decides_what_the_guard_governs() {
+    const TMUX: &str = "let mut harness = TmuxHarness::new();\n";
+    const SHARED: &str = "let mut harness = WezTermHarness::shared_or_spawn();\n";
+    const PTY_ONLY: &str = "let session = expectrl::Session::spawn(cmd).unwrap();\n";
+
+    // An emulator session is the exemption, and the file's name has no say in
+    // it either way.
+    assert_eq!(
+        exemption("level2_perf_capture.rs", TMUX),
+        Some(Exemption::EmulatorSession("TmuxHarness"))
+    );
+    assert_eq!(
+        exemption("level3_wrap_ctrl_c.rs", SHARED),
+        Some(Exemption::EmulatorSession("WezTermHarness"))
+    );
+    assert!(excluded("an_unprefixed_capture.rs", TMUX));
+
+    // The `real_` tier keeps its declared-tier exemption.
+    assert_eq!(
+        exemption("real_opencode_yolo_subagent.rs", "fn main() {}\n"),
+        Some(Exemption::RealProviderTier)
+    );
+
+    // `common/` holds the builder itself.
+    assert!(excluded("common/mod.rs", ""));
+    assert!(excluded("common/wrap.rs", ""));
+
+    // A PTY is Level-1 plumbing, so a PTY-only file is governed whatever it is
+    // called. This is the blind spot the filename rule had: `level2_` alone
+    // used to be enough.
+    assert!(!excluded("level2_schema_prompt_pty.rs", PTY_ONLY));
+    assert!(!excluded("level1_schema_prompt_pty.rs", PTY_ONLY));
+    assert!(!excluded("level1_structured_error_message.rs", ""));
+    assert!(!excluded("wrap_basics.rs", ""));
+    assert!(!excluded("sequence_overlay_pty.rs", PTY_ONLY));
+
+    // Prose naming a harness confers nothing — this guard's own docs and
+    // `test_placement.rs`'s assertion messages name every one of them.
+    assert!(!excluded(
+        "level2_ghost.rs",
+        "//! Complemented by a `TmuxHarness` capture elsewhere.\n"
+    ));
+    assert!(!excluded(
+        "level2_ghost.rs",
+        "panic!(\"use WezTermHarness::shared_or_spawn()\");\n"
+    ));
+    // Identifier boundaries hold on both sides.
+    assert!(!excluded("level2_ghost.rs", "let h = MyTmuxHarness::new();\n"));
+    assert!(!excluded("level2_ghost.rs", "let h = TmuxHarnessBuilder::new();\n"));
+}
+
+/// A `level2_`/`level3_` name is a claim about the resource a file owns, and the
+/// canonical recipes route the file on that claim alone: `_tier_filter` selects
+/// those names for `just test-l2` / `just test-l3` and excludes them from
+/// `just test`. Where the claim and the resource disagree, the file runs in the
+/// wrong tier — as nineteen `expectrl` tests did, measured as L2 evidence while
+/// the fast L1 suite never ran them.
+#[test]
+fn a_terminal_tier_name_must_match_the_resource_the_file_owns() {
+    let root = tests_root();
+    let mut files = Vec::new();
+    collect_rust_files(&root, &mut files).expect("tier-naming population");
+    files.sort();
+
+    let mut mislabeled = Vec::new();
+    let mut unlabeled = Vec::new();
+    for file in &files {
+        let relative_path = relative(&root, file);
+        if relative_path.starts_with("common/") {
+            continue;
+        }
+        let source = fs::read_to_string(file).expect("test source is readable");
+        let name = relative_path.rsplit('/').next().unwrap_or(&relative_path);
+        let claims_emulator = name.starts_with("level2_") || name.starts_with("level3_");
+        match (claims_emulator, emulator_session_api(&source)) {
+            (true, None) => mislabeled.push(relative_path),
+            (false, Some(api)) => unlabeled.push(format!("{relative_path} ({api})")),
+            _ => {}
+        }
+    }
+
+    assert!(
+        mislabeled.is_empty(),
+        "These files carry a real-terminal tier prefix but construct no emulator session. \
+         The prefix keeps them out of `just test` and routes them through `just test-l2` / \
+         `just test-l3`, so the tests run in a tier they do not need and skip the one they \
+         belong to. Rename them `level1_…` (a PTY is Level-1 plumbing) or stand up the \
+         emulator session the name claims.\nMislabeled:\n{}",
+        mislabeled.join("\n")
+    );
+    assert!(
+        unlabeled.is_empty(),
+        "These files construct a real terminal-emulator session without a `level2_`/`level3_` \
+         name, so `just test` selects them and the L1 suite spawns real terminal panes. Add \
+         the tier prefix.\nUnlabeled:\n{}",
+        unlabeled.join("\n")
+    );
 }
 
 #[test]
@@ -1231,7 +1401,18 @@ fn the_spawn_gate_reads_a_real_population_and_still_finds_a_planted_site() {
     );
     // The population is the real L1 suite, not a stray directory.
     let names: BTreeSet<&str> = governed.iter().map(|(file, _)| file.as_str()).collect();
-    for expected in ["wrap_basics.rs", "sequence_cli.rs", "wrap_ctrl_c_windows.rs"] {
+    for expected in [
+        "wrap_basics.rs",
+        "sequence_cli.rs",
+        "wrap_ctrl_c_windows.rs",
+        // PTY-only binaries. They were named `level2_*` and therefore exempt
+        // while the classification was by filename; a pseudo-terminal is
+        // Level-1 plumbing, so they are governed like any other L1 file.
+        "level1_dry_run_pty.rs",
+        "level1_provided_partial_file_pty.rs",
+        "level1_pty_wrapper_summary.rs",
+        "level1_schema_prompt_pty.rs",
+    ] {
         assert!(names.contains(expected), "{expected} must be governed: {names:?}");
     }
 
@@ -1286,6 +1467,11 @@ fn the_isolation_gate_governs_the_migrated_files_and_only_those() {
         "compose_schema_cli.rs",
         "sequence_cli.rs",
         "loop_cli.rs",
+        // The PTY binaries the filename rule used to exempt.
+        "level1_dry_run_pty.rs",
+        "level1_provided_partial_file_pty.rs",
+        "level1_pty_wrapper_summary.rs",
+        "level1_schema_prompt_pty.rs",
     ] {
         assert!(
             governed.contains(migrated),
@@ -1294,7 +1480,7 @@ fn the_isolation_gate_governs_the_migrated_files_and_only_those() {
     }
     // Never obtains a fixture command; its `.current_dir` pins a `git` child.
     assert!(!governed.contains("system_prompt_perf_bench.rs"));
-    // The tier and `common/` exclusions still apply.
+    // The emulator-session and `common/` exclusions still apply.
     assert!(!governed.contains("level2_context_capture.rs"));
     assert!(!governed.contains("common/mod.rs"));
     // This guard names the fixture in prose only.

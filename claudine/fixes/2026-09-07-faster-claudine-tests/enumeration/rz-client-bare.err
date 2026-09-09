@@ -1,4 +1,2 @@
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.31s
-real 1.04
-user 1.33
-sys 0.35
+   Compiling rendezvous-client v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/claudine/rendezvous/client)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.32s

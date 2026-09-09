@@ -1,105 +1,268 @@
 {
-  "revision": "9fc5151a0df52acb63c5458b1564aa9c01bfe9b1",
+  "toolVersion": "@rusty-biscuit/test-audit@0.1.0",
+  "revision": "78b44a96651e33b0eb7cb2f82a96255853cc2998",
+  "dirty": [
+    "M .claude/skills/biscuit-test-harness/SKILL.md",
+    " M .claude/skills/darkmatter/SKILL.md",
+    " M biscuit-test-harness/README.md",
+    " M biscuit-test-harness/src/kitty.rs",
+    " M biscuit-test-harness/src/lib.rs",
+    " M biscuit-test-harness/src/wezterm.rs",
+    " M claudine/cli/Cargo.toml",
+    " M claudine/cli/tests/common/mod.rs",
+    " M claudine/cli/tests/common/pty.rs",
+    " M claudine/cli/tests/sequence_overlay_pty.rs",
+    " M claudine/cli/tests/spawn_site_guard.rs",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/attribution.md",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/attribution/budgets-pending.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/captures.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/captures.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/catalog-types-bare.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/catalog-types-bare.err",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/catalog-types-bare.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/catalog-types-bare.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-all.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-all.err",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-all.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-all.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-bare.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-bare.err",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-bare.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-bare.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-ci.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-ci.err",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-ci.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-ci.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-daemon.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-daemon.err",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-daemon.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-daemon.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-real.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-real.err",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-real.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-real.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-terminal.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-terminal.err",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/cli-terminal.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/cli-terminal.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/contract-bare.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/contract-bare.err",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/contract-bare.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/contract-bare.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/contract-real.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/contract-real.err",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/contract-real.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/contract-real.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/gen-bare.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/gen-bare.err",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/gen-bare.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/gen-bare.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/gen-terminal.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/gen-terminal.err",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/gen-terminal.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/gen-terminal.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/lib-bare.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/lib-bare.err",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/lib-bare.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/lib-bare.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/rz-client-bare.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/rz-client-bare.err",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/rz-client-bare.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/rz-client-bare.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/rz-core-bare.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/rz-core-bare.err",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/rz-core-bare.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/rz-core-bare.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/rz-core-testsupport.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/rz-core-testsupport.err",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/rz-core-testsupport.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/rz-core-testsupport.json",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/rz-daemon-bare.err -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/rz-daemon-bare.err",
+    "R  claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/rz-daemon-bare.json -> claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/9fc5151a0/rz-daemon-bare.json",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/families.json",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/inventory.md",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/log.md",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/results.md",
+    " M claudine/fixes/2026-09-07-faster-claudine-tests/spec.md",
+    " M claudine/fixes/_unscheduled/test-suite-residuals/spec.md",
+    " M darkmatter/fixes/2026-09-07-faster-darkmatter-tests/review-2.md",
+    " M tools/test-audit/README.md",
+    " M tools/test-audit/src/attribute/command.ts",
+    " M tools/test-audit/src/attribute/index.ts",
+    " M tools/test-audit/src/capture/command.ts",
+    "?? tools/test-audit/src/attribute/aggregate.ts",
+    "?? tools/test-audit/tests/aggregate-claudine-compat.test.ts",
+    "?? tools/test-audit/tests/aggregate.test.ts"
+  ],
+  "note": "Captured from the WORKING TREE, not a committed revision: this cycle renamed four expectrl binaries level2_* -> level1_* and moved their 19 tests into the L1 fixture and guard contract, and there is no committed candidate revision to capture at. The 'dirty' list above is the uncommitted delta these listings include. The superseded listings for revision 9fc5151a0 are preserved verbatim under enumeration/9fc5151a0/.",
   "toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
   "nextest": "cargo-nextest 0.9.136 (1d5bf1ec9 2026-05-16)",
-  "platform": "aarch64-apple-darwin (Darwin 27.0.0)",
-  "note": "Each capture is `cargo nextest list --message-format json` run from the repository root at the revision above. Stderr from each run is kept beside the JSON as `<label>.err`. Windows- and Linux-only identities are absent by construction on this host; they are declared as exclusions in families.json and enumerated in inventory.md.",
+  "platform": "arm64-darwin (Darwin 27.0.0)",
+  "capturedAt": "2026-09-09T19:54:03.766Z",
   "captures": [
     {
       "label": "catalog-types-bare",
-      "packages": ["claudine-catalog-types"],
+      "packages": [
+        "claudine-catalog-types"
+      ],
       "features": [],
-      "command": "cargo nextest list --message-format json -p claudine-catalog-types"
-    },
-    {
-      "label": "lib-bare",
-      "packages": ["claudine"],
-      "features": [],
-      "command": "cargo nextest list --message-format json -p claudine"
-    },
-    {
-      "label": "contract-bare",
-      "packages": ["claudine-contract"],
-      "features": [],
-      "command": "cargo nextest list --message-format json -p claudine-contract"
-    },
-    {
-      "label": "contract-real",
-      "packages": ["claudine-contract"],
-      "features": ["real-tests"],
-      "command": "cargo nextest list --message-format json -p claudine-contract --features real-tests"
-    },
-    {
-      "label": "cli-bare",
-      "packages": ["claudine-cli"],
-      "features": [],
-      "command": "cargo nextest list --message-format json -p claudine-cli"
-    },
-    {
-      "label": "cli-daemon",
-      "packages": ["claudine-cli"],
-      "features": ["daemon-tests"],
-      "command": "cargo nextest list --message-format json -p claudine-cli --features daemon-tests"
-    },
-    {
-      "label": "cli-terminal",
-      "packages": ["claudine-cli"],
-      "features": ["terminal-tests"],
-      "command": "cargo nextest list --message-format json -p claudine-cli --features terminal-tests"
-    },
-    {
-      "label": "cli-real",
-      "packages": ["claudine-cli"],
-      "features": ["real-tests"],
-      "command": "cargo nextest list --message-format json -p claudine-cli --features real-tests"
-    },
-    {
-      "label": "cli-ci",
-      "packages": ["claudine-cli"],
-      "features": ["daemon-tests", "terminal-tests"],
-      "command": "cargo nextest list --message-format json -p claudine-cli --features daemon-tests,terminal-tests"
+      "command": "cargo nextest list --message-format json -p claudine-catalog-types",
+      "exitCode": 0,
+      "seconds": 2.4,
+      "identities": 21
     },
     {
       "label": "cli-all",
-      "packages": ["claudine-cli"],
-      "features": ["daemon-tests", "terminal-tests", "real-tests"],
-      "command": "cargo nextest list --message-format json -p claudine-cli --features daemon-tests,terminal-tests,real-tests"
+      "packages": [
+        "claudine-cli"
+      ],
+      "features": [
+        "daemon-tests",
+        "terminal-tests",
+        "real-tests"
+      ],
+      "command": "cargo nextest list --message-format json -p claudine-cli --features daemon-tests,terminal-tests,real-tests",
+      "exitCode": 0,
+      "seconds": 61.8,
+      "identities": 2760
+    },
+    {
+      "label": "cli-bare",
+      "packages": [
+        "claudine-cli"
+      ],
+      "features": [],
+      "command": "cargo nextest list --message-format json -p claudine-cli",
+      "exitCode": 0,
+      "seconds": 33.5,
+      "identities": 2532
+    },
+    {
+      "label": "cli-ci",
+      "packages": [
+        "claudine-cli"
+      ],
+      "features": [
+        "daemon-tests",
+        "terminal-tests"
+      ],
+      "command": "cargo nextest list --message-format json -p claudine-cli --features daemon-tests,terminal-tests",
+      "exitCode": 0,
+      "seconds": 77.3,
+      "identities": 2759
+    },
+    {
+      "label": "cli-daemon",
+      "packages": [
+        "claudine-cli"
+      ],
+      "features": [
+        "daemon-tests"
+      ],
+      "command": "cargo nextest list --message-format json -p claudine-cli --features daemon-tests",
+      "exitCode": 0,
+      "seconds": 130.2,
+      "identities": 2537
+    },
+    {
+      "label": "cli-real",
+      "packages": [
+        "claudine-cli"
+      ],
+      "features": [
+        "real-tests"
+      ],
+      "command": "cargo nextest list --message-format json -p claudine-cli --features real-tests",
+      "exitCode": 0,
+      "seconds": 84.7,
+      "identities": 2533
+    },
+    {
+      "label": "cli-terminal",
+      "packages": [
+        "claudine-cli"
+      ],
+      "features": [
+        "terminal-tests"
+      ],
+      "command": "cargo nextest list --message-format json -p claudine-cli --features terminal-tests",
+      "exitCode": 0,
+      "seconds": 1.6,
+      "identities": 2754
+    },
+    {
+      "label": "contract-bare",
+      "packages": [
+        "claudine-contract"
+      ],
+      "features": [],
+      "command": "cargo nextest list --message-format json -p claudine-contract",
+      "exitCode": 0,
+      "seconds": 28.2,
+      "identities": 48
+    },
+    {
+      "label": "contract-real",
+      "packages": [
+        "claudine-contract"
+      ],
+      "features": [
+        "real-tests"
+      ],
+      "command": "cargo nextest list --message-format json -p claudine-contract --features real-tests",
+      "exitCode": 0,
+      "seconds": 2.7,
+      "identities": 52
     },
     {
       "label": "gen-bare",
-      "packages": ["claudine-gen"],
+      "packages": [
+        "claudine-gen"
+      ],
       "features": [],
-      "command": "cargo nextest list --message-format json -p claudine-gen"
+      "command": "cargo nextest list --message-format json -p claudine-gen",
+      "exitCode": 0,
+      "seconds": 6.6,
+      "identities": 155
     },
     {
       "label": "gen-terminal",
-      "packages": ["claudine-gen"],
-      "features": ["terminal-tests"],
-      "command": "cargo nextest list --message-format json -p claudine-gen --features terminal-tests"
+      "packages": [
+        "claudine-gen"
+      ],
+      "features": [
+        "terminal-tests"
+      ],
+      "command": "cargo nextest list --message-format json -p claudine-gen --features terminal-tests",
+      "exitCode": 0,
+      "seconds": 0.9,
+      "identities": 158
     },
     {
-      "label": "rz-core-bare",
-      "packages": ["rendezvous-core"],
+      "label": "lib-bare",
+      "packages": [
+        "claudine"
+      ],
       "features": [],
-      "command": "cargo nextest list --message-format json -p rendezvous-core"
-    },
-    {
-      "label": "rz-core-testsupport",
-      "packages": ["rendezvous-core"],
-      "features": ["test-support"],
-      "command": "cargo nextest list --message-format json -p rendezvous-core --features test-support"
-    },
-    {
-      "label": "rz-daemon-bare",
-      "packages": ["rendezvous-daemon"],
-      "features": [],
-      "command": "cargo nextest list --message-format json -p rendezvous-daemon"
+      "command": "cargo nextest list --message-format json -p claudine",
+      "exitCode": 0,
+      "seconds": 83.9,
+      "identities": 4151
     },
     {
       "label": "rz-client-bare",
-      "packages": ["rendezvous-client"],
+      "packages": [
+        "rendezvous-client"
+      ],
       "features": [],
-      "command": "cargo nextest list --message-format json -p rendezvous-client"
+      "command": "cargo nextest list --message-format json -p rendezvous-client",
+      "exitCode": 0,
+      "seconds": 4.1,
+      "identities": 21
+    },
+    {
+      "label": "rz-core-bare",
+      "packages": [
+        "rendezvous-core"
+      ],
+      "features": [],
+      "command": "cargo nextest list --message-format json -p rendezvous-core",
+      "exitCode": 0,
+      "seconds": 57.7,
+      "identities": 82
+    },
+    {
+      "label": "rz-core-testsupport",
+      "packages": [
+        "rendezvous-core"
+      ],
+      "features": [
+        "test-support"
+      ],
+      "command": "cargo nextest list --message-format json -p rendezvous-core --features test-support",
+      "exitCode": 0,
+      "seconds": 2.4,
+      "identities": 82
+    },
+    {
+      "label": "rz-daemon-bare",
+      "packages": [
+        "rendezvous-daemon"
+      ],
+      "features": [],
+      "command": "cargo nextest list --message-format json -p rendezvous-daemon",
+      "exitCode": 0,
+      "seconds": 67.3,
+      "identities": 172
     }
   ]
 }

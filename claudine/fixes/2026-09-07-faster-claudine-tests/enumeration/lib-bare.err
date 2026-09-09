@@ -1,4 +1,69 @@
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.40s
-real 0.97
-user 0.68
-sys 0.45
+   Compiling tokio v1.52.1
+   Compiling getrandom v0.2.17
+   Compiling objc2-core-foundation v0.3.2
+   Compiling url v2.5.8
+   Compiling uuid v1.23.1
+   Compiling toml_datetime v1.1.1+spec-1.1.0
+   Compiling serde-value v0.7.0
+   Compiling coreaudio-sys v0.2.17
+   Compiling native-tls v0.2.18
+   Compiling mach2 v0.5.0
+   Compiling biscuit-visualized v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/biscuit-visualized/src)
+   Compiling fs4 v0.13.1
+   Compiling rusqlite v0.31.0
+   Compiling chrono-tz v0.10.4
+   Compiling criterion v0.5.1
+   Compiling rstest v0.25.0
+   Compiling ring v0.17.14
+   Compiling cfb v0.7.3
+   Compiling toml v1.1.2+spec-1.1.0
+   Compiling twilight-model v0.17.1
+   Compiling toml_edit v0.25.11+spec-1.1.0
+   Compiling rustls-webpki v0.103.13
+   Compiling renderable v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/renderable)
+   Compiling infer v0.19.0
+   Compiling rustls v0.23.38
+   Compiling objc2-foundation v0.3.2
+   Compiling objc2-io-kit v0.3.2
+   Compiling sysinfo v0.38.4
+   Compiling tokio-util v0.7.18
+   Compiling tower v0.5.3
+   Compiling async-compression v0.4.41
+   Compiling tokio-stream v0.1.18
+   Compiling tokio-native-tls v0.3.1
+   Compiling h2 v0.4.13
+   Compiling tower-http v0.6.8
+   Compiling twilight-http-ratelimiting v0.17.1
+   Compiling tokio-rustls v0.26.4
+   Compiling rustls-platform-verifier v0.7.0
+   Compiling rustls-platform-verifier v0.6.2
+   Compiling tungstenite v0.26.2
+   Compiling tokio-tungstenite v0.26.2
+   Compiling hyper v1.9.0
+   Compiling hyper-util v0.1.20
+   Compiling hyper-rustls v0.27.9
+   Compiling hyper-tls v0.6.0
+   Compiling reqwest v0.12.28
+   Compiling reqwest v0.13.2
+   Compiling twilight-validate v0.17.0
+   Compiling twilight-util v0.17.0
+   Compiling twilight-http v0.17.1
+   Compiling biscuit-file v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/biscuit-file/lib)
+   Compiling schematic-define v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/schematic/define)
+   Compiling biscuit-terminal v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/biscuit-terminal/lib)
+   Compiling objc2-core-audio v0.3.2
+   Compiling objc2-core-location v0.3.2
+   Compiling objc2-user-notifications v0.3.2
+   Compiling objc2-audio-toolbox v0.3.2
+   Compiling schematic-definitions v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/schematic/definitions)
+   Compiling coreaudio-rs v0.14.1
+   Compiling cpal v0.17.3
+   Compiling rodio v0.22.2
+   Compiling schematic-schema v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/schematic/schema)
+   Compiling sniff v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/sniff/lib)
+   Compiling playa v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/playa/lib)
+   Compiling messenger v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/messenger/lib)
+   Compiling darkmatter v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/darkmatter/lib)
+   Compiling biscuit-speaks v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/biscuit-speaks/lib)
+   Compiling claudine v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/claudine/lib)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 23s

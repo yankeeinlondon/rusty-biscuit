@@ -1,12 +1,12 @@
 //! Level 1 PTY tests for `claudine sequence` interactive schema-property
 //! collection.
 //!
-//! Split out of `level2_schema_prompt_pty.rs`: this binary owns the
+//! Split out of the schema-prompt PTY binary: this one owns the
 //! sequence-overlay coverage (cross-step prompt deduplication, per-step
 //! overlay satisfaction, status reporting, and the pre-prompt /
 //! agent-resolution gate that must fire before any provider launches).
 //! The schema-prompt and inline-compose coverage stays in
-//! `level2_schema_prompt_pty.rs`. Shared PTY harness helpers live in
+//! `level1_schema_prompt_pty.rs`. Shared PTY harness helpers live in
 //! `common::pty`.
 //!
 //! ## Tier

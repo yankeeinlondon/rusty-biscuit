@@ -1,0 +1,105 @@
+{
+  "revision": "9fc5151a0df52acb63c5458b1564aa9c01bfe9b1",
+  "toolchain": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "nextest": "cargo-nextest 0.9.136 (1d5bf1ec9 2026-05-16)",
+  "platform": "aarch64-apple-darwin (Darwin 27.0.0)",
+  "note": "Each capture is `cargo nextest list --message-format json` run from the repository root at the revision above. Stderr from each run is kept beside the JSON as `<label>.err`. Windows- and Linux-only identities are absent by construction on this host; they are declared as exclusions in families.json and enumerated in inventory.md.",
+  "captures": [
+    {
+      "label": "catalog-types-bare",
+      "packages": ["claudine-catalog-types"],
+      "features": [],
+      "command": "cargo nextest list --message-format json -p claudine-catalog-types"
+    },
+    {
+      "label": "lib-bare",
+      "packages": ["claudine"],
+      "features": [],
+      "command": "cargo nextest list --message-format json -p claudine"
+    },
+    {
+      "label": "contract-bare",
+      "packages": ["claudine-contract"],
+      "features": [],
+      "command": "cargo nextest list --message-format json -p claudine-contract"
+    },
+    {
+      "label": "contract-real",
+      "packages": ["claudine-contract"],
+      "features": ["real-tests"],
+      "command": "cargo nextest list --message-format json -p claudine-contract --features real-tests"
+    },
+    {
+      "label": "cli-bare",
+      "packages": ["claudine-cli"],
+      "features": [],
+      "command": "cargo nextest list --message-format json -p claudine-cli"
+    },
+    {
+      "label": "cli-daemon",
+      "packages": ["claudine-cli"],
+      "features": ["daemon-tests"],
+      "command": "cargo nextest list --message-format json -p claudine-cli --features daemon-tests"
+    },
+    {
+      "label": "cli-terminal",
+      "packages": ["claudine-cli"],
+      "features": ["terminal-tests"],
+      "command": "cargo nextest list --message-format json -p claudine-cli --features terminal-tests"
+    },
+    {
+      "label": "cli-real",
+      "packages": ["claudine-cli"],
+      "features": ["real-tests"],
+      "command": "cargo nextest list --message-format json -p claudine-cli --features real-tests"
+    },
+    {
+      "label": "cli-ci",
+      "packages": ["claudine-cli"],
+      "features": ["daemon-tests", "terminal-tests"],
+      "command": "cargo nextest list --message-format json -p claudine-cli --features daemon-tests,terminal-tests"
+    },
+    {
+      "label": "cli-all",
+      "packages": ["claudine-cli"],
+      "features": ["daemon-tests", "terminal-tests", "real-tests"],
+      "command": "cargo nextest list --message-format json -p claudine-cli --features daemon-tests,terminal-tests,real-tests"
+    },
+    {
+      "label": "gen-bare",
+      "packages": ["claudine-gen"],
+      "features": [],
+      "command": "cargo nextest list --message-format json -p claudine-gen"
+    },
+    {
+      "label": "gen-terminal",
+      "packages": ["claudine-gen"],
+      "features": ["terminal-tests"],
+      "command": "cargo nextest list --message-format json -p claudine-gen --features terminal-tests"
+    },
+    {
+      "label": "rz-core-bare",
+      "packages": ["rendezvous-core"],
+      "features": [],
+      "command": "cargo nextest list --message-format json -p rendezvous-core"
+    },
+    {
+      "label": "rz-core-testsupport",
+      "packages": ["rendezvous-core"],
+      "features": ["test-support"],
+      "command": "cargo nextest list --message-format json -p rendezvous-core --features test-support"
+    },
+    {
+      "label": "rz-daemon-bare",
+      "packages": ["rendezvous-daemon"],
+      "features": [],
+      "command": "cargo nextest list --message-format json -p rendezvous-daemon"
+    },
+    {
+      "label": "rz-client-bare",
+      "packages": ["rendezvous-client"],
+      "features": [],
+      "command": "cargo nextest list --message-format json -p rendezvous-client"
+    }
+  ]
+}

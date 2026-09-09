@@ -144,10 +144,6 @@ name = "level2_dry_run_metadata_capture"
 required-features = ["terminal-tests"]
 
 [[test]]
-name = "level2_dry_run_pty"
-required-features = ["terminal-tests"]
-
-[[test]]
 name = "level2_file_resolution_capture"
 required-features = ["terminal-tests"]
 
@@ -196,23 +192,11 @@ name = "level2_prompt_reporting_capture"
 required-features = ["terminal-tests"]
 
 [[test]]
-name = "level2_provided_partial_file_pty"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_pty_tests"
-required-features = ["terminal-tests"]
-
-[[test]]
 name = "level2_removed_validation_key_capture"
 required-features = ["terminal-tests"]
 
 [[test]]
 name = "level2_schema_parse_capture"
-required-features = ["terminal-tests"]
-
-[[test]]
-name = "level2_schema_prompt_pty"
 required-features = ["terminal-tests"]
 
 [[test]]

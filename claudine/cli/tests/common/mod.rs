@@ -170,8 +170,9 @@ pub use test_toolkit::init_test_tracing;
 /// most call sites interpolate it into a shell command line.
 ///
 /// This is a path, not a command: it carries none of the L1 spawn contract's
-/// environment. L2/L3 binaries drive claudine through a real terminal and need
-/// exactly that, which is why `spawn_site_guard.rs` governs L1 callers only.
+/// environment. A binary that stands up a real terminal-emulator session needs
+/// exactly that — the pane's login shell owns the child's environment — which is
+/// why `spawn_site_guard.rs` exempts those files and governs every other caller.
 pub fn claudine_bin() -> &'static str {
     static BIN: std::sync::OnceLock<String> = std::sync::OnceLock::new();
     BIN.get_or_init(|| {
@@ -811,14 +812,16 @@ pub fn init_git_repo(path: &Path) -> bool {
 /// real provider binaries that claudine's `which`-based discovery will find, so
 /// an assertion downstream of it pins whichever host ran the suite. L1 tests
 /// reach it through [`ClaudineCommandBuilder::host_path`], which requires a
-/// call-site comment naming the tool; it stays public for the L2/L3 binaries,
-/// where a realistic host `PATH` is the point.
+/// call-site comment naming the tool; it stays public for the binaries that
+/// drive a real terminal-emulator session, where a realistic host `PATH` is the
+/// point.
 ///
 /// Visibility cannot express that split. Every integration test binary compiles
 /// its own copy of this module as a private `mod common`, so `pub` here already
 /// means "this binary only" and `pub(crate)` would reach exactly as far — there
-/// is no marker that admits `level2_*` and refuses `wrap_basics`. The isolation
-/// gate in `spawn_site_guard.rs` is what keeps the migrated L1 files off it.
+/// is no marker that admits an emulator-session file and refuses `wrap_basics`.
+/// The isolation gate in `spawn_site_guard.rs` is what keeps the migrated L1
+/// files off it.
 pub fn augmented_path(fake_bin: &Path) -> std::ffi::OsString {
     ensure_test_tracing_initialized();
     let system_path = std::env::var_os("PATH").unwrap_or_default();
@@ -908,7 +911,7 @@ pub fn strip_ansi(input: &str) -> String {
 ///
 /// On Unix, attempts to open `/dev/ptmx` (the master multiplexer). Returns
 /// `true` when allocation succeeds, which is the precondition every
-/// `expectrl::Session::spawn` call in this crate's L2 PTY tests requires.
+/// `expectrl::Session::spawn` call in this crate's Level 1 PTY tests requires.
 /// On non-Unix targets returns `false` (the PTY test files are themselves
 /// `#[cfg(unix)]`, so this branch is unreachable from those tests).
 #[allow(dead_code)]

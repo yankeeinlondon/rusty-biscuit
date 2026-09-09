@@ -89,8 +89,16 @@ Two consequences run through everything below.
 
 From Phase 1's recorded gate logs (`just test`, `just test-l2`) plus Phase 2's
 `just test-rendezvous` log — 7,373 results, 1,196.94 s summed, 115.55 s of
-runner elapsed. Gate output pasted verbatim; the counts match
-[`inventory.md`'s family index](inventory.md#family-index) row for row.
+runner elapsed. Gate output pasted verbatim.
+
+> **These are `9fc5151a0` numbers and are not restated.** They matched
+> [`inventory.md`'s family index](inventory.md#family-index) row for row when
+> both were taken. The inventory has since been reconciled to retaken captures
+> and six families' identity counts moved, so those six now differ here; the
+> other forty still agree. Re-measurement is deferred with a named blocker —
+> see [`results.md`](results.md) § Measurement re-run. The gate that produced
+> this table replays the same logs against a snapshot of the same-era
+> `families.json`, so the table stays reproducible from its own inputs.
 
 | Family | Package | Tests | Summed | Mean | Max | Share |
 |---|---|---:|---:|---:|---:|---:|
@@ -100,7 +108,7 @@ runner elapsed. Gate output pasted verbatim; the counts match
 | `rz-daemon-unit` | `rendezvous-daemon` | 153 | 107.75 s | 0.704 s | 6.80 s | 9.0% |
 | `cli-l1-fixture` | `claudine-cli` | 282 | 75.09 s | 0.266 s | 4.33 s | 6.3% |
 | `lib-unit-task-shell` | `claudine` | 106 | 58.14 s | 0.548 s | 2.06 s | 4.9% |
-| `cli-l2-pty` | `claudine-cli` | 19 | 54.61 s | 2.874 s | 4.71 s | 4.6% |
+| `cli-l1-pty-interactive` | `claudine-cli` | 19 | 54.61 s | 2.874 s | 4.71 s | 4.6% |
 | `cli-l2-autocomplete` | `claudine-cli` | 27 | 44.68 s | 1.655 s | 3.59 s | 3.7% |
 | `cli-l1-source-scan-guards` | `claudine-cli` | 79 | 39.53 s | 0.500 s | 3.21 s | 3.3% |
 | `cli-l1-raw-sequence-loop` | `claudine-cli` | 154 | 34.76 s | 0.226 s | 2.34 s | 2.9% |
@@ -175,7 +183,7 @@ future claim about a single binary getting faster must subtract it.
 
 | Rank | Family | Summed | What the time actually is | Owner |
 |---|---|---:|---|---|
-| 1 | `cli-l2-lifecycle` + `cli-l2-render-capture` + `cli-l2-pty` | 443.08 s | Real terminal panes driving a real lifecycle. L2 by construction. | out of L1 scope; Phase 6 re-measures |
+| 1 | `cli-l2-lifecycle` + `cli-l2-render-capture` + `cli-l1-pty-interactive` | 443.08 s | Real terminal panes driving a real lifecycle for the first two. The third was measured on the L2 route but owns no emulator session (review-1 finding 1) and now runs at L1. | out of L1 scope for the first two; Phase 6 re-measures |
 | 2 | `lib-unit` + `lib-unit-task-shell` | 254.72 s | `composition::sequence` 94.15 s / 257 tests and `composition::schema` 43.43 s / 75 tests dominate; the shell-task cases run real child process trees | Phase 6 (schema corpus), Phase 7 (shell waits) |
 | 3 | `rz-daemon-unit` | 107.75 s | 153 unit tests at a 704 ms mean — the highest unit-test mean in the eight packages — in a crate the parent area's `just test` never runs | Phase 7 (endpoints/cleanup) |
 | 4 | `cli-l1-source-scan-guards` | 39.53 s | One `syn` parse of `lib/src` + `cli/src` + `contract/src`, repeated once per test process | Phase 6 — see [decision 2](#draft-decision-2--which-source-scans-can-share-work) |
@@ -375,8 +383,8 @@ fitted to whatever the candidate run happened to produce.
 
 1. **Input.** For each configured leg — `ubuntu-latest`, `macos-latest`,
    `windows-latest`, `wsl2-ubuntu` — the three consecutive green baseline runs
-   Phase 1 collects, read through `junit-metrics.ts` and grouped by family with
-   the same `families.json` used here.
+   Phase 1 collects, gated by `junit-metrics.ts` and grouped by family by
+   `attribution.ts aggregate` with the same `families.json` used here.
 2. **Statistic.** Per leg and family, `observedMax` = the largest summed
    duration across that leg's three runs. Worst-of-three, not a mean: a budget
    that the baseline itself breaches one run in three is not a budget.
@@ -396,7 +404,49 @@ fitted to whatever the candidate run happened to produce.
    adjusted to cover it (AC7).
 
 The procedure is executable today — only its input is missing — and each rule
-above has a test in `attribution.test.ts`.
+above has a named test in `tools/test-audit/tests/attribute.test.ts`.
+
+### Step 1 shipped, 2026-09-09
+
+The one part of the procedure that had no implementation was the join from a
+JUnit `<testcase>` to a family: `attribution.ts` reads nextest *console logs*
+and the CI evidence is XML, so `perLegFamilySummed` stayed empty and every leg
+was refused with `missing-leg` — the wrong reason. `attribution.ts aggregate`
+(shared implementation in `tools/test-audit/src/attribute/aggregate.ts`) closes
+it. It walks the stored `<run-id>/<env>/<tier>/<package>.xml` staging trees and
+resolves every case through the reconciler's own `familiesMatching`, so the
+attribution gate and the reconciliation gate cannot drift on family membership.
+
+It is a gate, not a report. A leg contributes its one sample per family only
+when that run's evidence for that leg is clean; a red run (non-zero manifest
+`exit_code` or a failed case), a malformed or missing report, a manifest record
+naming another environment, a declared leg absent from the tree, or an identity
+that zero or two families claim disqualifies the leg for that run rather than
+being averaged in. Rule 5's refusals are untouched.
+
+Against the one stored baseline run:
+
+```text
+$ npx tsx attribution.ts aggregate baseline/34173378609 --out /tmp/agg.json
+… 18 families on each Unix leg, 15 on windows-latest;
+  summed duration identical to results.md § CI baseline
+GATE EXIT=0
+
+$ npx tsx attribution.ts budgets --runs /tmp/agg.json
+4 violation(s):
+  [insufficient-runs] ubuntu-latest: 1 green run(s); 3 consecutive are required
+  [insufficient-runs] macos-latest: 1 green run(s); 3 consecutive are required
+  [insufficient-runs] windows-latest: 1 green run(s); 3 consecutive are required
+  [insufficient-runs] wsl2-ubuntu: 1 green run(s); 3 consecutive are required
+GATE EXIT=1
+```
+
+That is the correct end state and the whole of the change: the refusal moved
+from "nothing joins the evidence to the families" to "one run is not three".
+`attribution/budgets-pending.json` is left as it was — `runsPerLeg` 1, an empty
+`perLegFamilySummed`, and the pre-existing `missing-leg` refusal reproducible
+verbatim — because the aggregator's output is what replaces it once the runs
+exist, and editing it by hand would fabricate evidence.
 
 ## Timeout and clock semantics these numbers were taken under
 
@@ -473,7 +523,7 @@ explains.
 | Requirement | Status |
 |---|---|
 | Every draft decision has a written answer backed by a measurement | **3 of 4 answered**; decision 4 is answered by a documented, tested refusal plus a fixed procedure, because its input is blocked |
-| Budgets are in `inventory.md` next to the baseline | **procedure and refusal are**; the numbers are **pending** on Phase 1's CI tranche |
+| Budgets are in `inventory.md` next to the baseline | **procedure, tooling and refusal are** — step 1's JUnit → family join shipped 2026-09-09; the numbers are **pending** on two more green runs per leg |
 | No budget was derived from a local run alone | **done** — no budget exists, and the gate refuses local provenance by construction |
 | Cost attributed by family against the baseline, three columns separate | **done** for the local evidence; the CI baseline's three columns remain pending |
 | Source-scan families measured individually, with process counts | **done** — seven binaries, three repetitions, plus the shared-process counterfactual |

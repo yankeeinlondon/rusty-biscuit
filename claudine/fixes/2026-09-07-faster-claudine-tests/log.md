@@ -2228,3 +2228,329 @@ Done by the darkmatter fix's Phase 1A (`darkmatter/fixes/2026-09-07-faster-darkm
 - `sentinels.ts` and `attribution/launch-cwd-probe.ts` stay local (lldb symbol lists and the `git` shim are Claudine-specific).
 - Finding for this fix's follow-up: the `enumeration/` captures describe 9fc5151a0, and the working tree has since gained tests (Phases 4–7). `npx tsx inventory-reconciler.ts` on the live tree therefore reports those as `undeclared-exclusion` (e.g. `claudine-cli :: the_spawn_gate_reads_a_real_population_and_still_finds_a_planted_site`). That is the gate working; re-run `test-audit capture --config audit.config.json` at the committed candidate revision before the next inventory checkpoint.
 - Tool version for every report from here on: `@rusty-biscuit/test-audit@0.1.0`.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-09T10:53:47-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/claudine/fixes/2026-09-07-faster-claudine-tests/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- the review carries three numbered findings plus one verification-level defect
+  raised in the requirement table, which its own **Closure Criteria** section
+  enumerates as four items; those four are the work units below
+        - **C1** — reclassify the four PTY-only binaries as Level 1, migrate all
+          19 tests into the `CliProcessFixture` contract, and make
+          `spawn_site_guard` classify by resource boundary rather than filename
+        - **C2** — add real Level-2 proof for the wrapper-summary rendering
+          claim, or narrow the claim to what the Level-1 assertions establish
+        - **C3** — isolate the WezTerm pane's shell startup from host
+          configuration so the canonical `just test-l2` run is green
+        - **C4** — integrate `main`, collect the consecutive baseline/candidate
+          CI runs on all four legs, aggregate JUnit into families, ratify budgets
+- orchestration is serial: one subagent per work unit, each running the
+  claudine area's own `just test` / `just lint` gates before reporting back
+- starting the work on 'C1 — reclassify and migrate the four PTY-only binaries to Level 1' at 10:55:41-07:00
+        - reclassified the four `expectrl` binaries from L2 to L1 with `git mv`,
+          so history follows: `level2_pty_tests.rs` → `level1_pty_wrapper_summary.rs`,
+          `level2_schema_prompt_pty.rs` → `level1_schema_prompt_pty.rs`,
+          `level2_provided_partial_file_pty.rs` → `level1_provided_partial_file_pty.rs`,
+          `level2_dry_run_pty.rs` → `level1_dry_run_pty.rs`
+        - all 19 test functions renamed `level2_pty_…` → `level1_pty_…`; every
+          `require_level!(Level::L2, …)` is now `Level::L1`; each `//!` header
+          gained a `## Tier` section stating why a bare PTY is Level 1, and
+          `level1_dry_run_pty.rs` keeps its cross-reference to
+          `level2_dry_run_approval_capture.rs` as the emulator-level complement
+        - `expectrl` was already an unconditional dev-dependency
+          (`claudine/cli/Cargo.toml:94`), so the four
+          `required-features = ["terminal-tests"]` blocks were removable at no
+          cost — which also means these 19 tests were **not previously compiled
+          at all** on the local `just test` route, only on `just test-l2`
+        - every Claudine child now comes from `CliProcessFixture`:
+          `command_std()` for the ordinary shape, and
+          `command_builder().fake_only_path().build_std()` for
+          `level1_pty_wrapper_summary` (whose original `PATH` was the fake bin
+          alone; the escape carries the call-site comment the contract requires).
+          Four hand-rolled `Command` duplicates in the schema file collapsed into
+          one `claudine_command(fixture, args)` helper
+        - the migration exposed a latent capture race: `level1_dry_run_pty`'s
+          parity test waited on the label `"Blacklist and stop"`, which can match
+          mid-line, so under full-suite parallel load the two captures differed by
+          a truncated final row. It now waits on that option's tail,
+          `"(persists to blacklist)"`. No assertion was weakened — the comparison
+          is still byte-identical after ANSI stripping
+        - `spawn_site_guard.rs` now classifies by **resource, not filename**:
+          `EXCLUDED_PREFIXES` is replaced by `exemption(relative, source)`, which
+          exempts a file only when it names a `biscuit-test-harness` emulator
+          constructor (`TmuxHarness`/`WezTermHarness`/`KittyHarness`/`AppleTerminalHarness`/`shared_or_spawn`)
+          in sanitized executable code, or is the opt-in `real_` tier — the one
+          surviving prefix rule, because an authenticated provider account has no
+          source-visible constructor. Opening a PTY is explicitly not a resource.
+          The governed population grew from 90 files to **95**
+        - a new failure mode closes the blind spot in the other direction:
+          `a_terminal_tier_name_must_match_the_resource_the_file_owns` fails any
+          `level2_`/`level3_`-named file that constructs no emulator session, and
+          any file that constructs one *without* the prefix (which would let
+          `just test` spawn real panes)
+        - non-vacuity proven by two reverted experiments — (a) restoring one raw
+          `cargo_bin` spawn in `level1_pty_wrapper_summary.rs` produced
+          `FAIL … l1_tests_spawn_claudine_through_the_fixture_builder` naming
+          `level1_pty_wrapper_summary.rs:46`, a site the old filename rule made
+          invisible; (b) renaming `level1_dry_run_pty.rs` back to `level2_…`
+          produced `FAIL … a_terminal_tier_name_must_match_the_resource_the_file_owns`.
+          Both restored and re-run green
+        - the 19 tests were **counted, not assumed**, in the L1 route: an isolated
+          run reports `Summary [4.720s] 19 tests run: 19 passed, 0 skipped`, and
+          all 19 appear as `PASS` inside the full `just test-cli` output
+        - documents reconciled: family `cli-l2-pty` → `cli-l1-pty-interactive` in
+          `families.json`, moved into the "L1 integration binaries" block of
+          `inventory.md`, both rows corrected in `attribution.md`, and in
+          `results.md` the AC2 census (90 → 95, with the reason) plus the
+          `just test-l2` count 237 → 218 marked **stale / not re-run**
+        - `.config/nextest.toml` was deliberately left alone and re-verified:
+          218 `level2_`-named tests remain in `claudine-cli`, so neither the
+          slow-timeout filter nor the CI retries-0 filter is stale.
+          `git status -- .config/nextest.toml` is empty (AC5, AC7)
+        - `enumeration/` was **not** regenerated — it is deliberately frozen at
+          `9fc5151a0`. `inventory-reconciler.ts` therefore reports
+          `[stale-family] cli-l1-pty-interactive matches no identity` and
+          `[inventory-drift] inventory says 19, the captures say 0`. It was
+          already exiting 1 before this work: 54 of its 75 `undeclared-exclusion`
+          entries name tests untouched here, because the branch has moved past the
+          capture revision
+        - **finding, not fixed here:** the sibling guards
+          `sniff/cli/tests/spawn_site_guard.rs` and
+          `darkmatter/cli/tests/spawn_site_guard.rs` still classify by filename
+          and carry the same blind spot. It is latent in both — neither area has a
+          `level2_*` file that uses `expectrl` today — and outside this fix's
+          package scope
+        - **pre-existing branch failures disclosed, not absorbed.**
+          `just test` is 6880 passed / 17 failed / 1 timed out and `just test-cli`
+          is 2515 passed / 7 failed / 1 timed out on this tree. None is in a file
+          this work touched: the only edits to shared test code
+          (`common/mod.rs`, `common/pty.rs`) are comment-only, verified by
+          reading the diff. The set is 5 × `loop_control::target_launch::tests::*`,
+          `propagated_context_fixtures::isolated_fixture_can_opt_in_to_provider_memory_discovery`
+          (fails in isolation), `spawn_inventory::production_spawn_inventory_is_complete_and_governed`
+          (line-number drift in production sources from commit `f0aaa4832`),
+          10 × `claudine-gen::drift`/`generate_ux` (the known archived-baseline
+          break), and a `wrap_sigint` timeout that reproduces in isolation. This
+          is a regression in the branch since the fix's Phase 10 green run, and
+          it is a finding for the operator rather than something this cycle
+          can close
+- work completed for 'C1 — reclassify and migrate the four PTY-only binaries to Level 1' at 11:26:10-07:00
+- starting the work on 'C2 — reconcile the wrapper-summary rendering claim with its evidence' at 11:26:20-07:00
+        - route chosen: **narrow the claim**, which the review permits as an
+          alternative to adding Level-2 proof. The decision was made from a
+          negative search, not from convenience
+        - every `level2_*`/`level3_*` binary in `claudine/cli/tests`,
+          `claudine/lib/tests` and `claudine/gen/tests` was read; none asserts
+          the wrapper header row that `claudine/cli/src/output/mod.rs`'s
+          `log_wrapper_header` emits. The two near-misses are
+          `level2_perf_capture.rs` (prints the row, but its own comment records
+          that the headline scrolls out of the viewport and every assertion is on
+          the perf tree) and `level2_stalled_generation_capture.rs` (the only L2
+          test on the bare wrap path, asserting only the `Agent Error` block).
+          `level2_dry_run_metadata_capture.rs` captures a red `YOLO` cell in the
+          `--dry-run` *metadata table* — a different surface
+        - the closest genuine evidence is component-level, not surface-level:
+          `biscuit-terminal-cli::level2_prose_styling` decodes `Bold`, `Italic`,
+          `FgRgb`, `BgRgb` and `Dim` from real WezTerm and Kitty captures, which
+          proves the `Prose` renderer the badges are built from — but not this
+          row's composition, spacing, glyph width, or truncation
+        - a second overstatement surfaced while checking: of the old test's five
+          assertions only **one** (`YOLO`) is a badge at all. `INTERACTIVE` is a
+          row of the environment-variables table, and the `-n` flag actively
+          suppresses the Interactive badge. The name overstated the test on two
+          axes, not one
+        - renamed `level1_pty_wrapper_summary_shows_badges` →
+          `level1_pty_wrapper_summary_text_precedes_child_output`. All five
+          `expect` calls are unchanged and in the same order: this is a statement
+          change, not a coverage change, and the test count is 2523 before and
+          after
+        - the module `//!` docs gained a "What these assertions establish, and
+          what they do not" section — textual content and ordering in the child's
+          byte stream; explicitly nothing about glyph width, SGR styling, or badge
+          row layout — naming where the neighboring L2 evidence actually lives
+        - `inventory.md`'s `cli-l1-pty-interactive` row now states the family's
+          claims as textual and records the "visible as rendered terminal UI"
+          claim as **withdrawn**; its Disposition carries the full negative search
+          result and the explicit decision to record a gap rather than manufacture
+          coverage. `results.md` gained a **Narrowed claims** paragraph naming the
+          rename and "replacement coverage: none, by decision", which is what the
+          spec's "record every assertion or test-population change and its
+          replacement coverage" asks for
+        - no new L2 capture binary was written. The review permits narrowing, this
+          is a test-performance fix, and ~2 s of L2 cost for a surface with no
+          identified regression pressure is against the repo's Rule 2. The gap is
+          recorded as a gap in both documents so a reader sees an honest hole
+          rather than phantom coverage
+        - gates: `just test-cli` reproduces the baseline **exactly** — 2523 run,
+          2515 passed, 7 failed, 1 timed out, 9 skipped, the same eight
+          pre-existing identities and zero added failures; `just lint` exit 0 with
+          zero warnings; `git status -- .config/nextest.toml` empty
+- work completed for 'C2 — reconcile the wrapper-summary rendering claim with its evidence' at 11:36:05-07:00
+- starting the work on 'C3 — isolate the WezTerm pane's shell startup from host configuration' at 11:36:20-07:00
+        - root cause **confirmed on this host, not assumed**.
+          `biscuit-test-harness/src/lib.rs::configure_login_shell` built
+          `bash -l -c '… exec "$0" -i' bash`. The inner `exec "$0" -i` is a
+          *non-login interactive* bash, so it reads `~/.bashrc`, whose line 3 on
+          this host is `eval "$(atuin init bash)"`. Atuin's first-run picker
+          rendered into the pane and swallowed the line the harness sent, so
+          `; echo claudine_rc:$?` never ran
+        - the two shells serve unrelated purposes and need **opposite** startup
+          files: the outer `-l` is the only source of the host `PATH` when a
+          terminal GUI is launched from the desktop (on this host
+          `~/.bash_profile` supplies `cargo env` and `~/.local/bin`), so it stays;
+          the inner `-i` exists only so the harness can see a prompt and send
+          lines, needs nothing from the rc file, and the rc file is exactly where
+          Atuin, starship, fzf and zoxide install themselves
+        - shipped in `biscuit-test-harness/src/lib.rs`:
+          `interactive_rc_suppression_flags(shell)` (`bash` ⇒ `--norc`,
+          `zsh` ⇒ `-f`, otherwise empty, matched on the shell's *file name* so an
+          absolute `$SHELL` still resolves) and `login_shell_script(shell, augment_path)`,
+          which always prefixes `unset ENV BASH_ENV;` because POSIX
+          `sh`/`dash`/`ksh` have no rc flag and source whatever `$ENV` names
+        - `configure_login_shell` collapsed to one code path. The old
+          `else { cmd.arg("-l") }` branch produced a *single* interactive-login
+          shell and was contaminated on any host whose `.bash_profile` sources
+          `.bashrc`; it now gets the same two-stage treatment
+        - no custom `PS1`. Rc suppression leaves bash on its stock `\s-\v\$`
+          (`bash-3.2$`), which `looks_like_prompt` already accepts; a synthetic
+          prompt would add a fresh collision surface against captured content for
+          no gain. `stock_prompts_of_rc_suppressed_shells_are_recognized` pins
+          that coupling so the two cannot drift apart
+        - six non-vacuous unit tests added, each asserting the **constructed
+          argv** rather than an outcome:
+          `login_shell_script_suppresses_interactive_rc_for_bash` / `..._for_zsh`,
+          `login_shell_script_clears_env_for_shells_without_an_rc_flag`,
+          `interactive_rc_suppression_flags_match_on_the_shell_file_name`,
+          `login_shell_script_prepends_the_bin_dir_after_login_startup`, and the
+          prompt-coupling test above
+        - **the canonical gate is green.** `just test-l2` in the `claudine` area:
+          `claudine-cli` `Summary [51.043s] 218 tests run: 218 passed, 2536 skipped`
+          and `claudine-gen` `Summary [2.585s] 3 tests run: 3 passed, 155 skipped`,
+          **EXIT=0**, no `FAIL` and no `error:` lines. The previously surviving
+          test appears inline as
+          `PASS [3.252s] (207/218) … level2_initialize_proxy_block_auto_detects_osc8_in_wezterm`
+        - before/after on the focused reproduction: `FAIL [34.089s]` with the
+          Atuin picker in the captured frame → `PASS [2.903s]`
+        - blast radius checked beyond the required gates, because
+          `biscuit-test-harness` is shared: `biscuit-terminal` 76 + 2 passed,
+          `worktree` 5 passed, `tree-hugger` 3 passed, `biscuit-icon` 11 passed,
+          `biscuit-tui` 21 passed, all exit 0. `biscuit-test-harness`'s own
+          `just test` is 103 passed and `just lint` exit 0
+        - darkmatter's L2 showed a ~26 s stall failing a **different identity on
+          each run**; A/B'd by temporarily reverting the rc suppression in place —
+          `level2_list_center_alignment_indents_more_than_left` failed with rc
+          files loaded, `level2_cli_align_lists_broadcast_indents_in_real_terminal`
+          failed with them suppressed, and a re-run with the fix was 10/10. A
+          pre-existing wandering flake on that branch, not caused here; the file
+          was restored exactly and every gate re-run afterwards
+        - **host trap re-confirmed and worked around, not papered over:** an agent
+          session Claudine launched with `--model opus` exports ambient
+          `MODEL=opus`, which fails
+          `level2_lifecycle_equivalence_ac9_context_facets_match_direct_run`
+          (`ctx.model=opus` vs the probe's pinned value). Run L2 as
+          `env -u MODEL just test-l2`. No test or config was changed to make it pass
+        - two unadvertised wins fall out of the same change: an rc-installed
+          `precmd` title hook can no longer clobber `wezterm cli set-tab-title`'s
+          harness tag (which L3's `AXRaise` matches on), and prompt generators
+          that query terminal colors on each redraw can no longer perturb
+          `level2_terminal_osc_wezterm`'s exactly-one-OSC-10 count
+        - docs updated alongside the behavior: `configure_login_shell`'s docblock,
+          `PROMPT_TERMINATORS`' now-stale claim that the harness always inherits
+          host dotfiles, the `spawn_shell` notes in `wezterm.rs` and `kitty.rs`,
+          `biscuit-test-harness/README.md`, and
+          `.claude/skills/biscuit-test-harness/SKILL.md`
+        - **finding, not fixed here:** the tmux and Apple Terminal backends still
+          run a *single* `bash -l`. On this host that reads `~/.bash_profile`
+          only — no Atuin — which is exactly why 217 of 218 passed while the one
+          WezTerm test failed. The hazard is latent rather than absent: on a host
+          whose `.bash_profile` sources `.bashrc` (the Debian/Fedora skeleton
+          default) tmux would inherit the same contamination. It is a ~10-line
+          change reusing `login_shell_script`, but it crosses five package areas
+          whose suites are being refactored concurrently in this worktree, so a
+          regression could not have been attributed. Recorded for follow-up
+        - **second finding, not fixed here:** `assert_no_sgr_red` in
+          `biscuit-terminal/cli/tests/level2_prose_styling.rs:906` has a
+          prompt-terminator `return` that now reliably fires and shortens its
+          10-line negative-assertion window. It already fired on this host before
+          the change (the stock prompt was already `bash-5.3$`), so this work did
+          not alter it, and the suite is green. It belongs to `biscuit-terminal`
+- work completed for 'C3 — isolate the WezTerm pane's shell startup from host configuration' at 12:32:40-07:00
+- starting the work on 'C4 — CI performance contract: aggregation, evidence, budgets' at 12:32:50-07:00
+        - split on what this session can actually close: the JUnit-to-family
+          aggregation is code and is implementable now; the consecutive candidate
+          CI runs are operator-gated and are the deferral
+        - **built:** `test-audit attribute aggregate <run-dir>… --config <cfg>
+          [--families <json>] [--out <json>] [--provenance ci|local] [--headroom <ratio>]`
+          in `tools/test-audit/src/attribute/aggregate.ts`, with the subcommand
+          wired in `src/attribute/command.ts`. It walks
+          `<run-id>/<env>/<tier>/<package>.xml` staging trees, projects each cell
+          through the existing `invocationFromJunit`, and resolves every
+          `<testcase>` through the reconciler's existing `familiesMatching` — a
+          join, not a second classifier, which is what residual 7 said was missing
+        - it lives in the shared `tools/test-audit` package rather than the fix
+          directory, so darkmatter's and sniff's parallel fixes inherit it. No new
+          wrapper was needed: `attribution.ts` forwards positionals unchanged, so
+          `npx tsx attribution.ts aggregate baseline/34173378609` already works
+        - it is a gate, not a report — exit 0 clean, 1 on violation, 2 on usage,
+          matching every other tool in the package. Disqualifying classes, each
+          with a named test: red run (non-zero manifest `exit_code`, or a failed
+          `<testcase>`), malformed or missing report, missing manifest, a manifest
+          record naming another environment, a declared leg absent, a leg
+          declaring no cells, a cell with no manifest record,
+          `report_present=false`, an XML named but absent, a count mismatch, a
+          duplicate identity, an identity claimed by zero families, an identity
+          claimed by two (counted by **neither**, as the reconciler already does),
+          and the same run id supplied twice
+        - real-artifact result against `baseline/34173378609/`: the join is
+          **total** — 0 unclaimed, 0 double-claimed, on all four legs — and the
+          per-leg summed durations reproduce `results.md` § CI baseline to 0.1 s
+          (324.7 / 753.5 / 355.8 / 692.2 s)
+        - **the refusal narrowed; it did not disappear.** `deriveBudgets` moved
+          from `[missing-leg] declared but carries no measurements` to
+          `[insufficient-runs] 1 green run(s); 3 consecutive are required` on all
+          four legs. That is the correct end state at one stored run, and it is
+          the evidence that the join works while the budget still refuses
+        - `runsPerLeg` was not raised and `perLegFamilySummed` was not hand-filled
+          in `budgets-pending.json`; the recorded refusal reproduces byte-identical
+        - the `cli-l2-pty` → `cli-l1-pty-interactive` rename from C1 is handled
+          without a special case: the renamed family's four suites are simply
+          absent from the stored L1 cell, so it carries no sample and
+          `deriveBudgets`'s "fewer samples than runs" rule catches it. There is an
+          explicit test for that
+        - 36 new vitest tests (28 unit + 8 real-artifact compat). Non-vacuity by
+          neuter, six detectors disabled one at a time with the file restored
+          between each; `sha256(aggregate.ts)` is
+          `35e2a2b4e0ff72f6e95acc0f27c5e5d76d32ddc66d33270f77b7cdf43ec9aae6`
+          before, after every restore, and at the end
+        - `--provenance local` exists so a local `target/nextest/ci-reports` tree
+          can be aggregated and then refused downstream by
+          `local-derived-budget`, rather than quietly becoming a target
+        - documents reconciled: `tools/test-audit/README.md`,
+          `claudine/fixes/_unscheduled/test-suite-residuals/spec.md` §7 rewritten
+          as a **half-closed** deferral, `inventory.md` § Budgets, `attribution.md`
+          (procedure step 1 plus a "Step 1 shipped" section), and `results.md`'s
+          AC6 row — whose *reason* for being pending changed while its **status did
+          not**
+        - **regression surfaced, owned below:** `tools/test-audit`'s own
+          `just test` is now 197 passed / 3 failed, and all three failures trace to
+          C1's `families.json` rename replaying against the frozen `enumeration/`
+          captures. Proof, same logs and same code with two family files —
+          `HEAD families.json: 0 violation(s)` vs
+          `working-tree families.json: 19 violation(s)`, exactly the 19 identities
+          C1 moved. The shared package was green at `HEAD` and is red on this tree,
+          so this cycle owns it
+        - **not done and not fakeable from here:** the `main` merge (13 conflicting
+          files), the OpenPGP-signed commit, the push (the remote branch was
+          auto-deleted at PR #69's merge), the pull request, and three consecutive
+          green Actions runs per leg across four environments. No budget can be
+          ratified until that evidence exists
+- work completed for 'C4 — CI performance contract: aggregation, evidence, budgets' at 12:48:20-07:00
+        - the aggregation half is **complete**; the evidence and ratification
+          halves are **deferred**, with the reason recorded in the closing section
+- starting the work on 'C1-followup — regenerate the enumeration captures and reconcile the inventory' at 12:48:35-07:00
+        - the review's Closure Criterion 1 ends "regenerate inventory and
+          measurement evidence", which C1 deliberately left alone; C4 then showed
+          the cost of leaving it, so it is picked up here as its own unit

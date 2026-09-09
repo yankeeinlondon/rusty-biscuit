@@ -1,4 +1,9 @@
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.34s
-real 0.85
-user 0.52
-sys 0.31
+   Compiling sniff v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/sniff/lib)
+   Compiling biscuit-contract v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/biscuit-contract/lib)
+   Compiling playa v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/playa/lib)
+   Compiling messenger v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/messenger/lib)
+   Compiling darkmatter v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/darkmatter/lib)
+   Compiling biscuit-speaks v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/biscuit-speaks/lib)
+   Compiling claudine v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/claudine/lib)
+   Compiling claudine-contract v0.1.0 (/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/claudine/contract)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 27.33s

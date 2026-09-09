@@ -228,6 +228,7 @@
           "claudine-cli::characterization_error_routes",
           "claudine-cli::command_routing",
           "claudine-cli::compose_caller_file_provenance",
+          "claudine-cli::compose_frontmatter_model",
           "claudine-cli::compose_header_first",
           "claudine-cli::contextual_errors",
           "claudine-cli::ctx_launch_anchor",
@@ -268,7 +269,8 @@
       "package": "claudine-cli",
       "match": {
         "suites": [
-          "claudine-cli::cli_process_fixture"
+          "claudine-cli::cli_process_fixture",
+          "claudine-cli::contamination_probes"
         ]
       }
     },
@@ -413,6 +415,18 @@
       }
     },
     {
+      "id": "cli-l1-pty-interactive",
+      "package": "claudine-cli",
+      "match": {
+        "suites": [
+          "claudine-cli::level1_dry_run_pty",
+          "claudine-cli::level1_provided_partial_file_pty",
+          "claudine-cli::level1_schema_prompt_pty",
+          "claudine-cli::level1_pty_wrapper_summary"
+        ]
+      }
+    },
+    {
       "id": "cli-l1-live-child",
       "package": "claudine-cli",
       "match": {
@@ -467,18 +481,6 @@
           "claudine-cli::level2_auto_complete_chooser",
           "claudine-cli::level2_auto_complete_operation_file",
           "claudine-cli::level2_explicit_operation_file_miss"
-        ]
-      }
-    },
-    {
-      "id": "cli-l2-pty",
-      "package": "claudine-cli",
-      "match": {
-        "suites": [
-          "claudine-cli::level2_dry_run_pty",
-          "claudine-cli::level2_provided_partial_file_pty",
-          "claudine-cli::level2_schema_prompt_pty",
-          "claudine-cli::level2_pty_tests"
         ]
       }
     },

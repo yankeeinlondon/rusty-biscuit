@@ -4,4 +4,4 @@ warning: linker stderr: ld: __eh_frame section too large (max 16MB) to encode dw
   = note: `#[warn(linker_messages)]` on by default
 
 warning: `claudine-cli` (bin "claudine" test) generated 1 warning
-    Finished `test` profile [unoptimized + debuginfo] target(s) in 37.44s
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1m 00s
