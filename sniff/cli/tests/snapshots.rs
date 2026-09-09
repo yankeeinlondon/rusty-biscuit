@@ -1,8 +1,9 @@
 use serde_json::{Value, json};
 
+mod common;
+
 fn run_stdout(args: &[&str]) -> String {
-    let output = assert_cmd::Command::cargo_bin("sniff")
-        .unwrap()
+    let output = common::owned_sniff_command()
         .args(args)
         .assert()
         .success()
@@ -360,8 +361,7 @@ fn create_degenerate_cargo_fixture() -> (tempfile::TempDir, std::path::PathBuf) 
 }
 
 fn run_repo_structure(base: &std::path::Path) -> String {
-    let output = assert_cmd::Command::cargo_bin("sniff")
-        .unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             base.to_str().unwrap(),
@@ -382,8 +382,7 @@ fn run_repo_structure(base: &std::path::Path) -> String {
 }
 
 fn run_repo_structure_json(base: &std::path::Path) -> serde_json::Value {
-    let output = assert_cmd::Command::cargo_bin("sniff")
-        .unwrap()
+    let output = common::owned_sniff_command()
         .args([
             "--base",
             base.to_str().unwrap(),
@@ -799,8 +798,7 @@ fn redact_base_paths_normalizes_windows_separators() {
 }
 
 fn run_repo_aggregate_json(base: &std::path::Path) -> Value {
-    let output = assert_cmd::Command::cargo_bin("sniff")
-        .unwrap()
+    let output = common::owned_sniff_command()
         .args(["--base", base.to_str().unwrap(), "repo", "--json"])
         .env("NO_COLOR", "1")
         .output()

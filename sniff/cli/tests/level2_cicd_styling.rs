@@ -18,13 +18,29 @@
 #![cfg(feature = "test-fixtures")]
 
 use assert_cmd::cargo::cargo_bin;
+use biscuit_test_harness::CapturedFrame;
 use biscuit_test_harness::TerminalHarness;
 use biscuit_test_harness::tmux::TmuxHarness;
-use serial_test::serial;
+use std::time::Duration;
 use test_toolkit::{Backend, Level, require_level};
 
+mod common;
+
+const RENDER_DEADLINE: Duration = Duration::from_secs(5);
+const VISIBLE_EVIDENCE: &[&str] = &[
+    "CI/CD", "Build", "Lint", "Deploy", "Release", "✓", "✗", "⊘", "queued",
+];
+
+fn final_cicd_frame_is_visible(frame: &CapturedFrame) -> bool {
+    VISIBLE_EVIDENCE
+        .iter()
+        .all(|needle| frame.plain.contains(needle))
+        && frame.raw.contains("32m")
+        && frame.raw.contains("31m")
+        && (frame.raw.contains("[2m") || frame.raw.contains(";2m"))
+}
+
 #[test]
-#[serial(level2_terminal)]
 fn level2_cicd_status_cells_render_styled_in_tmux() {
     require_level!(Level::L2, TmuxHarness::available(), Backend::Tmux);
 
@@ -32,19 +48,14 @@ fn level2_cicd_status_cells_render_styled_in_tmux() {
 
     let bin_path = cargo_bin("render_cicd_fixture").display().to_string();
     harness
-        .send_command_with_env(&bin_path, &[("FORCE_COLOR", "1")])
+        .send_command_with_env(&format!("clear; {bin_path}"), &[("FORCE_COLOR", "1")])
         .expect("send_command_with_env failed");
 
-    let _ = biscuit_test_harness::wait_for_prompt(&mut harness);
-    std::thread::sleep(std::time::Duration::from_millis(200));
-
-    let frame = harness.capture().expect("capture failed");
+    let frame = common::capture_until(&mut harness, RENDER_DEADLINE, final_cicd_frame_is_visible);
 
     // Visible text: the four run rows, each status indicator, and — proving
     // active runs render their dim status word rather than a glyph — "queued".
-    for needle in [
-        "CI/CD", "Build", "Lint", "Deploy", "Release", "✓", "✗", "⊘", "queued",
-    ] {
+    for needle in VISIBLE_EVIDENCE {
         assert!(
             frame.plain.contains(needle),
             "expected '{needle}' in captured pane.\nplain:\n{}",
