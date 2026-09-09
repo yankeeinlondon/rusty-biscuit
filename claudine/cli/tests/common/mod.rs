@@ -42,7 +42,7 @@
 //! ### The inheritance contract
 //!
 //! A child inherits the parent's whole environment by default, so the builder
-//! also *removes* three families the developer's shell routinely exports:
+//! also *removes* four families the developer's shell routinely exports:
 //!
 //! - the whole `CLAUDINE_*` namespace, by prefix — an exported
 //!   `CLAUDINE_STEP_TIMEOUT` otherwise re-parameterizes the timeout tests;
@@ -51,7 +51,14 @@
 //!   repository discovery and so defeats the pinned `current_dir`;
 //! - the rendering inputs `TERM_WIDTH`, `COLUMNS`, and `FORCE_COLOR`, so
 //!   claudine's documented 80-column fallback applies and `FORCE_COLOR` cannot
-//!   out-vote the `NO_COLOR=1` above.
+//!   out-vote the `NO_COLOR=1` above;
+//! - the launch identity — `AGENT`, `MODEL`, `YOLO`, `INTERACTIVE`,
+//!   `AGENT_CWD`, and every provider's own model variable. These are the same
+//!   hazard as `CLAUDINE_*` with no namespace to catch them by prefix, and
+//!   `claudine wrap` exports all of them into the provider it launches, so a
+//!   suite run from inside a Claudine-wrapped agent session inherits that
+//!   session's own provider, model, and permission mode. See
+//!   [`UNPREFIXED_APPLICATION_VARS`].
 //!
 //! Removal is per key at build time and scrubs only what was *inherited*: a
 //! call site that sets any of these on the returned command still wins, and a
@@ -607,6 +614,9 @@ impl<'fixture> ClaudineCommandBuilder<'fixture> {
 /// `TERM_WIDTH`/`COLUMNS`/`FORCE_COLOR` go because `cli/src/log.rs` reads them
 /// before falling back to 80 columns, and because `FORCE_COLOR` would otherwise
 /// out-vote the `NO_COLOR=1` the builder sets.
+/// [`UNPREFIXED_APPLICATION_VARS`] and the provider model variables go because
+/// they are the same hazard as `CLAUDINE_*` without the namespace that lets a
+/// prefix rule catch them.
 fn inherited_scrub_keys() -> Vec<OsString> {
     let mut keys: Vec<OsString> = std::env::vars_os()
         .map(|(key, _)| key)
@@ -617,7 +627,56 @@ fn inherited_scrub_keys() -> Vec<OsString> {
         .collect();
     keys.extend(GIT_PLUMBING_VARS.iter().map(OsString::from));
     keys.extend(["TERM_WIDTH", "COLUMNS", "FORCE_COLOR"].map(OsString::from));
+    keys.extend(UNPREFIXED_APPLICATION_VARS.iter().copied().map(OsString::from));
+    keys.extend(provider_model_vars());
     keys
+}
+
+/// The un-namespaced variables Claudine reads out of its own environment.
+///
+/// Each is a `CLAUDINE_*`-class contaminant that the prefix sweep above cannot
+/// see, and every one of them is *routinely* exported: `claudine wrap` stamps
+/// `AGENT`, `MODEL`, `YOLO`, `INTERACTIVE`, and `AGENT_CWD` into the child it
+/// launches, so a suite run from inside a Claudine-wrapped agent session
+/// inherits the wrapper's own launch identity. The production reads:
+///
+/// - `MODEL` outranks a document's `model:` in the shared precedence chain
+///   (`lib/src/composition/select.rs:490`, reached from
+///   `resolve_model_with_hints` at `select.rs:453`), so an ambient value
+///   re-pins the model of every launch plan the suite builds and every
+///   rebuild it compares against one.
+/// - `AGENT` (and its `Agent` spelling, which Unix treats as a distinct name)
+///   selects the provider for `claudine handle`
+///   (`cli/src/commands/handle.rs:334-335`).
+/// - `YOLO` and `INTERACTIVE` are the wrapper flags
+///   `lib/src/dispatch/wrapper_flags.rs:17` and `:24` consult.
+/// - `AGENT_CWD` replaces the captured process launch directory outright
+///   (`lib/src/child_environment.rs:60`), which is the isolation the builder's
+///   pinned `current_dir` exists to provide.
+///
+/// `PROVIDER` is deliberately absent: it appears only as a clap `value_name`,
+/// and nothing reads it from the environment.
+const UNPREFIXED_APPLICATION_VARS: &[&str] = &[
+    "AGENT",
+    "Agent",
+    "AGENT_CWD",
+    "MODEL",
+    "YOLO",
+    "INTERACTIVE",
+];
+
+/// Every provider-specific model variable, read from the registry rather than
+/// spelled out here.
+///
+/// `lib/src/composition/select.rs:479-486` walks `ProviderInfo::model_env_vars`
+/// ahead of the generic `MODEL`, so `ANTHROPIC_MODEL`, `OPENCODE_MODEL`, and
+/// their siblings are the same launch-plan hazard. Deriving the list means a
+/// provider that gains one is scrubbed without this fixture being told.
+fn provider_model_vars() -> Vec<OsString> {
+    claudine::provider::all_providers()
+        .flat_map(|info| info.model_env_vars.iter().copied())
+        .map(OsString::from)
+        .collect()
 }
 
 /// One ordered operation on the child's environment block.

@@ -237,12 +237,87 @@ fn observed_iteration_cap() -> usize {
         .unwrap_or_else(|error| panic!("cap is not a number ({error}); tail: {tail:?}"))
 }
 
+/// The `model:` the [`observed_child_model`] probe document authors.
+///
+/// Deliberately not a real model name: nothing launches it, and a catalog that
+/// stops recognizing a real one would rot the probe.
+const AUTHORED_MODEL: &str = "fixture/authored-probe-model";
+
+/// The model the provider stub was launched with.
+///
+/// The launch-identity family needs its own discriminator for the same reason
+/// `CLAUDINE_*` does: a single `compose` run's stdout, stderr, and exit status
+/// are the same whichever model it resolves. What is *not* the same is the
+/// `MODEL` claudine stamps into the provider it launches — an inherited value
+/// out-ranks the document's `model:` in the shared precedence chain
+/// (`lib/src/composition/select.rs:490`), and the resolved model is what the
+/// child receives.
+fn observed_child_model() -> String {
+    let fixture = CliProcessFixture::named("contamination-probe-model");
+    fixture.seed_user_config();
+    let observed = fixture.workspace_path().join("child-model.txt");
+    write_executable(
+        &fixture.bin_dir().join("goose"),
+        &format!(
+            "#!/bin/sh\nprintf '%s' \"$MODEL\" > '{}'\nprintf 'ok\\n'\nexit 0\n",
+            observed.display()
+        ),
+    );
+    let doc = fixture.cwd().join("model.md");
+    write(
+        &doc,
+        &format!("---\ntitle: model probe\nmodel: {AUTHORED_MODEL}\n---\nBody.\n"),
+    );
+
+    let output = fixture
+        .command()
+        .args(["compose", "--goose", doc.to_str().unwrap()])
+        .output()
+        .expect("the model probe must run");
+    assert!(
+        output.status.success(),
+        "the model probe must succeed; stderr:\n{}",
+        strip_ansi(&String::from_utf8_lossy(&output.stderr))
+    );
+    std::fs::read_to_string(&observed)
+        .expect("the staged goose stub must have recorded the model it was launched with")
+}
+
 /// The control. Without it, every probe below could be passing because the
 /// expectations describe a broken run rather than a clean one.
 #[test]
 fn an_uncontaminated_run_matches_the_expectations_every_probe_asserts() {
     assert_uncontaminated("baseline");
     assert_eq!(observed_iteration_cap(), AUTHORED_CAP);
+    assert_eq!(observed_child_model(), AUTHORED_MODEL);
+}
+
+/// The launch identity. `claudine wrap` exports `AGENT`, `MODEL`, `YOLO`,
+/// `INTERACTIVE`, and `AGENT_CWD` into every provider it launches, so a suite
+/// run from inside a Claudine-wrapped agent session starts with all five
+/// already set — and `MODEL`, like each provider's own model variable, out-ranks
+/// the document's frontmatter.
+///
+/// This is not a hypothetical: an ambient `MODEL=opus` is what reddened
+/// `propagated_context_fixtures` and five `target_launch` unit tests, and it
+/// looked like a production regression in the launch-plan rebuild.
+#[test]
+fn an_exported_launch_identity_does_not_change_the_result() {
+    unsafe {
+        std::env::set_var("AGENT", "codex");
+        std::env::set_var("MODEL", "fixture/leaked-generic-model");
+        std::env::set_var("GOOSE_MODEL", "fixture/leaked-provider-model");
+        std::env::set_var("YOLO", "true");
+        std::env::set_var("INTERACTIVE", "true");
+        std::env::set_var("AGENT_CWD", "/fixture/leaked-launch-dir");
+    }
+
+    assert_uncontaminated("AGENT / MODEL / YOLO / INTERACTIVE / AGENT_CWD");
+    assert_eq!(
+        observed_child_model(),
+        AUTHORED_MODEL,
+        "an inherited MODEL or GOOSE_MODEL out-ranked the document's own `model:`"
+    );
 }
 
 /// Application variables. An exported `CLAUDINE_TIMEOUT` / `CLAUDINE_STEP_TIMEOUT`

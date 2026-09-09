@@ -54,6 +54,12 @@ fn write_probe_stub(bin_dir: &Path) {
                 ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo TERM_WIDTH=[%TERM_WIDTH%]\r\n",
                 ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo COLUMNS=[%COLUMNS%]\r\n",
                 ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo FORCE_COLOR=[%FORCE_COLOR%]\r\n",
+                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo MODEL=[%MODEL%]\r\n",
+                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo CLAUDE_MODEL=[%CLAUDE_MODEL%]\r\n",
+                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo AGENT=[%AGENT%]\r\n",
+                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo YOLO=[%YOLO%]\r\n",
+                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo INTERACTIVE=[%INTERACTIVE%]\r\n",
+                ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo AGENT_CWD=[%AGENT_CWD%]\r\n",
                 ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo PATHEXT=[%PATHEXT%]\r\n",
                 ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo COMSPEC=[%COMSPEC%]\r\n",
                 ">>\"%CLAUDINE_PROBE_CAPTURE%\" echo SYSTEMROOT=[%SystemRoot%]\r\n",
@@ -84,6 +90,12 @@ fn write_probe_stub(bin_dir: &Path) {
   printf 'TERM_WIDTH=[%s]\n' "$TERM_WIDTH"
   printf 'COLUMNS=[%s]\n' "$COLUMNS"
   printf 'FORCE_COLOR=[%s]\n' "$FORCE_COLOR"
+  printf 'MODEL=[%s]\n' "$MODEL"
+  printf 'CLAUDE_MODEL=[%s]\n' "$CLAUDE_MODEL"
+  printf 'AGENT=[%s]\n' "$AGENT"
+  printf 'YOLO=[%s]\n' "$YOLO"
+  printf 'INTERACTIVE=[%s]\n' "$INTERACTIVE"
+  printf 'AGENT_CWD=[%s]\n' "$AGENT_CWD"
   printf 'PATHEXT=[%s]\n' "$PATHEXT"
   printf 'COMSPEC=[%s]\n' "$COMSPEC"
   printf 'SYSTEMROOT=[%s]\n' "$SystemRoot"
@@ -363,6 +375,52 @@ fn default_command_drops_the_inherited_render_inputs() {
         assert_eq!(
             recorded[key], "[]",
             "an inherited {key} reached the child and would reshape its rendering"
+        );
+    }
+}
+
+/// The launch identity. Claudine reads all six of these out of its *own*
+/// environment, and `claudine wrap` exports every one of them into the provider
+/// it launches — so a suite run from inside a Claudine-wrapped agent session
+/// inherits that session's provider, model, permission mode, session mode, and
+/// launch directory.
+///
+/// `MODEL` and the provider's own `CLAUDE_MODEL` out-rank a document's
+/// frontmatter in the shared precedence chain, which is how an ambient
+/// `MODEL=opus` re-pinned every launch plan the migrated suite builds.
+#[test]
+fn default_command_drops_the_inherited_launch_identity() {
+    let (fixture, capture) = probe_fixture("fixture-inherited-launch-identity");
+
+    unsafe {
+        std::env::set_var("MODEL", "sentinel-model");
+        std::env::set_var("CLAUDE_MODEL", "sentinel-provider-model");
+        std::env::set_var("AGENT", "sentinel-agent");
+        std::env::set_var("YOLO", "sentinel-yolo");
+        std::env::set_var("INTERACTIVE", "sentinel-interactive");
+        std::env::set_var("AGENT_CWD", "/sentinel-launch-dir");
+        std::env::set_var("FIXTURE_PROBE_CONTROL", "sentinel-control");
+    }
+
+    let recorded = run_probe(fixture.command(), &capture);
+
+    assert_parent_environment_reached_the_child(&recorded);
+    // Asserted as "carries no sentinel" rather than "is empty": claudine writes
+    // its own `AGENT`, `YOLO`, `INTERACTIVE`, and `AGENT_CWD` for the provider
+    // it launches, so the child legitimately receives values for those — just
+    // never the parent's.
+    for key in [
+        "MODEL",
+        "CLAUDE_MODEL",
+        "AGENT",
+        "YOLO",
+        "INTERACTIVE",
+        "AGENT_CWD",
+    ] {
+        assert!(
+            !recorded[key].contains("sentinel"),
+            "an inherited {key} reached the child as `{}` and would re-pin its launch identity",
+            recorded[key]
         );
     }
 }
