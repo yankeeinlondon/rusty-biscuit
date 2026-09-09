@@ -241,6 +241,10 @@ impl DisposableAmbientContext for assert_cmd::Command {
     }
 }
 
+/// The fluent escape's ownership contract: the launch directory must be one the
+/// test built and can throw away. Rejecting everything outside the system
+/// temporary root keeps a developer-owned repository or home subdirectory —
+/// whose Git state and contents vary per machine — from becoming a test input.
 fn assert_disposable_context(dir: &Path) {
     let canonical_dir = dir.canonicalize().unwrap_or_else(|error| {
         panic!(
@@ -250,11 +254,24 @@ fn assert_disposable_context(dir: &Path) {
     });
     if let Some(checkout) = checkout_root() {
         assert!(
-            !canonical_dir.starts_with(checkout),
-            "ambient-context escape: {} is inside the checkout",
-            dir.display()
+            !canonical_dir.starts_with(&checkout),
+            "ambient-context escape: {} is inside the rusty-biscuit checkout {}. \
+             The fixture must own its launch directory",
+            dir.display(),
+            checkout.display()
         );
     }
+    let temporary_root = std::env::temp_dir()
+        .canonicalize()
+        .expect("system temporary root must exist");
+    assert!(
+        canonical_dir.starts_with(&temporary_root),
+        "ambient-context escape: {} is not disposable — it is outside the system \
+         temporary root {}. The fixture must own its launch directory; build it \
+         with `tempfile` or use `SniffCommandBuilder::ambient_context`",
+        dir.display(),
+        temporary_root.display()
+    );
 }
 
 /// Build the default isolated command while retaining its disposable root.

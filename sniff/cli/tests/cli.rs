@@ -12,6 +12,8 @@ fn run_isolated_software(args: &[&str]) -> assert_cmd::assert::Assert {
     let fixture = common::SniffCliFixture::named("sniff-software-contract");
     fixture
         .command_builder()
+        // Proves the absence of every host program: `sniff software` must find
+        // no `rg`, `fd`, `node`, or any other real binary to version-probe.
         .fake_only_path()
         .build()
         .args(args)

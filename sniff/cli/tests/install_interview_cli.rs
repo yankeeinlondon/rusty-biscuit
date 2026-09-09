@@ -10,7 +10,8 @@ mod common;
 #[test]
 fn install_dry_run_plain_emits_announcement_and_success_status() {
     let fixture = common::SniffCliFixture::named("sniff-install-interview");
-    // This case verifies the host-selected install plan without executing it.
+    // The host's real package manager (Homebrew, apt, winget, ...) is the tool
+    // under observation: the interview must select one to plan a ripgrep install.
     let mut cmd = fixture.command_builder().host_path().build();
     cmd.env("NO_COLOR", "1")
         .args([

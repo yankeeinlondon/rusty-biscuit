@@ -5,7 +5,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 use std::process::Command;
 
-use common::{SniffCliFixture, checkout_containment_error};
+use common::{DisposableAmbientContext as _, SniffCliFixture, checkout_containment_error};
 
 fn environment_recorder() -> Command {
     if cfg!(windows) {
@@ -18,11 +18,21 @@ fn environment_recorder() -> Command {
     }
 }
 
+/// Windows variable names are case-insensitive, and `cmd.exe`'s `set` reports
+/// each one under its canonical Windows casing — the `PATH` the builder
+/// exported comes back as `Path`. Upper-casing the recorded name there makes a
+/// single upper-case lookup mean the same thing on both platforms; on Unix the
+/// names stay case-sensitive, as the environment itself is.
 fn parse_environment(stdout: &[u8]) -> BTreeMap<OsString, OsString> {
     String::from_utf8_lossy(stdout)
         .lines()
         .filter_map(|line| line.split_once('='))
         .map(|(key, value)| {
+            let key = if cfg!(windows) {
+                key.to_ascii_uppercase()
+            } else {
+                key.to_owned()
+            };
             (
                 OsString::from(key),
                 OsString::from(value.trim_end_matches('\r')),
@@ -55,10 +65,13 @@ fn assert_and_raw_surfaces_produce_the_same_effective_environment() {
         assert_environment.get(&OsString::from("HOME")),
         Some(&fixture.home().as_os_str().to_os_string())
     );
-    assert_eq!(
-        assert_environment.get(&OsString::from("PATH")),
-        raw_environment.get(&OsString::from("PATH"))
-    );
+    let assert_path = assert_environment
+        .get(&OsString::from("PATH"))
+        .expect("the assert surface must export PATH");
+    let raw_path = raw_environment
+        .get(&OsString::from("PATH"))
+        .expect("the raw surface must export PATH");
+    assert_eq!(assert_path, raw_path);
     assert!(!assert_environment.contains_key(&OsString::from("GIT_DIR")));
     assert!(!assert_environment.contains_key(&OsString::from("FORCE_COLOR")));
 }
@@ -164,7 +177,8 @@ fn path_modes_are_bounded_and_keep_fixture_stubs_first() {
     let fake_only = capture(fixture.command_builder().fake_only_path());
     assert_eq!(fake_only, [fixture.bin_dir()]);
 
-    // `git` is the real tool this escape intentionally exposes.
+    // The escape itself is the subject: the host tools it exposes must never
+    // precede the fixture stubs.
     let host = capture(fixture.command_builder().host_path());
     assert_eq!(host.first().map(PathBuf::as_path), Some(fixture.bin_dir()));
     assert!(!host.is_empty());
@@ -188,6 +202,55 @@ fn ambient_context_accepts_only_existing_fixture_directories() {
         let _ = fixture.command_builder().ambient_context(&missing);
     });
     assert!(panic.is_err(), "a missing ambient context must panic");
+}
+
+/// An existing directory that no test built and no test may delete.
+fn non_disposable_system_directory() -> PathBuf {
+    common::minimal_system_path()
+        .into_iter()
+        .find(|entry| entry.is_dir())
+        .expect("the platform's minimal system path must exist")
+}
+
+#[test]
+#[should_panic(expected = "is inside the rusty-biscuit checkout")]
+fn owned_ambient_context_rejects_a_checkout_directory() {
+    let checkout = common::checkout_root().expect("L1 tests run from inside the checkout");
+    let mut command = common::owned_sniff_command();
+    command.ambient_context(&checkout);
+}
+
+#[test]
+#[should_panic(expected = "is not disposable")]
+fn owned_ambient_context_rejects_a_non_disposable_directory() {
+    let mut command = common::owned_sniff_command();
+    command.ambient_context(&non_disposable_system_directory());
+}
+
+#[test]
+#[should_panic(expected = "is inside the rusty-biscuit checkout")]
+fn fluent_ambient_context_rejects_a_checkout_directory() {
+    let checkout = common::checkout_root().expect("L1 tests run from inside the checkout");
+    let fixture = SniffCliFixture::new();
+    fixture.command().ambient_context(&checkout);
+}
+
+#[test]
+#[should_panic(expected = "is not disposable")]
+fn fluent_ambient_context_rejects_a_non_disposable_directory() {
+    let fixture = SniffCliFixture::new();
+    fixture
+        .command()
+        .ambient_context(&non_disposable_system_directory());
+}
+
+#[test]
+fn ambient_context_accepts_a_disposable_directory_the_test_built() {
+    let disposable = tempfile::tempdir().unwrap();
+    let mut command = common::owned_sniff_command();
+    command.ambient_context(disposable.path());
+    let fixture = SniffCliFixture::new();
+    fixture.command().ambient_context(disposable.path());
 }
 
 #[test]
