@@ -12,7 +12,7 @@ name: maintenance-audit
 #
 # Audited authorities:
 #   - `rust-toolchain.toml`      the required Rust version (D5)
-#   - `.github/kache-version`    the pinned compiler cache (D2)
+#   - `.github/kache-min-version` the compiler cache version floor (D2)
 #   - `cargo-nextest`            the test runner
 #   - `.github/workflows/**`     third-party GitHub Action major versions
 #   - runner images              the `*-latest` image this audit ran on
@@ -59,7 +59,7 @@ jobs:
           # fatal under GitHub's `bash -e -o pipefail`.
           latest_rust="$(awk '/^\[pkg\.rust\]/ { in_pkg = 1; next }
                               in_pkg && /^version/ { split($0, q, "\""); split(q[2], v, " "); print v[1]; exit }' <<<"$channel")"
-          pinned_kache="$(tr -d '[:space:]' <.github/kache-version)"
+          pinned_kache="$(tr -d '[:space:]' <.github/kache-min-version)"
           # cargo-nextest is not on this runner image -- the audit only installs
           # the toolchain -- so `cargo nextest` exits 101 and would abort the
           # step under `bash -e -o pipefail`. The table reports "not installed"
@@ -76,7 +76,7 @@ jobs:
             echo "| authority | pinned | latest upstream |"
             echo "|---|---|---|"
             echo "| Rust (rust-toolchain.toml) | ${pinned_rust} | ${latest_rust:-lookup failed} |"
-            echo "| kache (.github/kache-version) | ${pinned_kache} | see kunobi-ninja/kache releases |"
+            echo "| kache floor (.github/kache-min-version) | ${pinned_kache} | see kunobi-ninja/kache releases |"
             echo "| cargo-nextest (this runner) | ${pinned_nextest:-not installed} | see nextest-rs/nextest releases |"
             echo "| runner image | ${ImageOS:-unknown} / ${ImageVersion:-unknown} | GitHub rolls \`*-latest\` automatically |"
             echo ""

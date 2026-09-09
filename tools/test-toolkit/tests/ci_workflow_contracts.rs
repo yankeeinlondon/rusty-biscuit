@@ -137,39 +137,53 @@ fn repository_tracks_no_rustc_wrapper() {
 }
 
 #[test]
-fn kache_has_a_single_version_authority() {
-    let version = read(".github/kache-version");
+fn kache_has_a_single_version_floor() {
+    let version = read(".github/kache-min-version");
     assert!(
         !version.trim().is_empty(),
-        ".github/kache-version must hold the single pinned kache version"
+        ".github/kache-min-version must hold the single minimum kache version"
     );
 
     let justfile = read("justfile");
     assert!(
-        justfile.contains(".github/kache-version"),
-        "root justfile must read KACHE_VERSION from the single authority file"
+        justfile.contains(".github/kache-min-version"),
+        "root justfile must read KACHE_MIN_VERSION from the single authority file"
     );
     assert!(
-        !justfile.contains(r#"KACHE_VERSION := """#),
+        !justfile.contains(r#"KACHE_MIN_VERSION := ""#),
         "root justfile must not hard-code a second kache version literal"
+    );
+    assert!(
+        !justfile.contains("--version \"{{ KACHE_MIN_VERSION }}\""),
+        "install-kache installs the latest release; the floor is a check, not a pin"
     );
 }
 
+// Ruling 2026-09-09: `just init` installs kache on macOS and Linux (never on
+// Windows or WSL) but activation stays a host decision, so no recipe may wire
+// the wrapper.
 #[test]
-fn installing_the_compiler_cache_is_not_a_dependency_of_init() {
+fn init_installs_the_compiler_cache_without_activating_it() {
     let justfile = read("justfile");
-    let init_line = justfile
-        .lines()
-        .find(|line| line.starts_with("init:"))
-        .expect("root justfile must declare an `init` recipe");
     assert!(
-        !init_line.contains("kache"),
-        "`just init` must not depend on a kache recipe; it is an explicit opt-in \
-         (`just install-kache`)"
+        justfile.contains("    just _ensure-kache\n"),
+        "`just init` must run the `_ensure-kache` step"
+    );
+    assert!(
+        justfile.contains("_ensure-kache:"),
+        "the `_ensure-kache` step must exist"
     );
     assert!(
         justfile.contains("install-kache:"),
-        "the pinned installer must remain available as an explicit recipe"
+        "the installer must remain available as an explicit recipe"
+    );
+    let activates = justfile.lines().any(|line| {
+        let cmd = line.trim_start();
+        cmd.starts_with("kache init") || cmd.starts_with("export RUSTC_WRAPPER=kache")
+    });
+    assert!(
+        !activates,
+        "no recipe may activate kache; that is host policy (docs/kache-strategy.md)"
     );
 }
 
@@ -1030,7 +1044,7 @@ fn maintenance_audit_reports_without_changing_anything() {
             "the maintenance audit must not change the repository (found `{forbidden}`)"
         );
     }
-    for authority in ["rust-toolchain.toml", ".github/kache-version", "nextest"] {
+    for authority in ["rust-toolchain.toml", ".github/kache-min-version", "nextest"] {
         assert!(
             audit.contains(authority),
             "the audit must cover the pinned authority `{authority}`"

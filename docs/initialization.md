@@ -59,9 +59,10 @@ WSL terminal, not through `scripts\init.ps1`.
 
 ## Build Caching
 
-kache is an **optional, per-host** compiler cache. This repository tracks no
-Cargo wrapper configuration: nothing in a fresh clone activates it, and Cargo
-works normally without it.
+kache is a **per-host** compiler cache. `just init` installs it on macOS and
+Linux (never on Windows or WSL) when it is absent, and never reinstalls one that
+is present. This repository tracks no Cargo wrapper configuration: nothing in a
+fresh clone activates it, and Cargo works normally without it.
 
 That is deliberate. kache's economics are decided by the **filesystem**, not the
 operating system. APFS, btrfs, XFS-with-reflink, and ReFS restore cache hits by
@@ -77,13 +78,15 @@ evidence.
 just install-kache
 ```
 
-This installs the exact version declared by `.github/kache-version` (surfaced as
-`KACHE_VERSION` in the root `justfile`) using `cargo binstall`, which fetches a
-prebuilt binary rather than compiling from source. It is the supported install
-path on every OS; per-OS package managers are fallbacks. On hosts with no kache
+This installs the **latest** release using `cargo binstall`, which fetches a
+prebuilt binary rather than compiling from source, and leaves an existing install
+alone unless it is below the floor in `.github/kache-min-version` (surfaced as
+`KACHE_MIN_VERSION` in the root `justfile`). It is the supported install path on
+every OS; per-OS package managers are fallbacks. On hosts with no kache
 configuration it seeds a default store cap of `local_max_size = "100GiB"` — an
-existing config is never overwritten. It clears `RUSTC_WRAPPER` during the
-install so an absent or older wrapper cannot intercept its own installation.
+existing config is never overwritten, and a read-only config directory is
+reported rather than fatal. It clears `RUSTC_WRAPPER` during the install so an
+absent or older wrapper cannot intercept its own installation.
 
 Installing does not activate anything.
 
@@ -94,10 +97,15 @@ actually clone blocks:
 
 ```sh
 just kache-status                              # what is active here, and does this volume earn it
-kache doctor                                   # reports the store filesystem (0.12.0+)
-cp -c  <store-file> <target-dir>/probe                 # macOS: fails if clonefile can't
+kache doctor                                   # reports the store filesystem
+stat -f %d <store-dir> <target-dir>                    # macOS: must match — clones never cross volumes
 cp --reflink=always <store-file> <target-dir>/probe    # Linux: fails if reflink can't
 ```
+
+Probe from the **store** to `target/`, not within `target/`. On macOS `cp -c`
+silently falls back to a copy across volumes and still exits 0, so compare
+device IDs (or a `df` delta) instead: every volume being APFS is not enough,
+because a checkout on a second APFS volume is restored by copy.
 
 Windows has no userspace reflink probe, so the filesystem type *is* the answer:
 **ReFS** clones blocks, **NTFS** restores by copy. `just kache-status` reads it
@@ -105,13 +113,13 @@ for you.
 
 ### Activating
 
-Start from the per-host decision table in
-[`kache-strategy.md`](kache-strategy.md#per-host-activation-decision). The one
-that most often surprises people:
-
-> **Windows dev hosts: leave kache off.** NTFS restores cache hits by copy, so
-> the store becomes a genuine second copy of every cached artifact. Opt in only
-> after a ReFS Dev Drive — holding the store *and* `target/` — has been measured.
+The ruling of 2026-09-09 in
+[`kache-strategy.md`](kache-strategy.md#ruling-2026-09-09): **macOS on** when the
+store and `target/` share an APFS volume; **Linux on only when the clone probe
+passes** (ZFS with block cloning is the expected case); **Windows and WSL off**.
+A `target/` is always wrapped or never wrapped — a read-only hard-link restore
+breaks the next unwrapped rebuild — and the standing `ci-verification` clones on
+the build hosts are never wrapped.
 
 If kache prints storage-layout advice on a non-clone volume, do **not** take its
 first two suggestions: `windows_hardlink = true` is unsafe because Cargo rewrites
