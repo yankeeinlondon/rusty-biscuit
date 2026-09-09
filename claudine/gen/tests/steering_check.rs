@@ -1,6 +1,8 @@
 use std::fs;
 use std::process::Command;
 
+use biscuit_test_harness::bin_exe;
+
 #[test]
 fn generation_stops_before_writes_when_steering_gate_fails() {
     let area = tempfile::tempdir().expect("temporary area");
@@ -22,7 +24,9 @@ fn generation_stops_before_writes_when_steering_gate_fails() {
     )
     .expect("invalid research document");
 
-    let output = Command::new(env!("CARGO_BIN_EXE_claudine-gen"))
+    // Resolved at run time: the WSL2 CI leg executes a nextest archive whose
+    // compile-time `CARGO_BIN_EXE_*` path names the builder's target directory.
+    let output = Command::new(bin_exe!("claudine-gen"))
         .args(["--area", area.path().to_str().expect("UTF-8 path"), "generate", "--yes"])
         .output()
         .expect("run claudine-gen");
