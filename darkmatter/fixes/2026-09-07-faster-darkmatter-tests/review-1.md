@@ -4,9 +4,12 @@ ready: false
 agent: codex/gpt-5.6-sol
 created: 2026-09-08T21:11:06-07:00
 spec: 2026-09-07-faster-darkmatter-tests/spec.md
-implemented: false
+implemented: true
+implemented_by: claude/opus
+log: darkmatter/fixes/2026-09-07-faster-darkmatter-tests/log.md
 description: A **fix** review of `2026-09-07-faster-darkmatter-tests/spec.md`
 fix: 2026-09-07-faster-darkmatter-tests/review-1.md
+next: 2026-09-07-faster-darkmatter-tests/review-2.md
 ---
 
 # Review 1: Faster Darkmatter Tests

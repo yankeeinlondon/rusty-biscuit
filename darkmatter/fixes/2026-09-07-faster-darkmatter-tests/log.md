@@ -1,3 +1,9 @@
+---
+fix: 2026-09-07-faster-darkmatter-tests
+implementation_1: "2026-09-09T10:50:12-07:00"
+deferred_perf_measurement: true
+---
+
 # Validation ledger — faster-darkmatter-tests
 
 One entry per run or gate: command, selection, source state, result, and the
@@ -1059,3 +1065,569 @@ completed implementation or available-resource local verification.
 drift updates, local evidence reconciliation, and the acceptance table are
 complete. Final CI performance verification remains pending, so the fix is not
 reported as archived or fully verified on CI.
+
+## Implementation of Review Findings #1
+
+> **started at:** 2026-09-09T10:50:12-07:00
+
+- this implementation is attempting to implement _all_ of the review findings found in '/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/darkmatter/fixes/2026-09-07-faster-darkmatter-tests/review-1.md'
+- this is iteration 1 of the review-to-implement cycle
+- the review carries five findings — four **High**, one **Medium** — and two of
+  the High findings carry operator annotations that change how they are treated:
+        - finding 1 (CI comparison and ratified budgets) is annotated
+          `**DECISION:** this bar was set to high and should not be considered a
+          blocker being production ready`
+        - finding 2 (Level-3 behavior) is annotated `**CRITICAL:** There needs
+          to be a CLEAR explanation why the synchronization was changed`
+- orchestration plan — findings are worked serially, each by a subagent using
+  the `rust`, `rust-testing`, and `darkmatter` skills, with `just test` and
+  `just lint` run in the `darkmatter/` package area only (the four packages the
+  spec names: `darkmatter`, `darkmatter-cli`, `dmls`, `zed-dmls-cli`)
+- starting state — the worktree is clean apart from `spec.md`; the fix's
+  implementation is already committed as `8540d36df`, `a1746f217`, `a05e3b747`,
+  which materially changes finding 4's premise (recorded under that finding)
+- starting the work on 'F1 — required CI comparison and ratified budgets do not exist' at 10:53:41
+        - handled by the orchestrator rather than a subagent: the finding has no
+          code surface, and its resolution is an evidence/ruling record. Running
+          the package-area `just test` + `just lint` gates for a two-paragraph
+          documentation edit would burn several minutes of CPU for no signal;
+          the gates still run for every finding that does touch code.
+        - recorded the operator ruling in `results.md` § Budgets as a new
+          subsection *Operator ruling — hosted budget evidence is not a
+          readiness blocker*, stating plainly that the ruling changes the
+          finding's **severity**, not the evidence: no budget was invented, no
+          local timing was promoted to a target, no leg was marked green
+        - the substantive reason the requirement cannot be met from this side:
+          a *candidate* sample is by definition a hosted CI run of the candidate
+          revision, and hosted CI does not run an unpushed revision. Holding
+          readiness on it makes the fix permanently un-mergeable by its author.
+        - created `deferred-performance-measurement.md` with the exact missing
+          artifact table (1 of 3 baseline samples, 0 of 3 candidate samples, 0
+          ratified budgets, 0 matched-identity comparisons, per leg) and the
+          six-step operator-owned closing sequence, mapped back to `review-1.md`
+        - noted explicitly in that file that this is **not** the usual
+          "host CPU load spoiled the measurement" deferral — the two genuine
+          host-load rejections this cycle are already retained under
+          `measurement/rejected-high-load/` and
+          `measurement/rejected-http-regression/`. This deferral is structural
+          runner inaccessibility.
+        - `results.md` status cells updated: *Verified on CI* → **Deferred**,
+          AC7 → **Deferred (operator-ruled non-blocking)**
+- work completed for 'F1 — required CI comparison and ratified budgets do not exist' at 10:58:07
+- starting the work on 'F2 — Level-3 keyboard, pointer, and image-paint behavior was not executed' at 10:59:14
+        - dispatched to a `rust-developer` subagent using the `rust`,
+          `rust-testing`, and `darkmatter` skills, briefed that the whole
+          session tree is non-interactive and that `just test-l3` must **not**
+          be run — it injects OS input and seizes desktop focus on a host a
+          person is currently using
+        - the finding's `**CRITICAL:**` annotation (explain the synchronization
+          change) was set as the primary deliverable; the reviewer's other ask,
+          executing L3, is not reachable from an unattended session
+- what the synchronization actually changed to, established from
+  `git diff main...HEAD` plus a full read of both L3 files:
+        - `level3_popover.rs` — five `sleep(150ms)`-then-`evaluate` sites became
+          `wait_for_evaluation(script, what, condition)`, polling at 25 ms
+          against a 3 s deadline. The polled predicate was verified byte-identical
+          to the assertion it feeds in all five cases, so the wait cannot
+          terminate on a weaker signal.
+        - `level3_popover.rs` — `resolve_window_process_id` went from 20 × 100 ms
+          fixed attempts to a 2 s deadline at 25 ms; same success condition, only
+          the bound's units changed.
+        - `level3_image_painting.rs` — the fixed `sleep(400ms)` plus a single
+          `capture_window_png` became a 5 s / 50 ms poll whose exit test
+          `magenta > 1000 && non_black * 100 >= total` is exactly the conjunction
+          of the `assert!` below it and the non-black guard above it. Side
+          effect: one transient `None` capture used to abandon the pixel claim as
+          a skip; only an all-`None` five seconds does now.
+- why the change is strictly stronger rather than merely faster — the answer to
+  the `**CRITICAL:**` annotation:
+        - a fixed sleep is simultaneously a flake source and a hidden-pass
+          source. Too short under load gives a spurious failure; and it asserts
+          nothing about *when* the value became true, so a condition already true
+          before the OS input arrived passed identically — which is precisely the
+          thing L3 exists to rule out.
+        - the polls assert the same final condition the test claims, and report
+          the last observed value plus what they were waiting for on timeout
+        - candid about masking, and recorded as such: both bounds are real
+          ceilings. A regression delaying focus/navigation/hover to 2.9 s, or
+          paint to 4 s, now passes where the old sleeps failed. Accepted because
+          neither file asserts a latency contract at any tier — a sleep failing at
+          151 ms was enforcing host load, not a budget.
+        - the change is mandated by `spec.md` §4 ("Poll the final asserted
+          condition"), not incidental
+- **defect found and fixed** while answering task 3 (how the harness records a
+  skip):
+        - `require_level!` only enforces the gate at the *top* of a test.
+          `level3_rich_image_node_paints_distinctive_pixels` had two further
+          exits decided mid-body — every capture `None`, or an essentially-black
+          capture from missing Screen Recording permission — that were bare
+          `return`s and therefore reported **green** even under
+          `BISCUIT_TEST_LEVEL_REQUIRED=3`.
+        - consequence had it shipped: an operator's authorized L3 run on a
+          mis-permissioned macOS host would have filed a pass for a pixel claim
+          that was never evaluated
+        - both exits now route through a new `skip_pixel_assertion(reason)`
+          helper applying the same `BISCUIT_TEST_LEVEL_REQUIRED=3` rule and
+          panicking with the reason; inert unless the variable is set
+        - this is the one place in F2 where behavior changed rather than
+          comments. Kept deliberately: the reviewer's "record skips as
+          unavailable rather than passes" is unenforceable at that test without
+          it.
+- how a skip is recorded, verified in source rather than assumed:
+        - libtest has no runtime "skipped" outcome — `require_level!` resolves to
+          `LevelDecision::Skip`, prints `skipping: …` to stderr and returns
+          (`tools/test-toolkit/src/lib.rs:258-272`), so the identity reports green
+        - three mechanisms keep that green out of this fix's record, each checked:
+          the `_tier_filter L1` excludes `test(/(^|::)level3_/)` so `just test`
+          never selects them; `_test_l3` (`just/devops.just:1609-1634`) hard-refuses
+          without a TTY unless `BISCUIT_L3_TAKE_FOCUS=1`; and
+          `BISCUIT_TEST_LEVEL_REQUIRED=3` promotes an unavailable harness from
+          Skip to Panic
+- documentation written in two places, per the brief:
+        - `//!` module docs in both L3 test files (`## Why the fixed sleeps became
+          polls`, `## What the 3-second bound gives up`, and the image-paint
+          equivalents) plus per-function docs on `wait_for_evaluation`
+        - a new `## Level-3 synchronization and availability` section in
+          `results.md`, anchor-able as
+          `#level-3-synchronization-and-availability` (already linked from
+          `deferred-performance-measurement.md`), carrying the rationale, a
+          polled-predicate/assertion correspondence table, the masking
+          trade-off, and the four UNAVAILABLE identities
+- the four identities recorded as UNAVAILABLE, never as passes:
+  `level3_popover_tab_focuses_anchor_and_reveals_prompt`,
+  `level3_popover_enter_activates_link`,
+  `level3_popover_pointer_hover_reveals_prompt`,
+  `level3_rich_image_node_paints_distinctive_pixels`. These are all four L3
+  tests in the area. `results.md` prescribes the closing invocation
+  `BISCUIT_L3_TAKE_FOCUS=1 BISCUIT_TEST_LEVEL_REQUIRED=3 just test-l3` with
+  stderr retained to prove no `skipping` line was emitted.
+- gates:
+        - compile-only verification, no tests executed:
+          `cargo nextest list -p darkmatter --features terminal-tests,browser-tests
+          -E 'test(/(^|::)level3_/)'` lists all 4 identities, exit 0, before and
+          after the edits
+        - `just lint` (darkmatter area): **PASS**, exit 0, zero warnings across
+          all four packages plus the `wasm32-wasip2` Zed check
+        - gap noticed and covered: `_lint` runs `cargo clippy --all-targets`
+          without features, and both L3 targets carry `required-features`, so
+          `just lint` does not actually reach them. Ran
+          `cargo clippy -p darkmatter --all-targets --features
+          terminal-tests,browser-tests -- -D warnings` explicitly — exit 0, clean.
+        - `just test` (darkmatter L1): **PASS**, exit 0 —
+          `7745 tests run: 7745 passed, 6 skipped` in 31.5 s across 121 binaries.
+          The 6 skips match the population `results.md` already records. Nothing
+          was failing before the change.
+- blocked: L3 execution itself, for the reason above. Compile reachability is
+  recorded as the only evidence and explicitly labelled non-behavioral.
+- environment friction, not caused by this work: a concurrent agent editing the
+  claudine fix in this shared worktree staged renames of four
+  `claudine/cli/tests/level2_*_pty.rs` files without updating
+  `claudine/cli/Cargo.toml`'s `[[test]] name = "level2_dry_run_pty"`, breaking
+  workspace manifest parsing for every cargo invocation for ~3 minutes. All
+  results above are from after it resolved.
+- follow-up candidate noted, deliberately not fixed (outside this finding):
+  `verify_keyboard_canary`'s `if !observed_canary` and `verify_pointer_canary`'s
+  zero-check branches are now unreachable, since `wait_for_evaluation` returns
+  `Ok` only when the identical predicate already holds. Their richer
+  `PROVISIONING_FAILURE` diagnostics (pid, window title) are consequently dead
+  and would be worth folding into the timeout path.
+- work completed for 'F2 — Level-3 keyboard, pointer, and image-paint behavior was not executed' at 11:17:26
+- starting the work on 'F3 — DMLS server-thread cleanup is neither complete nor bounded' at 11:18:02
+        - dispatched to a `rust-developer` subagent with the `rust`,
+          `rust-testing`, and `darkmatter` skills; the four acceptance criteria
+          taken directly from the review (one shared owned fixture,
+          non-panicking teardown during unwind, a documented completion bound,
+          and a failure-path regression proving the worker finished before the
+          workspace is released)
+- verified all three of the review's claims against source before changing
+  anything — the finding was accurate on every point:
+        - `lsp_session.rs`'s `ClientFixture::drop` joined with no deadline and
+          `.expect("server thread panicked")`
+        - `no_side_effects.rs` (`struct Fixture`) and `suggest_constraint_phase1.rs`
+          (its own `struct ClientFixture`) discarded the `thread::spawn` handle
+          and had **no** `Drop` at all
+        - `stdio_subprocess.rs`'s existing unwind regression covers only the
+          `ChildGuard` subprocess path
+- one shared owned fixture now lives at `darkmatter/dmls/tests/common/mod.rs`,
+  consumed via `mod common;` from all three targets. `#![allow(dead_code)]` is
+  load-bearing there (removing it produces 5 dead-code warnings, since each
+  binary uses a different subset).
+        - **deliberate design deviation from the brief, and a better one:**
+          `LspFixture<'workspace>` *borrows* an `LspWorkspace` rather than owning
+          the `TempDir`. Because `LspFixture` has a `Drop` impl, dropck makes
+          that shared borrow strict — releasing the workspace while a session is
+          live is a **compile error**, and a fixture declared after its workspace
+          always drops first.
+        - this converts the ordering contract from a drop-order convention
+          documented in a comment into something the compiler enforces, which is
+          what the review was reaching for
+        - it also avoids rewriting 84 workspace call sites across 88 tests, and
+          keeps working for the two tests that run two sequential fixtures
+          against one workspace — fixture-owned `TempDir` would have broken those
+        - per-test churn collapsed to two mechanical lines
+          (`tempfile::tempdir()` → `LspWorkspace::new()`,
+          `ClientFixture::start()` → `LspFixture::start(&workspace)`); every
+          `workspace.path()` call site is untouched. Three filesystem-free
+          sessions gained a workspace purely to have something to borrow.
+- **completion bound: `SERVER_EXIT_BOUND = 10 s`**, placed on the worker's
+  `mpsc` outcome channel rather than on `join()`, because `JoinHandle` has no
+  timed join:
+        - the worker records completion and sends its outcome as its last two
+          acts, so observing the outcome *proves* the body finished and the
+          subsequent `join()` cannot block meaningfully
+        - on expiry the worker is deliberately **detached and reported**, never
+          joined — joining a stuck worker would hang the runner forever. The
+          reasoning is documented at the constant.
+        - 10 s chosen because it is the same budget `MESSAGE_BOUND` already gives
+          every single protocol message in this suite (the slowest legitimate
+          reason a worker has not returned is an in-flight request or the startup
+          disk walk), and because it must stay well under nextest's
+          `terminate-after` ceiling (`slow-timeout = 5s × 6` = 30 s) or the
+          teardown is killed before printing the diagnostic that makes a timeout
+          actionable
+        - a `Disconnected` outcome (worker unwound without sending) is
+          distinguished from `Timeout`: the former is still safe to join, the
+          latter is not
+- **non-panicking teardown:** `release_server()` returns a `Vec<String>` of
+  problems instead of asserting. `shutdown()` asserts on them; `Drop` gates on
+  `std::thread::panicking()` and prints to stderr during unwind, because a
+  second panic aborts the process and destroys the real assertion diagnostic.
+        - confirmed live rather than by inspection — the regression run shows the
+          original panic message intact with the teardown diagnostic printed
+          *beside* it, not replacing it
+        - added a `clean_shutdown` flag so an aborted session's expected
+          `client sent 'exit' before 'shutdown'` server complaint is not
+          misreported as a teardown failure; a session that did handshake still
+          owes a clean exit, preserving the original `assert_eq!(outcome, Ok(()))`
+- **new regression:** `server_worker_finishes_before_workspace_release_during_unwind`
+  (`dmls/tests/lsp_session.rs:5711`). Drives the shared fixture to a failing
+  assertion inside `catch_unwind`, then asserts the recorded teardown sequence is
+  `[WorkerFinished { workspace_present: true }, WorkspaceReleased]` — the worker
+  itself records, from its own thread, whether the workspace root still existed
+  at the instant its body returned.
+        - a 300 ms worker epilogue delay makes the distinction deterministic;
+          without it an undelayed worker finishes so soon after the connection
+          closes that a detaching teardown would win the race by accident
+        - **non-vacuity proven in both directions**, as required before a new test
+          is accepted:
+                - break A (`SERVER_EXIT_BOUND` → `Duration::ZERO`) → FAIL:
+                  `assertion 'left == right' failed: the unwinding fixture must
+                  reap its server worker, and must observe the workspace still
+                  present when it does / left: [WorkerAbandoned] / right:
+                  [WorkerFinished { workspace_present: true }]`
+                - break B (silent `drop(server_thread)` before the wait) → FAIL
+                  with the same assertion and `left: []`
+                - both breaks reverted; the test passes in 0.32 s
+- gates, all run in the `darkmatter/` package area:
+        - `cargo nextest run -p dmls --features effects-instrumentation --test
+          stdio_subprocess --test no_side_effects --test suggest_constraint_phase1`
+          — **23 passed, 0 skipped**, identical to the review's recorded baseline
+        - `cargo nextest run -p dmls --test lsp_session` — **89 passed, 0 skipped**
+          (88 pre-existing + the new regression)
+        - `just lint` — **pass**; additionally
+          `cargo clippy -p dmls --all-targets --features effects-instrumentation
+          -- -D warnings` clean, confirming the test targets are actually covered
+        - `just test` — **7746 passed, 6 skipped, exit 0**
+        - nothing was failing before the change; no pre-existing failure is being
+          claimed as fixed or introduced
+- assertion accounting, so the coverage delta is not silent: `lsp_session`
+  310 → 309, `no_side_effects` 12 → 9, `suggest_constraint_phase1` 49 → 46. The
+  deltas are exactly the fixture helpers' own assertions (`initialize`,
+  `flush_server`, `shutdown`) relocating into `common/mod.rs`, offset by the new
+  regression's 3. No test assertion was removed or weakened.
+        - one behavior change worth recording: `no_side_effects`'s diagnostics
+          wait moved from a 64-iteration cap panicking `no diagnostics for {uri}`
+          to the shared `recv_timeout(10 s)` loop panicking
+          `diagnostics before timeout`. Same effective bound, different message.
+- `results.md` corrected so it no longer overstates the evidence:
+        - the "Resource cleanup" row now names the two proofs separately —
+          `child_guard_reaps_process_during_unwind` for the subprocess path and
+          `server_worker_finishes_before_workspace_release_during_unwind` for the
+          in-memory path — and states that the latter asserts recorded ordering
+          rather than absence of a hang
+        - the coverage-changes table splits the old "DMLS unwind/cancellation
+          ownership" row into a subprocess row and a new in-memory row
+        - the AC4 row now states which session shapes are proven, names the
+          shared fixture file, the 10 s bound, the detach-on-expiry behavior, and
+          the dropck-enforced workspace ordering
+- work completed for 'F3 — DMLS server-thread cleanup is neither complete nor bounded' at 11:34:22
+- starting the work on 'F4 — the reviewed tree is not an isolated candidate' at 11:35:10
+        - handled by the orchestrator: the finding has no code surface, and its
+          premise changed between the review and this implementation
+        - the finding's premise has changed since the review ran. At review time
+          the work was uncommitted; it is now committed as three named commits,
+          so a candidate that identifies the exact bytes this fix owns does
+          exist.
+        - root cause of the reviewer's measurement: the branch
+          `fix/cli-slow-tests` carries **three sibling fixes** — the Darkmatter,
+          Claudine and Sniff test-performance fixes — plus shared tooling, and
+          `detect_changes(scope=all)` covered the whole branch and every
+          concurrent agent's uncommitted working tree at once. The 1,306 files
+          and CRITICAL risk were correct for what they measured, and they did not
+          measure this fix.
+        - identified and recorded the owning commit set: `8540d36df` (47 files,
+          +6,493/−1,443), `a1746f217` (8 files, +890/−242), `a05e3b747`
+          (21 files, +6,199/−5,556), plus the shared `d35b4c23b`/`b0a5142aa`
+          tooling commits and six planning/evidence commits. The remaining ~45
+          branch commits belong to the sibling fixes.
+        - re-ran change detection scoped to the candidate range
+          (`detect_changes(scope=compare, base_ref=f0aaa4832)` — the commit
+          immediately preceding this fix's first implementation commit):
+                - **0 affected execution flows** (review measured 119)
+                - risk `low` (review measured CRITICAL)
+                - 1,444 changed symbols (review: 8,067), 99 files (review: 1,306)
+                - 1,396 of the 1,444 symbols are in `darkmatter/` — 47 files
+                  under `cli/`, 20 under `lib/`, 6 under `dmls/`. The residual 35
+                  Claudine and 13 Sniff symbols are the concurrent agents'
+                  uncommitted work plus `1e7f2fc30`, which the range unavoidably
+                  spans; none belong to this fix.
+        - zero affected execution flows is the substantive result, and it is
+          exactly what the undifferentiated CRITICAL aggregate obscured
+- audited the `results.md:22-24` scope claim rather than restating it, and found
+  it **accurate in substance but imprecise as written** — corrected it:
+        - ten of the 76 candidate files are not under a `tests/` directory
+        - `lib/src/layout/page/tests.rs` plus the `#[cfg(test)]` modules inside
+          `code_block.rs`, `catalog.rs`, `alias.rs`, `code_renderer.rs` and
+          `entrypoints.rs` are test code that happens to live in `src/`;
+          `a05e3b747` unindents those inner modules, which is why the diffs look
+          large
+        - within those same files, every non-test hunk inspected is a
+          **line-wrapping reflow with no semantic change**
+        - one substantive change does live in `src/`:
+          `catalog.rs`'s `capture_shape_matches_projected_type` no longer walks
+          the real monorepo for a Git root, it initializes a disposable
+          repository with `gix::init` in a temp dir — a hermeticity fix, not a
+          production change
+        - `Cargo.lock`, two `Cargo.toml` files (test targets/dev-deps) and
+          `cli/README.md` round out the set
+        - the corrected claim now reads: no production behavior, signature or API
+          changed; test code inside `src/` did
+        - written up as a new `## Candidate identity` section in `results.md`,
+          which `deferred-performance-measurement.md` already links to
+- note on method: did not run `just gitnexus` (a full re-index) — it would
+  rewrite the shared index while sibling agents are mid-run, and the range-scoped
+  query answered the finding without it
+- work completed for 'F4 — the reviewed tree is not an isolated candidate' at 11:44:55
+- starting the work on 'F5 — the isolation guard permits most protected environment defaults to be undone' at 11:45:38
+        - dispatched to a `rust-developer` subagent with the `rust`,
+          `rust-testing` and `darkmatter` skills; the three acceptance criteria
+          taken from the review (retain intentional claims, route them through a
+          named builder override or a narrow reasoned allowlist, add negative
+          tests for the home/cache, Git plumbing, rendering and Darkmatter
+          application namespaces)
+- verified the gap before changing anything, and it was worse than the review
+  stated:
+        - `isolation_sites()` recognized only four post-`build()` forms
+          (`.current_dir(…)`, `.env("PATH", …)`, `.env_remove("PATH")`,
+          `.env_clear()`), and its negative test asserted `HOME`, `COLUMNS` and
+          `HOMEDRIVE` overrides were ignored
+        - a survey found **60 post-`build()` `.env`/`.env_remove` sites across 13
+          files**, every one naming a variable the fixture pins — none flagged by
+          either gate
+- two-class design, in a new shared table `cli/tests/common/protected_env.rs`
+  (`ProtectedClass` + `protected_class(key)`). The line is drawn on *what undoing
+  it costs*, not on which namespace it belongs to:
+        - **Containment** — `HOME`, `HOMEDRIVE`, `HOMEPATH`, `USERPROFILE`,
+          `APPDATA`, `LOCALAPPDATA`, `XDG_*`, `TMPDIR`/`TEMP`/`TMP`, and
+          `GIT_DIR`/`GIT_WORK_TREE`/`GIT_INDEX_FILE`/`GIT_COMMON_DIR`/
+          `GIT_OBJECT_DIRECTORY`/`GIT_CONFIG_*`. Handing one back re-contaminates
+          the child with host state, so the class carries **no** builder method at
+          any spelling and the guard always flags it.
+        - **Behavior input** — rendering (`COLUMNS`, `LINES`, `TERM`, `COLORTERM`,
+          `COLORFGBG`, `CLICOLOR_FORCE`, `FORCE_COLOR`, `NO_COLOR`, `DARK_MODE`,
+          `THEME`, `CODE_THEME`, `PREFER_ITALICS`, `TERMINAL_IMAGES`) and
+          darkmatter application (`DARKMATTER_*`/`DM_*`/`MD_*`, `AGENT`, `MODEL`,
+          `RUST_LOG`, `HASH_PROPERTY`, `HASH_IGNORE_PROPERTIES`,
+          `BASELINE_SCHEMA`). A different value here is a real claim about
+          behavior, so it must be **declared at construction**, not silently
+          re-set after `build()`.
+        - `PATH` deliberately stays unclassified so the table cannot open a
+          second, weaker route to an escape that already has dedicated vocabulary
+          (`host_path`/`fake_only_path`) and two existing guard forms
+        - the table is single-sourced: `common/fixture.rs` validates declarations
+          against it and `spawn_site_guard.rs` includes the same file via
+          `#[path]`, so the guard binary stays light
+- named builder methods added to `MdCommandBuilder`, alongside the existing
+  `host_path`/`fake_only_path`/`ambient_context`/`inherit_no_env`:
+        - `rendering_input` / `rendering_input_removed`
+        - `application_input` / `application_input_removed`
+        - `plain_terminal(columns, lines)` — the whole
+          `COLUMNS`/`LINES`/`TERM=dumb`/`-COLORTERM`/`NO_COLOR=1`/`-FORCE_COLOR`
+          frame as one claim; it collapses four byte-identical six-line per-file
+          helpers
+        - declarations are stored as `EnvironmentOp`s and appended *after* the
+          fixture defaults, so a declared value out-ranks both the inherited value
+          and the default; both command surfaces get them through the existing
+          `ChildEnvironment::apply`
+        - each accessor panics on a wrong-class key with a message naming the
+          correct method, or stating that containment has no override
+- **all 60 call sites migrated with no allowlist entry needed** — every
+  intentional claim became a declaration or moved out of a protected namespace:
+        - `layout_fill.rs`, `layout_flags.rs`, `compose_layout.rs`,
+          `layout_style_frontmatter.rs` — four identical `rendering_command()`
+          helpers collapse to `plain_terminal(80, 24)`; 39 call sites untouched
+        - `compose_terminal_detection.rs`, `code_block.rs`, `schema_about.rs`,
+          `hash_kind_save_diff.rs` (7), `compose_base_schema.rs` (8),
+          `hash_directory.rs` (2), `schema_validate.rs`,
+          `schema_validate_baseline.rs`, `render_basic.rs`
+        - `md_process_fixture.rs`, the fixture's own self-test, handled with
+          care: `MD_PROBE_CAPTURE` renamed to `FIXTURE_PROBE_CAPTURE` (43
+          occurrences) because it is harness plumbing rather than a darkmatter
+          input — that takes it out of the `MD_*` namespace entirely instead of
+          allow-listing the file
+        - three post-`build()` `.env` sites remain suite-wide, all correct:
+          `compose_transclusion.rs`'s `PROJECT_ROOT` (the contract does not pin
+          it, so there is nothing to undo) and the two `FIXTURE_PROBE_CAPTURE`
+          sites
+- guard changes: four new forms, a `first_string_argument()` reader over the
+  *original* source (an escaped literal is rejected rather than half-decoded),
+  and one new match arm classifying any `.env`/`.env_remove` in method position
+  after the two `PATH` arms. The existing four detections are unchanged.
+        - no generic exemption added; `ISOLATION_ALLOWLIST` still holds exactly
+          its one `md_process_fixture.rs` entry and the census is unchanged at
+          `{"files":1,"sites":2,"scanned_sites":2,"governed_files":39}`
+- anti-drift test added
+  (`every_variable_the_spawn_contract_owns_is_classified_as_protected`): collects
+  `inherited_scrub_keys()` plus `ChildEnvironment::set_keys()` and asserts every
+  one except `PATH` is classified. This keeps the guard's table honest against
+  the fixture's own policy without rewriting the scrub.
+- **non-vacuity proven three separate ways**, as required:
+        - four namespace negatives, with the new match arm neutered — exactly
+          four tests failed, all `assertion left == right failed, left: []`,
+          against expected forms
+          `".env/.env_remove of a home/config/cache/temp anchor"`,
+          `"… of a Git plumbing variable"`,
+          `"… of an undeclared rendering input"`,
+          `"… of an undeclared application input"`. The control
+          `a_declared_input_is_not_an_isolation_escape` correctly stayed green
+          under the break.
+        - the two accidents the review names specifically, against the **live**
+          gate: planting `.env("HOME", host_home)`, `.env("GIT_DIR", checkout)`,
+          `.env("COLUMNS", "44")` and
+          `.env_remove("DARKMATTER_NO_BASELINE_SCHEMA")` into the real governed
+          file `clean.rs` failed
+          `migrated_l1_tests_keep_the_isolation_the_builder_gave_them` with all
+          four listed by file and line. `clean.rs` restored, gate green.
+        - the anti-drift test: deleting `"HOME"` and `"RUST_LOG"` from
+          `protected_env.rs` failed with `the spawn contract pins or scrubs
+          these, but protected_env.rs does not classify them, so a post-build()
+          override of one would pass the isolation gate: ["HOME", "RUST_LOG"]`
+- gates, all in the `darkmatter/` package area:
+        - `just lint` — **PASS** across all four packages plus the
+          `wasm32-wasip2` extension check
+        - `just test` — **PASS**, `7755 tests run: 7755 passed, 6 skipped` in 31.9 s
+        - `cargo nextest run -p darkmatter-cli --test md_process_fixture --test
+          spawn_site_guard` — **PASS**, `44 passed, 0 skipped`, up from the
+          review's baseline of 35. The +9 are 5 guard cases (4 namespace
+          negatives + the declaration control) and 4 fixture cases (the
+          classification anti-drift test and three `#[should_panic]` validator
+          tests for containment, wrong-class, and `PATH`).
+- pre-existing condition disclosed rather than silently fixed:
+  `cargo fmt -p darkmatter-cli -- --check` reports drift in 17 `cli/src/*` and 7
+  `cli/tests/*` files, none of them modified in the working tree — the drift is
+  committed on this branch and predates this change. `just lint` runs no fmt
+  check, so it does not gate. The two spots in `md_process_fixture.rs` that did
+  carry drift were hand-corrected; `cargo fmt` was **not** run.
+- docs moved with the behavior, per CLAUDE.md's drift rule: `common/fixture.rs`
+  module docs gained a *Declared inputs* section, `spawn_site_guard.rs` module
+  docs describe the widened gate and the two classes,
+  `darkmatter/cli/README.md` § Integration tests documents the declaration
+  vocabulary, and `.claude/skills/darkmatter/SKILL.md` § Testing and verification
+  does the same
+- `results.md` updated: the spawn/isolation guard coverage row 18 → 23 with the
+  four-namespace contract described, the fixture-contract row 17 → 21, the
+  population total 84 → 93 added identities, and the AC2/AC3 rows restated
+- work completed for 'F5 — the isolation guard permits most protected environment defaults to be undone' at 12:03:14
+- final consolidated gate over all three code findings together, run by the
+  orchestrator rather than trusting the per-subagent runs:
+        - `just test` (darkmatter area) — **PASS**,
+          `7755 tests run: 7755 passed, 6 skipped` in 32.3 s. Both new
+          regressions visible in the tail:
+          `dmls::lsp_session server_worker_finishes_before_workspace_release_during_unwind`
+          and `dmls::stdio_subprocess child_guard_reaps_process_during_unwind`.
+        - `just lint` (darkmatter area) — **PASS**, exit 0, including the
+          `wasm32-wasip2` Zed extension check
+        - identity accounting reconciles: 7,745 before this cycle, +1 from F3's
+          unwind regression, +9 from F5's guard/fixture cases = 7,755
+
+### Successful Completion
+
+The implementation of review cycle 1 has completed successfully in 1 hour and
+2 minutes. During this implementation all 5 review findings were evaluated to
+see if they could be fixed as a part of this implementation cycle: 3 were fixed
+in full, 1 was fixed in part with one component deferred, and 1 was deferred
+(see reasons below):
+
+- **F1 — Required CI comparison and ratified budgets do not exist — DEFERRED.**
+  The requirement cannot be satisfied from the implementing side at all. A
+  *candidate* sample is by definition a hosted CI run of the candidate revision,
+  and hosted CI does not run an unpushed revision; pushing is the operator's
+  action. Holding readiness on it would make the fix permanently un-mergeable by
+  its own author. The operator had already ruled the bar too high
+  (`**DECISION:**` in `review-1.md`), and that ruling is now recorded in
+  `results.md` as a change of **severity, not of evidence** — no budget was
+  invented, no local timing promoted to a target, no leg marked green. The exact
+  missing artifacts (1 of 3 baseline samples, 0 of 3 candidate samples, 0
+  ratified budgets, 0 matched-identity comparisons, per leg) and the six-step
+  closing sequence are in `deferred-performance-measurement.md`.
+        - note this is **not** the usual host-CPU-load deferral. The two genuine
+          load rejections from earlier in this fix are already retained under
+          `measurement/rejected-high-load/` and
+          `measurement/rejected-http-regression/`. This one is structural runner
+          inaccessibility, and the log records it as such.
+- **F2 — Level-3 keyboard, pointer and image-paint behavior was not executed —
+  PARTIALLY FIXED; the runtime half DEFERRED.**
+        - **Fixed:** the finding's `**CRITICAL:**` annotation, which was the
+          operator's actual demand. The synchronization change is now explained
+          in both L3 test modules and in a new `results.md` section: fixed
+          sleeps became polls of the *same final asserted condition*, which is
+          strictly stronger than a sleep (a sleep is simultaneously a flake
+          source and a hidden-pass source), and it is mandated by `spec.md` §4
+          rather than incidental. The masking trade-off the new bounds introduce
+          is stated candidly rather than glossed.
+        - **Fixed, and unplanned:** a real defect surfaced while answering the
+          "record skips as unavailable, not passes" ask.
+          `level3_rich_image_node_paints_distinctive_pixels` had two mid-body
+          bare `return`s that `require_level!` cannot reach, so an operator's
+          authorized L3 run on a mis-permissioned macOS host would have filed a
+          **green pass for a pixel claim it never evaluated**. Both exits now
+          route through `skip_pixel_assertion`, which honors
+          `BISCUIT_TEST_LEVEL_REQUIRED=3`.
+        - **Deferred:** executing the four L3 identities. They require an
+          attended macOS host with foreground focus and OS input injection. This
+          session is non-interactive and the host is in use by a person; running
+          them would seize the desktop, which repo policy forbids. Compile
+          reachability was verified with `cargo nextest list` (which does not
+          execute) and is explicitly labelled non-behavioral evidence. The four
+          identities are recorded as UNAVAILABLE, never as passes, with the exact
+          closing invocation prescribed in `results.md`.
+- **F3 — DMLS server-thread cleanup is neither complete nor bounded — FIXED.**
+  All four of the review's criteria are met, and the ordering criterion is met
+  more strongly than asked: rather than documenting a drop-order convention,
+  `LspFixture<'workspace>` borrows its `LspWorkspace`, so dropck makes releasing
+  a workspace while a session is live a **compile error**.
+- **F4 — The reviewed tree is not an isolated candidate — FIXED.** The premise
+  had already changed (the work is now three named commits), and the reviewer's
+  CRITICAL aggregate turned out to be measuring three sibling fixes plus other
+  agents' uncommitted trees at once. Change detection re-run on the isolated
+  candidate range reports **0 affected execution flows and `low` risk**, against
+  119 and CRITICAL for the undifferentiated tree. The `results.md` scope claim
+  was also audited and found imprecise; it is now corrected.
+- **F5 — The isolation guard permits most protected environment defaults to be
+  undone — FIXED.** The gap was wider than reported: 60 unguarded post-`build()`
+  sites across 13 files. All 60 are migrated, no allowlist entry was needed, and
+  the guard now enforces a two-class contract with non-vacuity proven three
+  separate ways.
+
+The files carrying this cycle's evidence are `results.md` (candidate identity,
+the operator ruling, the L3 synchronization section, and corrected AC2/AC3/AC4
+rows), `deferred-performance-measurement.md` (new), and this log.
+
+Both package-area gates pass over the combined result: `just test` 7,755 passed
+/ 6 skipped, `just lint` exit 0.
+
+One pre-existing condition is disclosed rather than silently repaired:
+`cargo fmt -p darkmatter-cli -- --check` reports drift in 24 files that are
+unmodified in the working tree, so the drift is committed on this branch and
+predates this cycle. `just lint` runs no fmt check, so it does not gate, and
+`cargo fmt` was not run.

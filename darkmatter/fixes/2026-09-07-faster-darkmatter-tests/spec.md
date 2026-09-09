@@ -5,8 +5,8 @@ created: 2026-09-07
 reviewed: true
 reviewed_by: opencode/zai-coding-plan/glm-5.3
 reviewed_on: 2026-09-07
-implemented: false
-review_iterations: 1
+implemented: true
+review_iterations: 2
 packages:
     - darkmatter
     - darkmatter-cli
