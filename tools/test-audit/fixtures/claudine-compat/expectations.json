@@ -1,0 +1,97 @@
+{
+  "$comment": [
+    "Frozen expectations for the Claudine compatibility replays in",
+    "tools/test-audit/tests/*-claudine-compat.test.ts. Every number was recorded",
+    "by the first-generation scripts in",
+    "claudine/fixes/2026-09-07-faster-claudine-tests/ at revision 9fc5151a0 and",
+    "published in that fix's attribution.md and inventory.md. They are copied",
+    "here, not read from those documents, because the replays consume frozen",
+    "inputs (the nextest listings under enumeration/9fc5151a0/ and the gate logs",
+    "under baseline/local-gates/) and a frozen input judged against a moving",
+    "expectation proves nothing. See README.md beside this file."
+  ],
+  "revision": "9fc5151a0df52acb63c5458b1564aa9c01bfe9b1",
+  "renames": {
+    "cli-l2-pty": "cli-l1-pty-interactive"
+  },
+  "attribution": {
+    "count": 7373,
+    "summed": 1196.94,
+    "elapsed": 115.55,
+    "topFamily": "cli-l2-lifecycle",
+    "familyCounts": {
+      "cli-l2-lifecycle": 114,
+      "lib-unit": 3833,
+      "cli-l2-render-capture": 74,
+      "rz-daemon-unit": 153,
+      "cli-l1-fixture": 282,
+      "lib-unit-task-shell": 106,
+      "cli-l2-autocomplete": 27,
+      "cli-l1-source-scan-guards": 79,
+      "cli-l1-raw-sequence-loop": 154,
+      "cli-unit": 1173,
+      "cli-l1-raw-context-resources": 83,
+      "rz-daemon-integration": 16,
+      "cli-l1-pty": 11,
+      "cli-l1-raw-compose": 69,
+      "gen-generate-ux": 10,
+      "cli-unit-completion-engine": 322,
+      "cli-unit-child-exec": 199,
+      "cli-l2-ctrl-c": 3,
+      "gen-artifact-pipeline": 51,
+      "cli-override-context-width": 1,
+      "rz-client-integration": 7,
+      "cli-override-loop-rate-limit": 1,
+      "lib-corpus-replay": 82,
+      "cli-l1-completion-ui": 79,
+      "gen-l2-report": 3,
+      "lib-unit-model-catalog": 71,
+      "cli-l1-fixture-selftest": 14,
+      "cli-l1-perf-budget": 12,
+      "lib-unit-atomic-config": 5,
+      "gen-unit": 93,
+      "rz-core-unit": 82,
+      "cli-override-perf-parity": 2,
+      "contract-unit": 48,
+      "cli-l1-shipped-corpus": 6,
+      "lib-unit-clock-streams": 24,
+      "lib-structural-guards": 18,
+      "cli-l1-md-fixture": 1,
+      "catalog-types-unit": 21,
+      "rz-client-unit": 14,
+      "lib-override-agent-errors-remediation": 1,
+      "lib-tts-contract": 5,
+      "lib-agent-errors-fleet": 1,
+      "cli-override-empty-state-routing": 1,
+      "lib-model-catalog-integration": 2,
+      "lib-override-seeded-loop": 1,
+      "cli-l2-pty": 19
+    }
+  },
+  "universe": {
+    "total": 7400,
+    "byPackage": {
+      "claudine": 4149,
+      "claudine-catalog-types": 21,
+      "claudine-cli": 2746,
+      "claudine-contract": 52,
+      "claudine-gen": 158,
+      "rendezvous-client": 21,
+      "rendezvous-core": 82,
+      "rendezvous-daemon": 171
+    }
+  },
+  "sourceScan": {
+    "byPackage": {
+      "claudine": 4167,
+      "claudine-catalog-types": 21,
+      "claudine-cli": 2761,
+      "claudine-contract": 52,
+      "claudine-gen": 158,
+      "rendezvous-client": 24,
+      "rendezvous-core": 88,
+      "rendezvous-daemon": 184
+    },
+    "maxFilesWithParseErrors": 60
+  }
+}

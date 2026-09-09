@@ -4,8 +4,8 @@ import { join, dirname, resolve } from "node:path";
 
 import { loadConfig } from "../src/config.ts";
 import { readManifest, buildReport, type CohortSpec, type TargetSpec } from "../src/measure/index.ts";
+import { FIX_DIR } from "./claudine-compat-inputs.ts";
 
-const FIX_DIR = "/Users/ken/.claudine/worktrees/rusty-biscuit/fix-cli-slow-tests/claudine/fixes/2026-09-07-faster-claudine-tests";
 const CONFIG_PATH = join(FIX_DIR, "audit.config.json");
 const MEASUREMENT_DIR = join(FIX_DIR, "measurement");
 
