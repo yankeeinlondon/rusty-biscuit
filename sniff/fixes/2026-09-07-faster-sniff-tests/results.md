@@ -5,8 +5,8 @@
 | Claim | Status | Evidence |
 |---|---|---|
 | Implemented | **Complete** | Phases 1–8 implemented the shared CLI process fixture, spawn guard, fixture migrations, request/work-count proofs, bounded process and terminal waits, and reconciled test inventory. Phase 9 completed the local pre-push tranche. |
-| Verified locally | **Complete** | The final source state passes `just sanity`, `just lint`, `just check`, `just doctest`, `just test`, required-tmux `just test-l2`, the Sniff-scoped root leak sweep, tier coverage, audit configuration validation, and inventory reconciliation. |
-| Verified on CI | **Pending** | The exact candidate is uncommitted by explicit instruction, so it has no candidate SHA or CI run. Native Windows and three consecutive matched candidate runs per declared environment remain required; baseline run `34008778001` is not candidate evidence. |
+| Verified locally | **Complete** | The committed candidate passes `just sanity`, `just lint`, `just check`, `just doctest`, `just test`, required-tmux `just test-l2`, the Sniff-scoped root leak sweep, tier coverage, audit configuration validation, and inventory reconciliation. Every gate was re-run at the current tree in Phase 10's continuation rather than credited from the earlier ledger. |
+| Verified on CI | **Pending** | The candidate is now committed — Sniff sources at `66892d319`, fix documents at `3b112c4d5`, branch head `a05e3b747` — but the branch is 53 commits ahead of `origin/fix/cli-slow-tests` and unpushed. The newest branch CI run (`34159725015`) is against origin head `a9e88c069…`, which does not contain the candidate. Native Windows and three consecutive matched candidate runs per declared environment remain required; baseline run `34008778001` is not candidate evidence. |
 
 The implementation is ready for review, but the fix is not ready to archive or
 claim fully verified until the Phase 9 CI handoff is completed. The active fix
@@ -86,7 +86,7 @@ and summed test duration separate. Full provenance and every raw run are in
 | Cohort | Baseline build/setup | Candidate build/setup | Baseline runner / summed | Candidate runner / summed | Judgment |
 |---|---:|---:|---:|---:|---|
 | Full local L1 | 1.2 s median | 1.1 s median | 21.53 / 324.99 s | 44.80 / 684.81 s | All samples passed, but the candidate ran amid load up to 134 and extensive unrelated dirty shared-worktree activity. Attribution only; CI comparison pending. |
-| Sanity | 2.6 s median | 2.4 s median | 7.94 / 104.80 s | 17.03 / 254.82 s | The alternating candidate window missed the 15-second budget under the same contention. The Phase 10 acceptance rerun passed 1,820 tests in **11.72 s wall clock**, within budget. |
+| Sanity | 2.6 s median | 2.4 s median | 7.94 / 104.80 s | 17.03 / 254.82 s | The alternating candidate window missed the 15-second budget under the same contention. The Phase 10 acceptance reruns passed 1,820 tests in **11.72 s** and, at the committed candidate, **12.13 s wall clock** — both within budget. |
 | Changed CLI integration cohort | — | — | 115.54 s summed | 94.63 s summed | Directional 18.1% reduction, inside drift; no causal claim. |
 | Requested-work / representative fixtures | — | — | 23.45 s summed | 4.30 s summed | 81.7% reduction outside both drift brackets. |
 | Inherited-Git fixture repairs | — | — | 29.89 s summed | 51.17 s summed | Loaded-candidate increase retained as attribution; no production regression inferred. |
@@ -118,30 +118,38 @@ is [`work-counts.compare.md`](measurement/local-phase8/work-counts.compare.md).
 
 ## Final local gates
 
-| Gate | Source state | Result |
+Every gate below was re-run against the committed candidate at branch head
+`a05e3b747`. Unrelated Darkmatter and Claudine commits landed after the Sniff
+candidate, so no earlier result was credited by reuse; no Sniff source file
+changed between the two ledgers and every result reproduced.
+
+| Gate | Wall / runner | Result |
 |---|---|---|
-| `just sanity` | Phase 10, current source | Pass: 1,419 library + 401 CLI tests; 11.72 s wall clock, within 15-second budget. |
-| `just test` | Phase 10 source unchanged from Phase 9; repeated inside Phase 10 leak sweep | Pass: 2,609 tests, 24 declared policy skips, 0 failures in 22.470 s. |
-| `just lint` | Phase 9 final source | Pass, no diagnostics. |
-| `just check` | Phase 9 final source | Pass. |
-| `just doctest` | Phase 9 final source | Pass: 91 run, 22 documented ignored examples; CLI has zero doctests. |
-| `just test-l2` with tmux required | Phase 9 final source | Pass: both affected tests in 0.675 s; two backend `run` decisions recorded. |
-| Root `just test-leaks sniff` | Phase 10, current source | Pass: all 2,609 L1 tests; no leaked processes. |
-| Root `just check-tier-coverage sniff` | Phase 10, current source | Pass with modern Bash: zero stranded tests. The default macOS Bash 3.2 invocation failed before audit because shared tooling uses `BASHPID`; selecting installed Bash 5.3 resolved the environment prerequisite. |
-| Audit `config validate` + `reconcile` | Phase 10 documents/current captures | Pass: 2 packages, 6 selections, 4 environments, 2,635 runner identities, 41 declared platform exclusions, zero reconciliation violations. |
+| `just sanity` | 12.13 s wall (9.418 s + 0.506 s runner) | Pass: 1,419 library (23 skipped) + 401 CLI tests; **within the 15-second budget**. A preceding cold invocation took 142.16 s because the changed dependency graph rebuilt; the budget governs the warm subset. |
+| `just test` | 86.34 s wall / 23.855 s runner | Pass: 2,609 tests, 24 declared policy skips, 0 failures, no slow marks, retries, or timeouts. |
+| `just lint` | 50.70 s | Pass, no diagnostics. |
+| `just check` | 42.17 s | Pass. |
+| `just doctest` | 11.13 s | Pass: 91 run, 0 failed, 22 documented ignored examples; CLI has zero doctests. |
+| `just test-l2` with tmux required | 14.35 s wall / 0.655 s runner | Pass: both affected tests (0.323 s, 0.331 s), 802 correctly skipped. |
+| Root `just test-leaks sniff` | 28.50 s wall / 23.477 s runner | Pass: all 2,609 L1 tests; `leak-sweep: no leaked processes detected`. |
+| Root `just check-tier-coverage sniff` | — | Pass under installed Bash 5.3: 1 listed, zero stranded. The default macOS Bash 3.2 invocation fails before audit because shared tooling uses `BASHPID`; that portability issue is owned by the repository-wide tooling. |
+| Audit `config validate` + `reconcile --markdown` | — | Pass: 2 packages, 6 selections, 4 environments, 83 families, 2,635 runner identities, 2,676 source attributes, 41 declared platform exclusions, `GATE EXIT=0`. |
 
 `just test-real` was not applicable: this fix changes no real-resource product
 behavior, and the audited route remains explicit (`network` for the library,
-bare CLI). The final `git diff main -- .config/nextest.toml` contains only
-unrelated removals and expanded justifications; this fix added no override,
-retry, tier change, disabled assertion, or timeout increase. The only surviving
-Sniff-specific override is `sniff-windows-l1`, documented in
+bare CLI). The final `git diff main -- .config/nextest.toml` is 16 insertions
+and 41 deletions of unrelated removals and expanded justifications; filtering
+that diff for `sniff` or `detect_completes` returns no line, so this fix added,
+removed, or weakened no Sniff override, retry, tier, assertion, or timeout. The
+only surviving Sniff-specific override is `sniff-windows-l1`, documented in
 [`inventory.md`](inventory.md) as retained pending native-Windows concurrency
 evidence.
 
 ## Failures and skips
 
-The final L1 and L2 gates have no failures, retries, timeouts, or leaks. The 24
+The final L1 and L2 gates have no failures, retries, timeouts, slow marks, or
+leaks — reproduced at the committed candidate, where `just test` and the root
+leak sweep each ran all 2,609 tests green. The 24
 L1 skips and 22 ignored doctest examples are declared policy exclusions, not
 missing execution evidence. Earlier red tests and invalid command attempts are
 recorded in [`log.md`](log.md); none is hidden by a retry or weakened gate.
@@ -158,7 +166,7 @@ exemptions. The only outstanding items are required CI evidence, not deferrals:
 
 | Pending evidence | Reason | Owner / handoff |
 |---|---|---|
-| Exact candidate SHA and CI run | This session may not stage, commit, push, or authenticate GitHub; CI cannot test an uncommitted worktree. | [Phase 9 handoff](plan.md#phase-9--ci-candidate-sampling-and-pre-push-gates) |
+| CI run covering the candidate | The candidate is committed (Sniff sources `66892d319`, branch head `a05e3b747`), but the branch is 53 commits ahead of `origin/fix/cli-slow-tests` and unpushed; the newest branch run `34159725015` is against origin head `a9e88c069…`, which does not contain the candidate. Pushing is the human-gated Phase 9 step. | [Phase 9 handoff](plan.md#phase-9--ci-evidence-rb5-second-tranche-ac6-ac8) |
 | Three consecutive candidate runs for Ubuntu, macOS, native Windows, and WSL2 | Required for compatible matched-test and per-family budget comparison; baseline run `34008778001` supplies only one baseline sample. | [Inventory CI handoff](inventory.md#phase-9-ci-evidence-handoff) |
 | Native Windows compile/runtime proof | This area has no local MinGW recipe, and WSL follows Linux rather than native-Windows code paths. | [Platform exclusions](inventory.md#platform-and-feature-exclusions) |
 
@@ -176,11 +184,11 @@ tier census.
 | AC3 — request/work-count contracts | **Verified** | Seeded acquisition/execution counters, zero descendant work, dependent output assertions, and thread/Rayon/walker propagation tests pass; compatible eight-signal drift bracket retained. |
 | AC4 — bounded effects and cleanup | **Verified locally** | Loopback request-count/error tests, real process termination/reaping tests, bounded PTY/final-frame polling, required-tmux execution proof, and leak sweep all pass. |
 | AC5 — generic exemptions eliminated | **Verified** | Spawn allowlist has zero generic migration entries; surviving technical tier exclusions have explicit ownership and guard coverage. |
-| AC6 — canonical gates and cross-platform evidence | **Pending CI** | All applicable local gates pass, including sanity at 11.72 s and required tmux. Exact-candidate `windows-latest` and three-run CI evidence do not yet exist. |
+| AC6 — canonical gates and cross-platform evidence | **Pending CI** | All applicable local gates pass at the committed candidate: `just test` (2,609/0 failed), `just check`, `just lint`, `just doctest` (91 run) with `remote` preserved, required-tmux `just test-l2` (2/2), and `just sanity` at 12.13 s against the 15-second budget. The single outstanding clause is `windows-latest` evidence, which requires a push this phase is not authorized to make. |
 | AC7 — bespoke gates/placeholders resolved | **Verified** | `install_interactive_pty.rs` and `foo.rs` removed; source/listing reconciliation finds no silently unreachable replacement. |
-| AC8 — results and clean process evidence complete | **Pending CI** | Local results, coverage, work counts, budgets, skips/failures, no-weakened-gate check, and leak sweep are complete. Candidate CI results and matched budget conclusions remain pending. |
+| AC8 — results and clean process evidence complete | **Pending CI** | Local results, coverage, work counts, budgets, skips/failures, no-weakened-gate check (`nextest.toml` diff carries no Sniff line), and the clean leak sweep are complete and refreshed at the committed candidate. Candidate CI results and matched per-family budget conclusions remain pending on the push. |
 | AC9 — contract documentation drift | **Verified** | The Sniff skill already documents the fixture, L1/L2 feature split, final-frame polling, counters, and audit configuration. No additional area-doc or production-contract change was found in Phase 10. |
 
 Final closure is therefore **implemented and verified locally, but not verified
 on CI**. Review may proceed; archival must wait for AC6 and AC8 to become
-verified from the exact committed candidate.
+verified from a CI run that actually covers the committed candidate.

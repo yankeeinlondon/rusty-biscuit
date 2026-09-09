@@ -546,16 +546,18 @@ the equivalent non-empty assertion fixed the lint; the named test, complete
 L1 population, and final consolidated validation all passed afterward. This
 is a test-source lint correction and changes no Sniff product behavior.
 
-Candidate CI evidence is pending. The working candidate is uncommitted at
-local HEAD `c2dee9217f3e6be14d7a6adfeb2c90cd2cd31966`, GitHub CLI has no
-authenticated session, the public API reports no current
-`fix/cli-slow-tests` branch, and the session is explicitly prohibited from
-committing, staging, or pushing. Therefore there is no exact candidate SHA,
-PR, `windows-latest` result, or three-run environment series to fetch. The
-preserved Phase 1 run `34008778001` remains baseline-only and must not be
-presented as candidate evidence.
+Candidate CI evidence is pending. The candidate has since been committed by
+the separate commit step: Sniff sources at `66892d319`, fix documents at
+`3b112c4d5`, branch head `a05e3b747`, working tree clean. It is nonetheless
+still absent from CI — the branch is 53 commits ahead of
+`origin/fix/cli-slow-tests`, and the newest branch run `34159725015` targets
+origin head `a9e88c069…`, which does not contain `66892d319`. Pushing is the
+human-gated Phase 9 step and is out of scope for the implementation phases, so
+there is still no `windows-latest` result or three-run environment series to
+fetch. The preserved Phase 1 run `34008778001` remains baseline-only and must
+not be presented as candidate evidence.
 
-After an authorized human commits and pushes this exact source state, run the
+After an authorized human pushes this exact source state, run the
 declared `_package-ci.yml` cells for native Ubuntu, macOS, and Windows plus the
 `_wsl-ci.yml` WSL2 cells. Retain three consecutive green candidate runs per
 leg, fetch them with the shared test-audit tool, compare matched tests against

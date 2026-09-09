@@ -15,6 +15,7 @@ docs_updated_during_phase_10:
     - sniff/fixes/2026-09-07-faster-sniff-tests/plan.md
     - sniff/fixes/2026-09-07-faster-sniff-tests/log.md
     - sniff/fixes/2026-09-07-faster-sniff-tests/results.md
+    - sniff/fixes/2026-09-07-faster-sniff-tests/inventory.md
 docs_created_during_phase_10: []
 skills_files_updated_during_phase_10: []
 source_files_during_phase_9:
@@ -992,6 +993,15 @@ removals/justifications only.
         `just test-leaks` sweeps.
   - [x] **AC9** — Sniff skill and area docs updated where contracts changed;
         shared production changes routed to a separate scope.
+
+  AC6 and AC8 remain unchecked because their only outstanding clauses are CI
+  clauses. The candidate is now committed (Sniff sources `66892d319`, branch
+  head `a05e3b747`) but the branch is 53 commits ahead of
+  `origin/fix/cli-slow-tests`, so no CI run covers it; the newest branch run
+  `34159725015` targets origin head `a9e88c069…`. Every local clause of both
+  criteria was re-verified against the committed candidate and passes —
+  see [`results.md`](results.md) and [`log.md`](log.md). Pushing is Phase 9's
+  human-gated step.
 - [x] Reconcile the final gate ledger instead of restarting all gates.
       Credit passing checks from implementation, measurement, and pre-push
       validation when their relevant source state and environment are still

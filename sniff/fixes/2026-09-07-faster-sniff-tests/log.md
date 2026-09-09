@@ -493,3 +493,49 @@ execution, or three-run matched environment series. Those are required pending
 evidence, not deferrals; the Phase 9 plan and inventory sections own the
 handoff. The fix is implemented and verified locally but is not verified on CI
 and must not be archived yet.
+
+### Phase 10 continuation — candidate committed, gates re-run
+
+The candidate has since been committed by the separate commit step. Its Sniff
+source content is `66892d319` (last commit touching `sniff/lib` or `sniff/cli`)
+with the fix documents at `3b112c4d5`; the branch head carrying that tree is
+`a05e3b747`. `git status --porcelain` is empty, so the working tree and the
+committed candidate are identical.
+
+The branch is **53 commits ahead of `origin/fix/cli-slow-tests`** and has not
+been pushed. `gh run list --branch fix/cli-slow-tests` shows the newest CI run
+(`34159725015`, `ci`, success) against head SHA
+`a9e88c069…`, which is the current origin head; `git merge-base --is-ancestor
+66892d319 origin/fix/cli-slow-tests` returns false. **No CI run covers the Sniff
+candidate.** The stale reason recorded above ("uncommitted") is superseded: the
+candidate now exists as a commit, but it is unpushed, so the AC6/AC8 CI evidence
+is still absent for the same practical effect. Pushing is the human-gated
+Phase 9 handoff and is out of this phase's scope.
+
+Because unrelated Darkmatter and Claudine commits landed after the Sniff
+candidate, every local gate was re-run at the current tree rather than credited
+from Phase 9/10's earlier ledger. No Sniff source file changed between the two
+ledgers, and every result reproduced.
+
+| Command | Selection | Result |
+|---|---|---:|
+| test-audit `config validate` | Sniff audit configuration | pass: 2 packages, 6 selections, 4 environments |
+| test-audit `reconcile --markdown` | current captures, sources, 83 families | pass: 2,635 runner identities, 2,676 source attributes, 41 declared platform exclusions, 5 known parse diagnostics, `GATE EXIT=0` |
+| `/usr/bin/time -p just sanity` (cold) | `sniff/remote` + `sniff-cli/test-fixtures`, lib + bins, `!slow` | pass: 1,419 + 401 tests; 142.16 s wall including a full rebuild of the changed dependency graph |
+| `/usr/bin/time -p just sanity` (warm) | same | pass: 1,419 (23 skipped) + 401 tests; runner 9.418 s + 0.506 s; **12.13 s wall clock, within the 15-second budget** |
+| `/usr/bin/time -p just lint` | `sniff/remote` + `sniff-cli` | pass: no diagnostics, 50.70 s |
+| `/usr/bin/time -p just check` | `sniff/remote` + `sniff-cli` | pass, 42.17 s |
+| `just doctest` | `sniff/remote`; `sniff-cli` | pass: 91 passed, 0 failed, 22 ignored; CLI has zero doctests |
+| `/usr/bin/time -p just test` | Sniff-area L1 | pass: 2,609 run, 2,609 passed, 24 skipped, 0 failed; runner 23.855 s, 86.34 s wall |
+| `/usr/bin/time -p just test-l2` | `sniff-cli --features test-fixtures`, tmux | pass: 2 tests in 0.655 s (802 skipped); 14.35 s wall |
+| root `just test-leaks sniff` | Sniff-area L1 | pass: 2,609 tests, 24 skips, 0 failures in 23.477 s; `leak-sweep: no leaked processes detected` |
+| root `just check-tier-coverage sniff` | Sniff stubbed L3/browser tiers | pass under Bash 5.3: 1 listed, 0 stranded |
+| `git diff main -- .config/nextest.toml` | override delta | 16 insertions / 41 deletions; grepping the diff for `sniff` or `detect_completes` returns nothing — this fix changed no Sniff override |
+
+`check-tier-coverage` was invoked directly under `/opt/homebrew/bin/bash` 5.3.
+The macOS Bash 3.2 `BASHPID` limitation recorded in the previous Phase 10 entry
+is unchanged and still owned by the shared tooling, not by this fix.
+
+No new failure, retry, timeout, slow mark, or leak appeared. AC6 and AC8 stay
+**pending on CI** with their reason updated from "uncommitted" to "committed but
+unpushed; no CI run covers the candidate tree".
