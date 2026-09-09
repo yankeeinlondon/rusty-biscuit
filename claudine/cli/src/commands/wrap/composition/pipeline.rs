@@ -4,10 +4,8 @@ use color_eyre::eyre::WrapErr;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
+use super::preflight::{PreflightBlockedOutcome, emit_preflight_blocked_and_finalize_in_context};
 use super::*;
-use super::preflight::{
-    PreflightBlockedOutcome, emit_preflight_blocked_and_finalize_in_context,
-};
 use claudine::composition::{
     DocumentTransition, EvaluatedProxyRequest, LifecycleCatchProtocol, LifecycleCatchResult,
     LifecycleCatchState, LifecycleErrorInfo, LifecycleTransitionAbort, LifecycleTransitionDecision,
@@ -197,8 +195,9 @@ macro_rules! proceed_phase {
         match $phase {
             CompositionPhaseResult::Proceed(value) => value,
             CompositionPhaseResult::Completed(outcome) => return Ok(*outcome),
-            CompositionPhaseResult::Blocked(error)
-            | CompositionPhaseResult::Failed(error) => return Err(error),
+            CompositionPhaseResult::Blocked(error) | CompositionPhaseResult::Failed(error) => {
+                return Err(error)
+            }
         }
     };
 }
@@ -245,8 +244,7 @@ pub(super) fn execute_composition_request_inner_with_guard<'guard, 'runtime>(
     }
 
     let selection = proceed_phase!(resolve_selection_and_launch(&mut attempt));
-    let mut environment =
-        proceed_phase!(prepare_environment_and_mcp(&mut attempt, &selection));
+    let mut environment = proceed_phase!(prepare_environment_and_mcp(&mut attempt, &selection));
     let command = proceed_phase!(construct_argv_and_system_prompt(
         &mut attempt,
         &selection,
@@ -261,13 +259,7 @@ pub(super) fn execute_composition_request_inner_with_guard<'guard, 'runtime>(
         &environment,
     ));
     let outcome = proceed_phase!(CompositionPhaseResult::from_blocked_result(
-        provider_run_handoff(
-            &mut attempt,
-            &selection,
-            &environment,
-            &command,
-            &lifecycle,
-        ),
+        provider_run_handoff(&mut attempt, &selection, &environment, &command, &lifecycle,),
     ));
     Ok(outcome)
 }
@@ -372,11 +364,7 @@ fn resolve_selection_and_launch(
             _ => SelectionReason::InteractiveChoice,
         };
         let is_inline = matches!(request.prepared.closure, CompositionClosurePlan::Inline(_));
-        record_substage(
-            perf_collector,
-            last_checkpoint,
-            "target resolution",
-        );
+        record_substage(perf_collector, last_checkpoint, "target resolution");
 
         // -- Profile, binary, arguments, environment --------------------------
 
@@ -386,7 +374,10 @@ fn resolve_selection_and_launch(
 
         // -- Inline + interactive check ---------------------------------------
 
-        if request.session_interactive && is_inline && !profile.supports_interactive_inline_closure() {
+        if request.session_interactive
+            && is_inline
+            && !profile.supports_interactive_inline_closure()
+        {
             return Err(CompositionError::InlineInteractiveUnsupported {
                 provider: provider.to_string(),
                 source_kind: request.session_interactive_source,
@@ -524,10 +515,7 @@ fn prepare_environment_and_mcp(
         // different provider must not inherit those writes.
         let mut pre_provider_env = env_plan.env.clone();
         let codex_sqlite_home = if env_plan.shadow_home_path.is_some() {
-            Some(
-                crate::commands::wrap::repo_home::codex_sqlite_home()?
-                    .into_os_string(),
-            )
+            Some(crate::commands::wrap::repo_home::codex_sqlite_home()?.into_os_string())
         } else {
             None
         };
@@ -566,11 +554,9 @@ fn prepare_environment_and_mcp(
             use claudine::mcp::inject::injector_for_provider;
             use claudine::mcp::session::{compute_session_set, lex_tags};
 
-            let repo_root_ref =
-                effective_source_repo_root(request, env_plan.repo_root.as_deref());
+            let repo_root_ref = effective_source_repo_root(request, env_plan.repo_root.as_deref());
             let _ = super::super::bootstrap_mcp_state(repo_root_ref)?;
-            let catalog =
-                McpCatalogStore::load().wrap_err("failed to load MCP catalog")?;
+            let catalog = McpCatalogStore::load().wrap_err("failed to load MCP catalog")?;
             let (cleaned_prompt, prompt_tags) = lex_tags(&effective_prompt);
             let prompt_is_interactive = request.session_interactive
                 && std::io::stdin().is_terminal()
@@ -679,7 +665,10 @@ fn prepare_environment_and_mcp(
                     // and YOLO producers, so it must merge into any value already on
                     // the plan rather than overwrite it; every other key is a plain
                     // set. Mirrors the direct wrapper at wrapper_mcp.rs.
-                    super::super::wrapper_mcp::merge_injected_env_into_plan(string_env, &mut env_plan)?;
+                    super::super::wrapper_mcp::merge_injected_env_into_plan(
+                        string_env,
+                        &mut env_plan,
+                    )?;
                     mcp_extra_args.extend(result.extra_args);
                 }
             } else {
@@ -836,7 +825,7 @@ fn construct_argv_and_system_prompt(
         let has_model_env = env_plan
             .env
             .contains_key(&std::ffi::OsString::from("MODEL"));
-        let _opencode_model_source: Option<super::super::profile::OpenCodeModelSource> =
+        let _model_source: Option<super::super::profile::ModelSource> =
             crate::commands::exec_prep::resolve_model_and_validate(
                 provider,
                 profile,
@@ -875,10 +864,7 @@ fn construct_argv_and_system_prompt(
 
         record_substage(perf_collector, last_checkpoint, "argv assembly");
 
-        enforce_repo_launch_detection(
-            request.repo,
-            request.prep_launch_detection_error.as_ref(),
-        )?;
+        enforce_repo_launch_detection(request.repo, request.prep_launch_detection_error.as_ref())?;
         let mut launch_context = if let Some(prep) = request.prep_launch_context.as_ref() {
             // Reuse the launch projection supplied by the invocation owner.
             prep.clone()
@@ -962,7 +948,9 @@ fn construct_argv_and_system_prompt(
                             "OPENCODE_CONFIG_CONTENT".to_string(),
                             v.to_string_lossy().to_string(),
                         )]);
-                        super::super::wrapper_mcp::merge_injected_env_into_plan(injected, env_plan)?;
+                        super::super::wrapper_mcp::merge_injected_env_into_plan(
+                            injected, env_plan,
+                        )?;
                         continue;
                     }
                     env_plan.env.insert(
@@ -1083,9 +1071,7 @@ fn construct_argv_and_system_prompt(
             }
             let mut mcp_body_tags: Vec<String> = mcp_rebuild
                 .as_ref()
-                .map(|_| {
-                    claudine::mcp::session::lex_tags(&request.prepared.prompt).1
-                })
+                .map(|_| claudine::mcp::session::lex_tags(&request.prepared.prompt).1)
                 .unwrap_or_default();
             mcp_body_tags.sort();
             mcp_body_tags.dedup();
@@ -1104,8 +1090,7 @@ fn construct_argv_and_system_prompt(
             }
             for key in pre_provider_env.keys() {
                 if !env_plan.env.contains_key(key) {
-                    provider_env_baseline
-                        .insert(key.clone(), pre_provider_env.get(key).cloned());
+                    provider_env_baseline.insert(key.clone(), pre_provider_env.get(key).cloned());
                 }
             }
             lp::LaunchPlanInputs {
@@ -1169,14 +1154,13 @@ fn construct_argv_and_system_prompt(
         )?;
 
         if tracing::enabled!(tracing::Level::WARN) {
-            super::super::profile::validate_argv_flags_before_separator(profile.binary(), &child_args);
+            super::super::profile::validate_argv_flags_before_separator(
+                profile.binary(),
+                &child_args,
+            );
         }
 
-        record_substage(
-            perf_collector,
-            last_checkpoint,
-            "stream + prompt delivery",
-        );
+        record_substage(perf_collector, last_checkpoint, "stream + prompt delivery");
 
         if let Some(collector) = perf_collector.as_mut() {
             collector.mark_env_setup_complete();
@@ -1338,7 +1322,6 @@ fn construct_lifecycle_runtime(
     })
 }
 
-
 fn execute_initialize_catch(
     guard: &mut LifecycleRunGuard<'_>,
     init_ctx: &StackExecutionContext<'_>,
@@ -1372,7 +1355,9 @@ fn execute_initialize_catch(
         let outcome = guard.execute_event(step.signal, &event_ctx);
         assert!(protocol.record(step.signal, outcome));
     }
-    let result = protocol.finish().expect("initialize catch protocol completed");
+    let result = protocol
+        .finish()
+        .expect("initialize catch protocol completed");
     let Some(signal) = result.evaluation_error_signal else {
         return Ok(result);
     };
@@ -1385,17 +1370,19 @@ fn execute_initialize_catch(
         .evaluation_error
         .as_ref()
         .expect("evaluation signal carries error info");
-    Err(crate::output::error_walker::emit_lifecycle_evaluation_error_early(
-        source_path,
-        match signal {
-            LifecycleSignal::Failure => "failure",
-            LifecycleSignal::Finalize => "finalize",
-            _ => unreachable!("catch protocol returned an unexpected signal"),
-        },
-        info,
-        term,
+    Err(
+        crate::output::error_walker::emit_lifecycle_evaluation_error_early(
+            source_path,
+            match signal {
+                LifecycleSignal::Failure => "failure",
+                LifecycleSignal::Finalize => "finalize",
+                _ => unreachable!("catch protocol returned an unexpected signal"),
+            },
+            info,
+            term,
+        )
+        .into(),
     )
-    .into())
 }
 
 /// Run the launched document's `initialize` event and translate its control
@@ -1413,18 +1400,10 @@ fn route_initialize(
 ) -> CompositionPhaseResult<DocumentTransition> {
     let routed = (|| -> Result<CompositionPhaseResult<DocumentTransition>> {
         let init_outcome = guard.execute_event(LifecycleSignal::Initialize, init_ctx);
-        let init_result = execute_initialize_catch(
-            guard,
-            init_ctx,
-            source_path,
-            term,
-            init_outcome.clone(),
-        )?;
+        let init_result =
+            execute_initialize_catch(guard, init_ctx, source_path, term, init_outcome.clone())?;
         if let Some(setup_error) = init_result.setup_error.as_ref() {
-            let message = if matches!(
-                init_result.control,
-                Some(StackControl::Error { .. })
-            ) {
+            let message = if matches!(init_result.control, Some(StackControl::Error { .. })) {
                 setup_error.msg.clone()
             } else {
                 "lifecycle initialize failed".to_string()
@@ -1694,7 +1673,11 @@ fn provider_run_handoff(
         base_dir,
         ctx_base_dir: Some(launch_workspace.launch_cwd.as_path()),
         prepared_context: Some(lifecycle_context),
-        file_resolution_context: request.prepared.input_layers.file_resolution_context.as_ref(),
+        file_resolution_context: request
+            .prepared
+            .input_layers
+            .file_resolution_context
+            .as_ref(),
         effect_engine: lifecycle_effect_engine,
         shell_runner: &SystemShellRunner,
         emitter,

@@ -210,7 +210,7 @@ pub(crate) fn emit_preflight_preamble(
     quiet_requested: bool,
     detail_requested: bool,
     launch_context: &claudine::system_prompt::LaunchContext,
-    opencode_model_source: Option<&profile::OpenCodeModelSource>,
+    model_source: Option<&profile::ModelSource>,
     term: &Terminal,
     verbose: u8,
 ) {
@@ -241,7 +241,7 @@ pub(crate) fn emit_preflight_preamble(
             log::message(&crate::output::post_env_message(message, term));
         }
 
-        if let Some(source) = opencode_model_source {
+        if let Some(source) = model_source {
             use biscuit_terminal::components::status::Status;
             use biscuit_terminal::prelude::TerminalRenderable as _;
             let status = Status::from_prose(source.status_markup());
@@ -577,57 +577,58 @@ pub(crate) fn run_execution_stage(
             &default_lifecycle_emitter,
         );
 
-        let (harness_code, harness_perf, _harness_signals, surfaced_handoff) = harness_orch::run_harness_loop(
-            provider,
-            profile,
-            child_cwd,
-            effective_non_interactive,
-            args.timeout.clone(),
-            cli_step_timeout.clone(),
-            args.stall_timeout.clone(),
-            args.model.clone(),
-            passthrough_launch_intent(
+        let (harness_code, harness_perf, _harness_signals, surfaced_handoff) =
+            harness_orch::run_harness_loop(
                 provider,
-                binary_path,
+                profile,
+                child_cwd,
                 effective_non_interactive,
-                args,
-                &harness_base_args,
-                structured_codex_output.map(|output| output.last_message_path.clone()),
-            ),
-            &env_plan.env,
-            &mut prompt_state,
-            env_plan.repo_root.as_deref(),
-            shell_options,
-            stream_verbosity != Verbosity::Silent,
-            stream_verbosity,
-            detail_requested,
-            stream_verbosity == Verbosity::Silent,
-            env_context,
-            Some(initial_materialized),
-            term,
-            &mut lifecycle_guard,
-            // A direct wrapper passthrough has no `initialize` route to hand
-            // off from; the run starts on the document it was given.
-            claudine::composition::DocumentTransition::Continue,
-            // The direct passthrough prepares no active document, so it owns no
-            // coordinator that could bring a proxy target up under the target's
-            // own launch bundle. The harness refuses such a hand-off with a typed
-            // diagnostic (R3/R6/AC10) instead of adopting it against this
-            // invocation's profile/argv/MCP, so no handoff can surface here.
-            None,
-            // No proxy reached this document, so there is no committed handoff to
-            // adopt: the passthrough runs the document it was given directly.
-            None,
-            // The passthrough prompt comes from argv or stdin; the document is a
-            // provider memory file, judged (if at all) where it was prepared. No
-            // deferred verdict, so nothing to stabilize.
-            false,
-            // Has a prompt file (the passthrough document), so it emits the
-            // prompt-scoped timing header like a composition caller.
-            true,
-            // Wrapper passthrough: no sequence task owns this stream.
-            None,
-        )?;
+                args.timeout.clone(),
+                cli_step_timeout.clone(),
+                args.stall_timeout.clone(),
+                args.model.clone(),
+                passthrough_launch_intent(
+                    provider,
+                    binary_path,
+                    effective_non_interactive,
+                    args,
+                    &harness_base_args,
+                    structured_codex_output.map(|output| output.last_message_path.clone()),
+                ),
+                &env_plan.env,
+                &mut prompt_state,
+                env_plan.repo_root.as_deref(),
+                shell_options,
+                stream_verbosity != Verbosity::Silent,
+                stream_verbosity,
+                detail_requested,
+                stream_verbosity == Verbosity::Silent,
+                env_context,
+                Some(initial_materialized),
+                term,
+                &mut lifecycle_guard,
+                // A direct wrapper passthrough has no `initialize` route to hand
+                // off from; the run starts on the document it was given.
+                claudine::composition::DocumentTransition::Continue,
+                // The direct passthrough prepares no active document, so it owns no
+                // coordinator that could bring a proxy target up under the target's
+                // own launch bundle. The harness refuses such a hand-off with a typed
+                // diagnostic (R3/R6/AC10) instead of adopting it against this
+                // invocation's profile/argv/MCP, so no handoff can surface here.
+                None,
+                // No proxy reached this document, so there is no committed handoff to
+                // adopt: the passthrough runs the document it was given directly.
+                None,
+                // The passthrough prompt comes from argv or stdin; the document is a
+                // provider memory file, judged (if at all) where it was prepared. No
+                // deferred verdict, so nothing to stabilize.
+                false,
+                // Has a prompt file (the passthrough document), so it emits the
+                // prompt-scoped timing header like a composition caller.
+                true,
+                // Wrapper passthrough: no sequence task owns this stream.
+                None,
+            )?;
         // The passthrough passes `None` for the ledger and `Continue` for the
         // initial transition, so a hand-off is refused inside the harness and the
         // loop can never produce a surfaced one. If one ever arrives, an

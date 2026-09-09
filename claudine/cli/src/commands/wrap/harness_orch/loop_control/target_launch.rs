@@ -352,8 +352,7 @@ pub(crate) fn rebuild_launch_identity(
     let use_structured = facets.use_structured();
     let plan = launch_plan::build_launch_plan(&intent.launch_plan_inputs, &facets)?;
 
-    let env_overrides =
-        launch_env_overrides(provider, model.as_deref(), plan.yolo_applied);
+    let env_overrides = launch_env_overrides(provider, model.as_deref(), plan.yolo_applied);
 
     // `env_overrides` can only *set*, and it is applied over a base child
     // environment the invocation stamped its own resolved `MODEL` into. A
@@ -364,12 +363,7 @@ pub(crate) fn rebuild_launch_identity(
     // whatever `MODEL` the child environment carries is the caller's own ambient
     // value — invocation-fixed, and not this rebuild's to delete.
     let mut launch_env = plan.env_overlay;
-    let invocation_resolved_a_model = intent
-        .launch_plan_inputs
-        .invocation
-        .facets
-        .model
-        .is_some();
+    let invocation_resolved_a_model = intent.launch_plan_inputs.invocation.facets.model.is_some();
     if invocation_resolved_a_model && model.is_none() {
         launch_env.push(launch_plan::EnvChange::Remove("MODEL".into()));
     }
@@ -507,9 +501,10 @@ fn select_rebuilt_provider(
     let Some(snapshot) = intent.installed_snapshot.as_ref() else {
         return Ok(match hint {
             AgentHint::Single(provider) => *provider,
-            AgentHint::List(providers) => {
-                providers.first().copied().unwrap_or(intent.fallback_provider)
-            }
+            AgentHint::List(providers) => providers
+                .first()
+                .copied()
+                .unwrap_or(intent.fallback_provider),
         });
     };
     let state = claudine::composition::classify_agent_resolution(hints, snapshot);
@@ -565,8 +560,8 @@ pub(super) struct TargetLaunchRebuild {
 }
 
 /// Resolve the model the refreshed document launches with, under R6 precedence:
-/// explicit `--model` beats the document's own `model:`, validated against the
-/// same catalog a direct invocation uses.
+/// explicit `--model` beats the document's own `model:`, through the same
+/// shared resolver a direct invocation uses (no refresh, no repeat warning).
 ///
 /// One answer serves both the launch plan's argv and the `MODEL` environment, so
 /// the two cannot describe different models.
@@ -582,11 +577,12 @@ fn resolve_launch_model(
         Some(cfg) => ModelCatalogService::with_overrides(cfg.model_overrides.clone()),
         None => ModelCatalogService::new(),
     };
-    claudine::composition::resolve_model_with_hints(
+    crate::commands::wrap::composition::resolve_document_model(
+        &catalog,
         provider,
         &document.selection_hints,
         cli_model,
-        Some(&catalog),
+        crate::commands::wrap::composition::ModelResolveMode::REBUILD,
     )
 }
 
@@ -645,7 +641,9 @@ pub(super) fn rebuild_target_launch(
         darkmatter::markdown::compose::ComposeContext::capture_for_content(launch_area, &scan)
     });
     for (key, value) in &env_overrides {
-        prepared_context.env_mut().insert(key.clone(), value.clone());
+        prepared_context
+            .env_mut()
+            .insert(key.clone(), value.clone());
     }
 
     Ok(TargetLaunchRebuild {

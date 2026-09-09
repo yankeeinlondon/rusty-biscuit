@@ -4,12 +4,16 @@
 //! `common::wrap`.
 
 use predicates::str::contains;
+// Consumed only by the `#[cfg(unix)]` cases below; ungated, the Windows
+// check (`just check-windows`) reports both imports unused.
+#[cfg(unix)]
 use std::fs;
 mod common;
+#[cfg(unix)]
 use common::wrap::*;
-use common::{CliProcessFixture, strip_ansi, write_dry_run_provider_stub};
 #[cfg(unix)]
 use common::write_executable;
+use common::{CliProcessFixture, strip_ansi, write_dry_run_provider_stub};
 
 #[test]
 fn help_lists_wrapper_subcommands() {

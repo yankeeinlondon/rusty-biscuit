@@ -13,10 +13,11 @@ use biscuit_terminal::components::prose::Prose;
 use biscuit_terminal::prelude::TerminalRenderable;
 use claudine::composition::{
     AgentResolutionState, CompositionError, CompositionExecutionRequest, CompositionMode,
-    ModelResolutionReason, ResolvedExecutionTarget, agent_state_breakdown,
-    build_installed_snapshot, classify_agent_resolution, detect_installed_providers,
-    invalid_agent_message,
+    EffectiveSelectionHints, ModelResolutionReason, ResolvedExecutionTarget,
+    agent_state_breakdown, build_installed_snapshot, classify_agent_resolution,
+    detect_installed_providers, invalid_agent_message, resolve_model_with_hints,
 };
+use claudine::model_catalog::ModelCatalogService;
 use claudine::provider::Provider;
 use color_eyre::eyre::{Result, WrapErr, eyre};
 use sniff::programs::InstalledAiClients;
@@ -109,24 +110,14 @@ pub(crate) fn resolve_execution_target(
     };
     let favorite = selection_config.as_ref().and_then(|c| c.favorite);
 
+    let mode = ModelResolveMode::live(request.silent);
     if let Some(provider) = request.explicit_provider {
-        let (_, probe_reason) = claudine::composition::resolve_model_with_catalog(
-            provider,
-            &request.prepared,
-            request.model.as_deref(),
-            None,
-        );
-        refresh_for_prepared_model_validation(
+        let (model, model_reason) = resolve_document_model(
             &catalog,
             provider,
-            &request.prepared,
-            Some(&probe_reason),
-        );
-        let (model, model_reason) = claudine::composition::resolve_model_with_catalog(
-            provider,
-            &request.prepared,
+            &request.prepared.selection_hints,
             request.model.as_deref(),
-            Some(&catalog),
+            mode,
         );
         return Ok(ResolvedExecutionTarget {
             provider,
@@ -144,23 +135,12 @@ pub(crate) fn resolve_execution_target(
     };
 
     if let Some(provider) = selected_provider {
-        let (_, probe_reason) = claudine::composition::resolve_model_with_catalog(
-            provider,
-            &request.prepared,
-            request.model.as_deref(),
-            None,
-        );
-        refresh_for_prepared_model_validation(
+        let (model, model_reason) = resolve_document_model(
             &catalog,
             provider,
-            &request.prepared,
-            Some(&probe_reason),
-        );
-        let (model, model_reason) = claudine::composition::resolve_model_with_catalog(
-            provider,
-            &request.prepared,
+            &request.prepared.selection_hints,
             request.model.as_deref(),
-            Some(&catalog),
+            mode,
         );
         let provider_reason = match state {
             AgentResolutionState::Selected { .. } => {
@@ -185,23 +165,12 @@ pub(crate) fn resolve_execution_target(
             favorite,
             &request.prepared.resolved_path,
         )?;
-        let (_, probe_reason) = claudine::composition::resolve_model_with_catalog(
-            provider,
-            &request.prepared,
-            request.model.as_deref(),
-            None,
-        );
-        refresh_for_prepared_model_validation(
+        let (model, model_reason) = resolve_document_model(
             &catalog,
             provider,
-            &request.prepared,
-            Some(&probe_reason),
-        );
-        let (model, model_reason) = claudine::composition::resolve_model_with_catalog(
-            provider,
-            &request.prepared,
+            &request.prepared.selection_hints,
             request.model.as_deref(),
-            Some(&catalog),
+            mode,
         );
         Ok(ResolvedExecutionTarget {
             provider,
@@ -235,6 +204,7 @@ pub(crate) fn eagerly_resolve_target(
     explicit_provider: Option<Provider>,
     cli_model: Option<&str>,
     dry_run: bool,
+    silent: bool,
     source_path: &std::path::Path,
 ) -> Result<Option<ResolvedExecutionTarget>> {
     // Phase 2 (2026-05-09-slow-prep): the installed-provider snapshot and
@@ -254,18 +224,17 @@ pub(crate) fn eagerly_resolve_target(
     // is scoped to that provider only. Provider selection itself never
     // touches the catalog.
     let favorite = selection_config.and_then(|c| c.favorite);
+    // Dry-run resolves against the same compiled baseline the live run uses
+    // (so its `Model` row is the launch model) but never warms the listing.
+    let mode = if dry_run {
+        ModelResolveMode::dry_run(silent)
+    } else {
+        ModelResolveMode::live(silent)
+    };
 
     if let Some(provider) = explicit_provider {
-        // Probe model resolution without catalog to determine whether
-        // an env var override makes refresh unnecessary.
-        let (_, probe_reason) =
-            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
-        if !dry_run {
-            refresh_for_model_validation(&catalog, provider, hints, Some(&probe_reason));
-        }
-        let catalog_ref = if dry_run { None } else { Some(&catalog) };
         let (model, model_reason) =
-            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, catalog_ref);
+            resolve_document_model(&catalog, provider, hints, cli_model, mode);
         return Ok(Some(ResolvedExecutionTarget {
             provider,
             provider_reason: claudine::composition::ProviderResolutionReason::ExplicitFlag,
@@ -291,7 +260,7 @@ pub(crate) fn eagerly_resolve_target(
             _ => return Ok(None),
         };
         let (model, model_reason) =
-            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
+            resolve_document_model(&catalog, provider, hints, cli_model, mode);
         return Ok(Some(ResolvedExecutionTarget {
             provider,
             provider_reason,
@@ -300,8 +269,17 @@ pub(crate) fn eagerly_resolve_target(
         }));
     }
 
-    resolve_live_target(state, hints, snapshot, favorite, cli_model, &catalog, source_path)
-        .map(Some)
+    resolve_live_target(
+        state,
+        hints,
+        snapshot,
+        favorite,
+        cli_model,
+        &catalog,
+        source_path,
+        mode,
+    )
+    .map(Some)
 }
 
 /// Resolve a classified agent state for a live (non-dry-run) run.
@@ -311,6 +289,7 @@ pub(crate) fn eagerly_resolve_target(
 /// - TTY prompting states show the scoped picker (and any required
 ///   pre-prompt message),
 /// - no-TTY prompting states abort with a structured error.
+#[allow(clippy::too_many_arguments)]
 fn resolve_live_target(
     state: AgentResolutionState,
     hints: &claudine::composition::EffectiveSelectionHints,
@@ -319,6 +298,7 @@ fn resolve_live_target(
     cli_model: Option<&str>,
     catalog: &claudine::model_catalog::ModelCatalogService,
     source_path: &std::path::Path,
+    mode: ModelResolveMode,
 ) -> Result<ResolvedExecutionTarget> {
     resolve_live_target_with_tty(
         state,
@@ -329,6 +309,7 @@ fn resolve_live_target(
         catalog,
         source_path,
         std::io::stderr().is_terminal(),
+        mode,
     )
 }
 
@@ -342,6 +323,7 @@ pub(crate) fn resolve_live_target_with_tty(
     catalog: &claudine::model_catalog::ModelCatalogService,
     source_path: &std::path::Path,
     is_tty: bool,
+    mode: ModelResolveMode,
 ) -> Result<ResolvedExecutionTarget> {
     use claudine::composition::ProviderResolutionReason;
 
@@ -352,11 +334,8 @@ pub(crate) fn resolve_live_target_with_tty(
     let selected_provider = provider_for_state_non_tty(&state, snapshot, source_path);
 
     if let Ok(&provider) = selected_provider.as_ref() {
-        let (_, probe_reason) =
-            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
-        refresh_for_model_validation(catalog, provider, hints, Some(&probe_reason));
         let (model, model_reason) =
-            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, Some(catalog));
+            resolve_document_model(catalog, provider, hints, cli_model, mode);
         let provider_reason = match state {
             AgentResolutionState::Selected { .. } => ProviderResolutionReason::FrontmatterSingle,
             _ => ProviderResolutionReason::FrontmatterList,
@@ -370,13 +349,9 @@ pub(crate) fn resolve_live_target_with_tty(
     }
 
     if is_tty {
-        let provider =
-            prompt_for_agent_state(&state, hints, snapshot, favorite, source_path)?;
-        let (_, probe_reason) =
-            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, None);
-        refresh_for_model_validation(catalog, provider, hints, Some(&probe_reason));
+        let provider = prompt_for_agent_state(&state, hints, snapshot, favorite, source_path)?;
         let (model, model_reason) =
-            claudine::composition::resolve_model_with_hints(provider, hints, cli_model, Some(catalog));
+            resolve_document_model(catalog, provider, hints, cli_model, mode);
         Ok(ResolvedExecutionTarget {
             provider,
             provider_reason: ProviderResolutionReason::InteractivePicker,
@@ -509,8 +484,7 @@ fn build_scoped_picker_plan(
     favorite: Option<Provider>,
     scope: Option<&[Provider]>,
 ) -> Result<claudine::composition::ProviderPickerPlan, CompositionError> {
-    let mut plan =
-        claudine::composition::build_picker_plan_with_hints(hints, snapshot, favorite)?;
+    let mut plan = claudine::composition::build_picker_plan_with_hints(hints, snapshot, favorite)?;
 
     if let Some(scope) = scope {
         let scope_set: std::collections::BTreeSet<Provider> = scope.iter().copied().collect();
@@ -522,6 +496,95 @@ fn build_scoped_picker_plan(
     }
 
     Ok(plan)
+}
+
+/// How a route wants a document's model resolved by
+/// [`resolve_document_model`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct ModelResolveMode {
+    /// Warm the provider's listing cache as drift-channel input. Off under
+    /// `--dry-run`, which must start no subprocess.
+    pub(crate) refresh: bool,
+    /// Emit the `[model]` warning for a frontmatter model the catalog does
+    /// not recognize. Off under `--silent`, and off for the per-attempt
+    /// launch rebuild, which re-reads a document that already warned.
+    pub(crate) warn: bool,
+}
+
+impl ModelResolveMode {
+    pub(crate) fn live(silent: bool) -> Self {
+        Self {
+            refresh: true,
+            warn: !silent,
+        }
+    }
+
+    pub(crate) fn dry_run(silent: bool) -> Self {
+        Self {
+            refresh: false,
+            warn: !silent,
+        }
+    }
+
+    /// Retry/resume re-entry: the invocation already refreshed and warned.
+    pub(crate) const REBUILD: Self = Self {
+        refresh: false,
+        warn: false,
+    };
+}
+
+/// The one place the CLI turns (provider, frontmatter hints, `--model`,
+/// catalog) into the model a document launches with.
+///
+/// Every route — compose, inline-compose, dry-run, sequence review, sequence
+/// dry-run, and the retry/resume rebuild — resolves here, so the library
+/// chain in `composition::select` is the only model precedence rule and the
+/// catalog's role (order list hints, warn on a miss, never demote) cannot
+/// drift between routes.
+pub(crate) fn resolve_document_model(
+    catalog: &ModelCatalogService,
+    provider: Provider,
+    hints: &EffectiveSelectionHints,
+    cli_model: Option<&str>,
+    mode: ModelResolveMode,
+) -> (Option<String>, ModelResolutionReason) {
+    if mode.refresh {
+        // Probe without the catalog so the refresh gate can see whether a
+        // CLI/env source already decided the model.
+        let (_, probe_reason) = resolve_model_with_hints(provider, hints, cli_model, None);
+        refresh_for_model_validation(catalog, provider, hints, Some(&probe_reason));
+    }
+    let (model, reason) = resolve_model_with_hints(provider, hints, cli_model, Some(catalog));
+    if mode.warn
+        && let Some(notice) = model_catalog_notice(catalog, provider, model.as_deref(), &reason)
+    {
+        log::warn(&notice);
+    }
+    (model, reason)
+}
+
+/// The `[model]` prepare-time warning for a frontmatter model outside the
+/// provider's expected offerings, or `None` when the model came from a
+/// CLI/env source or the catalog recognizes it.
+pub(crate) fn model_catalog_notice(
+    catalog: &ModelCatalogService,
+    provider: Provider,
+    model: Option<&str>,
+    reason: &ModelResolutionReason,
+) -> Option<String> {
+    let model = model?;
+    if !matches!(
+        reason,
+        ModelResolutionReason::FrontmatterSingle | ModelResolutionReason::FrontmatterList
+    ) || catalog.is_valid(provider, model)
+    {
+        return None;
+    }
+    Some(format!(
+        "[model] frontmatter model '{model}' is outside Claudine's expected offerings for {}; \
+         forwarding it unchanged",
+        crate::output::capitalize_provider(provider)
+    ))
 }
 
 /// Refresh a single provider's dynamic listing only when a frontmatter
@@ -558,22 +621,6 @@ pub(crate) fn refresh_for_model_validation(
     // subprocess result (`opencode models` feeds the drift channel, not
     // validation), so the refresh detaches even on a cold cache.
     catalog.refresh_provider_async(provider);
-}
-
-/// Same gating as [`refresh_for_model_validation`] but reads the
-/// `model` hint from a fully prepared composition.
-fn refresh_for_prepared_model_validation(
-    catalog: &claudine::model_catalog::ModelCatalogService,
-    provider: Provider,
-    prepared: &claudine::composition::PreparedComposition,
-    resolved_model_reason: Option<&ModelResolutionReason>,
-) {
-    refresh_for_model_validation(
-        catalog,
-        provider,
-        &prepared.selection_hints,
-        resolved_model_reason,
-    );
 }
 
 /// Inject `AGENT` into the supplied `env_overrides` map so composition

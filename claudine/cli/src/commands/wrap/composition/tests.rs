@@ -80,7 +80,9 @@ fn captured_launch_detection_failure() -> claudine::diagnostics::DiagnosticSnaps
 fn enforce_repo_launch_detection_passes_when_repo_off() {
     // Sniff failed during prep but `--repo` is not set, so the
     // best-effort default is acceptable and the executor proceeds.
-    assert!(enforce_repo_launch_detection(false, Some(&captured_launch_detection_failure())).is_ok());
+    assert!(
+        enforce_repo_launch_detection(false, Some(&captured_launch_detection_failure())).is_ok()
+    );
 }
 
 #[test]
@@ -133,7 +135,9 @@ fn the_repo_abort_surfaces_the_captured_diagnostic_identity() {
 
     // Rendering resolves through the same selection, so the block carries the
     // captured message rather than a generic `Error:` line.
-    let rendered = selected.block_error().report_block_error_optimistic(Some(120));
+    let rendered = selected
+        .block_error()
+        .report_block_error_optimistic(Some(120));
     assert!(
         rendered.contains("/no/such/repo"),
         "expected the captured sniff text in the rendered block, got: {rendered}"
@@ -184,12 +188,8 @@ fn load_selection_config_returns_both_favorite_and_overrides() {
 fn load_selection_config_handles_missing_config() {
     let dir = tempfile::tempdir().unwrap();
     let nonexistent = dir.path().join("no-such-config.json");
-    let result =
-        claudine::dispatch::loader::load_claudine_config(Some(&nonexistent), None);
-    assert!(
-        result.is_err(),
-        "expected error for missing config file"
-    );
+    let result = claudine::dispatch::loader::load_claudine_config(Some(&nonexistent), None);
+    assert!(result.is_err(), "expected error for missing config file");
 }
 
 #[test]
@@ -578,6 +578,10 @@ fn live_selected_auto_selects_regardless_of_tty() {
         &catalog,
         Path::new("/tmp/doc.md"),
         false,
+        ModelResolveMode {
+            refresh: true,
+            warn: false,
+        },
     );
     let target = result.expect("should auto-select");
     assert_eq!(target.provider, Provider::Claude);
@@ -614,6 +618,10 @@ fn live_list_one_installed_auto_selects_regardless_of_tty() {
         &catalog,
         Path::new("/tmp/doc.md"),
         false,
+        ModelResolveMode {
+            refresh: true,
+            warn: false,
+        },
     );
     let target = result.expect("should auto-select from list");
     assert_eq!(target.provider, Provider::Claude);
@@ -640,6 +648,10 @@ fn live_no_agent_aborts_when_not_tty() {
         &catalog,
         Path::new("/tmp/doc.md"),
         false,
+        ModelResolveMode {
+            refresh: true,
+            warn: false,
+        },
     );
     assert_agent_resolution_failed(&result, state);
 }
@@ -666,6 +678,10 @@ fn live_single_invalid_aborts_when_not_tty() {
         &catalog,
         Path::new("/tmp/doc.md"),
         false,
+        ModelResolveMode {
+            refresh: true,
+            warn: false,
+        },
     );
     assert_agent_resolution_failed(&result, state);
 }
@@ -692,6 +708,10 @@ fn live_single_not_installed_aborts_when_not_tty() {
         &catalog,
         Path::new("/tmp/doc.md"),
         false,
+        ModelResolveMode {
+            refresh: true,
+            warn: false,
+        },
     );
     assert_agent_resolution_failed(&result, state);
 }
@@ -723,6 +743,10 @@ fn live_list_multiple_installed_aborts_when_not_tty() {
         &catalog,
         Path::new("/tmp/doc.md"),
         false,
+        ModelResolveMode {
+            refresh: true,
+            warn: false,
+        },
     );
     assert_agent_resolution_failed(&result, state);
 }
@@ -753,6 +777,10 @@ fn live_zero_installed_list_aborts_when_not_tty() {
         &catalog,
         Path::new("/tmp/doc.md"),
         false,
+        ModelResolveMode {
+            refresh: true,
+            warn: false,
+        },
     );
     assert_agent_resolution_failed(&result, state);
 }
@@ -839,7 +867,10 @@ fn agent_prompt_message_single_invalid_is_imperative_with_link() {
     };
     let msg = agent_prompt_message(&state, Path::new("/tmp/doc.md"))
         .expect("single-invalid has a pre-prompt message");
-    assert!(msg.contains("<red><b>Invalid Agent:</b></red>"), "got: {msg}");
+    assert!(
+        msg.contains("<red><b>Invalid Agent:</b></red>"),
+        "got: {msg}"
+    );
     assert!(msg.contains("totally-bogus"), "got: {msg}");
     assert!(msg.contains("/tmp/doc.md"), "got: {msg}");
     // The TTY pre-prompt and the no-TTY abort body share this exact text.
@@ -890,10 +921,7 @@ fn agent_prompt_message_is_none_for_picker_only_states() {
 #[test]
 fn timeout_conflict_message_names_source_and_flag() {
     assert_eq!(
-        format_interactive_timeout_conflict(
-            SessionInteractivitySource::Frontmatter,
-            "--timeout"
-        ),
+        format_interactive_timeout_conflict(SessionInteractivitySource::Frontmatter, "--timeout"),
         "interactive mode (from frontmatter) cannot be used with --timeout"
     );
     assert_eq!(
@@ -904,10 +932,7 @@ fn timeout_conflict_message_names_source_and_flag() {
         "interactive mode (from --interactive) cannot be used with --timeout"
     );
     assert_eq!(
-        format_interactive_timeout_conflict(
-            SessionInteractivitySource::Default,
-            "--timeout"
-        ),
+        format_interactive_timeout_conflict(SessionInteractivitySource::Default, "--timeout"),
         "interactive mode (from default) cannot be used with --timeout"
     );
     // The step-silence flag is named distinctly so a `--step-timeout`
@@ -1186,10 +1211,8 @@ fn preflight_blocked_and_finalize_stacks_reuse_prepared_file_resolution() {
     let resolution = biscuit_file::FileResolutionContext::new(&source_dir)
         .with_source_path(&source_path)
         .with_repository_root(&owned_repo);
-    let prepared_context = darkmatter::markdown::compose::ComposeContext::capture_for_content(
-        &source_dir,
-        "",
-    );
+    let prepared_context =
+        darkmatter::markdown::compose::ComposeContext::capture_for_content(&source_dir, "");
     let fm = json!({
         "blocked": {
             "stack": [{
@@ -1793,8 +1816,7 @@ mod opencode_yolo_assembly {
         let mut plan = env_plan_with(Some(r#"{"instructions":["/tmp/sp.md"]}"#));
 
         // Stage: MCP fold injects an `mcp` block (must merge, not clobber).
-        let injected =
-            HashMap::from([(KEY.to_string(), r#"{"mcp":{"srv":{}}}"#.to_string())]);
+        let injected = HashMap::from([(KEY.to_string(), r#"{"mcp":{"srv":{}}}"#.to_string())]);
         merge_injected_env_into_plan(injected, &mut plan).unwrap();
 
         // Stage: YOLO overlay, effective + non-interactive.
@@ -1847,8 +1869,7 @@ mod opencode_yolo_assembly {
     fn user_supplied_object_value_is_merged_not_replaced() {
         let mut plan = env_plan_with(Some(r#"{"theme":"dark"}"#));
 
-        let injected =
-            HashMap::from([(KEY.to_string(), r#"{"mcp":{"srv":{}}}"#.to_string())]);
+        let injected = HashMap::from([(KEY.to_string(), r#"{"mcp":{"srv":{}}}"#.to_string())]);
         merge_injected_env_into_plan(injected, &mut plan).unwrap();
         apply_opencode_yolo_config_overlay(Provider::OpenCode, true, true, &mut plan).unwrap();
 
