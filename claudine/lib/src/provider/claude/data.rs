@@ -16,10 +16,8 @@ use std::sync::LazyLock;
 use sniff::programs::AiCli;
 
 use crate::events::AgenticEvent;
-use crate::linking::capabilities::{
-    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport,
-    SkillFrontmatter, SupportLevel,
-};
+use crate::linking::capabilities::{ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport, SkillFrontmatter, SupportLevel};
+use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::provider::acp::{AcpServerMode, AcpSupport};
 use crate::provider::billing_model::BillingModel;
 use crate::provider::cap_policy::{CapPolicy, CapScope, Quantity, Unit};
@@ -29,22 +27,15 @@ use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSuppo
 use crate::provider::identity::Provider;
 use crate::provider::known_gap::{KnownGap, KnownGapArea};
 use crate::provider::model_catalog_source::ModelCatalogSource;
-use crate::provider::offering::{
-    ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource, ResolvesVia,
-};
-use crate::provider::output_format::{
-    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
-};
+use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource, ResolvesVia};
+use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
 use crate::provider::prompt_args::PromptArgConventions;
 use crate::provider::reasoning::ReasoningSupport;
 use crate::provider::resume_support::ResumeSupport;
-use crate::provider::system_prompt::{
-    SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
-};
+use crate::provider::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
 use crate::provider::yolo::YoloSupport;
-use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::stream::StreamProtocol;
 
 use super::behavior::CLAUDE_PROVIDER;
@@ -75,9 +66,7 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
     adapter: &CLAUDE_PROVIDER,
     configurator: &CLAUDE_PROVIDER,
     resource_support_fn: resource_support,
-    session_log_paths: &[PathTemplate::Static(
-        "~/.claude/projects/{sanitized_cwd}/{session_id}.jsonl",
-    )],
+    session_log_paths: &[PathTemplate::Static("~/.claude/projects/{sanitized_cwd}/{session_id}.jsonl")],
     config_paths: &[
         PathTemplate::Static("~/.claude/settings.json"),
         PathTemplate::Static("~/.claude.json"),
@@ -161,11 +150,13 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
         flag: "thinking_effort",
         levels: &["low", "medium", "high"],
     },
-    known_gaps: &[KnownGap {
-        area: KnownGapArea::Other,
-        note: "Populate claudine/docs/cross-referencing/claude-code.md",
-        tracker: Some("claudine/docs/cross-referencing/claude-code.md"),
-    }],
+    known_gaps: &[
+        KnownGap {
+            area: KnownGapArea::Other,
+            note: "Populate claudine/docs/cross-referencing/claude-code.md",
+            tracker: Some("claudine/docs/cross-referencing/claude-code.md"),
+        },
+    ],
     acp: AcpSupport {
         server_mode: AcpServerMode::Adapter,
         client_supported: false,
@@ -309,31 +300,19 @@ pub(in crate::provider) static CLAUDE_INFO: ProviderInfo = ProviderInfo {
     cap_policies: &[
         CapPolicy {
             model: CapScope::All,
-            timeframe: Quantity {
-                value: 18000.0,
-                unit: Unit::DurationSecs,
-            },
+            timeframe: Quantity { value: 18000.0, unit: Unit::DurationSecs },
         },
         CapPolicy {
             model: CapScope::All,
-            timeframe: Quantity {
-                value: 604800.0,
-                unit: Unit::DurationSecs,
-            },
+            timeframe: Quantity { value: 604800.0, unit: Unit::DurationSecs },
         },
         CapPolicy {
             model: CapScope::specific("opus"),
-            timeframe: Quantity {
-                value: 604800.0,
-                unit: Unit::DurationSecs,
-            },
+            timeframe: Quantity { value: 604800.0, unit: Unit::DurationSecs },
         },
         CapPolicy {
             model: CapScope::specific("sonnet"),
-            timeframe: Quantity {
-                value: 604800.0,
-                unit: Unit::DurationSecs,
-            },
+            timeframe: Quantity { value: 604800.0, unit: Unit::DurationSecs },
         },
     ],
     allowed_env_keys: &[],

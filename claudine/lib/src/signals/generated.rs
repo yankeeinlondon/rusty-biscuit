@@ -18,8 +18,8 @@
 //! Slug-keyed static signal-detection tables (generated).
 
 use claudine_catalog_types::{
-    DetectionMode, DetectionRecord, ExtractStrategy, ExtractionSpec, MatchOp, ProviderSignalTable,
-    SignalKind, SignalSource, Unit, Zone,
+    DetectionMode, DetectionRecord, ExtractStrategy, ExtractionSpec, MatchOp,
+    ProviderSignalTable, SignalKind, SignalSource, Unit, Zone,
 };
 
 pub(super) static ANTIGRAVITY_SIGNALS: ProviderSignalTable = ProviderSignalTable {
@@ -37,12 +37,14 @@ pub(super) static ANTIGRAVITY_SIGNALS: ProviderSignalTable = ProviderSignalTable
             values: &[],
             since: Some("1.0.5"),
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("stdout_tail"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("stdout_tail"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "exit-auth_invalid-print-timeout",
@@ -56,12 +58,14 @@ pub(super) static ANTIGRAVITY_SIGNALS: ProviderSignalTable = ProviderSignalTable
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("stdout_tail"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("stdout_tail"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
     ],
 };
@@ -81,12 +85,14 @@ pub(super) static CLAUDE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "resets_at",
-                source: ExtractStrategy::Path("rate_limit_info.resetsAt"),
-                unit: Some(Unit::UnixSeconds),
-                zone: Some(Zone::Utc),
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "resets_at",
+                    source: ExtractStrategy::Path("rate_limit_info.resetsAt"),
+                    unit: Some(Unit::UnixSeconds),
+                    zone: Some(Zone::Utc),
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-usage_cap_approaching-seven_day",
@@ -247,12 +253,14 @@ pub(super) static CLAUDE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("error.message"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("error.message"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-no_funds-error-billing",
@@ -266,12 +274,14 @@ pub(super) static CLAUDE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("error.message"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("error.message"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-no_funds-assistant-billing",
@@ -285,12 +295,14 @@ pub(super) static CLAUDE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("message.content[0].text"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("message.content[0].text"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-model_resolved-init",
@@ -304,12 +316,14 @@ pub(super) static CLAUDE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "resolved",
-                source: ExtractStrategy::Path("model"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "resolved",
+                    source: ExtractStrategy::Path("model"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-auth_kind_detected-init",
@@ -323,12 +337,14 @@ pub(super) static CLAUDE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "auth_kind",
-                source: ExtractStrategy::Path("apiKeySource"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "auth_kind",
+                    source: ExtractStrategy::Path("apiKeySource"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-tokens_consumed-total_cost_usd",
@@ -440,12 +456,14 @@ pub(super) static CODEX_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("error.message"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("error.message"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-usage_capped-error-message",
@@ -459,12 +477,14 @@ pub(super) static CODEX_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("error_message"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("error_message"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-rate_limited-error_type",
@@ -478,12 +498,14 @@ pub(super) static CODEX_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("error_message"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("error_message"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-tokens_consumed-turn_completed",
@@ -536,12 +558,14 @@ pub(super) static CODEX_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "session_id",
-                source: ExtractStrategy::Path("thread_id"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "session_id",
+                    source: ExtractStrategy::Path("thread_id"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
     ],
 };
@@ -588,12 +612,14 @@ pub(super) static GEMINI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &["FatalTurnLimitedError", "FatalTurnLimited"],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("error.message"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("error.message"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-tokens_consumed-result-stats",
@@ -685,12 +711,14 @@ pub(super) static GOOSE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("message.content[0].text"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("message.content[0].text"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-rate_limited-provider-error-text",
@@ -704,12 +732,14 @@ pub(super) static GOOSE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("message.content[0].text"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("message.content[0].text"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-provider_overloaded-server-error-text",
@@ -723,12 +753,14 @@ pub(super) static GOOSE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("message.content[0].text"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("message.content[0].text"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-tokens_consumed-complete",
@@ -852,12 +884,14 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("payload.properties.error.data.responseBody"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("payload.properties.error.data.responseBody"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-no_funds-gateway-402",
@@ -871,12 +905,14 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("payload.properties.error.data.responseBody"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("payload.properties.error.data.responseBody"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-auth_invalid-paid-model-auth-required",
@@ -890,12 +926,14 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("payload.properties.error.data.responseBody"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("payload.properties.error.data.responseBody"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-rate_limited-status-retry",
@@ -1029,12 +1067,14 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("payload.properties.error.data.message"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("payload.properties.error.data.message"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-model_resolved-model-switched",
@@ -1222,12 +1262,14 @@ pub(super) static KILO_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("row.data.error.data.message"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("row.data.error.data.message"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
     ],
 };
@@ -1274,12 +1316,14 @@ pub(super) static KIMI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("error.message"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("error.message"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-rate_limited-step_retry-429",
@@ -1404,9 +1448,7 @@ pub(super) static KIMI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
                 },
                 ExtractionSpec {
                     field: "cache_creation",
-                    source: ExtractStrategy::Path(
-                        "params.payload.token_usage.input_cache_creation",
-                    ),
+                    source: ExtractStrategy::Path("params.payload.token_usage.input_cache_creation"),
                     unit: Some(Unit::Tokens),
                     zone: None,
                 },
@@ -1442,12 +1484,14 @@ pub(super) static KIMI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "status",
-                source: ExtractStrategy::Path("result.status"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "status",
+                    source: ExtractStrategy::Path("result.status"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-turn_limit_reached-max_steps",
@@ -1461,12 +1505,14 @@ pub(super) static KIMI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "limit",
-                source: ExtractStrategy::Path("result.steps"),
-                unit: Some(Unit::Requests),
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "limit",
+                    source: ExtractStrategy::Path("result.steps"),
+                    unit: Some(Unit::Requests),
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-human_input_requested-question_request",
@@ -1513,12 +1559,14 @@ pub(super) static OPENCODE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("message"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("message"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stderr_promoted-usage_capped-legacy",
@@ -1709,12 +1757,14 @@ pub(super) static OPENCODE_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "version",
-                source: ExtractStrategy::Path("version"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "version",
+                    source: ExtractStrategy::Path("version"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stderr_promoted-model_resolved-llm-call",
@@ -1761,12 +1811,14 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("message.errorMessage"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("message.errorMessage"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-no_funds-billing",
@@ -1780,12 +1832,14 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("message.errorMessage"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("message.errorMessage"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-auth_invalid-no-api-key",
@@ -1799,12 +1853,14 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("message.errorMessage"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("message.errorMessage"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-auth_invalid-oauth",
@@ -1818,12 +1874,14 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("message.errorMessage"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("message.errorMessage"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-rate_limited-message",
@@ -1837,12 +1895,14 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("message.errorMessage"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("message.errorMessage"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-provider_overloaded-message",
@@ -1856,12 +1916,14 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("message.errorMessage"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("message.errorMessage"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-interrupted-aborted",
@@ -1875,12 +1937,14 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("message.errorMessage"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("message.errorMessage"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-tokens_consumed-message_end",
@@ -2136,12 +2200,14 @@ pub(super) static PI_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("stderr_tail"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("stderr_tail"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
     ],
 };
@@ -2242,12 +2308,14 @@ pub(super) static QWEN_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: None,
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("error.message"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("error.message"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-auth_invalid-result-missing-api-key",
@@ -2261,12 +2329,14 @@ pub(super) static QWEN_SIGNALS: ProviderSignalTable = ProviderSignalTable {
             values: &[],
             since: Some("0.19.6"),
             until: None,
-            extractions: &[ExtractionSpec {
-                field: "message",
-                source: ExtractStrategy::Path("error.message"),
-                unit: None,
-                zone: None,
-            }],
+            extractions: &[
+                ExtractionSpec {
+                    field: "message",
+                    source: ExtractStrategy::Path("error.message"),
+                    unit: None,
+                    zone: None,
+                },
+            ],
         },
         DetectionRecord {
             id: "stream-runaway_repetition-result-loop",

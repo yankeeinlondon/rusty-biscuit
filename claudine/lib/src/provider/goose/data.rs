@@ -16,10 +16,8 @@ use std::sync::LazyLock;
 use sniff::programs::AiCli;
 
 use crate::events::AgenticEvent;
-use crate::linking::capabilities::{
-    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport,
-    SkillFrontmatter, SupportLevel,
-};
+use crate::linking::capabilities::{ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport, SkillFrontmatter, SupportLevel};
+use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::provider::acp::{AcpEvent, AcpServerMode, AcpSupport};
 use crate::provider::billing_model::BillingModel;
 use crate::provider::cli_sensitivity::CliSensitiveAxes;
@@ -27,22 +25,15 @@ use crate::provider::display_policy::{DisplayPolicy, ToolResultSummary};
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 use crate::provider::identity::Provider;
 use crate::provider::model_catalog_source::ModelCatalogSource;
-use crate::provider::offering::{
-    ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource,
-};
-use crate::provider::output_format::{
-    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
-};
+use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
+use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
 use crate::provider::prompt_args::PromptArgConventions;
 use crate::provider::reasoning::{ReasoningCustomTag, ReasoningSupport};
 use crate::provider::resume_support::ResumeSupport;
-use crate::provider::system_prompt::{
-    SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
-};
+use crate::provider::system_prompt::{SystemPromptCustomTag, SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
 use crate::provider::yolo::YoloSupport;
-use crate::provider::{OutputFormatSelector, ProviderInfo};
 
 use super::behavior::GOOSE_PROVIDER;
 
@@ -111,15 +102,19 @@ pub(in crate::provider) static GOOSE_INFO: ProviderInfo = ProviderInfo {
             companion_flags: &[],
         },
     ],
-    entrypoints: &[EntrypointSpec {
-        subcommand: Some("run"),
-        required_flags: &[],
-        mode: EntrypointMode::NonInteractive,
-    }],
+    entrypoints: &[
+        EntrypointSpec {
+            subcommand: Some("run"),
+            required_flags: &[],
+            mode: EntrypointMode::NonInteractive,
+        },
+    ],
     system_prompt: &SystemPromptSpec {
         append: SystemPromptDeliveryByMode {
             interactive: SystemPromptDelivery::Custom(SystemPromptCustomTag::GooseRecipe),
-            non_interactive: SystemPromptDelivery::InlineFlag { flag: "--system" },
+            non_interactive: SystemPromptDelivery::InlineFlag {
+                flag: "--system",
+            },
         },
         replace: SystemPromptDeliveryByMode {
             interactive: SystemPromptDelivery::Unsupported,
@@ -406,10 +401,7 @@ fn build_resource_support() -> ProviderCapabilities {
             format: Some(ResourceFormat::Markdown),
             repo_path: Some(PathBuf::from(".goose/skills")),
             user_path: Some(PathBuf::from(".config/goose/skills")),
-            also_reads_from: vec![
-                PathBuf::from(".claude/skills"),
-                PathBuf::from(".agents/skills"),
-            ],
+            also_reads_from: vec![PathBuf::from(".claude/skills"), PathBuf::from(".agents/skills")],
             notes: None,
             properties: Some(ResourcePropertySchema::new(
                 &["name", "description"],
@@ -435,13 +427,7 @@ fn build_resource_support() -> ProviderCapabilities {
             notes: Some("Recipe YAML files with specific schema"),
             properties: Some(ResourcePropertySchema::new(
                 &["title", "description"],
-                &[
-                    "instructions",
-                    "prompt",
-                    "extensions",
-                    "parameters",
-                    "sub_recipes",
-                ],
+                &["instructions", "prompt", "extensions", "parameters", "sub_recipes"],
                 "claudine/docs/cross-referencing/goose.md",
             )),
         },

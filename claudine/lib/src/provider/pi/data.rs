@@ -16,10 +16,8 @@ use std::sync::LazyLock;
 use sniff::programs::AiCli;
 
 use crate::events::AgenticEvent;
-use crate::linking::capabilities::{
-    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport,
-    SkillFrontmatter, SupportLevel,
-};
+use crate::linking::capabilities::{ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport, SkillFrontmatter, SupportLevel};
+use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::provider::acp::{AcpServerMode, AcpSupport};
 use crate::provider::billing_model::BillingModel;
 use crate::provider::cli_sensitivity::CliSensitiveAxes;
@@ -27,27 +25,21 @@ use crate::provider::display_policy::{DisplayPolicy, ToolResultSummary};
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 use crate::provider::identity::Provider;
 use crate::provider::model_catalog_source::ModelCatalogSource;
-use crate::provider::offering::{
-    ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource, ResolvesVia,
-};
-use crate::provider::output_format::{
-    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
-};
+use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource, ResolvesVia};
+use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
 use crate::provider::prompt_args::PromptArgConventions;
 use crate::provider::reasoning::ReasoningSupport;
 use crate::provider::resume_support::ResumeSupport;
-use crate::provider::system_prompt::{
-    SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
-};
+use crate::provider::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
 use crate::provider::yolo::YoloSupport;
-use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::stream::StreamProtocol;
 
 use super::behavior::PI_PROVIDER;
 
-static PI_RESOURCE_SUPPORT: LazyLock<ProviderCapabilities> = LazyLock::new(build_resource_support);
+static PI_RESOURCE_SUPPORT: LazyLock<ProviderCapabilities> =
+    LazyLock::new(build_resource_support);
 
 fn resource_support() -> &'static ProviderCapabilities {
     &PI_RESOURCE_SUPPORT
@@ -72,9 +64,9 @@ pub(in crate::provider) static PI_INFO: ProviderInfo = ProviderInfo {
     adapter: &PI_PROVIDER,
     configurator: &PI_PROVIDER,
     resource_support_fn: resource_support,
-    session_log_paths: &[PathTemplate::Static(
-        "~/.pi/agent/sessions/--{sanitized_cwd}--/{ISO8601Z}_{session_id}.jsonl",
-    )],
+    session_log_paths: &[
+        PathTemplate::Static("~/.pi/agent/sessions/--{sanitized_cwd}--/{ISO8601Z}_{session_id}.jsonl"),
+    ],
     config_paths: &[
         PathTemplate::Static("~/.pi/agent/settings.json"),
         PathTemplate::Static(".pi/settings.json"),
@@ -105,7 +97,9 @@ pub(in crate::provider) static PI_INFO: ProviderInfo = ProviderInfo {
             native_name: "json",
             cli_flag: Some("--mode"),
             stdin_supported: true,
-            selector: OutputFormatSelector::FlagValue { flag: "--mode" },
+            selector: OutputFormatSelector::FlagValue {
+                flag: "--mode",
+            },
             companion_flags: &[
                 "--no-approve",
                 "--no-extensions",
@@ -115,11 +109,13 @@ pub(in crate::provider) static PI_INFO: ProviderInfo = ProviderInfo {
             ],
         },
     ],
-    entrypoints: &[EntrypointSpec {
-        subcommand: None,
-        required_flags: &["-p"],
-        mode: EntrypointMode::NonInteractive,
-    }],
+    entrypoints: &[
+        EntrypointSpec {
+            subcommand: None,
+            required_flags: &["-p"],
+            mode: EntrypointMode::NonInteractive,
+        },
+    ],
     system_prompt: &SystemPromptSpec {
         append: SystemPromptDeliveryByMode {
             interactive: SystemPromptDelivery::InlineFlag {
@@ -419,18 +415,9 @@ pub(in crate::provider) static PI_INFO: ProviderInfo = ProviderInfo {
     resume: ResumeSupport::FirstClass,
     model_cli_flag: Some("--model"),
     non_interactive_conflicting_flags: &[],
-    billing_models: &[
-        BillingModel::PrepaidCredits,
-        BillingModel::Subscription,
-        BillingModel::PerToken,
-    ],
+    billing_models: &[BillingModel::PrepaidCredits, BillingModel::Subscription, BillingModel::PerToken],
     cap_policies: &[],
-    allowed_env_keys: &[
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_OAUTH_TOKEN",
-        "OPENAI_API_KEY",
-        "GEMINI_API_KEY",
-    ],
+    allowed_env_keys: &["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN", "OPENAI_API_KEY", "GEMINI_API_KEY"],
     display_policy: DisplayPolicy {
         tool_result_summary: ToolResultSummary::Show,
         info_event_suppression: &[],
@@ -592,9 +579,7 @@ fn build_resource_support() -> ProviderCapabilities {
             repo_path: Some(PathBuf::from(".pi/skills")),
             user_path: Some(PathBuf::from(".pi/agent/skills")),
             also_reads_from: vec![PathBuf::from(".agents/skills")],
-            notes: Some(
-                "Agent Skills standard; Pi does not enforce name == directory name and also accepts Pi-native direct root *.md skills.",
-            ),
+            notes: Some("Agent Skills standard; Pi does not enforce name == directory name and also accepts Pi-native direct root *.md skills."),
             properties: Some(ResourcePropertySchema::new(
                 &["name", "description"],
                 &["license", "compatibility", "metadata"],
@@ -607,9 +592,7 @@ fn build_resource_support() -> ProviderCapabilities {
             repo_path: Some(PathBuf::from(".pi/prompts")),
             user_path: Some(PathBuf::from(".pi/agent/prompts")),
             also_reads_from: vec![],
-            notes: Some(
-                "Prompt templates; the filename (minus .md) becomes the /command name. Shell-style $1/$@/$ARGUMENTS substitution.",
-            ),
+            notes: Some("Prompt templates; the filename (minus .md) becomes the /command name. Shell-style $1/$@/$ARGUMENTS substitution."),
             properties: Some(ResourcePropertySchema::new(
                 &[],
                 &["description", "argument-hint"],
@@ -622,9 +605,7 @@ fn build_resource_support() -> ProviderCapabilities {
             repo_path: None,
             user_path: None,
             also_reads_from: vec![],
-            notes: Some(
-                "No native subagents; the optional example `subagent` extension reads ~/.pi/agent/agents/*.md and .pi/agents/*.md but is not in the default install.",
-            ),
+            notes: Some("No native subagents; the optional example `subagent` extension reads ~/.pi/agent/agents/*.md and .pi/agents/*.md but is not in the default install."),
             properties: None,
         },
         scripts: ResourceSupport {
@@ -633,9 +614,7 @@ fn build_resource_support() -> ProviderCapabilities {
             repo_path: None,
             user_path: None,
             also_reads_from: vec![],
-            notes: Some(
-                "Scripts are stored within skill directories (freeform sibling files resolved relative to the skill dir); Pi has no dedicated scripts resource directory.",
-            ),
+            notes: Some("Scripts are stored within skill directories (freeform sibling files resolved relative to the skill dir); Pi has no dedicated scripts resource directory."),
             properties: None,
         },
         skill_frontmatter: SkillFrontmatter {

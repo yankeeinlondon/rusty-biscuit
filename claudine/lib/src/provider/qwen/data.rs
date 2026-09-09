@@ -16,10 +16,8 @@ use std::sync::LazyLock;
 use sniff::programs::AiCli;
 
 use crate::events::AgenticEvent;
-use crate::linking::capabilities::{
-    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport,
-    SkillFrontmatter, SupportLevel,
-};
+use crate::linking::capabilities::{ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport, SkillFrontmatter, SupportLevel};
+use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::provider::acp::{AcpServerMode, AcpSupport};
 use crate::provider::billing_model::BillingModel;
 use crate::provider::cli_sensitivity::CliSensitiveAxes;
@@ -27,22 +25,15 @@ use crate::provider::display_policy::{DisplayPolicy, ToolResultSummary};
 use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSupportLevel};
 use crate::provider::identity::Provider;
 use crate::provider::model_catalog_source::ModelCatalogSource;
-use crate::provider::offering::{
-    ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource,
-};
-use crate::provider::output_format::{
-    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
-};
+use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
+use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
 use crate::provider::prompt_args::PromptArgConventions;
 use crate::provider::reasoning::ReasoningSupport;
 use crate::provider::resume_support::ResumeSupport;
-use crate::provider::system_prompt::{
-    SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
-};
+use crate::provider::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
 use crate::provider::yolo::YoloSupport;
-use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::stream::StreamProtocol;
 
 use super::behavior::QWEN_PROVIDER;
@@ -73,9 +64,7 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
     adapter: &QWEN_PROVIDER,
     configurator: &QWEN_PROVIDER,
     resource_support_fn: resource_support,
-    session_log_paths: &[PathTemplate::Static(
-        "~/.qwen/projects/{sanitized_cwd}/chats/{session_id}.jsonl",
-    )],
+    session_log_paths: &[PathTemplate::Static("~/.qwen/projects/{sanitized_cwd}/chats/{session_id}.jsonl")],
     config_paths: &[
         PathTemplate::Static("~/.qwen/settings.json"),
         PathTemplate::Static(".qwen/settings.json"),
@@ -115,11 +104,13 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
             companion_flags: &[],
         },
     ],
-    entrypoints: &[EntrypointSpec {
-        subcommand: None,
-        required_flags: &[],
-        mode: EntrypointMode::NonInteractive,
-    }],
+    entrypoints: &[
+        EntrypointSpec {
+            subcommand: None,
+            required_flags: &[],
+            mode: EntrypointMode::NonInteractive,
+        },
+    ],
     system_prompt: &SystemPromptSpec {
         append: SystemPromptDeliveryByMode {
             interactive: SystemPromptDelivery::InlineFlag {
@@ -306,11 +297,7 @@ pub(in crate::provider) static QWEN_INFO: ProviderInfo = ProviderInfo {
     resume: ResumeSupport::FirstClass,
     model_cli_flag: Some("--model"),
     non_interactive_conflicting_flags: &["--prompt-interactive"],
-    billing_models: &[
-        BillingModel::PrepaidCredits,
-        BillingModel::Subscription,
-        BillingModel::PerToken,
-    ],
+    billing_models: &[BillingModel::PrepaidCredits, BillingModel::Subscription, BillingModel::PerToken],
     cap_policies: &[],
     allowed_env_keys: &["DASHSCOPE_API_KEY", "QWEN_API_KEY"],
     display_policy: DisplayPolicy {
@@ -449,10 +436,7 @@ pub(in crate::provider) static QWEN_EVENT_MAPPING: EventMappingTable = EventMapp
 /// Memory / instruction files contributing to the system prompt
 /// hierarchy — one list, shared by `memory_files` and
 /// `system_prompt.memory_files`.
-const QWEN_MEMORY_FILES: &[PathTemplate] = &[
-    PathTemplate::Static("~/.qwen/QWEN.md"),
-    PathTemplate::Static("QWEN.md"),
-];
+const QWEN_MEMORY_FILES: &[PathTemplate] = &[PathTemplate::Static("~/.qwen/QWEN.md"), PathTemplate::Static("QWEN.md")];
 
 /// Builds the resource portability descriptor served through
 /// `resource_support_fn` (heap-backed, so it lives behind the `LazyLock`

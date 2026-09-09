@@ -16,10 +16,8 @@ use std::sync::LazyLock;
 use sniff::programs::AiCli;
 
 use crate::events::AgenticEvent;
-use crate::linking::capabilities::{
-    ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport,
-    SkillFrontmatter, SupportLevel,
-};
+use crate::linking::capabilities::{ProviderCapabilities, ResourceFormat, ResourcePropertySchema, ResourceSupport, SkillFrontmatter, SupportLevel};
+use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::provider::acp::{AcpServerMode, AcpSupport};
 use crate::provider::billing_model::BillingModel;
 use crate::provider::cli_sensitivity::CliSensitiveAxes;
@@ -28,22 +26,15 @@ use crate::provider::event_mapping::{EventMapping, EventMappingTable, EventSuppo
 use crate::provider::identity::Provider;
 use crate::provider::known_gap::{KnownGap, KnownGapArea};
 use crate::provider::model_catalog_source::ModelCatalogSource;
-use crate::provider::offering::{
-    ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource,
-};
-use crate::provider::output_format::{
-    EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport,
-};
+use crate::provider::offering::{ExpectedOffering, LocalRunnerIntegration, OfferingClass, OfferingSource};
+use crate::provider::output_format::{EntrypointMode, EntrypointSpec, OutputFormat, OutputFormatSupport};
 use crate::provider::path_template::PathTemplate;
 use crate::provider::platform_kind::PlatformKind;
 use crate::provider::prompt_args::PromptArgConventions;
 use crate::provider::reasoning::ReasoningSupport;
 use crate::provider::resume_support::ResumeSupport;
-use crate::provider::system_prompt::{
-    SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec,
-};
+use crate::provider::system_prompt::{SystemPromptDelivery, SystemPromptDeliveryByMode, SystemPromptSpec};
 use crate::provider::yolo::YoloSupport;
-use crate::provider::{OutputFormatSelector, ProviderInfo};
 use crate::stream::StreamProtocol;
 
 use super::behavior::ANTIGRAVITY_PROVIDER;
@@ -75,12 +66,8 @@ pub(in crate::provider) static ANTIGRAVITY_INFO: ProviderInfo = ProviderInfo {
     configurator: &ANTIGRAVITY_PROVIDER,
     resource_support_fn: resource_support,
     session_log_paths: &[
-        PathTemplate::Static(
-            "~/.gemini/antigravity-cli/brain/{conversation_id}/.system_generated/logs/transcript.jsonl",
-        ),
-        PathTemplate::Static(
-            "~/.gemini/antigravity-cli/brain/{conversation_id}/.system_generated/logs/transcript_full.jsonl",
-        ),
+        PathTemplate::Static("~/.gemini/antigravity-cli/brain/{conversation_id}/.system_generated/logs/transcript.jsonl"),
+        PathTemplate::Static("~/.gemini/antigravity-cli/brain/{conversation_id}/.system_generated/logs/transcript_full.jsonl"),
         PathTemplate::Static("~/.gemini/antigravity-ide/conversations/{conversation_id}.pb"),
     ],
     config_paths: &[
@@ -112,11 +99,13 @@ pub(in crate::provider) static ANTIGRAVITY_INFO: ProviderInfo = ProviderInfo {
             companion_flags: &[],
         },
     ],
-    entrypoints: &[EntrypointSpec {
-        subcommand: None,
-        required_flags: &[],
-        mode: EntrypointMode::NonInteractive,
-    }],
+    entrypoints: &[
+        EntrypointSpec {
+            subcommand: None,
+            required_flags: &[],
+            mode: EntrypointMode::NonInteractive,
+        },
+    ],
     system_prompt: &SystemPromptSpec {
         append: SystemPromptDeliveryByMode {
             interactive: SystemPromptDelivery::Unsupported,
@@ -443,9 +432,7 @@ fn build_resource_support() -> ProviderCapabilities {
             repo_path: Some(PathBuf::from(".agents/skills")),
             user_path: Some(PathBuf::from("~/.gemini/config/skills")),
             also_reads_from: vec![],
-            notes: Some(
-                "Agent Skills standard (<root>/skills/<name>/SKILL.md), first-class in agy 1.1.0 (built-ins shipped under ~/.gemini/antigravity-cli/builtin/skills). Only name + description are documented frontmatter keys; progressive disclosure injects name+description until activated.",
-            ),
+            notes: Some("Agent Skills standard (<root>/skills/<name>/SKILL.md), first-class in agy 1.1.0 (built-ins shipped under ~/.gemini/antigravity-cli/builtin/skills). Only name + description are documented frontmatter keys; progressive disclosure injects name+description until activated."),
             properties: Some(ResourcePropertySchema::new(
                 &["name", "description"],
                 &[],
@@ -458,9 +445,7 @@ fn build_resource_support() -> ProviderCapabilities {
             repo_path: None,
             user_path: None,
             also_reads_from: vec![],
-            notes: Some(
-                "Antigravity has no dedicated slash-command directory; registered Agent Skills automatically become TUI slash commands, and there is no argument-placeholder syntax. Commands are skill-derived (rewrite required); not linked as a separate resource.",
-            ),
+            notes: Some("Antigravity has no dedicated slash-command directory; registered Agent Skills automatically become TUI slash commands, and there is no argument-placeholder syntax. Commands are skill-derived (rewrite required); not linked as a separate resource."),
             properties: None,
         },
         agents: ResourceSupport {
@@ -469,9 +454,7 @@ fn build_resource_support() -> ProviderCapabilities {
             repo_path: None,
             user_path: None,
             also_reads_from: vec![],
-            notes: Some(
-                "agy discovers agent.md files (~/.gemini/config/agents, .agents/agents) but exposes no non-interactive `--agent` selector and the schema is only partially public; subagents are managed through the interactive /agents and /tasks panels only. Not linked in v1.",
-            ),
+            notes: Some("agy discovers agent.md files (~/.gemini/config/agents, .agents/agents) but exposes no non-interactive `--agent` selector and the schema is only partially public; subagents are managed through the interactive /agents and /tasks panels only. Not linked in v1."),
             properties: None,
         },
         scripts: ResourceSupport {
