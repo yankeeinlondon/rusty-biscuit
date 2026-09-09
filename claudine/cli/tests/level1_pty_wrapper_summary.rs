@@ -31,8 +31,11 @@
 //! emulator's rendering is under test. Level 2 means a real emulator session
 //! reached through `biscuit-test-harness`.
 //!
-//! Gating: `#![cfg(unix)]`, `require_level!(Level::L1, pty_available(), ...)`
-//! so the test skips cleanly without a PTY.
+//! Gating: `#![cfg(unix)]` is the only exclusion, because `expectrl`'s
+//! `OsSession` is Unix-only. On a selected platform
+//! `expect_level!(Level::L1, pty_available(), ...)` **fails** when the PTY is
+//! missing rather than skipping: Level 1 is the mandatory suite, where a skip
+//! is indistinguishable from a pass.
 //!
 //! Run via the canonical recipe:
 //!
@@ -43,7 +46,7 @@
 #![cfg(unix)]
 
 use expectrl::{Expect, Session};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Level, expect_level};
 
 mod common;
 use common::{CliProcessFixture, pty_available, write_executable};
@@ -54,7 +57,7 @@ use common::{CliProcessFixture, pty_available, write_executable};
 /// this says nothing about the badge row's rendered appearance.
 #[test]
 fn level1_pty_wrapper_summary_text_precedes_child_output() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let fixture = CliProcessFixture::named("level1-pty-wrapper-summary");
     write_executable(
@@ -86,7 +89,7 @@ fn level1_pty_wrapper_summary_text_precedes_child_output() {
 
 #[test]
 fn level1_pty_non_interactive_detection() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let fixture = CliProcessFixture::named("level1-pty-wrapper-summary");
     write_executable(&fixture.bin_dir().join("goose"), "#!/bin/sh\nexit 0\n");

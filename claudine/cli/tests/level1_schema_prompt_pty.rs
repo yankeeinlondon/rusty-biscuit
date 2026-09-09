@@ -34,8 +34,11 @@
 //! the emulator's own capability handshake and rendering are part of what is
 //! under test.
 //!
-//! Gating: `#![cfg(unix)]`, `require_level!(Level::L1, pty_available(),
-//! ...)` so the test skips cleanly without a PTY.
+//! Gating: `#![cfg(unix)]` is the only exclusion, because `expectrl`'s
+//! `OsSession` is Unix-only. On a selected platform
+//! `expect_level!(Level::L1, pty_available(), ...)` **fails** when the PTY is
+//! missing rather than skipping: Level 1 is the mandatory suite, where a skip
+//! is indistinguishable from a pass.
 //!
 //! Run via the canonical recipe:
 //!
@@ -52,7 +55,7 @@ use std::io::Write;
 use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Level, expect_level};
 
 mod common;
 use common::pty::*;
@@ -122,7 +125,7 @@ fn drain_until_marker(
 
 #[test]
 fn level1_pty_schema_prompt_collects_string_and_launches_provider() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let (fixture, marker) = staged_fixture();
     let md_file = write_plan(
@@ -159,7 +162,7 @@ fn level1_pty_schema_prompt_collects_string_and_launches_provider() {
 
 #[test]
 fn level1_pty_schema_prompt_collects_enum_selection() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let (fixture, marker) = staged_fixture();
     let md_file = write_plan(
@@ -194,7 +197,7 @@ fn level1_pty_schema_prompt_collects_enum_selection() {
 
 #[test]
 fn level1_pty_schema_prompt_collects_boolean() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let (fixture, marker) = staged_fixture();
     let md_file = write_plan(
@@ -228,7 +231,7 @@ fn level1_pty_schema_prompt_collects_boolean() {
 
 #[test]
 fn level1_pty_schema_prompt_number_retries_on_invalid_input() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let (fixture, marker) = staged_fixture();
     let md_file = write_plan(
@@ -282,7 +285,7 @@ fn level1_pty_schema_prompt_number_retries_on_invalid_input() {
 
 #[test]
 fn level1_pty_schema_silent_suppresses_prompt_under_tty() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let (fixture, marker) = staged_fixture();
     let md_file = write_plan(
@@ -330,7 +333,7 @@ fn level1_pty_schema_status_does_not_report_templated_enum_as_invalid() {
     // (provider-derived) enum value as Invalid. The preflight + prepare
     // pipeline composes `{{ env.AGENT }}` into the resolved provider slug,
     // so the status display must agree.
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let (fixture, marker) = staged_fixture();
     let md_file = write_plan(
@@ -396,7 +399,7 @@ fn level1_pty_schema_prompt_precedes_provider_launch_with_interactive_flag() {
     // `compose -i` requests an interactive session via CLI flag. The missing
     // required property must still be collected before the provider stub
     // launches.
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let (fixture, marker) = staged_fixture();
     let md_file = write_plan(
@@ -444,7 +447,7 @@ fn level1_pty_schema_prompt_precedes_provider_launch_with_frontmatter_interactiv
     // A document with `interactive: true` in frontmatter selects interactive
     // session mode without a CLI flag. Schema collection must still complete
     // before the provider session starts.
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let (fixture, marker) = staged_fixture();
     let md_file = write_plan(
@@ -496,7 +499,7 @@ fn level1_pty_schema_prompt_appears_even_when_no_interactive_overrides_frontmatt
     // prompt must still appear under a TTY because the collection gate is
     // independent of the resolved session mode. Adding `--timeout` proves the
     // resolved mode is non-interactive (it would be rejected in interactive mode).
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let (fixture, marker) = staged_fixture();
     let md_file = write_plan(
@@ -613,7 +616,7 @@ fn drive_inline_compose_collection(cmd: Command, marker: &Path) {
 fn level1_pty_inline_compose_interactive_flag_collects_before_launch() {
     // `inline-compose -i --codex` requests an interactive session via flag.
     // The missing required `topic` must be collected before Codex launches.
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let fixture = CliProcessFixture::named("level1-schema-prompt-pty");
     let marker = fixture.cwd().join("launched.flag");
@@ -644,7 +647,7 @@ fn level1_pty_inline_compose_frontmatter_interactive_collects_before_launch() {
     // `interactive: true` frontmatter selects an interactive session for
     // `inline-compose` with no CLI flag. The missing required `topic` must
     // still be collected before Codex launches.
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let fixture = CliProcessFixture::named("level1-schema-prompt-pty");
     let marker = fixture.cwd().join("launched.flag");

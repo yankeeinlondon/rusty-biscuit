@@ -21,8 +21,11 @@
 //! ## Tier
 //!
 //! **Level 1**, and gating mirrors `level1_schema_prompt_pty.rs`:
-//! `#![cfg(unix)]` plus `require_level!(Level::L1, pty_available(), ...)` so the
-//! test skips cleanly without a PTY. `expectrl` opens `/dev/ptmx` and the test
+//! `#![cfg(unix)]` is the only exclusion, because `expectrl`'s `OsSession` is
+//! Unix-only. On a selected platform
+//! `expect_level!(Level::L1, pty_available(), ...)` **fails** when the PTY is
+//! missing rather than skipping: Level 1 is the mandatory suite, where a skip
+//! is indistinguishable from a pass. `expectrl` opens `/dev/ptmx` and the test
 //! manufactures every byte the child reads; no terminal emulator participates.
 //!
 //! Run via the canonical recipe:
@@ -40,7 +43,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Level, expect_level};
 
 mod common;
 use common::pty::*;
@@ -130,11 +133,12 @@ fn staged_fixture() -> (CliProcessFixture, PathBuf) {
 /// records its launch, returning the accumulated transcript.
 ///
 /// `confirm_one_file` enables raw mode via crossterm directly (not the
-/// `run_standalone` path), so there is no kitty-protocol raw-mode marker to wait
-/// on. Raw mode is enabled synchronously right after the dialog flushes; the
-/// brief settle guards against sending the key before the read loop starts.
+/// `run_standalone` path), so it emits no raw-mode marker byte — nothing at all
+/// between flushing the dialog and blocking on the key read. The line
+/// discipline is the observable condition instead; see
+/// [`wait_for_raw_mode_termios`].
 fn confirm_and_drain(session: &mut OsSession, marker: &Path, seed: String) -> String {
-    std::thread::sleep(Duration::from_millis(300));
+    wait_for_raw_mode_termios(session, Duration::from_secs(10));
     session.write_all(b"y").expect("confirm file selection");
     session.flush().ok();
 
@@ -151,7 +155,7 @@ fn confirm_and_drain(session: &mut OsSession, marker: &Path, seed: String) -> St
 
 #[test]
 fn level1_pty_provided_partial_single_match_confirms_and_launches() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let (fixture, marker) = staged_fixture();
     let md_file = plan_with_file_schema(fixture.cwd());
@@ -183,7 +187,7 @@ fn level1_pty_provided_partial_single_match_confirms_and_launches() {
 
 #[test]
 fn level1_pty_provided_partial_zero_match_preserves_error() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let (fixture, marker) = staged_fixture();
     let md_file = plan_with_file_schema(fixture.cwd());
@@ -210,7 +214,7 @@ fn level1_pty_provided_partial_zero_match_preserves_error() {
 
 #[test]
 fn level1_pty_provided_partial_file_array_scalar_confirms_and_launches() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let (fixture, marker) = staged_fixture();
     let md_file = plan_with_file_array_schema(fixture.cwd());
@@ -241,7 +245,7 @@ fn level1_pty_provided_partial_file_array_scalar_confirms_and_launches() {
 
 #[test]
 fn level1_pty_provided_partial_file_array_array_confirms_and_launches() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let (fixture, marker) = staged_fixture();
     let md_file = plan_with_file_array_schema(fixture.cwd());

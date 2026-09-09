@@ -26,9 +26,11 @@
 //! `real_`/`slow_`, so any of those prefixes would have left this binary
 //! running in no canonical recipe at all.
 //!
-//! Gating: `#![cfg(unix)]`, `require_level!(Level::L1, pty_available(), ...)`
-//! so the test skips cleanly without a PTY and panics under
-//! `BISCUIT_TEST_LEVEL_REQUIRED=1`.
+//! Gating: `#![cfg(unix)]` is the only exclusion, because `expectrl`'s
+//! `OsSession` is Unix-only. On a selected platform
+//! `expect_level!(Level::L1, pty_available(), ...)` **fails** when the PTY is
+//! missing rather than skipping: Level 1 is the mandatory suite, where a skip
+//! is indistinguishable from a pass.
 //!
 //! Run via the canonical recipe:
 //!
@@ -44,7 +46,7 @@ use std::fs;
 use std::io::Write;
 use std::process::Command;
 use std::time::{Duration, Instant};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Level, expect_level};
 
 mod common;
 use common::pty::*;
@@ -101,7 +103,7 @@ fn pty_sequence_prompt_dedupes_and_launches_all_steps() {
     // The interactive collector must prompt for `topic` EXACTLY ONCE
     // (dedupe), reuse the answer for every step, and only launch the
     // provider AFTER the prompt has been satisfied.
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let fixture = CliProcessFixture::named("sequence-overlay-pty");
     let count_path = fixture.cwd().join("call-count.txt");
@@ -215,7 +217,7 @@ fn pty_sequence_step_overlay_satisfies_required_property() {
     // report must honor the per-step effective override map: `state`
     // must appear as Valid for every step (because the overlay supplies
     // it) even while the user is being prompted for the missing `topic`.
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let fixture = CliProcessFixture::named("sequence-overlay-pty");
     let prompts_path = fixture.cwd().join("all-prompts.txt");
@@ -328,7 +330,7 @@ fn pty_sequence_status_report_honors_setter_supplied_required() {
     // user `--set` overrides and the per-step overlay, so `tier` would
     // appear as missing in the pre-prompt diagnostic even though every
     // step's prepare step had already accepted the supplied value.
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let fixture = CliProcessFixture::named("sequence-overlay-pty");
     let marker = fixture.cwd().join("launched.flag");
@@ -461,7 +463,7 @@ fn stage_provider_launch_stub(
 
 #[test]
 fn pty_sequence_invalid_agent_shows_preprompt_before_review() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let fixture = CliProcessFixture::named("sequence-overlay-pty");
     let marker = fixture.cwd().join("launched.flag");
@@ -515,7 +517,7 @@ fn pty_sequence_invalid_agent_shows_preprompt_before_review() {
 
 #[test]
 fn pty_sequence_zero_installed_list_shows_preprompt_before_review() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let fixture = CliProcessFixture::named("sequence-overlay-pty");
     let marker = fixture.cwd().join("launched.flag");
@@ -576,7 +578,7 @@ fn pty_sequence_stderr_tty_with_stdout_redirected_prompts() {
     // keys off `stderr` only, so the prompting state must reach the review
     // screen (emitting the pre-prompt) rather than aborting with the no-TTY
     // `agent resolution failed` error the old `stdin && stdout` gate produced.
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let fixture = CliProcessFixture::named("sequence-overlay-pty");
     let marker = fixture.cwd().join("launched.flag");
@@ -662,7 +664,7 @@ fn pty_sequence_auto_selectable_skips_review_and_launches() {
     // A one-installed-list hint (`agent: [goose, gemini]` with only `goose`
     // staged) classifies as `ListOneInstalled`, so the provider must launch with
     // no alternate-screen review UI and no keyboard input.
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let fixture = CliProcessFixture::named("sequence-overlay-pty");
     let marker = fixture.cwd().join("launched.flag");

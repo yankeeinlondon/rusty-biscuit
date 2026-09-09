@@ -22,7 +22,7 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Level, expect_level};
 
 mod common;
 use common::{CliProcessFixture, pty_available, strip_ansi, write_executable};
@@ -98,7 +98,7 @@ fn compose_command(fixture: &CliProcessFixture, query: &str) -> Command {
 
 #[test]
 fn level1_pty_compose_autocomplete_no_match_errors() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let (fixture, prompts_dir) = stage_workspace();
     fs::write(prompts_dir.join("alpha.md"), "---\n---\nbody\n").unwrap();
@@ -138,7 +138,7 @@ fn level1_pty_compose_autocomplete_no_match_errors() {
 
 #[test]
 fn level1_pty_compose_autocomplete_over_cap_errors() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let (fixture, prompts_dir) = stage_workspace();
     for i in 0..MAX_CANDIDATES + 1 {

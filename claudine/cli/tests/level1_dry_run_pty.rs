@@ -30,8 +30,11 @@
 //! `level2_dry_run_approval_capture.rs` — drives the same prompt through a real
 //! terminal (`tmux`) and compares the surface the emulator actually displayed.
 //!
-//! Gating: `#![cfg(unix)]`, `require_level!(Level::L1, pty_available(), ...)`
-//! so the test skips cleanly without a PTY.
+//! Gating: `#![cfg(unix)]` is the only exclusion, because `expectrl`'s
+//! `OsSession` is Unix-only. On a selected platform
+//! `expect_level!(Level::L1, pty_available(), ...)` **fails** when the PTY is
+//! missing rather than skipping: Level 1 is the mandatory suite, where a skip
+//! is indistinguishable from a pass.
 //!
 //! Run via the canonical recipe:
 //!
@@ -48,7 +51,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Level, expect_level};
 
 mod common;
 use common::{CliProcessFixture, pty_available, write_executable};
@@ -236,7 +239,7 @@ fn capture_approval_prompt(staged: &StagedApproval, dry_run: bool) -> Vec<String
 /// the provider.
 #[test]
 fn level1_pty_dry_run_shell_approval_prompt_appears_and_allows() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let staged = stage_shell_approval_doc();
     let marker = staged.launch_marker.clone();
@@ -296,7 +299,7 @@ fn level1_pty_dry_run_shell_approval_prompt_appears_and_allows() {
 /// rather than a single-mode existence check.
 #[test]
 fn level1_pty_dry_run_approval_prompt_matches_normal_mode() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     // One shared fixture so the prompt's `Source:` line (which embeds the
     // document path) is identical across both runs. Denying persists nothing,

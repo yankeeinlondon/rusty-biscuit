@@ -23,6 +23,7 @@ use super::{strip_ansi, write_executable};
 use expectrl::session::OsSession;
 use std::fs;
 use std::io::Write;
+use std::os::fd::{AsRawFd, RawFd};
 use std::time::{Duration, Instant};
 
 /// DSR cursor-position query (`ESC[6n`) that crossterm — via ratatui's
@@ -307,6 +308,75 @@ pub(crate) fn wait_for_raw_mode_reentry(
     panic!(
         "prompt did not re-enter raw mode within {deadline:?}; transcript:\n{transcript}"
     );
+}
+
+/// Poll cadence for [`wait_for_raw_mode_termios`].
+///
+/// The window being observed is the child's own `tcsetattr` call, so the wait
+/// is normally over within one interval. Two milliseconds keeps the loop from
+/// dominating the measurement it replaced without spinning a core.
+const TERMIOS_POLL_INTERVAL: Duration = Duration::from_millis(2);
+
+/// Report whether the pty's line discipline is still in canonical mode.
+///
+/// `tcgetattr` on the **master** fd reports the pty's termios on both Linux and
+/// macOS — the same mechanism `ptyprocess::PtyProcess::get_echo` relies on —
+/// so the parent can observe a mode change the child made on its own tty.
+fn tty_is_canonical(fd: RawFd) -> std::io::Result<bool> {
+    let mut termios = std::mem::MaybeUninit::<libc::termios>::uninit();
+    // SAFETY: `fd` is the live PTY master owned by the caller's session, and
+    // `tcgetattr` initializes the struct on success.
+    let rc = unsafe { libc::tcgetattr(fd, termios.as_mut_ptr()) };
+    if rc != 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: `tcgetattr` returned 0, so the struct is initialized.
+    let termios = unsafe { termios.assume_init() };
+    Ok(termios.c_lflag & libc::ICANON != 0)
+}
+
+/// Block until the child has switched the pty out of canonical mode — i.e. it
+/// has called `enable_raw_mode()` and its next act is a blocking key read.
+///
+/// Use this for a prompt that drives crossterm directly instead of going
+/// through biscuit-tui's `run_standalone`: [`wait_for_raw_mode`]'s
+/// [`KBD_ENHANCEMENT_PUSH`] marker is written by `prepare_terminal`, and a
+/// direct `crossterm::terminal::enable_raw_mode()` emits no bytes at all. The
+/// last thing such a child writes is its own prompt text, which says nothing
+/// about whether the line discipline has flipped yet.
+///
+/// The mode itself is therefore the final required condition, and it is
+/// sufficient rather than merely necessary: once `ICANON` is clear a keystroke
+/// is safe to send whether or not the child has reached its `read` yet,
+/// because the byte queues on the tty in raw mode and the read returns it.
+/// Sending while `ICANON` is still set is what races — the byte lands in the
+/// canonical line buffer, and whether it survives the mode change is
+/// kernel-specific.
+///
+/// Panics when the mode has not changed within `deadline`, so a wedged child is
+/// a failure rather than an unbounded wait.
+///
+/// Expect the loop to return on its first probe. The pty *is* canonical at
+/// spawn, but the child's `tcsetattr` follows its dialog flush immediately,
+/// while the caller needs a full read round-trip to see that dialog — so the
+/// flip has already happened by the time anyone asks. This is the bound that
+/// keeps the send correct if that ordering ever slips, not a wait that is
+/// normally paid.
+pub(crate) fn wait_for_raw_mode_termios(session: &mut OsSession, deadline: Duration) {
+    let fd = session.as_raw_fd();
+    let stop = Instant::now() + deadline;
+    loop {
+        match tty_is_canonical(fd) {
+            Ok(false) => return,
+            Ok(true) => {}
+            Err(err) => panic!("could not read the PTY line discipline: {err}"),
+        }
+        if Instant::now() >= stop {
+            break;
+        }
+        std::thread::sleep(TERMIOS_POLL_INTERVAL);
+    }
+    panic!("child did not leave canonical mode within {deadline:?}");
 }
 
 /// Pre-stage a minimal claudine config at `$HOME/.claudine/config.json`.

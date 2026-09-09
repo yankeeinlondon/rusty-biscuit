@@ -8,8 +8,11 @@
 //! Each test spawns the real `claudine` binary with stderr attached to a PTY so
 //! `std::io::stderr().is_terminal()` is true (TTY branch) and forces an
 //! optimistic color terminal (`FORCE_COLOR=1`) so the SGR + OSC 8 pipeline runs
-//! at full fidelity. Gated by `require_level!(Level::L1, pty_available(), …)` so
-//! they skip cleanly without a PTY and panic under `BISCUIT_TEST_LEVEL_REQUIRED=1`.
+//! at full fidelity. `#![cfg(unix)]` is the only exclusion, because `expectrl`'s
+//! `OsSession` is Unix-only; on a selected platform
+//! `expect_level!(Level::L1, pty_available(), …)` **fails** when the PTY is
+//! missing rather than skipping, since Level 1 is the mandatory suite where a
+//! skip is indistinguishable from a pass.
 //!
 //! Exact YAML line-ending fidelity (LF vs CRLF, delimiter exclusion) is proved
 //! precisely by the unit capture/render tests in
@@ -23,7 +26,7 @@ use expectrl::Session;
 use expectrl::session::OsSession;
 use std::io::Write;
 use std::time::{Duration, Instant};
-use test_toolkit::{Level, require_level};
+use test_toolkit::{Level, expect_level};
 
 mod common;
 use common::{CliProcessFixture, pty_available, strip_ansi, write};
@@ -98,7 +101,7 @@ fn run_mismatch_under_pty() -> (String, std::path::PathBuf) {
 
 #[test]
 fn level1_pty_mismatch_takes_tty_branch_with_yaml_block() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     let (transcript, _doc) = run_mismatch_under_pty();
 
     assert!(
@@ -141,7 +144,7 @@ fn level1_pty_mismatch_takes_tty_branch_with_yaml_block() {
 
 #[test]
 fn level1_pty_mismatch_emits_sgr_and_osc8_link() {
-    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+    expect_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
     let (transcript, doc) = run_mismatch_under_pty();
 
     // Styling fired: the status block border and inline `<cyan>` tags emit SGR
