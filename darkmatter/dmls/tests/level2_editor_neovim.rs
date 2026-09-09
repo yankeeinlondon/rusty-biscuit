@@ -102,6 +102,9 @@ fn stage_workspace() -> (tempfile::TempDir, PathBuf) {
     fs::write(dir.path().join("tokens.md"), FIXTURE_DOC).unwrap();
     fs::write(dir.path().join("other.md"), "# Other\n").unwrap();
     fs::write(dir.path().join(".dmls.toml"), DMLS_TOML).unwrap();
+    for name in ["home", "cache", "config", "data"] {
+        fs::create_dir(dir.path().join(name)).unwrap();
+    }
     #[cfg(windows)]
     let root = dir.path().to_path_buf();
     #[cfg(not(windows))]
@@ -154,6 +157,11 @@ fn run_probe(mode: &str, root: &Path) -> ProbeReport {
         .env("DMLS_L2_BIN", biscuit_test_harness::bin_exe!("dmls"))
         .env("DMLS_L2_ROOT", root)
         .env("DMLS_L2_MODE", mode)
+        .env("HOME", root.join("home"))
+        .env("USERPROFILE", root.join("home"))
+        .env("XDG_CACHE_HOME", root.join("cache"))
+        .env("XDG_CONFIG_HOME", root.join("config"))
+        .env("XDG_DATA_HOME", root.join("data"))
         .output()
         .expect("spawn headless nvim");
     // `nvim -l` routes `print()` through the message system, which lands on
@@ -249,10 +257,7 @@ fn level2_neovim_decodes_semantic_token_families_and_positions() {
     // DMLS supports both, and the assertions below verify that Neovim decodes
     // the negotiated token positions back to the intended byte columns.
     assert!(
-        matches!(
-            report.offset_encoding.as_deref(),
-            Some("utf-8" | "utf-16")
-        ),
+        matches!(report.offset_encoding.as_deref(), Some("utf-8" | "utf-16")),
         "Neovim negotiated an unsupported encoding: {:?}",
         report.offset_encoding
     );
@@ -260,7 +265,10 @@ fn level2_neovim_decodes_semantic_token_families_and_positions() {
     // F1 interpolation: whole `{{ … }}` span, not inert.
     assert_classified(&report, "interpolation", "macro", &["interpolation"]);
     let (site, token) = single(&report, "interpolation");
-    assert_eq!(token.start_col, site.col, "interpolation must span the `{{{{`");
+    assert_eq!(
+        token.start_col, site.col,
+        "interpolation must span the `{{{{`"
+    );
     assert_eq!(
         token.end_col - token.start_col,
         "{{ title }}".len() as u32,
@@ -281,10 +289,20 @@ fn level2_neovim_decodes_semantic_token_families_and_positions() {
         "{{ east }}".len() as u32,
         "unicode token span length"
     );
-    assert_classified(&report, "unicode_interpolation", "macro", &["interpolation"]);
+    assert_classified(
+        &report,
+        "unicode_interpolation",
+        "macro",
+        &["interpolation"],
+    );
 
     // F1 literal: inert, and split per line (continuation starts at col 0).
-    assert_classified(&report, "literal_open", "macro", &["interpolation", "inert"]);
+    assert_classified(
+        &report,
+        "literal_open",
+        "macro",
+        &["interpolation", "inert"],
+    );
     assert_classified(
         &report,
         "literal_continuation",
@@ -352,10 +370,7 @@ fn has_indexed_fg(raw_line: &str, index: u16) -> bool {
 
 /// The raw (SGR-bearing) pane line whose plain text contains `needle`.
 fn raw_line_containing<'a>(frame: &'a CapturedFrame, needle: &str) -> Option<&'a str> {
-    let idx = frame
-        .plain
-        .lines()
-        .position(|line| line.contains(needle))?;
+    let idx = frame.plain.lines().position(|line| line.contains(needle))?;
     frame.raw.lines().nth(idx)
 }
 
@@ -374,7 +389,7 @@ fn wait_for_frame(
             }
             last = Some(frame);
         }
-        std::thread::sleep(Duration::from_millis(200));
+        std::thread::sleep(Duration::from_millis(50));
     }
     panic!(
         "timed out waiting for {what}; last pane:\n{}",
@@ -398,7 +413,11 @@ fn level2_neovim_tmux_renders_recipe_colors_and_repaints() {
             "__DMLS_BIN__",
             &biscuit_test_harness::bin_exe!("dmls").to_string_lossy(),
         )
-        .replace("__ROOT__", &root.to_string_lossy());
+        .replace("__ROOT__", &root.to_string_lossy())
+        .replace("__HOME__", &root.join("home").to_string_lossy())
+        .replace("__CACHE__", &root.join("cache").to_string_lossy())
+        .replace("__CONFIG__", &root.join("config").to_string_lossy())
+        .replace("__DATA__", &root.join("data").to_string_lossy());
     let init_path = root.join("init.lua");
     fs::write(&init_path, init).unwrap();
 

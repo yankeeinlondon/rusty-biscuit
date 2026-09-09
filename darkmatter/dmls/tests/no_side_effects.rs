@@ -45,7 +45,11 @@ impl Fixture {
         let id = RequestId::from(self.next_id);
         self.client
             .sender
-            .send(Message::Request(Request::new(id.clone(), method.to_string(), params)))
+            .send(Message::Request(Request::new(
+                id.clone(),
+                method.to_string(),
+                params,
+            )))
             .expect("send request");
         loop {
             let message = self
@@ -65,7 +69,10 @@ impl Fixture {
     fn notify(&self, method: &str, params: Value) {
         self.client
             .sender
-            .send(Message::Notification(Notification::new(method.to_string(), params)))
+            .send(Message::Notification(Notification::new(
+                method.to_string(),
+                params,
+            )))
             .expect("send notification");
     }
 
@@ -108,7 +115,11 @@ impl Fixture {
                 "workspaceFolders": [ { "uri": root_uri.as_str(), "name": "scratch" } ]
             }),
         );
-        assert!(response.error.is_none(), "initialize failed: {:?}", response.error);
+        assert!(
+            response.error.is_none(),
+            "initialize failed: {:?}",
+            response.error
+        );
         self.notify("initialized", json!({}));
     }
 
@@ -116,13 +127,22 @@ impl Fixture {
         let response = self.request("shutdown", Value::Null);
         assert!(response.error.is_none());
         self.notify("exit", Value::Null);
-        let outcome = self.outcome.recv_timeout(Duration::from_secs(10)).expect("server finished");
+        let outcome = self
+            .outcome
+            .recv_timeout(Duration::from_secs(10))
+            .expect("server finished");
         assert_eq!(outcome, Ok(()), "server exited with error");
     }
 }
 
 #[test]
 fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
+    #[cfg(feature = "effects-instrumentation")]
+    let before = (
+        darkmatter::effects::engine_build_count(),
+        darkmatter::effects::network_attempt_count(),
+    );
+
     let workspace = tempfile::tempdir().unwrap();
     // A sentinel a shell directive *would* create if DMLS ever executed it. Its
     // continued absence after every request is the "no child process" proof.
@@ -170,7 +190,10 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
     let has_security = diagnostics
         .iter()
         .any(|diagnostic| diagnostic["code"] == json!("dm.security.disallowed_command"));
-    assert!(has_security, "the dangerous ::shell must be diagnosed: {diagnostics:?}");
+    assert!(
+        has_security,
+        "the dangerous ::shell must be diagnosed: {diagnostics:?}"
+    );
 
     // Drive every read-side request across the shell/remote spans and the
     // Expression-typed frontmatter values. Each must return promptly (no Git or
@@ -204,7 +227,11 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
                 params["context"] = json!({ "includeDeclaration": true });
             }
             let response = fixture.request(method, params);
-            assert!(response.error.is_none(), "{method} errored: {:?}", response.error);
+            assert!(
+                response.error.is_none(),
+                "{method} errored: {:?}",
+                response.error
+            );
         }
     }
     let folding = fixture.request(
@@ -224,7 +251,11 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
         "textDocument/semanticTokens/full",
         json!({ "textDocument": { "uri": doc_uri.as_str() } }),
     );
-    assert!(full.error.is_none(), "semanticTokens/full errored: {:?}", full.error);
+    assert!(
+        full.error.is_none(),
+        "semanticTokens/full errored: {:?}",
+        full.error
+    );
     let range = fixture.request(
         "textDocument/semanticTokens/range",
         json!({
@@ -235,7 +266,11 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
             }
         }),
     );
-    assert!(range.error.is_none(), "semanticTokens/range errored: {:?}", range.error);
+    assert!(
+        range.error.is_none(),
+        "semanticTokens/range errored: {:?}",
+        range.error
+    );
 
     // The standalone content-activation path must be equally passive. Neither
     // the named import nor the example reference is opened on a keystroke.
@@ -263,7 +298,11 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
                 "position": { "line": 1, "character": 16 }
             }),
         );
-        assert!(response.error.is_none(), "{method} errored: {:?}", response.error);
+        assert!(
+            response.error.is_none(),
+            "{method} errored: {:?}",
+            response.error
+        );
     }
 
     fixture.shutdown();
@@ -273,5 +312,15 @@ fn dsl_requests_spawn_no_processes_and_open_no_sockets() {
     assert!(
         !sentinel.exists(),
         "a shell directive was executed — the language server is not passive"
+    );
+
+    #[cfg(feature = "effects-instrumentation")]
+    assert_eq!(
+        (
+            darkmatter::effects::engine_build_count(),
+            darkmatter::effects::network_attempt_count(),
+        ),
+        before,
+        "passive LSP requests must build no effect engine and attempt no network access",
     );
 }

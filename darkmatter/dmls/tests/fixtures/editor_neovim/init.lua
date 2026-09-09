@@ -13,6 +13,11 @@
 
 vim.o.swapfile = false
 vim.o.termguicolors = false
+vim.env.HOME = [[__HOME__]]
+vim.env.USERPROFILE = [[__HOME__]]
+vim.env.XDG_CACHE_HOME = [[__CACHE__]]
+vim.env.XDG_CONFIG_HOME = [[__CONFIG__]]
+vim.env.XDG_DATA_HOME = [[__DATA__]]
 vim.cmd('syntax off')
 vim.diagnostic.config({ virtual_text = false, signs = false, underline = false })
 
