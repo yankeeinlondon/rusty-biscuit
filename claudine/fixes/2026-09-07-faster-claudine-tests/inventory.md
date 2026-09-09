@@ -130,10 +130,38 @@ omission.
 
 ## Baseline
 
-Phase 1's CI baseline is **pending** — the predecessor has not merged, so no
-post-merge run exists to read (see [`log.md`](log.md) § Blocked). The table
-below is the local attribution Phase 1 recorded, kept in the three separate
-columns the plan requires. It is evidence about *this host*, not a target.
+### CI — one run of three (2026-09-08)
+
+The predecessor merged to `main` as `444213eb5` (PR #69). The first post-merge
+`ci` run, `34173378609`, is green on all four legs; its artifacts are under
+[`baseline/34173378609/`](baseline/34173378609/) and the gate's own table is
+reproduced here. **Two more consecutive green `main` runs are pending** — see
+[`baseline/README.md`](baseline/README.md) for why later `main` pushes are a
+different source state and what an operator has to do about it.
+
+| Environment | Build/setup | Runner elapsed | Summed duration | Tests | Failures | Skips |
+|---|---:|---:|---:|---:|---:|---:|
+| `ubuntu-latest` | 695.1 s | 324.9 s | 324.7 s | 2466 | 0 | 0 |
+| `macos-latest` | 832.3 s | 753.7 s | 753.5 s | 2466 | 0 | 0 |
+| `windows-latest` | 1012.9 s | 356.1 s | 355.8 s | 2105 | 0 | 0 |
+| `wsl2-ubuntu` | 81.3 s | 692.7 s | 692.2 s | 2466 | 0 | 0 |
+
+`claudine-cli`'s CI profile runs at `max-threads = 1`, which is why runner
+elapsed and summed duration agree to within a second on every leg. The build
+column is large because each leg compiles from a cold runner cache; the WSL2 leg
+is the exception because its `nextest archive` was built on the host job.
+`windows-latest` runs 361 fewer identities: 372 Unix-only tests (every
+`#![cfg(unix)]` binary) against 11 Windows-only ones; the three Unix legs carry
+identical identity sets. The PR's own `pull_request` run on the identical tree
+(`34159725015`) is stored beside it as a supplementary sample: same identities
+on every leg, matched-summed ratio 0.93 / 1.05 / 0.86 / 1.00 against the `main`
+run — the run-to-run noise a three-run baseline exists to bracket.
+
+### Local — attribution only
+
+The table below is the local attribution Phase 1 recorded, kept in the three
+separate columns the plan requires. It is evidence about *this host*, not a
+target.
 
 | Gate | Build/setup | Runner elapsed | Summed test duration | Identities |
 |---|---:|---:|---:|---:|
@@ -193,6 +221,12 @@ and never closed by adjusting the budget after the fact (AC7).
 When Phase 9 fills `perLegFamilySummed` from the stored JUnit artifacts, the
 resulting table lands **here**, beside the baseline above, so budget review and
 evidence review remain one act (spec RB5).
+
+**Phase 9 status (2026-09-08): still refused, for a smaller reason.** The
+provenance is now real — `budgets-pending.json` declares one collected `main`
+run per leg (`34173378609`) — but one is not three, and nothing yet joins a
+JUnit identity to a family (`attribution.ts` reads nextest logs, not the CI
+XML). Both remain open; neither is closed by a local number.
 
 ## Family index
 

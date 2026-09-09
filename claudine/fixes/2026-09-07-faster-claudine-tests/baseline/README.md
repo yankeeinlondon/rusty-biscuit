@@ -52,8 +52,32 @@ questions.
 | Runner elapsed | `<testsuites time>` | nextest's own wall time, sensitive to runner core count |
 | Summed duration | Σ `<testcase time>` | total test work, the only column comparable across runners |
 
-## Status
+## Platform exclusions
 
-Phase 1's CI tranche is **not yet collected** — see `../log.md`. Committing,
-pushing and merging are operator actions, so no post-merge run exists to
-download. `local-gates/` holds attribution only and establishes no target.
+Every `requiredTests` entry lives in a `#![cfg(unix)]` binary, so the
+`windows-latest` leg cannot execute any of them — 2,105 identities against
+2,466 on the three Unix legs (372 Unix-only, 11 Windows-only). `expectations.json`
+declares those eleven under `platformExclusions["windows-latest"]`; the gate
+reports them in their own table instead of as `missing-test`, and fails with
+`stale-exclusion` if one of them ever *does* run on Windows. The three Unix legs
+carry identical identity sets.
+
+## Status (2026-09-08)
+
+The predecessor merged to `main` as `444213eb5` (PR #69, 00:27 UTC). Collected:
+
+| Run | Event | Source | Legs | Gate |
+|---|---|---|---|---|
+| [`34173378609/`](34173378609/) | push to `main` | `444213eb5` | four, all green | exit 0 — **baseline run 1 of 3** |
+| [`34159725015/`](34159725015/) | `pull_request` on PR #69 | `a9e88c069` — tree-identical to `444213eb5` (`git diff a9e88c069 444213eb5` is empty) | four, all green | exit 0 — **supplementary**, same tree, not counted toward the three `main` runs |
+
+Each run directory also holds the gate's verbatim output (`junit-metrics.txt`).
+`local-gates/` holds attribution only and establishes no target.
+
+**Still pending: two more consecutive green runs on `main` at a comparable
+source state.** `main` moved 13 hours after the merge (PR #70, `6504747e2`),
+touching `claudine/lib`, four `claudine/cli/tests` files and the `test-real`
+recipe, so later `main` pushes are a different source state; run `34232285291`
+at `6504747e2` is recorded in `../log.md` § Phase 9 with that caveat. The one
+way to get two more samples at `444213eb5` itself is `gh run rerun 34173378609`,
+which is an operator call — the `main` concurrency group cancels in-flight runs.

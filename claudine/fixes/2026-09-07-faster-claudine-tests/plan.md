@@ -1,7 +1,7 @@
 ---
 total_phases: 10
 created: 2026-09-07
-phase: 1
+phase: 10
 agent: claude/default
 yolo: "true"
 fix: 2026-09-07-faster-claudine-tests
@@ -279,6 +279,218 @@ skills_files_updated_during_phase_8: []
 # edited. The baseline was measured in a detached worktree with its own build
 # directory (`/tmp/rb-baseline-9fc5151a0`), left in place for Phases 9–10.
 packages_touched_during_phase_8: []
+phase_9_status: >-
+    partial, human-gated — the predecessor merged to main (444213eb5) and its
+    first CI run is stored, gated and green on all four legs (baseline 1 of
+    3); consolidated local validation green (ci-local 147/147 over 73
+    packages, check-windows exit 0, L2 236/237 with the known host-condition
+    survivor); the gate learned platform exclusions and a within-environment
+    comparison; candidate CI runs are 0 of 3 because merging main (13
+    conflicts), committing and pushing are operator actions — handoff written
+source_files_during_phase_9:
+    - claudine/fixes/2026-09-07-faster-claudine-tests/junit-metrics.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/junit-metrics.test.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/baseline/expectations.json
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/expectations.json
+    - claudine/fixes/2026-09-07-faster-claudine-tests/attribution/budgets-pending.json
+docs_updated_during_phase_9:
+    - claudine/fixes/2026-09-07-faster-claudine-tests/plan.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/log.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/inventory.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/baseline/README.md
+    - claudine/fixes/_completed/2026-08-01-cli-slow-tests/deferred-performance.md
+# Evidence: the two stored baseline runs (four downloaded artifact trees each,
+# plus the gate's verbatim output) and the local-gate logs.
+docs_created_during_phase_9:
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/README.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/pr-body.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/baseline/34173378609/junit-metrics.txt
+    - claudine/fixes/2026-09-07-faster-claudine-tests/baseline/34159725015/junit-metrics.txt
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/ci-local.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/check-windows.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/just-test-l2.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/just-test-l2-claudine-gen.log
+# Nothing this phase found falsified a written skill claim; Phase 10 owns the
+# skill sweep and the new candidates are in `log.md` § Phase 9 Carried forward.
+skills_files_updated_during_phase_9: []
+# Validation only: every workspace package was *run* by `ci-local`, none was
+# edited. No Rust source changed in this phase.
+packages_touched_during_phase_9: []
+phase_10_status: >-
+    closed for what this session can answer — results.md written with the
+    three completion claims separate; seven deferrals given an owner document;
+    three skill files corrected where a workflow claim was missing or false;
+    two Windows-only unused-import warnings closed with cfg gates (cold
+    check-windows: zero warnings); every local gate run or credited; AC1–AC5
+    and AC7 verified, AC6 verified locally and pending on CI (candidate runs
+    0 of 3, baseline 1 of 3, no budget derivable)
+source_files_during_phase_10:
+    - claudine/cli/tests/wrap_basics.rs
+    - claudine/cli/tests/compose_caller_file_provenance.rs
+docs_updated_during_phase_10:
+    - claudine/fixes/2026-09-07-faster-claudine-tests/plan.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/log.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/spec.md
+# Evidence logs for the Phase 10 gate ledger sit beside Phase 9's under
+# `candidate/local-gates/`.
+docs_created_during_phase_10:
+    - claudine/fixes/2026-09-07-faster-claudine-tests/results.md
+    - claudine/fixes/_unscheduled/test-suite-residuals/spec.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/phase10-just-test.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/phase10-test-leaks-claudine.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/phase10-check-windows.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/phase10-check-windows-cold.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/phase10-just-lint.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/phase10-just-doctest.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/phase10-sniff-just-test.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/phase10-sniff-just-lint.log
+# Only where a workflow claim was missing (the mingw cross-compile route, the
+# measurement method) or false (the Windows console-control row).
+skills_files_updated_during_phase_10:
+    - .claude/skills/rust-testing/SKILL.md
+    - .claude/skills/rust-testing/test-suite-audits.md
+    - .claude/skills/claudine/signal-handling.md
+# Two test-file import gates; no library, CLI or production source changed.
+packages_touched_during_phase_10:
+    - claudine-cli
+# Aggregates over Phases 1–10: every source file and every documentation or
+# skill file created or updated by the plan.
+source_code:
+    - claudine/fixes/2026-09-07-faster-claudine-tests/junit-metrics.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/junit-metrics.test.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/fixtures/nextest-l1-excerpt.xml
+    - claudine/fixes/2026-09-07-faster-claudine-tests/baseline/expectations.json
+    - claudine/fixes/2026-09-07-faster-claudine-tests/inventory-reconciler.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/inventory-reconciler.test.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/families.json
+    - claudine/fixes/2026-09-07-faster-claudine-tests/enumeration/captures.json
+    - claudine/fixes/2026-09-07-faster-claudine-tests/attribution.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/attribution.test.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/attribution/launch-cwd-probe.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/attribution/budgets-pending.json
+    - claudine/cli/tests/common/mod.rs
+    - claudine/cli/tests/common/host_tools.rs
+    - claudine/cli/tests/cli_process_fixture.rs
+    - claudine/cli/tests/spawn_site_guard.rs
+    - claudine/cli/tests/system_prompt_perf_bench.rs
+    - claudine/cli/tests/sequence_magic_reference.rs
+    - claudine/cli/tests/loop_cli.rs
+    - claudine/cli/tests/level2_lifecycle_control.rs
+    - claudine/cli/tests/contamination_probes.rs
+    - claudine/cli/tests/compose_cli.rs
+    - claudine/cli/tests/compose_interactive_timeout_cli.rs
+    - claudine/cli/tests/compose_removed_validation_keys.rs
+    - claudine/cli/tests/compose_schema_cli.rs
+    - claudine/cli/tests/compose_system_prompt_lifetime.rs
+    - claudine/cli/tests/compose_ttff_perf.rs
+    - claudine/cli/tests/composition_outputs.rs
+    - claudine/cli/tests/inline_compose_cli.rs
+    - claudine/cli/tests/sequence_cli.rs
+    - claudine/cli/tests/sequence_errors_cli.rs
+    - claudine/cli/tests/sequence_groups.rs
+    - claudine/cli/tests/sequence_jit.rs
+    - claudine/cli/tests/sequence_prompt_property.rs
+    - claudine/cli/tests/sequence_sources_cli.rs
+    - claudine/cli/tests/wrap_sequence_composition.rs
+    - claudine/cli/tests/context_command.rs
+    - claudine/cli/tests/skills_integration.rs
+    - claudine/cli/tests/errors_command.rs
+    - claudine/cli/tests/effective_diagnostic_render.rs
+    - claudine/cli/tests/completion_contract.rs
+    - claudine/cli/tests/completion_perf.rs
+    - claudine/cli/tests/completion_resolution_round_trip.rs
+    - claudine/cli/tests/handle_deadline.rs
+    - claudine/cli/tests/handle_blocking_output.rs
+    - claudine/cli/tests/level1_structured_error_message.rs
+    - claudine/cli/tests/protect_cli.rs
+    - claudine/cli/tests/provider_error_finalize.rs
+    - claudine/cli/tests/shipped_prompts.rs
+    - claudine/cli/tests/wrap_sigint.rs
+    - claudine/cli/tests/level1_compose_autocomplete_failure_pty.rs
+    - claudine/cli/tests/level1_inline_compose_mismatch_pty.rs
+    - claudine/cli/tests/sequence_overlay_pty.rs
+    - claudine/cli/tests/wrap_ctrl_c_windows.rs
+    - claudine/cli/tests/sequence_ctrl_c_windows.rs
+    - .config/nextest.toml
+    - claudine/justfile
+    - claudine/rendezvous/justfile
+    - claudine/catalog-types/Cargo.toml
+    - claudine/contract/Cargo.toml
+    - claudine/rendezvous/core/Cargo.toml
+    - claudine/rendezvous/daemon/Cargo.toml
+    - claudine/rendezvous/client/Cargo.toml
+    - claudine/lib/src/composition/mod.rs
+    - claudine/lib/src/composition/resolve.rs
+    - claudine/lib/src/composition/schema/tests.rs
+    - claudine/lib/src/composition/sequence/preflight/tests.rs
+    - claudine/lib/src/composition/sequence/task/tests.rs
+    - claudine/lib/src/linking/paths.rs
+    - claudine/lib/src/render/event_renderer/mod.rs
+    - claudine/lib/src/stream/stderr/tests.rs
+    - claudine/cli/tests/error_guards.rs
+    - claudine/cli/tests/wrap_opencode.rs
+    - claudine/gen/tests/signals_validation.rs
+    - claudine/cli/tests/common/pty.rs
+    - claudine/cli/tests/level2_schema_prompt_pty.rs
+    - claudine/cli/tests/level2_provided_partial_file_pty.rs
+    - claudine/cli/tests/level2_dry_run_pty.rs
+    - claudine/cli/tests/level2_pty_tests.rs
+    - claudine/rendezvous/core/src/local_endpoint/test_support.rs
+    - claudine/rendezvous/daemon/tests/pairing_and_sync.rs
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement.test.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement-runner.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/sentinels.ts
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement/plan.json
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement/plan-series-2.json
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement/cohorts.json
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement/targets.json
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/expectations.json
+    - claudine/cli/tests/wrap_basics.rs
+    - claudine/cli/tests/compose_caller_file_provenance.rs
+documentation:
+    - claudine/fixes/2026-09-07-faster-claudine-tests/plan.md
+    - claudine/fixes/_completed/2026-08-01-cli-slow-tests/deferred-performance.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/log.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/baseline/README.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/inventory.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/attribution.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement/report.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement/series-2/report.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/measurement/sentinels/summary.tsv
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/README.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/pr-body.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/baseline/34173378609/junit-metrics.txt
+    - claudine/fixes/2026-09-07-faster-claudine-tests/baseline/34159725015/junit-metrics.txt
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/ci-local.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/check-windows.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/just-test-l2.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/just-test-l2-claudine-gen.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/spec.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/results.md
+    - claudine/fixes/_unscheduled/test-suite-residuals/spec.md
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/phase10-just-test.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/phase10-test-leaks-claudine.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/phase10-check-windows.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/phase10-check-windows-cold.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/phase10-just-lint.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/phase10-just-doctest.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/phase10-sniff-just-test.log
+    - claudine/fixes/2026-09-07-faster-claudine-tests/candidate/local-gates/phase10-sniff-just-lint.log
+    - .claude/skills/claudine/SKILL.md
+    - .claude/skills/rust-testing/SKILL.md
+    - .claude/skills/claudine/architecture.md
+    - .claude/skills/rust-testing/test-suite-audits.md
+    - .claude/skills/claudine/signal-handling.md
+packages_touched:
+    - claudine-cli
+    - claudine
+    - claudine-catalog-types
+    - claudine-contract
+    - claudine-gen
+    - rendezvous-core
+    - rendezvous-daemon
+    - rendezvous-client
 ---
 
 # Execution plan — Faster Claudine tests through complete evaluation and explicit fixtures
@@ -1506,15 +1718,24 @@ Human-gated like Phase 1: push and read.
 Configured legs include `ubuntu-latest`, `macos-latest`,
 `windows-latest`, and WSL2; record the actual selected packages on each.
 
-- [ ] Complete one consolidated validation of the affected scope before
+- [x] Complete one consolidated validation of the affected scope before
       push handoff. Inspect the actual recipe expansion: if `just ci-local`
       already includes lint, run it once without a preceding
       `just ci-local --lint-only`. Credit equivalent current-state checks in
       the validation ledger only where the workflow supports that reuse;
       otherwise run the required gate once. Record scope, features, and any
       checks still missing. This step does not authorize a commit or push.
-- [ ] Run `just check-windows` where the mingw toolchain is present; state the
+      `ci-local` runs lint and test by default, so it ran once: **73 packages,
+      class=full** (the `.config/nextest.toml` deletions are a non-comment
+      global change), **147/147 gates, exit 0** in 44 m 16 s. Nothing
+      credited from earlier phases; ledger in `log.md` § Phase 9. Still
+      missing: candidate CI itself, L3 (focus), `real` (host auth).
+- [x] Run `just check-windows` where the mingw toolchain is present; state the
       limitation explicitly where it is not.
+      Toolchain present; exit 0 (warm, 1.3 s) with the two `wrap_basics.rs`
+      unused-import warnings Phase 1 disclosed still emitted. mingw, not MSVC;
+      the MSVC surface is covered by the `windows-latest` check job on the
+      baseline run (`candidate/local-gates/check-windows.log`).
 - [ ] Open or hand off the PR once implementation and applicable local
       checks are ready; do not wait for repeated performance CI samples.
       Use the first candidate run on every configured package/environment leg
@@ -1525,19 +1746,44 @@ Configured legs include `ubuntu-latest`, `macos-latest`,
       image, and features comparable, and record every intervening failure.
       Baseline gaps and missing samples remain pending; PR readiness does not
       imply merge readiness or completion of the performance criteria.
+      **Handed off, not opened — operator action.** `candidate/README.md`
+      carries the steps and `candidate/pr-body.md` the description. Blocked
+      on a merge of `origin/main` that conflicts in thirteen files (PR #70
+      landed after this branch diverged), a signed commit and a push, none of
+      which this non-interactive session can do. Candidate runs: **0 of 3**
+      per leg. Baseline: the predecessor merged (`444213eb5`) and its first
+      `main` run is stored and green on all four legs, **1 of 3**.
 - [ ] Compare **matched tests within each environment** against that
       environment's own baseline. Report additions and platform exclusions
       separately; do not require identical cross-platform counts.
+      **Tool ready, candidate pending.** `junit-metrics.ts --baseline` matches
+      identities within one environment and lists additions and removals
+      apart, never across legs; platform exclusions are declared
+      (`windows-latest`: eleven `#![cfg(unix)]` tests, 2105 vs 2466
+      identities) and reported in their own table. Smoke on real data: the
+      tree-identical PR run against the `main` run matches every identity.
 - [ ] Run `junit-metrics.ts` as the gate over both baseline and candidate sets;
       it must fail on malformed reports, missing artifacts or tests, duplicate
       identities, invalid durations, and failed runs.
+      **Baseline gated (exit 0 on both stored runs); candidate pending.** The
+      first pass over real artifacts failed on Windows's eleven `cfg(unix)`
+      absences, so the gate gained `platformExclusions` plus a
+      `stale-exclusion` violation — stricter, not looser. 57 tests.
 - [ ] Compare against the Phase 3 budgets. **Report misses and their causes;
       do not invent a universal speedup percentage** and do not close a miss by
       adjusting the budget after the fact.
-- [ ] Run the affected L2/L3/real tiers through their canonical recipes only
+      **No budget exists to compare against.** `deriveBudgets` still refuses:
+      one run per leg, not three, and no JUnit → family aggregator yet.
+      Causes named in `log.md` § Phase 9; no percentage offered.
+- [x] Run the affected L2/L3/real tiers through their canonical recipes only
       where the resources exist (`just test-l2`, `just test-l3`,
       `just test-real`); record unavailable runtime evidence as **pending**, not
       as passing.
+      `just test-l2`: 236/237, the Phases 4–7 Atuin/WezTerm host-condition
+      survivor, plus `claudine-gen`'s 3 run separately (the recipe aborts
+      first). `test-l3`: **pending** — steals focus; not run from a
+      non-interactive session. `test-real`: **pending, host condition** —
+      Phase 6's `Unauthorized` on 4 of 5; not re-run against live providers.
 
 **Validation checkpoint 9 (final performance evidence; not PR opening)**
 
@@ -1545,40 +1791,96 @@ three consecutive green runs exist per leg, with
 failures disclosed; every budget is met or its miss is explained; no override,
 retry, tier change, or disabled assertion was used to reach a number.
 
+**Not passed — human-gated.** Candidate runs 0 of 3 per leg (no push);
+baseline runs 1 of 3 (`34173378609`, green on all four legs, stored and
+gated). Failures disclosed for everything that ran; L3 and `real` are named
+pending. No budget exists yet, so none is met or missed. The only expectation
+change is the Windows platform-exclusion declaration, which adds a violation
+class rather than removing one. Full record in `log.md` § Phase 9.
+
 ---
 
 ## Phase 10 — Closure: `results.md`, drift, acceptance sweep
 
-- [ ] Write `results.md` with: the measurements (baseline and candidate, three
+- [x] Write `results.md` with: the measurements (baseline and candidate, three
       costs separate, per leg); coverage changes (tests added, removed, moved
       boundary, replacement coverage for each changed assertion); residual
       findings; and **separate** implementation / verified-locally / verified-on-CI
       completion status.
-- [ ] Give every deferred finding evidence, a reason, and a linked owner
+      [`results.md`](results.md). Baseline per leg from `34173378609` with the
+      PR-run noise bracket; candidate **none exists** (no push) and says so;
+      local Phase 8 tables labelled attribution only; every one of the sixteen
+      removed identities named with its replacement; the three claims are the
+      first table and are not collapsed.
+- [x] Give every deferred finding evidence, a reason, and a linked owner
       document. Generic fixture migration may **not** be deferred (AC4).
-- [ ] Update area docs and the `rust-testing` / `claudine` skills **only where
+      Seven deferrals, each with evidence, reason and closing criteria, in
+      [`../_unscheduled/test-suite-residuals/spec.md`](../_unscheduled/test-suite-residuals/spec.md);
+      none is a fixture migration (the spawn allow-list is empty). Host
+      conditions and recorded observations are listed apart in `results.md`
+      § Residual findings so a pending tier cannot read as a deferral.
+- [x] Update area docs and the `rust-testing` / `claudine` skills **only where
       workflow or architecture changed** — the raw-command builder surface and
       the widened isolation-gate population are the likely candidates.
       `CLAUDE.md` § Drift Maintenance governs.
-- [ ] Sweep the acceptance criteria using one compact status-and-evidence table:
-  - [ ] **AC1** — every discovered test/family has a reviewed disposition and a
+      The builder surface and the isolation population were already repaired
+      in Phases 5–7 (both skills). Phase 10 changed three skill files and no
+      area doc (no `claudine/` doc describes the test workflow):
+      `rust-testing/SKILL.md` gained the cross-compile route the predecessor
+      lacked (`just check-windows`, mingw vs MSVC, warm-check caveat), the
+      one-binary narrowing spelling, and the global-path scope rule;
+      `rust-testing/test-suite-audits.md` gained the measurement workflow
+      Phases 8–9 used (exact-recipe warm-up, drift bracket + paired ratio,
+      lldb entry-location counters and the `PATH` shim, per-leg exclusions
+      with stale-exclusion failure, `gh run rerun` for a second sample);
+      `claudine/signal-handling.md`'s Windows row said "no recorded green
+      Windows runtime run in this repo yet", which run `34173378609` falsified.
+      Also repaired: the spec's links to the two archived fixes, which pointed
+      at pre-`_completed` paths.
+- [x] Sweep the acceptance criteria using one compact status-and-evidence table:
+      the table is `results.md` § Acceptance criteria; statuses below.
+  - [x] **AC1** — every discovered test/family has a reviewed disposition and a
         reconciled platform/feature/tier route; none omitted by timing threshold
         (reconciler output attached).
-  - [ ] **AC2** — zero generic residual spawn exemptions; live-child and
+        **Verified.** Reconciler exit 0 at `9fc5151a0`, 7400 identities / 163
+        targets, 0 unassigned / double-assigned / stale; output reproduced in
+        `inventory.md` § Reconciler output.
+  - [x] **AC2** — zero generic residual spawn exemptions; live-child and
         ordinary paths share the policy; negative guard tests and Windows proof
         present.
-  - [ ] **AC3** — the two inherited-width failures are covered; every
+        **Verified.** Allow-list empty (`files:0 sites:0 governed_files:90`);
+        one `ChildEnvironment` behind `build` / `build_std` /
+        `apply_policy_to` with the drift test; seven neuters; `check-windows`
+        exit 0 with zero warnings warm and cold; the two console-control tests
+        green on `windows-latest`.
+  - [x] **AC3** — the two inherited-width failures are covered; every
         contamination probe cannot alter unrelated results; probes used only
         disposable state.
-  - [ ] **AC4** — shared-setup, cleanup, assertion and reachability findings in
+        **Verified.** `COLUMNS=44` before/after transcripts (`log.md` § Phase
+        5); eight probes, four neuters; the one checkout-adjacent probe uses
+        gitignored `target/` and cleans up on both paths.
+  - [x] **AC4** — shared-setup, cleanup, assertion and reachability findings in
         scope are resolved; deferrals are evidenced and linked.
-  - [ ] **AC5** — every pre-existing override is justified in the inventory or
+        **Verified.** Four unreachable identities run; `test-real` on nextest;
+        five metadata blocks; seven assertion repairs; leak sweep clean again
+        in Phase 10; seven deferrals with an owner document.
+  - [x] **AC5** — every pre-existing override is justified in the inventory or
         removed with the cost it hid; none was added.
-  - [ ] **AC6** — local gates pass, `just check-windows` result recorded,
+        **Verified.** `inventory.md` § Runner override census + § Phase 6
+        disposition; diff against `main` re-checked in Phase 10: 41 deletions,
+        16 comment-only insertions, 0 non-comment insertions.
+  - [x] **AC6** — local gates pass, `just check-windows` result recorded,
         platform limitations explicit, budgets have compatible CI evidence.
-  - [ ] **AC7** — `results.md` complete; docs and skills updated only where
+        **Partially verified; the CI half is pending.** Every local gate this
+        host can run is green (ledger in `results.md`); `check-windows` exit 0;
+        exclusions declared per leg; L3 and `real` recorded pending with
+        cause. **No budget exists and no candidate CI run exists** — not
+        claimable from this session.
+  - [x] **AC7** — `results.md` complete; docs and skills updated only where
         workflow or architecture changed.
-- [ ] Reconcile the final gate ledger instead of restarting all gates.
+        **Verified.** `results.md` written; skill edits limited to the items
+        above; no area doc needed a change.
+- [x] Reconcile the final gate ledger instead of restarting all gates.
       Credit passing checks from implementation, measurement, and pre-push
       validation when their relevant source state and environment are still
       applicable. Run only missing or invalidated checks. If a full-suite
@@ -1586,22 +1888,53 @@ retry, tier change, or disabled assertion was used to reach a number.
       repeat that subset just to obtain a second green command. Record known
       environment failures as pending with links; do not retry them without
       a relevant change.
-- [ ] Prepare `results.md` and the acceptance review while CI runs. Record
+      Phase 10 edited two `claudine-cli` test files (the carried unused-import
+      pair, plus a third of the same shape the warm Windows check had hidden),
+      which invalidated the `claudine-cli` L1 suite, the area lint and the
+      Windows check. Those were re-run; `test-rendezvous` (Phase 8),
+      `test-l2` (Phase 9), `bench` (Phase 6), `ci-local` (Phase 9) and the
+      TypeScript gates (Phase 9) are credited with the source-state argument
+      recorded in `results.md` § Gate ledger. `test-l3` and `test-real`
+      stay pending, not retried.
+- [x] Prepare `results.md` and the acceptance review while CI runs. Record
       each criterion as verified, pending, or an explicitly permitted
       deferral, with an evidence link; keep the detailed record in its owning
       document. Final closure still requires the specified measurement samples
       and applicable acceptance evidence. Pending evidence does not prevent
       PR review, but it does prevent claiming that verification is complete.
-- [ ] Required final coverage: area `just test` and `just lint`; relevant
+      Done as above. No CI is running for this branch — there is nothing to
+      run until the operator pushes — so the review was prepared against the
+      stored baseline and the handoff. Verification is **not** claimed
+      complete: `results.md`'s first table says so.
+- [x] Required final coverage: area `just test` and `just lint`; relevant
       L2 via `just test-l2`; `just doctest`, `just bench`, and
       `just test-rendezvous`; root `just test-leaks`. Credit the CLI,
       generator, and contract selection already covered by area `just test`
       when the features match. Preserve missing higher-tier evidence as pending.
-- [ ] Confirm `git diff main -- .config/nextest.toml` contains removals only.
+      Run in Phase 10: `just test` 6873 / 9 skipped; `just lint` exit 0;
+      `just doctest` 25 / 7 ignored; root `just test-leaks claudine` 7146 /
+      11 skipped, no leaks; `just check-windows` exit 0 warm and cold; sniff
+      `just test` 2599 / 23 skipped and `just lint` exit 0. Credited:
+      `test-l2` 236/237 + 3/3 (Phase 9, same day, same source), `bench`
+      (Phase 6), `test-rendezvous` ×11 (Phase 8, and inside the Phase 10
+      leak sweep's 7146). Pending: L3, `real`.
+- [x] Confirm `git diff main -- .config/nextest.toml` contains removals only.
+      Re-checked against `origin/main` (= local `main`, `6504747e2`): **41
+      deletions, 16 insertions, and every inserted line is a comment** (the
+      retained rate-limit override's contract and the ci-profile no-op rule
+      Phase 6 recorded); zero non-comment insertions. Literal removals-only
+      it is not; no override, retry, tier change or disabled assertion was
+      added, which is what the bullet guards.
 
 **Validation checkpoint 10** — all seven acceptance criteria are answered with
 evidence or an explicitly linked deferral; `results.md` keeps the three
 completion claims separate; no gate was weakened to close a criterion.
+
+**Passed for what this session can answer; AC6's CI half is pending.** AC1–AC5
+and AC7 verified with evidence; AC6 verified locally and pending on CI (no
+candidate run, no budget). The three claims are separate in `results.md`. No
+gate was weakened: the only test-file edits are two `#[cfg(unix)]` import
+gates, and the nextest diff is unchanged from Phase 6.
 
 ---
 

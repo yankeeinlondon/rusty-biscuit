@@ -1,18 +1,13 @@
 {
   "_comment": [
-    "Expectations for `junit-metrics.ts` over the four-leg baseline.",
-    "`requiredTests` are the nine timeout-shaped tests the predecessor fix's",
-    "acceptance criterion 4 measures plus two Phase 3 additions: their absence",
-    "from a leg is a gate failure, so a run that silently stopped executing one",
-    "cannot read as a speed-up. Every one of them lives in a `#![cfg(unix)]`",
-    "binary (`wrap_watchdog_timeout`, `sequence_schema`, `wrap_opencode`,",
-    "`compose_schema_cli`, `composition_outputs`), so `windows-latest` cannot",
-    "run them: `platformExclusions` declares that, and the gate reports the",
-    "absence apart from violations while failing if one ever *does* run there.",
-    "`enforceTimeoutFloors` stays false for the baseline because those floors were",
-    "ratified under the pre-fix first-event grace; Phase 3 re-derives them under",
-    "the 2026-08-31 spawn-fallback silence clock and Phase 9 turns enforcement on",
-    "for the candidate sets (`../candidate/expectations.json`)."
+    "Expectations for `junit-metrics.ts` over the candidate CI runs (Phase 9).",
+    "Identical to `../baseline/expectations.json` except that the timeout floors",
+    "are ENFORCED: a timeout-shaped test that overruns its bound is a violation,",
+    "not a printed remark. Invoke with the baseline run as the reference so the",
+    "matched-test comparison runs inside each environment:",
+    "  npx tsx ../junit-metrics.ts candidate/<run-id> --label 'candidate <run-id>' \\",
+    "    --expect candidate/expectations.json \\",
+    "    --baseline baseline/<run-id> --baseline-expect baseline/expectations.json"
   ],
   "environments": ["ubuntu-latest", "macos-latest", "windows-latest", "wsl2-ubuntu"],
   "cells": [
@@ -47,5 +42,5 @@
       "a_loop_accumulates_outputs_and_retains_mutations_across_iterations"
     ]
   },
-  "enforceTimeoutFloors": false
+  "enforceTimeoutFloors": true
 }

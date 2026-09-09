@@ -6,9 +6,10 @@ reviewed: true
 reviewed_by: opencode/zai-coding-plan/glm-5.3
 reviewed_on: 2026-09-07
 implemented: false
-depends-on: claudine/fixes/2026-08-01-cli-slow-tests/spec.md
+review_iterations: 1
+depends-on: claudine/fixes/_completed/2026-08-01-cli-slow-tests/spec.md
 coordinates_with:
-    - claudine/fixes/2026-08-31-silent-success-and-startup-stall/spec.md
+    - claudine/fixes/_completed/2026-08-31-silent-success-and-startup-stall/spec.md
 packages:
     - claudine
     - claudine-cli
@@ -37,13 +38,13 @@ and [audit guidance](../../../.claude/skills/rust-testing/test-suite-audits.md).
 
 ## Relationship to prior work
 
-The [2026-08-01 fix](../2026-08-01-cli-slow-tests/spec.md) migrated 29 formerly
+The [2026-08-01 fix](../_completed/2026-08-01-cli-slow-tests/spec.md) migrated 29 formerly
 slow CLI binaries plus launch-context subjects to `CliProcessFixture`, added
 spawn/isolation guards, and reduced test-specific timeout floors. Its CI
 acceptance evidence remains a separate obligation; this work neither replaces
 nor weakens those targets.
 
-The predecessor's [log](../2026-08-01-cli-slow-tests/log.md) records a residual
+The predecessor's [log](../_completed/2026-08-01-cli-slow-tests/log.md) records a residual
 census of 170 raw sites in 36 exempt files: 168 sites in 34 files excluded by
 scope and two Windows console-control sites needing a live child. These are
 historical observations, not this fix's baseline. It also records inherited
@@ -163,7 +164,7 @@ every assertion or test-population change and its replacement coverage.
 Replace readiness sleeps with bounded observation of the final required
 condition. Retain intentional sleeps in timeout contracts and justify their
 budgets, polling cadence, and shutdown margin. Coordinate with the
-[startup-stall fix](../2026-08-31-silent-success-and-startup-stall/spec.md)
+[startup-stall fix](../_completed/2026-08-31-silent-success-and-startup-stall/spec.md)
 where clock semantics overlap: that fix is implemented, so timeout floors and
 budgets recorded here are derived under its spawn-fallback silence clock
 rather than the pre-fix first-event grace.
@@ -235,4 +236,3 @@ substitute for a fix.
 - Which source scans can share work without losing independent failure detail?
 - Which technical exceptions remain necessary after live-child support?
 - What per-family timing budgets are justified on the existing CI runners?
-

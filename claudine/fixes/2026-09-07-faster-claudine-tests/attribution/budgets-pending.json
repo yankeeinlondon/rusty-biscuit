@@ -2,21 +2,25 @@
   "_comment": [
     "Budget input for `attribution.ts --budgets`. It declares the four legs the",
     "spec requires and the number of consecutive green CI runs collected for",
-    "each. Phase 1's merge has not happened, so every leg stands at zero and the",
-    "gate refuses to derive a budget. Phase 9 fills `perLegFamilySummed` from the",
-    "stored JUnit artifacts and raises `runsPerLeg` to 3; nothing else changes.",
-    "Local timing lives in `attribution.md` and is never a budget input — a",
-    "`kind` of `local` is refused before any leg is read."
+    "each. Phase 9 (2026-09-08) collected the first post-merge `main` run",
+    "(`baseline/34173378609/`), so every leg stands at one; the gate still",
+    "refuses to derive a budget until each leg has three and",
+    "`perLegFamilySummed` is filled from the stored JUnit artifacts. Nothing",
+    "yet joins a JUnit identity to a family — `attribution.ts` reads nextest",
+    "logs — so the families stay empty until that aggregator exists; see",
+    "`log.md` § Phase 9. Local timing lives in `attribution.md` and is never a",
+    "budget input — a `kind` of `local` is refused before any leg is read."
   ],
   "provenance": {
     "kind": "ci",
     "legs": ["ubuntu-latest", "macos-latest", "windows-latest", "wsl2-ubuntu"],
     "runsPerLeg": {
-      "ubuntu-latest": 0,
-      "macos-latest": 0,
-      "windows-latest": 0,
-      "wsl2-ubuntu": 0
-    }
+      "ubuntu-latest": 1,
+      "macos-latest": 1,
+      "windows-latest": 1,
+      "wsl2-ubuntu": 1
+    },
+    "runs": ["34173378609"]
   },
   "perLegFamilySummed": {},
   "headroom": 0.25

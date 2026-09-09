@@ -1,0 +1,39 @@
+{"kind":"file","gate":"spawn","file":"completion_contract.rs","reason":"outside this fix's scope","sites":2}
+{"kind":"file","gate":"spawn","file":"completion_perf.rs","reason":"outside this fix's scope","sites":2}
+{"kind":"file","gate":"spawn","file":"completion_resolution_round_trip.rs","reason":"outside this fix's scope","sites":1}
+{"kind":"file","gate":"spawn","file":"compose_cli.rs","reason":"outside this fix's scope","sites":4}
+{"kind":"file","gate":"spawn","file":"compose_interactive_timeout_cli.rs","reason":"outside this fix's scope","sites":5}
+{"kind":"file","gate":"spawn","file":"compose_removed_validation_keys.rs","reason":"outside this fix's scope","sites":1}
+{"kind":"file","gate":"spawn","file":"compose_schema_cli.rs","reason":"outside this fix's scope","sites":20}
+{"kind":"file","gate":"spawn","file":"compose_system_prompt_lifetime.rs","reason":"outside this fix's scope","sites":1}
+{"kind":"file","gate":"spawn","file":"compose_ttff_perf.rs","reason":"outside this fix's scope","sites":1}
+{"kind":"file","gate":"spawn","file":"composition_outputs.rs","reason":"outside this fix's scope","sites":2}
+{"kind":"file","gate":"spawn","file":"context_command.rs","reason":"outside this fix's scope","sites":24}
+{"kind":"file","gate":"spawn","file":"effective_diagnostic_render.rs","reason":"outside this fix's scope","sites":3}
+{"kind":"file","gate":"spawn","file":"errors_command.rs","reason":"outside this fix's scope","sites":5}
+{"kind":"file","gate":"spawn","file":"handle_blocking_output.rs","reason":"outside this fix's scope","sites":1}
+{"kind":"file","gate":"spawn","file":"handle_deadline.rs","reason":"outside this fix's scope","sites":2}
+{"kind":"file","gate":"spawn","file":"inline_compose_cli.rs","reason":"outside this fix's scope","sites":2}
+{"kind":"file","gate":"spawn","file":"level1_compose_autocomplete_failure_pty.rs","reason":"outside this fix's scope","sites":1}
+{"kind":"file","gate":"spawn","file":"level1_inline_compose_mismatch_pty.rs","reason":"outside this fix's scope","sites":1}
+{"kind":"file","gate":"spawn","file":"level1_structured_error_message.rs","reason":"outside this fix's scope","sites":1}
+{"kind":"file","gate":"spawn","file":"loop_cli.rs","reason":"outside this fix's scope","sites":18}
+{"kind":"file","gate":"spawn","file":"protect_cli.rs","reason":"outside this fix's scope","sites":1}
+{"kind":"file","gate":"spawn","file":"provider_error_finalize.rs","reason":"outside this fix's scope","sites":1}
+{"kind":"file","gate":"spawn","file":"sequence_cli.rs","reason":"outside this fix's scope","sites":20}
+{"kind":"file","gate":"spawn","file":"sequence_ctrl_c_windows.rs","reason":"needs a live Child + CREATE_NEW_PROCESS_GROUP; assert_cmd has neither","sites":1}
+{"kind":"file","gate":"spawn","file":"sequence_errors_cli.rs","reason":"outside this fix's scope","sites":1}
+{"kind":"file","gate":"spawn","file":"sequence_groups.rs","reason":"outside this fix's scope","sites":4}
+{"kind":"file","gate":"spawn","file":"sequence_jit.rs","reason":"outside this fix's scope","sites":1}
+{"kind":"file","gate":"spawn","file":"sequence_magic_reference.rs","reason":"outside this fix's scope","sites":4}
+{"kind":"file","gate":"spawn","file":"sequence_overlay_pty.rs","reason":"outside this fix's scope","sites":4}
+{"kind":"file","gate":"spawn","file":"sequence_prompt_property.rs","reason":"outside this fix's scope","sites":3}
+{"kind":"file","gate":"spawn","file":"sequence_sources_cli.rs","reason":"outside this fix's scope","sites":1}
+{"kind":"file","gate":"spawn","file":"shipped_prompts.rs","reason":"outside this fix's scope","sites":1}
+{"kind":"file","gate":"spawn","file":"skills_integration.rs","reason":"outside this fix's scope","sites":22}
+{"kind":"file","gate":"spawn","file":"wrap_ctrl_c_windows.rs","reason":"needs a live Child + CREATE_NEW_PROCESS_GROUP; assert_cmd has neither","sites":1}
+{"kind":"file","gate":"spawn","file":"wrap_sequence_composition.rs","reason":"outside this fix's scope","sites":9}
+{"kind":"file","gate":"spawn","file":"wrap_sigint.rs","reason":"outside this fix's scope","sites":1}
+{"kind":"reason","gate":"spawn","reason":"needs a live Child + CREATE_NEW_PROCESS_GROUP; assert_cmd has neither","files":2,"sites":2}
+{"kind":"reason","gate":"spawn","reason":"outside this fix's scope","files":34,"sites":170}
+{"kind":"total","gate":"spawn","files":36,"sites":172,"scanned_sites":172,"governed_files":87}

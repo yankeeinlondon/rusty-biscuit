@@ -1,6 +1,6 @@
 ---
 fix: 2026-09-07-faster-claudine-tests
-phase: 8
+phase: 10
 created: 2026-09-07
 ---
 
@@ -1793,3 +1793,438 @@ so `just lint` in `claudine` is Phase 7's record.
 - The host: `identityservicesd` at 30–90 % of a core for most of an hour is
   the same class of background noise the 2026-08-13 triage recorded; it is
   disclosed, not diagnosed, here.
+
+---
+
+## Phase 9 — CI evidence (RB5, second tranche; AC6)
+
+**Outcome: partial, and human-gated exactly where the plan said it would be.**
+The operator action Phase 1 was blocked on has happened — the predecessor
+merged to `main` — so the baseline half of the CI tranche is open and its
+first run is collected, gated and stored. The candidate half cannot start: the
+branch has 36 unpushed signed commits plus this working tree, a merge of
+`origin/main` conflicts in thirteen files, and committing, merging and pushing
+are operator actions this non-interactive session cannot take. Everything that
+does not depend on a push is done: the consolidated local validation, the
+Windows check, the gate over the stored baseline, the gate's two hardening
+changes this run forced, the handoff, and the budget answer. Nothing below
+reports a pending thing as passing.
+
+### Grounding facts re-checked (2026-09-08, 14:00–15:30 UTC)
+
+- **PR #69 merged.** `fix/cli-slow-tests` at `a9e88c069` (the predecessor's
+  nine commits) merged to `main` as `444213eb5` at 00:27 UTC. `git diff
+  a9e88c069 444213eb5` is empty: the merge tree *is* the PR-head tree.
+- **`main` moved again thirteen hours later.** PR #70 (`feat/unifi`) merged as
+  `6504747e2` at 13:29 UTC, changing `claudine/lib` (composition closure /
+  completion / schema), four `claudine/cli/tests` files
+  (`wrap_inline_compose.rs` +595, `wrap_perf.rs`, `shipped_prompt_contract.rs`,
+  `wrap_inline_compose_interactive.rs`), `claudine/justfile`'s `test-real`
+  recipe, and `scripts/ci/test_affected_scope.py`. A `main` push after that is
+  a different source state from the merge commit.
+- **Runs on `main`:** `34173378609` (`ci`, push, `444213eb5`) completed green at
+  02:44 UTC; `34232285291` (`ci`, push, `6504747e2`) was queued at 13:29 UTC; by 15:05 UTC
+  its three native `claudine-cli` L1 legs had completed green and the WSL2 and
+  L2 legs were still queued — recorded, not collected, since it is a
+  different source state (below). The PR's own
+  `pull_request` run `34159725015` at `a9e88c069` (20:31 UTC the day before)
+  is green on the identical tree.
+- **This branch:** local HEAD `973d1d918`, 36 commits ahead of
+  `origin/fix/cli-slow-tests` (which still sits at the PR head `a9e88c069`),
+  every one OpenPGP-signed by `Ken Snyder <ken@ken.net>`. No Rust file under
+  `claudine/**`, `.config/` or `just/` differs from HEAD in the working tree,
+  so Phase 8's validation record is reusable under its own rule; only this
+  phase's documents and the gate script are new.
+- **The Windows toolchain is present** (`x86_64-pc-windows-gnu` target,
+  `/opt/homebrew/bin/x86_64-w64-mingw32-gcc`, mingw-w64 14.0.0).
+
+### The baseline's first run, gated
+
+Collected with the recipe `baseline/README.md` fixed in Phase 1; the gate's
+verbatim output sits beside each run as `junit-metrics.txt`.
+
+| Run | Event | Source | Legs | Gate |
+|---|---|---|---|---|
+| `baseline/34173378609/` | push to `main` | `444213eb5` | four, all green | **exit 0** — baseline run 1 of 3 |
+| `baseline/34159725015/` | `pull_request`, PR #69 | `a9e88c069`, tree-identical | four, all green | **exit 0** — supplementary, not counted |
+
+The three costs, from the `main` run:
+
+| Environment | Build/setup | Runner elapsed | Summed duration | Tests | Failures | Skips |
+|---|---:|---:|---:|---:|---:|---:|
+| `ubuntu-latest` | 695.1 s | 324.9 s | 324.7 s | 2466 | 0 | 0 |
+| `macos-latest` | 832.3 s | 753.7 s | 753.5 s | 2466 | 0 | 0 |
+| `windows-latest` | 1012.9 s | 356.1 s | 355.8 s | 2105 | 0 | 0 |
+| `wsl2-ubuntu` | 81.3 s | 692.7 s | 692.2 s | 2466 | 0 | 0 |
+
+and from the tree-identical PR run, which is the only run-to-run noise bracket
+the baseline has until its second `main` sample exists:
+
+| Environment | Build/setup | Runner elapsed | Summed duration | Matched summed, PR ÷ main |
+|---|---:|---:|---:|---:|
+| `ubuntu-latest` | 222.8 s | 301.2 s | 301.0 s | 0.927 |
+| `macos-latest` | 273.4 s | 794.6 s | 794.3 s | 1.054 |
+| `windows-latest` | 878.2 s | 304.8 s | 304.3 s | 0.855 |
+| `wsl2-ubuntu` | 65.9 s | 690.1 s | 689.6 s | 0.996 |
+
+Three readings, all of which Phase 3 predicted:
+
+- **Runner elapsed equals summed duration** on every leg to within a second,
+  because `claudine-cli`'s CI profile runs at `max-threads = 1`. On CI the
+  summed column is the floor, not something parallelism hides.
+- **The build column is the largest cost on three legs** (695–1013 s against
+  325–754 s of tests) and near zero on WSL2, whose `nextest archive` is built by
+  the host job. The recipes still cannot separate build from run locally;
+  `manifest.duration_s − <testsuites time>` is what makes the column exist.
+- **The same tree varies 7–15 % run to run** on Ubuntu and Windows and 5 % on
+  macOS. A candidate ratio inside that bracket on one run is not a result.
+
+**Identities.** 2466 on each Unix leg, the same set on all three. 2105 on
+`windows-latest`: 372 Unix-only identities (every `#![cfg(unix)]` binary) and
+11 Windows-only ones, including the two live-child console-control tests no
+local host could run — `wrap_ctrl_c_windows::ctrl_c_terminates_wrapped_child_on_windows`
+(1.25 s) and `sequence_ctrl_c_windows::sequence_ctrl_c_fans_out_to_parallel_children_on_windows`
+(4.02 s), both passing. That closes the predecessor's finding 3 outright
+(recorded in its `deferred-performance.md`, 2026-09-08 addendum).
+
+**Timeout-shaped tests.** All nine inside budget + tick + allowance on the three
+Unix legs; the thinnest margin is `sequence_per_step_step_timeout_override` at
+1.3 s against its 1.6 s bound on macOS (1.2 s on Ubuntu; 1.2 s against 2.6 s on
+WSL2). Floors are printed, not enforced, for the baseline, as Phase 1 set.
+
+**Slow cases, tracked so that lost coverage cannot read as speed** (`main` run):
+
+| Environment | ≥ 2 s | ≥ 5 s | Slowest |
+|---|---:|---:|---|
+| `ubuntu-latest` | 34 | 15 | `context_reports_preserve_all_columns_at_minimum_supported_width` 19.06 s |
+| `macos-latest` | 30 | 1 | same, 9.71 s |
+| `windows-latest` | 42 | 5 | `shipped_implement_router_keeps_the_callers_launch_origin_for_its_lazy_target` 16.17 s |
+| `wsl2-ubuntu` | 34 | 19 | `context_reports_preserve_all_columns_at_minimum_supported_width` 62.44 s |
+
+The `context_*` and `compose_eager_spec_setter_*` cases at the top of every leg
+are the launch-origin discovery cohort Phase 6 removed from the library and
+Phase 5 removed from the CLI fixtures; the candidate's per-environment
+comparison is where that claim gets its CI number.
+
+### What the first run taught the gate
+
+Running `junit-metrics.ts` over the real artifacts, with Phase 1's
+`expectations.json`, **failed** — eleven `missing-test` violations, all on
+`windows-latest`. Every one of the eleven required tests lives in a
+`#![cfg(unix)]` binary (`wrap_watchdog_timeout`, `sequence_schema`,
+`wrap_opencode`, `compose_schema_cli`, `composition_outputs`), so Windows cannot
+execute them and never could. The gate was doing what the plan forbids —
+requiring identical cross-platform counts — and a gate that fails the baseline
+itself is not usable on the candidate. Two changes, both tested:
+
+1. **`platformExclusions`** in the expectations: per environment, tests that leg
+   cannot run, by name or full identity. An excluded test's absence from that
+   leg is reported in its own table (`renderExclusions`) instead of as a
+   violation; on every other leg it is still required; and if it ever *does*
+   run on the excluding leg, that is a new `stale-exclusion` violation, so the
+   list cannot silently outlive the `cfg` that justified it. The timeout-floor
+   table prints `excluded` instead of `ABSENT` for those cells.
+   `baseline/expectations.json` declares the eleven under `windows-latest`;
+   `candidate/expectations.json` is the same file with `enforceTimeoutFloors`
+   on, as Phase 1's comment promised.
+2. **`--baseline <dir> [--baseline-expect <json>]`**: the comparison the plan's
+   fourth bullet needs. Both trees are gated (a violation in either exits 1),
+   and every environment present in both is compared *against itself*:
+   identities in both are matched and their summed durations set side by side
+   with the ratio; candidate-only identities are listed as additions and
+   baseline-only ones as removals, each with the seconds they carry. A leg on
+   one side only is left out rather than matched against a neighbour — that is
+   the cross-platform count comparison in another form.
+
+Requirement → test map, `junit-metrics.test.ts` (46 → 57, all passing):
+
+| Behavior | Test |
+|---|---|
+| Excluded + absent on its leg → reported apart, no violation | `an_excluded_required_test_absent_on_its_leg_is_reported_apart_from_violations` |
+| Exclusion is per-leg; the same absence elsewhere is still `missing-test` | `an_exclusion_is_scoped_to_its_own_leg` |
+| Excluded but ran → `stale-exclusion` | `an_exclusion_whose_test_ran_on_that_leg_is_a_stale_exclusion_violation` |
+| Bare name and full identity both match; another binary's same-named test does not | `exclusions_match_by_bare_name_or_full_identity` |
+| JSON round trip; absent key defaults to `{}` | `expectations_round_trip_platform_exclusions_and_default_them_empty` |
+| Passive corpus: every stored `baseline/<run>/` passes the shipped expectations through `main()` | `the_shipped_expectations_accept_every_stored_baseline_run` |
+| The shipped exclusions are absent on Windows and present on all three Unix legs, in every stored run | `the_shipped_windows_exclusions_are_absent_on_windows_and_present_elsewhere` |
+| Matched within one environment only; additions and removals apart with their seconds | `compare_matches_identities_within_one_environment_only` |
+| A real run against itself: everything matched, nothing added or removed | `a_stored_baseline_run_compared_with_itself_matches_everything` |
+| `main --baseline` prints the comparison and fails on a violation in the *baseline* tree | `main_with_a_baseline_gates_both_trees_and_prints_the_comparison` |
+| `--baseline-expect` without `--baseline` is a usage error; flags parse | `baseline_expect_without_baseline_is_a_usage_error` |
+
+Non-vacuity: the corpus test was run against the pre-change expectations file
+first and failed with the same eleven violations the CLI had printed; the
+stale-exclusion test fails if the `ran(test)` branch is removed. The comparison
+smoke on real data is the PR-run-versus-`main`-run table above: 2466 / 2466 /
+2105 / 2466 matched, zero added, zero removed on every leg.
+
+### Consolidated validation — the ledger
+
+`just ci-local` runs lint *and* L1 test by default (`run_lint=1`, `run_test=1`
+unless `--lint-only` / `--test-only`), so it was run **once**, without a
+preceding `--lint-only` pass. Scope is **73 packages, class=full**: the
+branch's `.config/nextest.toml` change against the merge base `a9e88c069` is
+41 deleted lines of override blocks, which `affected_scope.py` correctly treats
+as a non-comment change to a global path. That is also what CI will select on
+push. Tests before lint inside each package, per the stale-binary note.
+
+| Gate | Where | Scope / features | Result | Artifact |
+|---|---|---|---|---|
+| `just ci-local` | repo root | 73 packages, lint (`--all-targets`, no features) + L1 (declared CI features) | **147 of 147 gates passed, exit 0**, 44 m 16 s (14:15–14:59 UTC); preflight ci-infra self-test included; every package compiled and ran, none skipped | `candidate/local-gates/ci-local.log` |
+| `just check-windows` | `claudine/` | `claudine`, `claudine-cli`, `--tests`, `x86_64-pc-windows-gnu` | **exit 0**, 1.3 s warm; 2 unused-import warnings in `wrap_basics.rs` (Phase 1's finding, minus the `compose_caller_file_provenance.rs` one) | `candidate/local-gates/check-windows.log` |
+| `just test-l2` | `claudine/` | `claudine-cli` + `claudine-gen`, `terminal-tests` | **236 of 237, exit 100** — the one failure is `level2_typed_error_render_capture::level2_initialize_proxy_block_auto_detects_osc8_in_wezterm`, the same Atuin/WezTerm host condition Phases 4–7 disclosed (`claudine_rc:<code>` exit marker not seen in 30 s; the capture sits behind the Atuin prompt). The recipe aborts before `claudine-gen`, so its three L2 tests were run separately: **3 passed** (`just-test-l2-claudine-gen.log`) | `candidate/local-gates/just-test-l2.log` |
+| `just test-l3` | `claudine/` | WezTerm + cliclick keystroke injection | **pending** — not run: L3 injects OS keystrokes into a real window and steals focus on the operator's desktop; forbidden from a non-interactive session | — |
+| `just test-real` | `claudine/` | `CLAUDINE_CONTRACT_REAL=1`, `real-tests` | **pending, host condition** — Phase 6 ran it: 4 of 5 fail `Unauthorized` because the provider CLI is not authenticated on this host, identically under the retired `cargo test` route; re-running reproduces a credential state, not code | `log.md` § Phase 6 |
+| `npx tsx --test junit-metrics.test.ts` | fix directory | — | **57 passed, 0 failed** | — |
+| `junit-metrics.ts` over `baseline/34173378609` and `baseline/34159725015` | fix directory | shipped `expectations.json` | **exit 0, exit 0** | `baseline/<run>/junit-metrics.txt` |
+| `attribution.ts --budgets` | fix directory | `budgets-pending.json` at one run per leg | **exit 1, as designed** — four `missing-leg` refusals | — |
+| `just test` | `sniff/` | `sniff`, `sniff-cli` L1 | **2599 passed (81 slow), 23 skipped, exit 0**, 80.0 s | — |
+| `just lint` | `sniff/` | — | **exit 0** | — |
+
+`sniff` is included because the session was started in that area; no `sniff` file was read or written by this phase, and `ci-local` had already gated both `sniff` packages inside the 147.
+
+Not credited from earlier phases: nothing. Phase 8's `just test` /
+`just test-rendezvous` / L2 PTY records remain valid under their reuse rule
+(no Rust change since), but this phase's bullet asks for one consolidated
+validation and `ci-local` is it; L2 was re-run rather than credited because
+it is a two-minute recipe and the ledger is cleaner with a same-day row.
+
+### The PR — handed off, not opened
+
+Everything an operator needs is in [`candidate/README.md`](candidate/README.md)
+and [`candidate/pr-body.md`](candidate/pr-body.md). Why it is a handoff:
+
+1. **The branch conflicts with `main`.** `git merge-tree --write-tree
+   origin/main HEAD` reports thirteen conflicting files, twenty-one hunks:
+   eight `claudine/cli/tests` files that both PR #70 and Phases 4–5 rewrote
+   (`common/mod.rs`, `compose_schema_cli.rs`, `composition_outputs.rs`,
+   `handle_deadline.rs`, `inline_compose_cli.rs`, `loop_cli.rs`,
+   `sequence_groups.rs`, `sequence_prompt_property.rs`); `claudine/justfile`,
+   where Phase 6 moved `test-real` onto nextest and `main` added a
+   `real_inline_write_grant` invocation to the old `cargo test` form;
+   `claudine/lib/src/diagnostics/registry.rs`;
+   `claudine/docs/providers/dispatch-inventory.json`;
+   `.claude/skills/claudine/timeline.md`; and the completed
+   `2026-09-05-inline-flow-and-validations/spec.md`. Resolving a merge writes
+   the index and a merge commit — both outside this session's remit — and the
+   resolved tree has to be re-validated in `claudine/` before it is pushed,
+   because it is a different test population from the one Phases 4–8 measured.
+2. **Pushing is outward-facing and the commits must be signed.** The 36 local
+   commits are already signed; the Phase 9 working tree is not yet committed
+   and the separate commit process owns that.
+3. **A PR opened before the merge would be red and unmergeable** on arrival,
+   which produces intervening failures the plan would then require recording
+   for no evidentiary gain.
+
+The first candidate run on every leg is for cross-platform correctness review;
+three consecutive green candidate runs per leg follow from normal CI, with
+extra runs requested only for missing samples.
+
+### Budgets — still refused, for a smaller reason
+
+Phase 3 refused to derive budgets because the CI baseline did not exist. It now
+exists at **one run of three** per leg, and `attribution/budgets-pending.json`
+says so (`runsPerLeg` 1 on each leg, `runs: ["34173378609"]`). `deriveBudgets`
+still refuses — `missing-leg: declared but carries no measurements` — for two
+reasons that stay open: one run is not three, and nothing yet joins a JUnit
+identity to a family (`attribution.ts` reads nextest *logs*; the CI evidence is
+XML). So there is no budget to compare against, no miss to explain, and no
+universal speedup percentage on offer. The local prior remains what Phase 8
+recorded: paired 0.64–0.77 for `just test`, which is the library-heavy
+population and not the `claudine-cli` `max-threads = 1` leg this baseline
+measures.
+
+### Validation checkpoint 9 — not passed
+
+| Requirement | Status |
+|---|---|
+| Three consecutive green candidate runs per leg | **pending** — no push; handoff written |
+| Three consecutive green baseline runs per leg | **1 of 3** — `34173378609`; `main` moved before a second push run at the same source state could exist |
+| Failures disclosed | **done for what exists** — none in either stored run; L3 and `real` recorded as pending, not passing |
+| Every budget met or its miss explained | **no budget exists** — refusal reproduced, causes named |
+| No override, retry, tier change or disabled assertion used | **held** — the only expectation change is the platform-exclusion declaration, which makes the gate stricter (`stale-exclusion`) rather than looser |
+
+### Deliberate choices
+
+- **Collected the PR's own run as a supplementary sample** rather than
+  discarding it: same tree, four green legs, and the only noise bracket the
+  baseline has. It is labelled `pull_request`, stored beside the `main` run,
+  and counted toward nothing.
+- **Did not `gh run rerun 34173378609`** to manufacture the two missing
+  baseline samples. It is the right mechanism — same SHA, same workflow — but
+  it spends CI minutes on a repository whose cache quota is already saturated,
+  and the `main` concurrency group cancels in-flight runs, with `34232285291`
+  in flight. Operator call; written up in `baseline/README.md`.
+- **Did not record `34232285291` as a baseline run.** It is at `6504747e2`,
+  after PR #70 changed the `claudine-cli` test population. If it finishes green
+  it is a valid sample of *that* source state and the comparison tool handles
+  the population difference; it is not a second sample of the predecessor's.
+- **Did not re-run `test-real`.** The failure Phase 6 recorded is a credential
+  state on this host. Re-running would drive two external provider CLIs to
+  reproduce `Unauthorized`; the evidence is pending until the host is
+  authenticated, and saying so is the honest row.
+- **Left the two `wrap_basics.rs` warnings alone.** Phase 5 was to fix them
+  and did not; they are `#[cfg(unix)]` residue, warnings not errors, and a
+  test-file edit now would invalidate Phase 8's reuse rule for a cosmetic gain.
+  Carried to Phase 10.
+
+### Carried forward
+
+- **Operator:** merge `origin/main` (thirteen conflicts), re-run `just test`
+  and `just lint` in `claudine/`, signed commit, push, `gh pr create
+  --body-file candidate/pr-body.md`; then either `gh run rerun 34173378609`
+  twice for the missing baseline samples or accept that the baseline is one run
+  at `444213eb5` plus whatever `main` produces at later source states.
+- **Phase 9, resumed once runs exist:** collect with `candidate/README.md`'s
+  recipe; the comparison is `junit-metrics.ts candidate/<run> --expect
+  candidate/expectations.json --baseline baseline/34173378609 --baseline-expect
+  baseline/expectations.json`.
+- **Budget derivation** needs a JUnit → family aggregator to fill
+  `perLegFamilySummed`; `inventory-reconciler.ts`'s matcher already maps an
+  identity to a family, so it is a join, not a new classifier.
+- **`34232285291`** at `6504747e2`: collect when complete, label it with its
+  source state.
+- **Phase 10 skill candidates** (added to Phase 8's three): the
+  `platformExclusions` / `stale-exclusion` pattern for any per-leg required-test
+  gate; `gh run rerun` as the only way to sample one SHA twice on `main`; a
+  non-comment change to `.config/nextest.toml` selects the full 73-package
+  workspace in `ci-local` and CI alike.
+- The `wrap_basics.rs` unused-import pair.
+
+## Phase 10 — Closure: `results.md`, drift, acceptance sweep
+
+**Outcome: closed for everything this session can answer; the CI half of
+AC6 is pending on the operator, exactly as Phase 9 left it.** `results.md`
+exists and keeps the three completion claims apart; seven deferred findings
+have an owner document; three skill files changed where a workflow claim was
+missing or false; two test files gained `#[cfg(unix)]` import gates; every
+local gate the plan names was run or credited with its source-state argument;
+no gate was weakened.
+
+### Grounding facts re-checked (2026-09-08, 15:10–15:35 UTC)
+
+- **No candidate CI run exists.** `gh run list --branch fix/cli-slow-tests`
+  shows nothing after the PR #69 runs at `a9e88c069`; nothing has been pushed.
+- **The remote branch is gone.** `git ls-remote --heads origin
+  fix/cli-slow-tests` returns nothing — GitHub deleted the head branch when
+  PR #69 merged. The next push recreates it; `candidate/README.md` and
+  `results.md` say so.
+- **`main` is still `6504747e2`** (local and origin agree). Its run
+  `34232285291` was still in progress at 15:13 UTC: every `claudine*` native
+  L1 leg, lint and check green; `claudine-cli` WSL2 archive in progress; the
+  L2 legs queued. Different source state from the baseline; recorded, not
+  collected.
+- **`git diff origin/main -- .config/nextest.toml`**: 41 deletions, 16
+  insertions, zero non-comment insertions — unchanged since Phase 6.
+- **The startup-stall spec link the Phase 3 note flagged** resolves in
+  `plan.md` (`_completed/…`); the dangling ones were in `spec.md`, which still
+  pointed at both archived fixes' pre-`_completed` paths. Repaired there.
+- **The Windows toolchain is present**; `just check-windows` warm is 0.9 s.
+
+### What shipped
+
+| Item | Where |
+|---|---|
+| `results.md` — measurements per leg with the three costs apart, coverage changes with replacement coverage for all sixteen removals, residual findings in three classes, the AC table, the gate ledger, the operator handoff | [`results.md`](results.md) |
+| Owner document for the seven deferrals (bench files, `context` render seam, the vacuous ownership-kill test, `real_provider`'s credential path, the failing ignored perf harness, the `max-threads = 1` group, the JUnit → family aggregator) | [`../_unscheduled/test-suite-residuals/spec.md`](../_unscheduled/test-suite-residuals/spec.md) |
+| Two `#[cfg(unix)]` import gates: `wrap_basics.rs` (`std::fs`, `common::wrap::*`) and `compose_caller_file_provenance.rs` (`write_executable`) | `claudine/cli/tests/` |
+| `rust-testing/SKILL.md`: the cross-compile route (mingw vs MSVC, warm-check caveat), narrowing a recipe to one binary, a global-path change selects the whole workspace | `.claude/skills/rust-testing/SKILL.md` |
+| `rust-testing/test-suite-audits.md` § Measurement: exact-recipe warm-up, drift bracket beside paired ratio, lldb entry-location counters and the `PATH` shim, per-leg exclusions with stale-exclusion failure, `gh run rerun` for a second sample | `.claude/skills/rust-testing/test-suite-audits.md` |
+| `claudine/signal-handling.md`: the Windows console-control row no longer says there is no green runtime run — `34173378609` ran both tests green | `.claude/skills/claudine/signal-handling.md` |
+| `spec.md`: five links/paths repointed at `_completed/` | [`spec.md`](spec.md) |
+
+**The third warning.** Phase 9 recorded the `compose_caller_file_provenance.rs`
+unused-import warning as gone and only the `wrap_basics.rs` pair remaining.
+Phase 10's first warm check, after gating the `wrap_basics.rs` pair, reported
+the `compose_caller_file_provenance.rs` one instead. The two warm runs replayed
+different subsets of cached diagnostics, so neither was a complete count; the
+import was gated the same way and a **cold** check into a fresh
+`CARGO_TARGET_DIR` (`phase10-check-windows-cold.log`, 1 m 28 s) is the
+definitive count: **zero warnings**. The caveat is now in the skill.
+
+### Requirement → test map
+
+Phase 10 changed no behavior, so it added no test. The two edits are import
+gates whose only observable is the Windows target's warning count, and the
+gate for that is the cold `just check-windows` (0 warnings, exit 0) plus the
+unchanged Unix result (`just test` 6873 passed — the gated imports are still
+in scope for every `#[cfg(unix)]` case, or the binaries would not compile).
+The plan's Phase 10 bullets are document deliverables; their "test" is the
+acceptance table in `results.md`, each row pointing at the artifact that
+proves it.
+
+### Gate ledger
+
+Tests before lint, per the stale-binary note. Logs under
+`candidate/local-gates/phase10-*.log`.
+
+| Gate | Where | Result | Run / credited |
+|---|---|---|---|
+| `just test` | `claudine/` | **6873 passed / 9 skipped, exit 0**, 35.7 s runner elapsed (1 m 46 s wall with the `wrap_basics` rebuild) | run, after the first edit |
+| `just test-leaks claudine` | repo root | **7146 passed / 11 skipped (1 slow), `no leaked processes detected`, exit 0**, 39.8 s / 3 m 08 s | run, after both edits |
+| `just check-windows` | `claudine/` | **exit 0, 0 warnings** warm (0.9 s) and cold (1 m 28 s, fresh target dir) | run |
+| `just lint` | `claudine/` | **exit 0, 0 warnings**, 5 m 03 s wall (overlapping the cold check) | run, after the tests |
+| `just doctest` | `claudine/` | **exit 0** — 20 + 3 + 2 passed, 7 ignored; `claudine-cli` skipped (no lib target) | run |
+| `just test` / `just lint` | `sniff/` | **2599 passed / 23 skipped, exit 0** (52.4 s); **exit 0** | run — the session's starting area; no `sniff` file changed |
+| `just test-rendezvous` | `claudine/` | 273 / 2, ×11 | credited, Phase 8; also inside the leak sweep's 7146 |
+| `just test-l2` | `claudine/` | 236 / 237 + `claudine-gen` 3 / 3 | credited, Phase 9 (same day, same source); the survivor is the Atuin/WezTerm host condition |
+| `just bench` | `claudine/` | exit 0 (`BENCH_YES=1`) | credited, Phase 6; no bench input changed |
+| `just ci-local` | repo root | 147 / 147 | credited, Phase 9; the tree differs by two import gates |
+| `junit-metrics.test.ts` | fix directory | 57 passed | credited, Phase 9; script unchanged |
+| `just test-l3` | `claudine/` | — | **pending**, focus-stealing tier |
+| `just test-real` | `claudine/` | 1 / 4 `Unauthorized` | **pending**, host credential state |
+| `git diff origin/main -- .config/nextest.toml` | repo root | 41 − / 16 + (all comments) | run |
+
+### Deliberate choices
+
+- **Fixed the import warnings instead of deferring them.** Two lines each,
+  zero behavior, and the alternative was a deferral entry for a warning the
+  area's own gate emits. It cost the reuse rule for the `claudine-cli` suite,
+  which the plan's "required final coverage" bullet was going to re-run anyway.
+- **Ran a cold Windows check.** A warm check's warning count proved unreliable
+  across Phases 9 and 10; the cold count is the only one worth writing down.
+- **Credited rather than re-ran `test-l2`, `bench`, `test-rendezvous`.** None
+  of their inputs changed since the run credited; the rendezvous population
+  also ran again inside the leak sweep. Re-running `test-l2` would have
+  reproduced the Atuin host condition for no new evidence.
+- **One owner document for seven deferrals** rather than seven. They share an
+  origin and a reader; each has its own section, evidence, reason and closing
+  criteria, which is what AC4 asks for.
+- **Skill edits stayed at the workflow level.** No Phase 8/9 number went into
+  a skill; what went in is the method (exact-recipe warm-up, paired ratio,
+  entry-location counters, per-leg exclusions) and the two facts that changed
+  the predecessor's conclusion (mingw route; global-path scope).
+- **Did not touch `deferred-performance.md`.** Item 1 is still one run of
+  three; Phase 9's addendum is current.
+- **Did not gzip the Phase 10 logs.** Phase 9 stored `ci-local.log` (3.7 MB)
+  uncompressed under the same directory; matched that precedent.
+
+### Validation checkpoint 10 — passed for what this session can answer
+
+| Requirement | Status |
+|---|---|
+| All seven ACs answered with evidence or a linked deferral | **yes** — AC1–5, AC7 verified; AC6 verified locally, **pending on CI** with the cause named |
+| `results.md` keeps the three completion claims separate | **yes** — first table |
+| No gate weakened to close a criterion | **yes** — the nextest diff is Phase 6's; no override, retry, tier change, `#[ignore]` or dropped assertion anywhere in Phases 4–10 |
+
+### Carried forward — operator
+
+Unchanged from Phase 9, plus one fact: merge `origin/main` (thirteen
+conflicts), re-run `just test` and `just lint` in `claudine/` on the merged
+tree, signed commit, push (**the remote branch has to be recreated**),
+`gh pr create --base main --body-file candidate/pr-body.md`; then three green
+candidate runs per leg collected with `candidate/README.md`'s recipe, and
+either `gh run rerun 34173378609` twice or an accepted one-run baseline. The
+budget path needs residual 7 (the aggregator) before `deriveBudgets` can
+produce a table. The spec directory stays where it is; archiving to
+`_completed` is a separate step.
+
+## 2026-09-08 — analysis tools moved to the shared `tools/test-audit` package
+
+Done by the darkmatter fix's Phase 1A (`darkmatter/fixes/2026-09-07-faster-darkmatter-tests`, plan § Phase 1A), not by this fix.
+
+- `junit-metrics.ts`, `inventory-reconciler.ts`, `attribution.ts`, `measurement.ts`, and `measurement-runner.ts` are now thin wrappers that forward to `tools/test-audit` (`junit`, `reconcile`, `attribute`, `measure`, `measure run`) with `audit.config.json` beside them, which carries what the scripts hard-coded (package roots, the four legs and their one gated cell, the eleven required timeout-shaped tests, the timeout floors). Every recorded invocation in this log still works unchanged.
+- Their `*.test.ts` files moved into `tools/test-audit/tests/` (ported to vitest) together with `*-claudine-compat.test.ts` replays over the preserved inputs here: the JUnit gate reproduces `baseline/34173378609/junit-metrics.txt`; `attribute` reproduces `attribution.md` (6,861 results, 561.00 s summed, 36.05 s elapsed on `baseline/local-gates/just-test.log`); `measure report` reproduces `measurement/report.md` and `report.gate.txt`; the reconciler reproduces the family index (7,400 runner identities) and, against the preserved baseline worktree `/tmp/rb-baseline-9fc5151a0`, the source column (4,167 / 21 / 2,761 / 52 / 158 / 24 / 88 / 184) with zero exclusion violations.
+- `sentinels.ts` and `attribution/launch-cwd-probe.ts` stay local (lldb symbol lists and the `git` shim are Claudine-specific).
+- Finding for this fix's follow-up: the `enumeration/` captures describe 9fc5151a0, and the working tree has since gained tests (Phases 4–7). `npx tsx inventory-reconciler.ts` on the live tree therefore reports those as `undeclared-exclusion` (e.g. `claudine-cli :: the_spawn_gate_reads_a_real_population_and_still_finds_a_planted_site`). That is the gate working; re-run `test-audit capture --config audit.config.json` at the committed candidate revision before the next inventory checkpoint.
+- Tool version for every report from here on: `@rusty-biscuit/test-audit@0.1.0`.
