@@ -129,11 +129,14 @@ pre-push *areas="claudine darkmatter":
     @just _orchestrate lint {{ areas }}
     @just test {{ areas }}
 
-# run one package's L1 suite on the standing build-host clones (real Linux +
-# native Windows) against the LOCAL tree — no commit or push needed. The
-# expected pre-push step for changes touching path semantics, process
-# spawning, or terminal behavior, which macOS L1 cannot exercise.
-# Usage: just cross-check <package> [--host linux|windows|all] [nextest args]
+# run one package's L1 suite on the standing build-host clones (real Linux,
+# native Windows, and WSL2 in CI's nextest-archive mode) against the LOCAL
+# tree — no commit or push needed. Hosts come from BUILD_LINUX, BUILD_WIN, and
+# BUILD_WSL (SSH destinations); an unset variable means that host is not
+# available here. The expected pre-push step for changes touching path
+# semantics, process spawning, or terminal behavior, which macOS L1 cannot
+# exercise.
+# Usage: just cross-check <package> [--host linux|windows|wsl|all] [nextest args]
 cross-check *args:
     @./scripts/cross-check.sh {{ args }}
 
