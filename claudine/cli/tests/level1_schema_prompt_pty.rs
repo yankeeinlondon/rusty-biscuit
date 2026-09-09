@@ -1,4 +1,4 @@
-//! Level 2 PTY tests for interactive schema-property collection.
+//! Level 1 PTY tests for interactive schema-property collection.
 //!
 //! Addresses the High finding in `review-3.md`:
 //!
@@ -7,9 +7,9 @@
 //!
 //! The schema-aware interactive prompt fires only when stdin AND stderr
 //! are both TTYs, `prompt_for_missing` is enabled (default), and
-//! `--silent` is off. The Level 1 process tests in
-//! `compose_schema_cli.rs` cover the non-TTY denial path; this file
-//! drives the prompt through a real pseudo-terminal so we can verify:
+//! `--silent` is off. The process tests in `compose_schema_cli.rs` cover
+//! the non-TTY denial path; this file drives the prompt through a
+//! pseudo-terminal so we can verify:
 //!
 //! - The widget appears with the correct property label.
 //! - Typing a value and pressing Enter satisfies the missing required
@@ -26,43 +26,47 @@
 //! coverage lives in `sequence_overlay_pty.rs`; shared PTY harness
 //! helpers live in `common::pty`.
 //!
-//! Gating: `#![cfg(unix)]`, `require_level!(Level::L2, pty_available(),
-//! ...)` so the test skips cleanly without a PTY and panics under
-//! `BISCUIT_TEST_LEVEL_REQUIRED=2`.
+//! ## Tier
+//!
+//! **Level 1.** `expectrl` opens `/dev/ptmx` and every byte the child reads is
+//! manufactured by the test, so no terminal emulator participates. Level 2
+//! means a real emulator session reached through `biscuit-test-harness`, where
+//! the emulator's own capability handshake and rendering are part of what is
+//! under test.
+//!
+//! Gating: `#![cfg(unix)]`, `require_level!(Level::L1, pty_available(),
+//! ...)` so the test skips cleanly without a PTY.
 //!
 //! Run via the canonical recipe:
 //!
 //! ```text
-//! just test-l2
+//! just test
 //! ```
 
 #![cfg(unix)]
 
-#[allow(deprecated)]
-use assert_cmd::cargo::cargo_bin;
 use expectrl::Session;
 use expectrl::session::OsSession;
 use std::fs;
 use std::io::Write;
+use std::path::Path;
 use std::process::Command;
 use std::time::{Duration, Instant};
-use tempfile::tempdir;
 use test_toolkit::{Level, require_level};
 
 mod common;
 use common::pty::*;
-use common::{augmented_path, pty_available, write_executable};
+use common::{CliProcessFixture, pty_available, write_executable};
 
-/// Build a fresh PTY-spawnable `Command` for `claudine compose --goose <file>`
-/// with the workspace's `bin` dir on PATH and HOME set to the workspace so
-/// `prompt_for_missing` reads the default (`true`) instead of any real
-/// user config.
-fn compose_command(workspace_dir: &std::path::Path, bin_dir: &std::path::Path, md_file: &std::path::Path) -> Command {
-    stage_default_config(workspace_dir);
-    let mut cmd = Command::new(cargo_bin("claudine"));
-    cmd.args(["compose", "--goose", md_file.to_str().unwrap()]);
-    cmd.env("HOME", workspace_dir);
-    cmd.env("PATH", augmented_path(bin_dir));
+/// Build a fresh PTY-spawnable `claudine <args>` command against the fixture's
+/// own `HOME`, so `prompt_for_missing` reads the default (`true`) instead of any
+/// real user config.
+fn claudine_command(fixture: &CliProcessFixture, args: &[&str]) -> Command {
+    stage_default_config(fixture.home());
+    // `expectrl` needs a live `std::process::Command`; the builder's raw
+    // surface hands one over carrying the same policy.
+    let mut cmd = fixture.command_std();
+    cmd.args(args);
     // Give the TUI a deterministic terminal type with truecolor support
     // so the inquire/biscuit-tui rendering path picks a consistent style.
     cmd.env("TERM", "xterm-256color");
@@ -70,29 +74,63 @@ fn compose_command(workspace_dir: &std::path::Path, bin_dir: &std::path::Path, m
     cmd.env_remove("NO_COLOR");
     cmd.env_remove("CLAUDINE_PLAIN");
     cmd.env_remove("CI");
-    cmd.current_dir(workspace_dir);
     cmd
 }
 
-#[test]
-fn level2_pty_schema_prompt_collects_string_and_launches_provider() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
-
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-
-    stage_goose_stub(&bin_dir, &marker);
-
-    let md_file = workspace.path().join("plan.md");
-    fs::write(
-        &md_file,
-        "---\n$schema:\n  topic: 'string(required)'\n---\nPlan for {{topic}}.\n",
+/// The `claudine compose --goose <file>` shape most tests here drive.
+fn compose_command(fixture: &CliProcessFixture, md_file: &Path) -> Command {
+    claudine_command(
+        fixture,
+        &["compose", "--goose", md_file.to_str().unwrap()],
     )
-    .unwrap();
+}
 
-    let cmd = compose_command(workspace.path(), &bin_dir, &md_file);
+/// Write `contents` as the plan document inside the fixture's launch area.
+fn write_plan(fixture: &CliProcessFixture, contents: &str) -> std::path::PathBuf {
+    let md_file = fixture.cwd().join("plan.md");
+    fs::write(&md_file, contents).unwrap();
+    md_file
+}
+
+/// A fixture with a `goose` stub staged, plus the marker path the stub writes
+/// when it is launched.
+fn staged_fixture() -> (CliProcessFixture, std::path::PathBuf) {
+    let fixture = CliProcessFixture::named("level1-schema-prompt-pty");
+    let marker = fixture.cwd().join("launched.flag");
+    stage_goose_stub(fixture.bin_dir(), &marker);
+    (fixture, marker)
+}
+
+/// Drain the PTY until `marker` appears on disk or the deadline elapses,
+/// accumulating the transcript.
+fn drain_until_marker(
+    session: &mut OsSession,
+    marker: &Path,
+    seed: String,
+    deadline: Duration,
+) -> String {
+    let stop = Instant::now() + deadline;
+    let mut transcript = seed;
+    while Instant::now() < stop {
+        if marker.exists() {
+            break;
+        }
+        transcript.push_str(&read_for(session, Duration::from_millis(200)));
+    }
+    transcript
+}
+
+#[test]
+fn level1_pty_schema_prompt_collects_string_and_launches_provider() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
+
+    let (fixture, marker) = staged_fixture();
+    let md_file = write_plan(
+        &fixture,
+        "---\n$schema:\n  topic: 'string(required)'\n---\nPlan for {{topic}}.\n",
+    );
+
+    let cmd = compose_command(&fixture, &md_file);
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     // The property name appears in the pre-prompt status report. Wait for
@@ -108,14 +146,7 @@ fn level2_pty_schema_prompt_collects_string_and_launches_provider() {
 
     // Drain until the child exits. The stub writes the marker file once
     // it has been spawned, so polling for that file is a robust signal.
-    let stop = Instant::now() + Duration::from_secs(15);
-    let mut transcript = pre;
-    while Instant::now() < stop {
-        if marker.exists() {
-            break;
-        }
-        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
-    }
+    let transcript = drain_until_marker(&mut session, &marker, pre, Duration::from_secs(15));
 
     assert!(
         marker.exists(),
@@ -127,24 +158,16 @@ fn level2_pty_schema_prompt_collects_string_and_launches_provider() {
 }
 
 #[test]
-fn level2_pty_schema_prompt_collects_enum_selection() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_pty_schema_prompt_collects_enum_selection() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-
-    stage_goose_stub(&bin_dir, &marker);
-
-    let md_file = workspace.path().join("plan.md");
-    fs::write(
-        &md_file,
+    let (fixture, marker) = staged_fixture();
+    let md_file = write_plan(
+        &fixture,
         "---\n$schema:\n  tier: 'enum(small, medium, large; required)'\n---\nPlan with {{tier}}.\n",
-    )
-    .unwrap();
+    );
 
-    let cmd = compose_command(workspace.path(), &bin_dir, &md_file);
+    let cmd = compose_command(&fixture, &md_file);
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     let pre = wait_for_marker(&mut session, "tier", Duration::from_secs(10));
@@ -155,13 +178,12 @@ fn level2_pty_schema_prompt_collects_enum_selection() {
     session.write_all(b"\r").expect("submit default enum choice");
     session.flush().ok();
 
-    let stop = Instant::now() + Duration::from_secs(15);
-    while Instant::now() < stop {
-        if marker.exists() {
-            break;
-        }
-        let _ = read_for(&mut session, Duration::from_millis(200));
-    }
+    drain_until_marker(
+        &mut session,
+        &marker,
+        String::new(),
+        Duration::from_secs(15),
+    );
 
     assert!(
         marker.exists(),
@@ -171,24 +193,16 @@ fn level2_pty_schema_prompt_collects_enum_selection() {
 }
 
 #[test]
-fn level2_pty_schema_prompt_collects_boolean() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_pty_schema_prompt_collects_boolean() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-
-    stage_goose_stub(&bin_dir, &marker);
-
-    let md_file = workspace.path().join("plan.md");
-    fs::write(
-        &md_file,
+    let (fixture, marker) = staged_fixture();
+    let md_file = write_plan(
+        &fixture,
         "---\n$schema:\n  ready: 'boolean(required)'\n---\nReady = {{ready}}.\n",
-    )
-    .unwrap();
+    );
 
-    let cmd = compose_command(workspace.path(), &bin_dir, &md_file);
+    let cmd = compose_command(&fixture, &md_file);
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     let pre = wait_for_marker(&mut session, "ready", Duration::from_secs(10));
@@ -198,13 +212,12 @@ fn level2_pty_schema_prompt_collects_boolean() {
     session.write_all(b"\r").expect("submit boolean default");
     session.flush().ok();
 
-    let stop = Instant::now() + Duration::from_secs(15);
-    while Instant::now() < stop {
-        if marker.exists() {
-            break;
-        }
-        let _ = read_for(&mut session, Duration::from_millis(200));
-    }
+    drain_until_marker(
+        &mut session,
+        &marker,
+        String::new(),
+        Duration::from_secs(15),
+    );
 
     assert!(
         marker.exists(),
@@ -214,24 +227,16 @@ fn level2_pty_schema_prompt_collects_boolean() {
 }
 
 #[test]
-fn level2_pty_schema_prompt_number_retries_on_invalid_input() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_pty_schema_prompt_number_retries_on_invalid_input() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-
-    stage_goose_stub(&bin_dir, &marker);
-
-    let md_file = workspace.path().join("plan.md");
-    fs::write(
-        &md_file,
+    let (fixture, marker) = staged_fixture();
+    let md_file = write_plan(
+        &fixture,
         "---\n$schema:\n  count: 'number(required; integer)'\n---\nCount = {{count}}.\n",
-    )
-    .unwrap();
+    );
 
-    let cmd = compose_command(workspace.path(), &bin_dir, &md_file);
+    let cmd = compose_command(&fixture, &md_file);
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     let pre = wait_for_marker(&mut session, "count", Duration::from_secs(10));
@@ -261,13 +266,12 @@ fn level2_pty_schema_prompt_number_retries_on_invalid_input() {
     session.write_all(b"42\r").expect("write good value");
     session.flush().ok();
 
-    let stop = Instant::now() + Duration::from_secs(15);
-    while Instant::now() < stop {
-        if marker.exists() {
-            break;
-        }
-        let _ = read_for(&mut session, Duration::from_millis(200));
-    }
+    drain_until_marker(
+        &mut session,
+        &marker,
+        String::new(),
+        Duration::from_secs(15),
+    );
 
     assert!(
         marker.exists(),
@@ -277,43 +281,22 @@ fn level2_pty_schema_prompt_number_retries_on_invalid_input() {
 }
 
 #[test]
-fn level2_pty_schema_silent_suppresses_prompt_under_tty() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_pty_schema_silent_suppresses_prompt_under_tty() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-
-    stage_goose_stub(&bin_dir, &marker);
-
-    let md_file = workspace.path().join("plan.md");
-    fs::write(
-        &md_file,
+    let (fixture, marker) = staged_fixture();
+    let md_file = write_plan(
+        &fixture,
         "---\n$schema:\n  topic: 'string(required)'\n---\nPlan for {{topic}}.\n",
-    )
-    .unwrap();
+    );
 
-    // Same as `compose_command`, but adds `--silent`. With both stdin and
-    // stderr as TTYs, the prompt would normally fire; `--silent` must
-    // suppress it and surface the typed `MissingProperties` error
-    // instead.
-    stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin("claudine"));
-    cmd.args([
-        "compose",
-        "--goose",
-        "--silent",
-        md_file.to_str().unwrap(),
-    ]);
-    cmd.env("HOME", workspace.path());
-    cmd.env("PATH", augmented_path(&bin_dir));
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-    cmd.env_remove("NO_COLOR");
-    cmd.env_remove("CLAUDINE_PLAIN");
-    cmd.env_remove("CI");
-    cmd.current_dir(workspace.path());
+    // With both stdin and stderr as TTYs, the prompt would normally fire;
+    // `--silent` must suppress it and surface the typed `MissingProperties`
+    // error instead.
+    let cmd = claudine_command(
+        &fixture,
+        &["compose", "--goose", "--silent", md_file.to_str().unwrap()],
+    );
 
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
     let transcript = read_for(&mut session, Duration::from_secs(8));
@@ -340,25 +323,18 @@ fn level2_pty_schema_silent_suppresses_prompt_under_tty() {
 }
 
 #[test]
-fn level2_pty_schema_status_does_not_report_templated_enum_as_invalid() {
+fn level1_pty_schema_status_does_not_report_templated_enum_as_invalid() {
     // Regression test for review-4 medium finding. When the schema status
     // report renders before Interactive Mode prompts for a missing
     // required property, it must not flag a separately-templated
     // (provider-derived) enum value as Invalid. The preflight + prepare
     // pipeline composes `{{ env.AGENT }}` into the resolved provider slug,
     // so the status display must agree.
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-
-    stage_goose_stub(&bin_dir, &marker);
-
-    let md_file = workspace.path().join("plan.md");
-    fs::write(
-        &md_file,
+    let (fixture, marker) = staged_fixture();
+    let md_file = write_plan(
+        &fixture,
         concat!(
             "---\n",
             "$schema:\n",
@@ -368,10 +344,9 @@ fn level2_pty_schema_status_does_not_report_templated_enum_as_invalid() {
             "---\n",
             "Plan for {{topic}} via {{runtime_agent}}.\n",
         ),
-    )
-    .unwrap();
+    );
 
-    let cmd = compose_command(workspace.path(), &bin_dir, &md_file);
+    let cmd = compose_command(&fixture, &md_file);
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     // Drive the prompt: wait for the missing-required label, type a
@@ -383,15 +358,7 @@ fn level2_pty_schema_status_does_not_report_templated_enum_as_invalid() {
     session.write_all(b"async\r").expect("write topic value");
     session.flush().ok();
 
-    // Drain until the stub records its launch.
-    let stop = Instant::now() + Duration::from_secs(15);
-    let mut transcript = pre;
-    while Instant::now() < stop {
-        if marker.exists() {
-            break;
-        }
-        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
-    }
+    let transcript = drain_until_marker(&mut session, &marker, pre, Duration::from_secs(15));
 
     assert!(
         marker.exists(),
@@ -425,37 +392,22 @@ fn level2_pty_schema_status_does_not_report_templated_enum_as_invalid() {
 // the resolved session interactivity value is derived.
 
 #[test]
-fn level2_pty_schema_prompt_precedes_provider_launch_with_interactive_flag() {
+fn level1_pty_schema_prompt_precedes_provider_launch_with_interactive_flag() {
     // `compose -i` requests an interactive session via CLI flag. The missing
     // required property must still be collected before the provider stub
     // launches.
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-
-    stage_goose_stub(&bin_dir, &marker);
-
-    let md_file = workspace.path().join("plan.md");
-    fs::write(
-        &md_file,
+    let (fixture, marker) = staged_fixture();
+    let md_file = write_plan(
+        &fixture,
         "---\n$schema:\n  topic: 'string(required)'\n---\nPlan for {{topic}}.\n",
-    )
-    .unwrap();
+    );
 
-    stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin("claudine"));
-    cmd.args(["compose", "-i", "--goose", md_file.to_str().unwrap()]);
-    cmd.env("HOME", workspace.path());
-    cmd.env("PATH", augmented_path(&bin_dir));
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-    cmd.env_remove("NO_COLOR");
-    cmd.env_remove("CLAUDINE_PLAIN");
-    cmd.env_remove("CI");
-    cmd.current_dir(workspace.path());
+    let cmd = claudine_command(
+        &fixture,
+        &["compose", "-i", "--goose", md_file.to_str().unwrap()],
+    );
 
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
@@ -477,14 +429,7 @@ fn level2_pty_schema_prompt_precedes_provider_launch_with_interactive_flag() {
     session.write_all(b"async\r").expect("write topic value");
     session.flush().ok();
 
-    let stop = Instant::now() + Duration::from_secs(15);
-    let mut transcript = pre;
-    while Instant::now() < stop {
-        if marker.exists() {
-            break;
-        }
-        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
-    }
+    let transcript = drain_until_marker(&mut session, &marker, pre, Duration::from_secs(15));
 
     assert!(
         marker.exists(),
@@ -495,22 +440,15 @@ fn level2_pty_schema_prompt_precedes_provider_launch_with_interactive_flag() {
 }
 
 #[test]
-fn level2_pty_schema_prompt_precedes_provider_launch_with_frontmatter_interactive() {
+fn level1_pty_schema_prompt_precedes_provider_launch_with_frontmatter_interactive() {
     // A document with `interactive: true` in frontmatter selects interactive
     // session mode without a CLI flag. Schema collection must still complete
     // before the provider session starts.
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-
-    stage_goose_stub(&bin_dir, &marker);
-
-    let md_file = workspace.path().join("plan.md");
-    fs::write(
-        &md_file,
+    let (fixture, marker) = staged_fixture();
+    let md_file = write_plan(
+        &fixture,
         concat!(
             "---\n",
             "$schema:\n",
@@ -519,10 +457,9 @@ fn level2_pty_schema_prompt_precedes_provider_launch_with_frontmatter_interactiv
             "---\n",
             "Plan for {{topic}}.\n",
         ),
-    )
-    .unwrap();
+    );
 
-    let cmd = compose_command(workspace.path(), &bin_dir, &md_file);
+    let cmd = compose_command(&fixture, &md_file);
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     let pre = wait_for_marker(&mut session, "topic", Duration::from_secs(10));
@@ -542,14 +479,7 @@ fn level2_pty_schema_prompt_precedes_provider_launch_with_frontmatter_interactiv
     session.write_all(b"async\r").expect("write topic value");
     session.flush().ok();
 
-    let stop = Instant::now() + Duration::from_secs(15);
-    let mut transcript = pre;
-    while Instant::now() < stop {
-        if marker.exists() {
-            break;
-        }
-        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
-    }
+    let transcript = drain_until_marker(&mut session, &marker, pre, Duration::from_secs(15));
 
     assert!(
         marker.exists(),
@@ -560,24 +490,17 @@ fn level2_pty_schema_prompt_precedes_provider_launch_with_frontmatter_interactiv
 }
 
 #[test]
-fn level2_pty_schema_prompt_appears_even_when_no_interactive_overrides_frontmatter() {
+fn level1_pty_schema_prompt_appears_even_when_no_interactive_overrides_frontmatter() {
     // `--no-interactive` overrides a document's `interactive: true` frontmatter,
     // so the resolved session mode is non-interactive. The schema collection
     // prompt must still appear under a TTY because the collection gate is
     // independent of the resolved session mode. Adding `--timeout` proves the
     // resolved mode is non-interactive (it would be rejected in interactive mode).
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-
-    stage_goose_stub(&bin_dir, &marker);
-
-    let md_file = workspace.path().join("plan.md");
-    fs::write(
-        &md_file,
+    let (fixture, marker) = staged_fixture();
+    let md_file = write_plan(
+        &fixture,
         concat!(
             "---\n",
             "$schema:\n",
@@ -586,27 +509,19 @@ fn level2_pty_schema_prompt_appears_even_when_no_interactive_overrides_frontmatt
             "---\n",
             "Plan for {{topic}}.\n",
         ),
-    )
-    .unwrap();
+    );
 
-    stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin("claudine"));
-    cmd.args([
-        "compose",
-        "--no-interactive",
-        "--timeout",
-        "30s",
-        "--goose",
-        md_file.to_str().unwrap(),
-    ]);
-    cmd.env("HOME", workspace.path());
-    cmd.env("PATH", augmented_path(&bin_dir));
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-    cmd.env_remove("NO_COLOR");
-    cmd.env_remove("CLAUDINE_PLAIN");
-    cmd.env_remove("CI");
-    cmd.current_dir(workspace.path());
+    let cmd = claudine_command(
+        &fixture,
+        &[
+            "compose",
+            "--no-interactive",
+            "--timeout",
+            "30s",
+            "--goose",
+            md_file.to_str().unwrap(),
+        ],
+    );
 
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
@@ -627,14 +542,7 @@ fn level2_pty_schema_prompt_appears_even_when_no_interactive_overrides_frontmatt
     session.write_all(b"async\r").expect("write topic value");
     session.flush().ok();
 
-    let stop = Instant::now() + Duration::from_secs(15);
-    let mut transcript = pre;
-    while Instant::now() < stop {
-        if marker.exists() {
-            break;
-        }
-        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
-    }
+    let transcript = drain_until_marker(&mut session, &marker, pre, Duration::from_secs(15));
 
     assert!(
         marker.exists(),
@@ -650,7 +558,7 @@ fn level2_pty_schema_prompt_appears_even_when_no_interactive_overrides_frontmatt
 /// `--output-last-message <path>` capture by writing a replacement body
 /// there. Recording the launch first lets the test observe it even though
 /// the wrapper keeps the PTY stdin attached.
-fn stage_codex_inline_stub(bin_dir: &std::path::Path, marker_file: &std::path::Path) {
+fn stage_codex_inline_stub(bin_dir: &Path, marker_file: &Path) {
     write_executable(
         &bin_dir.join("codex"),
         &format!(
@@ -664,7 +572,7 @@ fn stage_codex_inline_stub(bin_dir: &std::path::Path, marker_file: &std::path::P
 /// the schema prompt, assert collection has not yet launched the provider nor
 /// emitted the inline-unsupported diagnostic, submit the value, and confirm
 /// the provider launches afterward.
-fn drive_inline_compose_collection(cmd: Command, marker: &std::path::Path) {
+fn drive_inline_compose_collection(cmd: Command, marker: &Path) {
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     // The schema prompt renders the property name before raw mode is entered.
@@ -691,14 +599,7 @@ fn drive_inline_compose_collection(cmd: Command, marker: &std::path::Path) {
     session.write_all(b"async\r").expect("write topic value");
     session.flush().ok();
 
-    let stop = Instant::now() + Duration::from_secs(15);
-    let mut transcript = pre;
-    while Instant::now() < stop {
-        if marker.exists() {
-            break;
-        }
-        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
-    }
+    let transcript = drain_until_marker(&mut session, marker, pre, Duration::from_secs(15));
 
     assert!(
         marker.exists(),
@@ -709,20 +610,17 @@ fn drive_inline_compose_collection(cmd: Command, marker: &std::path::Path) {
 }
 
 #[test]
-fn level2_pty_inline_compose_interactive_flag_collects_before_launch() {
+fn level1_pty_inline_compose_interactive_flag_collects_before_launch() {
     // `inline-compose -i --codex` requests an interactive session via flag.
     // The missing required `topic` must be collected before Codex launches.
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-    stage_codex_inline_stub(&bin_dir, &marker);
+    let fixture = CliProcessFixture::named("level1-schema-prompt-pty");
+    let marker = fixture.cwd().join("launched.flag");
+    stage_codex_inline_stub(fixture.bin_dir(), &marker);
 
-    let md_file = workspace.path().join("plan.md");
-    fs::write(
-        &md_file,
+    let md_file = write_plan(
+        &fixture,
         concat!(
             "---\n",
             "$schema:\n",
@@ -731,45 +629,29 @@ fn level2_pty_inline_compose_interactive_flag_collects_before_launch() {
             "---\n",
             "Original body.\n",
         ),
-    )
-    .unwrap();
+    );
 
-    stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin("claudine"));
-    cmd.args([
-        "inline-compose",
-        "-i",
-        "--codex",
-        md_file.to_str().unwrap(),
-    ]);
-    cmd.env("HOME", workspace.path());
-    cmd.env("PATH", augmented_path(&bin_dir));
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-    cmd.env_remove("NO_COLOR");
-    cmd.env_remove("CLAUDINE_PLAIN");
-    cmd.env_remove("CI");
-    cmd.current_dir(workspace.path());
+    let cmd = claudine_command(
+        &fixture,
+        &["inline-compose", "-i", "--codex", md_file.to_str().unwrap()],
+    );
 
     drive_inline_compose_collection(cmd, &marker);
 }
 
 #[test]
-fn level2_pty_inline_compose_frontmatter_interactive_collects_before_launch() {
+fn level1_pty_inline_compose_frontmatter_interactive_collects_before_launch() {
     // `interactive: true` frontmatter selects an interactive session for
     // `inline-compose` with no CLI flag. The missing required `topic` must
     // still be collected before Codex launches.
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-    stage_codex_inline_stub(&bin_dir, &marker);
+    let fixture = CliProcessFixture::named("level1-schema-prompt-pty");
+    let marker = fixture.cwd().join("launched.flag");
+    stage_codex_inline_stub(fixture.bin_dir(), &marker);
 
-    let md_file = workspace.path().join("plan.md");
-    fs::write(
-        &md_file,
+    let md_file = write_plan(
+        &fixture,
         concat!(
             "---\n",
             "$schema:\n",
@@ -779,20 +661,12 @@ fn level2_pty_inline_compose_frontmatter_interactive_collects_before_launch() {
             "---\n",
             "Original body.\n",
         ),
-    )
-    .unwrap();
+    );
 
-    stage_default_config(workspace.path());
-    let mut cmd = Command::new(cargo_bin("claudine"));
-    cmd.args(["inline-compose", "--codex", md_file.to_str().unwrap()]);
-    cmd.env("HOME", workspace.path());
-    cmd.env("PATH", augmented_path(&bin_dir));
-    cmd.env("TERM", "xterm-256color");
-    cmd.env("COLORTERM", "truecolor");
-    cmd.env_remove("NO_COLOR");
-    cmd.env_remove("CLAUDINE_PLAIN");
-    cmd.env_remove("CI");
-    cmd.current_dir(workspace.path());
+    let cmd = claudine_command(
+        &fixture,
+        &["inline-compose", "--codex", md_file.to_str().unwrap()],
+    );
 
     drive_inline_compose_collection(cmd, &marker);
 }

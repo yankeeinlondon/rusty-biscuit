@@ -1,4 +1,4 @@
-//! Level 2 PTY tests for provided-partial `file`/`file[]` resolution.
+//! Level 1 PTY tests for provided-partial `file`/`file[]` resolution.
 //!
 //! Phase 3 of `fixes/2026-06-30-completion-failures`. When a `compose`
 //! invocation supplies a value for a `file`/`file[]` schema property that
@@ -8,7 +8,7 @@
 //! and — finding exactly one — shows a confirmation dialog. On `y`,
 //! composition proceeds with the resolved path.
 //!
-//! These tests drive that flow through a real pseudo-terminal:
+//! These tests drive that flow through a pseudo-terminal:
 //!
 //! - A single glob+substring match reaches the `Use this file? (Y/n)`
 //!   confirmation dialog and, on `y`, launches the provider stub.
@@ -18,36 +18,37 @@
 //! - Scalar string values for `file[]` properties are normalized to a
 //!   single-element array before resolution.
 //!
-//! Gating mirrors `level2_schema_prompt_pty.rs`: `#![cfg(unix)]` plus
-//! `require_level!(Level::L2, pty_available(), ...)` so the test skips
-//! cleanly without a PTY.
+//! ## Tier
+//!
+//! **Level 1**, and gating mirrors `level1_schema_prompt_pty.rs`:
+//! `#![cfg(unix)]` plus `require_level!(Level::L1, pty_available(), ...)` so the
+//! test skips cleanly without a PTY. `expectrl` opens `/dev/ptmx` and the test
+//! manufactures every byte the child reads; no terminal emulator participates.
 //!
 //! Run via the canonical recipe:
 //!
 //! ```text
-//! just test-l2
+//! just test
 //! ```
 
 #![cfg(unix)]
 
-#[allow(deprecated)]
-use assert_cmd::cargo::cargo_bin;
 use expectrl::Session;
 use expectrl::session::OsSession;
 use std::fs;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
-use tempfile::tempdir;
 use test_toolkit::{Level, require_level};
 
 mod common;
 use common::pty::*;
-use common::{augmented_path, pty_available};
+use common::{CliProcessFixture, pty_available};
 
 /// Seed a workspace whose only `**/*spec*.md` files are two specs, exactly
 /// one of which carries `everywhere` in its path.
-fn seed_specs(root: &std::path::Path) {
+fn seed_specs(root: &Path) {
     let target = root.join("features/2026-06-30-style-everywhere/spec.md");
     fs::create_dir_all(target.parent().unwrap()).unwrap();
     fs::write(&target, "---\ntitle: Everywhere\n---\nSpec body.\n").unwrap();
@@ -57,35 +58,33 @@ fn seed_specs(root: &std::path::Path) {
 }
 
 /// Build a `claudine compose --goose <plan> <property>=<partial>` command
-/// anchored at `workspace_dir` (the launch area the glob walks) with HOME set
-/// to the workspace so `prompt_for_missing` reads its default (`true`).
+/// anchored at the fixture's launch area (the directory the glob walks) with
+/// `HOME` inside the fixture so `prompt_for_missing` reads its default (`true`).
 fn compose_command(
-    workspace_dir: &std::path::Path,
-    bin_dir: &std::path::Path,
-    md_file: &std::path::Path,
+    fixture: &CliProcessFixture,
+    md_file: &Path,
     property: &str,
     partial: &str,
 ) -> Command {
-    stage_default_config(workspace_dir);
-    let mut cmd = Command::new(cargo_bin("claudine"));
+    stage_default_config(fixture.home());
+    // `expectrl` needs a live `std::process::Command`; the builder's raw
+    // surface hands one over carrying the same policy.
+    let mut cmd = fixture.command_std();
     cmd.args([
         "compose",
         "--goose",
         md_file.to_str().unwrap(),
         &format!("{property}={partial}"),
     ]);
-    cmd.env("HOME", workspace_dir);
-    cmd.env("PATH", augmented_path(bin_dir));
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env_remove("NO_COLOR");
     cmd.env_remove("CLAUDINE_PLAIN");
     cmd.env_remove("CI");
-    cmd.current_dir(workspace_dir);
     cmd
 }
 
-fn plan_with_file_schema(root: &std::path::Path) -> std::path::PathBuf {
+fn plan_with_file_schema(root: &Path) -> PathBuf {
     let md_file = root.join("plan.md");
     fs::write(
         &md_file,
@@ -101,7 +100,7 @@ fn plan_with_file_schema(root: &std::path::Path) -> std::path::PathBuf {
     md_file
 }
 
-fn plan_with_file_array_schema(root: &std::path::Path) -> std::path::PathBuf {
+fn plan_with_file_array_schema(root: &Path) -> PathBuf {
     let md_file = root.join("plan.md");
     fs::write(
         &md_file,
@@ -117,20 +116,47 @@ fn plan_with_file_array_schema(root: &std::path::Path) -> std::path::PathBuf {
     md_file
 }
 
+/// A fixture with the two specs seeded, a `goose` stub staged, and the marker
+/// path the stub writes when it is launched.
+fn staged_fixture() -> (CliProcessFixture, PathBuf) {
+    let fixture = CliProcessFixture::named("level1-provided-partial-pty");
+    let marker = fixture.cwd().join("launched.flag");
+    stage_goose_stub(fixture.bin_dir(), &marker);
+    seed_specs(fixture.cwd());
+    (fixture, marker)
+}
+
+/// Answer the `Use this file? (Y/n)` dialog with `y` and drain until the stub
+/// records its launch, returning the accumulated transcript.
+///
+/// `confirm_one_file` enables raw mode via crossterm directly (not the
+/// `run_standalone` path), so there is no kitty-protocol raw-mode marker to wait
+/// on. Raw mode is enabled synchronously right after the dialog flushes; the
+/// brief settle guards against sending the key before the read loop starts.
+fn confirm_and_drain(session: &mut OsSession, marker: &Path, seed: String) -> String {
+    std::thread::sleep(Duration::from_millis(300));
+    session.write_all(b"y").expect("confirm file selection");
+    session.flush().ok();
+
+    let stop = Instant::now() + Duration::from_secs(15);
+    let mut transcript = seed;
+    while Instant::now() < stop {
+        if marker.exists() {
+            break;
+        }
+        transcript.push_str(&read_for(session, Duration::from_millis(200)));
+    }
+    transcript
+}
+
 #[test]
-fn level2_pty_provided_partial_single_match_confirms_and_launches() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_pty_provided_partial_single_match_confirms_and_launches() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
+    let (fixture, marker) = staged_fixture();
+    let md_file = plan_with_file_schema(fixture.cwd());
 
-    stage_goose_stub(&bin_dir, &marker);
-    seed_specs(workspace.path());
-    let md_file = plan_with_file_schema(workspace.path());
-
-    let cmd = compose_command(workspace.path(), &bin_dir, &md_file, "spec", "everywhere");
+    let cmd = compose_command(&fixture, &md_file, "spec", "everywhere");
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     // A single glob+substring match drives the confirmation dialog, whose
@@ -145,25 +171,7 @@ fn level2_pty_provided_partial_single_match_confirms_and_launches() {
         common::strip_ansi(&pre)
     );
 
-    // `confirm_one_file` enables raw mode via crossterm directly (not the
-    // `run_standalone` path), so there is no kitty-protocol raw-mode marker to
-    // wait on. Raw mode is enabled synchronously right after the dialog flushes;
-    // a brief settle guards against sending the key before the read loop starts.
-    std::thread::sleep(Duration::from_millis(300));
-
-    // `y` confirms; the resolved path override satisfies the schema and the
-    // stub launches.
-    session.write_all(b"y").expect("confirm file selection");
-    session.flush().ok();
-
-    let stop = Instant::now() + Duration::from_secs(15);
-    let mut transcript = pre;
-    while Instant::now() < stop {
-        if marker.exists() {
-            break;
-        }
-        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
-    }
+    let transcript = confirm_and_drain(&mut session, &marker, pre);
 
     assert!(
         marker.exists(),
@@ -174,21 +182,15 @@ fn level2_pty_provided_partial_single_match_confirms_and_launches() {
 }
 
 #[test]
-fn level2_pty_provided_partial_zero_match_preserves_error() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_pty_provided_partial_zero_match_preserves_error() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-
-    stage_goose_stub(&bin_dir, &marker);
-    seed_specs(workspace.path());
-    let md_file = plan_with_file_schema(workspace.path());
+    let (fixture, marker) = staged_fixture();
+    let md_file = plan_with_file_schema(fixture.cwd());
 
     // No spec path contains `no-such-partial`, so the glob+substring filter
     // yields zero candidates and the original error is preserved unchanged.
-    let cmd = compose_command(workspace.path(), &bin_dir, &md_file, "spec", "no-such-partial");
+    let cmd = compose_command(&fixture, &md_file, "spec", "no-such-partial");
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     let transcript = read_for(&mut session, Duration::from_secs(8));
@@ -207,21 +209,15 @@ fn level2_pty_provided_partial_zero_match_preserves_error() {
 }
 
 #[test]
-fn level2_pty_provided_partial_file_array_scalar_confirms_and_launches() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_pty_provided_partial_file_array_scalar_confirms_and_launches() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-
-    stage_goose_stub(&bin_dir, &marker);
-    seed_specs(workspace.path());
-    let md_file = plan_with_file_array_schema(workspace.path());
+    let (fixture, marker) = staged_fixture();
+    let md_file = plan_with_file_array_schema(fixture.cwd());
 
     // A scalar string provided for a `file[]` property is normalized to a
     // single-element array and treated as a partial.
-    let cmd = compose_command(workspace.path(), &bin_dir, &md_file, "attachments", "everywhere");
+    let cmd = compose_command(&fixture, &md_file, "attachments", "everywhere");
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     let pre = wait_for_marker(&mut session, "Use this file", Duration::from_secs(10));
@@ -233,18 +229,7 @@ fn level2_pty_provided_partial_file_array_scalar_confirms_and_launches() {
         common::strip_ansi(&pre)
     );
 
-    std::thread::sleep(Duration::from_millis(300));
-    session.write_all(b"y").expect("confirm file selection");
-    session.flush().ok();
-
-    let stop = Instant::now() + Duration::from_secs(15);
-    let mut transcript = pre;
-    while Instant::now() < stop {
-        if marker.exists() {
-            break;
-        }
-        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
-    }
+    let transcript = confirm_and_drain(&mut session, &marker, pre);
 
     assert!(
         marker.exists(),
@@ -255,26 +240,14 @@ fn level2_pty_provided_partial_file_array_scalar_confirms_and_launches() {
 }
 
 #[test]
-fn level2_pty_provided_partial_file_array_array_confirms_and_launches() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_pty_provided_partial_file_array_array_confirms_and_launches() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    let marker = workspace.path().join("launched.flag");
-
-    stage_goose_stub(&bin_dir, &marker);
-    seed_specs(workspace.path());
-    let md_file = plan_with_file_array_schema(workspace.path());
+    let (fixture, marker) = staged_fixture();
+    let md_file = plan_with_file_array_schema(fixture.cwd());
 
     // An explicit JSON array value is also accepted as a `file[]` partial.
-    let cmd = compose_command(
-        workspace.path(),
-        &bin_dir,
-        &md_file,
-        "attachments",
-        "[\"everywhere\"]",
-    );
+    let cmd = compose_command(&fixture, &md_file, "attachments", "[\"everywhere\"]");
     let mut session: OsSession = Session::spawn(cmd).expect("spawn PTY session");
 
     let pre = wait_for_marker(&mut session, "Use this file", Duration::from_secs(10));
@@ -286,18 +259,7 @@ fn level2_pty_provided_partial_file_array_array_confirms_and_launches() {
         common::strip_ansi(&pre)
     );
 
-    std::thread::sleep(Duration::from_millis(300));
-    session.write_all(b"y").expect("confirm file selection");
-    session.flush().ok();
-
-    let stop = Instant::now() + Duration::from_secs(15);
-    let mut transcript = pre;
-    while Instant::now() < stop {
-        if marker.exists() {
-            break;
-        }
-        transcript.push_str(&read_for(&mut session, Duration::from_millis(200)));
-    }
+    let transcript = confirm_and_drain(&mut session, &marker, pre);
 
     assert!(
         marker.exists(),

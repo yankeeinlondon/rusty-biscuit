@@ -1,13 +1,13 @@
-//! Level 2 PTY test for interactive shell-command approval under `--dry-run`.
+//! Level 1 PTY test for interactive shell-command approval under `--dry-run`.
 //!
 //! Closes the spec acceptance criterion:
 //!
 //! > Interactive approval prompts for unapproved shell commands appear
 //! > exactly as in normal mode.
 //!
-//! The Level 1 process tests in `wrap_compose_preflight.rs` cover the
+//! The non-PTY process tests in `wrap_compose_preflight.rs` cover the
 //! **non-TTY** gate (`compose_dry_run_non_tty_unapproved_shell_emits_gate_error`)
-//! and the `--yolo` bypass. This file drives the approval prompt through a real
+//! and the `--yolo` bypass. This file drives the approval prompt through a
 //! pseudo-terminal to prove the interactive handler still fires under
 //! `--dry-run` — `dry_run` only changes the *no-handler* branch, so with a
 //! TTY (handler present) the prompt path must be untouched.
@@ -21,39 +21,37 @@
 //!   (after ANSI stripping), closing the spec's "exactly as in normal mode"
 //!   requirement with a direct comparison rather than a single-mode check.
 //!
-//! Gating: `#![cfg(unix)]`, `require_level!(Level::L2, pty_available(), ...)`
-//! so the test skips cleanly without a PTY and panics under
-//! `BISCUIT_TEST_LEVEL_REQUIRED=2`. PTY suites are classified L2 across this
-//! crate (see the sibling `level2_*_pty.rs` files) because they require a real
-//! `/dev/ptmx` resource.
+//! ## Tier
 //!
-//! These tests inject bytes into a raw pseudo-terminal and read the child's
-//! output back; they prove the *handler* fires and renders identically in both
-//! modes. The emulator-level complement —
+//! **Level 1.** These tests inject bytes into a bare pseudo-terminal and read
+//! the child's output back; they prove the *handler* fires and renders
+//! identically in both modes. No terminal emulator participates, so nothing
+//! about emulator rendering is under test. The emulator-level complement —
 //! `level2_dry_run_approval_capture.rs` — drives the same prompt through a real
 //! terminal (`tmux`) and compares the surface the emulator actually displayed.
+//!
+//! Gating: `#![cfg(unix)]`, `require_level!(Level::L1, pty_available(), ...)`
+//! so the test skips cleanly without a PTY.
 //!
 //! Run via the canonical recipe:
 //!
 //! ```text
-//! just test-l2
+//! just test
 //! ```
 
 #![cfg(unix)]
 
-#[allow(deprecated)]
-use assert_cmd::cargo::cargo_bin;
 use expectrl::Session;
 use expectrl::session::OsSession;
 use std::fs;
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
-use tempfile::tempdir;
 use test_toolkit::{Level, require_level};
 
 mod common;
-use common::{augmented_path, pty_available, write_executable};
+use common::{CliProcessFixture, pty_available, write_executable};
 
 /// Drain bytes from the PTY for a window so each `try_read` collects
 /// whatever the child has flushed so far.
@@ -110,7 +108,7 @@ fn wait_for_marker(session: &mut OsSession, marker: &str, deadline: Duration) ->
 
 /// Pre-stage a minimal claudine config so the first-run setup wizard does
 /// not intercept the input we send to the approval prompt.
-fn stage_default_config(home_dir: &std::path::Path) {
+fn stage_default_config(home_dir: &Path) {
     let claudine_dir = home_dir.join(".claudine");
     fs::create_dir_all(&claudine_dir).unwrap();
     fs::write(claudine_dir.join("config.json"), "{}").unwrap();
@@ -119,33 +117,30 @@ fn stage_default_config(home_dir: &std::path::Path) {
 /// A staged workspace with a document whose body holds one unapproved
 /// `::shell` command, plus a provider stub that records a launch.
 struct StagedApproval {
-    workspace: tempfile::TempDir,
-    bin_dir: std::path::PathBuf,
-    md_file: std::path::PathBuf,
+    fixture: CliProcessFixture,
+    md_file: PathBuf,
     /// Written by the provider stub if it ever runs; must stay absent in
     /// dry-run mode.
-    launch_marker: std::path::PathBuf,
+    launch_marker: PathBuf,
 }
 
 /// Stage the shared approval fixture: default config, a `goose` provider stub
 /// that touches `launch_marker` when launched, and a document whose body is a
 /// single unapproved `::shell echo tty-approved-marker` command.
 fn stage_shell_approval_doc() -> StagedApproval {
-    let workspace = tempdir().unwrap();
-    let bin_dir = workspace.path().join("bin");
-    fs::create_dir_all(&bin_dir).unwrap();
-    stage_default_config(workspace.path());
+    let fixture = CliProcessFixture::named("level1-dry-run-pty");
+    stage_default_config(fixture.home());
 
-    let launch_marker = workspace.path().join("launched.flag");
+    let launch_marker = fixture.cwd().join("launched.flag");
     write_executable(
-        &bin_dir.join("goose"),
+        &fixture.bin_dir().join("goose"),
         &format!(
             "#!/bin/sh\necho 'launched' > {marker}\nexit 0\n",
             marker = launch_marker.display()
         ),
     );
 
-    let md_file = workspace.path().join("doc.md");
+    let md_file = fixture.cwd().join("doc.md");
     fs::write(
         &md_file,
         "---\ntitle: dry-run approval\n---\n::shell echo tty-approved-marker\n",
@@ -153,8 +148,7 @@ fn stage_shell_approval_doc() -> StagedApproval {
     .unwrap();
 
     StagedApproval {
-        workspace,
-        bin_dir,
+        fixture,
         md_file,
         launch_marker,
     }
@@ -164,20 +158,19 @@ fn stage_shell_approval_doc() -> StagedApproval {
 /// fixture, with the environment normalized so the approval prompt renders
 /// identically regardless of the developer's shell.
 fn compose_command(staged: &StagedApproval, dry_run: bool) -> Command {
-    let mut cmd = Command::new(cargo_bin("claudine"));
+    // `expectrl` needs a live `std::process::Command`; the builder's raw
+    // surface hands one over carrying the same policy.
+    let mut cmd = staged.fixture.command_std();
     cmd.arg("compose").arg("--goose");
     if dry_run {
         cmd.arg("--dry-run");
     }
     cmd.arg(staged.md_file.to_str().unwrap());
-    cmd.env("HOME", staged.workspace.path());
-    cmd.env("PATH", augmented_path(&staged.bin_dir));
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     cmd.env_remove("NO_COLOR");
     cmd.env_remove("CLAUDINE_PLAIN");
     cmd.env_remove("CI");
-    cmd.current_dir(staged.workspace.path());
     cmd
 }
 
@@ -213,10 +206,18 @@ fn capture_approval_prompt(staged: &StagedApproval, dry_run: bool) -> Vec<String
     let mut session: OsSession =
         Session::spawn(compose_command(staged, dry_run)).expect("spawn PTY session");
 
-    // `Blacklist and stop` is the last static option written before the
-    // handler blocks on input, so its appearance means the whole prompt has
-    // been flushed and is safe to snapshot.
-    let transcript = wait_for_marker(&mut session, "Blacklist and stop", Duration::from_secs(10));
+    // The parenthetical is the tail of the last static option written before
+    // the handler blocks on input, so its appearance means the whole prompt has
+    // been flushed and is safe to snapshot. Waiting on the option's *label*
+    // instead ("Blacklist and stop") returns as soon as the option's first
+    // bytes land: under parallel load the read can split mid-line, and the two
+    // captures below then differ by a truncated final row rather than by
+    // anything the handler rendered.
+    let transcript = wait_for_marker(
+        &mut session,
+        "(persists to blacklist)",
+        Duration::from_secs(10),
+    );
     let region = approval_prompt_region(&transcript);
 
     // Deny so the composition aborts before any provider launch.
@@ -234,8 +235,8 @@ fn capture_approval_prompt(staged: &StagedApproval, dry_run: bool) -> Vec<String
 /// for real (its output lands in the rendered body) without ever launching
 /// the provider.
 #[test]
-fn level2_pty_dry_run_shell_approval_prompt_appears_and_allows() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_pty_dry_run_shell_approval_prompt_appears_and_allows() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     let staged = stage_shell_approval_doc();
     let marker = staged.launch_marker.clone();
@@ -294,8 +295,8 @@ fn level2_pty_dry_run_shell_approval_prompt_appears_and_allows() {
 /// satisfying the spec's "exactly as in normal mode" wording with a comparison
 /// rather than a single-mode existence check.
 #[test]
-fn level2_pty_dry_run_approval_prompt_matches_normal_mode() {
-    require_level!(Level::L2, pty_available(), "PTY (/dev/ptmx)");
+fn level1_pty_dry_run_approval_prompt_matches_normal_mode() {
+    require_level!(Level::L1, pty_available(), "PTY (/dev/ptmx)");
 
     // One shared fixture so the prompt's `Source:` line (which embeds the
     // document path) is identical across both runs. Denying persists nothing,
