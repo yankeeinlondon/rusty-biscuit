@@ -67,6 +67,24 @@ host-terminal gotcha below. Cannot deliver Kitty keyboard-protocol bytes
 **Use `spawn_shell` by default.** `spawn_program` is for tests that must
 control the process tree (no shell wrapper, absolute path required).
 
+### The pane's shell reads login files, not interactive ones
+
+WezTerm and Kitty spawn an outer `-l` login shell (which is where `PATH`
+is assembled) that `exec`s an interactive shell with its **rc files
+suppressed** — `bash --norc -i`, `zsh -f -i`, `unset ENV` for POSIX
+`sh`. The interactive rc is where Atuin, starship, fzf, and zoxide
+install themselves; an Atuin first-run picker rendered into the pane
+swallowed a sent command line and stalled a claudine L2 test until its
+exit marker timed out. Consequences:
+
+- Pane `PATH` is **login-profile only**. A `~/.bashrc` PATH edit does
+  not reach a WezTerm/Kitty pane — pass an absolute path or an explicit
+  `PATH` env pair.
+- The prompt is the shell's stock `PS1` (`bash-5.3$`, `host%`). Never
+  grep a captured frame for a literal the stock prompt contains.
+- tmux and Terminal.app still run a single login shell and still
+  inherit whatever a host's profile chain pulls in.
+
 Assert *styling* on `raw`; assert *visible text* on `plain`.
 
 ## `available()` and skip-clean

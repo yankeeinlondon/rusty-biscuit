@@ -78,7 +78,7 @@ the same commands and accept the legacy `--expect` expectations shape.
 
 | Command | Primary input | Output |
 |---|---|---|
-| `capture` | `cargo nextest list --message-format json` | `<enumeration>/<label>.json` + `.err`, `captures.json` (revision, dirty files, toolchain, platform, command, identity count) |
+| `capture` | `cargo nextest list --message-format json` | `<enumeration>/<label>.json` + `.err`, `captures.json` (revision, dirty files, `--note` provenance, toolchain, platform, command, identity count) |
 | `fetch` | GitHub `junit-<pkg>-<tier>-<env>` and `status-*` artifacts via `gh` | `<env>/<tier>/<pkg>.xml`, appended `manifest.jsonl`, `status/`, `missing.jsonl`, `fetch.json` |
 | `junit` | staging tree (`_stage_junit` layout) | per-cell table; `--baseline` comparison matched/added/removed per environment |
 | `sources` | `.rs` under the package source roots | records with attributes, cfg gates, module path, ignore reason, `fromMacro`/`macroExpanded`, plus `parse-error` diagnostics |
@@ -105,7 +105,12 @@ the same commands and accept the legacy `--expect` expectations shape.
   request shape; phase) and refuses pairs that straddle a declared boundary.
   Record the revision and dirty state of every input; a source state whose
   captures predate the tree reports the drift as `undeclared-exclusion`, which
-  is the gate working.
+  is the gate working. When you retake captures, move the superseded set into a
+  revision-named subdirectory (`enumeration/<rev>/`) rather than overwriting
+  it — the reconciler ignores subdirectories, and the old listings are what the
+  already-published cost numbers were derived from. Capture with
+  `--note` whenever the listing is not from a committed revision, so
+  `captures.json` says *why* its `dirty` list is non-empty.
 - **Source scan is discovery, not coverage.** `sources` resolves
   `macro_rules!` templates, literal `#[test] fn` items inside macro bodies
   (`proptest!`), and marks `#[rstest]` cases `macroExpanded` (the runner names
