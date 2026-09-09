@@ -1,7 +1,7 @@
 ---
 fix: 2026-08-01-cli-slow-tests
 created: 2026-09-07
-updated: 2026-09-07
+updated: 2026-09-08
 ---
 
 # Deferred performance measurements — `2026-08-01-cli-slow-tests`
@@ -18,8 +18,8 @@ whose gate is to resolve both items in writing before any of its own code lands.
 
 | Item | Status |
 |---|---|
-| 1 — AC4 CI targets, four environments × three green runs | **OPEN.** Still a committed-state problem: nothing has been committed, pushed or merged, so no post-change CI run exists. |
-| 2 — Windows compilation of the `#[cfg(windows)]` arms | **COMPILE HALF CLOSED** for `x86_64-pc-windows-gnu`; MSVC-specific surface and all runtime behavior remain open. See the addendum below. |
+| 1 — AC4 CI targets, four environments × three green runs | **OPEN, 1 of 3 collected.** Merged to `main` as `444213eb5` (PR #69, 2026-09-08); the first post-merge run is green on all four legs and stored. See the 2026-09-08 addendum. |
+| 2 — Windows compilation of the `#[cfg(windows)]` arms | **CLOSED** on 2026-09-08: the `windows-latest` leg (MSVC) compiled and ran the arms green. See the 2026-09-08 addendum. |
 
 ## 1. Acceptance criterion 4 — CI targets on four environments × three green runs
 
@@ -179,3 +179,45 @@ host build does not, all residue of `#[cfg(unix)]`-gated cases:
 `claudine/cli/tests/compose_caller_file_provenance.rs:5` (`write_executable`).
 Warnings, not errors; carried to the successor's Phase 5, which edits both
 files.
+
+### Addendum, 2026-09-08 — the push happened; one run of three is in
+
+Written by the successor's Phase 9
+([log](../../2026-09-07-faster-claudine-tests/log.md) § Phase 9).
+
+The branch was merged to `main` as `444213eb5` (PR #69, 00:27 UTC); the merge
+tree is identical to the PR head `a9e88c069`. The `ci` run on that push,
+`34173378609`, is green on every leg, and its four
+`junit-claudine-cli-L1-<env>` artifacts are stored under the successor's
+[`baseline/34173378609/`](../../2026-09-07-faster-claudine-tests/baseline/34173378609/)
+with the gate's verbatim output beside them:
+
+| Leg | Build/setup | Runner elapsed | Summed | Tests | Failures |
+|---|---:|---:|---:|---:|---:|
+| `ubuntu-latest` | 695.1 s | 324.9 s | 324.7 s | 2466 | 0 |
+| `macos-latest` | 832.3 s | 753.7 s | 753.5 s | 2466 | 0 |
+| `windows-latest` | 1012.9 s | 356.1 s | 355.8 s | 2105 | 0 |
+| `wsl2-ubuntu` | 81.3 s | 692.7 s | 692.2 s | 2466 | 0 |
+
+All nine timeout-shaped tests are inside budget + tick + allowance on the three
+Unix legs (worst margin: `sequence_per_step_step_timeout_override` at 1.3 s
+against 1.6 s on macOS). They are `#![cfg(unix)]` and do not exist on
+`windows-latest`, which the successor's gate now records as a declared platform
+exclusion rather than a missing test.
+
+**Item 1 stays open — one run of three.** `main` moved thirteen hours later
+(PR #70, `6504747e2`, which touches `claudine/lib` and four `claudine/cli/tests`
+files), so subsequent `main` pushes are a different source state. Two more
+samples at `444213eb5` itself need `gh run rerun 34173378609`, an operator call.
+The PR's own `pull_request` run `34159725015` (same tree) is stored as a
+supplementary sample and not counted.
+
+**Item 2 closes.** `claudine-cli / check (claudine-cli on windows-latest)` and
+`claudine-cli / test (claudine-cli on windows-latest)` both succeeded on the
+MSVC runner, and the two live-child console-control tests that no local host
+could execute — `wrap_ctrl_c_windows::ctrl_c_terminates_wrapped_child_on_windows`
+and `sequence_ctrl_c_windows::sequence_ctrl_c_fans_out_to_parallel_children_on_windows`
+— ran and passed there. The "fourth thing a cleared Windows environment might
+need" did not materialize. The two `wrap_basics.rs` unused-import warnings from
+the mingw check are still emitted (`just check-windows`, 2026-09-08, exit 0);
+the `compose_caller_file_provenance.rs` one is gone.

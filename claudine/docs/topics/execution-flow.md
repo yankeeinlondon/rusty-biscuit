@@ -7,8 +7,8 @@ prompt: |-
   - identify what CLI switches or prompt frontmatter has an impact on each step and what that impact is
 
   After fully documenting the flows add a section called `## Future Improvements` and add any improvements you think could be made to the current flow
-last_updated: 2026-08-27
-hash: 7738d51f4cfa73e2-20e4f64f887d14d3
+last_updated: 2026-09-08
+hash: 7738d51f4cfa73e2-458492b37eaacaef
 ---
 Let me explore the composition-related source code and documentation to trace the exact execution flows.Now let me read the existing composition topic doc and the key source files for precision:Now let me read the critical execution pipeline files:Now let me read the remaining portions of the composition executor to get the full execution pipeline:Now I have a comprehensive understanding of all three flows. Let me compose the complete Markdown body.Now I have all the details needed. Let me produce the comprehensive Markdown body content:Now I have all the details. Let me compose the full Markdown document body:
 
@@ -283,7 +283,7 @@ Constructs a `CompositionExecutionRequest` with `mode: ChainedDocument`, the pre
     - **TTY mode**: explicit `--provider` flag wins unconditionally; otherwise shows interactive picker via `biscuit-tui::ChooseOne`
     - **Non-TTY mode**: `resolve_target_non_tty_with_catalog()` applies strict chain: explicit flag → frontmatter `agent` (single or first-installed-from-list) → config favorite → hard error
 
-6. Resolves model: CLI `--model` → provider-specific env vars → generic `MODEL` → frontmatter `model` (validated against catalog) → provider default. When the frontmatter `model` hint is the only source, the selected provider's catalog is refreshed via `refresh_provider_blocking(provider)` before validation; CLI/env model wins skip the refresh entirely.
+6. Resolves model through the shared `resolve_document_model` helper (the one CLI seam every route uses): CLI `--model` → provider-specific env vars → generic `MODEL` → frontmatter `model` (always forwarded; the catalog only orders list hints) → provider default. When the frontmatter `model` hint is the only source, the selected provider's listing is refreshed asynchronously as drift-channel input, and a value the catalog does not recognize is announced with a `[model]` warning; CLI/env model wins skip the refresh entirely.
 
 **Affected by:**
 
@@ -293,7 +293,7 @@ Constructs a `CompositionExecutionRequest` with `mode: ChainedDocument`, the pre
 | `--exclude`                                | Removes providers from candidate pool                               |
 | `--model` / `-m`                           | Overrides model selection; highest priority in model chain          |
 | Frontmatter `agent`                        | Hint for provider selection (single string or ordered list)         |
-| Frontmatter `model`                        | Hint for model selection (validated against catalog when available) |
+| Frontmatter `model`                        | Hint for model selection (always forwarded; unrecognized values warn) |
 | Config `favorite_agent`                    | Fallback provider when no explicit flag or frontmatter hint         |
 
 ##### 6b. Profile and Binary Resolution
@@ -363,7 +363,7 @@ Applies provider-specific flags to child args:
 - YOLO/auto-approval mode via `profile.apply_yolo_for_mode()`
 - Entrypoint via `profile.apply_entrypoint()`
 - Non-interactive flags via `profile.apply_non_interactive_flags()`
-- OpenCode model resolution (special handling)
+- Model discovery for providers that require one non-interactively (catalog `model_required_in_non_tty`: env vars, then the profile's configured default)
 - Model flag via `profile.apply_model()`
 - Output format via `profile.apply_output_format()`
 - Sandbox via `profile.apply_sandbox()`
@@ -755,7 +755,7 @@ model: gpt-4o
 model: [gpt-4o, o3-mini]
 ```
 
-List-valued `agent` is treated as author preference order: the first installed provider wins. List-valued `model` is validated against the provider's model catalog; the first valid entry wins. When a catalog is unavailable (e.g., Gemini, Kimi, Goose in v1), frontmatter `model` is gracefully skipped rather than treated as an error.
+List-valued `agent` is treated as author preference order: the first installed provider wins. A frontmatter `model` is always forwarded to the provider: the provider is the authority on which ids it accepts, and Claudine's compiled model catalog is a drift signal, not a gate. A list-valued `model` resolves to the first entry the catalog recognizes, else to its first entry. When the resolved frontmatter model is outside the provider's expected offerings (for OpenCode that baseline is the `opencode/*` aggregator ids, so any provider configured in `opencode.jsonc`, such as `minimax/…` or `zai-coding-plan/…`, qualifies), composition prints one `warning: [model] …` naming the value and the provider, suppressed by `--silent`, and launches with the value unchanged. `--dry-run` resolves the same way and prints the same warning.
 
 ### Model Resolution
 
@@ -764,15 +764,15 @@ Model selection follows a single chain independent of TTY mode:
 1. **CLI `--model`**
 2. **Provider-specific env var** (`CODEX_MODEL`, `CLAUDE_MODEL`, `OPENCODE_MODEL`, etc.)
 3. **Generic `MODEL` env var**
-4. **Frontmatter `model`** (validated against catalog when available)
+4. **Frontmatter `model`** (always forwarded; the catalog orders list hints and warns on an unrecognized value)
 5. **Provider default** (`None` — let the provider choose)
 
-### OpenCode Non-TTY Requirement
+### Providers That Require a Model in Non-Interactive Mode
 
-OpenCode requires a model in non-interactive mode. If no model survives the resolution chain when running OpenCode in non-TTY mode, Claudine emits a hard error before launching the provider:
+A provider whose catalog sets `model_required_in_non_tty` (OpenCode today) cannot launch non-interactively without a model. When nothing in the chain above resolves one, the shared prep stage (`exec_prep::resolve_model_and_validate`, the same function for every provider and for the direct wrapper) looks for one on the provider's behalf through two data sources: the catalog's `model_env_vars` (`OPENCODE_MODEL`), applied exactly like an explicit `--model`, then the provider's own configured default through the `WrapperProfile::configured_default_model` hook. For OpenCode that is the `model` key of `opencode.jsonc` / `opencode.json` (then the legacy `config.json`) under `$XDG_CONFIG_HOME/opencode` or `~/.config/opencode`, parsed JSONC-tolerant; a configured default is exported as `MODEL` and reported in the preflight preamble without pushing a flag, because OpenCode reads it itself. Only when neither names a model does Claudine fail before launch:
 
-```text
-OpenCode requires a model in non-interactive mode; set --model, OPENCODE_MODEL, or MODEL
+```
+No model specified! OpenCode requires a model in non-interactive mode.
 ```
 
 ### Shorthand Flags

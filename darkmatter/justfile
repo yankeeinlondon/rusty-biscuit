@@ -75,9 +75,9 @@ test *args="":
     if [[ "${NEXTEST_PROFILE:-}" == "ci" || -n "${BISCUIT_CI_ENVIRONMENT:-}" ]]; then
         # Darkmatter's CI L1 contract retains the explicitly marked slow tests
         # and keeps per-package invocations for distinct JUnit reports.
-        BISCUIT_L1_INCLUDE_SLOW=1 just _test_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }} {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
+        BISCUIT_L1_INCLUDE_SLOW=1 just _test_all "{{ LIBRARY }} --features effects-instrumentation; {{ CLI }}; {{ DMLS }} --features effects-instrumentation; {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
     else
-        just _test_local_all "{{ LIBRARY }} {{ CLI }} {{ DMLS }} {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
+        just _test_local_all "{{ LIBRARY }} --features effects-instrumentation; {{ CLI }}; {{ DMLS }} --features effects-instrumentation; {{ DMLS_ZED_CLI }}" {{ args }} || exit_code=$?
     fi
     if (( exit_code == 130 )); then
         exit 130
@@ -187,6 +187,9 @@ lint-files:
         "./cli/tests/code_block.rs:exhaustive per-flag coverage of the md code-block surface"
         "./cli/tests/schema_validate.rs:per-flag coverage of the md schema validate surface"
         "./cli/tests/common/level2.rs:shared Level 2 harness — shim creation/integrity, sentinel polling, fixture runners, frame/color helpers"
+        "./cli/tests/common/fixture.rs:L1 spawn contract (CliProcessFixture + MdCommandBuilder + env policy + topology builders); mirrors the claudine reference implementation so the planned test_toolkit promotion is a rename, not a redesign"
+        "./cli/tests/md_process_fixture.rs:self-tests proving the L1 spawn contract from outside via a recording stub; one binary so mod common compiles once"
+        "./cli/tests/spawn_site_guard.rs:structural spawn/isolation gates over the L1 population (two gates, one detector module, allow-lists, census artifact, and the detector/population unit tests that keep them non-vacuous); mirrors the claudine reference guard so the planned test_toolkit promotion is a rename, not a redesign"
     )
 
     is_accepted() {

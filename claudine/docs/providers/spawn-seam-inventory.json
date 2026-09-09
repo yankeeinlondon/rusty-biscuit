@@ -8,14 +8,14 @@
   "sites": [
     {
       "path": "cli/src/commands/config_tui/mod.rs",
-      "line": 581,
+      "line": 579,
       "function": "query_say_voices",
       "command_kind": "std",
       "governed_by": "contribute_child_environment"
     },
     {
       "path": "cli/src/commands/config_tui/mod.rs",
-      "line": 603,
+      "line": 601,
       "function": "query_espeak_voices",
       "command_kind": "std",
       "governed_by": "contribute_child_environment"
@@ -29,21 +29,21 @@
     },
     {
       "path": "cli/src/commands/providers.rs",
-      "line": 370,
-      "function": "gen_command",
-      "command_kind": "std",
-      "governed_by": "contribute_child_environment"
-    },
-    {
-      "path": "cli/src/commands/providers.rs",
       "line": 373,
       "function": "gen_command",
       "command_kind": "std",
       "governed_by": "contribute_child_environment"
     },
     {
+      "path": "cli/src/commands/providers.rs",
+      "line": 376,
+      "function": "gen_command",
+      "command_kind": "std",
+      "governed_by": "contribute_child_environment"
+    },
+    {
       "path": "cli/src/commands/sequence.rs",
-      "line": 189,
+      "line": 188,
       "function": "expand_shell_source",
       "command_kind": "std",
       "governed_by": "contribute_child_environment"
@@ -71,14 +71,14 @@
     },
     {
       "path": "lib/src/composition/sequence/task/shell.rs",
-      "line": 893,
+      "line": 896,
       "function": "system_shell_command",
       "command_kind": "std",
       "governed_by": "caller:SystemTaskShell::run"
     },
     {
       "path": "lib/src/composition/sequence/task/shell.rs",
-      "line": 904,
+      "line": 907,
       "function": "system_shell_command",
       "command_kind": "std",
       "governed_by": "caller:SystemTaskShell::run"
@@ -92,14 +92,14 @@
     },
     {
       "path": "lib/src/dispatch/runner/bash.rs",
-      "line": 107,
+      "line": 109,
       "function": "execute_bash",
       "command_kind": "tokio",
       "governed_by": "contribute_child_environment"
     },
     {
       "path": "lib/src/dispatch/runner/bash.rs",
-      "line": 179,
+      "line": 182,
       "function": "run_command_blocking",
       "command_kind": "tokio",
       "governed_by": "contribute_child_environment"
