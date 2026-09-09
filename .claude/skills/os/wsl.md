@@ -24,6 +24,12 @@ guest has no rustup, no cargo, and no toolchain. Consequences:
 - The archive does include the package's non-test binaries and the linked
   paths nextest knows about, so a correctly resolved `bin_exe!` works.
 
+The guest follows **Linux** code paths on a `windows-latest` host. Its build
+phase is only the archive download and extraction, and its wall clock is
+dominated by slow test execution, so it is never evidence for
+native Windows behavior and is never compared with the `windows-latest` leg
+as one environment ([ci-runners.md](ci-runners.md)).
+
 ## Faithful reproduction on the WSL host
 
 A test that is green natively but red only on `wsl2-ubuntu` is almost always
@@ -31,7 +37,7 @@ an archive-mode failure. Reproduce it on the guest declared by `BUILD_WSL`
 (if unset, this machine has no WSL host; say so and use CI):
 
 ```bash
-just cross-check <package> --host wsl <test-name-substring>
+just cross-check <package> --os wsl <test-name-substring>
 ```
 
 That recipe syncs the standing clone to your local tree, builds a nextest
