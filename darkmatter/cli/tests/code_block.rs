@@ -640,16 +640,18 @@ fn code_block_theme_env_changes_terminal_output_without_flag() {
     // resolves env in the render hook. `github` and `nord` are distinct themes,
     // so their highlighted ANSI must differ for the same source.
     let capture = |theme: &str| {
-        let mut cmd = process.command();
-        cmd.env_remove("NO_COLOR")
-            .env_remove("CODE_THEME")
-            .env("THEME", theme)
-            .args([
-                "code-block",
-                "fn demo() -> usize { 42 }",
-                "--language",
-                "rust",
-            ]);
+        let mut cmd = process
+            .command_builder()
+            .rendering_input_removed("NO_COLOR")
+            .rendering_input_removed("CODE_THEME")
+            .rendering_input("THEME", theme)
+            .build();
+        cmd.args([
+            "code-block",
+            "fn demo() -> usize { 42 }",
+            "--language",
+            "rust",
+        ]);
         cmd.assert().success()
     };
 
@@ -668,8 +670,12 @@ fn code_block_code_theme_env_changes_html_output_without_flag() {
     // review-2 finding 1: `CODE_THEME` must drive the resolved code theme on the
     // direct `md code-block` browser surface when `--theme` is absent.
     let capture = |theme: &str| {
-        let mut cmd = process.command();
-        cmd.env_remove("THEME").env("CODE_THEME", theme).args([
+        let mut cmd = process
+            .command_builder()
+            .rendering_input_removed("THEME")
+            .rendering_input("CODE_THEME", theme)
+            .build();
+        cmd.args([
             "code-block",
             "fn demo() -> usize { 42 }",
             "--language",
@@ -695,18 +701,20 @@ fn code_block_theme_flag_wins_over_theme_env() {
     // review-2 finding 1: an explicit `--theme` must override `THEME`, so the
     // resolved output is identical regardless of the env value.
     let capture = |env_theme: &str| {
-        let mut cmd = process.command();
-        cmd.env_remove("NO_COLOR")
-            .env_remove("CODE_THEME")
-            .env("THEME", env_theme)
-            .args([
-                "code-block",
-                "fn demo() -> usize { 42 }",
-                "--language",
-                "rust",
-                "--theme",
-                "nord",
-            ]);
+        let mut cmd = process
+            .command_builder()
+            .rendering_input_removed("NO_COLOR")
+            .rendering_input_removed("CODE_THEME")
+            .rendering_input("THEME", env_theme)
+            .build();
+        cmd.args([
+            "code-block",
+            "fn demo() -> usize { 42 }",
+            "--language",
+            "rust",
+            "--theme",
+            "nord",
+        ]);
         cmd.assert().success()
     };
 

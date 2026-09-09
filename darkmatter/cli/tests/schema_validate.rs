@@ -265,10 +265,11 @@ fn schema_validate_baseline_from_env_var() {
     let doc = write_file(tmp, "doc.md", "---\ntitle: hi\n---\nBody\n");
 
     process
-        .command()
+        .command_builder()
+        .application_input("BASELINE_SCHEMA", &baseline)
+        .build()
         .args(["schema", "validate"])
         .arg(&doc)
-        .env("BASELINE_SCHEMA", &baseline)
         .assert()
         .code(1)
         .stdout(predicate::str::contains("owner"));

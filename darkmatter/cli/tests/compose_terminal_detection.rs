@@ -47,18 +47,15 @@ fn compose_verbose_perf_performs_single_terminal_detection() {
     let doc = common::md_file(DOC_WITH_WARNING);
 
     let output = fixture
-        .command()
+        .command_builder()
+        .plain_terminal(80, 24)
+        // Surface the `biscuit_terminal::terminal` detection span so we can
+        // count constructions. `--debug` is ignored when RUST_LOG is set.
+        .application_input("RUST_LOG", "biscuit_terminal=debug")
+        .build()
         .args(["compose"])
         .arg(doc.path())
         .args(["-vv", "--perf"])
-        .env("COLUMNS", "80")
-        .env("LINES", "24")
-        .env("TERM", "dumb")
-        .env_remove("COLORTERM")
-        .env("NO_COLOR", "1")
-        // Surface the `biscuit_terminal::terminal` detection span so we can
-        // count constructions. `--debug` is ignored when RUST_LOG is set.
-        .env("RUST_LOG", "biscuit_terminal=debug")
         .output()
         .expect("failed to run md compose");
 
@@ -138,16 +135,12 @@ fn compose_redirected_does_not_spawn_appearance_defaults() {
     let output = fixture
         .command_builder()
         .host_path()
+        .plain_terminal(80, 24)
+        .rendering_input_removed("DARK_MODE")
         .build()
         .args(["compose"])
         .arg(doc.path())
         .args(["-vv", "--perf"])
-        .env("COLUMNS", "80")
-        .env("LINES", "24")
-        .env("TERM", "dumb")
-        .env_remove("COLORTERM")
-        .env("NO_COLOR", "1")
-        .env_remove("DARK_MODE")
         .output()
         .expect("failed to run md compose");
 

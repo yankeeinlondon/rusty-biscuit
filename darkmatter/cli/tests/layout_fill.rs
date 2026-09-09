@@ -2,18 +2,16 @@ mod common;
 
 use biscuit_terminal::terminal::Terminal;
 use common::layout::*;
-use common::{CliProcessFixture, md_file};
+use common::{CliProcessFixture, MdCommandBuilder, md_file};
 
 fn rendering_command(fixture: &CliProcessFixture) -> assert_cmd::Command {
-    let mut command = fixture.command();
-    command
-        .env("COLUMNS", "80")
-        .env("LINES", "24")
-        .env("TERM", "dumb")
-        .env_remove("COLORTERM")
-        .env("NO_COLOR", "1")
-        .env_remove("FORCE_COLOR");
-    command
+    rendering_builder(fixture).build()
+}
+
+/// The same pinned rendering frame before `build()`, for a test that also has
+/// an application input to declare.
+fn rendering_builder(fixture: &CliProcessFixture) -> MdCommandBuilder<'_> {
+    fixture.command_builder().plain_terminal(80, 24)
 }
 use darkmatter::layout::{DarkmatterPage, PageComponent};
 use darkmatter_cli::render::apply_cli_layout_flags;
@@ -218,13 +216,14 @@ fn style_fixture_renders_html_with_fill_override() {
     let fixture = CliProcessFixture::named("style_fixture_renders_html_with_fill_override");
     // End-to-end sanity check: --output html runs the same component-style
     // path as the terminal pipeline.
-    let output = rendering_command(&fixture)
+    let output = rendering_builder(&fixture)
+        .application_input("MD_DRY_RUN", "1")
+        .build()
         .arg(style_prop_fixture())
         .arg("--output")
         .arg("html")
         .arg("--fill")
         .arg("max=60")
-        .env("MD_DRY_RUN", "1")
         .output()
         .unwrap();
     assert!(

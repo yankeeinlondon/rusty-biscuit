@@ -263,15 +263,17 @@ fn test_hash_directory_honors_ignore_properties() {
     .unwrap();
 
     let a = fixture
-        .command()
-        .env("HASH_IGNORE_PROPERTIES", "draft")
+        .command_builder()
+        .application_input("HASH_IGNORE_PROPERTIES", "draft")
+        .build()
         .arg("hash")
         .arg(with_draft.as_path())
         .output()
         .unwrap();
     let b = fixture
-        .command()
-        .env("HASH_IGNORE_PROPERTIES", "draft")
+        .command_builder()
+        .application_input("HASH_IGNORE_PROPERTIES", "draft")
+        .build()
         .arg("hash")
         .arg(without_draft.as_path())
         .output()

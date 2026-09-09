@@ -474,20 +474,20 @@ fn schema_about_code_block_dark_and_light_differ() {
     // The OneHalf code theme is paired, so forcing the dark vs light variant
     // must change the code-block background SGR. We assert each run carries a
     // background SGR the other does not, independent of exact RGB.
-    let dark = process
-        .command()
+    let forced_color = || {
+        process
+            .command_builder()
+            .rendering_input("FORCE_COLOR", "1")
+            .rendering_input("COLORTERM", "truecolor")
+            .rendering_input_removed("NO_COLOR")
+            .build()
+    };
+    let dark = forced_color()
         .args(["schema", "about", "--code-block", "dark"])
-        .env("FORCE_COLOR", "1")
-        .env("COLORTERM", "truecolor")
-        .env_remove("NO_COLOR")
         .output()
         .expect("run dark");
-    let light = process
-        .command()
+    let light = forced_color()
         .args(["schema", "about", "--code-block", "light"])
-        .env("FORCE_COLOR", "1")
-        .env("COLORTERM", "truecolor")
-        .env_remove("NO_COLOR")
         .output()
         .expect("run light");
     assert!(dark.status.success() && light.status.success());
@@ -504,10 +504,11 @@ fn schema_about_code_block_dark_and_light_differ() {
 fn schema_about_emits_table_stripes_when_color_is_enabled() {
     let process = CliProcessFixture::new();
     let output = process
-        .command()
+        .command_builder()
+        .rendering_input("FORCE_COLOR", "1")
+        .rendering_input_removed("NO_COLOR")
+        .build()
         .args(["schema", "about"])
-        .env("FORCE_COLOR", "1")
-        .env_remove("NO_COLOR")
         .output()
         .expect("run md schema about with color enabled");
     assert!(output.status.success());

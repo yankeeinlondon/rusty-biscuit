@@ -17,10 +17,11 @@ fn compose_uses_darkmatter_base_schema_by_default() {
     let doc = write_file(&dir, "bad-draft.md", "---\ndraft: maybe\n---\nBody\n");
 
     fixture
-        .command()
+        .command_builder()
+        .application_input_removed("DARKMATTER_NO_BASELINE_SCHEMA")
+        .build()
         .arg("compose")
         .arg(&doc)
-        .env_remove("DARKMATTER_NO_BASELINE_SCHEMA")
         .assert()
         .failure()
         .stderr(predicate::str::contains("draft"));
@@ -38,10 +39,11 @@ fn compose_generated_ctx_reference_succeeds_without_authored_ctx() {
     );
 
     fixture
-        .command()
+        .command_builder()
+        .application_input_removed("DARKMATTER_NO_BASELINE_SCHEMA")
+        .build()
         .arg("compose")
         .arg(&doc)
-        .env_remove("DARKMATTER_NO_BASELINE_SCHEMA")
         .assert()
         .success()
         .stdout(predicate::str::contains("-"));
@@ -58,10 +60,11 @@ fn compose_default_baseline_rejects_custom_ctx_keys() {
     );
 
     fixture
-        .command()
+        .command_builder()
+        .application_input_removed("DARKMATTER_NO_BASELINE_SCHEMA")
+        .build()
         .arg("compose")
         .arg(&doc)
-        .env_remove("DARKMATTER_NO_BASELINE_SCHEMA")
         .assert()
         .failure()
         .stderr(predicate::str::contains("ctx"));
@@ -78,10 +81,11 @@ fn compose_document_schema_precedence_is_preserved() {
     );
 
     fixture
-        .command()
+        .command_builder()
+        .application_input_removed("DARKMATTER_NO_BASELINE_SCHEMA")
+        .build()
         .arg("compose")
         .arg(&doc)
-        .env_remove("DARKMATTER_NO_BASELINE_SCHEMA")
         .assert()
         .failure()
         .stderr(predicate::str::contains("title"));
@@ -94,10 +98,11 @@ fn compose_unknown_frontmatter_keys_remain_allowed() {
     let doc = write_file(&dir, "custom.md", "---\ncustom_key: 42\n---\nBody\n");
 
     fixture
-        .command()
+        .command_builder()
+        .application_input_removed("DARKMATTER_NO_BASELINE_SCHEMA")
+        .build()
         .arg("compose")
         .arg(&doc)
-        .env_remove("DARKMATTER_NO_BASELINE_SCHEMA")
         .assert()
         .success()
         .stdout(predicate::str::contains("Body"));
@@ -126,10 +131,11 @@ fn compose_no_baseline_schema_env_disables_default_baseline() {
     let doc = write_file(&dir, "raw-env.md", "---\ndraft: maybe\n---\nBody\n");
 
     fixture
-        .command()
+        .command_builder()
+        .application_input("DARKMATTER_NO_BASELINE_SCHEMA", "1")
+        .build()
         .arg("compose")
         .arg(&doc)
-        .env("DARKMATTER_NO_BASELINE_SCHEMA", "1")
         .assert()
         .success()
         .stdout(predicate::str::contains("Body"));
@@ -144,12 +150,13 @@ fn compose_custom_baseline_schema_overrides_default_baseline() {
     let doc = write_file(&dir, "custom-baseline.md", "---\ndraft: maybe\n---\nBody\n");
 
     fixture
-        .command()
+        .command_builder()
+        .application_input_removed("DARKMATTER_NO_BASELINE_SCHEMA")
+        .build()
         .arg("compose")
         .arg("--baseline-schema")
         .arg(&schema)
         .arg(&doc)
-        .env_remove("DARKMATTER_NO_BASELINE_SCHEMA")
         .assert()
         .success()
         .stdout(predicate::str::contains("Body"));
@@ -169,12 +176,13 @@ fn compose_explicit_baseline_schema_wins_over_no_baseline_schema_env() {
     let doc = write_file(&dir, "custom-env.md", "---\ncustom: 42\n---\nBody\n");
 
     fixture
-        .command()
+        .command_builder()
+        .application_input("DARKMATTER_NO_BASELINE_SCHEMA", "1")
+        .build()
         .arg("compose")
         .arg("--baseline-schema")
         .arg(&schema)
         .arg(&doc)
-        .env("DARKMATTER_NO_BASELINE_SCHEMA", "1")
         .assert()
         .failure()
         .stderr(predicate::str::contains("custom"));

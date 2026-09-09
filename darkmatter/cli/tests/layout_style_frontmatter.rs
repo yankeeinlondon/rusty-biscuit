@@ -2,18 +2,16 @@ mod common;
 
 use biscuit_terminal::terminal::Terminal;
 use common::layout::*;
-use common::{CliProcessFixture, md_file};
+use common::{CliProcessFixture, MdCommandBuilder, md_file};
 
 fn rendering_command(fixture: &CliProcessFixture) -> assert_cmd::Command {
-    let mut command = fixture.command();
-    command
-        .env("COLUMNS", "80")
-        .env("LINES", "24")
-        .env("TERM", "dumb")
-        .env_remove("COLORTERM")
-        .env("NO_COLOR", "1")
-        .env_remove("FORCE_COLOR");
-    command
+    rendering_builder(fixture).build()
+}
+
+/// The same pinned rendering frame before `build()`, for a test that also has
+/// an application input to declare.
+fn rendering_builder(fixture: &CliProcessFixture) -> MdCommandBuilder<'_> {
+    fixture.command_builder().plain_terminal(80, 24)
 }
 use darkmatter::layout::DarkmatterPage;
 
@@ -49,11 +47,12 @@ fn style_fixture_renders_html_successfully() {
     // Acceptance: `md --output html style-prop.md` uses the same page-level
     // frontmatter values through `render_to_browser_document` (a complete
     // standalone document). MD_DRY_RUN avoids launching a browser.
-    let output = rendering_command(&fixture)
+    let output = rendering_builder(&fixture)
+        .application_input("MD_DRY_RUN", "1")
+        .build()
         .arg(style_prop_fixture())
         .arg("--output")
         .arg("html")
-        .env("MD_DRY_RUN", "1")
         .output()
         .unwrap();
     assert!(
@@ -158,12 +157,13 @@ fn style_strict_style_fails_on_unknown_key() {
         ---\n\n# Doc\n",
     );
 
-    let output = rendering_command(&fixture)
+    let output = rendering_builder(&fixture)
+        .application_input("MD_DRY_RUN", "1")
+        .build()
         .arg(tmp.path())
         .arg("--output")
         .arg("html")
         .arg("--strict-style")
-        .env("MD_DRY_RUN", "1")
         .output()
         .unwrap();
     assert!(
@@ -188,12 +188,13 @@ fn style_strict_style_fails_on_deprecated_key() {
         ---\n\n# Doc\n",
     );
 
-    let output = rendering_command(&fixture)
+    let output = rendering_builder(&fixture)
+        .application_input("MD_DRY_RUN", "1")
+        .build()
         .arg(tmp.path())
         .arg("--output")
         .arg("html")
         .arg("--strict-style")
-        .env("MD_DRY_RUN", "1")
         .output()
         .unwrap();
     assert!(
@@ -215,11 +216,12 @@ fn style_non_strict_renders_with_unknown_key() {
         \x20       made-up-key: 2ch\n\
         ---\n\n# Doc\n",
     );
-    let output = rendering_command(&fixture)
+    let output = rendering_builder(&fixture)
+        .application_input("MD_DRY_RUN", "1")
+        .build()
         .arg(tmp.path())
         .arg("--output")
         .arg("html")
-        .env("MD_DRY_RUN", "1")
         .output()
         .unwrap();
     assert!(

@@ -107,8 +107,8 @@ fn schema_validate_legacy_pretty_output_is_byte_identical() {
         let output = process
             .command_builder()
             .ambient_context(&work)
+            .rendering_input("NO_COLOR", "1")
             .build()
-            .env("NO_COLOR", "1")
             .args(["schema", "validate", "doc.md"])
             .output()
             .unwrap();

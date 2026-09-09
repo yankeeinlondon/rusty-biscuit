@@ -201,8 +201,9 @@ fn test_hash_env_property_override() {
     std::fs::write(&file, "---\ntitle: T\n---\n# H\n\nBody.\n").unwrap();
 
     fixture
-        .command()
-        .env("HASH_PROPERTY", "fingerprint")
+        .command_builder()
+        .application_input("HASH_PROPERTY", "fingerprint")
+        .build()
         .arg("hash")
         .arg("--save")
         .arg(&file)
@@ -220,15 +221,17 @@ fn test_hash_ignore_properties_excludes_key() {
         CliProcessFixture::named("hash-kind-save-diff-test-hash-ignore-properties-excludes-key");
     // A document differing only in an ignored property hashes identically.
     let with_draft = fixture
-        .command()
-        .env("HASH_IGNORE_PROPERTIES", "draft")
+        .command_builder()
+        .application_input("HASH_IGNORE_PROPERTIES", "draft")
+        .build()
         .args(["hash", "--frontmatter", "-"])
         .write_stdin("---\ntitle: T\ndraft: true\n---\n# H")
         .output()
         .unwrap();
     let without_draft = fixture
-        .command()
-        .env("HASH_IGNORE_PROPERTIES", "draft")
+        .command_builder()
+        .application_input("HASH_IGNORE_PROPERTIES", "draft")
+        .build()
         .args(["hash", "--frontmatter", "-"])
         .write_stdin("---\ntitle: T\n---\n# H")
         .output()
@@ -342,8 +345,9 @@ fn test_hash_save_honors_quoted_custom_property() {
     std::fs::write(&file, source).unwrap();
 
     fixture
-        .command()
-        .env("HASH_PROPERTY", "fingerprint")
+        .command_builder()
+        .application_input("HASH_PROPERTY", "fingerprint")
+        .build()
         .arg("hash")
         .arg("--save")
         .arg(&file)
@@ -353,8 +357,9 @@ fn test_hash_save_honors_quoted_custom_property() {
     assert!(written.contains("title: T # keep\n'fingerprint': "));
     assert!(!written.contains("\nhash:"));
     fixture
-        .command()
-        .env("HASH_PROPERTY", "fingerprint")
+        .command_builder()
+        .application_input("HASH_PROPERTY", "fingerprint")
+        .build()
         .arg("hash")
         .arg("--diff")
         .arg(&file)
@@ -568,13 +573,14 @@ fn test_hash_save_preservation_matrix_covers_representations_and_newlines() {
             );
             std::fs::write(&file, source).unwrap();
 
-            let mut save = fixture.command();
+            let mut save_builder = fixture.command_builder();
+            if case.property != "hash" {
+                save_builder = save_builder.application_input("HASH_PROPERTY", case.property);
+            }
+            let mut save = save_builder.build();
             save.arg("hash");
             if let Some(kind) = case.kind {
                 save.args(["--kind", kind]);
-            }
-            if case.property != "hash" {
-                save.env("HASH_PROPERTY", case.property);
             }
             save.arg("--save").arg(&file).assert().success();
 
@@ -609,12 +615,12 @@ fn test_hash_save_preservation_matrix_covers_representations_and_newlines() {
                 );
             }
 
-            let mut diff = fixture.command();
-            diff.arg("hash");
+            let mut diff_builder = fixture.command_builder();
             if case.property != "hash" {
-                diff.env("HASH_PROPERTY", case.property);
+                diff_builder = diff_builder.application_input("HASH_PROPERTY", case.property);
             }
-            diff.arg("--diff").arg(&file).assert().success();
+            let mut diff = diff_builder.build();
+            diff.arg("hash").arg("--diff").arg(&file).assert().success();
         }
     }
 }

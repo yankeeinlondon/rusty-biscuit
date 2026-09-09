@@ -117,8 +117,9 @@ fn test_output_json_alias_ast() {
 fn test_show_option_with_markdown_output() {
     let fixture = CliProcessFixture::named("test_show_option_with_markdown_output");
     fixture
-        .command()
-        .env("MD_DRY_RUN", "1")
+        .command_builder()
+        .application_input("MD_DRY_RUN", "1")
+        .build()
         .args(["--output", "markdown", "--show", "-"])
         .write_stdin("# Show Test")
         .assert()

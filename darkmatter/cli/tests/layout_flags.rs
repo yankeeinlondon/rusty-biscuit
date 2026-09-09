@@ -3,15 +3,7 @@ mod common;
 use common::{CliProcessFixture, md_file};
 
 fn rendering_command(fixture: &CliProcessFixture) -> assert_cmd::Command {
-    let mut command = fixture.command();
-    command
-        .env("COLUMNS", "80")
-        .env("LINES", "24")
-        .env("TERM", "dumb")
-        .env_remove("COLORTERM")
-        .env("NO_COLOR", "1")
-        .env_remove("FORCE_COLOR");
-    command
+    fixture.command_builder().plain_terminal(80, 24).build()
 }
 
 #[test]

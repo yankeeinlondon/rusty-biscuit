@@ -12,10 +12,10 @@ mod common;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use common::fixture::{checkout_root, minimal_system_path};
+use common::fixture::{checkout_root, inherited_scrub_keys, minimal_system_path};
 #[cfg(unix)]
 use common::write_executable;
-use common::{CliProcessFixture, checkout_containment_error, git, write};
+use common::{CliProcessFixture, checkout_containment_error, git, protected_class, write};
 
 /// Name of the recording stub. It is executed through `md compose`'s shell
 /// expansion, so "the fixture stub ran" also proves the child resolved it
@@ -30,11 +30,11 @@ const PROBE_DOCUMENT: &str = "# Probe\n\n::shell dm-fixture-probe record\n";
 /// Write the recording stub into the fixture `bin` directory.
 ///
 /// The stub dumps the environment md handed it to the file named by
-/// `MD_PROBE_CAPTURE` (set after `build()`, which is exactly the per-key
-/// ordering the contract promises). Bracketed values distinguish "empty"
-/// from a shell's own rendering of an unset variable. `MD_DRY_RUN` lives in
-/// the `MD_` namespace the builder sweeps, so the capture key would be
-/// scrubbed if it were inherited rather than call-site-chosen.
+/// `FIXTURE_PROBE_CAPTURE`. Bracketed values distinguish "empty" from a
+/// shell's own rendering of an unset variable. The `FIXTURE_` prefix — shared
+/// with `FIXTURE_PROBE_CONTROL` — keeps this harness plumbing outside every
+/// namespace the spawn contract owns, so setting it on the built command is
+/// not an isolation escape.
 fn write_probe_stub(bin_dir: &Path) {
     #[cfg(windows)]
     {
@@ -42,43 +42,43 @@ fn write_probe_stub(bin_dir: &Path) {
             &bin_dir.join(format!("{PROBE}.cmd")),
             concat!(
                 "@echo off\r\n",
-                ">\"%MD_PROBE_CAPTURE%\" echo PATH=%PATH%\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo HOME=%HOME%\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo CWD=%CD%\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo USERPROFILE=[%USERPROFILE%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo HOMEDRIVE=[%HOMEDRIVE%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo HOMEPATH=[%HOMEPATH%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo APPDATA=[%APPDATA%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo LOCALAPPDATA=[%LOCALAPPDATA%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo XDG_CONFIG_HOME=[%XDG_CONFIG_HOME%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo XDG_CACHE_HOME=[%XDG_CACHE_HOME%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo TMPDIR=[%TMPDIR%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo TEMP=[%TEMP%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo TMP=[%TMP%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo GIT_DIR=[%GIT_DIR%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo GIT_WORK_TREE=[%GIT_WORK_TREE%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo GIT_INDEX_FILE=[%GIT_INDEX_FILE%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo GIT_CONFIG_NOSYSTEM=[%GIT_CONFIG_NOSYSTEM%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo GIT_CONFIG_COUNT=[%GIT_CONFIG_COUNT%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo COLUMNS=[%COLUMNS%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo LINES=[%LINES%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo TERM=[%TERM%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo COLORTERM=[%COLORTERM%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo FORCE_COLOR=[%FORCE_COLOR%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo COLORFGBG=[%COLORFGBG%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo CLICOLOR_FORCE=[%CLICOLOR_FORCE%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo THEME=[%THEME%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo DARKMATTER_TEST_VAR=[%DARKMATTER_TEST_VAR%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo DM_TEST_VAR=[%DM_TEST_VAR%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo MD_DRY_RUN=[%MD_DRY_RUN%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo AGENT=[%AGENT%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo MODEL=[%MODEL%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo RUST_LOG=[%RUST_LOG%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo CONTROL=[%FIXTURE_PROBE_CONTROL%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo PATHEXT=[%PATHEXT%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo COMSPEC=[%COMSPEC%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo SYSTEMROOT=[%SystemRoot%]\r\n",
-                ">>\"%MD_PROBE_CAPTURE%\" echo STUB=fixture-probe\r\n",
+                ">\"%FIXTURE_PROBE_CAPTURE%\" echo PATH=%PATH%\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo HOME=%HOME%\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo CWD=%CD%\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo USERPROFILE=[%USERPROFILE%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo HOMEDRIVE=[%HOMEDRIVE%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo HOMEPATH=[%HOMEPATH%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo APPDATA=[%APPDATA%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo LOCALAPPDATA=[%LOCALAPPDATA%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo XDG_CONFIG_HOME=[%XDG_CONFIG_HOME%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo XDG_CACHE_HOME=[%XDG_CACHE_HOME%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo TMPDIR=[%TMPDIR%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo TEMP=[%TEMP%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo TMP=[%TMP%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo GIT_DIR=[%GIT_DIR%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo GIT_WORK_TREE=[%GIT_WORK_TREE%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo GIT_INDEX_FILE=[%GIT_INDEX_FILE%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo GIT_CONFIG_NOSYSTEM=[%GIT_CONFIG_NOSYSTEM%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo GIT_CONFIG_COUNT=[%GIT_CONFIG_COUNT%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo COLUMNS=[%COLUMNS%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo LINES=[%LINES%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo TERM=[%TERM%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo COLORTERM=[%COLORTERM%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo FORCE_COLOR=[%FORCE_COLOR%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo COLORFGBG=[%COLORFGBG%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo CLICOLOR_FORCE=[%CLICOLOR_FORCE%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo THEME=[%THEME%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo DARKMATTER_TEST_VAR=[%DARKMATTER_TEST_VAR%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo DM_TEST_VAR=[%DM_TEST_VAR%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo MD_DRY_RUN=[%MD_DRY_RUN%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo AGENT=[%AGENT%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo MODEL=[%MODEL%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo RUST_LOG=[%RUST_LOG%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo CONTROL=[%FIXTURE_PROBE_CONTROL%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo PATHEXT=[%PATHEXT%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo COMSPEC=[%COMSPEC%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo SYSTEMROOT=[%SystemRoot%]\r\n",
+                ">>\"%FIXTURE_PROBE_CAPTURE%\" echo STUB=fixture-probe\r\n",
                 "exit /b 0\r\n",
             ),
         );
@@ -126,7 +126,7 @@ fn write_probe_stub(bin_dir: &Path) {
   printf 'COMSPEC=[%s]\n' "$COMSPEC"
   printf 'SYSTEMROOT=[%s]\n' "$SystemRoot"
   printf 'STUB=fixture-probe\n'
-} > "$MD_PROBE_CAPTURE"
+} > "$FIXTURE_PROBE_CAPTURE"
 exit 0
 "#,
         );
@@ -157,7 +157,7 @@ fn probe_fixture(name: &str) -> (CliProcessFixture, PathBuf) {
 /// the stub recorded.
 fn run_probe(mut command: assert_cmd::Command, capture: &Path) -> BTreeMap<String, String> {
     command
-        .env("MD_PROBE_CAPTURE", capture)
+        .env("FIXTURE_PROBE_CAPTURE", capture)
         .args(["compose", "-"])
         .write_stdin(PROBE_DOCUMENT)
         .assert()
@@ -172,7 +172,7 @@ fn run_probe_std(mut command: std::process::Command, capture: &Path) -> BTreeMap
     use std::io::Write as _;
     use std::process::Stdio;
     command
-        .env("MD_PROBE_CAPTURE", capture)
+        .env("FIXTURE_PROBE_CAPTURE", capture)
         .args(["compose", "-"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -399,33 +399,97 @@ fn inherited_families_do_not_reach_the_child_and_fixture_defaults_win() {
     }
 }
 
-/// The scrub removes what was *inherited* and never what a test chose;
-/// without this rule the builder would silently drop every intentional
-/// override a migrated test sets after `build()`.
+/// A declared behavior input out-ranks both the inherited value and the
+/// scrub — the ordering that makes declaration a usable replacement for the
+/// post-`build()` `.env` the isolation gate now rejects.
 #[test]
-fn a_scrubbed_key_set_after_build_still_reaches_the_child() {
-    let (fixture, capture) = probe_fixture("fixture-scrubbed-key-set-after-build");
+fn a_declared_behavior_input_out_ranks_the_inherited_value_and_the_scrub() {
+    let (fixture, capture) = probe_fixture("fixture-declared-behavior-input");
     unsafe {
         std::env::set_var("DARKMATTER_TEST_VAR", "sentinel-darkmatter");
         std::env::set_var("COLUMNS", "44");
         std::env::set_var("FIXTURE_PROBE_CONTROL", "sentinel-control");
     }
 
-    let mut command = fixture.command();
-    command
-        .env("DARKMATTER_TEST_VAR", "chosen")
-        .env("COLUMNS", "120");
+    let command = fixture
+        .command_builder()
+        .application_input("DARKMATTER_TEST_VAR", "chosen")
+        .rendering_input("COLUMNS", "120")
+        .build();
     let recorded = run_probe(command, &capture);
 
     assert_parent_environment_reached_the_child(&recorded);
     assert_eq!(
         recorded["DARKMATTER_TEST_VAR"], "[chosen]",
-        "a darkmatter value chosen after `build()` must out-rank the scrub"
+        "a declared darkmatter input must out-rank the scrub"
     );
     assert_eq!(
         recorded["COLUMNS"], "[120]",
-        "a render width chosen after `build()` must out-rank the scrub"
+        "a declared render width must out-rank the scrub"
     );
+}
+
+/// Every variable the spawn contract pins or scrubs must be classified, or the
+/// isolation gate has a blind spot exactly where the fixture has a default.
+#[test]
+fn every_variable_the_spawn_contract_owns_is_classified_as_protected() {
+    let fixture = CliProcessFixture::named("fixture-protected-classification");
+    let mut owned: Vec<String> = inherited_scrub_keys()
+        .iter()
+        .map(|key| key.to_string_lossy().into_owned())
+        .collect();
+    owned.extend(
+        fixture
+            .command_builder()
+            .child_environment()
+            .set_keys()
+            .into_iter()
+            .map(|key| key.to_string_lossy().into_owned()),
+    );
+    owned.sort();
+    owned.dedup();
+    assert!(
+        owned.len() > 20,
+        "the contract's own key list came back suspiciously small: {owned:?}"
+    );
+
+    let unclassified: Vec<&String> = owned
+        .iter()
+        .filter(|key| key.as_str() != "PATH" && protected_class(key).is_none())
+        .collect();
+    assert!(
+        unclassified.is_empty(),
+        "the spawn contract pins or scrubs these, but `protected_env.rs` does not classify \
+         them, so a post-`build()` override of one would pass the isolation gate: \
+         {unclassified:?}"
+    );
+}
+
+#[test]
+#[should_panic(expected = "there is no declared override")]
+fn a_containment_variable_cannot_be_declared_as_a_rendering_input() {
+    let fixture = CliProcessFixture::named("fixture-declare-containment");
+    let _ = fixture
+        .command_builder()
+        .rendering_input("HOME", "/elsewhere");
+}
+
+#[test]
+#[should_panic(expected = "declare it with `application_input`")]
+fn a_rendering_declaration_of_an_application_input_names_the_right_method() {
+    let fixture = CliProcessFixture::named("fixture-declare-wrong-class");
+    let _ = fixture
+        .command_builder()
+        .rendering_input("HASH_PROPERTY", "fingerprint");
+}
+
+#[test]
+#[should_panic(expected = "use `host_path()` or `fake_only_path()`")]
+fn path_is_composed_by_the_builder_not_declared() {
+    let fixture = CliProcessFixture::named("fixture-declare-path");
+    let _ = fixture
+        .command_builder()
+        .rendering_input("PATH", "/usr/bin");
 }
 
 /// The tightening knob has to survive its own `env_clear()`. On Windows that
@@ -681,12 +745,12 @@ fn hostile_inherited_environment_leaves_the_fixture_defaults_unchanged() {
     #[cfg(unix)]
     write_executable(
         &poisoned_bin.join(PROBE),
-        "#!/bin/sh\necho 'STUB=hostile-probe' > \"$MD_PROBE_CAPTURE\"\n",
+        "#!/bin/sh\necho 'STUB=hostile-probe' > \"$FIXTURE_PROBE_CAPTURE\"\n",
     );
     #[cfg(windows)]
     write(
         &poisoned_bin.join(format!("{PROBE}.cmd")),
-        "@echo off\r\necho STUB=hostile-probe>\"%MD_PROBE_CAPTURE%\"\r\n",
+        "@echo off\r\necho STUB=hostile-probe>\"%FIXTURE_PROBE_CAPTURE%\"\r\n",
     );
 
     // A checkout-ancestor TMPDIR: the fixture must accept a workspace beside
