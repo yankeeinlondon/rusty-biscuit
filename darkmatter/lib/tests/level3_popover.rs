@@ -12,13 +12,13 @@ use std::time::Duration;
 
 use biscuit_browser_harness::find_chrome;
 use biscuit_test_harness::cliclick;
-use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::Page;
-use darkmatter::markdown::output::HtmlOptions;
+use chromiumoxide::browser::{Browser, BrowserConfig};
 use darkmatter::markdown::Markdown;
+use darkmatter::markdown::output::HtmlOptions;
 use futures_util::StreamExt;
 use serial_test::serial;
-use test_toolkit::{require_level, Level};
+use test_toolkit::{Level, require_level};
 
 static WINDOW_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
@@ -62,9 +62,7 @@ impl Level3Chrome {
             .get_mut_child()
             .and_then(|child| child.as_mut_inner().id())
             .ok_or_else(|| "headed Chrome launch did not expose its process ID".to_string())?;
-        let handler = tokio::spawn(async move {
-            while browser_handler.next().await.is_some() {}
-        });
+        let handler = tokio::spawn(async move { while browser_handler.next().await.is_some() {} });
         let page = browser
             .new_page(format!("file://{}", path.display()))
             .await
@@ -134,6 +132,27 @@ impl Level3Chrome {
             .ok_or_else(|| format!("selector {selector:?} had no screen-space center"))
     }
 
+    async fn wait_for_evaluation(
+        &self,
+        script: &str,
+        what: &str,
+        condition: impl Fn(&str) -> bool,
+    ) -> Result<String, String> {
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(3);
+        loop {
+            let observed = self.evaluate(script).await?;
+            if condition(&observed) {
+                return Ok(observed);
+            }
+            if tokio::time::Instant::now() >= deadline {
+                return Err(format!(
+                    "timed out waiting for {what}; last value: {observed:?}"
+                ));
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    }
+
     fn activate_exact_window(&self) -> Result<(), String> {
         cliclick::activate_process_window(self.window_process_id, &self.title)
             .map_err(|error| format!("{PROVISIONING_FAILURE}: {error}"))
@@ -142,20 +161,24 @@ impl Level3Chrome {
     async fn verify_keyboard_canary(&self) -> Result<(i32, i32), String> {
         self.activate_exact_window()?;
         let coordinates = self.element_screen_center("#os-key-canary").await?;
-        cliclick::click_then_text(coordinates.0, coordinates.1, KEY_CANARY)
-            .map_err(|error| format!("{PROVISIONING_FAILURE}: keyboard injection failed: {error}"))?;
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        cliclick::click_then_text(coordinates.0, coordinates.1, KEY_CANARY).map_err(|error| {
+            format!("{PROVISIONING_FAILURE}: keyboard injection failed: {error}")
+        })?;
         let observed = self
-            .evaluate(
+            .wait_for_evaluation(
                 "(() => { const input = document.querySelector('#os-key-canary'); \
                  return `${input.value}|${window.__osKeyCanaryEvents || 0}`; })()",
+                "the OS keyboard canary",
+                |value| {
+                    value.split_once('|').is_some_and(|(text, events)| {
+                        text == KEY_CANARY && events.parse::<u32>().unwrap_or(0) > 0
+                    })
+                },
             )
             .await?;
-        let observed_canary = observed
-            .split_once('|')
-            .is_some_and(|(value, events)| {
-                value == KEY_CANARY && events.parse::<u32>().unwrap_or(0) > 0
-            });
+        let observed_canary = observed.split_once('|').is_some_and(|(value, events)| {
+            value == KEY_CANARY && events.parse::<u32>().unwrap_or(0) > 0
+        });
         if !observed_canary {
             return Err(format!(
                 "{PROVISIONING_FAILURE}: the live page did not observe the OS keyboard canary; \
@@ -169,11 +192,15 @@ impl Level3Chrome {
     async fn verify_pointer_canary(&self, click_from: (i32, i32)) -> Result<(), String> {
         self.activate_exact_window()?;
         let target = self.element_screen_center("#os-pointer-canary").await?;
-        cliclick::click_then_move(click_from.0, click_from.1, target.0, target.1)
-            .map_err(|error| format!("{PROVISIONING_FAILURE}: pointer injection failed: {error}"))?;
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        cliclick::click_then_move(click_from.0, click_from.1, target.0, target.1).map_err(
+            |error| format!("{PROVISIONING_FAILURE}: pointer injection failed: {error}"),
+        )?;
         let observed = self
-            .evaluate("String(window.__osPointerCanaryEvents || 0)")
+            .wait_for_evaluation(
+                "String(window.__osPointerCanaryEvents || 0)",
+                "the OS pointer canary",
+                |value| value.parse::<u32>().unwrap_or(0) > 0,
+            )
             .await?;
         if observed.parse::<u32>().unwrap_or(0) == 0 {
             return Err(format!(
@@ -194,19 +221,18 @@ impl Level3Chrome {
 }
 
 async fn resolve_window_process_id(title: &str) -> Result<u32, String> {
-    let mut last_error = None;
-    for _ in 0..20 {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    let last_error = loop {
         match cliclick::process_id_for_window(title) {
             Ok(process_id) => return Ok(process_id),
-            Err(error) => last_error = Some(error),
+            Err(error) if tokio::time::Instant::now() >= deadline => break error,
+            Err(_) => {}
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    };
     Err(format!(
         "{PROVISIONING_FAILURE}: the headed Chrome page has no unique AX window: {}",
-        last_error
-            .map(|error| error.to_string())
-            .unwrap_or_else(|| "window lookup produced no diagnostic".to_string()),
+        last_error,
     ))
 }
 
@@ -219,8 +245,7 @@ fn unique_window_title() -> String {
 }
 
 fn popover_page(title: &str) -> String {
-    let markdown: Markdown =
-        "[Click](https://example.com \"prompt='Extra detail'\")\n".into();
+    let markdown: Markdown = "[Click](https://example.com \"prompt='Extra detail'\")\n".into();
     let fragment = markdown
         .as_html(HtmlOptions::default())
         .expect("render prompted link");
@@ -267,12 +292,13 @@ async fn level3_popover_tab_focuses_anchor_and_reveals_prompt() {
         harness.activate_exact_window()?;
         cliclick::click_then_keys(canary.0, canary.1, &["tab"])
             .map_err(|error| format!("OS Tab injection failed: {error}"))?;
-        tokio::time::sleep(Duration::from_millis(150)).await;
         harness
-            .evaluate(
+            .wait_for_evaluation(
                 "(() => { const a=document.querySelector('.dm-popover-wrapper a'); \
                  const p=document.querySelector('.dm-popover-prompt'); \
                  return `active=${document.activeElement===a};vis=${getComputedStyle(p).visibility}`; })()",
+                "anchor focus and prompt visibility",
+                |value| value == "active=true;vis=visible",
             )
             .await
     }
@@ -300,8 +326,11 @@ async fn level3_popover_enter_activates_link() {
         harness.activate_exact_window()?;
         cliclick::click_then_keys(canary.0, canary.1, &["tab", "return"])
             .map_err(|error| format!("OS Tab/Enter injection failed: {error}"))?;
-        tokio::time::sleep(Duration::from_millis(150)).await;
-        harness.evaluate("String(window.__nav || '')").await
+        harness
+            .wait_for_evaluation("String(window.__nav || '')", "link activation", |value| {
+                value == "https://example.com/"
+            })
+            .await
     }
     .await;
     harness.shutdown().await;
@@ -329,17 +358,13 @@ async fn level3_popover_pointer_hover_reveals_prompt() {
         let anchor = harness
             .element_screen_center(".dm-popover-wrapper a")
             .await?;
-        cliclick::click_then_move(
-            keyboard_canary.0,
-            keyboard_canary.1,
-            anchor.0,
-            anchor.1,
-        )
-        .map_err(|error| format!("OS pointer hover injection failed: {error}"))?;
-        tokio::time::sleep(Duration::from_millis(150)).await;
+        cliclick::click_then_move(keyboard_canary.0, keyboard_canary.1, anchor.0, anchor.1)
+            .map_err(|error| format!("OS pointer hover injection failed: {error}"))?;
         harness
-            .evaluate(
+            .wait_for_evaluation(
                 "getComputedStyle(document.querySelector('.dm-popover-prompt')).visibility",
+                "prompt visibility after pointer hover",
+                |value| value == "visible",
             )
             .await
     }

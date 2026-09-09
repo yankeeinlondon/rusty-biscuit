@@ -656,7 +656,10 @@ fn regression_ctx_agent_uses_compose_env_override() {
 Agent: {{ ctx.agent }}
 Model: {{ ctx.model }}"#;
     let md: Markdown = content.into();
-    let mut ctx = darkmatter::markdown::compose::ComposeContext::capture();
+    let mut ctx = darkmatter::markdown::compose::ComposeContext::capture_for_content(
+        std::path::Path::new("."),
+        content,
+    );
     ctx.env_mut()
         .insert("AGENT".to_string(), "  codex  ".to_string());
     ctx.env_mut()
@@ -703,9 +706,10 @@ Skill found
 ::end-block"#;
     std::fs::write(&source_path, content).unwrap();
 
-    let md =
-        darkmatter::markdown::Markdown::try_from_content(std::fs::read_to_string(&source_path).unwrap())
-            .unwrap();
+    let md = darkmatter::markdown::Markdown::try_from_content(
+        std::fs::read_to_string(&source_path).unwrap(),
+    )
+    .unwrap();
     // Build the options *inside* `with_agent_env`: `ComposeOptions::new()`
     // snapshots the process environment (via `ComposeContext::capture`) at
     // construction time, and `ctx.agent()` prefers that captured snapshot over
@@ -715,8 +719,8 @@ Skill found
     // failing this test whenever the caller's ambient `AGENT` is not a
     // recognized agent name.
     let (composed, _) = with_agent_env("claude", || {
-        let options = darkmatter::markdown::compose::ComposeOptions::new()
-            .with_source_file(&source_path);
+        let options =
+            darkmatter::markdown::compose::ComposeOptions::new().with_source_file(&source_path);
         md.compose_with(options).unwrap()
     });
     assert!(composed.content().contains("Skill found"));

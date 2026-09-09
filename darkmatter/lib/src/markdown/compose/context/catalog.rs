@@ -185,9 +185,17 @@ const CONTEXT_VARIABLE_GROUPING: &[(&str, &str, &str)] = &[
     ("staged_packages", "File Changes", "Packages"),
     ("staged_package_areas", "File Changes", "Packages"),
     ("current_package_has_staged_files", "File Changes", "Flags"),
-    ("current_package_area_has_staged_files", "File Changes", "Flags"),
+    (
+        "current_package_area_has_staged_files",
+        "File Changes",
+        "Flags",
+    ),
     ("current_package_has_dirty_files", "File Changes", "Flags"),
-    ("current_package_area_has_dirty_files", "File Changes", "Flags"),
+    (
+        "current_package_area_has_dirty_files",
+        "File Changes",
+        "Flags",
+    ),
     // ── Languages ───────────────────────────────────────────────────
     ("programming_languages_in_repo", "Languages", ""),
     ("programming_language", "Languages", ""),
@@ -265,7 +273,9 @@ fn ctx_shape(schema: &SimplifiedSchema) -> &crate::markdown::schemas::SchemaShap
 fn project_one(index: usize, name: &str, def: &PropertyDef) -> ContextVariableDescriptor {
     let atom = match def {
         PropertyDef::Single(atom) => atom,
-        PropertyDef::Union(atoms) => atoms.first().expect("`ctx` property union must be non-empty"),
+        PropertyDef::Union(atoms) => atoms
+            .first()
+            .expect("`ctx` property union must be non-empty"),
     };
 
     let base = match &atom.ty {
@@ -435,7 +445,11 @@ mod tests {
             };
             let d = &descriptors[index];
 
-            assert_eq!(d.name, name.as_str(), "name/order mismatch at index {index}");
+            assert_eq!(
+                d.name,
+                name.as_str(),
+                "name/order mismatch at index {index}"
+            );
             assert_eq!(d.order, index + 1, "order must be the declaration index");
 
             let expected_base = match &atom.ty {
@@ -448,7 +462,10 @@ mod tests {
                 .constraints
                 .iter()
                 .any(|c| matches!(c, Constraint::Integer));
-            assert_eq!(d.display_type.integer, expected_integer, "ctx.{name} integer");
+            assert_eq!(
+                d.display_type.integer, expected_integer,
+                "ctx.{name} integer"
+            );
 
             assert_eq!(
                 d.description,
@@ -506,8 +523,10 @@ mod tests {
             .iter()
             .map(|d| d.name)
             .collect();
-        let grouping_names: HashSet<&str> =
-            CONTEXT_VARIABLE_GROUPING.iter().map(|(name, _, _)| *name).collect();
+        let grouping_names: HashSet<&str> = CONTEXT_VARIABLE_GROUPING
+            .iter()
+            .map(|(name, _, _)| *name)
+            .collect();
 
         let ungrouped: Vec<&&str> = catalog_names.difference(&grouping_names).collect();
         assert!(
@@ -555,7 +574,10 @@ mod tests {
             "staged_packages_list",
             "staged_package_areas_list",
         ] {
-            assert!(!names.contains(removed), "removed `_list` twin still present: {removed}");
+            assert!(
+                !names.contains(removed),
+                "removed `_list` twin still present: {removed}"
+            );
         }
     }
 
@@ -626,9 +648,9 @@ mod capture_shape_tests {
     /// variables as arrays of objects.
     #[test]
     fn capture_shape_matches_projected_type() {
-        let repo_root = crate::markdown::compose::find_git_root_from(std::path::Path::new("."))
-            .unwrap_or_else(|| std::path::PathBuf::from("."));
-        let ctx = ComposeContext::capture_for_dir(&repo_root);
+        let repo = tempfile::tempdir().expect("temporary repository");
+        gix::init(repo.path()).expect("initialize repository boundary");
+        let ctx = ComposeContext::capture_for_dir(repo.path());
         let mut failures = Vec::new();
         for d in context_variable_descriptors() {
             let ty = &d.display_type;
@@ -640,8 +662,7 @@ mod capture_shape_tests {
             let ok = if ty.is_array {
                 // `object[]` items must be objects; other arrays hold scalars.
                 value.as_array().is_some_and(|items| {
-                    ty.base != SimplifiedType::Object
-                        || items.iter().all(Value::is_object)
+                    ty.base != SimplifiedType::Object || items.iter().all(Value::is_object)
                 })
             } else {
                 match ty.base {

@@ -27,9 +27,12 @@
 #![cfg(target_os = "macos")]
 #![allow(deprecated)]
 
+#[path = "image_test_support/mod.rs"]
+mod image_test_support;
+
 use std::fs;
 use std::rc::Rc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use biscuit_terminal::discovery::detection::ImageSupport;
 use biscuit_terminal::render_tree::{
@@ -44,6 +47,8 @@ use renderable::tree::{GraphicsMode, RenderStrictness, SourceDescriptor};
 use serial_test::serial;
 use tempfile::tempdir;
 use test_toolkit::{Backend, Level, require_level};
+
+use image_test_support::{classify_pixels, write_solid_png};
 
 /// Magenta (`#ff00ff`) does not occur in terminal chrome, text, or theme
 /// backgrounds — its presence proves the image was decoded and painted, not
@@ -104,20 +109,30 @@ fn level3_rich_image_node_paints_distinctive_pixels() {
     harness
         .send_text(format!("cat {}\n", ansi_path.display()).as_bytes())
         .expect("send_text failed");
-    // Allow the terminal to decode and paint the image payload.
-    std::thread::sleep(Duration::from_millis(400));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut last_counts = None;
+    while Instant::now() < deadline {
+        let Some(png) = harness
+            .capture_window_png()
+            .expect("screen-capture invocation")
+        else {
+            std::thread::sleep(Duration::from_millis(50));
+            continue;
+        };
+        let counts = classify_pixels(&png, MAGENTA, 60);
+        last_counts = Some(counts);
+        if counts.0 > 1000 && counts.1 * 100 >= counts.2 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
 
-    let Some(png) = harness
-        .capture_window_png()
-        .expect("screen-capture invocation")
-    else {
+    let Some((magenta, non_black, total)) = last_counts else {
         eprintln!(
             "skipping pixel assertion: window-region capture unavailable (non-macOS or screencapture failed)"
         );
         return;
     };
-
-    let (magenta, non_black, total) = classify_pixels(&png, MAGENTA, 60);
     // A near-black capture means screen recording is blocked (no permission);
     // we cannot tell that from a paint failure, so skip rather than hard-fail.
     if non_black * 100 < total {
@@ -135,35 +150,4 @@ fn level3_rich_image_node_paints_distinctive_pixels() {
          capture ({non_black} non-black). The image protocol bytes were emitted but the \
          terminal did not render the decoded image.",
     );
-}
-
-/// Encodes a `size`×`size` opaque PNG filled with a single RGB color.
-fn write_solid_png(path: &std::path::Path, size: u32, rgb: [u8; 3]) {
-    let img = image::RgbImage::from_pixel(size, size, image::Rgb(rgb));
-    img.save_with_format(path, image::ImageFormat::Png)
-        .expect("encode probe PNG");
-}
-
-/// Counts pixels in `png` that are near `target` RGB (per-channel within
-/// `tol`), and the total pixels that are not near-black. Returns
-/// `(near_target, non_black, total)`.
-fn classify_pixels(png: &[u8], target: [u8; 3], tol: i32) -> (u64, u64, u64) {
-    let img = image::load_from_memory(png).expect("decode screen capture");
-    let rgb = img.to_rgb8();
-    let mut near_target = 0u64;
-    let mut non_black = 0u64;
-    let total = (rgb.width() as u64) * (rgb.height() as u64);
-    for px in rgb.pixels() {
-        let [r, g, b] = px.0;
-        let near = (r as i32 - target[0] as i32).abs() <= tol
-            && (g as i32 - target[1] as i32).abs() <= tol
-            && (b as i32 - target[2] as i32).abs() <= tol;
-        if near {
-            near_target += 1;
-        }
-        if r > 30 || g > 30 || b > 30 {
-            non_black += 1;
-        }
-    }
-    (near_target, non_black, total)
 }

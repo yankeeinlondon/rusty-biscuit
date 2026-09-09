@@ -104,11 +104,7 @@ pub(super) fn render_tree_terminal_spanned_text_tier_to_tempfile(
     body: &str,
     name: &str,
 ) -> (tempfile::TempDir, std::path::PathBuf) {
-    write_doc_to_tempfile(
-        fold_spanned_doc(body, name),
-        name,
-        Some(ImageSupport::None),
-    )
+    write_doc_to_tempfile(fold_spanned_doc(body, name), name, Some(ImageSupport::None))
 }
 
 /// Like [`render_tree_terminal_spanned_to_tempfile`] but pins
@@ -141,8 +137,8 @@ pub(super) fn render_tree_terminal_spanned_vector_to_tempfile(
 pub(super) fn fold_spanned_doc(body: &str, name: &str) -> renderable::tree::Document {
     let source = SourceDescriptor::Virtual { name: name.into() };
     let md: Markdown = body.into();
-    let (doc, diags) = fold_markdown_spanned_with_frontmatter(source, &md)
-        .expect("span-aware fold must succeed");
+    let (doc, diags) =
+        fold_markdown_spanned_with_frontmatter(source, &md).expect("span-aware fold must succeed");
     assert!(
         diags.is_empty(),
         "Level 2 span-aware fixture must fold without diagnostics: {diags:?}"
@@ -187,7 +183,10 @@ pub(super) fn run_in_pane(body: &str, name: &str) -> Option<(CapturedFrame, temp
 }
 
 /// Drives the shared WezTerm pane with the **span-aware** fold path.
-pub(super) fn run_in_pane_spanned(body: &str, name: &str) -> Option<(CapturedFrame, tempfile::TempDir)> {
+pub(super) fn run_in_pane_spanned(
+    body: &str,
+    name: &str,
+) -> Option<(CapturedFrame, tempfile::TempDir)> {
     drive_pane(body, name, render_tree_terminal_spanned_to_tempfile)
 }
 
@@ -197,7 +196,11 @@ pub(super) fn run_in_pane_spanned_text_tier(
     body: &str,
     name: &str,
 ) -> Option<(CapturedFrame, tempfile::TempDir)> {
-    drive_pane(body, name, render_tree_terminal_spanned_text_tier_to_tempfile)
+    drive_pane(
+        body,
+        name,
+        render_tree_terminal_spanned_text_tier_to_tempfile,
+    )
 }
 
 /// Drives the shared WezTerm pane with the **span-aware** fold at
@@ -470,13 +473,6 @@ pub(super) fn osc8_openers(raw: &str) -> Vec<String> {
 // The fixture mirrors the `code_block_rich` parity fixture: a `rust` block
 // with `title="Demo Snippet"`, `line-numbering=true`, and `highlight=2`.
 
-
-
-
-
-
-
-
 // ---------------------------------------------------------------------------
 // Span-aware Level 2 coverage (review-3 finding 3)
 //
@@ -502,7 +498,6 @@ pub(super) fn osc8_openers(raw: &str) -> Vec<String> {
 // `Rich`) but with the policy pinned to `Vector`, and asserts the captured
 // pane shows the waves **glyph** line — proving the rule degraded to text and
 // emitted no image payload even though the terminal could have rasterized.
-
 
 // ---------------------------------------------------------------------------
 // Bespoke page-path Level 2 coverage (review-1 finding 1)
@@ -719,17 +714,6 @@ pub(super) fn run_page_in_pane(
     Some((frame, cols))
 }
 
-/// Review-1 finding 1: under the repro layout (`--ml 4 --mr 4`, github theme,
-/// dark page), the code panel must render in a real terminal as a single
-/// contiguous **inverted (light)** background rectangle spanning exactly the
-/// content columns `[left, width - right)` on every panel row — and prose must
-/// not carry that background. This verifies Defects #0/#1/#2 against the actual
-/// cell grid, not just the ANSI byte string.
-/// Review-1 finding 1 (blank-line behavior): between two code blocks the
-/// rendered pane must not contain a run of two or more consecutive *blank* rows
-/// (the Markdown vertical-rhythm invariant). A background-filled panel padding
-/// row is **not** blank; "blank" means visibly empty with no code-panel
-/// background. This checks the rhythm on the real terminal grid.
 /// A valid 2×2 RGB PNG, embedded so the image-node Level-2 test needs no
 /// on-disk fixture or `image`-crate dependency.
 pub(super) const TINY_PNG: &[u8] = &[
@@ -737,93 +721,6 @@ pub(super) const TINY_PNG: &[u8] = &[
     0, 0, 253, 212, 154, 115, 0, 0, 0, 16, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 0, 68, 12,
     16, 10, 0, 31, 238, 3, 253, 139, 95, 20, 212, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
 ];
-
-/// Review-3 finding 3: a `Rich` image node through the render-tree path is
-/// user-visible terminal graphics, but was only verified for the missing-file
-/// and `Off`/`Vector` alt-text fallbacks. This Level-2 test renders a real
-/// image node through `render_terminal_document` (the production tree path),
-/// confirms the iTerm2 image protocol bytes are emitted, then `cat`s them into
-/// a real WezTerm pane to confirm the terminal does not fall back to literal
-/// `[cat]` alt text.
-///
-/// ## Verification scope — protocol + anti-regression
-///
-/// This test deliberately verifies only two things via text capture:
-///
-/// 1. **Level 1 (in-process):** the production tree path emits the iTerm2
-///    image protocol (OSC 1337) at `Rich`, not the alt-text fallback.
-/// 2. **Level 2 (real terminal):** WezTerm consumes those bytes without
-///    surfacing the `[cat]` alt-text fallback in its text capture.
-///
-/// `wezterm cli get-text` strips image-protocol bytes, so the pane assertion is
-/// the **absence** of the alt-text fallback — which a malformed, ignored, or
-/// zero-visible image payload could also satisfy. Proof that the image is
-/// actually decoded and painted lives in the Level-3 test
-/// `level3_rich_image_node_paints_distinctive_pixels`
-/// (`darkmatter/lib/tests/level3_image_painting.rs`), which screen-captures
-/// the pane and samples the rendered pixels. Pixel-readback is gated to L3
-/// because `screencapture` requires raising the WezTerm window to the
-/// foreground, which the harness contract reserves for L3.
-///
-/// Encodes a `size`×`size` opaque PNG filled with a single RGB color.
-pub(super) fn write_solid_png(path: &std::path::Path, size: u32, rgb: [u8; 3]) {
-    let img = image::RgbImage::from_pixel(size, size, image::Rgb(rgb));
-    img.save_with_format(path, image::ImageFormat::Png)
-        .expect("encode probe PNG");
-}
-
-/// Counts pixels in `png` that are near `target` RGB (per-channel within
-/// `tol`), and the total pixels that are not near-black. Returns
-/// `(near_target, non_black, total)`.
-pub(super) fn classify_pixels(png: &[u8], target: [u8; 3], tol: i32) -> (u64, u64, u64) {
-    let img = image::load_from_memory(png).expect("decode screen capture");
-    let rgb = img.to_rgb8();
-    let mut near_target = 0u64;
-    let mut non_black = 0u64;
-    let total = (rgb.width() as u64) * (rgb.height() as u64);
-    for px in rgb.pixels() {
-        let [r, g, b] = px.0;
-        let near = (r as i32 - target[0] as i32).abs() <= tol
-            && (g as i32 - target[1] as i32).abs() <= tol
-            && (b as i32 - target[2] as i32).abs() <= tol;
-        if near {
-            near_target += 1;
-        }
-        if r > 30 || g > 30 || b > 30 {
-            non_black += 1;
-        }
-    }
-    (near_target, non_black, total)
-}
-
-// Validates the pixel-classification pipeline used by
-// `level3_rich_image_node_paints_distinctive_pixels`
-// (`darkmatter/lib/tests/level3_image_painting.rs`) without a terminal:
-// a solid-magenta PNG must classify as (near-)all magenta and all non-black,
-// while a solid-black PNG must register as near-zero non-black (the signature
-// the paint test treats as "capture blocked → skip"). This guards the decode +
-// threshold logic independently of the WezTerm/`screencapture` environment.
-// Review-5 finding 3: the previous Level-2 image test proves only that the
-// iTerm2 protocol bytes are emitted and that WezTerm does not surface the
-// `[cat]` alt-text fallback — a dropped or malformed payload passes it too,
-// because text capture strips graphics bytes. This test closes that gap with
-// **pixel-readback**: it renders a `240×240` solid-magenta image through the
-// production tree path, paints it into a real WezTerm pane, screen-captures the
-// window via `screencapture`, and asserts the distinctive magenta is actually
-// on screen. Magenta (`#ff00ff`) does not occur in terminal chrome, text, or
-// the theme background, so its presence proves the image was decoded and
-// painted — not merely that bytes were consumed.
-//
-// ## Skips cleanly
-//
-// Skips when WezTerm is unavailable (like the other Level-2 tests), when the
-// harness cannot capture the window region (off macOS, or `screencapture`
-// fails), or when the capture comes back essentially black — the signature of
-// missing Screen Recording permission, which cannot be distinguished from a
-// genuine paint failure and so must not hard-fail. Set
-// `BISCUIT_TEST_LEVEL_REQUIRED=2` to enforce the WezTerm prerequisite; the
-// pixel assertion still self-skips on a black capture.
-
 
 // ---------------------------------------------------------------------------
 // Public post-cutover entry-point Level 2 coverage (review-1 finding 7)
@@ -849,7 +746,9 @@ pub(super) fn render_public_as_terminal_to_tempfile(
     let mut opts = TerminalOptions::default();
     opts.max_width = Some(120);
     opts.color_depth = Some(ColorDepth::TrueColor);
-    let rendered = md.as_terminal(opts).expect("public Markdown::as_terminal render");
+    let rendered = md
+        .as_terminal(opts)
+        .expect("public Markdown::as_terminal render");
 
     let dir = tempdir().unwrap();
     let path = dir.path().join(format!("{name}.ansi"));
@@ -998,7 +897,6 @@ pub(super) fn render_unmatched_policy_page_to_tempfile(
 // the 25%-of-width left offset and (b) cap their content at 50% of the
 // post-margin width — mirroring [`length_to_cells`]'s `f32::round`.
 
-
 // ---------------------------------------------------------------------------
 // `::file-links` directive Level 2 coverage (review-1 findings 1 + 2)
 //
@@ -1059,7 +957,11 @@ pub(super) fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempf
     fs::write(sub.join("buried.md"), "# Buried\n").unwrap();
 
     let root = dir.path().join("root.md");
-    fs::write(&root, "# Root\n\n::file-links --dir docs/topics --depth 1\n").unwrap();
+    fs::write(
+        &root,
+        "# Root\n\n::file-links --dir docs/topics --depth 1\n",
+    )
+    .unwrap();
 
     let md = Markdown::try_from(root.as_path()).unwrap();
     let (composed, _report) = md
@@ -1075,7 +977,9 @@ pub(super) fn run_file_links_in_pane(name: &str) -> Option<(CapturedFrame, tempf
     options.dim_mode = DimMode::Always;
     options.hyperlink_mode = HyperlinkMode::Always;
     options.max_width = Some(100);
-    let rendered = composed.as_terminal(options).expect("render composed ::file-links");
+    let rendered = composed
+        .as_terminal(options)
+        .expect("render composed ::file-links");
 
     let path = dir.path().join(format!("{name}.ansi"));
     fs::write(&path, rendered).unwrap();

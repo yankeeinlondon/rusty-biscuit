@@ -131,6 +131,7 @@ image = { version = "0.25", optional = true }
 libc = "0.2"
 
 [dev-dependencies]
+image = "0.25"
 # Re-declares the renderable path dep with the test-only `hint-access-counter`
 # feature so the structural performance gate (`render_tree::structural_gate`)
 # can observe the `NodeAttrs::data` hint-access counter while folding a styled
@@ -245,7 +246,7 @@ harness = false
 # that no lib test executes fails backend-proof.
 [package.metadata.ci.tests]
 tiers = ["L1", "L2", "browser"]
-features = ["terminal-tests", "browser-tests"]
-local-features = []
+features = ["terminal-tests", "browser-tests", "effects-instrumentation"]
+local-features = ["effects-instrumentation"]
 l2-backends = ["wezterm"]
 l1-include-slow = true
