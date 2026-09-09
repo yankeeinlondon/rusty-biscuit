@@ -82,17 +82,17 @@ The valid operations we use include: fix, docs, chore, feat, refactor, style, pe
 >   **Note:** the action 'refactor' should be reserved for commits which have at least some source code files.
 
 ### Agent Skills
-::block when="ctx.package_area && has_skill(ctx.package_area)"
+::block when="ctx.current_package_area && has_skill(ctx.current_package_area)"
 
-This git commit operation was called from within the **{{ctx.package_area}}** package area. There is an Agent Skill "{{ctx.package_area}}" that provides insights into this package area that you should consider using to help understand this package area.
+This git commit operation was called from within the **{{ctx.current_package_area}}** package area. There is an Agent Skill "{{ctx.current_package_area}}" that provides insights into this package area that you should consider using to help understand this package area.
 
-If the packages which have staged files in them are outside of the {{ctx.package_area}} package area
+If the packages which have staged files in them are outside of the {{ctx.current_package_area}} package area
 you may also want to consider using the Agent Skill's associated with given package areas where the
 staged files exist. 
 
 > **Note:** not all package areas have a corresponding Agent Skill but many of them do
 ::end-block
-::block when="!ctx.package_area || !has_skill(ctx.package_area)"
+::block when="!ctx.current_package_area || !has_skill(ctx.current_package_area)"
 
 Some but not all of the package areas in this monorepo have Agent Skill's of the same name as the package area (e.g., "claudine" agent skill for "claudine" package area). You should consider these skills when they are available to the package areas the staged files reside in.
 

@@ -41,6 +41,8 @@ Your task is to review the "{{ ctx.area }}" package area for signs that it is no
 
 > **Note:** you are running this review on host which is running the {{ctx.os}} OS. That doesn't mean you should focus more on that OS. All OS's are given equal weight and importance. Ironically it is likely that the code base is actually in better shape for the {{ctx.os}} OS simply because this host may be being used as the primary development and testing platform too.
 
+Load the `os` agent skill before starting: it records the repo-specific traps already found on each OS (Windows path spelling and handle inheritance, the WSL2 archive contract, macOS symlinked temp dirs) and which hosts can produce real evidence for each one. Cite it rather than re-deriving those findings.
+
 ## Key areas to examine
 
 ### 1. Hard‑coded file paths and separators
