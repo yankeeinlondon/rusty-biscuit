@@ -62,8 +62,8 @@ pub(crate) use selection::{
 pub(crate) use target::{
     ModelResolveMode, agent_prompt_message, composition_dispatch_context,
     eagerly_resolve_target, install_agent_env_for_composition, provider_for_state_non_tty,
-    refresh_for_model_validation, resolve_document_model, resolve_execution_target,
-    scoped_picker_plan_for_state,
+    refresh_for_model_validation, resolve_document_model, resolve_document_model_from,
+    resolve_execution_target, scoped_picker_plan_for_state,
 };
 #[cfg(test)]
 pub(crate) use target::{picker_scope_for_state, resolve_live_target_with_tty};

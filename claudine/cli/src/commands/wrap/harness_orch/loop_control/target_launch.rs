@@ -217,6 +217,18 @@ pub(crate) struct LaunchRebuildIntent {
     /// rebuild can re-derive argv and the environment overlay without repeating
     /// any of them. See [`crate::commands::wrap::launch_plan`].
     pub(crate) launch_plan_inputs: crate::commands::wrap::launch_plan::LaunchPlanInputs,
+    /// Where model precedence steps 2 and 3 — the provider-specific model
+    /// variables and the generic `MODEL` — read their values.
+    ///
+    /// Production passes [`claudine::composition::ambient_env_lookup`]; the
+    /// field exists so the rebuild's unit tests can be reproducible under
+    /// whatever the developer's shell exports. They run in the same process as
+    /// every other test in the binary, so scrubbing the process environment is
+    /// not available to them: `std::env::set_var` is unsound while sibling
+    /// tests are running, and a Claudine-wrapped session exports `MODEL` into
+    /// every command it launches — which is the ambient value that silently
+    /// out-ranked these fixtures' frontmatter.
+    pub(crate) env_lookup: fn(&str) -> Option<String>,
 }
 
 /// The launch properties a resume cannot renegotiate, recomputed from one
@@ -335,7 +347,8 @@ pub(crate) fn rebuild_launch_identity(
         Vec::new()
     };
 
-    let (model, model_reason) = resolve_launch_model(provider, cli_model, repo_root, document);
+    let (model, model_reason) =
+        resolve_launch_model(provider, cli_model, repo_root, document, intent.env_lookup);
 
     // The single re-entrant rebuild. `--yolo` is a request; whether it *applies*
     // is the profile's decision in this mode, and the plan is what makes it —
@@ -570,6 +583,7 @@ fn resolve_launch_model(
     cli_model: Option<&str>,
     repo_root: Option<&Path>,
     document: &MaterializedHarnessPrompt,
+    env_lookup: fn(&str) -> Option<String>,
 ) -> (Option<String>, ModelResolutionReason) {
     let selection_config =
         crate::commands::wrap::composition::load_selection_config_for_repo(repo_root);
@@ -577,12 +591,13 @@ fn resolve_launch_model(
         Some(cfg) => ModelCatalogService::with_overrides(cfg.model_overrides.clone()),
         None => ModelCatalogService::new(),
     };
-    crate::commands::wrap::composition::resolve_document_model(
+    crate::commands::wrap::composition::resolve_document_model_from(
         &catalog,
         provider,
         &document.selection_hints,
         cli_model,
         crate::commands::wrap::composition::ModelResolveMode::REBUILD,
+        env_lookup,
     )
 }
 

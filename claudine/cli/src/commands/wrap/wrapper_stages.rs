@@ -483,6 +483,7 @@ fn passthrough_launch_intent(
             harness_base_args.to_vec(),
             codex_last_message,
         ),
+        env_lookup: claudine::composition::ambient_env_lookup,
     }
 }
 

@@ -15,7 +15,7 @@ use claudine::composition::{
     AgentResolutionState, CompositionError, CompositionExecutionRequest, CompositionMode,
     EffectiveSelectionHints, ModelResolutionReason, ResolvedExecutionTarget,
     agent_state_breakdown, build_installed_snapshot, classify_agent_resolution,
-    detect_installed_providers, invalid_agent_message, resolve_model_with_hints,
+    detect_installed_providers, invalid_agent_message, resolve_model_with_hints_from,
 };
 use claudine::model_catalog::ModelCatalogService;
 use claudine::provider::Provider;
@@ -548,13 +548,39 @@ pub(crate) fn resolve_document_model(
     cli_model: Option<&str>,
     mode: ModelResolveMode,
 ) -> (Option<String>, ModelResolutionReason) {
+    resolve_document_model_from(
+        catalog,
+        provider,
+        hints,
+        cli_model,
+        mode,
+        claudine::composition::ambient_env_lookup,
+    )
+}
+
+/// [`resolve_document_model`] against a caller-supplied environment, for the
+/// rebuild path — whose callers include tests that cannot scrub the process
+/// environment they share with every other test in their binary.
+pub(crate) fn resolve_document_model_from<E>(
+    catalog: &ModelCatalogService,
+    provider: Provider,
+    hints: &EffectiveSelectionHints,
+    cli_model: Option<&str>,
+    mode: ModelResolveMode,
+    env_lookup: E,
+) -> (Option<String>, ModelResolutionReason)
+where
+    E: Fn(&str) -> Option<String>,
+{
     if mode.refresh {
         // Probe without the catalog so the refresh gate can see whether a
         // CLI/env source already decided the model.
-        let (_, probe_reason) = resolve_model_with_hints(provider, hints, cli_model, None);
+        let (_, probe_reason) =
+            resolve_model_with_hints_from(provider, hints, cli_model, None, &env_lookup);
         refresh_for_model_validation(catalog, provider, hints, Some(&probe_reason));
     }
-    let (model, reason) = resolve_model_with_hints(provider, hints, cli_model, Some(catalog));
+    let (model, reason) =
+        resolve_model_with_hints_from(provider, hints, cli_model, Some(catalog), &env_lookup);
     if mode.warn
         && let Some(notice) = model_catalog_notice(catalog, provider, model.as_deref(), &reason)
     {
