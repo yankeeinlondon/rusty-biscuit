@@ -4,17 +4,18 @@ $schema:
     design: file(match(**/*design*.md)) -> the design file (_optional_) that compliments the spec
     iteration: number -> the review's iteration number
     review: file -> the review file which will be created based on this prompt's execution
-description: "Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.\n\nThe caller can pass in the **iteration** number but it should be detected automatically."
+description: |-
+    Reviews a _feature specification_ to make sure that the specification has been fully implemented. This prompt is also aware of the likelihood of more than one review being necessary and therefore names the reviews `review-{iteration}.md` in the same folder where the feature was specified.
 
+    Note: the caller _can_ pass in the **iteration** number but it should be detected automatically.
 dir: "{{dirname(spec)}}"
 design: "{{ file_exists(dir + '/design.md') ? dir + '/design.md' : null }}"
 iteration: "{{ file_exists(spec) ? (frontmatter(spec, 'review_iterations') || 0) + 1  : 1   }}"
 review: "{{ dirname(spec) + '/review-' + iteration + '.md' }}"
-previous: {{ iteration < 2 ? null : decrement_file_index(review) }}
+previous: "{{ iteration < 2 ? null : decrement_file_index(review) }}"
 feature_or_fix: "{{ contains(spec, 'fixes') ? 'fix' : 'feature' }}"
 start:
     message: "👓 starting {{feature_or_fix}} review #{{iteration}} of `{{parent_dir(spec)}}` (_in the **{{ctx.area}}** package area_)"
-    info: "spec [{{spec}}]: {{file_exists(spec)}}"
 success:
     stack:
         - when: "frontmatter(review,'ready') == true"
@@ -22,6 +23,13 @@ success:
               - success: "{{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in **{{ctx.area}}** finished and deemed code to be **production ready**"
               - message: "✅  {{feature_or_fix}} review #{{iteration}} for `{{parent_dir(spec)}}` in the **{{ctx.area}}** package area completed successfully (_**production ready**_)"
               - effect: small-group-cheer
+        - when: "frontmatter(review,'ready') == true && frontmatter(review,'human_review') == true"
+          action:
+              - message: "{{feature_or_fix}} review of `{{ parent_dir(spec) }}` -- while production ready -- does require human review"
+              - info: |-
+                  {{feature_or_fix}} review of `{{ parent_dir(spec) }}` -- _while production ready_ -- does require human review ({{length(frontmatter(review, 'human_review_items'))}} items):
+
+                  {{ as_ordered_list(frontmatter(review, 'human_review_items')) }}
         - when: "frontmatter(review,'ready') != true"
           action:
               - warn: "{{feature_or_fix}} review {{iteration}} of `{{ parent_dir(spec) }}` in the {{ctx.area}} package area has completed successfully but <i><yellow>not</yellow></i> production ready: <blue>{{link(review)}}</blue>"
@@ -102,12 +110,12 @@ test is at the wrong level under "Findings" with severity at least "high".
 - Save your review suggestions to "@{{review}}"
 - Save the following frontmatter properties to the review file (@{{review}}):
     - set `$schema` to "feature-review.yaml"
-    - set `ready` to whether you think this feature is **ready for production** (boolean)
-    - set the `agent` property to "{{ctx.agent}}/{{ctx.model}}" 
-    - set the `created` property to "{{ctx.now}}"
-    - set the `spec` property to "{{ parent_dir(spec) }}/{{ basename(spec) }}"
-    - set the `implemented` property to `false`
-    - set the `description` property to "A **{{feature_or_fix}}** review of `{{ parent_dir(spec) }}/{{ basename(spec) }}`"
+    ::file "../_ready.md"
+    - set `reviewed_by` property to "{{ctx.agent}}/{{ctx.model}}" 
+    - set `created` property to "{{ctx.now}}"
+    - set `spec` property to "{{ parent_dir(spec) }}/{{ basename(spec) }}"
+    - set `implemented` property to `false`
+    - set `description` property to "A **{{feature_or_fix}}** review of `{{ parent_dir(spec) }}/{{ basename(spec) }}`"
     - set the `{{feature_or_fix}}` property to "{{ parent_dir(review) }}/{{ basename(review) }}"
     ::block when="iteration > 1"
     - set the `previous` property to "{{parent_dir(previous)}}/{{basename(previous)}}"

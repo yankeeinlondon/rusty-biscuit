@@ -35,6 +35,7 @@ failure:
     message: "❌ implementation of the review #{{iteration}} suggestions from **{{ parent_dir(review) }}** failed to complete ({{err.msg}})!"
     effect: sad-trombone
 ---
+::file "../_no_formatting.md"
 
 # Implement Review Suggestions for {{title_case(without_date(parent_dir(spec)))}}
 
@@ -174,3 +175,5 @@ Now your task is to:
         - set the `implementation_{{iteration}}` frontmatter to "{{ ctx.now }}"
 
 ::end-block
+
+::file "../_os.md"

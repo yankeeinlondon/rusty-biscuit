@@ -24,6 +24,8 @@ initialize:
               - message: "😵  the initial review `{{review}}` was _implemented_ and so was the most recent iteration of the review cycle: `find_latest_index(review)`! Nothing to implement."
               - error: "the review `{{review}}` and the follow-on review/implement cycle is ready for another _review_ not an _implemenation_!"
 ---
+::file "../_no_formatting.md"
+
 # Implementation of Review Findings
 
 ## Agent Skills
@@ -32,6 +34,8 @@ initialize:
 - because this is an implementation task primarily you should also leverage the 'rust' agent skill
 - and when working with testing you will use the 'rust-testing' agent skill
 - while acting as orchestrator, you should instruct subagents to also use these agent skills
+
+::file "../_os.md"
 
 ## Task
 
@@ -63,7 +67,7 @@ Once the review is complete you must set Frontmatter metadata on both the review
     - set `initial_review` to `{{ parent_dir(initial_review) + '/' + basename(initial_review) }}`
     ::end-block
 - On your implementation report ({{report}}):
-    - set `agent` to `{{ctx.agent}}/{{ctx.model}}`
+    - set `reviewed_by` to `{{ctx.agent}}/{{ctx.model}}`
     - set `created` to "{{ ctx.now }}"
     - set `underlying` to "{{ parent_dir(review) + '/' + basename(review) }}"
 

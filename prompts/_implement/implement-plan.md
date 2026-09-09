@@ -71,6 +71,8 @@ loop:
 > ⚠️ there was no `total_phases` set on this plan! This metadata missing may indicate a problem
 ::end-block
 
+::file "../_no_formatting.md"
+
 Your task is to implement phase {{phase}} of the plan found in '@{{area}}/{{plan}}'.
 
 - check off tasks in the plan -- marked by GFM todos (aka., `[ ]`) -- once they are complete
@@ -148,6 +150,8 @@ You are done when:
 - most plan's will have a `packages` or `blast_radius` Frontmatter property which will explicitly state which packages are in the "blast radius" (aka, will be impacted 
   during the implementation of this plan)
 ::end-block
+
+::file "../_os.md"
 
 **IMPORTANT:** 
 
