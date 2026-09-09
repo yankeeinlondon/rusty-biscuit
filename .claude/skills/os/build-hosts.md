@@ -8,10 +8,10 @@ were declared when you report.
 
 | Variable | Provides | Standing clone | Notes |
 |---|---|---|---|
-| `BUILD_LINUX` | Native Linux | `~/ci-verification/rusty-biscuit` | Target of `just cross-check --host linux`. |
-| `BUILD_WIN` | Native Windows, PowerShell as the remote shell | `W:\ci-verification\rusty-biscuit` | Target of `just cross-check --host windows`. Git's stderr shows as a red `NativeCommandError`; harmless. |
-| `BUILD_WSL` | A WSL2 Ubuntu guest | `~/ci-verification/rusty-biscuit` | Target of `just cross-check --host wsl`, which runs CI's archive mode ([wsl.md](wsl.md)). For ad hoc commands, non-login shells lack `~/.cargo/bin`; wrap them in `bash -lc`. |
-| `BUILD_MACOS` | A macOS host other than the current one | none yet | Reserved; no recipe consumes it today. |
+| `BUILD_LINUX` | Native Linux | `~/ci-verification/rusty-biscuit` | Target of `just cross-check --os linux`. |
+| `BUILD_WIN` | Native Windows, PowerShell as the remote shell | `W:\ci-verification\rusty-biscuit` | Target of `just cross-check --os windows`. Git's stderr shows as a red `NativeCommandError`; harmless. |
+| `BUILD_WSL` | A WSL2 Ubuntu guest | `~/ci-verification/rusty-biscuit` | Target of `just cross-check --os wsl`, which runs CI's archive mode ([wsl.md](wsl.md)). For ad hoc commands, non-login shells lack `~/.cargo/bin`; wrap them in `bash -lc`. |
+| `BUILD_MACOS` | A macOS host other than the current one | `~/ci-verification/rusty-biscuit` | Target of `just cross-check --os macos`; same flow as Linux. |
 
 Each value is an SSH destination: an alias from the developer's
 `~/.ssh/config` or `user@host`. Use it as `ssh -o BatchMode=yes "$BUILD_WSL"
@@ -25,18 +25,30 @@ the output.
 
 ## `just cross-check`
 
-`scripts/cross-check.sh` (root `just cross-check <package> [--host
-linux|windows|wsl|all] [nextest args]`) syncs a standing clone to
+`scripts/cross-check.sh` (root `just cross-check <package> [--os
+linux|windows|wsl|macos|all] [nextest args]`) syncs a standing clone to
 `origin/<branch>` (falls back to `origin/main` when the branch is unpushed),
 applies the local tree's difference as one patch (tracked and untracked
 files), and runs the package's L1 suite there. Compile caches stay warm
-between runs. It reads `BUILD_LINUX`, `BUILD_WIN`, and `BUILD_WSL`; the
-default `--host all` runs on whichever are set, an explicit `--host` for an
-undeclared one is an error, and no declared host at all is an error rather
-than a silent pass. The `wsl` host runs CI's nextest archive mode with the
-builder target directory hidden, so it catches the class of failure that
-only the `wsl2-ubuntu` CI leg sees; feature flags are routed to the archive
-build and everything else to the run.
+between runs. It reads `BUILD_LINUX`, `BUILD_WIN`, `BUILD_WSL`, and
+`BUILD_MACOS`. The default `--os all` runs on every declared OS except the
+one the script is running on, since the local suite already covers it; the
+banner names the skipped OS. An explicit `--os` runs that one OS even when it
+matches the local one, errors when its host is undeclared, and `all` errors
+when nothing but the local OS is declared rather than passing silently. The
+`wsl` host runs CI's nextest archive mode with the builder target directory
+hidden, so it catches the class of failure that only the `wsl2-ubuntu` CI
+leg sees; feature flags are routed to the archive build and everything else
+to the run.
+
+The hosts are shared. Each run holds a per-host lock
+(`ci-verification/.cross-check.lock`, an atomically created directory with an
+`owner` file naming the user, branch, base SHA, and start time) for the whole
+reset, apply, and test sequence, so overlapping runs queue instead of
+clobbering the clone. A waiter prints the owner and gives up after 30 minutes
+with exit 75. A lock left by a dead run is reported, never removed by the
+script; only its owner removes it by hand. Never work in the standing clone
+directly; use your own worktree for ad hoc sessions.
 
 - Verify the banner line `cross-check: <pkg> @ origin/<branch> (<sha>) + N
   patch line(s)` before trusting a result. If in doubt, confirm the remote
@@ -68,6 +80,14 @@ once filled the system drive to zero bytes and froze the host.
   Windows side and inside the WSL guest.
 - Check free space first: `ssh "$BUILD_WIN" "Get-PSDrive C, W"`; inside
   WSL, `ssh "$BUILD_WSL" 'df -h ~'`.
+
+## Compiler cache on the hosts
+
+The standing `ci-verification` clones are **never** built through kache, because CI never is.
+Do not export `RUSTC_WRAPPER` in a session that touches them: in hardlink mode (build-linux is
+ZFS without a working clone path; the WSL guest is ext4) a restored artifact is a read-only link
+into the store, and the next unwrapped rebuild fails with "output file ... is not writeable"
+(2026-09-09, 89 such files). Ruling per platform: `docs/kache-strategy.md`.
 
 ## Remote-process hygiene
 
