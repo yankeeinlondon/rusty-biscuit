@@ -21,6 +21,39 @@
 //! unavailable (off macOS, or `screencapture` failed), or when the capture
 //! comes back essentially black — the signature of missing Screen Recording
 //! permission, which cannot be distinguished from a genuine paint failure.
+//! Every one of those exits is a `return`, which libtest reports as a pass, so
+//! all three honor `BISCUIT_TEST_LEVEL_REQUIRED=3` and panic instead when an
+//! operator has demanded genuine Level-3 evidence.
+//!
+//! ## Why the fixed sleep became a poll
+//!
+//! The capture used to be taken once, 400 ms after `cat`. That number was a
+//! guess at how long WezTerm needs to decode and paint an iTerm2 payload, and
+//! it failed in three ways. Too short on a loaded host, so a correct build
+//! failed spuriously. Silent about *when* the pixels appeared, so it could
+//! never distinguish "painted in response to the payload" from "already
+//! there". And a single transient `screencapture` failure — one `None` — was
+//! enough to downgrade the whole pixel assertion into a skip, which reports as
+//! a pass.
+//!
+//! The loop's exit test is the conjunction of the two conditions below it: the
+//! `magenta > 1000` assertion, and the non-black guard that decides whether the
+//! assertion is meaningful at all. It therefore cannot stop on a
+//! partially-decoded frame, and the counts it carries out are the counts that
+//! satisfied it. Only an all-`None` five seconds now yields the
+//! capture-unavailable skip. Spec §4 of
+//! `fixes/2026-09-07-faster-darkmatter-tests` mandates this shape: "Poll the
+//! final asserted condition, retain real-boundary coverage".
+//!
+//! ## What the 5-second bound costs
+//!
+//! `capture_window_png` raises the window and lets the compositor settle before
+//! sampling, so an iteration costs roughly 350 ms whatever the 50 ms sleep
+//! says; the bound buys about a dozen attempts, each re-raising the window.
+//! And it is a real ceiling: a paint regression slower than 400 ms but faster
+//! than five seconds now passes where the old sleep would have failed. That is
+//! accepted — the claim here is that the decoded image is painted at all, and
+//! no paint-latency floor is asserted at any tier.
 
 // Whitebox: wires the deprecated `TerminalCodeRenderer` adapter directly to
 // exercise the production code-rendering path the public entry points use.
@@ -54,6 +87,28 @@ use image_test_support::{classify_pixels, write_solid_png};
 /// backgrounds — its presence proves the image was decoded and painted, not
 /// merely that the protocol bytes were consumed.
 const MAGENTA: [u8; 3] = [255, 0, 255];
+
+/// Abandons the pixel claim because the resource it needs is missing, panicking
+/// instead when `BISCUIT_TEST_LEVEL_REQUIRED=3` demands Level 3.
+///
+/// ## Notes
+///
+/// `require_level!` applies that enforcement only to the gate at the top of the
+/// test. Both of this test's other exits are decided mid-body from the capture
+/// itself, and a bare `return` is reported green by libtest — so without the
+/// same check here, an operator's authorized Level-3 run on a host that never
+/// granted Screen Recording would file a pass for a claim it never evaluated.
+fn skip_pixel_assertion(reason: &str) {
+    let required = std::env::var(test_toolkit::BISCUIT_TEST_LEVEL_REQUIRED)
+        .ok()
+        .and_then(|value| value.trim().parse::<u8>().ok());
+    assert!(
+        required != Some(Level::L3.as_u8()),
+        "{}=3 but the pixel assertion cannot be evaluated: {reason}",
+        test_toolkit::BISCUIT_TEST_LEVEL_REQUIRED,
+    );
+    eprintln!("skipping pixel assertion: {reason}");
+}
 
 #[test]
 #[serial(level3_terminal)]
@@ -128,18 +183,18 @@ fn level3_rich_image_node_paints_distinctive_pixels() {
     }
 
     let Some((magenta, non_black, total)) = last_counts else {
-        eprintln!(
-            "skipping pixel assertion: window-region capture unavailable (non-macOS or screencapture failed)"
+        skip_pixel_assertion(
+            "window-region capture unavailable (non-macOS or screencapture failed)",
         );
         return;
     };
     // A near-black capture means screen recording is blocked (no permission);
     // we cannot tell that from a paint failure, so skip rather than hard-fail.
     if non_black * 100 < total {
-        eprintln!(
-            "skipping pixel assertion: capture is essentially black ({non_black}/{total} non-black) \
-             — Screen Recording permission likely not granted to the parent terminal"
-        );
+        skip_pixel_assertion(&format!(
+            "capture is essentially black ({non_black}/{total} non-black) — Screen Recording \
+             permission likely not granted to the parent terminal"
+        ));
         return;
     }
 

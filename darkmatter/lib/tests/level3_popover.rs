@@ -4,6 +4,34 @@
 //! Level-3 tests instead launch one headed Chrome instance with an isolated
 //! profile, activate its exact PID and nonce-titled window, and inject Quartz
 //! keyboard/pointer events through `cliclick`.
+//!
+//! ## Why the fixed sleeps became polls
+//!
+//! Each OS-input step used to `sleep(150ms)` and then `evaluate` once. That
+//! sleep was wrong in both directions at the same time. Too short on a loaded
+//! host — Quartz delivery plus a Chrome paint plus a CDP round trip does not
+//! fit a fixed budget — so a correct build failed spuriously. And a sleep
+//! asserts nothing about *when* a value became true, so a page that already
+//! satisfied the condition before `cliclick` sent anything passed identically:
+//! the very thing this tier exists to rule out.
+//!
+//! [`Level3Chrome::wait_for_evaluation`] replaces it. Each call polls the exact
+//! value the caller goes on to assert — `"active=true;vis=visible"`,
+//! `"https://example.com/"`, `"visible"`, and the two canary predicates — so
+//! there is no weaker intermediate signal it could settle on, and no separate
+//! read that could observe a different frame than the one that satisfied the
+//! wait. Spec §4 of `fixes/2026-09-07-faster-darkmatter-tests` mandates this
+//! shape: "Poll the final asserted condition, retain real-boundary coverage".
+//!
+//! ## What the 3-second bound gives up
+//!
+//! It is a real ceiling, not a formality: a regression that delayed focus,
+//! navigation, or hover to two seconds would pass here where the old 150 ms
+//! sleep would have failed. That is accepted deliberately. These tests claim
+//! *whether* OS input reaches the page, never how fast — no assertion in this
+//! file has a timing floor — and the bound has to survive a machine that is
+//! also compiling. Interaction latency is covered at no tier; asserting it
+//! would need its own budget rather than a repurposed timeout.
 
 #![cfg(target_os = "macos")]
 
@@ -132,6 +160,21 @@ impl Level3Chrome {
             .ok_or_else(|| format!("selector {selector:?} had no screen-space center"))
     }
 
+    /// Polls `script` in the live page until `condition` accepts the result.
+    ///
+    /// ## Errors
+    ///
+    /// The evaluation error, or on expiry a message naming `what` and the last
+    /// observed value — the diagnostic a sleep-then-assert cannot produce,
+    /// because by then the interesting value is whatever the final read
+    /// happened to catch.
+    ///
+    /// ## Notes
+    ///
+    /// `condition` must be the caller's final assertion, not a precondition for
+    /// it. A weaker predicate would reintroduce the two-phase race the fixed
+    /// sleeps had: settle on one observation, then assert on a second, later
+    /// one that nothing waited for.
     async fn wait_for_evaluation(
         &self,
         script: &str,
