@@ -196,11 +196,18 @@ OS). `.github/workflows/ci.yml` calculates changed workspace packages and their
 reverse Cargo dependencies, reads each package's policy from its
 `[package.metadata.ci]`, and fans the resulting matrix into the reusable
 `.github/workflows/_package-ci.yml`. Platform behavior is uniform without starting
-jobs for unrelated packages. Global inputs (`justfile`, `just/`, `Cargo.toml`,
-the workflows, `.config/nextest.toml`, ...) select the whole workspace — but by
-*content*, not by name: the scope step passes `--base-ref`, and a global file
-whose diff touches only `#` comments and blank lines is scoped like
-documentation. An unobtainable diff keeps the trigger (widened, never narrowed).
+jobs for unrelated packages. Global inputs select the whole workspace for the
+*gate* whose verdict they can change, and only that gate: `Cargo.toml`, the
+toolchain, `.cargo/`, and the CI workflows widen lint, check, and test alike;
+`clippy.toml` widens only lint; `.config/nextest.toml` and `_wsl-ci.yml` only
+test. A just file widens a gate only when the recipe that changed is one CI's
+gate recipes (`_lint`, `_test`, `_test_l2`, `_test_browser`,
+`_ensure-native-libs`) reach through dependencies or `just <name>` calls at
+command position; every other recipe gates nothing, and text outside a recipe
+(settings, imports, assignments) widens every gate. All of it is decided by
+*content*: the scope step passes `--base-ref`, a global file whose diff touches
+only `#` comments and blank lines is scoped like documentation, and an
+unobtainable diff or base content keeps the trigger (widened, never narrowed).
 
 **Lost runners.** A job whose hosted runner dies mid-step ("The hosted runner
 lost communication with the server") is terminated by GitHub after ~45 minutes
@@ -241,8 +248,9 @@ packages or areas skip the scope calculation. L2/L3/browser tiers, WSL
 archives, and the Windows runner are not replicated.
 
 The versioned pre-push hook (`.githooks/pre-push`, installed by `just init`
-into `.git/hooks`) runs `just lint` for the changed areas before `just test`
-for the same reason.
+into `.git/hooks`) runs `just ci-local --lint-only` for the same reason, and
+nothing else: L1 is CI's job, and clippy immediately followed by nextest in one
+target directory reuses stale test binaries.
 
 ### Toolchain
 
@@ -305,7 +313,7 @@ and browser tiers are governed POLICY GAPs.
   every native leg and uses no rustc wrapper. The `kache` wrapper was removed
   from CI on 2026-07-30 after measuring 0-6% hit rates (0.4-2.3% weighted by
   compile cost); it remains a per-host developer opt-in via
-  `just install-kache`, pinned by `.github/kache-version`.
+  `just install-kache`, with a version floor in `.github/kache-min-version`.
 - **Every configured L1 leg gates**: there is no `continue-on-error` on any
   package gate. The retired `soft-os` input did not merely make a leg
   non-blocking — it removed the leg from the run's verdict, so 14 permanently
@@ -451,7 +459,7 @@ Rust and long wall-clock times.
 | One dependency-aware `ci.yml` caller + reusable `_package-ci.yml` | Uniform platform behavior without starting jobs for unrelated packages. |
 | macOS compile-checked (not full-tested) on PRs | GitHub macOS runners bill ~10× Linux; the `check` job catches macOS compile drift cheaply while full L1 runs on Linux + Windows. |
 | Windows runs full L1 | Windows is the highest-risk platform for silent API/type drift; compile-only would miss runtime-shaped bugs. |
-| `Swatinem/rust-cache@v2` on every native leg | CI uses no rustc wrapper. `kache` was measured at 0-6% hit rate through the GitHub Actions cache backend and removed from CI on 2026-07-30; it stays a per-host developer opt-in with one version authority (`.github/kache-version`). |
+| `Swatinem/rust-cache@v2` on every native leg | CI uses no rustc wrapper. `kache` was measured at 0-6% hit rate through the GitHub Actions cache backend and removed from CI on 2026-07-30; it stays a per-host developer opt-in with one version floor (`.github/kache-min-version`); the 2026-09-09 ruling in `docs/kache-strategy.md` says where it is on. |
 
 See also:
 

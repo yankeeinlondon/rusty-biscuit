@@ -21,18 +21,53 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[2]
 ENVIRONMENTS_CONFIG = ROOT / ".github" / "ci" / "environments.json"
-GLOBAL_PATHS = {
-    ".config/nextest.toml",
+
+# The three verdicts CI produces per package. A gate's verdict is a function of
+# the source it compiles and of the command and configuration it runs under,
+# so each gate has its own short list of non-source inputs that can change it
+# and NOTHING else re-runs it across the workspace: a change to CI's test
+# recipe must not re-lint 73 packages, and a clippy.toml edit must not re-test
+# them (2026-09-09).
+GATES = ("lint", "check", "test")
+
+# Inputs every gate compiles under.
+GLOBAL_PATHS_ALL_GATES = {
     ".github/ci/environments.json",
     ".github/workflows/_package-ci.yml",
-    ".github/workflows/_wsl-ci.yml",
     ".github/workflows/ci.yml",
     "Cargo.toml",
-    "justfile",
     "rust-toolchain.toml",
     "scripts/ci/affected_scope.py",
 }
-GLOBAL_PREFIXES = (".cargo/", ".github/actions/", "just/")
+GLOBAL_PREFIXES_ALL_GATES = (".cargo/", ".github/actions/")
+GLOBAL_PATHS_BY_GATE: dict[str, set[str]] = {
+    "lint": {"clippy.toml"},
+    "check": set(),
+    "test": {".config/nextest.toml", ".github/workflows/_wsl-ci.yml"},
+}
+
+# Just files are global by RECIPE, not by path. CI executes a closed set of
+# recipes; a change to one of those, or to anything they reach through header
+# dependencies or `just <name>` calls at command position, re-runs the gate
+# that owns the entry recipe. A change to any other recipe — `pre-push`,
+# `cross-check`, `doctest`, the whole of `just/plan.just` — reaches no gate
+# and selects nothing. Text outside every recipe (settings, imports, variable
+# assignments) is conservatively global to every gate.
+JUST_PATHS = {"justfile"}
+JUST_PREFIXES = ("just/",)
+CI_RECIPES_BY_GATE: dict[str, tuple[str, ...]] = {
+    "lint": ("_lint",),
+    "check": (),
+    "test": ("_test", "_test_l2", "_test_browser"),
+}
+CI_RECIPES_ALL_GATES = ("_ensure-native-libs",)
+
+# Any path that MAY force workspace scope for some gate; the per-gate decision
+# is `gate_triggers`.
+GLOBAL_PATHS = (
+    GLOBAL_PATHS_ALL_GATES | JUST_PATHS | set().union(*GLOBAL_PATHS_BY_GATE.values())
+)
+GLOBAL_PREFIXES = GLOBAL_PREFIXES_ALL_GATES + JUST_PREFIXES
 
 # Deliberately NOT in GLOBAL_PATHS. Every dependency add or removal rewrites the
 # lockfile, so treating the filename as global escalated the most routine change
@@ -728,28 +763,222 @@ def diff_changes_more_than_comments(diff_text: str) -> bool:
     return False
 
 
-def global_trigger(
+def read_at_ref(base_ref: str, path: str) -> str | None:
+    """The content of `path` at `base_ref`, or `None` when Git cannot produce
+    it (unknown ref, path absent there, no Git) — undecidable, so callers widen.
+    """
+    try:
+        result = subprocess.run(
+            ["git", "show", f"{base_ref}:{path}"],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=ROOT,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout
+
+
+def is_just_path(normalized: str) -> bool:
+    return normalized in JUST_PATHS or normalized.startswith(JUST_PREFIXES)
+
+
+# A recipe header: a name at column 0 followed by optional parameters and a
+# `:` that is not the `:=` of an assignment. Quiet recipes (`@name:`) are
+# matched after their `@` is stripped.
+JUST_HEADER = re.compile(r"^(?P<name>[A-Za-z_][\w-]*)(?:\s+[^:]*?)?\s*:(?!=)(?P<deps>.*)$")
+
+# `just <name>` at COMMAND position: the start of a command, or after a shell
+# operator or keyword. Not inside prose — "then re-run just init." in an echo
+# string is not a call, and treating it as one pulled `init` and every
+# `_ensure-*` helper into the lint closure.
+JUST_CALL = re.compile(
+    r"(?:^|&&|\|\||;|\||\(|`|\bif\b|\bthen\b|\belse\b|\bdo\b|!|--)"
+    r"\s*[@-]*just\s+(?P<name>[A-Za-z_][\w-]*)"
+)
+
+
+def parse_just_recipes(text: str) -> tuple[dict[str, dict[str, Any]], list[str]]:
+    """Split a justfile into recipes and the text outside them.
+
+    ## Returns
+
+    ``(recipes, other)``: ``recipes`` maps a name to ``{"lines", "deps",
+    "calls"}`` — its attribute, header, and body lines with comments and blank
+    lines dropped, the recipe names in its header dependencies, and the
+    recipe names it invokes at command position. ``other`` is every remaining
+    non-comment line (settings, imports, assignments), in order.
+    """
+    recipes: dict[str, dict[str, Any]] = {}
+    other: list[str] = []
+    pending_attributes: list[str] = []
+    current: dict[str, Any] | None = None
+
+    for raw in text.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if raw[0] in " \t":
+            if current is None:
+                other.append(stripped)
+            else:
+                current["lines"].append(stripped)
+                current["calls"].extend(match.group("name") for match in JUST_CALL.finditer(stripped))
+            continue
+
+        current = None
+        if stripped.startswith("["):
+            pending_attributes.append(stripped)
+            continue
+        header = JUST_HEADER.match(stripped.lstrip("@"))
+        if header is None:
+            other.extend(pending_attributes)
+            pending_attributes = []
+            other.append(stripped)
+            continue
+        deps = [
+            match.group(1)
+            for match in re.finditer(r"(?:^|[\s(])([A-Za-z_][\w-]*)", header.group("deps"))
+        ]
+        current = {
+            "lines": [*pending_attributes, stripped],
+            "deps": deps,
+            "calls": [],
+        }
+        pending_attributes = []
+        recipes[header.group("name")] = current
+
+    other.extend(pending_attributes)
+    return recipes, other
+
+
+def just_recipe_closure(recipes: dict[str, dict[str, Any]], entries: tuple[str, ...]) -> set[str]:
+    """Every recipe reachable from `entries` through dependencies and calls."""
+    reachable: set[str] = set()
+    queue = list(entries)
+    while queue:
+        name = queue.pop()
+        if name in reachable:
+            continue
+        reachable.add(name)
+        recipe = recipes.get(name)
+        if recipe is not None:
+            queue.extend(recipe["deps"])
+            queue.extend(recipe["calls"])
+    return reachable
+
+
+def just_sources(root: Path) -> dict[str, str]:
+    """The root justfile and everything under `just/`, as they are on disk."""
+    sources: dict[str, str] = {}
+    for candidate in sorted([root / "justfile", *(root / "just").glob("*.just")]):
+        if candidate.is_file():
+            sources[candidate.relative_to(root).as_posix()] = candidate.read_text(encoding="utf-8")
+    return sources
+
+
+def just_change_gates(
+    normalized: str,
+    base_ref: str,
+    root: Path,
+    reader: Callable[[str, str], str | None] = read_at_ref,
+) -> set[str] | None:
+    """The gates a changed just file can affect.
+
+    Compares the file recipe by recipe against `base_ref`: a recipe that
+    differs (or exists on one side only) is a trigger for every gate whose CI
+    entry recipes reach it, on either side's recipe graph. Any change outside
+    a recipe triggers every gate. `None` means the base content was
+    unobtainable — undecidable, widen.
+    """
+    old_text = reader(base_ref, normalized)
+    if old_text is None:
+        return None
+    new_sources = just_sources(root)
+    new_text = new_sources.get(normalized, "")
+
+    new_recipes, new_other = parse_just_recipes(new_text)
+    old_recipes, old_other = parse_just_recipes(old_text)
+    if new_other != old_other:
+        return set(GATES)
+    changed = {
+        name
+        for name in set(new_recipes) | set(old_recipes)
+        if (new_recipes.get(name) or {}).get("lines") != (old_recipes.get(name) or {}).get("lines")
+    }
+    if not changed:
+        return set()
+
+    old_sources = {**new_sources, normalized: old_text}
+    gates: set[str] = set()
+    for sources in (new_sources, old_sources):
+        graph: dict[str, dict[str, Any]] = {}
+        for text in sources.values():
+            graph.update(parse_just_recipes(text)[0])
+        if changed & just_recipe_closure(graph, CI_RECIPES_ALL_GATES):
+            return set(GATES)
+        for gate, entries in CI_RECIPES_BY_GATE.items():
+            if changed & just_recipe_closure(graph, entries):
+                gates.add(gate)
+    return gates
+
+
+def gate_triggers(
     files: list[str],
+    root: Path = ROOT,
     base_ref: str | None = None,
     differ: Callable[[str, str], str | None] = diff_against,
-) -> str | None:
-    """Return the first changed path that forces full workspace scope, if any.
+    reader: Callable[[str, str], str | None] = read_at_ref,
+) -> dict[str, str | None]:
+    """For each gate, the first changed path that forces workspace scope for it.
 
     With `base_ref`, a global path whose diff touches only comments and blank
-    lines is not a trigger: nine comment lines in the root justfile once
-    scheduled all 72 packages (PR #59). Without `base_ref`, or when the diff is
-    unobtainable, the path stays a trigger — the fallback is always wider.
+    lines is not a trigger for any gate: nine comment lines in the root
+    justfile once scheduled all 72 packages (PR #59). Without `base_ref`, or
+    when the diff or base content is unobtainable, the path triggers every
+    gate — the fallback is always wider.
     """
+    triggers: dict[str, str | None] = {gate: None for gate in GATES}
     for raw_file in files:
         if not is_global_path(raw_file):
             continue
         normalized = raw_file.replace("\\", "/").removeprefix("./")
-        if base_ref is not None:
-            diff = differ(base_ref, normalized)
-            if diff is not None and not diff_changes_more_than_comments(diff):
-                continue
-        return normalized
-    return None
+        diff = differ(base_ref, normalized) if base_ref is not None else None
+        if diff is not None and not diff_changes_more_than_comments(diff):
+            continue
+        gates: set[str]
+        if is_just_path(normalized):
+            # Which gate a just file reaches is a property of its content, so
+            # without a readable base it reaches every gate.
+            decided = just_change_gates(normalized, base_ref, root, reader) if diff is not None else None
+            gates = set(GATES) if decided is None else decided
+        elif normalized in GLOBAL_PATHS_ALL_GATES or normalized.startswith(
+            GLOBAL_PREFIXES_ALL_GATES
+        ):
+            gates = set(GATES)
+        else:
+            # A named input's gate is known from the name alone; a base ref
+            # only adds the comment-only exemption above.
+            gates = {gate for gate in GATES if normalized in GLOBAL_PATHS_BY_GATE[gate]}
+        for gate in gates:
+            if triggers[gate] is None:
+                triggers[gate] = normalized
+    return triggers
+
+
+def global_trigger(
+    files: list[str],
+    base_ref: str | None = None,
+    differ: Callable[[str, str], str | None] = diff_against,
+    root: Path = ROOT,
+    reader: Callable[[str, str], str | None] = read_at_ref,
+) -> str | None:
+    """The first changed path that forces workspace scope for ANY gate."""
+    triggers = gate_triggers(files, root, base_ref, differ, reader)
+    return next((path for path in triggers.values() if path is not None), None)
 
 
 def parse_lockfile(text: str) -> dict[tuple[str, str], frozenset[str]] | None:
@@ -925,10 +1154,20 @@ def matrix_record(
     record: dict[str, Any],
     native: dict[str, list[str]],
     environments: list[dict[str, Any]],
+    gates: set[str] | frozenset[str] = frozenset(GATES),
 ) -> dict[str, Any]:
-    """The workflow-facing shape of one gating package's policy."""
+    """The workflow-facing shape of one gating package's policy.
+
+    `gates` narrows the record to the gates this run selected the package
+    for: a package reached only through a lint-global input carries no test
+    tiers, environments, or compile-check OS, so the reusable workflow
+    schedules nothing but its lint job.
+    """
     features = feature_args(record, record["package"])
     check_args = f"-p {record['package']}" + (f" {features}" if features else "")
+    testing = "test" in gates
+    tiers = record["tiers"] if testing else []
+    companion_suites = record["companion_suites"] if testing else []
 
     native_environments = [
         environment["name"]
@@ -938,16 +1177,17 @@ def matrix_record(
     ]
     return {
         "package": record["package"],
+        "gates": sorted(gates, key=GATES.index),
         "check_args": check_args,
         "test_args": features,
         "l1_include_slow": record["l1_include_slow"],
-        "tiers": record["tiers"],
+        "tiers": tiers,
         "l2_backends": record["l2_backends"],
         "runner_tools": record["runner_tools"],
-        "companion_suites": record["companion_suites"],
+        "companion_suites": companion_suites,
         "native": native,
-        "native_environments": native_environments,
-        "check_os": CHECK_OS,
+        "native_environments": native_environments if testing else [],
+        "check_os": CHECK_OS if "check" in gates else [],
         "l2_environments": (
             [
                 environment["name"]
@@ -957,7 +1197,7 @@ def matrix_record(
                     for backend in record["l2_backends"]
                 )
             ]
-            if "L2" in record["tiers"]
+            if "L2" in tiers
             else []
         ),
         "browser_environments": (
@@ -966,7 +1206,7 @@ def matrix_record(
                 for environment in environments
                 if capability(environment, "headless_browser")
             ]
-            if "browser" in record["tiers"]
+            if "browser" in tiers
             else []
         ),
         "node_environments": (
@@ -975,13 +1215,12 @@ def matrix_record(
                 for environment in environments
                 if capability(environment, "node_pnpm")
             ]
-            if record["companion_suites"]
-            or {"node-22", "pnpm-10"} & set(record["runner_tools"])
+            if companion_suites
+            or (testing and {"node-22", "pnpm-10"} & set(record["runner_tools"]))
             else []
         ),
-        "wsl": any(
-            capability(environment, "archive_only") for environment in environments
-        ),
+        "wsl": testing
+        and any(capability(environment, "archive_only") for environment in environments),
     }
 
 
@@ -997,23 +1236,38 @@ def estimate_jobs(matrix: list[dict[str, Any]]) -> int:
         len(entry["check_os"])
         + len(entry["native_environments"])
         + (2 if entry["wsl"] else 0)
-        + 1  # lint
+        + (1 if "lint" in entry.get("gates", GATES) else 0)
         + len(entry["l2_environments"])
         + len(entry["browser_environments"])
         for entry in matrix
     )
 
 
-def policy_record(record: dict[str, Any]) -> dict[str, Any]:
-    """The rollup-facing shape of one impacted package's policy."""
+def policy_record(
+    record: dict[str, Any], gates: set[str] | frozenset[str] = frozenset(GATES)
+) -> dict[str, Any]:
+    """The rollup-facing shape of one impacted package's policy.
+
+    The rollup expects one evidence cell per declared test tier, so a package
+    selected without its test gate declares no tiers here — otherwise the
+    L1 evidence its skipped test job never produced would roll up as MISSING.
+    The package stays in `packages` (the rollup's `--scope`) because its lint
+    and check status cells are only admitted for in-scope packages.
+
+    The rollup records the scheduled cells alongside its scope, so a
+    `.github/ci/ci-baseline.toml` entry naming a tier this run did not
+    schedule is reported `baseline-unscheduled` (a note), not
+    `baseline-no-result` (a block).
+    """
+    testing = "test" in gates
     shaped = {
         "package": record["package"],
         "gates": record["gates"],
-        "tiers": record["tiers"],
+        "tiers": record["tiers"] if testing else [],
         "l2_backends": record["l2_backends"],
         # The rollup needs to know a companion suite was DECLARED: a green
         # Rust JUnit report must not hide a companion that never ran (R12).
-        "companion_suites": record["companion_suites"],
+        "companion_suites": record["companion_suites"] if testing else [],
     }
     if not record["gates"]:
         shaped["exclusion"] = record["exclusion"]
@@ -1030,37 +1284,46 @@ def calculate_scope(
     base_lockfile: str | None = None,
     base_ref: str | None = None,
     differ: Callable[[str, str], str | None] = diff_against,
+    reader: Callable[[str, str], str | None] = read_at_ref,
 ) -> dict[str, Any]:
     packages = workspace_packages(metadata)
 
+    triggers: dict[str, str | None] = {gate: None for gate in GATES}
     if force_all:
-        affected_ids = set(packages)
-        full_scope = True
-    elif global_trigger(files, base_ref, differ) is not None:
-        affected_ids = set(packages)
-        full_scope = True
+        full_gates = set(GATES)
     else:
-        # Any global path still present is comment-only (proved above) and
-        # selects nothing: no build executes it.
-        files = [raw for raw in files if not is_global_path(raw)]
-        lock_impacted = None
-        if any(
-            raw.replace("\\", "/").removeprefix("./") == LOCKFILE_PATH for raw in files
-        ):
-            head_lockfile = None
-            lock_path = root / LOCKFILE_PATH
-            if lock_path.is_file():
-                head_lockfile = lock_path.read_text(encoding="utf-8")
-            lock_impacted = lockfile_impacted_names(
-                base_lockfile,
-                head_lockfile,
-                {package["name"] for package in packages.values()},
-            )
+        triggers = gate_triggers(files, root, base_ref, differ, reader)
+        full_gates = {gate for gate, path in triggers.items() if path is not None}
 
-        seeds, full_scope = changed_package_ids(files, root, packages, lock_impacted)
-        affected_ids = direct_dependents(seeds, metadata, packages)
+    # Package-local selection is computed regardless: a package with a source
+    # change keeps every gate even when a lint-only global input widened the
+    # lint gate to the workspace. A global path still present is comment-only
+    # (proved above) or gate-scoped, and selects nothing by path.
+    local_files = [raw for raw in files if not is_global_path(raw)]
+    lock_impacted = None
+    if any(
+        raw.replace("\\", "/").removeprefix("./") == LOCKFILE_PATH for raw in local_files
+    ):
+        head_lockfile = None
+        lock_path = root / LOCKFILE_PATH
+        if lock_path.is_file():
+            head_lockfile = lock_path.read_text(encoding="utf-8")
+        lock_impacted = lockfile_impacted_names(
+            base_lockfile,
+            head_lockfile,
+            {package["name"] for package in packages.values()},
+        )
+    seeds, lock_undecidable = changed_package_ids(local_files, root, packages, lock_impacted)
+    if lock_undecidable:
+        full_gates = set(GATES)
+    source_ids = direct_dependents(seeds, metadata, packages)
 
+    full_scope = bool(full_gates)
+    affected_ids = set(packages) if full_scope else source_ids
     impacted = sorted(packages[package_id]["name"] for package_id in affected_ids)
+
+    def gates_for(package_id: str) -> set[str]:
+        return set(GATES) if package_id in source_ids else set(full_gates)
 
     matrix = []
     for name in impacted:
@@ -1085,7 +1348,7 @@ def calculate_scope(
         # is PYTHONHASHSEED-dependent); nothing consumes the order, but noisy
         # diffs obscure real scope changes.
         native = {os_name: sorted(bucket) for os_name, bucket in native.items()}
-        matrix.append(matrix_record(record, native, environments))
+        matrix.append(matrix_record(record, native, environments, gates_for(package_id)))
 
     job_estimate = estimate_jobs(matrix)
     if len(matrix) > MATRIX_LIMIT:
@@ -1095,12 +1358,15 @@ def calculate_scope(
         )
 
     change_class, preflight_os, preflight_reason = classify_preflight(
-        files, matrix, full_scope, force_all, environments, base_ref, differ
+        triggers, matrix, full_scope, force_all, environments
     )
 
+    # Area flags drive test-shaped specialized jobs, so a workspace-wide lint
+    # does not raise them; only source changes and a test-global input do.
+    flagged_ids = set(packages) if "test" in full_gates else source_ids
     top_dirs = {
         Path(packages[package_id]["manifest_path"]).parent.relative_to(root.resolve()).parts[0]
-        for package_id in affected_ids
+        for package_id in flagged_ids
     }
 
     flags = {
@@ -1112,27 +1378,27 @@ def calculate_scope(
         for raw in files
     )
 
+    policy_ids = {packages[package_id]["name"]: package_id for package_id in affected_ids}
     return {
         "packages": impacted,
         "full_scope": full_scope,
+        "full_scope_gates": sorted(full_gates, key=GATES.index),
         "change_class": change_class,
         "preflight_os": preflight_os,
         "preflight_reason": preflight_reason,
         "matrix": matrix,
-        "policy": [policy_record(policy[name]) for name in impacted],
+        "policy": [policy_record(policy[name], gates_for(policy_ids[name])) for name in impacted],
         "job_estimate": job_estimate,
         "flags": flags,
     }
 
 
 def classify_preflight(
-    files: list[str],
+    triggers: dict[str, str | None],
     matrix: list[dict[str, Any]],
     full_scope: bool,
     force_all: bool,
     environments: list[dict[str, Any]],
-    base_ref: str | None = None,
-    differ: Callable[[str, str], str | None] = diff_against,
 ) -> tuple[str, list[str], str]:
     """Classify the change and derive its bootstrap-preflight OS matrix (D3).
 
@@ -1145,11 +1411,11 @@ def classify_preflight(
         if force_all:
             reason = "explicit full-scope request selects every runner OS"
         else:
-            trigger = global_trigger(files, base_ref, differ)
+            named = [f"{path} ({gate})" for gate, path in triggers.items() if path is not None]
             reason = (
-                f"global CI/tooling input changed ({trigger}); "
+                f"global input changed: {', '.join(named)}; "
                 "preflight runs on every runner OS before fan-out"
-                if trigger is not None
+                if named
                 else "workspace-global change selects full scope"
             )
         return "full", list(ALL_RUNNER_OS), reason

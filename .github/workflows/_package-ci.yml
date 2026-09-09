@@ -46,6 +46,10 @@ on:
         description: "Extra args forwarded to the canonical tier recipes (the package's declared feature flags, e.g. '--features remote' or '--all-features')."
         type: string
         default: ""
+      gates:
+        description: "JSON array of the gates this run selected the package for, from the closed set lint, check, test. A gate absent here schedules no job: the scope calculator narrows a package reached only through a gate-scoped global input (clippy.toml, the `_lint` recipe, nextest.toml, ...) to that gate alone."
+        type: string
+        default: '["lint", "check", "test"]'
       l1-include-slow:
         description: "Keep `slow_` tests inside the L1 selection (darkmatter's declared L1 contract)."
         type: boolean
@@ -124,6 +128,7 @@ jobs:
   # enforces the same bar off CI.
   check:
     name: check (${{ inputs.package }} on ${{ matrix.os }})
+    if: ${{ contains(fromJSON(inputs.gates), 'check') }}
     strategy:
       fail-fast: false
       matrix:
@@ -195,6 +200,7 @@ jobs:
   # (fixes/2026-08-06-cicd/spec.md § Sharding).
   test:
     name: test (${{ inputs.package }} on ${{ matrix.environment }})
+    if: ${{ contains(fromJSON(inputs.gates), 'test') }}
     # Deliberately depends on nothing. Lint is a parallel gate, not a
     # prerequisite: a clippy hint in one package must not delete another
     # package's L1 evidence. Nor does this job export RUSTFLAGS=-D warnings,
@@ -419,6 +425,7 @@ jobs:
 
   lint:
     name: lint (${{ inputs.package }})
+    if: ${{ contains(fromJSON(inputs.gates), 'lint') }}
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
@@ -582,7 +589,7 @@ jobs:
     # evidence. Absence of evidence must never be a side effect of a failure
     # elsewhere.
     needs: test
-    if: ${{ !cancelled() && inputs.l2-environments != '[]' }}
+    if: ${{ !cancelled() && contains(fromJSON(inputs.gates), 'test') && inputs.l2-environments != '[]' }}
     strategy:
       fail-fast: false
       matrix:
@@ -755,7 +762,7 @@ jobs:
     # evidence. Absence of evidence must never be a side effect of a failure
     # elsewhere.
     needs: test
-    if: ${{ !cancelled() && inputs.browser-environments != '[]' }}
+    if: ${{ !cancelled() && contains(fromJSON(inputs.gates), 'test') && inputs.browser-environments != '[]' }}
     strategy:
       fail-fast: false
       matrix:
@@ -834,7 +841,7 @@ jobs:
     # evidence. Absence of evidence must never be a side effect of a failure
     # elsewhere.
     needs: test
-    if: ${{ !cancelled() && inputs.wsl }}
+    if: ${{ !cancelled() && contains(fromJSON(inputs.gates), 'test') && inputs.wsl }}
     uses: ./.github/workflows/_wsl-ci.yml
     with:
       package: ${{ inputs.package }}

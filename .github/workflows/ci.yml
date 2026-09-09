@@ -166,6 +166,7 @@ jobs:
             echo "| event | ${EVENT_NAME} |"
             echo "| change class | $(jq -r '.change_class' <<<"$scope_json") |"
             echo "| full scope | $(jq -r '.full_scope' <<<"$scope_json") |"
+            echo "| full-scope gates | $(jq -rc '.full_scope_gates | join(", ")' <<<"$scope_json") |"
             echo "| reason | $(jq -r '.preflight_reason' <<<"$scope_json") |"
             echo "| preflight OS | $(jq -rc '.preflight_os | join(", ")' <<<"$scope_json") |"
             echo "| affected packages | $(jq -r '.packages | length' <<<"$scope_json") |"
@@ -268,6 +269,10 @@ jobs:
       package: ${{ matrix.package }}
       check-args: ${{ matrix.check_args }}
       test-args: ${{ matrix.test_args }}
+      # Which of lint / check / test this run selected the package for. A package
+      # reached only through a gate-scoped global input (clippy.toml, the
+      # `_lint` recipe, nextest.toml, ...) runs that gate alone.
+      gates: ${{ toJSON(matrix.gates) }}
       l1-include-slow: ${{ matrix.l1_include_slow }}
       # `native_environments`, `l2_environments`, and `wsl` are DERIVED by
       # `affected_scope.py` from package policy crossed with the environment

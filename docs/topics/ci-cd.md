@@ -25,15 +25,19 @@ The pipeline has four conceptual layers. Each layer answers a different question
 
 ### Layer 1 — Local pre-push hook
 
-`.githooks/pre-push` runs `just pre-push <areas>` before `git push` completes. It is controlled by
+`.githooks/pre-push` runs `just pre-push` before `git push` completes. That is
+`just ci-local --lint-only`: CI's clippy gate (`--all-targets`, no features) for the packages CI
+would schedule for the branch's changes, and nothing else — a docs-only push gates nothing. Tests
+are left to CI: it runs L1 per package on native runners, and a lint immediately followed by
+nextest in one target directory reuses stale test binaries. The hook is controlled by
 `RUSTY_BISCUIT_PRE_PUSH`:
 
 - `off` — skip entirely
 - `warn` — run, report, but never block the push (the default)
 - `strict` — run and block the push on failure
 
-The hook picks areas dynamically via `just changed-areas` against the upstream branch, falling back
-to `RUSTY_BISCUIT_PRE_PUSH_AREAS` and finally a hardcoded short list. Install it once with:
+`RUSTY_BISCUIT_PRE_PUSH_AREAS` (package names or area directories) replaces the computed scope with
+a fixed selection. Install the hook once with:
 
 ```bash
 ln -s ../../.githooks/pre-push .git/hooks/pre-push
@@ -60,7 +64,13 @@ package's lint/documentation guards. Per-package policy — L2/browser tier
 ownership, native libraries, Cargo features, runner tools, and companion
 suites — lives in each package's `[package.metadata.ci]`; environment
 capabilities live in `.github/ci/environments.json`.
-Changes to global build/test configuration conservatively select every package.
+Changes to global build/test configuration select every package for the *gate*
+they can change and no other: `clippy.toml` widens lint alone, `nextest.toml`
+widens test alone, and a just file widens a gate only when the recipe that
+changed is one CI's gate recipes reach (see
+[testing-strategy.md](../testing-strategy.md)). The rollup records which legs
+policy scheduled, so a baselined leg a gate-scoped run did not schedule is a
+note (`baseline-unscheduled`), not a block.
 
 ### Layer 3 — Affected coverage and specialized workflows
 
@@ -121,7 +131,7 @@ and 300 s per target. The interesting policy bits:
 #### `maintenance-audit.yml` — Mondays 07:00 UTC and manual
 
 Reports what has moved upstream for every value the repository pins on purpose — the required Rust
-version, the kache pin, `cargo-nextest`, third-party GitHub Action versions, and the runner image —
+version, the kache version floor, `cargo-nextest`, third-party GitHub Action versions, and the runner image —
 and changes nothing. The job always succeeds; a finding is information. Pins advance only through a
 reviewed change (see [Advancing a pinned value](#advancing-a-pinned-value)).
 
@@ -210,7 +220,7 @@ The maintenance audit reports drift; advancing a pin is a reviewed change:
 
 1. Check the most recent `rust-latest-stable` run (for a toolchain bump) or the upstream release
    notes (for an action, kache, or nextest bump).
-2. Update the single authority — `rust-toolchain.toml`, `.github/kache-version`, or the `uses:`
+2. Update the single authority — `rust-toolchain.toml`, `.github/kache-min-version`, or the `uses:`
    pin — never a second copy.
 3. Run `cargo fmt --all --check` (read-only; never write-mode), plus the affected areas' `just
    build`, `just test`, and `just lint`.

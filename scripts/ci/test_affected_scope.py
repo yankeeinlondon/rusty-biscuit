@@ -13,6 +13,8 @@ from affected_scope import (
     calculate_scope,
     diff_changes_more_than_comments,
     global_trigger,
+    just_recipe_closure,
+    parse_just_recipes,
     lockfile_impacted_names,
     parse_lockfile,
     matrix_record,
@@ -119,12 +121,75 @@ class AffectedScopeTests(unittest.TestCase):
     def test_global_test_configuration_selects_full_scope(self) -> None:
         scope = self.scope([".config/nextest.toml"])
         self.assertTrue(scope["full_scope"])
+        # ... for the test gate alone: nextest configuration cannot move a
+        # clippy or compile-check verdict.
+        self.assertEqual(["test"], scope["full_scope_gates"])
+        for entry in scope["matrix"]:
+            self.assertEqual(["test"], entry["gates"])
+            self.assertEqual([], entry["check_os"])
+            self.assertNotEqual([], entry["native_environments"])
+        self.assertEqual(0, sum(1 for entry in scope["matrix"] if "lint" in entry["gates"]))
 
     def test_wsl_workflow_change_selects_full_scope(self) -> None:
         # `_wsl-ci.yml` is shared by every package that declares wsl2-ubuntu, so
-        # a change to it has the same blast radius as `_package-ci.yml`.
+        # a change to it has the same blast radius as `_package-ci.yml`'s test
+        # legs — and no wider.
         scope = self.scope([".github/workflows/_wsl-ci.yml"])
         self.assertTrue(scope["full_scope"])
+        self.assertEqual(["test"], scope["full_scope_gates"])
+
+    # -- per-gate global inputs (2026-09-09) --------------------------------
+    #
+    # A gate's verdict is a function of the source it compiles and of the
+    # command and configuration it runs under. Each gate therefore has its
+    # own list of non-source inputs, and nothing else re-runs it workspace-wide.
+
+    def test_clippy_configuration_widens_lint_alone(self) -> None:
+        scope = self.scope(["clippy.toml"])
+        self.assertTrue(scope["full_scope"])
+        self.assertEqual(["lint"], scope["full_scope_gates"])
+        self.assertEqual("full", scope["change_class"])
+        self.assertIn("clippy.toml (lint)", scope["preflight_reason"])
+        for entry in scope["matrix"]:
+            self.assertEqual(["lint"], entry["gates"])
+            # Nothing test-shaped survives: no tiers, no environments, no WSL.
+            self.assertEqual([], entry["tiers"])
+            self.assertEqual([], entry["native_environments"])
+            self.assertEqual([], entry["l2_environments"])
+            self.assertEqual([], entry["browser_environments"])
+            self.assertEqual([], entry["check_os"])
+            self.assertFalse(entry["wsl"])
+        # The rollup expects one cell per declared tier, so a lint-only package
+        # must declare none — its skipped L1 must not roll up as MISSING.
+        for record in scope["policy"]:
+            self.assertEqual([], record["tiers"])
+        # Lint is one job per package and nothing else.
+        self.assertEqual(len(scope["matrix"]), scope["job_estimate"])
+        # Test-shaped specialized jobs key off the area flags; a workspace
+        # lint must not raise them.
+        self.assertFalse(any(scope["flags"][area] for area in ("claudine", "sniff")))
+
+    def test_source_change_keeps_every_gate_under_a_lint_global(self) -> None:
+        scope = self.scope(["clippy.toml", "alpha/lib/src/lib.rs"])
+        gates = {entry["package"]: entry["gates"] for entry in scope["matrix"]}
+        # alpha-core changed and beta-app depends on it: both keep all gates.
+        self.assertEqual(["lint", "check", "test"], gates["alpha-core"])
+        self.assertEqual(["lint", "check", "test"], gates["beta-app"])
+        # shared-tests is reached only through clippy.toml.
+        self.assertEqual(["lint"], gates["shared-tests"])
+        tiers = {record["package"]: record["tiers"] for record in scope["policy"]}
+        self.assertEqual(["L1"], tiers["alpha-core"])
+        self.assertEqual([], tiers["shared-tests"])
+
+    def test_compile_inputs_widen_every_gate(self) -> None:
+        for path in ("Cargo.toml", "rust-toolchain.toml", ".cargo/config.toml"):
+            scope = self.scope([path])
+            self.assertEqual(["lint", "check", "test"], scope["full_scope_gates"], path)
+
+    def test_the_scope_calculator_itself_widens_every_gate(self) -> None:
+        scope = self.scope(["scripts/ci/affected_scope.py"])
+        self.assertEqual(["lint", "check", "test"], scope["full_scope_gates"])
+        self.assertTrue(scope["flags"]["ci_tooling"])
 
     # -- content-aware global triggers (2026-08-28) -------------------------
     #
@@ -162,20 +227,155 @@ class AffectedScopeTests(unittest.TestCase):
         self.assertFalse(scope["full_scope"])
         self.assertEqual(["alpha-core", "beta-app"], scope["packages"])
 
-    def test_recipe_change_with_base_ref_is_still_global(self) -> None:
-        differ = lambda base, path: self.RECIPE_DIFF  # noqa: E731
-        self.assertEqual("justfile", global_trigger(["justfile"], "base", differ))
-        scope = self.scope(["justfile"], base_ref="base", differ=differ)
-        self.assertTrue(scope["full_scope"])
-        self.assertIn("justfile", scope["preflight_reason"])
+    # -- just files are global by recipe, not by path (2026-09-09) ----------
+    #
+    # `JUSTFILE_BASE` is the base-ref content; each test edits one recipe on
+    # the working-tree side and asks which gates that reaches. The differ
+    # only has to say "more than comments changed".
+
+    JUSTFILE_BASE = (
+        "set shell := [\"bash\", \"-eu\", \"-c\"]\n"
+        "areas := \"alpha beta\"\n"
+        "\n"
+        "# CI's lint gate.\n"
+        "_lint pkg: _storage_preflight\n"
+        "    cargo clippy -p {{ pkg }} -- -D warnings\n"
+        "\n"
+        "_storage_preflight:\n"
+        "    df -h .\n"
+        "\n"
+        "# CI's L1 gate.\n"
+        "_test pkg *args:\n"
+        "    filter=\"$(just _tier_filter L1)\"\n"
+        "    cargo nextest run -p {{ pkg }} -E \"$filter\" {{ args }}\n"
+        "\n"
+        "_tier_filter tier:\n"
+        "    echo 'not test(/^level2_/)'\n"
+        "\n"
+        "_ensure-native-libs *packages:\n"
+        "    echo \"Install the headers, then re-run just init again.\" >&2\n"
+        "\n"
+        "init: _ensure-git-hooks\n"
+        "    @echo ready\n"
+        "\n"
+        "[no-cd]\n"
+        "_ensure-git-hooks:\n"
+        "    ln -sf ../../.githooks/pre-push .git/hooks/pre-push\n"
+        "\n"
+        "# Developer convenience; CI never runs it.\n"
+        "pre-push *selectors=\"\":\n"
+        "    @just ci-local --lint-only {{ selectors }}\n"
+    )
+
+    def just_scope(self, working_tree: str, base: str | None = JUSTFILE_BASE) -> dict[str, object]:
+        (self.root / "justfile").write_text(working_tree, encoding="utf-8")
+        differ = lambda base_ref, path: self.RECIPE_DIFF  # noqa: E731
+        reader = lambda base_ref, path: base  # noqa: E731
+        return self.scope(["justfile"], base_ref="base", differ=differ, reader=reader)
+
+    def test_a_change_inside_the_lint_recipe_widens_lint_alone(self) -> None:
+        edited = self.JUSTFILE_BASE.replace(
+            "cargo clippy -p {{ pkg }} -- -D warnings",
+            "cargo clippy -p {{ pkg }} --all-targets -- -D warnings",
+        )
+        scope = self.just_scope(edited)
+        self.assertEqual(["lint"], scope["full_scope_gates"])
+        self.assertIn("justfile (lint)", scope["preflight_reason"])
+
+    def test_a_change_to_a_recipe_the_lint_gate_depends_on_widens_lint(self) -> None:
+        edited = self.JUSTFILE_BASE.replace("    df -h .\n", "    df -h . && sync\n")
+        self.assertEqual(["lint"], self.just_scope(edited)["full_scope_gates"])
+
+    def test_a_change_to_a_recipe_the_test_gate_calls_widens_test_alone(self) -> None:
+        # `_tier_filter` is reached from `_test` through a `just` call at
+        # command position, not a header dependency.
+        edited = self.JUSTFILE_BASE.replace("not test(/^level2_/)", "not test(/^level[23]_/)")
+        self.assertEqual(["test"], self.just_scope(edited)["full_scope_gates"])
+
+    def test_a_change_to_a_developer_recipe_gates_nothing(self) -> None:
+        edited = self.JUSTFILE_BASE.replace(
+            "@just ci-local --lint-only {{ selectors }}",
+            "@just ci-local --lint-only --base origin/main {{ selectors }}",
+        )
+        scope = self.just_scope(edited)
+        self.assertFalse(scope["full_scope"])
+        self.assertEqual([], scope["full_scope_gates"])
+        self.assertEqual("documentation", scope["change_class"])
+        self.assertEqual([], scope["packages"])
+
+    def test_a_just_name_inside_prose_is_not_a_call(self) -> None:
+        # `_ensure-native-libs` says "re-run just init" in an echo string. If
+        # that counted as a call, `init` and `_ensure-git-hooks` would sit in
+        # every gate's closure and this edit would widen the workspace.
+        edited = self.JUSTFILE_BASE.replace("ln -sf ../../.githooks/pre-push", "ln -sfn ../../.githooks/pre-push")
+        self.assertEqual([], self.just_scope(edited)["full_scope_gates"])
+
+    def test_a_change_to_the_shared_prerequisite_recipe_widens_every_gate(self) -> None:
+        edited = self.JUSTFILE_BASE.replace("Install the headers", "Install the development headers")
+        self.assertEqual(["lint", "check", "test"], self.just_scope(edited)["full_scope_gates"])
+
+    def test_a_removed_or_added_recipe_counts_as_changed(self) -> None:
+        removed = self.JUSTFILE_BASE.replace("_tier_filter tier:\n    echo 'not test(/^level2_/)'\n\n", "")
+        self.assertEqual(["test"], self.just_scope(removed)["full_scope_gates"])
+        added = self.JUSTFILE_BASE + "\nrelease:\n    cargo build --release\n"
+        self.assertEqual([], self.just_scope(added)["full_scope_gates"])
+
+    def test_text_outside_every_recipe_widens_every_gate(self) -> None:
+        for edited in (
+            self.JUSTFILE_BASE.replace('areas := "alpha beta"', 'areas := "alpha beta gamma"'),
+            self.JUSTFILE_BASE.replace('set shell := ["bash", "-eu", "-c"]', 'set shell := ["bash", "-euo", "pipefail", "-c"]'),
+            'import "./just/color.just"\n' + self.JUSTFILE_BASE,
+        ):
+            self.assertEqual(["lint", "check", "test"], self.just_scope(edited)["full_scope_gates"])
+
+    def test_a_recipe_reformat_that_keeps_every_line_gates_nothing(self) -> None:
+        # Comments and blank lines are not part of a recipe's identity.
+        edited = self.JUSTFILE_BASE.replace("# CI's lint gate.\n", "# CI's clippy gate.\n#\n# Runs without features.\n")
+        self.assertEqual([], self.just_scope(edited)["full_scope_gates"])
+
+    def test_a_just_file_under_just_is_scoped_the_same_way(self) -> None:
+        (self.root / "just").mkdir()
+        (self.root / "justfile").write_text("import \"./just/devops.just\"\n", encoding="utf-8")
+        base = "_lint pkg:\n    cargo clippy -p {{ pkg }}\n\nplan:\n    echo plan\n"
+        (self.root / "just" / "devops.just").write_text(base.replace("echo plan", "echo planning"), encoding="utf-8")
+        differ = lambda base_ref, path: self.RECIPE_DIFF  # noqa: E731
+        reader = lambda base_ref, path: base  # noqa: E731
+        scope = self.scope(["just/devops.just"], base_ref="base", differ=differ, reader=reader)
+        self.assertEqual([], scope["full_scope_gates"])
+        (self.root / "just" / "devops.just").write_text(base.replace("clippy -p", "clippy --all-targets -p"), encoding="utf-8")
+        scope = self.scope(["just/devops.just"], base_ref="base", differ=differ, reader=reader)
+        self.assertEqual(["lint"], scope["full_scope_gates"])
+
+    def test_unobtainable_base_content_widens_every_gate(self) -> None:
+        (self.root / "justfile").write_text(self.JUSTFILE_BASE, encoding="utf-8")
+        differ = lambda base_ref, path: self.RECIPE_DIFF  # noqa: E731
+        reader = lambda base_ref, path: None  # noqa: E731
+        scope = self.scope(["justfile"], base_ref="base", differ=differ, reader=reader)
+        self.assertEqual(["lint", "check", "test"], scope["full_scope_gates"])
+
+    def test_parse_just_recipes_shapes(self) -> None:
+        recipes, other = parse_just_recipes(self.JUSTFILE_BASE)
+        self.assertEqual(
+            ['set shell := ["bash", "-eu", "-c"]', 'areas := "alpha beta"'], other
+        )
+        self.assertEqual(["_storage_preflight"], recipes["_lint"]["deps"])
+        self.assertEqual(["_tier_filter"], recipes["_test"]["calls"])
+        self.assertEqual([], recipes["_ensure-native-libs"]["calls"])
+        self.assertEqual(["_ensure-git-hooks"], recipes["init"]["deps"])
+        self.assertEqual(["[no-cd]", "_ensure-git-hooks:", "ln -sf ../../.githooks/pre-push .git/hooks/pre-push"], recipes["_ensure-git-hooks"]["lines"])
+        self.assertEqual(["ci-local"], recipes["pre-push"]["calls"])
+        self.assertEqual({"_lint", "_storage_preflight"}, just_recipe_closure(recipes, ("_lint",)))
+        self.assertEqual({"_test", "_tier_filter"}, just_recipe_closure(recipes, ("_test",)))
 
     def test_undecidable_global_diff_keeps_the_trigger(self) -> None:
         # No base ref, or a differ that cannot produce the diff: widen, never
-        # narrow silently.
+        # narrow silently — for every gate.
         self.assertEqual("justfile", global_trigger(["justfile"]))
         differ = lambda base, path: None  # noqa: E731
         self.assertEqual("justfile", global_trigger(["justfile"], "base", differ))
-        self.assertTrue(self.scope(["justfile"], base_ref="base", differ=differ)["full_scope"])
+        scope = self.scope(["justfile"], base_ref="base", differ=differ)
+        self.assertTrue(scope["full_scope"])
+        self.assertEqual(["lint", "check", "test"], scope["full_scope_gates"])
 
     def test_package_local_change_derives_three_runner_preflight(self) -> None:
         scope = self.scope(["alpha/lib/src/lib.rs"])
@@ -1279,6 +1479,12 @@ class RealWorkspaceRetirementScopeTests(unittest.TestCase):
             "test-args: ${{ inputs.test-args }}" in package_ci,
             "${{ inputs.check-args }}" in wsl_ci,
             "${{ inputs.test-args }}" in wsl_ci,
+            # Per-gate selection: the matrix's `gates` reaches every job that
+            # can be skipped by it.
+            "gates: ${{ toJSON(matrix.gates) }}" in ci,
+            package_ci.count("contains(fromJSON(inputs.gates), 'test')") == 4,
+            "contains(fromJSON(inputs.gates), 'lint')" in package_ci,
+            "contains(fromJSON(inputs.gates), 'check')" in package_ci,
         ]
         if not all(forwarding_contract):
             missing.append("check/native-L1/WSL2 feature-argument forwarding")

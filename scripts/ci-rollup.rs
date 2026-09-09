@@ -347,11 +347,25 @@ struct Rollup {
     /// being supplied. An inferred scope cannot see a package that produced
     /// nothing at all, which is exactly the case `MISSING` exists to catch.
     scope_degraded: bool,
+    /// Every `{package, environment, tier}` policy scheduled for this run —
+    /// the expected cells, before any evidence. Scope is per gate, so an
+    /// in-scope package may legitimately have no test tier here (it was
+    /// reached only through a lint-global input); the verdict consults this
+    /// to tell "not scheduled" from "scheduled and vanished". `None` on a
+    /// document written before the field existed: unknown, so fail closed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    scheduled: Option<Vec<CellKey>>,
     records: Vec<RunRecord>,
     cells: Vec<Cell>,
 }
 
 impl Rollup {
+    /// Whether policy scheduled `key` for this run. `None` when the document
+    /// predates the schedule field and cannot say.
+    fn scheduled(&self, key: &CellKey) -> Option<bool> {
+        self.scheduled.as_ref().map(|keys| keys.contains(key))
+    }
+
     fn cell(&self, key: &CellKey) -> Option<&Cell> {
         self.cells.iter().find(|cell| &cell.key == key)
     }
@@ -1718,6 +1732,7 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
     let mut findings = Vec::new();
     let mut excused_cells: BTreeSet<CellKey> = BTreeSet::new();
     let mut out_of_scope: BTreeSet<String> = BTreeSet::new();
+    let mut unscheduled: BTreeSet<String> = BTreeSet::new();
 
     for entry in &baseline.failure {
         let key = CellKey {
@@ -1748,6 +1763,15 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
         }
 
         let Some(cell) = rollup.cell(&key) else {
+            // Scope is per gate: a package reached only through a lint-global
+            // input is in scope with no test tier scheduled, and the run
+            // produced no information about this leg either way — the same
+            // standing as an out-of-scope entry. Only a KNOWN unscheduled
+            // leg is excused; a document that cannot say fails closed.
+            if rollup.scheduled(&key) == Some(false) {
+                unscheduled.insert(subject);
+                continue;
+            }
             findings.push(Finding::block(
                 "baseline-no-result",
                 subject,
@@ -1786,6 +1810,18 @@ fn verdict(rollup: &Rollup, baseline: &Baseline, today: Option<&str>) -> Vec<Fin
                 ),
             )),
         }
+    }
+
+    if !unscheduled.is_empty() {
+        findings.push(Finding::note(
+            "baseline-unscheduled",
+            format!("{} leg(s)", unscheduled.len()),
+            format!(
+                "in scope, but policy scheduled no such leg for this run (scope is \
+                 per gate); ignored, not treated as a pass: {}",
+                unscheduled.iter().cloned().collect::<Vec<_>>().join(", ")
+            ),
+        ));
     }
 
     // Collapsed to one line. Most of the baseline is out of scope on any
@@ -2709,6 +2745,7 @@ fn cmd_rollup(args: &Args) -> Result<i32> {
         run_id: args.one("run-id").map(str::to_owned),
         scope: scope.into_iter().collect(),
         scope_degraded,
+        scheduled: Some(expected.iter().map(|cell| cell.key.clone()).collect()),
         records,
         cells,
     };

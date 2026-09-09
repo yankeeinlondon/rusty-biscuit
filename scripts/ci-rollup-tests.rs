@@ -183,14 +183,34 @@ fn only_cell(cells: Vec<Cell>) -> Cell {
     cells.into_iter().next().unwrap()
 }
 
+/// A rollup that does not know what was scheduled — the shape of a document
+/// written before the schedule field existed, which the verdict must treat as
+/// "cannot say" and fail closed.
 fn rollup_of(cells: Vec<Cell>, scope: &[&str]) -> Rollup {
     Rollup {
         schema_version: SCHEMA_VERSION,
         run_id: None,
         scope: scope.iter().map(|s| (*s).to_owned()).collect(),
         scope_degraded: false,
+        scheduled: None,
         records: Vec::new(),
         cells,
+    }
+}
+
+/// A rollup that knows exactly which legs policy scheduled.
+fn rollup_scheduling(cells: Vec<Cell>, scope: &[&str], scheduled: Vec<CellKey>) -> Rollup {
+    Rollup {
+        scheduled: Some(scheduled),
+        ..rollup_of(cells, scope)
+    }
+}
+
+fn cell_key(package: &str, environment: &str, tier: Tier) -> CellKey {
+    CellKey {
+        package: package.to_owned(),
+        environment: environment.to_owned(),
+        tier,
     }
 }
 
@@ -1574,6 +1594,67 @@ fn a_scheduled_entry_with_no_test_result_stays_blocking(#[case] state: CellState
     );
 }
 
+/// Scope is per gate (2026-09-09): a package reached only through a
+/// lint-global input is in scope with no test tier scheduled. A baselined
+/// test leg of that package is a leg this run said nothing about — the
+/// standing of an out-of-scope entry, not a vanished result.
+#[test]
+fn a_baselined_leg_the_run_did_not_schedule_is_ignored_with_a_note() {
+    let baseline = Baseline {
+        schema_version: SCHEMA_VERSION,
+        failure: vec![failure_entry("claudine", "windows-latest", Tier::L1)],
+        skip: Vec::new(),
+    };
+    // A lint-only run: claudine is in scope, its lint status cell passed, and
+    // policy scheduled no test tier for it.
+    let lint = cell_key("claudine", "ubuntu-latest", Tier::parse("lint"));
+    let rollup = rollup_scheduling(
+        vec![Cell {
+            key: lint.clone(),
+            state: CellState::Pass,
+            counts: Counts::default(),
+            scheduled: true,
+            skipped_tests: Vec::new(),
+            failed_tests: Vec::new(),
+            skip_evidence_degraded: false,
+            declared_gap: None,
+            reasons: Vec::new(),
+            records: Vec::new(),
+        }],
+        &["claudine"],
+        vec![lint],
+    );
+    let findings = verdict(&rollup, &baseline, None);
+    assert!(!any_block(&findings), "an unscheduled leg must not block: {findings:#?}");
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding.rule == "baseline-unscheduled" && finding.severity == Severity::Note),
+        "the ignored leg must be visible as a note: {findings:#?}"
+    );
+}
+
+/// The excusal is for legs policy KNOWINGLY did not schedule. A leg policy
+/// scheduled and the rollup nevertheless has no cell for is still the
+/// "vanished result" the blocking rule exists to catch.
+#[test]
+fn a_baselined_leg_the_run_scheduled_but_has_no_cell_for_still_blocks() {
+    let baseline = Baseline {
+        schema_version: SCHEMA_VERSION,
+        failure: vec![failure_entry("claudine", "windows-latest", Tier::L1)],
+        skip: Vec::new(),
+    };
+    let rollup = rollup_scheduling(
+        Vec::new(),
+        &["claudine"],
+        vec![cell_key("claudine", "windows-latest", Tier::L1)],
+    );
+    let findings = verdict(&rollup, &baseline, None);
+    assert!(blocks_with_rule(&findings, "baseline-no-result"));
+}
+
+/// A document that predates the schedule field cannot say whether the leg
+/// was scheduled, and "cannot say" fails closed.
 #[test]
 fn a_baselined_package_that_produced_no_cell_at_all_blocks() {
     let baseline = Baseline {
@@ -2523,6 +2604,7 @@ fn compare_rollup(cells: Vec<Cell>) -> Rollup {
         run_id: None,
         scope: Vec::new(),
         scope_degraded: false,
+        scheduled: None,
         records: Vec::new(),
         cells,
     }
