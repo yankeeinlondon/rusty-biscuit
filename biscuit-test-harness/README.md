@@ -105,6 +105,30 @@ Every backend implements one **shell-model-first** contract:
   color-forcing. Only WezTerm, Kitty, and tmux override it; callers
   supply absolute paths and handle their own settling.
 
+#### The pane's shell reads login files, not interactive ones
+
+WezTerm and Kitty spawn two shells: an outer `-l` login shell that runs
+the host's *profile* files (where `PATH` is assembled), which then
+`exec`s an interactive shell with its **rc files suppressed**
+(`bash --norc -i`, `zsh -f -i`, `unset ENV` for POSIX `sh`).
+
+The interactive rc file is where Atuin, starship, fzf, and zoxide
+install themselves, and a prompt-replacement or first-run picker there
+reaches into the pane the harness is driving: an Atuin first-run prompt
+swallowed the command line sent by
+`level2_initialize_proxy_block_auto_detects_osc8_in_wezterm` until its
+exit marker timed out. Consequences for test authors:
+
+- The pane's `PATH` comes from the **login profile only**. A host that
+  edits `PATH` in `~/.bashrc` will not see those entries in a WezTerm or
+  Kitty pane. Pass an absolute path or an explicit `PATH` env pair for
+  anything outside `/etc/profile`'s reach.
+- The prompt is the shell's stock `PS1` (`bash-5.3$`, `host%`), not the
+  developer's theme. Never grep a captured frame for a literal that the
+  stock prompt contains.
+- tmux and Terminal.app still run a single login shell and therefore
+  still inherit whatever a host's profile chain pulls in.
+
 ### Sending input — pick the right channel
 
 | Channel | Use it for |

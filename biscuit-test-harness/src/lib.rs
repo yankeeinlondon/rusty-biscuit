@@ -409,29 +409,71 @@ pub fn cargo_bin_dir(bin_name: &str) -> Option<PathBuf> {
     None
 }
 
-/// Appends a login-shell invocation that preserves the Cargo binary directory.
+/// Flags that stop a shell from reading the user's *interactive* startup
+/// files (`~/.bashrc`, `~/.zshrc`, …) when it is started with `-i`.
 ///
-/// Login startup files may replace `PATH`, particularly when a terminal GUI
-/// launches from the desktop rather than an existing shell. The outer login
-/// shell therefore prepends the binary directory after startup, then replaces
-/// itself with the interactive shell used by the harness.
-pub(crate) fn configure_login_shell(
-    cmd: &mut Command,
-    shell: &str,
-    bin_dir: Option<&Path>,
-) {
+/// Shells with no such flag get an empty slice; they are covered instead by the
+/// `unset ENV BASH_ENV` in [`login_shell_script`], because POSIX `sh`, `dash`,
+/// and `ksh` source whatever `$ENV` names rather than a fixed rc path.
+pub(crate) fn interactive_rc_suppression_flags(shell: &str) -> &'static [&'static str] {
+    let name = Path::new(shell)
+        .file_name()
+        .map_or_else(|| shell.to_string(), |n| n.to_string_lossy().into_owned());
+    match name.as_str() {
+        "bash" => &["--norc"],
+        "zsh" => &["-f"],
+        _ => &[],
+    }
+}
+
+/// Builds the `-c` script for the outer login shell.
+///
+/// `augment_path` prepends `$BISCUIT_TEST_BIN_DIR` — the caller is responsible
+/// for setting that variable on the [`Command`].
+pub(crate) fn login_shell_script(shell: &str, augment_path: bool) -> String {
+    let mut script = String::from("unset ENV BASH_ENV; ");
+    if augment_path {
+        script.push_str(
+            "export PATH=\"$BISCUIT_TEST_BIN_DIR:$PATH\"; unset BISCUIT_TEST_BIN_DIR; ",
+        );
+    }
+    script.push_str("exec \"$0\"");
+    for flag in interactive_rc_suppression_flags(shell) {
+        script.push(' ');
+        script.push_str(flag);
+    }
+    script.push_str(" -i");
+    script
+}
+
+/// Appends a two-stage shell invocation: an outer login shell that replaces
+/// itself with the interactive shell the harness drives.
+///
+/// ## Why two stages
+///
+/// The two shells exist for unrelated reasons and need opposite startup files.
+///
+/// - The **outer** shell is `-l` because login startup files are where the
+///   host's `PATH` is assembled; a terminal GUI launched from the desktop
+///   inherits almost nothing otherwise, and `git` / `md` / the built cargo
+///   binaries have to resolve. `bin_dir` is prepended *after* those files run,
+///   so a profile that rewrites `PATH` wholesale cannot drop it.
+/// - The **inner** shell is `-i` only so the harness can see a prompt and send
+///   it lines. It needs nothing from the user's interactive rc file, and that
+///   file is a hazard: it is where Atuin, starship, fzf, and zoxide install
+///   themselves. An Atuin first-run picker rendered into the pane swallowed the
+///   line the harness sent and stalled
+///   `level2_initialize_proxy_block_auto_detects_osc8_in_wezterm` until its exit
+///   marker timed out. The inner shell therefore runs with rc files suppressed.
+///
+/// With rc files suppressed the prompt falls back to the shell's stock `PS1`
+/// (`bash-5.3$`, `host%`), which [`looks_like_prompt`] already recognizes.
+pub(crate) fn configure_login_shell(cmd: &mut Command, shell: &str, bin_dir: Option<&Path>) {
+    let script = login_shell_script(shell, bin_dir.is_some());
     cmd.arg(shell);
+    cmd.args(["-l", "-c", script.as_str(), shell]);
     if let Some(bin_dir) = bin_dir {
-        cmd.args([
-            "-l",
-            "-c",
-            "export PATH=\"$BISCUIT_TEST_BIN_DIR:$PATH\"; \
-             unset BISCUIT_TEST_BIN_DIR; exec \"$0\" -i",
-            shell,
-        ]);
         cmd.env("BISCUIT_TEST_BIN_DIR", bin_dir);
-    } else {
-        cmd.arg("-l");
     }
 }
 
@@ -471,12 +513,14 @@ pub fn apply_color_forcing_env(cmd: &mut std::process::Command) {
 
 /// Trailing glyphs that mark the end of an interactive shell prompt.
 ///
-/// The POSIX trio (`$`, `#`, `%`) only covers a shell running its *stock*
-/// prompt. The harness spawns a login shell, so it inherits whatever the host's
-/// dotfiles install, and modern prompt generators end on a glyph instead:
-/// starship / pure / spaceship default to `❯`, and assorted themes use `»` or
-/// `λ`. Themes whose distinguishing glyph *leads* the prompt (oh-my-zsh's
-/// `robbyrussell` `➜`) are not detectable this way and fall back to the timeout.
+/// The POSIX trio (`$`, `#`, `%`) covers a shell running its *stock* prompt,
+/// which is what [`configure_login_shell`]'s rc-suppressed inner shell gives the
+/// WezTerm and Kitty backends. The tmux and Terminal.app backends still run a
+/// shell that reads the host's dotfiles, and modern prompt generators end on a
+/// glyph instead: starship / pure / spaceship default to `❯`, and assorted
+/// themes use `»` or `λ`. Themes whose distinguishing glyph *leads* the prompt
+/// (oh-my-zsh's `robbyrussell` `➜`) are not detectable this way and fall back to
+/// the timeout.
 ///
 /// An unrecognized terminator is silent but expensive rather than fatal: it
 /// costs [`wait_for_prompt`] its full 5 s budget and every [`capture_settled`]
@@ -895,6 +939,79 @@ mod tests {
             // skip the strict assertion.
             assert!(!shell.is_empty());
         }
+    }
+
+    /// The Atuin regression in one assertion: the interactive shell the
+    /// harness drives must never read the host's interactive rc file.
+    #[test]
+    fn login_shell_script_suppresses_interactive_rc_for_bash() {
+        let script = login_shell_script("bash", true);
+        assert!(
+            script.ends_with("exec \"$0\" --norc -i"),
+            "bash's inner interactive shell must skip ~/.bashrc; got {script}"
+        );
+    }
+
+    #[test]
+    fn login_shell_script_suppresses_interactive_rc_for_zsh() {
+        let script = login_shell_script("zsh", false);
+        assert!(
+            script.ends_with("exec \"$0\" -f -i"),
+            "zsh's inner interactive shell must skip ~/.zshrc; got {script}"
+        );
+    }
+
+    /// `sh`/`dash`/`ksh` have no rc-suppression flag — they source whatever
+    /// `$ENV` names — so the preamble must clear it for every shell family.
+    #[test]
+    fn login_shell_script_clears_env_for_shells_without_an_rc_flag() {
+        for shell in ["sh", "dash", "ksh", "bash", "zsh"] {
+            let script = login_shell_script(shell, false);
+            assert!(
+                script.starts_with("unset ENV BASH_ENV; "),
+                "{shell}: the login preamble must clear $ENV; got {script}"
+            );
+        }
+        assert!(
+            interactive_rc_suppression_flags("sh").is_empty(),
+            "sh has no rc-suppression flag to pass"
+        );
+    }
+
+    /// The rc-suppression flags are chosen from the shell's *file name*, so an
+    /// absolute `$SHELL` path still selects the right family.
+    #[test]
+    fn interactive_rc_suppression_flags_match_on_the_shell_file_name() {
+        assert_eq!(
+            interactive_rc_suppression_flags("/opt/homebrew/bin/bash"),
+            ["--norc"]
+        );
+        assert_eq!(interactive_rc_suppression_flags("/bin/zsh"), ["-f"]);
+        assert!(interactive_rc_suppression_flags("/bin/sh").is_empty());
+    }
+
+    /// `PATH` augmentation belongs to the outer *login* shell: profile files
+    /// can replace `PATH` wholesale, so the binary directory is prepended after
+    /// they have run and the marker variable is not left in the environment.
+    #[test]
+    fn login_shell_script_prepends_the_bin_dir_after_login_startup() {
+        let script = login_shell_script("bash", true);
+        assert!(script.contains("export PATH=\"$BISCUIT_TEST_BIN_DIR:$PATH\";"));
+        assert!(script.contains("unset BISCUIT_TEST_BIN_DIR;"));
+        assert!(
+            !login_shell_script("bash", false).contains("BISCUIT_TEST_BIN_DIR"),
+            "no bin dir means no PATH rewrite"
+        );
+    }
+
+    /// Rc suppression leaves the shell on its stock prompt, so the harness's
+    /// prompt detection has to accept those forms — otherwise every capture
+    /// would burn its full timeout instead of one poll.
+    #[test]
+    fn stock_prompts_of_rc_suppressed_shells_are_recognized() {
+        assert!(looks_like_prompt("bash-5.3$ "), "bash --norc stock PS1");
+        assert!(looks_like_prompt("kens-mac% "), "zsh -f stock PS1");
+        assert!(looks_like_prompt("$ "), "sh stock PS1");
     }
 
     #[test]

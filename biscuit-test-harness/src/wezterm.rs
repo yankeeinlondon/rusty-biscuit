@@ -685,7 +685,9 @@ impl TerminalHarness for WezTermHarness {
     /// The cargo target directory containing `bt` and `question` is
     /// prepended to `PATH` so CLI binaries resolve without an absolute
     /// path. Color-forcing env vars are applied so SGR output in
-    /// captures is deterministic.
+    /// captures is deterministic. The interactive shell the harness
+    /// drives runs with its rc files suppressed — see
+    /// [`configure_login_shell`](super::configure_login_shell).
     fn spawn_shell(&mut self) -> io::Result<()> {
         if !Self::available() {
             return Err(io::Error::other("WezTerm not available"));
